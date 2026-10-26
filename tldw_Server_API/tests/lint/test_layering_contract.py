@@ -32,26 +32,37 @@ Counting. One statement counts once for each package it imports from, other than
   * relative imports are resolved against the importing module first.
 Imports at module level, in class bodies and inside functions all count (a function-level
 import still closes the cycle, and counting it stops a gate from being met by moving
-imports into functions). The body of ``if TYPE_CHECKING:`` is skipped (``TYPE_CHECKING``,
-``typing.TYPE_CHECKING`` or any ``<alias>.TYPE_CHECKING``, and ``from typing import
-TYPE_CHECKING as <alias>``); its ``else`` runs, so it counts. Imports in the body of a
-``try`` that catches ImportError or ModuleNotFoundError count; the counter reports how many.
-Not counted: ``importlib.import_module``/``__import__`` calls (6 literal ones in the app at
-the time of writing, none breaking a rule), and modules under a ``tests`` directory inside
-the app (core/MCP_unified/tests, core/Scheduler/tests): test code, never imported by the app.
+imports into functions). The body of ``if TYPE_CHECKING:`` is skipped only when the name
+is bound from typing: ``from typing import TYPE_CHECKING [as X]``, or ``typing.TYPE_CHECKING``
+after ``import typing [as t]``. A module-local ``TYPE_CHECKING = True`` hides nothing. The
+``else`` branch runs, so it counts. Imports in the body of a ``try`` that catches ImportError
+or ModuleNotFoundError count; the counter reports how many. Modules in a ``tests`` package
+directory inside the app (core/MCP_unified/tests, core/Scheduler/tests) are test code the app
+never imports, so they are not scanned; a module named ``tests.py`` is.
+
+Known limits:
+  * ``importlib.import_module``/``__import__`` calls are not counted (6 literal ones in the
+    app at the time of writing, none breaking a rule).
+  * Only direct edges are ruled, so a same-layer rule can be laundered through an unruled
+    package of the same layer: core.LLM_Calls -> core.X -> core.Chat passes the sibling
+    bans. An upward edge cannot be laundered: the second hop is still upward.
 
 Rules. A (importer, target) pair is ratcheted when it
   * goes up the layers ("upward (<layer> -> <layer>)"): this covers core -> api,
     services -> api and DB_Management -> domain;
-  * joins two endpoint families ("endpoint -> endpoint"): shared endpoint code belongs in
-    api/v1/utils, which is not an endpoint family;
+  * joins two endpoint families ("endpoint -> endpoint");
+  * imports an endpoint family from any other api package ("api -> endpoint"), except the
+    router assembly (ROUTER_ASSEMBLY), so endpoint code cannot be re-exported through
+    api/v1/utils, schemas or API_Deps. Shared code moves, without a re-export, into
+    api/v1/utils or a core/service module;
   * is a sibling ban ("sibling ban"): core.LLM_Calls -> core.Chat and -> core.AuthNZ.
 tests/lint/test_core_to_api_import_boundary.py is a view of the core -> api pairs.
 
 Baseline: layering_baseline.txt, one ``<importer> -> <target>: <statements>`` line per
 ratcheted pair. A new pair or a higher count fails. Unlike the size ratchets, whose
 numbers are ceilings that may shrink without an edit, a count here must equal the code:
-an edge that is gone or fell is stale and fails until its line is deleted or lowered. The
+an edge that is gone or fell is stale and fails until its line is deleted or lowered
+(``--tighten`` does it). The
 baseline is Phase 1's progress gate, so every cut is locked in by the PR that makes it,
 and an edge cut in one PR cannot quietly come back under its old count in the next.
 
@@ -65,10 +76,13 @@ for a text baseline.
 
 Commands:
     python -m tldw_Server_API.tests.lint.test_layering_contract                    # report
-    python -m tldw_Server_API.tests.lint.test_layering_contract --write-baseline   # rewrite
+    python -m tldw_Server_API.tests.lint.test_layering_contract --tighten          # cuts only
+    python -m tldw_Server_API.tests.lint.test_layering_contract --write-baseline   # everything
 The report gives the pair, statement and module counts and both package SCC sizes
 (module-level, and with function-level imports) for the roadmap's phase notes.
-``--write-baseline`` keeps each surviving line's reason.
+``--tighten`` only lowers fallen counts and deletes gone pairs; it never records growth.
+``--write-baseline`` records every measurement and prints each raised or new pair, which
+then needs a bump reason. Both keep each surviving line's reason.
 """
 
 from __future__ import annotations
@@ -120,9 +134,12 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("main", ("main", "app")),
 )
 SIBLING_BANS = frozenset({("core.LLM_Calls", "core.Chat"), ("core.LLM_Calls", "core.AuthNZ")})
+ROUTER_ASSEMBLY = frozenset({"api.v1.router_groups", "api.v1.router_registry", "api.v2.router"})
+_SHARE = "Move the code (don't re-export it) into api/v1/utils or a core/service module."
 FIXES = {
     "upward": "Invert it: move the shared code down to the importer's layer, or inject it from above.",
-    "endpoint -> endpoint": "Move the shared code to api/v1/utils, or down into core.",
+    "endpoint -> endpoint": _SHARE,
+    "api -> endpoint": f"Endpoint modules are not a library. {_SHARE}",
     "sibling ban": "core.LLM_Calls must not depend on core.Chat or core.AuthNZ: have the caller pass it in.",
 }
 
@@ -173,6 +190,8 @@ def rule(importer: str, target: str) -> str | None:
         return "sibling ban"
     if _is_endpoint(importer) and _is_endpoint(target):
         return "endpoint -> endpoint"
+    if _is_endpoint(target) and importer.split(".")[0] == "api" and importer not in ROUTER_ASSEMBLY:
+        return "api -> endpoint"
     low, high = layer_of(importer), layer_of(target)
     return f"upward ({LAYERS[low][0]} -> {LAYERS[high][0]})" if low < high else None
 
@@ -188,10 +207,21 @@ def _app_relative(name: str) -> str | None:
     return name[len(APP) + 1 :] if name.startswith(APP + ".") else None
 
 
-def _is_type_checking(test: ast.expr, names: set[str]) -> bool:
-    return (isinstance(test, ast.Name) and test.id in names) or (
-        isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
-    )
+def _dotted(test: ast.expr) -> str:
+    if isinstance(test, ast.Attribute) and isinstance(test.value, ast.Name):
+        return f"{test.value.id}.{test.attr}"
+    return test.id if isinstance(test, ast.Name) else ""
+
+
+def _bind_type_checking(node: ast.stmt, names: set[str]) -> None:
+    """Track the names bound to typing.TYPE_CHECKING, in source order; a rebinding drops one."""
+    if isinstance(node, ast.ImportFrom) and node.module == "typing" and not node.level:
+        names.update(alias.asname or alias.name for alias in node.names if alias.name == "TYPE_CHECKING")
+    elif isinstance(node, ast.Import):
+        names.update(f"{alias.asname or alias.name}.TYPE_CHECKING" for alias in node.names if alias.name == "typing")
+    elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        names.difference_update(target.id for target in targets if isinstance(target, ast.Name))
 
 
 def _catches_import_error(node: ast.Try | ast.TryStar) -> bool:
@@ -207,10 +237,11 @@ def _walk(
 ) -> Iterator[tuple[ast.Import | ast.ImportFrom, bool, bool]]:
     """Every import statement, in source order, outside ``if TYPE_CHECKING:`` bodies."""
     for node in statements:
+        if isinstance(node, (ast.Import, ast.ImportFrom, ast.Assign, ast.AnnAssign)):
+            _bind_type_checking(node, type_checking)
         if isinstance(node, (ast.Import, ast.ImportFrom)):
-            type_checking.update(a.asname for a in node.names if a.name == "TYPE_CHECKING" and a.asname)
             yield node, function_level, guarded
-        elif isinstance(node, ast.If) and _is_type_checking(node.test, type_checking):
+        elif isinstance(node, ast.If) and _dotted(node.test) in type_checking:
             yield from _walk(node.orelse, function_level, guarded, type_checking)
         else:
             inner = function_level or isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -255,10 +286,10 @@ def _scan(root: Path) -> tuple[Import, ...]:
     records = []
     for path, tree in trees.items():
         module = names[path]
-        if "tests" in module.split("."):
-            continue  # in-app test trees (core/MCP_unified/tests, core/Scheduler/tests) are not app code
+        if "tests" in path.relative_to(root).parts[:-1]:
+            continue  # an in-app test package (core/MCP_unified/tests, core/Scheduler/tests), not app code
         importer = package_of(module)
-        for node, function_level, guarded in _walk(tree.body, False, False, {"TYPE_CHECKING"}):
+        for node, function_level, guarded in _walk(tree.body, False, False, set()):
             for target in sorted(_targets(node, module, path.name == "__init__.py", known) - {importer}):
                 records.append(Import(module, target, function_level, guarded))
     return tuple(records)
@@ -354,6 +385,24 @@ def dump(path: Path, entries: Mapping[Pair, tuple[int, str]]) -> None:
     path.write_text(header + "".join(lines), encoding="utf-8")
 
 
+def rewritten(
+    baseline: Mapping[Pair, tuple[int, str]], measured: Mapping[Pair, Counter[str]], *, tighten: bool
+) -> tuple[Baseline, list[str]]:
+    """(The baseline ``--tighten`` or ``--write-baseline`` writes, the raised or new pairs it records).
+
+    ``tighten`` only lowers counts and drops gone pairs, so it never records growth; both keep reasons.
+    """
+    counts = {pair: sum(modules.values()) for pair, modules in measured.items()}
+    if tighten:
+        return {pair: (min(n, counts[pair]), why) for pair, (n, why) in baseline.items() if pair in counts}, []
+    raised = [
+        f"{a} -> {b}: {n} " + (f"(was {baseline[(a, b)][0]})" if (a, b) in baseline else "(new)")
+        for (a, b), n in sorted(counts.items())
+        if n > baseline.get((a, b), (0, ""))[0]
+    ]
+    return {pair: (n, baseline.get(pair, (0, ""))[1]) for pair, n in counts.items()}, raised
+
+
 def _statements(count: int) -> str:
     return f"{count} statement{'s' if count != 1 else ''}"
 
@@ -381,7 +430,7 @@ def violations(measured: Mapping[Pair, Counter[str]], baseline: Mapping[Pair, tu
                 else f"baseline {cap} but {now} measured. Lower it to {now}"
             )
             problems.append(
-                f"{name}: stale, {gone} in {_shown(BASELINE)} to lock the cut in, or run: {COMMAND} --write-baseline"
+                f"{name}: stale, {gone} in {_shown(BASELINE)} to lock the cut in, or run: {COMMAND} --tighten"
             )
     return problems
 
@@ -475,6 +524,32 @@ def test_type_checking_imports_are_not_counted_but_their_else_branch_is(tmp_path
     assert _counts(measure(root)) == {("core.config_x", "services"): 1}
 
 
+def test_only_type_checking_bound_from_typing_hides_imports(tmp_path: Path) -> None:
+    files = {
+        "core/config_a.py": f"TYPE_CHECKING = True\nif TYPE_CHECKING:\n    from {APP}.core.Chat import a\n",
+        "core/config_b.py": f"""
+            from typing import TYPE_CHECKING
+            TYPE_CHECKING = True
+            if TYPE_CHECKING:
+                from {APP}.core.Chat import b
+        """,
+        "core/config_c.py": f"""
+            import typing
+            from mylib import TYPE_CHECKING as OTHER
+            if typing.TYPE_CHECKING:
+                from {APP}.core.Chat import c
+            if OTHER:
+                from {APP}.core.RAG import d
+        """,
+    }
+
+    assert _counts(measure(_seed(tmp_path / "app", files))) == {
+        ("core.config_a", "core.Chat"): 1,
+        ("core.config_b", "core.Chat"): 1,
+        ("core.config_c", "core.RAG"): 1,
+    }
+
+
 def test_moving_an_import_inside_the_importer_package_keeps_the_baseline_and_growth_fails(tmp_path: Path) -> None:
     baseline = {("core.Utils", "core.Chat"): (1, "")}
 
@@ -529,6 +604,7 @@ def test_import_forms_resolve_to_their_target_package(tmp_path: Path) -> None:
         "core/Utils/pkg/__init__.py": "from ... import Chat\nfrom ...Chat.sub import thing\nfrom .. import mod\n",
         "api/v1/endpoints/media/__init__.py": "",
         "core/Utils/tests/test_mod.py": f"from {APP}.main import app\n",  # in-app test code: not scanned
+        "core/Logging/tests.py": f"from {APP}.main import app\n",  # a module named tests is app code
     }
     root = _seed(tmp_path / "app", files)
 
@@ -538,6 +614,7 @@ def test_import_forms_resolve_to_their_target_package(tmp_path: Path) -> None:
         ("core.Utils", "core"): 1,  # a name defined in core/__init__.py is the ``core`` package
         ("core.Utils", "api.v1.endpoints.media"): 1,
         ("core.Utils", "main"): 1,
+        ("core.Logging", "main"): 1,
     }
     assert sum(record.guarded for record in scan(root)) == 1  # under try/except ImportError, still counted
 
@@ -568,15 +645,56 @@ def test_endpoint_sibling_services_and_db_management_rules(tmp_path: Path) -> No
     assert scan_upward_edges(root) == {("services", "api.v1.schemas"), ("core.DB_Management", "core.Chat")}
 
 
+def test_re_exporting_endpoint_code_through_another_api_package_fails(tmp_path: Path) -> None:
+    files = {
+        "api/v1/utils/media_helpers.py": f"from {APP}.api.v1.endpoints.media import upload as upload\n",
+        "api/v1/router_groups/content.py": f"def f():\n    from {APP}.api.v1.endpoints import media\n",
+        "api/v2/router.py": f"from {APP}.api.v2.endpoints import user_profiles\n",  # router assembly: exempt
+    }
+
+    (problem,) = violations(measure(_seed(tmp_path / "app", files)), {})
+
+    assert problem.startswith("api.v1.utils -> api.v1.endpoints.media: 1 statement, not in the baseline"), problem
+    assert "[api -> endpoint]" in problem and "don't re-export it" in problem
+
+
 def test_package_scc_sizes_report_module_level_and_function_level_cycles(tmp_path: Path) -> None:
     files = {
         "core/Chat/a.py": f"from {APP}.core.RAG import x\n",
         "core/RAG/a.py": f"from {APP}.core.Chat import x\ndef f():\n    from {APP}.core.Notes import y\n",
-        "core/Notes/a.py": f"from {APP}.core.Chat import x\nif TYPE_CHECKING:\n    from {APP}.core.Jobs import z\n",
+        "core/Notes/a.py": f"""
+            from typing import TYPE_CHECKING
+            from {APP}.core.Chat import x
+            if TYPE_CHECKING:
+                from {APP}.core.Jobs import z
+        """,
         "core/Jobs/a.py": f"from {APP}.core.Notes import x\n",
     }
 
     assert package_scc_sizes(_seed(tmp_path / "app", files)) == {"module_level": 2, "with_function_level": 3}
+
+
+def test_tighten_only_lowers_and_drops_and_write_baseline_reports_what_it_raises(tmp_path: Path) -> None:
+    source = f"from {APP}.core.Chat import a\nfrom {APP}.services import b\nfrom {APP}.services import c\nimport {APP}.main\n"
+    measured = measure(_seed(tmp_path / "app", {"core/Utils/a.py": source}))
+    baseline = {
+        ("core.Utils", "core.Chat"): (3, "split pending (TASK-1)"),
+        ("core.Utils", "core.RAG"): (1, ""),
+        ("core.Utils", "services"): (1, ""),
+    }
+
+    assert rewritten(baseline, measured, tighten=True) == (
+        {("core.Utils", "core.Chat"): (1, "split pending (TASK-1)"), ("core.Utils", "services"): (1, "")},
+        [],
+    )
+    entries, raised = rewritten(baseline, measured, tighten=False)
+    assert entries == {
+        ("core.Utils", "core.Chat"): (1, "split pending (TASK-1)"),
+        ("core.Utils", "services"): (2, ""),
+        ("core.Utils", "main"): (1, ""),
+    }
+    assert raised == ["core.Utils -> main: 1 (new)", "core.Utils -> services: 2 (was 1)"]
+    assert "--tighten" in violations(measured, baseline)[0]  # the stale message names the quick fix
 
 
 def test_the_baseline_round_trips_with_its_bump_reasons_and_rejects_malformed_lines(tmp_path: Path) -> None:
@@ -670,19 +788,26 @@ def test_raised_counts_carry_a_new_reason() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=f"Report the layering contract; rewrite {_shown(BASELINE)}.")
-    parser.add_argument("--write-baseline", action="store_true", help="record every ratcheted pair, keeping reasons")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--tighten", action="store_true", help="only lower fallen counts and drop gone pairs")
+    mode.add_argument("--write-baseline", action="store_true", help="record every ratcheted pair, growth included")
     args = parser.parse_args(argv)
     measured = measure()
-    if args.write_baseline:
-        old = load(BASELINE) if BASELINE.exists() else {}
-        dump(BASELINE, {pair: (sum(m.values()), old.get(pair, (0, ""))[1]) for pair, m in measured.items()})
+    if args.tighten or args.write_baseline:
+        entries, raised = rewritten(load(BASELINE) if BASELINE.exists() else {}, measured, tighten=args.tighten)
+        dump(BASELINE, entries)
+        if raised:
+            print(
+                f"Recorded {len(raised)} raised or new pair(s); each needs '  # bump: {REASON_PLACEHOLDER}' "
+                "on its line before CI passes:\n  " + "\n  ".join(raised)
+            )
     records = scan()
     ratcheted = [r for r in records if rule(package_of(r.module), r.target)]
     upward = [r for r in records if layer_of(package_of(r.module)) < layer_of(r.target)]
     entries = {(r.module, r.target) for r in upward}
     module_level = {(r.module, r.target) for r in upward if not r.function_level}
     print(
-        f"{_shown(BASELINE)}: {len(measured)} pairs, {len(ratcheted)} statements "
+        f"ratcheted now: {len(measured)} pairs, {len(ratcheted)} statements "
         f"({sum(r.guarded for r in ratcheted)} under try/except ImportError) "
         f"from {len({r.module for r in ratcheted})} modules\n"
         f"upward (module -> package) entries: {len(module_level)} module-level from "
