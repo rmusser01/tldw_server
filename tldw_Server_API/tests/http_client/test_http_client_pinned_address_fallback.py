@@ -1,0 +1,315 @@
+"""Pinned connections fall back through the vetted DNS answers (TASK-13950.11 group C).
+
+http_client pins every connection to an address the egress policy approved. When the
+first approved address refuses the connect (``localhost`` answering ``::1`` first for a
+server bound to 127.0.0.1 only), the next approved address from the same resolution is
+tried, with the same Host and SNI. Nothing is re-resolved, and an address the policy did
+not approve is never tried. No real socket is opened: httpx runs over a MockTransport,
+aiohttp over a fake session, and ``socket.create_connection`` is recorded.
+"""
+
+from __future__ import annotations
+
+import socket
+from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
+from urllib.parse import urlsplit
+
+import aiohttp
+import httpx
+import pytest
+
+from tldw_Server_API.app.core import http_client
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, NetworkError
+from tldw_Server_API.app.core.Security import egress
+from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+
+pytestmark = pytest.mark.unit
+
+_LOCAL = "http://localhost:8080/health"
+_PUBLIC = "https://dual.example/resource"
+_PUBLIC_V6 = "2606:2800:220:1:248:1893:25c8:1946"
+_UP = frozenset({"127.0.0.1", "93.184.216.34"})
+
+
+@pytest.fixture
+def dns(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
+    """The production egress policy over a DNS table; returns the table."""
+    answers = {"localhost": ["::1", "127.0.0.1"], "dual.example": [_PUBLIC_V6, "93.184.216.34"]}
+    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
+    monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
+    monkeypatch.setattr(http_client, "env_flag_enabled", lambda _name: False)
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda host, **_kwargs: list(answers.get(host, [])))
+    return answers
+
+
+@pytest.fixture
+def sockets(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, int]]:
+    """Record every stdlib socket connect and refuse it."""
+    attempts: list[tuple[str, int]] = []
+
+    def refuse(address, *_args, **_kwargs):
+        attempts.append(address)
+        raise ConnectionRefusedError(61, "Connection refused")
+
+    monkeypatch.setattr(socket, "create_connection", refuse)
+    return attempts
+
+
+class _Body(httpx.SyncByteStream, httpx.AsyncByteStream):
+    """An unread body, so the streaming and byte-capped paths can read it."""
+
+    def __iter__(self):
+        yield b"ok"
+
+    async def __aiter__(self):
+        yield b"ok"
+
+
+def _transport(seen: list[tuple[str, str, object]], up=_UP) -> httpx.MockTransport:
+    """Record (address, Host, SNI) per connect; refuse addresses not in ``up``."""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.host, request.headers["host"], request.extensions.get("sni_hostname")))
+        if request.url.host not in up:
+            raise httpx.ConnectError("Connection refused", request=request)
+        return httpx.Response(200, stream=_Body(), request=request)
+
+    return httpx.MockTransport(handle)
+
+
+class _AiohttpSession:
+    """Just enough of aiohttp.ClientSession for http_client's request and stream I/O."""
+
+    def __init__(self, seen: list[tuple[str, str, object]], up=_UP) -> None:
+        self.seen = seen
+        self.up = up
+        self.cookie_jar = SimpleNamespace(clear=lambda: None)
+
+    @asynccontextmanager
+    async def request(self, method, url, **kwargs):
+        host = urlsplit(url).hostname or ""
+        self.seen.append((host, kwargs["headers"]["Host"], kwargs.get("server_hostname")))
+        if host not in self.up:
+            raise aiohttp.ClientConnectorError(
+                SimpleNamespace(host=host, port=8080, ssl=None),
+                ConnectionRefusedError(61, "Connection refused"),
+            )
+        remaining = bytearray(b"ok")
+
+        async def read(size=None):
+            chunk = bytes(remaining if size is None or size < 0 else remaining[:size])
+            del remaining[: len(chunk)]
+            return chunk
+
+        async def iter_any():
+            yield await read()
+
+        yield SimpleNamespace(
+            status=200,
+            headers={},
+            url=url,
+            read=read,
+            release=lambda: None,
+            content=SimpleNamespace(read=read, iter_any=iter_any, iter_chunked=lambda _size: iter_any()),
+        )
+
+
+_ONE_ATTEMPT = http_client.RetryPolicy(attempts=1)
+_LOCAL_SCOPE = ConfiguredEndpointScope.from_url(_LOCAL)
+
+
+async def _afetch_httpx(seen, *, url=_LOCAL, up=_UP, **kwargs):
+    async with httpx.AsyncClient(transport=_transport(seen, up)) as client:
+        response = await http_client.afetch(
+            method="GET",
+            url=url,
+            client=client,
+            configured_endpoint=_LOCAL_SCOPE,
+            retry=_ONE_ATTEMPT,
+            **kwargs,
+        )
+        return response.content
+
+
+async def _afetch_httpx_bounded(seen, **kwargs):
+    return await _afetch_httpx(seen, max_response_bytes=10, **kwargs)
+
+
+async def _afetch_aiohttp(seen, *, url=_LOCAL, up=_UP):
+    response = await http_client._afetch_aiohttp(
+        method="GET",
+        url=url,
+        client=_AiohttpSession(seen, up),
+        configured_endpoint=_LOCAL_SCOPE,
+        retry=_ONE_ATTEMPT,
+    )
+    return response.content
+
+
+async def _fetch_sync(seen, *, url=_LOCAL, up=_UP):
+    with httpx.Client(transport=_transport(seen, up)) as client:
+        response = http_client.fetch(
+            method="GET",
+            url=url,
+            client=client,
+            configured_endpoint=_LOCAL_SCOPE,
+            retry=_ONE_ATTEMPT,
+        )
+        return response.content
+
+
+async def _astream_httpx(seen, *, url=_PUBLIC, up=_UP):
+    async with httpx.AsyncClient(transport=_transport(seen, up)) as client:
+        chunks = [
+            chunk
+            async for chunk in http_client.astream_bytes(
+                method="GET", url=url, client=client, retry=_ONE_ATTEMPT, timeout=5.0
+            )
+        ]
+        return b"".join(chunks)
+
+
+async def _astream_aiohttp(seen, *, url=_PUBLIC, up=_UP):
+    chunks = [
+        chunk
+        async for chunk in http_client._astream_bytes_aiohttp(
+            method="GET", url=url, client=_AiohttpSession(seen, up), retry=_ONE_ATTEMPT, timeout=5.0
+        )
+    ]
+    return b"".join(chunks)
+
+
+async def _stream_response_sync(seen, *, url=_PUBLIC, up=_UP):
+    with httpx.Client(transport=_transport(seen, up)) as client:
+        with http_client.stream_response(method="GET", url=url, client=client) as response:
+            return response.read()
+
+
+async def _download_sync(seen, *, url=_PUBLIC, up=_UP, dest):
+    with httpx.Client(transport=_transport(seen, up)) as client:
+        path = http_client.download(url=url, dest=dest, client=client, retry=_ONE_ATTEMPT)
+        return path.read_bytes()
+
+
+# path -> (runner, Host header, SNI name). httpx always names the SNI host on a pinned
+# connection; aiohttp only for https.
+_RUNNERS: dict[str, tuple[Callable[..., Awaitable[bytes]], str, str | None]] = {
+    "afetch-httpx": (_afetch_httpx, "localhost:8080", "localhost"),
+    "afetch-httpx-bounded": (_afetch_httpx_bounded, "localhost:8080", "localhost"),
+    "afetch-aiohttp": (_afetch_aiohttp, "localhost:8080", None),
+    "fetch-sync": (_fetch_sync, "localhost:8080", "localhost"),
+    "astream-httpx": (_astream_httpx, "dual.example", "dual.example"),
+    "astream-aiohttp": (_astream_aiohttp, "dual.example", "dual.example"),
+    "stream-response-sync": (_stream_response_sync, "dual.example", "dual.example"),
+    "download-sync": (_download_sync, "dual.example", "dual.example"),
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", sorted(_RUNNERS))
+async def test_a_refused_first_address_falls_back_to_the_next_vetted_one(dns, sockets, tmp_path, path):
+    run, host_header, sni = _RUNNERS[path]
+    seen: list[tuple[str, str, object]] = []
+    kwargs = {"dest": tmp_path / "out.bin"} if path == "download-sync" else {}
+
+    assert await run(seen, **kwargs) == b"ok"
+
+    first, second = dns[host_header.split(":")[0]]
+    # Same Host and SNI on both addresses, the vetted answers in order, nothing re-resolved.
+    assert [address for address, _host, _sni in seen] == [first, second]
+    assert {(host, server_name) for _address, host, server_name in seen} == {(host_header, sni)}
+    assert sockets == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["afetch-httpx", "afetch-httpx-bounded", "afetch-aiohttp", "fetch-sync"])
+async def test_every_vetted_address_failing_raises_one_network_error(dns, sockets, path):
+    run, _host_header, _sni = _RUNNERS[path]
+    seen: list[tuple[str, str, object]] = []
+
+    with pytest.raises(NetworkError):
+        await run(seen, up=frozenset())
+
+    assert [address for address, _host, _sni in seen] == ["::1", "127.0.0.1"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["afetch-httpx", "afetch-aiohttp", "fetch-sync"])
+async def test_an_egress_refused_answer_refuses_the_request_before_any_connect(dns, sockets, path):
+    """One forbidden answer refuses the whole host, as before: no address is tried."""
+    run, _host_header, _sni = _RUNNERS[path]
+    dns["localhost"] = ["169.254.169.254", "127.0.0.1"]
+    seen: list[tuple[str, str, object]] = []
+
+    with pytest.raises(EgressPolicyError):
+        await run(seen)
+
+    assert seen == []
+    assert sockets == []
+
+
+@pytest.mark.asyncio
+async def test_the_fallback_is_bounded(dns, sockets):
+    dns["localhost"] = [f"10.0.0.{index}" for index in range(1, 9)]
+    seen: list[tuple[str, str, object]] = []
+
+    with pytest.raises(NetworkError):
+        await _afetch_httpx(seen, up=frozenset())
+
+    assert [address for address, _host, _sni in seen] == dns["localhost"][: http_client._PINNED_ADDRESS_ATTEMPTS]
+
+
+def test_certificate_pin_check_falls_back_through_vetted_addresses(dns, sockets):
+    with pytest.raises(EgressPolicyError, match="TLS pinning verification failed"):
+        http_client._check_cert_pinning(
+            "dual.example",
+            443,
+            {"00"},
+            None,
+            accepted_resolved_ips=(_PUBLIC_V6, "93.184.216.34"),
+        )
+
+    assert sockets == [(_PUBLIC_V6, 443), ("93.184.216.34", 443)]
+
+
+# --- timeout=None uses the client's configured timeout -------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_afetch_without_timeout_uses_the_client_timeout(dns):
+    seen: list[dict] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request.extensions["timeout"])
+        return httpx.Response(200, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle), timeout=7.0) as client:
+        inherited = await http_client.afetch(
+            method="GET", url="http://93.184.216.34/a", client=client, retry=_ONE_ATTEMPT
+        )
+        explicit = await http_client.afetch(
+            method="GET", url="http://93.184.216.34/a", client=client, retry=_ONE_ATTEMPT, timeout=2.0
+        )
+
+    assert (inherited.status_code, explicit.status_code) == (200, 200)
+    assert seen == [
+        {"connect": 7.0, "read": 7.0, "write": 7.0, "pool": 7.0},
+        {"connect": 2.0, "read": 2.0, "write": 2.0, "pool": 2.0},
+    ]
+
+
+def test_fetch_without_timeout_uses_the_client_timeout(dns):
+    seen: list[dict] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request.extensions["timeout"])
+        return httpx.Response(200, request=request)
+
+    with httpx.Client(transport=httpx.MockTransport(handle), timeout=7.0) as client:
+        response = http_client.fetch(method="GET", url="http://93.184.216.34/a", client=client, retry=_ONE_ATTEMPT)
+
+    assert response.status_code == 200
+    assert seen == [{"connect": 7.0, "read": 7.0, "write": 7.0, "pool": 7.0}]
