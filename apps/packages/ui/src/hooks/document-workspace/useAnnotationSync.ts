@@ -5,6 +5,7 @@ import {
   resolveBrowserRequestTransport,
   resolveTldwRequestHeaders
 } from "@/services/tldw/request-core"
+import type { AllowedPath } from "@/services/tldw/openapi-guard"
 import { useConnectionStore } from "@/store/connection"
 import { useDocumentWorkspaceStore } from "@/store/document-workspace"
 import { buildMediaNavigationScopeKey } from "@/utils/media-navigation-scope"
@@ -19,7 +20,7 @@ const MAX_RETRY_DELAY_MS = 8000 // 8 seconds
 // payloads are only persisted and replayed on the next load.
 const MAX_UNLOAD_PAYLOAD_BYTES = 60_000
 
-const syncPath = (mediaId: number) => `/api/v1/media/${mediaId}/annotations/sync`
+const syncPath = (mediaId: number): AllowedPath => `/api/v1/media/${mediaId}/annotations/sync`
 
 const pendingStorageKey = (scopeKey: string, mediaId: number) =>
   `tldw:document-workspace:pending-annotations:${scopeKey}:${mediaId}`
