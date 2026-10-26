@@ -58,4 +58,3 @@ def test_normalize_import_items_derives_title_from_url_when_missing():
     assert len(normalized) == 1
     assert normalized[0].title == "deep dive on testing"
     assert normalized[0].status == "saved"
-
