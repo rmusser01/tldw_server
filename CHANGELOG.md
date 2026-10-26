@@ -13,6 +13,7 @@ and this project adheres to Some kind of Versioning
 ### Changed
 
 - **Media and Prompts keywords are case-insensitive and keep their display casing.** "Foo" and "foo" are one keyword, stored with the first-seen casing (Media no longer lowercases keywords on write), and lookups also fold ß/SS, accented capitals and NFC forms. On PostgreSQL, Media DB startup merges existing case-variant keyword rows into the earliest one (links move to it; the others are soft-deleted with `merge_parent_uuid` set) and then enforces a unique `LOWER(keyword)` index. The PostgreSQL Media keyword vocabulary is shared, so the first user's casing becomes every user's display casing. Ingestion keeps processor-extracted keyword casing, and the Prompts keyword endpoints return stored casing instead of lowercase (TASK-13950.5).
+- **Collections (reading items) and Watchlists source tags are case-insensitive per user and keep their display casing.** Tags are no longer lowercased on write: "Foo" and "foo" are one tag, stored with the first-seen casing, and tag lookups, filters, OPML export and content-alert source constraints also fold ß/SS, accented capitals and NFC forms. On first open after upgrade (SQLite and PostgreSQL), each user's case-variant duplicate tags are merged into their earliest row (tagged items and sources move to it, the duplicates are deleted), and a unique case-insensitive index per user is enforced. Tags are never merged across users. Existing tags keep their stored lowercase names (TASK-13950.5).
 
 ### Fixed
 

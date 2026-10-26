@@ -19,7 +19,7 @@ def test_normalize_import_items_merges_equivalent_urls():
         ReadingImportItem(
             url="https://example.com/article?utm_source=b",
             title="Explicit Title",
-            tags=["research"],
+            tags=["ai", "Research"],
             status="read",
             favorite=True,
             notes="important",
@@ -35,7 +35,7 @@ def test_normalize_import_items_merges_equivalent_urls():
     assert merged.title == "Explicit Title"
     assert merged.status == "read"
     assert merged.favorite is True
-    assert set(merged.tags) == {"ai", "research"}
+    assert merged.tags == ["AI", "Research"]
     assert merged.notes == "important"
     assert merged.metadata["import_normalized_url"] == "https://example.com/article"
 

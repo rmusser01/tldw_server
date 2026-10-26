@@ -2201,20 +2201,15 @@ def sync_media_add_results_to_collections(
             word_count = len(content_text.split()) if content_text else None
             published_at = metadata_map.get("published_at") or metadata_map.get("publish_date")
 
-            tags: list[str] = []
-            seen: set[str] = set()
-            for keyword in getattr(form_data, "keywords", []) or []:
-                if isinstance(keyword, str):
-                    normalized = keyword.strip().lower()
-                    if normalized and normalized not in seen:
-                        seen.add(normalized)
-                        tags.append(normalized)
-            for keyword in metadata_map.get("keywords", []) if isinstance(metadata_map.get("keywords"), list) else []:
-                if isinstance(keyword, str):
-                    normalized = keyword.strip().lower()
-                    if normalized and normalized not in seen:
-                        seen.add(normalized)
-                        tags.append(normalized)
+            metadata_keywords = metadata_map.get("keywords")
+            tags = dedupe_keywords(
+                keyword
+                for keyword in [
+                    *(getattr(form_data, "keywords", []) or []),
+                    *(metadata_keywords if isinstance(metadata_keywords, list) else []),
+                ]
+                if isinstance(keyword, str)
+            )
 
             provenance_payload = {
                 "entrypoint": "/api/v1/media/add",

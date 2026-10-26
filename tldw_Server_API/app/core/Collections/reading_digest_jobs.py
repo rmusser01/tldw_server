@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.Collections.reading_service import ReadingService
 from tldw_Server_API.app.core.Collections.utils import is_supported_reading_url
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 from tldw_Server_API.app.core.exceptions import ReadingDigestJobError
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.services.outputs_service import (
@@ -227,7 +228,7 @@ def _score_suggestion_candidate(
     tags = getattr(row, "tags", None)
     if not isinstance(tags, list):
         tags = []
-    normalized_tags = {str(tag).strip().lower() for tag in tags if str(tag).strip()}
+    normalized_tags = {normalize_keyword_identity(str(tag)) for tag in tags if str(tag).strip()}
     overlap = len(digest_tags.intersection(normalized_tags))
     if overlap:
         overlap_bonus = min(1.0, 0.25 * overlap)
@@ -250,8 +251,8 @@ def _select_suggestion_candidates(
     suggestions_config: dict[str, Any],
 ) -> tuple[list[Any], dict[str, Any]]:
     digest_item_ids = {getattr(row, "id", None) for row in digest_rows if getattr(row, "id", None) is not None}
-    normalized_digest_tags = {tag.strip().lower() for tag in digest_tags if isinstance(tag, str) and tag.strip()}
-    exclude_tags = {tag.strip().lower() for tag in suggestions_config.get("exclude_tags", [])}
+    normalized_digest_tags = {normalize_keyword_identity(tag) for tag in digest_tags if isinstance(tag, str) and tag.strip()}
+    exclude_tags = {normalize_keyword_identity(tag) for tag in suggestions_config.get("exclude_tags", [])}
     max_age_days = suggestions_config.get("max_age_days")
     now = datetime.now(tz=timezone.utc)
 
@@ -277,7 +278,7 @@ def _select_suggestion_candidates(
         tags = getattr(row, "tags", None)
         if not isinstance(tags, list):
             tags = []
-        normalized_tags = {str(tag).strip().lower() for tag in tags if str(tag).strip()}
+        normalized_tags = {normalize_keyword_identity(str(tag)) for tag in tags if str(tag).strip()}
         if exclude_tags and normalized_tags.intersection(exclude_tags):
             continue
         if max_age_days:

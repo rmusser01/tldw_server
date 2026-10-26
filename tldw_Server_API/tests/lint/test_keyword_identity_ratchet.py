@@ -70,12 +70,10 @@ COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
 # Per-module ad hoc keyword/tag normalization counts; modules not listed must stay at 0.
 KEYWORD_NORMALIZATION_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/api/v1/endpoints/audio/audio_transcriptions.py": 1,
-    "tldw_Server_API/app/api/v1/endpoints/items.py": 1,
     "tldw_Server_API/app/api/v1/endpoints/media/listing.py": 2,
     "tldw_Server_API/app/api/v1/endpoints/notes.py": 1,  # YAML front-matter key match, not identity
     "tldw_Server_API/app/api/v1/endpoints/paper_search.py": 1,
     "tldw_Server_API/app/api/v1/endpoints/vector_stores_openai.py": 1,
-    "tldw_Server_API/app/api/v1/endpoints/watchlists.py": 2,
     "tldw_Server_API/app/api/v1/schemas/chat_dictionary_schemas.py": 1,
     "tldw_Server_API/app/api/v1/schemas/persona.py": 1,
     "tldw_Server_API/app/core/AuthNZ/email_service.py": 2,
@@ -83,8 +81,6 @@ KEYWORD_NORMALIZATION_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/core/Character_Chat/modules/persona_exemplar_selector.py": 1,
     "tldw_Server_API/app/core/Character_Chat/world_book_manager.py": 2,
     "tldw_Server_API/app/core/Chat/conversation_enrichment.py": 4,
-    "tldw_Server_API/app/core/Collections/reading_digest_jobs.py": 4,
-    "tldw_Server_API/app/core/Collections/reading_importers.py": 3,
     "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py": 2,
     "tldw_Server_API/app/core/DB_Management/chacha/character_store.py": 4,
     "tldw_Server_API/app/core/DB_Management/chacha/conversation_store.py": 1,
@@ -96,7 +92,6 @@ KEYWORD_NORMALIZATION_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py": 1,  # bump: chunk_type in add_media_with_keywords, not identity
     "tldw_Server_API/app/core/Ingestion_Media_Processing/Books/Book_Processing_Lib.py": 1,
     "tldw_Server_API/app/core/Ingestion_Media_Processing/Upload_Sink.py": 1,
-    "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py": 2,  # Collections content_item tags (slice 3)
     "tldw_Server_API/app/core/LLM_Calls/structured_output.py": 1,
     "tldw_Server_API/app/core/Local_LLM/Llamafile_Handler.py": 1,
     "tldw_Server_API/app/core/MCP_unified/tests/test_notes_crud_tags.py": 2,  # fake DB in a test
@@ -118,7 +113,6 @@ KEYWORD_NORMALIZATION_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/core/Sync/v2/notes_task_contract.py": 2,
     "tldw_Server_API/app/core/Third_Party/RePEc.py": 1,
     "tldw_Server_API/app/core/Utils/keyword_identity.py": 1,  # the identity rule itself
-    "tldw_Server_API/app/core/Watchlists/content_alerts.py": 2,
     "tldw_Server_API/app/core/Watchlists/fetchers.py": 2,
     "tldw_Server_API/app/core/Watchlists/filters.py": 3,
     "tldw_Server_API/app/core/Web_Scraping/extraction/strategies/cluster.py": 2,
