@@ -4,15 +4,19 @@ http_client pins every connection to an address the egress policy approved. When
 first approved address refuses the connect (``localhost`` answering ``::1`` first for a
 server bound to 127.0.0.1 only), the next approved address from the same resolution is
 tried, with the same Host and SNI. Nothing is re-resolved, and an address the policy did
-not approve is never tried. No real socket is opened: httpx runs over a MockTransport,
-aiohttp over a fake session, and ``socket.create_connection`` is recorded.
+not approve is never tried. Only the last test opens real (loopback) sockets; the others
+run httpx over a MockTransport, aiohttp over a fake session, and record
+``socket.create_connection``.
 """
 
 from __future__ import annotations
 
+import json
 import socket
-from collections.abc import Awaitable, Callable
+import threading
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 
@@ -401,3 +405,65 @@ def test_certificate_pin_preflight_shares_one_connect_budget(dns, monkeypatch):
     assert len(budgets) == 2
     assert budgets[0] == pytest.approx(0.2, abs=0.02)
     assert budgets[1] <= 0.07
+
+
+# --- Real sockets: an IPv4-only loopback server behind a ::1-first answer --------------------
+
+
+def _ipv6_loopback_available() -> bool:
+    try:
+        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as probe:
+            probe.bind(("::1", 0))
+    except OSError:
+        return False
+    return True
+
+
+@pytest.fixture
+def ipv4_only_server() -> Iterator[tuple[int, list[bytes]]]:
+    """An HTTP server on 127.0.0.1 only; yields its port and every POST body it received."""
+    if not _ipv6_loopback_available():
+        pytest.skip("IPv6 loopback is unavailable, so ::1 cannot be the refused first answer")
+    bodies: list[bytes] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            bodies.append(self.rfile.read(int(self.headers["Content-Length"])))
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *_args: object) -> None:
+            return None
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server.server_address[1], bodies
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+@pytest.mark.asyncio
+async def test_localhost_answering_ipv6_first_reaches_an_ipv4_only_server_once(dns, ipv4_only_server):
+    port, bodies = ipv4_only_server
+    url = f"http://localhost:{port}/echo"
+    scope = ConfiguredEndpointScope.from_url(url)
+    request = {"method": "POST", "url": url, "configured_endpoint": scope, "retry": _ONE_ATTEMPT, "timeout": 2.0}
+
+    async with http_client.create_async_client(timeout=2.0) as client:
+        via_httpx = await http_client.afetch(client=client, json={"via": "httpx"}, **request)
+    session = http_client.create_aiohttp_session(timeout=2.0)
+    try:
+        via_aiohttp = await http_client.afetch(client=session, json={"via": "aiohttp"}, **request)
+    finally:
+        await session.close()
+    with http_client.create_client(timeout=2.0) as sync_client:
+        via_sync = http_client.fetch(client=sync_client, json={"via": "sync"}, **request)
+
+    assert [via_httpx.status_code, via_aiohttp.status_code, via_sync.status_code] == [200, 200, 200]
+    assert [json.loads(body) for body in bodies] == [{"via": "httpx"}, {"via": "aiohttp"}, {"via": "sync"}]
