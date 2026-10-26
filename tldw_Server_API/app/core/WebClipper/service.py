@@ -10,7 +10,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
@@ -44,6 +44,7 @@ from tldw_Server_API.app.core.WebClipper.schemas import (
     WebClipperAttachmentRecord,
     WebClipperEnrichmentPayload,
     WebClipperEnrichmentResponse,
+    WebClipperOutcomeState,
     WebClipperSavedNote,
     WebClipperSaveRequest,
     WebClipperSaveResponse,
@@ -376,7 +377,7 @@ class WebClipperService:
             status = "saved"
         return WebClipperStatusResponse(
             clip_id=clip_id,
-            status=status,
+            status=cast(WebClipperOutcomeState, status),
             note=self._build_note_summary(note),
             workspace_placements=placements,
             attachments=attachments,
@@ -1187,7 +1188,7 @@ class WebClipperService:
         warnings: list[str],
         workspace_requested: bool,
         workspace_saved: bool,
-    ) -> str:
+    ) -> WebClipperOutcomeState:
         if workspace_requested and not workspace_saved:
             return "partially_saved"
         if warnings:
