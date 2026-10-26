@@ -13,6 +13,8 @@ German sharp s and folds the dotted capital I, which casefold keeps), so lookups
 matches for each name and its identity, compare identities over the owner's non-ASCII names
 for the rest, and on Postgres finally reuse the row holding the name's LOWER() slot. That makes
 "İstanbul" and "istanbul" one tag on Postgres and two on SQLite (a documented difference).
+Filters resolve every matching id, since concurrent first inserts of two spellings the fold
+index tells apart can both succeed; substring search (``tags_containing``) compares identities.
 """
 
 from __future__ import annotations
@@ -48,12 +50,12 @@ def _postgres(backend: DatabaseBackend) -> bool:
     return backend.backend_type == BackendType.POSTGRESQL
 
 
-def _first_id_per_identity(wanted: Mapping[str, str], rows: Iterable[Mapping[str, Any]]) -> dict[str, int]:
-    found: dict[str, int] = {}
-    for row in sorted(rows, key=lambda row: int(row["id"])):
+def _ids_by_identity(wanted: Mapping[str, str], rows: Iterable[Mapping[str, Any]]) -> dict[str, set[int]]:
+    found: dict[str, set[int]] = {}
+    for row in rows:
         identity = normalize_keyword_identity(str(row["name"]))
         if identity in wanted:
-            found.setdefault(identity, int(row["id"]))
+            found.setdefault(identity, set()).add(int(row["id"]))
     return found
 
 
@@ -63,35 +65,70 @@ def match_tag_ids(
     user_id: str,
     names: Iterable[object],
     *,
+    all_matches: bool = False,
     connection: Any | None = None,
-) -> dict[str, int]:
-    """Map the identity of each of ``names`` to the owner's tag id; names with no tag are left out."""
+) -> dict[str, list[int]]:
+    """Map the identity of each of ``names`` to the owner's matching tag ids, earliest first.
+
+    Names with no tag are left out. An identity has one id unless concurrent first inserts of
+    two spellings the fold index tells apart ("Straße", "STRASSE") both succeeded; filters pass
+    ``all_matches`` so the non-ASCII names are read even when every identity already matched.
+    """
     wanted = {normalize_keyword_identity(name): name for name in dedupe_keywords(names)}
     if not wanted:
         return {}
     postgres = _postgres(backend)
     terms = list(dict.fromkeys([*wanted.values(), *wanted]))
-    select = f"SELECT id, name FROM {tags.table} WHERE user_id = ? AND "  # nosec B608 - fixed table names
-    fold = (
-        f"LOWER(name) IN ({', '.join('LOWER(?)' for _ in terms)})"
-        if postgres
-        else f"name COLLATE NOCASE IN ({', '.join('?' for _ in terms)})"
-    )
-    rows = backend.execute(select + fold, (user_id, *terms), connection=connection).rows
-    found = _first_id_per_identity(wanted, rows)
-    if len(found) < len(wanted):
-        # ponytail: reads the owner's non-ASCII tag names once per lookup with a miss (an
-        # index range scan on user_id); a stored identity column if vocabularies grow large.
-        non_ascii = "name ~ '[^[:ascii:]]'" if postgres else "name GLOB '*[^ -~]*'"
-        rows = backend.execute(select + non_ascii, (user_id,), connection=connection).rows
-        for identity, tag_id in _first_id_per_identity(wanted, rows).items():
-            found.setdefault(identity, tag_id)
     if postgres:
-        for identity in wanted.keys() - found.keys():
-            row = backend.execute(select + "LOWER(name) = LOWER(?)", (user_id, wanted[identity]), connection=connection).first
-            if row:
-                found[identity] = int(row["id"])
-    return found
+        # Each row carries the term whose LOWER() slot it holds, so the slot holder needs no re-query.
+        values = ", ".join("(?, LOWER(?))" for _ in terms)
+        sql = (
+            f"WITH q(term, folded) AS (VALUES {values}) "  # nosec B608 - fixed table names
+            f"SELECT t.id, t.name, q.term FROM {tags.table} t JOIN q ON LOWER(t.name) = q.folded WHERE t.user_id = ?"
+        )
+        params: tuple[Any, ...] = (*(value for term in terms for value in (term, term)), user_id)
+    else:
+        marks = ", ".join("?" for _ in terms)
+        sql = f"SELECT id, name FROM {tags.table} WHERE user_id = ? AND name COLLATE NOCASE IN ({marks})"  # nosec B608
+        params = (user_id, *terms)
+    rows = backend.execute(sql, params, connection=connection).rows
+    found = _ids_by_identity(wanted, rows)
+    if all_matches or len(found) < len(wanted):
+        # ponytail: reads the owner's non-ASCII tag names (an index range scan on user_id) on a
+        # miss or for a filter; a stored identity column if vocabularies grow large.
+        non_ascii = "name ~ '[^[:ascii:]]'" if postgres else "name GLOB '*[^ -~]*'"
+        extra = backend.execute(
+            f"SELECT id, name FROM {tags.table} WHERE user_id = ? AND {non_ascii}",  # nosec B608
+            (user_id,),
+            connection=connection,
+        ).rows
+        found = _ids_by_identity(wanted, [*rows, *extra])
+    for identity in wanted.keys() - found.keys():
+        holders = {int(row["id"]) for row in rows if row.get("term") in (wanted[identity], identity)}
+        if holders:
+            found[identity] = holders
+    return {identity: sorted(ids) for identity, ids in found.items()}
+
+
+def tags_containing(
+    backend: DatabaseBackend,
+    tags: TagTable,
+    user_id: str,
+    text: str,
+    *,
+    connection: Any | None = None,
+) -> list[dict[str, Any]]:
+    """Return the owner's tag rows whose identity contains the identity of ``text``, by identity then id."""
+    # ponytail: filters the owner's whole tag vocabulary in Python on each search; per-user
+    # vocabularies are small, and SQL LIKE/LOWER cannot casefold on SQLite.
+    needle = normalize_keyword_identity(text)
+    rows = backend.execute(
+        f"SELECT id, user_id, name FROM {tags.table} WHERE user_id = ?",  # nosec B608
+        (user_id,),
+        connection=connection,
+    ).rows
+    keyed = sorted((normalize_keyword_identity(str(row["name"])), int(row["id"]), dict(row)) for row in rows)
+    return [row for identity, _tag_id, row in keyed if needle in identity]
 
 
 def ensure_tag_ids(
@@ -105,7 +142,10 @@ def ensure_tag_ids(
     """Return the owner's tag ids for ``names`` (one per tag), creating missing tags with their given casing."""
     display = dedupe_keywords(names)
     found = match_tag_ids(backend, tags, user_id, display, connection=connection)
-    ids = [found.get(normalize_keyword_identity(name)) or _insert_tag(backend, tags, user_id, name, connection) for name in display]
+    ids = [
+        (found.get(normalize_keyword_identity(name)) or [_insert_tag(backend, tags, user_id, name, connection)])[0]
+        for name in display
+    ]
     return list(dict.fromkeys(ids))
 
 
@@ -128,8 +168,9 @@ def _insert_tag(backend: DatabaseBackend, tags: TagTable, user_id: str, name: st
     return int(row["id"])
 
 
-def ensure_tag_identity(backend: DatabaseBackend, tags: TagTable) -> None:
-    """Merge each owner's case-variant duplicate tags, then add the case-insensitive unique index.
+def ensure_tag_identity(backend: DatabaseBackend, tags: TagTable) -> int:
+    """Merge each owner's case-variant duplicate tags, add the case-insensitive unique index, and
+    return how many rows were merged (0 once the index exists).
 
     Duplicates group by (owner, identity) and then by (owner, SQL fold), the key the index
     enforces; the earliest row of a group survives with its casing. The others' links move to it
@@ -145,7 +186,7 @@ def ensure_tag_identity(backend: DatabaseBackend, tags: TagTable) -> None:
         else "SELECT 1 AS found FROM sqlite_master WHERE type = 'index' AND name = ?"
     )
     if backend.execute(exists, (tags.identity_index,)).first:
-        return
+        return 0
     with backend.transaction() as conn:
         if postgres:
             backend.execute(f"LOCK TABLE {tags.table} IN SHARE ROW EXCLUSIVE MODE", connection=conn)
@@ -158,6 +199,7 @@ def ensure_tag_identity(backend: DatabaseBackend, tags: TagTable) -> None:
         )
     if merged:
         logger.info("Merged {} case-variant {} rows into their earliest variant", merged, tags.table)
+    return merged
 
 
 def _merge_duplicates(

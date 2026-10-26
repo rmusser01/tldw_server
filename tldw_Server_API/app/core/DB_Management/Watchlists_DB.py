@@ -69,7 +69,7 @@ from .backends.base import BackendType, DatabaseBackend, DatabaseConfig, Databas
 from .backends.factory import DatabaseBackendFactory
 from .backends.query_utils import prepare_backend_statement
 from .db_path_utils import DatabasePaths
-from .tag_identity import WATCHLIST_TAGS, ensure_tag_identity, match_tag_ids
+from .tag_identity import WATCHLIST_TAGS, ensure_tag_identity, match_tag_ids, tags_containing
 from .tag_identity import ensure_tag_ids as ensure_owner_tag_ids
 
 _WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS = (
@@ -1877,19 +1877,9 @@ class WatchlistsDatabase:
         return ensure_owner_tag_ids(self.backend, WATCHLIST_TAGS, self.user_id, names)
 
     def list_tags(self, q: str | None, limit: int, offset: int) -> tuple[list[TagRow], int]:
-        where = ["user_id = ?"]
-        params: list[Any] = [self.user_id]
-        if q:
-            # Substring match folds case per backend: SQLite LIKE folds ASCII only.
-            where.append("name ILIKE ?" if self.backend.backend_type == BackendType.POSTGRESQL else "name LIKE ?")
-            params.append(f"%{q}%")
-        where_sql = " AND ".join(where)
-        total = int(self.backend.execute(f"SELECT COUNT(*) AS cnt FROM tags WHERE {where_sql}", tuple(params)).scalar or 0)  # nosec B608
-        rows = self.backend.execute(
-            f"SELECT id, user_id, name FROM tags WHERE {where_sql} ORDER BY LOWER(name), id LIMIT ? OFFSET ?",  # nosec B608
-            tuple(params + [limit, offset]),
-        ).rows
-        return [TagRow(**r) for r in rows], total
+        """List this owner's tags by identity; ``q`` matches an identity substring ("ss" finds "Straße")."""
+        rows = tags_containing(self.backend, WATCHLIST_TAGS, self.user_id, q or "")
+        return [TagRow(**row) for row in rows[offset : offset + limit]], len(rows)
 
     # ------------------------
     # Sources
@@ -2069,12 +2059,13 @@ class WatchlistsDatabase:
         # Tag filter: require all tags
         wanted_tags = dedupe_keywords(tag_names or [])
         if wanted_tags:
-            tag_map = match_tag_ids(self.backend, WATCHLIST_TAGS, self.user_id, wanted_tags)
+            tag_map = match_tag_ids(self.backend, WATCHLIST_TAGS, self.user_id, wanted_tags, all_matches=True)
             if len(tag_map) < len(wanted_tags):
                 return [], 0
-            for tid in dict.fromkeys(tag_map.values()):
-                where.append("EXISTS (SELECT 1 FROM source_tags st WHERE st.source_id = sources.id AND st.tag_id = ?)")
-                params.append(tid)
+            for ids in tag_map.values():
+                marks = ", ".join("?" for _ in ids)
+                where.append(f"EXISTS (SELECT 1 FROM source_tags st WHERE st.source_id = sources.id AND st.tag_id IN ({marks}))")  # nosec B608
+                params.extend(ids)
         where_sql = " AND ".join(where)
         total = int(self.backend.execute(f"SELECT COUNT(*) AS cnt FROM sources WHERE {where_sql}", tuple(params)).scalar or 0)  # nosec B608
         rows = self.backend.execute(

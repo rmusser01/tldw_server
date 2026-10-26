@@ -99,6 +99,13 @@ class _TagStore:
     def drop_identity_index(self) -> None:
         self.backend.execute(f"DROP INDEX IF EXISTS {self.index}")
 
+    def has_identity_index(self) -> bool:
+        if self.backend.backend_type == BackendType.POSTGRESQL:
+            sql = "SELECT 1 AS found FROM pg_indexes WHERE schemaname = current_schema() AND indexname = ?"
+        else:
+            sql = "SELECT 1 AS found FROM sqlite_master WHERE type = 'index' AND name = ?"
+        return self.backend.execute(sql, (self.index,)).first is not None
+
     def reopen(self) -> _TagStore:
         """Construct the store again as a new process would, re-running its schema bootstrap."""
         self.forget_schema()
@@ -271,6 +278,18 @@ def test_tags_never_cross_owners(store: _TagStore) -> None:
     assert other.find(["Foo"]) == [row_id]
 
 
+def test_tag_filters_include_identity_duplicates_left_by_a_race(store: _TagStore) -> None:
+    first = store.tag_new("a", ["Straße"])
+    # Two concurrent first inserts of different spellings both pass the fold index.
+    raced = store.insert_tag("1", "STRASSE")
+    second = store.tag_new("b", [])
+    store.link(second, raced)
+
+    for probe in ("strasse", "Straße", "STRASSE"):
+        assert store.find([probe]) == sorted([first, second]), probe
+    assert store.find(["straße", "missing"]) == []
+
+
 def test_the_dotted_capital_i_follows_each_backends_fold(store: _TagStore) -> None:
     [first] = store.ensure(["İstanbul"])
     second = store.ensure(["istanbul"])
@@ -321,6 +340,24 @@ def test_reopening_merges_each_owners_case_variant_duplicates(store: _TagStore) 
     assert other.names() == ["Bar", "foo"]
 
 
+def test_reopening_merges_a_pair_only_the_postgres_fold_joins(store: _TagStore) -> None:
+    first = store.tag_new("a", ["İstanbul"])
+    store.drop_identity_index()
+    folded = store.insert_tag("1", "istanbul")
+    second = store.tag_new("b", [])
+    store.link(second, folded)
+
+    reopened = store.reopen()
+
+    assert reopened.has_identity_index()
+    if store.backend.backend_type != BackendType.POSTGRESQL:
+        assert reopened.names() == ["İstanbul", "istanbul"]
+        return
+    assert reopened.names() == ["İstanbul"]
+    assert reopened.tags_of(second) == ["İstanbul"]
+    assert reopened.find(["istanbul"]) == sorted([first, second])
+
+
 def _plan(backend: DatabaseBackend, query: str, params: Any) -> str:
     if backend.backend_type != BackendType.POSTGRESQL:
         return " | ".join(str(row["detail"]) for row in backend.execute("EXPLAIN QUERY PLAN " + query, params).rows)
@@ -336,7 +373,7 @@ def test_tag_lookups_on_a_miss_use_an_index(store: _TagStore, monkeypatch: pytes
     execute = store.backend.execute
 
     def recording_execute(query, params=None, *args, **kwargs):
-        if query.lstrip().startswith("SELECT id") and f"FROM {store.table} " in query:
+        if query.lstrip().startswith(("SELECT id", "WITH")) and f"FROM {store.table} " in query:
             lookups.append((query, params))
         return execute(query, params, *args, **kwargs)
 
@@ -373,12 +410,73 @@ def test_collections_bootstrap_merges_duplicates_in_the_media_db_copy(backend: D
         media.close_connection()
 
 
-def test_watchlist_tag_search_is_case_insensitive(backend: DatabaseBackend) -> None:
+def test_watchlist_tag_search_matches_identity_substrings(backend: DatabaseBackend) -> None:
     store = WatchlistsTags(backend)
-    store.ensure(["Foo", "bar"])
+    store.ensure(["Foo", "bar", "Éclair", "Straße"])
 
-    for q in ("foo", "FOO", "Fo"):
+    for q, expected in [
+        ("foo", ["Foo"]),
+        ("FOO", ["Foo"]),
+        ("o", ["Foo"]),
+        ("écl", ["Éclair"]),
+        ("CLAIR", ["Éclair"]),
+        ("STRASSE", ["Straße"]),
+        ("ss", ["Straße"]),
+    ]:
         rows, total = store.db.list_tags(q=q, limit=10, offset=0)
-        assert ([row.name for row in rows], total) == (["Foo"], 1)
-    rows, _total = store.db.list_tags(q=None, limit=10, offset=0)
-    assert [row.name for row in rows] == ["bar", "Foo"]
+        assert ([row.name for row in rows], total) == (expected, len(expected)), q
+    rows, total = store.db.list_tags(q=None, limit=2, offset=1)  # identity code-point order: bar, foo, strasse, éclair
+    assert ([row.name for row in rows], total) == (["Foo", "Straße"], 4)
+
+
+def test_collections_text_search_fallback_matches_tag_identity_substrings(backend: DatabaseBackend) -> None:
+    store = CollectionsTags(backend)
+    eclair = store.tag_new("a", ["Éclair"])
+    sharp = store.tag_new("b", ["Straße"])
+    store.db._fts_available = False  # the LIKE path: always on Postgres, SQLite's fallback
+
+    for q, expected in [("écl", [eclair]), ("CLAIR", [eclair]), ("strasse", [sharp]), ("ss", [sharp]), ("zzz", [])]:
+        rows, _total = store.db.list_content_items(q=q, size=100)
+        assert sorted(row.id for row in rows) == expected, q
+
+
+def _fts_ids(backend: DatabaseBackend, term: str) -> list[int]:
+    rows = backend.execute("SELECT rowid AS id FROM content_items_fts WHERE content_items_fts MATCH ?", (f'"{term}"',)).rows
+    return sorted(int(row["id"]) for row in rows)
+
+
+@pytest.mark.unit
+def test_collections_merge_rewrites_the_fts_rows_of_relinked_items(tmp_path: Path) -> None:
+    backend = SQLiteBackend(DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=str(tmp_path / "Media_DB_v2.db")))
+    try:
+        store = CollectionsTags(backend)
+        store.tag_new("a", ["straße"])
+        store.drop_identity_index()
+        loser = store.insert_tag("1", "strasse")
+        item = store.tag_new("b", [])
+        before = store.db.get_content_item(item)
+        # The legacy state: the item's contentless FTS row indexed the loser's text.
+        store.db._update_content_fts_entry(
+            item,
+            title=before.title,
+            summary=before.summary,
+            notes=before.notes,
+            tags=["strasse"],
+            metadata_json=before.metadata_json,
+            previous_title=before.title,
+            previous_summary=before.summary,
+            previous_notes=before.notes,
+            previous_tags=before.tags,
+            previous_metadata_json=before.metadata_json,
+            has_previous_entry=True,
+        )
+        store.link(item, loser)
+        assert item in _fts_ids(backend, "strasse")
+
+        reopened = store.reopen()
+
+        assert reopened.tags_of(item) == ["straße"]
+        assert item in _fts_ids(backend, "straße")
+        assert item not in _fts_ids(backend, "strasse")
+    finally:
+        backend.get_pool().close_all()

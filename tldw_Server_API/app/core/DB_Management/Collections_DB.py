@@ -46,6 +46,7 @@ from tldw_Server_API.app.core.DB_Management.tag_identity import (
     ensure_tag_identity,
     ensure_tag_ids,
     match_tag_ids,
+    tags_containing,
 )
 from tldw_Server_API.app.core.exceptions import (
     InvalidStorageUserIdError,
@@ -777,7 +778,44 @@ class CollectionsDatabase:
 
     def _ensure_schema_and_tag_identity(self) -> None:
         self.ensure_schema()
-        ensure_tag_identity(self.backend, COLLECTION_TAGS)
+        if ensure_tag_identity(self.backend, COLLECTION_TAGS) and self._fts_available:
+            self._rebuild_content_fts()
+
+    def _rebuild_content_fts(self) -> None:
+        """Re-index every content item after a tag merge changed tag text (TASK-13950.5).
+
+        The contentless FTS table can only drop a row given the exact text it indexed, which a
+        merge no longer has, so the index is cleared and rebuilt from current rows.
+        """
+        try:
+            clear = (
+                "DELETE FROM content_items_fts"
+                if self._fts_supports_direct_delete
+                else "INSERT INTO content_items_fts(content_items_fts) VALUES('delete-all')"
+            )
+            self.backend.execute(clear, ())
+            rows = self.backend.execute("SELECT id, title, summary, notes, metadata_json FROM content_items", ()).rows
+            tag_rows = self.backend.execute(
+                "SELECT cit.item_id AS item_id, ct.name AS name FROM content_item_tags cit "
+                "JOIN collection_tags ct ON ct.id = cit.tag_id",
+                (),
+            ).rows
+        except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
+            logger.warning("collections: FTS rebuild after a tag merge failed: {}", exc)
+            return
+        tags_by_item: dict[int, list[str]] = {}
+        for tag_row in tag_rows:
+            tags_by_item.setdefault(int(tag_row["item_id"]), []).append(str(tag_row["name"]))
+        for row in rows:
+            item_id = int(row["id"])
+            self._update_content_fts_entry(
+                item_id,
+                title=row.get("title"),
+                summary=row.get("summary"),
+                notes=row.get("notes"),
+                tags=sorted(tags_by_item.get(item_id, []), key=normalize_keyword_identity),
+                metadata_json=row.get("metadata_json"),
+            )
 
     def _run_backend_bootstrap(self) -> None:
         self._ensure_schema_and_tag_identity()
@@ -4053,28 +4091,28 @@ class CollectionsDatabase:
 
         tag_filters = dedupe_keywords(tags or [])
         if tag_filters:
-            tag_ids = match_tag_ids(self.backend, COLLECTION_TAGS, self.user_id, tag_filters)
+            tag_ids = match_tag_ids(self.backend, COLLECTION_TAGS, self.user_id, tag_filters, all_matches=True)
             if len(tag_ids) < len(tag_filters):
                 return [], 0
-            for tag_id in dict.fromkeys(tag_ids.values()):
-                where.append("EXISTS (SELECT 1 FROM content_item_tags cit WHERE cit.item_id = ci.id AND cit.tag_id = ?)")
-                params.append(tag_id)
+            for ids in tag_ids.values():
+                marks = ", ".join("?" for _ in ids)
+                where.append(f"EXISTS (SELECT 1 FROM content_item_tags cit WHERE cit.item_id = ci.id AND cit.tag_id IN ({marks}))")  # nosec B608
+                params.extend(ids)
 
         def _apply_like_search(where_clause: list[str], clause_params: list[Any]) -> None:
             q_like = f"%{q.lower()}%"
+            # Tags match by identity substring: SQLite LOWER() cannot fold "É" or "ß".
+            tag_ids = [int(row["id"]) for row in tags_containing(self.backend, COLLECTION_TAGS, self.user_id, q or "")]
+            tag_match = f"cit_q.tag_id IN ({', '.join('?' for _ in tag_ids)})" if tag_ids else "1 = 0"  # nosec B608
             where_clause.append(
                 "("
                 "LOWER(COALESCE(ci.title, '')) LIKE ? OR "
                 "LOWER(COALESCE(ci.summary, '')) LIKE ? OR "
                 "LOWER(COALESCE(ci.notes, '')) LIKE ? OR "
-                "EXISTS ("
-                "SELECT 1 FROM content_item_tags cit_q "
-                "JOIN collection_tags ct_q ON ct_q.id = cit_q.tag_id "
-                "WHERE cit_q.item_id = ci.id AND ct_q.user_id = ? AND LOWER(ct_q.name) LIKE ?"
-                ")"
+                f"EXISTS (SELECT 1 FROM content_item_tags cit_q WHERE cit_q.item_id = ci.id AND {tag_match})"  # nosec B608
                 ")"
             )
-            clause_params.extend([q_like, q_like, q_like, self.user_id, q_like])
+            clause_params.extend([q_like, q_like, q_like, *tag_ids])
 
         def _execute_query(
             where_clause: list[str],
