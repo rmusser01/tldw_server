@@ -181,6 +181,7 @@ def test_backlog_ratchet_base_prefers_the_dispatch_base():
     "ratchet",
     [
         "tldw_Server_API/tests/lint/test_function_size_ratchet.py",
+        "tldw_Server_API/tests/lint/test_charactersragdb_surface_ratchet.py",
     ],
 )
 def test_the_size_ratchets_run_in_the_required_ratchet_step(ratchet):
