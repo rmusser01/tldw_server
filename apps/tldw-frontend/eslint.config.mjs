@@ -57,15 +57,20 @@ const importBoundaries = {
   store: [noComponents],
   utils: [noComponents]
 }
-const apiPathAsAny = [
-  "TSAsExpression[typeAnnotation.type='TSAnyKeyword'] > Literal.expression[value=/^\\/api\\//]",
-  "TSAsExpression[typeAnnotation.type='TSAnyKeyword'] > TemplateLiteral.expression[quasis.0.value.raw=/^\\/api\\//]"
-].map((selector) => ({
-  selector,
-  message:
-    "Do not cast an API path `as any`: it defeats the ClientPath guard in services/tldw/openapi-guard.ts. Drop the cast, or type the path as ClientPathRuntimeWithQuery; if the endpoint is missing, regenerate @tldw/api-types (`bun run generate:api-types`)." +
-    keepWithReason("no-restricted-syntax")
-}))
+// A string, or a template with any part, starting with /api/ (so `${base}/api/v1/x` counts),
+// cast to any with `as any` or `<any>`, directly or through one more cast (`as unknown as any`).
+const anyCast = ":matches(TSAsExpression, TSTypeAssertion)[typeAnnotation.type='TSAnyKeyword']"
+const apiPathAsAny = [anyCast, `${anyCast} > :matches(TSAsExpression, TSTypeAssertion).expression`]
+  .flatMap((cast) => [
+    `${cast} > Literal.expression[value=/^\\/api\\//]`,
+    `${cast} > TemplateLiteral.expression:has(> TemplateElement[value.raw=/^\\/api\\//])`
+  ])
+  .map((selector) => ({
+    selector,
+    message:
+      "Do not cast an API path to any: it defeats the ClientPath guard in services/tldw/openapi-guard.ts. Drop the cast, or type the path as ClientPathRuntimeWithQuery; if the endpoint is missing, regenerate @tldw/api-types (`bun run generate:api-types`)." +
+      keepWithReason("no-restricted-syntax")
+  }))
 // Runtime strings that start with /api/v1/ (or a template part that does, as in
 // `${base}/api/v1/x`); prose that mentions a path and type-level paths do not match.
 const apiV1InComponents = [

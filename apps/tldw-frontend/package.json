@@ -59,7 +59,7 @@
     "review:parallel:category": "playwright test e2e/review/parallel-review.spec.ts --grep 'Category'",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "lint:ui": "cd .. && eslint --config tldw-frontend/eslint.config.mjs --suppressions-location tldw-frontend/eslint-suppressions.packages-ui.json packages/ui/src",
+    "lint:ui": "cd .. && eslint --concurrency auto --config tldw-frontend/eslint.config.mjs --suppressions-location tldw-frontend/eslint-suppressions.packages-ui.json packages/ui/src",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest",

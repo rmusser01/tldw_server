@@ -675,7 +675,7 @@
       "count": 1
     },
     "no-restricted-syntax": {
-      "count": 32
+      "count": 33
     }
   },
   "packages/ui/src/components/Review/ViewMediaPage.tsx": {

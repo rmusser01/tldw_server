@@ -8,6 +8,8 @@ const scopes = ['packages/ui/src', 'tldw-frontend/pages']
 // Vendored, minified assets; eslint.config.mjs ignores the same directory.
 const vendored = ['packages/ui/src/public']
 const hookRules = ['react-hooks/purity', 'react-hooks/static-components', 'react-hooks/use-memo']
+// An inline disable of these rules must say why ("-- <reason>"): it is a reviewed exception.
+const reasonedRules = [...hookRules, 'no-restricted-imports', 'no-restricted-syntax', 'max-lines', 'max-lines-per-function']
 // Written by `bun run lint:ui --suppress-all` (ESLint 9 bulk suppressions), keyed by
 // file path relative to apps/ and rule id.
 const suppressionsName = 'tldw-frontend/eslint-suppressions.packages-ui.json'
@@ -46,6 +48,10 @@ function fixHint({ ruleId, message }) {
 // count is at most the frozen count, and a frozen count above the current one is stale.
 // Unlike ESLint, the three hook rules and parser errors are never suppressible, and an
 // entry for a file that is no longer linted is stale too.
+// Limitation of per-rule counts: no-restricted-syntax holds three ratchets in one count per
+// file (an API path cast to any, an /api/v1/ literal in a component, an import() across a
+// boundary) and no-restricted-imports two, so fixing one kind in a file leaves room for
+// one new error of another kind in that file. A file's total for the rule never grows.
 export async function checkSharedHooks({
   appsRoot = path.dirname(frontendRoot),
   configFile = path.join(frontendRoot, 'eslint.config.mjs'),
@@ -56,7 +62,10 @@ export async function checkSharedHooks({
     if (!found.length) throw new Error(`No source files in required scope: ${scope}`)
     return found
   })
-  const eslint = new ESLint({ cwd: appsRoot, overrideConfigFile: configFile })
+  // ESLint's lint workers need worker_threads SHARE_ENV, which Bun lacks, so CI runs this
+  // under node; under bun it lints on one thread.
+  const concurrency = process.versions.bun ? 'off' : 'auto'
+  const eslint = new ESLint({ cwd: appsRoot, overrideConfigFile: configFile, concurrency })
   const failures = []
   for (const filePath of files) {
     const config = await eslint.calculateConfigForFile(filePath)
@@ -88,6 +97,18 @@ export async function checkSharedHooks({
         failures.push({ filePath: result.filePath, ...message })
       } else if (message.ruleId && message.severity === 2) {
         ;(errors[message.ruleId] ??= []).push(message)
+      }
+    }
+    for (const message of result.suppressedMessages) {
+      if (
+        reasonedRules.includes(message.ruleId) &&
+        !message.suppressions.some((suppression) => suppression.justification?.trim())
+      ) {
+        failures.push({
+          filePath: result.filePath,
+          ...message,
+          message: `${message.ruleId} is disabled without a reason: end the eslint-disable comment with "-- <reason>" so the exception can be reviewed`
+        })
       }
     }
     for (const [ruleId, messages] of Object.entries(errors)) {

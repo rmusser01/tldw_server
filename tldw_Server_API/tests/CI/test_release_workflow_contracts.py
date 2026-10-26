@@ -198,5 +198,5 @@ def test_frontend_required_enforces_shared_hooks_and_preserves_full_lint() -> No
     assert lint["working-directory"] == "apps/tldw-frontend"
     assert hooks["if"] == lint["if"]
     assert hooks["working-directory"] == "apps/tldw-frontend"
-    assert hooks["run"] == "bun scripts/check-shared-hooks.mjs"
+    assert hooks["run"] == "node scripts/check-shared-hooks.mjs"
     assert not hooks.get("continue-on-error", False)

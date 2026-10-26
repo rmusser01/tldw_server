@@ -18,7 +18,6 @@ vi.mock("@plasmohq/storage/hook", () => ({
 vi.mock("antd", async (importOriginal) => ({
   ...(await importOriginal<typeof import("antd")>()),
   Image: ({ src, alt, onError }: { src?: string; alt?: string; onError?: () => void }) => (
-    // eslint-disable-next-line @next/next/no-img-element -- Native img delivers the browser error event instead of a non-image placeholder.
     <img alt={alt ?? ""} src={src ?? ""} onError={onError} />
   ),
   Tooltip: ({ children }: { children?: React.ReactNode }) => <>{children}</>

@@ -170,7 +170,7 @@ async function lintSeeds(seeds: Record<string, string>) {
   return Object.keys(seeds).map((file) =>
     failures
       .filter((failure) => failure.filePath === path.join(options.appsRoot, file))
-      .map((failure) => failure.ruleId)
+      .map((failure) => `${failure.ruleId}${failure.message.includes('without a reason') ? ' (no reason)' : ''}`)
   )
 }
 
@@ -183,7 +183,10 @@ describe('shared UI boundary rules', () => {
     ['routes importing background-proxy', 'packages/ui/src/routes/seed.tsx', 'import { bgRequest } from "@/services/background-proxy"\nexport default bgRequest', 'no-restricted-imports'],
     ['hooks importing background-proxy lazily', 'packages/ui/src/hooks/useLazy.ts', 'export const load = () => import("../services/background-proxy")', 'no-restricted-syntax'],
     ['a component hard-coding /api/v1/', 'packages/ui/src/components/Seed.tsx', 'export const url = (base: string) => `${base}/api/v1/media`', 'no-restricted-syntax'],
-    ['an API path cast as any', 'packages/ui/src/services/seed.ts', 'export const path = (id: string) => `/api/v1/notes/${id}` as any', 'no-restricted-syntax']
+    ['an API path cast as any', 'packages/ui/src/services/seed.ts', 'export const path = (id: string) => `/api/v1/notes/${id}` as any', 'no-restricted-syntax'],
+    ['an absolute API URL cast as any', 'packages/ui/src/utils/seed.ts', 'export const url = (base: string) => `${base}/api/v1/notes/search` as any', 'no-restricted-syntax'],
+    ['an API path double-cast to any', 'packages/ui/src/store/seed.ts', 'export const path = "/api/v1/media" as unknown as any', 'no-restricted-syntax'],
+    ['an API path asserted <any>', 'packages/ui/src/services/assert.ts', 'export const path = <any>"/api/v1/media"', 'no-restricted-syntax']
   ])('rejects %s', async (_name, file, source, ruleId) => {
     expect(await lintSeeds({ [file]: source })).toEqual([[ruleId]])
   })
@@ -196,6 +199,15 @@ describe('shared UI boundary rules', () => {
         'export type NotePath = `/api/v1/notes/${string}`\nexport const hint = "This server does not advertise /api/v1/notes."'
     })
     expect(results).toEqual([[], [], []])
+  })
+  it('rejects disabling a boundary rule without a reason, and accepts one with a reason', async () => {
+    const violation = 'import { bgRequest } from "@/services/background-proxy"\nexport default bgRequest'
+    const results = await lintSeeds({
+      'packages/ui/src/routes/bare.tsx': `// eslint-disable-next-line no-restricted-imports\n${violation}`,
+      'packages/ui/src/routes/block.tsx': `/* eslint-disable */\n${violation}`,
+      'packages/ui/src/routes/reasoned.tsx': `// eslint-disable-next-line no-restricted-imports -- legacy proxy call, TASK-1\n${violation}`
+    })
+    expect(results).toEqual([['no-restricted-imports (no reason)'], ['no-restricted-imports (no reason)'], []])
   })
   it('rejects growth of a frozen chat file and of its largest function', async () => {
     const body = Array.from({ length: 3300 }, (_, index) => `  const v${index} = ${index}`).join('\n')
