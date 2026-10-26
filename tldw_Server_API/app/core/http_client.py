@@ -1735,8 +1735,10 @@ def _restore_httpx_response_url(response: Any, original_url: str) -> None:
 
 
 # A pinned connection tries the vetted addresses in resolution order, at most this many.
-# Each try gets the request's own connect timeout, so a host whose addresses all fail
-# costs at most this many connect timeouts.
+# Every try but the last has its connect phase capped at DEFAULT_CONNECT_TIMEOUT
+# (HTTP_CONNECT_TIMEOUT); the last gets the request's own connect timeout. A host whose
+# addresses all fail therefore costs at most 3 * DEFAULT_CONNECT_TIMEOUT plus the
+# request's connect timeout.
 _PINNED_ADDRESS_ATTEMPTS = 4
 
 # Failures that happen before any request byte is sent, so the next address is safe to try.
@@ -1762,7 +1764,9 @@ def _pinned_transport_targets(
     Every address passed this hop's egress check together, so falling back from one to the
     next never reaches an address the policy did not approve, and nothing is re-resolved.
     Host and SNI are the same for every target. A dual-stack ``localhost`` answering ``::1``
-    first still reaches a server listening only on 127.0.0.1.
+    first still reaches a server listening only on 127.0.0.1. The certificate-pin preflight
+    (``_check_cert_pinning``) connects on its own, so with several vetted addresses it may
+    verify a different one than the request then lands on; that gap predates the fallback.
     """
     if not accepted_resolved_ips:
         return [(url, headers, None)]
@@ -1778,26 +1782,62 @@ def _first_connected(
     *,
     failures: tuple[type[BaseException], ...] = _PINNED_CONNECT_FAILURES,
 ) -> _Result:
-    """``attempt(*target)`` for the first target that connects; the last failure propagates."""
+    """``attempt(*target, final=...)`` until one connects; the last failure propagates.
+
+    ``final`` is False on every target but the last, so the attempt caps its connect
+    timeout (``_httpx_fallback_timeout``/``_aiohttp_fallback_timeout``) while another
+    address is still left to try.
+    """
     for target in targets[:-1]:
         try:
-            return attempt(*target)
+            return attempt(*target, final=False)
         except failures:
             logger.debug("pinned connect failed; trying the next vetted address")
-    return attempt(*targets[-1])
+    return attempt(*targets[-1], final=True)
 
 
 async def _afirst_connected(
     targets: Sequence[tuple[Any, ...]],
     attempt: Callable[..., Awaitable[_Result]],
 ) -> _Result:
-    """``await attempt(*target)`` for the first target that connects; the last failure propagates."""
+    """``await attempt(*target, final=...)`` until one connects; see ``_first_connected``."""
     for target in targets[:-1]:
         try:
-            return await attempt(*target)
+            return await attempt(*target, final=False)
         except _PINNED_CONNECT_FAILURES:
             logger.debug("pinned connect failed; trying the next vetted address")
-    return await attempt(*targets[-1])
+    return await attempt(*targets[-1], final=True)
+
+
+def _capped_connect(seconds: float | None) -> float:
+    return DEFAULT_CONNECT_TIMEOUT if seconds is None else min(float(seconds), DEFAULT_CONNECT_TIMEOUT)
+
+
+def _httpx_fallback_timeout(timeout: Any, client: Any) -> Any:
+    """``timeout`` (or the client's, for USE_CLIENT_DEFAULT) with its connect phase capped."""
+    base = getattr(client, "timeout", None) if timeout is httpx.USE_CLIENT_DEFAULT else timeout
+    try:
+        resolved = httpx.Timeout(base)
+    except (TypeError, ValueError):
+        return timeout
+    return httpx.Timeout(
+        connect=_capped_connect(resolved.connect),
+        read=resolved.read,
+        write=resolved.write,
+        pool=resolved.pool,
+    )
+
+
+def _aiohttp_fallback_timeout(timeout: Any) -> Any:
+    """An aiohttp ``ClientTimeout`` with its connect phases capped."""
+    if aiohttp is None or not isinstance(timeout, aiohttp.ClientTimeout):
+        return timeout
+    return aiohttp.ClientTimeout(
+        total=timeout.total,
+        connect=_capped_connect(timeout.connect),
+        sock_read=timeout.sock_read,
+        sock_connect=_capped_connect(timeout.sock_connect),
+    )
 
 
 def _enter_pinned_httpx_stream(
@@ -1815,10 +1855,16 @@ def _enter_pinned_httpx_stream(
         transport_url: str,
         transport_headers: dict[str, str] | None,
         sni_hostname: str | None,
+        *,
+        final: bool,
     ) -> httpx.Response:
         stream_options = dict(options, headers=transport_headers)
         if sni_hostname:
             stream_options["extensions"] = {"sni_hostname": sni_hostname}
+        if not final:
+            stream_options["timeout"] = _httpx_fallback_timeout(
+                options.get("timeout", httpx.USE_CLIENT_DEFAULT), client
+            )
         return stack.enter_context(client.stream(method, transport_url, **stream_options))
 
     response = _first_connected(
@@ -2628,9 +2674,15 @@ def _check_cert_pinning(
             ctx.minimum_version = _tls_min_version_from_str(min_ver)
         except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
             ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        # Synchronous, and it runs on the event loop in the async paths: every address
+        # shares one DEFAULT_CONNECT_TIMEOUT budget, so the fallback never blocks longer
+        # than the single connect did.
+        deadline = time.monotonic() + DEFAULT_CONNECT_TIMEOUT
         sock = _first_connected(
             [(address,) for address in accepted_resolved_ips[:_PINNED_ADDRESS_ATTEMPTS] or (host,)],
-            lambda address: socket.create_connection((address, port), timeout=DEFAULT_CONNECT_TIMEOUT),
+            lambda address, *, final: socket.create_connection(
+                (address, port), timeout=max(deadline - time.monotonic(), 0.001)
+            ),
             failures=(OSError,),
         )
         with sock, ctx.wrap_socket(sock, server_hostname=host) as ssock:
@@ -2923,6 +2975,8 @@ def _httpx_request_io(
             transport_url: str,
             pinned_headers: dict[str, str] | None,
             sni_hostname: str | None,
+            *,
+            final: bool,
         ) -> httpx.Response:
             return client.request(
                 method_upper,
@@ -2933,7 +2987,7 @@ def _httpx_request_io(
                 json=json,
                 data=data,
                 files=files,
-                timeout=request_timeout,
+                timeout=request_timeout if final else _httpx_fallback_timeout(request_timeout, client),
                 follow_redirects=follow_redirects,
                 extensions={"sni_hostname": sni_hostname},
             )
@@ -3007,6 +3061,8 @@ async def _httpx_arequest_io(
             transport_url: str,
             pinned_headers: dict[str, str] | None,
             sni_hostname: str | None,
+            *,
+            final: bool,
         ) -> httpx.Response:
             stream_kwargs: dict[str, Any] = {
                 "headers": _force_identity_accept_encoding(pinned_headers),
@@ -3015,7 +3071,7 @@ async def _httpx_arequest_io(
                 "json": json,
                 "data": data,
                 "files": files,
-                "timeout": request_timeout,
+                "timeout": request_timeout if final else _httpx_fallback_timeout(request_timeout, client),
                 "follow_redirects": follow_redirects,
             }
             stream_kwargs["extensions"] = {
@@ -3062,6 +3118,8 @@ async def _httpx_arequest_io(
             transport_url: str,
             pinned_headers: dict[str, str] | None,
             sni_hostname: str | None,
+            *,
+            final: bool,
         ) -> httpx.Response:
             return await client.request(
                 method_upper,
@@ -3072,7 +3130,7 @@ async def _httpx_arequest_io(
                 json=json,
                 data=data,
                 files=files,
-                timeout=request_timeout,
+                timeout=request_timeout if final else _httpx_fallback_timeout(request_timeout, client),
                 follow_redirects=follow_redirects,
                 extensions={"sni_hostname": sni_hostname},
             )
@@ -3148,6 +3206,8 @@ async def _aiohttp_request_io(
         transport_url: str,
         pinned_headers: dict[str, str] | None,
         server_hostname: str | None,
+        *,
+        final: bool,
     ) -> _AiohttpResponse:
         if max_response_bytes is not None:
             pinned_headers = _force_identity_accept_encoding(pinned_headers)
@@ -3156,7 +3216,7 @@ async def _aiohttp_request_io(
             "headers": pinned_headers,
             "cookies": cookies,
             "params": params,
-            "timeout": req_timeout,
+            "timeout": req_timeout if final else _aiohttp_fallback_timeout(req_timeout),
             "allow_redirects": False,
         }
         if max_response_bytes is not None:
@@ -3229,6 +3289,8 @@ async def _httpx_stream_io(
             transport_url: str,
             pinned_headers: dict[str, str] | None,
             sni_hostname: str | None,
+            *,
+            final: bool,
         ) -> httpx.Response:
             extensions: dict[str, Any] = {"tldw_stream_response": True}
             if sni_hostname:
@@ -3243,7 +3305,7 @@ async def _httpx_stream_io(
                     json=json,
                     data=data,
                     files=files,
-                    timeout=timeout,
+                    timeout=timeout if final else _httpx_fallback_timeout(timeout, client),
                     follow_redirects=False,
                     extensions=extensions,
                 )
@@ -3287,13 +3349,15 @@ async def _aiohttp_stream_io(
             transport_url: str,
             pinned_headers: dict[str, str] | None,
             server_hostname: str | None,
+            *,
+            final: bool,
         ) -> Any:
             proxy = _resolve_proxy_for_url(transport_url, proxies)
             req_kwargs: dict[str, Any] = {
                 "headers": pinned_headers,
                 "cookies": cookies,
                 "params": params,
-                "timeout": req_timeout,
+                "timeout": req_timeout if final else _aiohttp_fallback_timeout(req_timeout),
                 "allow_redirects": False,
             }
             if proxy:

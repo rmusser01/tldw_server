@@ -313,3 +313,91 @@ def test_fetch_without_timeout_uses_the_client_timeout(dns):
 
     assert response.status_code == 200
     assert seen == [{"connect": 7.0, "read": 7.0, "write": 7.0, "pool": 7.0}]
+
+
+# --- The fallback's connect budget ---------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("explicit", [True, False])
+async def test_only_the_final_address_gets_the_full_connect_timeout_on_httpx(dns, sockets, explicit):
+    """A 300 s caller must not wait 4 x 300 s: non-final tries cap connect at the default."""
+    timeouts: list[dict] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        timeouts.append(request.extensions["timeout"])
+        if request.url.host == "::1":
+            raise httpx.ConnectError("Connection refused", request=request)
+        return httpx.Response(200, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle), timeout=300.0) as client:
+        response = await http_client.afetch(
+            method="GET",
+            url=_LOCAL,
+            client=client,
+            configured_endpoint=_LOCAL_SCOPE,
+            retry=_ONE_ATTEMPT,
+            **({"timeout": 300.0} if explicit else {}),
+        )
+
+    assert response.status_code == 200
+    capped = http_client.DEFAULT_CONNECT_TIMEOUT
+    assert timeouts == [
+        {"connect": capped, "read": 300.0, "write": 300.0, "pool": 300.0},
+        {"connect": 300.0, "read": 300.0, "write": 300.0, "pool": 300.0},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_only_the_final_address_gets_the_full_connect_timeout_on_aiohttp(dns, sockets):
+    seen: list[tuple[str, str, object]] = []
+    session = _AiohttpSession(seen)
+    timeouts: list[aiohttp.ClientTimeout] = []
+    request = session.request
+
+    def recording_request(method, url, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        return request(method, url, **kwargs)
+
+    session.request = recording_request
+    response = await http_client._afetch_aiohttp(
+        method="GET",
+        url=_LOCAL,
+        client=session,
+        configured_endpoint=_LOCAL_SCOPE,
+        retry=_ONE_ATTEMPT,
+        timeout=300.0,
+    )
+
+    assert response.content == b"ok"
+    capped = http_client.DEFAULT_CONNECT_TIMEOUT
+    assert timeouts == [
+        aiohttp.ClientTimeout(total=300.0, connect=capped, sock_connect=capped),
+        aiohttp.ClientTimeout(total=300.0),
+    ]
+
+
+def test_certificate_pin_preflight_shares_one_connect_budget(dns, monkeypatch):
+    """The preflight is synchronous on the event loop, so its addresses share one budget."""
+    import time
+
+    monkeypatch.setattr(http_client, "DEFAULT_CONNECT_TIMEOUT", 0.2)
+    budgets: list[float] = []
+
+    def slow_then_refuse(address, *, timeout):
+        budgets.append(timeout)
+        if len(budgets) == 1:
+            time.sleep(0.15)
+            raise TimeoutError("timed out")
+        raise ConnectionRefusedError(61, "Connection refused")
+
+    monkeypatch.setattr(socket, "create_connection", slow_then_refuse)
+
+    with pytest.raises(EgressPolicyError, match="TLS pinning verification failed"):
+        http_client._check_cert_pinning(
+            "dual.example", 443, {"00"}, None, accepted_resolved_ips=(_PUBLIC_V6, "93.184.216.34")
+        )
+
+    assert len(budgets) == 2
+    assert budgets[0] == pytest.approx(0.2, abs=0.02)
+    assert budgets[1] <= 0.07
