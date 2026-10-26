@@ -42644,6 +42644,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         else:
             item["flashcard_uuids_json"] = []
         item["superseded_count"] = int(item.get("superseded_count") or 0)
+        for field in ("created_at", "last_modified"):
+            item[field] = self._osce_timestamp(item.get(field))
         return item
 
     def _public_quiz_question(self, question: dict[str, Any]) -> dict[str, Any]:
