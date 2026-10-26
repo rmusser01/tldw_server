@@ -29,6 +29,7 @@ import tempfile
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from graphlib import TopologicalSorter
 from pathlib import Path, PurePosixPath
 from collections.abc import Callable
 from typing import Any
@@ -1069,6 +1070,18 @@ class ChatbookService:
         if fallback is None:
             return None, f"Character {original_id} not found and no fallback character is available."
         return fallback, f"Character {original_id} not found; using default character."
+
+    @staticmethod
+    def _resolve_import_conversation_id(
+        source_id: Any, conversation_id_map: dict[str, str] | None, status: ImportJob,
+    ) -> str | None:
+        """Only this import's successful conversation writes can receive archived links."""
+        if source_id is None:
+            return None
+        destination_id = (conversation_id_map or {}).get(str(source_id))
+        if destination_id is None:
+            status.warnings.append("Conversation reference was not imported; left unlinked.")
+        return destination_id
 
     def _normalize_prompt_record(self, record: dict[str, Any]) -> dict[str, Any]:
         """Normalize prompt record for JSON export."""
@@ -3291,6 +3304,8 @@ class ChatbookService:
 
             manifest_path_index = self._build_manifest_import_path_index(manifest)
             character_id_map: dict[str, int] = {}
+            conversation_id_map: dict[str, str] = {}
+            message_id_map: dict[tuple[str, str], str] = {}
             media_id_map: dict[str, int] = {}
             imported_items: dict[str, int] = {}
 
@@ -3402,7 +3417,9 @@ class ChatbookService:
                     conflict_resolution, prefix_imported,
                     import_status,
                     manifest_path_index=manifest_path_index,
-                    character_id_map=character_id_map
+                    character_id_map=character_id_map,
+                    conversation_id_map=conversation_id_map,
+                    message_id_map=message_id_map,
                 )
 
             # Import notes
@@ -3415,6 +3432,8 @@ class ChatbookService:
                     conflict_resolution, prefix_imported,
                     import_status,
                     manifest_path_index=manifest_path_index,
+                    conversation_id_map=conversation_id_map,
+                    message_id_map=message_id_map,
                 )
 
             # Import Explainer sessions from first-class content items.
@@ -3463,6 +3482,7 @@ class ChatbookService:
                         conflict_resolution, prefix_imported,
                         import_status,
                         manifest_path_index=manifest_path_index,
+                        conversation_id_map=conversation_id_map,
                     )
 
             # Note: We do NOT delete the original import file - the caller owns it
@@ -6111,6 +6131,7 @@ class ChatbookService:
                 for msg in (messages or []):
                     message_payload: dict[str, Any] = {
                         "id": msg['id'],
+                        "parent_message_id": msg.get("parent_message_id"),
                         "role": msg['sender'],
                         "content": msg.get('message', msg.get('content', '')),
                         "timestamp": msg['timestamp'].isoformat() if hasattr(msg['timestamp'], 'isoformat') else msg['timestamp'],
@@ -6320,17 +6341,22 @@ class ChatbookService:
                     "id": note['id'],
                     "title": rendered_title,
                     "content": rendered_content,
+                    "conversation_id": note.get("conversation_id"),
+                    "message_id": note.get("message_id"),
                     "created_at": note['created_at'].isoformat() if hasattr(note['created_at'], 'isoformat') else note['created_at']
                 }
 
                 # Write markdown file
                 note_file = notes_dir / f"note_{note_id}.md"
-                with open(note_file, 'w', encoding='utf-8') as f:
+                with open(note_file, 'w', encoding='utf-8', newline='') as f:
                     # Write frontmatter
                     f.write("---\n")
                     f.write(f"id: {note['id']}\n")
                     f.write(f"title: {_yaml_scalar(note_data['title'])}\n")
                     f.write(f"created_at: {note_data['created_at']}\n")
+                    for field in ("conversation_id", "message_id"):
+                        if note_data[field] is not None:
+                            f.write(f"{field}: {_yaml_scalar(note_data[field])}\n")
                     f.write("---\n\n")
                     f.write(str(note_data['content']))
 
@@ -6620,7 +6646,9 @@ class ChatbookService:
         prefix_imported: bool,
         status: ImportJob,
         manifest_path_index: ManifestImportPathIndex | None = None,
-        character_id_map: dict[str, int] | None = None
+        character_id_map: dict[str, int] | None = None,
+        conversation_id_map: dict[str, str] | None = None,
+        message_id_map: dict[tuple[str, str], str] | None = None,
     ):
         """Import conversations from chatbook."""
         max_img_bytes = self._get_max_message_image_bytes()
@@ -6679,6 +6707,22 @@ class ChatbookService:
                     status.warnings.append(f"Conversation {conv_id} skipped due to missing character_id.")
                     continue
 
+                messages = conv_data.get("messages", [])
+                source_indexes: dict[str, int] = {}
+                for index, msg in enumerate(messages):
+                    if msg.get("id") is not None:
+                        source_id = str(msg["id"])
+                        if source_id in source_indexes:
+                            raise ValidationError("Duplicate message ID in conversation")
+                        source_indexes[source_id] = index
+                # Parent-first order also handles archives whose timestamps put children first.
+                ordered_indexes = tuple(TopologicalSorter({
+                    index: (source_indexes[str(msg["parent_message_id"])],)
+                    if msg.get("parent_message_id") is not None and str(msg["parent_message_id"]) in source_indexes
+                    else ()
+                    for index, msg in enumerate(messages)
+                }).static_order())
+                imported_messages: dict[str, str] = {}
                 # Create conversation + messages atomically
                 with self.db.transaction():
                     conv_dict = {
@@ -6691,7 +6735,13 @@ class ChatbookService:
                     if new_conv_id:
                         # Import messages
                         base_path = extract_dir.resolve()
-                        for msg in conv_data.get('messages', []):
+                        for index in ordered_indexes:
+                            msg = messages[index]
+                            parent_id = None
+                            if msg.get("parent_message_id") is not None:
+                                parent_id = imported_messages.get(str(msg["parent_message_id"]))
+                                if parent_id is None:
+                                    status.warnings.append("Message parent was not imported; left unlinked.")
                             raw_role = msg.get('role') or msg.get('sender') or msg.get('author') or msg.get('from')
                             raw_content = msg.get('content')
                             if raw_content is None:
@@ -6700,6 +6750,7 @@ class ChatbookService:
                                 raw_content = msg.get('text')
                             msg_dict = {
                                 'conversation_id': new_conv_id,
+                                'parent_message_id': parent_id,
                                 'sender': raw_role or 'user',
                                 'content': raw_content if raw_content is not None else '',
                                 'timestamp': msg.get('timestamp') or msg.get('created_at')
@@ -6765,7 +6816,11 @@ class ChatbookService:
                             if images_payload:
                                 msg_dict['images'] = images_payload
 
-                            self.db.add_message(msg_dict)
+                            new_message_id = self.db.add_message(msg_dict)
+                            if not new_message_id:
+                                raise ValidationError("Message could not be imported")
+                            if msg.get("id") is not None:
+                                imported_messages[str(msg["id"])] = new_message_id
 
                         status.successful_items += 1
                     else:
@@ -6775,6 +6830,12 @@ class ChatbookService:
                             status.skipped_items += 1
                         else:
                             status.failed_items += 1
+
+                if new_conv_id:
+                    if conversation_id_map is not None:
+                        conversation_id_map[str(conv_id)] = new_conv_id
+                    if message_id_map is not None:
+                        message_id_map.update({(str(conv_id), key): value for key, value in imported_messages.items()})
 
             except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
                 status.failed_items += 1
@@ -6789,6 +6850,8 @@ class ChatbookService:
         prefix_imported: bool,
         status: ImportJob,
         manifest_path_index: ManifestImportPathIndex | None = None,
+        conversation_id_map: dict[str, str] | None = None,
+        message_id_map: dict[tuple[str, str], str] | None = None,
     ):
         """Import notes from chatbook."""
         template_settings = self._resolve_template_settings(manifest)
@@ -6841,12 +6904,13 @@ class ChatbookService:
                     continue
 
                 # Parse markdown with frontmatter
-                with open(note_file, encoding='utf-8') as f:
+                with open(note_file, encoding='utf-8', newline='') as f:
                     content = f.read()
 
                 # Extract frontmatter
                 note_content = content
                 note_title = f"Imported Note {note_id}"
+                parsed = {}
 
                 if content.startswith('---'):
                     parts = content.split('---', 2)
@@ -6862,7 +6926,10 @@ class ChatbookService:
                                 note_title = _extract_title_frontmatter(frontmatter, note_title)
                         except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
                             note_title = _extract_title_frontmatter(frontmatter, note_title)
-                        note_content = parts[2].strip()
+                        body = parts[2]
+                        newline = "\r\n" if body.startswith("\r\n") else "\n"
+                        separator = newline * 2 if body.startswith(newline * 2) else newline
+                        note_content = body.removeprefix(separator)
 
                 note_title = self._render_chatbook_text(
                     note_title,
@@ -6888,6 +6955,15 @@ class ChatbookService:
                 elif existing and conflict_resolution == ConflictResolution.RENAME:
                     note_title = self._generate_unique_name(note_title, "note")
 
+                source_conversation = parsed.get("conversation_id") if isinstance(parsed, dict) else None
+                source_message = parsed.get("message_id") if isinstance(parsed, dict) else None
+                conversation_id = self._resolve_import_conversation_id(source_conversation, conversation_id_map, status)
+                message_id = None
+                if source_message is not None:
+                    if conversation_id is not None:
+                        message_id = (message_id_map or {}).get((str(source_conversation), str(source_message)))
+                    if message_id is None:
+                        status.warnings.append("Note message reference was not imported; left unlinked.")
                 coordinator = active_coordinator(self.db, user_id=self.user_id)
                 if coordinator is not None:
                     key = coordinator.request_fingerprint(
@@ -6896,6 +6972,8 @@ class ChatbookService:
                             "source_note_id": note_id,
                             "title": note_title,
                             "content": note_content,
+                            "conversation_id": conversation_id,
+                            "message_id": message_id,
                         },
                     )
                     new_note_id = stable_note_id("chatbook-import", key)
@@ -6904,11 +6982,15 @@ class ChatbookService:
                         note_id=new_note_id,
                         title=note_title,
                         content=note_content,
+                        conversation_id=conversation_id,
+                        message_id=message_id,
                         source="chatbook-import",
                         key=key,
                     )
                 else:
-                    new_note_id = self.db.add_note(title=note_title, content=note_content)
+                    new_note_id = self.db.add_note(
+                        title=note_title, content=note_content, conversation_id=conversation_id, message_id=message_id,
+                    )
 
                 if new_note_id:
                     status.successful_items += 1
@@ -7457,6 +7539,7 @@ class ChatbookService:
         prefix_imported: bool,
         status: ImportJob,
         manifest_path_index: ManifestImportPathIndex | None = None,
+        conversation_id_map: dict[str, str] | None = None,
     ) -> None:
         """Import generic generated documents from a chatbook."""
         from ..Chat.document_generator import DocumentGeneratorService, DocumentType
@@ -7507,7 +7590,9 @@ class ChatbookService:
                 except Exception:
                     doc_type = DocumentType.SUMMARY
                 new_document_id = doc_service._save_generated_document(
-                    conversation_id=payload.get("conversation_id"),
+                    conversation_id=self._resolve_import_conversation_id(
+                        payload.get("conversation_id"), conversation_id_map, status,
+                    ),
                     document_type=doc_type,
                     title=title,
                     content=str(payload.get("content") or ""),
