@@ -628,7 +628,12 @@ _PUBLIC_URL = "http://93.184.216.34/page"
 
 @pytest.fixture
 def _http_egress(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Private and link-local addresses blocked; a stdlib socket fetch fails loudly."""
+    """Block private and link-local addresses.
+
+    A refused request is proven by the MockTransport's record of requests. httpx
+    connects through anyio, not ``socket.create_connection``, so the patch below
+    only catches a stdlib or urllib fetch.
+    """
     import socket
 
     def _no_real_network(*_args: Any, **_kwargs: Any) -> None:

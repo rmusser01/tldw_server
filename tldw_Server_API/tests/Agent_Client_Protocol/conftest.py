@@ -82,9 +82,11 @@ async def admitted_permission_prompt(monkeypatch):
 def mcp_http_egress(monkeypatch):
     """Run an MCP HTTP transport under the production egress policy, without a network.
 
-    Private and link-local addresses are blocked, and ``socket.create_connection``
-    fails loudly so a stdlib fetch that bypasses ``core.http_client`` shows up.
-    Tests send traffic through ``create_async_client(transport=httpx.MockTransport(...))``.
+    Private and link-local addresses are blocked. Tests send traffic through
+    ``create_async_client(transport=httpx.MockTransport(...))``; the proof that a
+    refused request never went out is the MockTransport's own record of requests.
+    httpx connects through anyio, not ``socket.create_connection``, so the patch
+    below only catches a stdlib or urllib fetch.
     """
     import socket
 
