@@ -17,12 +17,13 @@ from typing import Any, Callable
 import httpx
 from loguru import logger
 
+from tldw_Server_API.app.core.Admin_Webhooks.domain import redact_target
 from tldw_Server_API.app.core.AuthNZ.admin_webhook_secrets import (
     decrypt_admin_webhook_secret,
     encrypt_admin_webhook_secret,
 )
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
-from tldw_Server_API.app.core.exceptions import EgressPolicyError
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, WebhookError
 from tldw_Server_API.app.core.http_client import RetryPolicy, afetch, create_async_client
 
 # ---------------------------------------------------------------------------
@@ -66,6 +67,14 @@ def generate_signature(secret: str, timestamp: str, body: str) -> str:
     payload = f"{timestamp}.{body}"
     sig = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
     return f"v1={sig}"
+
+
+def _url_for_logs(url: str) -> str:
+    """Origin only: Slack/Discord-style webhook URLs carry their secret in the path."""
+    try:
+        return redact_target(url)
+    except WebhookError:
+        return "<invalid webhook url>"
 
 
 def _default_async_client_factory(*, timeout: int) -> httpx.AsyncClient:
@@ -278,7 +287,7 @@ class AdminWebhooksService:
                         url=webhook.url,
                         client=client,
                         headers=headers,
-                        data=body,
+                        content=body,
                         timeout=webhook.timeout_seconds,
                         allow_redirects=False,
                         retry=RetryPolicy(attempts=1),
@@ -293,15 +302,18 @@ class AdminWebhooksService:
                 except EgressPolicyError as exc:
                     # A refused target is a configuration problem, not a transient failure.
                     latency_ms = int((time.monotonic() - start) * 1000)
-                    error_message = str(exc)[:1024]
-                    logger.warning("Webhook delivery to {} refused by egress policy: {}", webhook.url, error_message)
+                    # Nothing was sent: drop any earlier attempt's status and body.
+                    status_code = None
+                    response_body = None
+                    error_message = f"egress policy refused: {exc}"[:1024]
+                    logger.warning("Webhook delivery to {} {}", _url_for_logs(webhook.url), error_message)
                     break
                 except Exception as exc:
                     latency_ms = int((time.monotonic() - start) * 1000)
                     error_message = str(exc)[:1024]
                     logger.warning(
                         "Webhook delivery attempt {}/{} to {} failed: {}",
-                        attempt + 1, max_attempts, webhook.url, error_message,
+                        attempt + 1, max_attempts, _url_for_logs(webhook.url), error_message,
                     )
 
         # Log the delivery

@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import time
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -393,8 +394,8 @@ def http_route(monkeypatch: pytest.MonkeyPatch, svc: AdminWebhooksService):
     """Deliver through the default client factory and the real afetch over a MockTransport.
 
     Egress and redirect handling run for real; only the socket layer is replaced, and any
-    real connection attempt fails loudly. ``replies`` holds (status, headers, body) per
-    request; the delivery log row is captured instead of written.
+    real connection attempt fails loudly. ``replies`` holds (status, headers, body) or an
+    exception to raise, per request; the delivery log row is captured instead of written.
     """
     import socket
 
@@ -410,11 +411,14 @@ def http_route(monkeypatch: pytest.MonkeyPatch, svc: AdminWebhooksService):
     monkeypatch.setattr(socket.socket, "connect", _no_real_network)
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
     requests: list[httpx.Request] = []
-    replies: list[tuple[int, dict[str, str], bytes]] = []
+    replies: list[Any] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        status, headers, body = replies.pop(0)
+        reply = replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        status, headers, body = reply
         return httpx.Response(status, headers=headers, content=body, request=request)
 
     def _mock_transport_client(**kwargs):
@@ -441,6 +445,7 @@ async def test_deliver_refuses_private_target_at_delivery_time(svc: AdminWebhook
     logged = log.await_args.kwargs
     assert logged["status_code"] is None
     assert logged["delivered_at"] is None
+    assert logged["error_message"].startswith("egress policy refused: ")
     assert "private or reserved" in logged["error_message"]
     # A policy refusal is final: no backoff, no second attempt.
     assert logged["retry_attempt"] == 0
@@ -465,10 +470,15 @@ async def test_deliver_does_not_follow_redirect_to_private_address(svc: AdminWeb
 @pytest.mark.unit
 async def test_deliver_signs_and_posts_to_a_public_target(svc: AdminWebhooksService, http_route):
     """A valid delivery sends the same body, signature headers and timeout as before."""
+    import warnings
+
     requests, replies, log = http_route
     replies.append((200, {}, b"OK"))
 
-    await svc.deliver(_hook(_PUBLIC_HOOK_URL), "test.event", {"key": "value"})
+    with warnings.catch_warnings():
+        # The body goes as content=, not httpx's deprecated data=<str>.
+        warnings.simplefilter("error", DeprecationWarning)
+        await svc.deliver(_hook(_PUBLIC_HOOK_URL), "test.event", {"key": "value"})
 
     (request,) = requests
     body = '{"key": "value"}'
@@ -520,3 +530,86 @@ async def test_deliver_retries_with_backoff_and_a_fresh_signature(
     assert logged["status_code"] == 200
     assert logged["retry_attempt"] == 2
     assert logged["error_message"] == "HTTP 503"
+
+
+def _resolve_hostnames(monkeypatch: pytest.MonkeyPatch, resolver) -> None:
+    """Make the egress check resolve hostnames through ``resolver``, as it does outside pytest."""
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Security import egress
+
+    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
+    monkeypatch.setattr(http_client, "env_flag_enabled", lambda _name: False)
+    monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda host, **_kwargs: resolver(host))
+
+
+@pytest.mark.unit
+async def test_deliver_refuses_a_hostname_resolving_to_a_private_address(
+    svc: AdminWebhooksService, http_route, monkeypatch: pytest.MonkeyPatch,
+):
+    """The DNS answer is checked at delivery, not only the literal URL."""
+    requests, _replies, log = http_route
+    _resolve_hostnames(monkeypatch, lambda _host: ["10.0.0.5"])
+
+    await svc.deliver(_hook("http://hooks.internal.example/hook"), "test.event", {"key": "value"})
+
+    assert requests == []
+    logged = log.await_args.kwargs
+    assert logged["status_code"] is None
+    assert logged["error_message"].startswith("egress policy refused: ")
+
+
+@pytest.mark.unit
+async def test_deliver_rechecks_egress_on_every_attempt(
+    svc: AdminWebhooksService, http_route, monkeypatch: pytest.MonkeyPatch,
+):
+    """A host that answers 500 and then rebinds to a private address is refused on the retry.
+
+    The refusal row must not keep the first attempt's status and body.
+    """
+    requests, replies, log = http_route
+    replies.append((500, {}, b"boom"))
+    _resolve_hostnames(monkeypatch, lambda _host: ["10.0.0.5"] if requests else ["93.184.216.34"])
+
+    with patch("tldw_Server_API.app.services.admin_webhooks_service.asyncio.sleep", new=AsyncMock()) as sleep:
+        await svc.deliver(_hook("http://hooks.example.com/hook", retry_count=3), "test.event", {"key": "value"})
+
+    assert len(requests) == 1
+    assert requests[0].headers["Host"] == "hooks.example.com"
+    # One backoff before attempt 2, then the refusal stops the loop.
+    assert [call.args[0] for call in sleep.await_args_list] == [2]
+    logged = log.await_args.kwargs
+    assert logged["retry_attempt"] == 1
+    assert logged["status_code"] is None
+    assert logged["response_body"] is None
+    assert logged["error_message"].startswith("egress policy refused: ")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("failure", ["egress", "transport"])
+async def test_delivery_warnings_log_only_the_url_origin(
+    svc: AdminWebhooksService, http_route, monkeypatch: pytest.MonkeyPatch, failure,
+):
+    """Slack/Discord-style URLs carry their secret in the path; warnings show only the origin."""
+    import httpx
+
+    from tldw_Server_API.app.services.admin_webhooks_service import logger
+
+    _requests, replies, _log = http_route
+    if failure == "egress":
+        monkeypatch.setenv("EGRESS_DENYLIST", "hooks.slack.com")
+    else:
+        replies.append(httpx.ConnectError("refused"))
+    messages: list[str] = []
+    sink = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        await svc.deliver(
+            _hook("https://hooks.slack.com/services/T000/B000/SECRETTOKEN?x=1"), "test.event", {"key": "value"},
+        )
+    finally:
+        logger.remove(sink)
+
+    warning = "".join(messages)
+    assert "https://hooks.slack.com" in warning
+    assert "SECRETTOKEN" not in warning
+    assert "/services/" not in warning
