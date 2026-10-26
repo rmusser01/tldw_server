@@ -349,8 +349,9 @@ export const BoardView = ({
       if (!isActive()) return
       const previous = queryClient.getQueryData<BoardWithLists>(key("kanban-board", board.id))
       if (previous) {
+        const listById = new Map(previous.lists.map((l) => [l.id, l]))
         const reordered = listIds
-          .map((id) => previous.lists.find((l) => l.id === id))
+          .map((id) => listById.get(id))
           .filter(Boolean) as ListWithCards[]
         queryClient.setQueryData<BoardWithLists>(key("kanban-board", board.id), {
           ...previous,
@@ -385,8 +386,9 @@ export const BoardView = ({
           ...previous,
           lists: previous.lists.map((l) => {
             if (l.id !== listId) return l
+            const cardById = new Map(l.cards.map((c) => [c.id, c]))
             const reordered = cardIds
-              .map((id) => l.cards.find((c) => c.id === id))
+              .map((id) => cardById.get(id))
               .filter(Boolean) as Card[]
             return { ...l, cards: reordered }
           })
