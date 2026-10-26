@@ -45,8 +45,10 @@ execution. This authorizes foundation implementation only, not backend routing.
 At the planning revalidation, all 16 relevant completion, policy, context, and
 shared-helper function ASTs match the original baseline. Incoming admission,
 failure-policy, WorkerSDK usage-accounting, and PostgreSQL fixture changes remain
-intact. The unpublished complementary ADR was renumbered from 060 to 078 because
-other open PRs now use 060; its accepted ownership rationale is unchanged.
+intact. The unpublished complementary ADR was first renumbered from 060 to 078
+during planning, then to 082 before publication on 2026-10-25 because live dev
+uses 078 for a different accepted decision. Its accepted ownership rationale is
+unchanged; the identifier-only change preserves the existing live ADR.
 
 ## Scope
 
@@ -71,10 +73,10 @@ for the foundation, routing, and any newly validated follow-up defects.
 
 ## ADR Check
 
-ADR required: yes. [ADR-078](../../ADR/078-jobs-completion-persistence-boundary.md)
+ADR required: yes. [ADR-082](../../ADR/082-jobs-completion-persistence-boundary.md)
 records the durable completion persistence boundary approved here.
 [ADR-058](../../ADR/058-jobs-completion-row-identity.md) continues to govern locking,
-row identity, and atomic bookkeeping. ADR-078 supplements it; neither accepted
+row identity, and atomic bookkeeping. ADR-082 supplements it; neither accepted
 rationale nor ADR-058's status changes.
 
 ## Alternatives
@@ -377,7 +379,7 @@ be revertible at its own merge point.
 
 Written-specification and plan review are complete. The
 [foundation implementation plan](../plans/2026-10-20-jobs-completion-foundation-implementation-plan.md)
-is approved for subagent-driven execution. TASK-13878 covers PR 1 only; PR 2
+is approved for subagent-driven execution. TASK-13937 covers PR 1 only; PR 2
 gets a separate task and plan after the foundation merges. TASK-13421 records the
 completed ownership assessment and written-design approval. No completion
 implementation is included here.

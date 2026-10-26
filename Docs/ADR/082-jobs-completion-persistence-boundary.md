@@ -1,4 +1,4 @@
-# ADR-078: Completion persistence belongs in DB_Management
+# ADR-082: Completion persistence belongs in DB_Management
 
 **Status:** Accepted
 **Date:** 2026-10-04
