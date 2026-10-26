@@ -45,7 +45,7 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ImportStatus,
     coerce_chatbook_export_version,
 )
-from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
+from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService, record_failed_import_result
 from tldw_Server_API.app.core.Chatbooks.openwebui_hydration_jobs import (
     OPENWEBUI_ATTACHMENT_HYDRATION_JOB_TYPE,
 )
@@ -508,7 +508,8 @@ async def _handle_import(service: ChatbookService, payload: dict[str, Any], job_
             return worker_result
         return {"imported_items": {}, "warnings": result or []}
 
-    if ij:
+    if ij and ij.status != ImportStatus.CANCELLED:
+        record_failed_import_result(ij, result)
         ij.status = ImportStatus.FAILED
         ij.completed_at = datetime.now(timezone.utc)
         ij.error_message = msg
