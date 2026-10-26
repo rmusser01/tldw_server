@@ -14,7 +14,6 @@ from tldw_Server_API.app.core.RAG.rag_service.vector_stores.pgvector_adapter imp
     PGVectorAdapter,
 )
 
-
 pytestmark = pytest.mark.unit
 
 
