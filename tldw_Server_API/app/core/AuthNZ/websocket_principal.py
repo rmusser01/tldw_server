@@ -12,6 +12,8 @@ Credentials, in order:
 - ``Authorization: Bearer <token>``, or ``Sec-WebSocket-Protocol: bearer, <token>`` for
   browsers, which cannot set headers on a WebSocket. Echo the marker with
   ``auth_subprotocol``: a browser fails a handshake whose offered protocol is ignored.
+  Only the Bearer scheme counts: a browser behind a Basic-auth proxy attaches the proxy's
+  ``Authorization: Basic`` to the upgrade, which is not a credential here.
 - ``X-API-KEY``.
 - With neither, the single-user session cookie, behind its trusted-Origin check
   (``websocket_session_auth``), since cookies are sent cross-site.
@@ -28,7 +30,7 @@ from fastapi import HTTPException, WebSocket, WebSocketException, status
 from starlette.requests import Request
 
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import has_scope, normalize_scope
-from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import get_auth_principal
+from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import _extract_bearer_token, get_auth_principal
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
     cookie_websocket_rejection_code,
@@ -56,11 +58,10 @@ def auth_subprotocol(websocket: WebSocket) -> str | None:
 def has_ws_credential(websocket: WebSocket) -> bool:
     """Whether the handshake presents a credential ``resolve_ws_principal`` reads.
 
-    That is ``Authorization``, ``X-API-KEY`` or the bearer subprotocol; the cookie is ambient
-    and does not count.
+    That is ``Authorization: Bearer``, ``X-API-KEY`` or the bearer subprotocol. Another
+    ``Authorization`` scheme (a proxy's Basic auth) does not count, nor does the ambient cookie.
     """
-    headers = websocket.headers
-    return bool(_subprotocol_token(websocket)) or "authorization" in headers or "x-api-key" in headers
+    return bool(_subprotocol_token(websocket) or _extract_bearer_token(websocket)) or "x-api-key" in websocket.headers
 
 
 async def resolve_ws_principal(
@@ -84,7 +85,7 @@ async def resolve_ws_principal(
             credential store failed. Uncaught, Starlette closes the socket with it.
     """
     token = _subprotocol_token(websocket)
-    if token and "authorization" not in websocket.headers:
+    if token and not _extract_bearer_token(websocket):
         return await verify_ws_credential(websocket, token=token, required_scope=required_scope)
     if not has_ws_credential(websocket):
         if await resolve_single_user_cookie_websocket(websocket) is not None:
@@ -108,14 +109,21 @@ async def verify_ws_credential(
     ``X-API-KEY``, on the same path as ``resolve_ws_principal``.
 
     ``resolve_ws_principal`` uses it for the bearer subprotocol, and a route for a deprecated
-    channel; call it when no ``Authorization`` header competes (a route shim: when
-    ``has_ws_credential`` is False). Raises ``WebSocketException`` as ``resolve_ws_principal``
-    does, and 4401 when given no credential: the handshake's own headers are never verified
-    here, or a bare cookie would reach the session check without its Origin check.
+    channel; call it when no ``Authorization: Bearer`` header competes (a route shim: when
+    ``has_ws_credential`` is False). An ``Authorization`` header of another scheme (a proxy's
+    Basic auth) is replaced by the token, so the verifier sees the token.
+
+    Raises ``WebSocketException`` as ``resolve_ws_principal`` does, and 4401 when given no
+    credential: the handshake's own headers are never verified here, or a bare cookie would
+    reach the session check without its Origin check.
     """
     if not token and not api_key:
         raise WebSocketException(code=WS_UNAUTHENTICATED, reason="authentication_required")
-    headers = list(websocket.scope.get("headers") or [])
+    replaced: set[bytes] = {b"authorization"} if token else set()
+    if api_key:
+        replaced.add(b"x-api-key")
+    handshake = websocket.scope.get("headers") or []
+    headers = [(name, value) for name, value in handshake if name not in replaced]
     try:
         if token:
             headers.append((b"authorization", f"Bearer {token}".encode("latin-1")))

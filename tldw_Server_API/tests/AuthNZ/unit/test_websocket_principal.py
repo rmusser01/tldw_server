@@ -92,6 +92,9 @@ def _websocket(headers: list[tuple[bytes, bytes]]) -> WebSocket:
     ("headers", "expected"),
     [
         ([(b"authorization", b"Bearer t")], True),
+        ([(b"authorization", b"bEaReR  t ")], True),  # the scheme is case-insensitive
+        ([(b"authorization", b"Basic dXNlcjpwdw==")], False),  # a proxy's, not ours
+        ([(b"authorization", b"Bearer ")], False),  # a scheme with no credential
         ([(b"x-api-key", b"k")], True),
         ([(b"sec-websocket-protocol", b"bearer, t")], True),
         ([(b"sec-websocket-protocol", b"x-api-key, k")], False),  # not a channel this module reads
@@ -148,3 +151,21 @@ async def test_verify_ws_credential_without_a_credential_never_reaches_the_cooki
 
     assert (refused.value.code, refused.value.reason) == (4401, "authentication_required")
     verifier.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_verify_ws_credential_replaces_a_proxy_authorization_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A browser behind a Basic-auth proxy sends ``Authorization: Basic``; the token must win."""
+    seen: list[str | None] = []
+
+    async def verifier(request):
+        seen.append(request.headers.get("authorization"))
+        return AuthPrincipal(kind="user", user_id=7)
+
+    monkeypatch.setattr(websocket_principal, "get_auth_principal", verifier)
+    behind_proxy = _websocket([(b"authorization", b"Basic dXNlcjpwdw==")])
+
+    principal = await websocket_principal.verify_ws_credential(behind_proxy, token="a.b.c")
+
+    assert principal.user_id == 7
+    assert seen == ["Bearer a.b.c"]

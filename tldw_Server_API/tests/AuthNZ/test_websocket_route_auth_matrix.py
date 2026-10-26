@@ -494,6 +494,28 @@ def test_acp_deprecated_query_keeps_the_single_user_ip_allowlist(
         inside.close()
 
 
+BASIC_PROXY_AUTH = {"Authorization": "Basic cHJveHktdXNlcjpwcm94eS1wYXNz"}
+
+
+@pytest.mark.parametrize("route", SHIM_ACCEPTING)
+def test_acp_a_proxy_basic_authorization_is_not_a_credential(
+    env: SimpleNamespace, route: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Basic-auth reverse proxy makes the browser attach its ``Authorization`` to the upgrade.
+    It neither blocks the deprecated query nor shadows the bearer subprotocol, and alone it
+    authenticates no one."""
+    url = ROUTES[route][0]
+    assert _outcome(env.client, url, headers=BASIC_PROXY_AUTH) == "close 4401"
+    # A copy each time: TestClient writes the handshake headers into the dict it is given.
+    with env.client.websocket_connect(url, headers=dict(BASIC_PROXY_AUTH), subprotocols=["bearer", env.valid]) as ws:
+        assert ws.accepted_subprotocol == "bearer"
+    _single_user(monkeypatch)
+    with _warnings() as warned:
+        with env.client.websocket_connect(_with_query(url, "api_key", SINGLE_USER_KEY), headers=dict(BASIC_PROXY_AUTH)):
+            pass
+    assert [message for message in _deprecations(warned) if "query api_key" in message], warned
+
+
 @pytest.mark.parametrize("route", SHIM_ACCEPTING)
 def test_acp_deprecated_query_pair_resolves_like_both_http_headers(env: SimpleNamespace, route: str) -> None:
     """``?token=&api_key=`` goes to the verifier as both headers, as HTTP resolves them: the JWT
