@@ -1110,85 +1110,114 @@ async def test_github_create_issue_adapter_cancelled():
     assert result.get("__status__") == "cancelled"
 
 
-@pytest.mark.asyncio
-async def test_github_create_issue_adapter_success():
-    """Test GitHub adapter creates issue successfully."""
+_GITHUB_ISSUES_URL = "https://api.github.com/repos/owner/repo/issues"
+_GITHUB_TEST_TOKEN = "ghp" + "_test_token"
+
+
+def _route_github_through_mock_transport(monkeypatch, handler):
+    """Send the adapter's POST through the real ``apost`` over a MockTransport.
+
+    Egress checks run for real; only the socket layer is replaced. A raw client that
+    bypasses core.http_client fails loudly instead of touching the network or DNS.
+    """
+    import socket
+
+    import httpx
+
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Workflows.adapters.integration import github
+
+    def _no_real_network(*_args, **_kwargs):
+        raise AssertionError("github_create_issue bypassed core.http_client")
+
+    monkeypatch.setattr(socket, "create_connection", _no_real_network)
+    monkeypatch.setattr(socket.socket, "connect", _no_real_network)
+    monkeypatch.setattr(socket, "getaddrinfo", _no_real_network)
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+    client = http_client.create_async_client(transport=httpx.MockTransport(handler))
+
+    async def _apost_via_mock(**kwargs):
+        return await http_client.apost(client=client, **kwargs)
+
+    monkeypatch.setattr(github, "apost", _apost_via_mock, raising=False)
+    return client
+
+
+def _resolve_api_github_com_to(monkeypatch, ip):
+    """Make the egress check resolve hostnames to ``ip``, as it does outside pytest."""
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Security import egress
+
+    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
+    monkeypatch.setattr(http_client, "env_flag_enabled", lambda _name: False)
+    monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda _host, **_kwargs: [ip])
+
+
+async def _create_issue(monkeypatch, handler, config=None, context=None):
     from tldw_Server_API.app.core.Workflows.adapters.integration import run_github_create_issue_adapter
 
-    mock_response = MagicMock()
-    mock_response.status_code = 201
-    mock_response.json.return_value = {"html_url": "https://github.com/owner/repo/issues/1", "number": 1}
-
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
-    mock_client.post = AsyncMock(return_value=mock_response)
-
-    mock_httpx = MagicMock()
-    mock_httpx.AsyncClient.return_value = mock_client
-
-    http_module_key = "http" + "x"
-    with patch.dict("sys.modules", {http_module_key: mock_httpx}):
-        fixture_token = "ghp" + "_test_token"
-        config = {
-            "repo": "owner/repo",
-            "title": "Bug Report",
-            "body": "This is a bug",
-            "labels": ["bug"],
-            "token": fixture_token,
-        }
-        context = {}
-
-        result = await run_github_create_issue_adapter(config, context)
-        assert result.get("created") is True
-        assert result.get("issue_url") == "https://github.com/owner/repo/issues/1"
-        assert result.get("issue_number") == 1
-
-
-@pytest.mark.asyncio
-async def test_github_create_issue_adapter_api_error():
-    """Test GitHub adapter handles API errors."""
-    from tldw_Server_API.app.core.Workflows.adapters.integration import run_github_create_issue_adapter
-
-    mock_response = AsyncMock()
-    mock_response.status_code = 422
-    mock_response.text = "Validation Failed"
-
-    async_client_path = "http" + "x" + ".AsyncClient"
-    with patch(async_client_path) as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client.__aenter__.return_value = mock_client
-        mock_client.__aexit__.return_value = None
-        mock_client.post.return_value = mock_response
-        mock_client_cls.return_value = mock_client
-
-        fixture_token = "test" + "_token"
-        config = {"repo": "owner/repo", "title": "Test", "token": fixture_token}
-        context = {}
-
-        result = await run_github_create_issue_adapter(config, context)
-        assert result.get("created") is False
-        assert "github_api_error" in result.get("error", "")
-
-
-@pytest.mark.asyncio
-async def test_github_create_issue_adapter_sanitizes_backend_errors():
-    """Test GitHub adapter hides raw backend errors."""
-    from tldw_Server_API.app.core.Workflows.adapters.integration import run_github_create_issue_adapter
-
-    async_client_path = "http" + "x" + ".AsyncClient"
-    with patch(async_client_path) as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client.__aenter__.return_value = mock_client
-        mock_client.__aexit__.return_value = None
-        mock_client.post.side_effect = RuntimeError("github token at /private/workflows-github.key")
-        mock_client_cls.return_value = mock_client
-
-        token_value = "_".join(("test", "token"))
-        result = await run_github_create_issue_adapter(
-            {"repo": "owner/repo", "title": "Test", "token": token_value},
-            {},
+    client = _route_github_through_mock_transport(monkeypatch, handler)
+    try:
+        return await run_github_create_issue_adapter(
+            {"repo": "owner/repo", "title": "Bug Report", "token": _GITHUB_TEST_TOKEN, **(config or {})},
+            context or {},
         )
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_github_create_issue_adapter_success(monkeypatch):
+    """A 201 is parsed; the POST carries the same URL, headers, JSON body and 30 s timeout."""
+    import json
+
+    import httpx
+
+    requests: list[Any] = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(201, json={"html_url": "https://github.com/owner/repo/issues/1", "number": 1})
+
+    result = await _create_issue(monkeypatch, handler, {"body": "This is a bug", "labels": ["bug"]})
+
+    assert result == {"issue_url": "https://github.com/owner/repo/issues/1", "issue_number": 1, "created": True}
+    (request,) = requests
+    assert request.method == "POST"
+    assert str(request.url) == _GITHUB_ISSUES_URL
+    assert request.headers["Authorization"] == f"token {_GITHUB_TEST_TOKEN}"
+    assert request.headers["Accept"] == "application/vnd.github.v3+json"
+    assert json.loads(request.content) == {
+        "title": "Bug Report",
+        "body": "This is a bug",
+        "labels": ["bug"],
+        "assignees": [],
+    }
+    assert request.extensions["timeout"] == {"connect": 30.0, "read": 30.0, "write": 30.0, "pool": 30.0}
+
+
+@pytest.mark.asyncio
+async def test_github_create_issue_adapter_api_error(monkeypatch):
+    """A non-201 answer is reported with its status and body."""
+    import httpx
+
+    def handler(request):
+        return httpx.Response(422, text="Validation Failed")
+
+    result = await _create_issue(monkeypatch, handler)
+
+    assert result == {"error": "github_api_error: 422 - Validation Failed", "created": False}
+
+
+@pytest.mark.asyncio
+async def test_github_create_issue_adapter_sanitizes_backend_errors(monkeypatch):
+    """Test GitHub adapter hides raw backend errors."""
+
+    def handler(request):
+        raise RuntimeError("github token at /private/workflows-github.key")
+
+    result = await _create_issue(monkeypatch, handler)
 
     assert result == {
         "error": "GitHub issue creation failed",
@@ -1198,38 +1227,69 @@ async def test_github_create_issue_adapter_sanitizes_backend_errors():
 
 
 @pytest.mark.asyncio
-async def test_github_create_issue_adapter_with_template():
+async def test_github_create_issue_adapter_with_template(monkeypatch):
     """Test GitHub adapter applies template to title and body."""
-    from tldw_Server_API.app.core.Workflows.adapters.integration import run_github_create_issue_adapter
+    import json
 
-    mock_response = MagicMock()
-    mock_response.status_code = 201
-    mock_response.json.return_value = {"html_url": "https://github.com/owner/repo/issues/1", "number": 1}
+    import httpx
 
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
-    mock_client.post = AsyncMock(return_value=mock_response)
+    requests: list[Any] = []
 
-    mock_httpx = MagicMock()
-    mock_httpx.AsyncClient.return_value = mock_client
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(201, json={"html_url": "https://github.com/owner/repo/issues/1", "number": 1})
 
-    http_module_key = "http" + "x"
-    with patch.dict("sys.modules", {http_module_key: mock_httpx}):
-        fixture_token = "test" + "_token"
-        config = {
-            "repo": "owner/repo",
-            "title": "Issue for {{inputs.component}}",
-            "body": "Error: {{prev.error_message}}",
-            "token": fixture_token,
-        }
-        context = {
-            "inputs": {"component": "auth"},
-            "prev": {"error_message": "Connection refused"},
-        }
+    result = await _create_issue(
+        monkeypatch,
+        handler,
+        {"title": "Issue for {{inputs.component}}", "body": "Error: {{prev.error_message}}"},
+        {"inputs": {"component": "auth"}, "prev": {"error_message": "Connection refused"}},
+    )
 
-        result = await run_github_create_issue_adapter(config, context)
-        assert result.get("created") is True
+    assert result.get("created") is True
+    sent = json.loads(requests[0].content)
+    assert (sent["title"], sent["body"]) == ("Issue for auth", "Error: Connection refused")
+
+
+@pytest.mark.asyncio
+async def test_github_create_issue_refuses_egress_denied_api_host(monkeypatch):
+    """The operator egress denylist now applies: a denied api.github.com is never contacted."""
+    requests: list[Any] = []
+    monkeypatch.setenv("EGRESS_DENYLIST", "api.github.com")
+
+    result = await _create_issue(monkeypatch, requests.append)
+
+    assert result == {"error": "github_api_blocked_egress", "issue_url": None, "created": False}
+    assert requests == []
+
+
+@pytest.mark.asyncio
+async def test_github_create_issue_refuses_api_host_resolving_to_metadata(monkeypatch):
+    """If api.github.com resolves to link-local metadata, the token and body are not sent."""
+    requests: list[Any] = []
+    _resolve_api_github_com_to(monkeypatch, "169.254.169.254")
+
+    result = await _create_issue(monkeypatch, requests.append)
+
+    assert result == {"error": "github_api_blocked_egress", "issue_url": None, "created": False}
+    assert requests == []
+
+
+@pytest.mark.asyncio
+async def test_github_create_issue_does_not_follow_redirects(monkeypatch):
+    """A redirect, even to link-local metadata, is reported as the status it was."""
+    import httpx
+
+    requests: list[str] = []
+
+    def handler(request):
+        requests.append(str(request.url))
+        return httpx.Response(307, headers={"Location": "http://169.254.169.254/latest/meta-data/"})
+
+    result = await _create_issue(monkeypatch, handler)
+
+    assert requests == [_GITHUB_ISSUES_URL]
+    assert result == {"error": "github_api_error: 307 - ", "created": False}
 
 
 # ==============================================================================

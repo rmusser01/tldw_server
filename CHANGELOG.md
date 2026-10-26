@@ -16,6 +16,7 @@ and this project adheres to Some kind of Versioning
 ### Fixed
 
 - **Admin webhook delivery SSRF:** `AdminWebhooksService.deliver` (incident `notify-webhooks`) now sends through `core.http_client.afetch`, so every attempt checks the egress policy (loopback, private and link-local addresses, operator allow/deny lists) and pins the resolved IP, and env proxies are ignored. A refused URL is logged as a failed delivery with no retries. Signing, headers, backoff, timeouts and the no-redirect rule are unchanged (TASK-13950.11).
+- **Workflows `github_create_issue` egress:** the issue POST now goes through `core.http_client.apost`, so the egress policy (including the operator allow/deny lists and a private or link-local DNS answer for `api.github.com`) is checked before the token is sent, the resolved IP is pinned, and env proxies are ignored. A refused request returns `github_api_blocked_egress`. Valid requests and responses are unchanged (TASK-13950.11).
 
 ### Removed
 

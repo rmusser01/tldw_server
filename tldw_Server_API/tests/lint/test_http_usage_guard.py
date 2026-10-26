@@ -110,10 +110,6 @@ ALLOWLIST: dict[str, str] = {
         "migrate: audiocpp_server client. Loopback by default, but allow_remote_base_url sends to any "
         "host through a raw httpx.AsyncClient with no egress policy; use create_async_client/afetch."
     ),
-    "tldw_Server_API/app/core/Workflows/adapters/integration/github.py": (
-        "migrate: creates GitHub issues via POST https://api.github.com with a raw httpx.AsyncClient "
-        "that honours env proxies; use apost/afetch."
-    ),
     "tldw_Server_API/app/core/Audio_Studio/providers/ace_step.py": (
         "migrate: defaults client_factory to httpx.AsyncClient (a reference the regex guard missed). "
         "It checks its own origin allowlist, not the egress policy; default to create_async_client."
