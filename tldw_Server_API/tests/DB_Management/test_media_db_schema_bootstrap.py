@@ -219,14 +219,10 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
         _ensure_postgres_source_hash_column=lambda value: calls.append(("source_hash", value)),
         _ensure_postgres_claims_extensions=lambda value: calls.append(("claims_extensions", value)),
         _ensure_postgres_email_schema=lambda value: calls.append(("email_schema", value)),
+        _ensure_postgres_rls=lambda value: calls.append(("policies", value)),
         _sync_postgres_sequences=lambda value: pytest.fail("routine bootstrap must not rewind RLS-scoped sequences"),
     )
 
-    monkeypatch.setattr(
-        postgres_helpers_module,
-        "ensure_postgres_policies",
-        lambda value, connection: calls.append(("policies", value, connection)),
-    )
     monkeypatch.setattr(
         postgres_helpers_module,
         "ensure_postgres_document_workspace_schema",
@@ -261,7 +257,7 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
         ("source_hash", conn),
         ("claims_extensions", conn),
         ("email_schema", conn),
-        ("policies", db, conn),
+        ("policies", conn),
         ("keyword_identity", db, conn),
     ]
 
