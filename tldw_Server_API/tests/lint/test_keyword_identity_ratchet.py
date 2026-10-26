@@ -98,7 +98,7 @@ KEYWORD_NORMALIZATION_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py": 1,  # bump: chunk_type in add_media_with_keywords, not identity
     "tldw_Server_API/app/core/Ingestion_Media_Processing/Books/Book_Processing_Lib.py": 1,
     "tldw_Server_API/app/core/Ingestion_Media_Processing/Upload_Sink.py": 1,
-    "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py": 5,
+    "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py": 2,  # Collections content_item tags (slice 3)
     "tldw_Server_API/app/core/LLM_Calls/structured_output.py": 1,
     "tldw_Server_API/app/core/Local_LLM/Llamafile_Handler.py": 1,
     "tldw_Server_API/app/core/MCP_unified/tests/test_notes_crud_tags.py": 2,  # fake DB in a test

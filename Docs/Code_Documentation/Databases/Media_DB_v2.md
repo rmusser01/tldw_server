@@ -553,7 +553,7 @@ The current database schema consists of the following main tables:
 
 *   **`schema_version`**: Stores the current schema version of the database.
 *   **`Media`**: Core table for media items (articles, videos, notes, etc.). Includes metadata like URL, title, content, author, timestamps, content hash, UUID, and flags for `is_trash`, `deleted`. Also tracks `chunking_status` and `vector_processing` states.
-*   **`Keywords`**: Stores unique keywords, case-insensitive with display casing preserved (SQLite `COLLATE NOCASE`; on PostgreSQL a unique `LOWER(keyword)` index over active rows). Includes UUID and sync metadata.
+*   **`Keywords`**: Stores unique keywords, case-insensitive with display casing preserved (SQLite `COLLATE NOCASE`; on PostgreSQL a unique `LOWER(keyword)` index over active rows). On PostgreSQL the keyword vocabulary is shared, so the first-seen casing is every user's display casing. Includes UUID and sync metadata.
 *   **`MediaKeywords`**: Junction table linking `Media` and `Keywords` (many-to-many).
 *   **`Transcripts`**: Stores transcriptions for media items, potentially from different models. Includes UUID and sync metadata.
 *   **`MediaChunks`**: Stores processed, smaller segments (chunks) of media content, often used for vectorization or focused analysis. Includes UUID and sync metadata.

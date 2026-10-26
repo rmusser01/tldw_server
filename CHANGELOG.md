@@ -12,7 +12,7 @@ and this project adheres to Some kind of Versioning
 
 ### Changed
 
-- **Media and Prompts keywords are case-insensitive and keep their display casing.** "Foo" and "foo" are one keyword, stored with the first-seen casing (Media no longer lowercases keywords on write), and lookups also fold ß/SS, accented capitals and NFC forms. On PostgreSQL, Media DB startup merges existing case-variant keyword rows into the earliest one (links move to it; the others are soft-deleted with `merge_parent_uuid` set) and then enforces a unique `LOWER(keyword)` index (TASK-13950.5).
+- **Media and Prompts keywords are case-insensitive and keep their display casing.** "Foo" and "foo" are one keyword, stored with the first-seen casing (Media no longer lowercases keywords on write), and lookups also fold ß/SS, accented capitals and NFC forms. On PostgreSQL, Media DB startup merges existing case-variant keyword rows into the earliest one (links move to it; the others are soft-deleted with `merge_parent_uuid` set) and then enforces a unique `LOWER(keyword)` index. The PostgreSQL Media keyword vocabulary is shared, so the first user's casing becomes every user's display casing. Ingestion keeps processor-extracted keyword casing, and the Prompts keyword endpoints return stored casing instead of lowercase (TASK-13950.5).
 
 ### Fixed
 

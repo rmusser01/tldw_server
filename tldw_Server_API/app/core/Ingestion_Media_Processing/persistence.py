@@ -82,6 +82,7 @@ from tldw_Server_API.app.core.testing import (
     is_test_mode,
 )
 from tldw_Server_API.app.core.Usage import concurrency_quota, quota_checks
+from tldw_Server_API.app.core.Utils.keyword_identity import dedupe_keywords
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
@@ -3699,9 +3700,10 @@ async def persist_primary_av_item(
     combined_keywords = set(getattr(form_data, "keywords", []) or [])
     if isinstance(extracted_keywords, list):
         combined_keywords.update(
-            k.strip().lower() for k in extracted_keywords if k and isinstance(k, str) and k.strip()
+            k.strip() for k in extracted_keywords if k and isinstance(k, str) and k.strip()
         )
-    final_keywords_list = sorted(combined_keywords)
+    # Display casing is kept; case variants collapse to one (TASK-13950.5).
+    final_keywords_list = dedupe_keywords(sorted(combined_keywords))
 
     # Use original input ref for default title to match previous endpoint behavior.
     default_title = FilePath(str(original_input_ref)).stem if original_input_ref else "Untitled"
@@ -5463,13 +5465,15 @@ async def process_document_like_item(
                             )
                             if isinstance(keywords_from_form, list):
                                 base_keywords = [
-                                    str(keyword).strip().lower() for keyword in keywords_from_form if keyword
+                                    str(keyword).strip() for keyword in keywords_from_form if keyword
                                 ]
                         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                             base_keywords = []
-                        merged = sorted(
-                            set(
-                                (final_result.get("keywords") or []) + base_keywords + [archive_keyword],
+                        merged = dedupe_keywords(
+                            sorted(
+                                set(
+                                    (final_result.get("keywords") or []) + base_keywords + [archive_keyword],
+                                ),
                             ),
                         )
                         final_result["keywords"] = merged
@@ -5697,7 +5701,7 @@ async def persist_doc_item_and_children(
     extracted_keywords = final_result.get("keywords", [])
     combined_keywords = set(getattr(form_data, "keywords", None) or [])
     if isinstance(extracted_keywords, list):
-        combined_keywords.update(k.strip().lower() for k in extracted_keywords if isinstance(k, str) and k.strip())
+        combined_keywords.update(k.strip() for k in extracted_keywords if isinstance(k, str) and k.strip())
 
     try:
         if media_type == "email":
@@ -5748,7 +5752,8 @@ async def persist_doc_item_and_children(
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
         pass
 
-    final_keywords_list = sorted(combined_keywords)
+    # Display casing is kept; case variants collapse to one (TASK-13950.5).
+    final_keywords_list = dedupe_keywords(sorted(combined_keywords))
     try:
         final_result["keywords"] = final_keywords_list
         if media_type == "email":
