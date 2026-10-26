@@ -265,3 +265,75 @@ def test_the_reported_service_tier_is_read_case_insensitively() -> None:
     normalized = normalize_llm_usage(provider="openai", usage={"prompt_tokens": 5, "service_tier": " Flex "})
 
     assert normalized.service_tier == "flex"
+
+
+# --- Anthropic Batch (AC #4) ---
+
+# platform.claude.com/docs/en/about-claude/pricing, "Batch processing", fetched 2026-10-26:
+# "a 50 percent discount on both input and output tokens". (batch input, batch output) per million tokens.
+ANTHROPIC_BATCH_PRICES: dict[str, tuple[float, float]] = {
+    "claude-fable-5-1": (5.00, 25.00),
+    "claude-mythos-5-1": (5.00, 25.00),
+    "claude-fable-5": (5.00, 25.00),
+    "claude-mythos-5": (5.00, 25.00),
+    "claude-opus-5-5": (2.00, 10.00),
+    "claude-opus-5": (2.50, 12.50),
+    "claude-opus-4-8": (2.50, 12.50),
+    "claude-opus-4-7": (2.50, 12.50),
+    "claude-opus-4-6": (2.50, 12.50),
+    "claude-opus-4-5": (2.50, 12.50),
+    "claude-opus-4-1": (7.50, 37.50),
+    "claude-opus-4": (7.50, 37.50),
+    "claude-sonnet-5-5": (1.00, 5.00),
+    "claude-sonnet-5": (1.00, 5.00),
+    "claude-sonnet-4-6": (1.50, 7.50),
+    "claude-sonnet-4-5": (1.50, 7.50),
+    "claude-sonnet-4": (1.50, 7.50),
+    "claude-haiku-4-5": (0.50, 2.50),
+    "claude-3-5-haiku-20241022": (0.40, 2.00),
+}
+
+
+@pytest.mark.parametrize(("model", "prices"), sorted(ANTHROPIC_BATCH_PRICES.items()))
+def test_an_anthropic_batch_call_costs_the_published_batch_price(model: str, prices: tuple[float, float]) -> None:
+    prompt_cost, completion_cost, _t, _e = compute_costs(
+        "anthropic", model, 1_000_000, 1_000_000, billable_input_tokens=1_000_000, service_tier="batch"
+    )
+
+    assert (prompt_cost, completion_cost) == pytest.approx(prices)
+
+
+def test_an_anthropic_batch_call_on_haiku_5_5_halves_both_prompt_length_tiers() -> None:
+    """Page rows: Haiku 5.5 batch input $0.05 up to 100,000 prompt tokens, $0.25 over."""
+    low = compute_costs(
+        "anthropic", "claude-haiku-5-5", 100_000, 0, billable_input_tokens=100_000, service_tier="batch"
+    )
+    high = compute_costs(
+        "anthropic", "claude-haiku-5-5", 100_001, 0, billable_input_tokens=100_001, service_tier="batch"
+    )
+
+    assert low[0] == pytest.approx(100_000 * 0.05 / 1_000_000)
+    assert high[0] == pytest.approx(100_001 * 0.25 / 1_000_000)
+
+
+def test_the_anthropic_batch_discount_stacks_with_the_cache_rates_and_us_only_inference() -> None:
+    """Cache multipliers "stack with other pricing modifiers, including the Batch API discount and data residency"."""
+    args = {
+        "cache_read_input_tokens": 40_000,
+        "cache_write_input_tokens": 10_000,
+        "cache_write_1h_input_tokens": 4_000,
+        "billable_input_tokens": 50_000,
+        "inference_geo": "us",
+    }
+
+    standard = compute_costs("anthropic", "claude-sonnet-4-6", 100_000, 2_000, **args)
+    batch = compute_costs("anthropic", "claude-sonnet-4-6", 100_000, 2_000, service_tier="batch", **args)
+
+    assert batch[0] == pytest.approx(standard[0] * 0.5)
+    assert batch[1] == pytest.approx(standard[1] * 0.5)
+
+
+def test_a_provider_without_a_batch_price_is_not_discounted() -> None:
+    assert compute_costs("mistral", "mistral-large-2512", 1000, 100, service_tier="batch") == compute_costs(
+        "mistral", "mistral-large-2512", 1000, 100
+    )

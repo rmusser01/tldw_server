@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip
 from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.Metrics import increment_counter
 
 from .llm_usage_normalizer import normalize_llm_usage
@@ -247,6 +248,10 @@ ANTHROPIC_US_ONLY_MULTIPLIER = 1.1
 _ANTHROPIC_STANDARD_PRICED_GEO = re.compile(
     r"^claude-(?:(?:opus|sonnet|haiku)-4(?:-[0-5])?(?:-\d{8})?$|[0-3](?:[-.]|$)|instant)"
 )
+# Anthropic's Batch API: "a 50 percent discount on both input and output tokens", and the cache multipliers "stack
+# with other pricing modifiers, including the Batch API discount and data residency" (same page). Every row of its
+# batch table is half the list row, so one multiplier on every category, applied when usage.service_tier is "batch".
+ANTHROPIC_BATCH_MULTIPLIER = 0.5
 
 
 def compute_costs(
@@ -313,6 +318,8 @@ def compute_costs(
         canonical_anthropic_model_id((model or "").strip().lower())
     ):
         multiplier *= ANTHROPIC_US_ONLY_MULTIPLIER
+    if tier == "batch" and canonical_provider_name(provider or "") == "anthropic":
+        multiplier *= ANTHROPIC_BATCH_MULTIPLIER
     prompt_cost *= multiplier
     completion_cost = (completion_total / 1000.0) * out_per_1k * multiplier
     total_cost = prompt_cost + completion_cost
