@@ -22,7 +22,15 @@ charactersragdb_surface_baseline.json, each a ceiling ``{"count": int, "reason":
     ``self._x = ...`` assignment), since that lookup lands on the db.
 
 The counter fails closed: a ``_delegate_store_method`` call it cannot attribute to a
-binding, or a binding in a loop it cannot size, raises instead of being skipped.
+binding, or a binding in a loop it cannot size, raises instead of being skipped. So does
+any module other than ChaChaNotes_DB.py that binds an attribute onto the class (by name,
+import alias or ``ChaChaNotes_DB.CharactersRAGDB``; assignment, ``del``, ``setattr`` or
+``delattr``) or references ``_delegate_store_method`` at all. Only modules whose source
+mentions either name are walked.
+
+Known limits: a class-body alias (``get_all = list_all``) is not counted as a method, and
+the private-reach matcher keys on the names ``db`` and ``self._db``, so an alias with any
+other name (``d = self._db; d._x``) is not counted.
 
 Growth fails: move the method into its chacha/ store and call the store, or use the
 db's public API instead of a private member. If growth is unavoidable, raise the count
@@ -209,10 +217,54 @@ def _private_reaches(tree: ast.Module) -> int:
     )
 
 
+def _mentions(source: bytes) -> bool:
+    return CLASS.encode() in source or DELEGATE.encode() in source
+
+
+def _outside_bindings(path: Path, tree: ast.Module) -> list[str]:
+    """Where a module other than DB_MODULE binds onto the class or references the delegate."""
+    names = {CLASS} | {
+        alias.asname
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+        if alias.name == CLASS and alias.asname
+    }
+
+    def is_class(node: ast.AST) -> bool:
+        if isinstance(node, ast.Name):
+            return node.id in names
+        return isinstance(node, ast.Attribute) and node.attr == CLASS
+
+    found = []
+    for node in ast.walk(tree):
+        delegate = (
+            (isinstance(node, ast.Name) and node.id == DELEGATE)
+            or (isinstance(node, ast.Attribute) and node.attr == DELEGATE)
+            or (isinstance(node, ast.alias) and node.name == DELEGATE)
+        )
+        stored = isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del)) and is_class(node.value)
+        called = _is_call_to(node, {"setattr", "delattr"}) and bool(node.args) and is_class(node.args[0])
+        if delegate or stored or called:
+            found.append(f"{path}:{getattr(node, 'lineno', '?')}")
+    return found
+
+
 def measure(repo_root: Path = REPO_ROOT) -> dict[str, dict[str, int]]:
     app = (repo_root / "tldw_Server_API" / "app").resolve()
     trees = parse_tree(app)
     db_tree = trees[app / DB_MODULE]
+    outside = [
+        where
+        for path, tree in trees.items()
+        if path != app / DB_MODULE and _mentions(path.read_bytes())
+        for where in _outside_bindings(path, tree)
+    ]
+    if outside:
+        raise ValueError(
+            f"{CLASS} is bound onto, or {DELEGATE} referenced, outside {DB_MODULE}, where this ratchet "
+            f"cannot count it. Register store methods in {DB_MODULE}:\n  " + "\n  ".join(outside)
+        )
     delegated, other = _bindings(db_tree)
     reaches = sum(_private_reaches(tree) for path, tree in trees.items() if path.is_relative_to(app / STORE_DIR))
     return {
@@ -292,9 +344,12 @@ class ForwardingStore:
 _SEEDED = {"methods": {"count": 5}, "delegated_methods": {"count": 3}, "private_member_reaches": {"count": 4}}
 
 
-def _measure_seeded(root: Path, db: str = _DB, store: str = _STORE) -> dict[str, dict[str, int]]:
+def _measure_seeded(
+    root: Path, db: str = _DB, store: str = _STORE, other: str = ""
+) -> dict[str, dict[str, int]]:
     app = root / "tldw_Server_API" / "app"
-    for relative, source in ((DB_MODULE, db), (STORE_DIR / "note_store.py", store)):
+    seeded = {DB_MODULE: db, STORE_DIR / "note_store.py": store, Path("core/Other/elsewhere.py"): other}
+    for relative, source in seeded.items():
         (app / relative).parent.mkdir(parents=True, exist_ok=True)
         (app / relative).write_text(source, encoding="utf-8")
     return measure(root)
@@ -366,6 +421,30 @@ def test_a_reach_through_a_forwarding_getattr_fails(tmp_path: Path) -> None:
     store = _STORE.replace("        self._prepare()", "        self._prepare()\n        self._commit()")
 
     assert _measure_seeded(tmp_path, store=store)["private_member_reaches"] == {"count": 5}
+
+
+_IMPORT = "from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB\n"
+
+
+@pytest.mark.parametrize(
+    "outside",
+    [
+        _IMPORT + "CharactersRAGDB.extra = len",
+        _IMPORT + 'setattr(CharactersRAGDB, "extra", len)',
+        _IMPORT.replace("CharactersRAGDB\n", "CharactersRAGDB as DB\n") + "DB.extra: object = len",
+        "from tldw_Server_API.app.core.DB_Management import ChaChaNotes_DB\nChaChaNotes_DB.CharactersRAGDB.extra = len",
+        "from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import _delegate_store_method",
+    ],
+)
+def test_a_binding_outside_chachanotes_db_fails_closed(tmp_path: Path, outside: str) -> None:
+    with pytest.raises(ValueError, match="outside"):
+        _measure_seeded(tmp_path, other=outside + "\n")
+
+
+def test_using_the_class_outside_chachanotes_db_is_not_a_binding(tmp_path: Path) -> None:
+    use = _IMPORT + "def read(db: CharactersRAGDB) -> object:\n    return CharactersRAGDB.get, db.extra\n"
+
+    assert _measure_seeded(tmp_path, other=use) == _SEEDED
 
 
 def test_shrinking_passes_without_a_baseline_edit(tmp_path: Path) -> None:

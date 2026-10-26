@@ -19,10 +19,12 @@ How a function is measured (the only definition; the counter below implements it
   * One module defining the same qualname more than once (a conditional def, an
     ``@overload``, a property setter) yields one entry holding the max lines and the max
     params over those defs, so a redefinition cannot hide growth past the ceiling.
+    Known limit: a duplicate below the max may grow up to the max unnoticed.
 
-A route handler is a function in tldw_Server_API/app/api/ decorated with
-``@<anything>.<verb>(...)`` for a verb in ROUTE_DECORATORS, or named as the endpoint of a
-module-level ``<router>.add_api_route(path, <name>)``-style call. Handlers share the
+A route handler is a function anywhere in tldw_Server_API/app/ (not only app/api/: a
+core WebSocket server mounts its own router) decorated with ``@<anything>.<verb>(...)`` for
+a verb in ROUTE_DECORATORS, or named as the endpoint of a module-level
+``<router>.add_api_route(path, <name>)``-style call. Handlers share the
 function baseline (one entry, one reason, one bump): the handler test only re-reports
 the handler subset with a handler-specific fix, and the function test is the backstop for
 any registration shape the handler matcher does not know.
@@ -48,7 +50,7 @@ from pathlib import Path
 import pytest
 
 from tldw_Server_API.tests.lint import _ceilings
-from tldw_Server_API.tests.lint._ast_cache import REPO_ROOT, parse_tree
+from tldw_Server_API.tests.lint._ast_cache import APP_ROOT, REPO_ROOT, parse_tree
 
 pytestmark = pytest.mark.unit
 
@@ -117,18 +119,15 @@ def _is_route_decorator(decorator: ast.expr) -> bool:
 
 def measure(repo_root: Path = REPO_ROOT) -> tuple[dict[str, dict[str, int]], frozenset[str]]:
     """(every function over THRESHOLD lines -> {"lines", "params"}, the key of every route handler)."""
-    app = repo_root / "tldw_Server_API" / "app"
-    api = (app / "api").resolve()
     functions: dict[str, dict[str, int]] = {}
     handlers: set[str] = set()
-    for path, tree in parse_tree(app).items():
+    for path, tree in parse_tree(repo_root / "tldw_Server_API" / "app").items():
         parts = path.relative_to(repo_root.resolve()).with_suffix("").parts
         module = ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
-        in_api = path.is_relative_to(api)
-        endpoints = _registered_endpoints(tree) if in_api else set()
+        endpoints = _registered_endpoints(tree)
         for qualname, fn in _defs(tree):
             key = f"{module}:{qualname}"
-            if in_api and (qualname in endpoints or any(map(_is_route_decorator, fn.decorator_list))):
+            if qualname in endpoints or any(map(_is_route_decorator, fn.decorator_list)):
                 handlers.add(key)
             lines = (fn.end_lineno or fn.lineno) - fn.lineno + 1  # end_lineno is always set by ast.parse
             if lines > THRESHOLD:
@@ -231,7 +230,7 @@ def test_nested_functions_and_methods_use_qualnames_and_a_redefinition_keeps_the
     }
 
 
-def test_route_handlers_are_found_by_decorator_or_registration_under_app_api(tmp_path: Path) -> None:
+def test_route_handlers_are_found_by_decorator_or_registration_anywhere_in_the_app(tmp_path: Path) -> None:
     endpoint = (
         "@router.post('/a')\n"
         + _function("decorated", 301)
@@ -244,16 +243,29 @@ def test_route_handlers_are_found_by_decorator_or_registration_under_app_api(tmp
         + _function("by_keyword", 5)
         + "router.add_api_route('/k', endpoint=by_keyword)\n"
     )
-    root = _seed(
-        tmp_path / "tree",
-        {"api/v1/endpoints/things.py": endpoint, "core/routes.py": "@router.get('/x')\n" + _function("not_api", 301)},
-    )
+    core_ws = "@app.websocket('/x')\n" + _function("core_ws", 301)  # a core server mounting its own route
+    root = _seed(tmp_path / "tree", {"api/v1/endpoints/things.py": endpoint, "core/ws_server.py": core_ws})
     functions, handlers = measure(root)
     module = "tldw_Server_API.app.api.v1.endpoints.things"
 
-    assert handlers == {f"{module}:{name}" for name in ("decorated", "socket", "registered", "by_keyword")}
-    (problem,) = _ceilings.violations(HANDLERS, handler_subset(functions, handlers), {})
-    assert problem.startswith(f"{module}:decorated: lines 301") and "Route handler" in problem
+    assert handlers == {f"{module}:{name}" for name in ("decorated", "socket", "registered", "by_keyword")} | {
+        "tldw_Server_API.app.core.ws_server:core_ws"
+    }
+    problems = _ceilings.violations(HANDLERS, handler_subset(functions, handlers), {})
+    assert [p.split(": lines 301")[0] for p in problems] == [
+        f"{module}:decorated",
+        "tldw_Server_API.app.core.ws_server:core_ws",
+    ]
+    assert all("Route handler" in p for p in problems)
+
+
+def test_a_sub_root_of_the_app_shares_the_app_parse() -> None:
+    """Minor: a narrower root must not cache a second copy of the tree."""
+    chacha = parse_tree(APP_ROOT / "core" / "DB_Management" / "chacha")
+    app = parse_tree(APP_ROOT)
+
+    assert chacha and all(path.is_relative_to(APP_ROOT / "core" / "DB_Management" / "chacha") for path in chacha)
+    assert all(tree is app[path] for path, tree in chacha.items())
 
 
 def test_a_raised_ceiling_needs_a_new_reason(tmp_path: Path) -> None:
