@@ -17,6 +17,7 @@ Credentials, in order:
   (``websocket_session_auth``), since cookies are sent cross-site.
 
 Query-string tokens are not read: they end up in access logs (TASK-12113).
+First-message-frame auth arrives with the audio slice of TASK-13950.7, with its consumer.
 """
 
 from __future__ import annotations
@@ -54,7 +55,6 @@ async def resolve_ws_principal(
     websocket: WebSocket,
     *,
     required_scope: str | None = None,
-    allow_first_frame: bool = False,
 ) -> AuthPrincipal:
     """Return the authenticated caller of ``websocket``; call it before ``accept()``.
 
@@ -62,18 +62,12 @@ async def resolve_ws_principal(
         websocket: The connection, not yet accepted.
         required_scope: API-key scope the route needs ("read", "write", ...). JWT and
             single-user callers are not scoped, as on HTTP.
-        allow_first_frame: Reserved for routes that authenticate with a first message
-            frame. They keep their own handshake until they migrate here.
 
     Raises:
         WebSocketException: 4401 when credentials are missing or rejected, 4403 when they
             are valid but not allowed, the cookie check's own code, or 1011 when the
             credential store failed. Uncaught, Starlette closes the socket with it.
-        NotImplementedError: ``allow_first_frame`` was requested.
     """
-    if allow_first_frame:
-        raise NotImplementedError("first-frame WebSocket auth moves here with the audio routes (TASK-13950.7)")
-
     headers = list(websocket.scope.get("headers") or [])
     token = _subprotocol_token(websocket)
     if token and "authorization" not in websocket.headers:
