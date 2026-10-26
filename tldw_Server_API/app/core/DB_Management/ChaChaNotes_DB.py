@@ -35290,11 +35290,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _unique_text_match_sql(self, table_name: str, column: str) -> str:
         """Return the equality predicate for a unique text column.
 
-        Keywords are case-insensitive (TASK-13950.5). SQLite gets that from the
-        column's ``COLLATE NOCASE``; PostgreSQL strips NOCASE and indexes
-        ``LOWER(keyword)`` instead, so the lookup must compare ``LOWER`` too.
+        Keywords and keyword collections are case-insensitive (TASK-13950.5). SQLite
+        gets that from the columns' ``COLLATE NOCASE``; PostgreSQL strips NOCASE and
+        indexes ``LOWER(keyword)``/``LOWER(name)`` instead, so it compares ``LOWER`` too.
         """
-        if table_name == "keywords" and self.backend_type == BackendType.POSTGRESQL:
+        if table_name in {"keywords", "keyword_collections"} and self.backend_type == BackendType.POSTGRESQL:
             return f"LOWER({column}) = LOWER(?)"
         return f"{column} = ?"
 
@@ -38832,7 +38832,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             join_tag = f"JOIN flashcard_keywords fk ON fk.card_id = f.id JOIN {keyword_table} kw ON kw.id = fk.keyword_id"
             if self.backend_type == BackendType.POSTGRESQL:
                 join_tag += " AND kw.client_id = f.client_id"
-            where_clauses.append("kw.keyword = ?")
+            where_clauses.append(self._unique_text_match_sql("keywords", "kw.keyword"))
             params.append(tag)
 
         # FTS filter
@@ -38925,7 +38925,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             join_tag = f"JOIN flashcard_keywords fk ON fk.card_id = f.id JOIN {keyword_table} kw ON kw.id = fk.keyword_id"
             if self.backend_type == BackendType.POSTGRESQL:
                 join_tag += " AND kw.client_id = f.client_id"
-            where_clauses.append("kw.keyword = ?")
+            where_clauses.append(self._unique_text_match_sql("keywords", "kw.keyword"))
             params.append(tag)
 
         fts_filter = ""
@@ -39767,11 +39767,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if scope_tag:
                     tag_owner_filter, tag_owner_params = self._flashcard_owner_filter("kw")
                     keyword_table = self._map_table_for_backend("keywords")
+                    tag_match_sql = self._unique_text_match_sql("keywords", "kw.keyword")
                     matching_tag = conn.execute(
                         f"""
                         SELECT 1 FROM flashcard_keywords fk
                         JOIN {keyword_table} kw ON kw.id = fk.keyword_id
-                        WHERE fk.card_id = ? AND kw.keyword = ?{tag_owner_filter}
+                        WHERE fk.card_id = ? AND {tag_match_sql}{tag_owner_filter}
                         """,  # nosec B608 -- keyword table comes from the backend mapping
                         (card_id, scope_tag, *tag_owner_params),
                     ).fetchone()

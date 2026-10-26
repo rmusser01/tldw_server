@@ -106,6 +106,30 @@ def test_non_ascii_case_variants_share_one_keyword(db, stored: str, probe: str) 
     assert db.count_keywords() == 1
 
 
+def test_keyword_collection_names_match_in_either_case(db) -> None:
+    collection_id = db.add_keyword_collection("Foo")
+
+    with pytest.raises(ConflictError):
+        db.add_keyword_collection("foo")
+    found = db.get_keyword_collection_by_name("FOO")
+    assert found is not None
+    assert (found["id"], found["name"]) == (collection_id, "Foo")
+
+    db.soft_delete_keyword_collection(collection_id, found["version"])
+    assert db.add_keyword_collection("foo") == collection_id
+    assert db.count_keyword_collections() == 1
+
+
+def test_flashcard_tag_filters_match_in_either_case(db) -> None:
+    card = db.add_flashcard({"front": "Q", "back": "A"})
+    db.set_flashcard_tags(card, ["Foo"])
+
+    assert [row["uuid"] for row in db.list_flashcards(tag="foo")] == [card]
+    assert db.count_flashcards(tag="FOO") == 1
+    db.review_flashcard(card, 4, review_mode="due", review_deck_id=None, review_tag_filter="foo")
+    assert db.get_latest_flashcard_review(card) is not None
+
+
 # --- the call sites ---------------------------------------------------------------
 
 
@@ -192,6 +216,29 @@ async def test_mcp_note_tags_keep_display_casing(db, monkeypatch) -> None:
     assert sorted(row["keyword"] for row in db.list_keywords()) == ["Bar", "Foo", "Straße"]
 
 
+@pytest.mark.asyncio
+async def test_mcp_flashcard_tags_keep_display_casing(db, monkeypatch) -> None:
+    from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
+    from tldw_Server_API.app.core.MCP_unified.modules.implementations.flashcards_module import (
+        FlashcardsModule,
+    )
+
+    module = FlashcardsModule(ModuleConfig(name="flashcards"))
+    monkeypatch.setattr(module, "_open_db", lambda _context: db)
+    monkeypatch.setattr(db, "close_all_connections", lambda: None)
+    context = SimpleNamespace(metadata={})
+    card = db.add_flashcard({"front": "Q", "back": "A"})
+
+    result = await module.execute_tool(
+        "flashcards.tags.set", {"card_uuid": card, "tags": ["Foo", "foo", "Straße", "STRASSE"]}, context=context
+    )
+    listed = await module.execute_tool("flashcards.tags.get", {"card_uuid": card}, context=context)
+
+    assert result["tags"] == ["Foo", "Straße"]
+    assert sorted(listed["tags"]) == ["Foo", "Straße"]
+    assert sorted(row["keyword"] for row in db.list_keywords()) == ["Foo", "Straße"]
+
+
 # --- request parsing ----------------------------------------------------------------
 
 
@@ -201,11 +248,15 @@ def test_request_keyword_lists_dedupe_by_identity_and_keep_first_casing() -> Non
         _normalize_import_keywords,
         _normalize_keyword_tokens,
     )
+    from tldw_Server_API.app.api.v1.schemas.chat_conversation_schemas import ConversationUpdateRequest
+    from tldw_Server_API.app.api.v1.schemas.chat_knowledge_schemas import KnowledgeSaveRequest
     from tldw_Server_API.app.api.v1.schemas.notes_schemas import NoteCreate, NoteUpdate
 
     raw = ["Foo", "foo", "Straße", "STRASSE", "Éclair", "éclair"]
     expected = ["Foo", "Straße", "Éclair"]
 
+    assert ConversationUpdateRequest(version=1, keywords=raw).keywords == expected
+    assert KnowledgeSaveRequest(conversation_id="c", snippet="s", tags=raw).tags == expected
     assert NoteCreate(title="t", content="c", keywords=raw).normalized_keywords == expected
     assert NoteUpdate(keywords=raw).normalized_keywords == expected
     assert _normalize_import_keywords(raw) == expected

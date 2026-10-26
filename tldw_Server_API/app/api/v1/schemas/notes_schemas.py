@@ -19,7 +19,7 @@ from tldw_Server_API.app.core.Notes.wikilinks import (
     is_single_wikilink,
 )
 from tldw_Server_API.app.core.Sync.v2.notes_provenance_contract import validate_notes_provenance_payload
-from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
+from tldw_Server_API.app.core.Utils.keyword_identity import dedupe_keywords
 
 from .notes_studio import NoteStudioDocumentSummaryResponse
 
@@ -50,13 +50,7 @@ def _split_keywords(value: Any) -> list[str] | None:
 
 def _dedupe_keywords(parts: list[str] | None) -> list[str] | None:
     """Drop empties and keyword-identity duplicates, keeping the first-seen casing."""
-    if parts is None:
-        return None
-    unique: dict[str, str] = {}
-    for part in parts:
-        if part:
-            unique.setdefault(normalize_keyword_identity(part), part)
-    return list(unique.values()) or None
+    return (dedupe_keywords(parts) or None) if parts is not None else None
 
 
 def _normalize_folder_paths(value: Any) -> list[str] | None:

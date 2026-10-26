@@ -789,6 +789,12 @@ class KeywordStore:
         """
         if not name or not name.strip():
             raise InputError("Collection name cannot be empty.")  # noqa: TRY003
+        if self.get_keyword_collection_by_name(name) is not None:
+            raise ConflictError(  # noqa: TRY003
+                f"keyword_collections '{name.strip()}' already exists and is active.",
+                entity="keyword_collections",
+                entity_id=name.strip(),
+            )
         with self._db.transaction() as conn:
             self._db._require_selected_owner_row(conn, "keyword_collections", parent_id, self._db.client_id)
             return self._db._add_generic_item(
