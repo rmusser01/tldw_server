@@ -209,7 +209,10 @@ def test_backend_required_runs_the_websocket_auth_guards() -> None:
     ]
     assert len(steps) == 1
     assert not steps[0].get("continue-on-error", False)
-    for suite in ("tldw_Server_API/tests/lint/test_auth_token_parsing_ratchet.py",):
+    for suite in (
+        "tldw_Server_API/tests/lint/test_auth_token_parsing_ratchet.py",
+        "tldw_Server_API/tests/AuthNZ/test_websocket_route_auth_matrix.py",
+    ):
         assert suite in steps[0]["run"], suite
 
 
