@@ -50,8 +50,6 @@ ENDPOINTS_ROOT = APP_ROOT / "api" / "v1" / "endpoints"
 # Per-module counts; lower or remove an entry when a module migrates.
 LOOKS_LIKE_JWT_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/api/v1/API_Deps/auth_deps.py": 1,
-    "tldw_Server_API/app/api/v1/endpoints/persona.py": 1,
-    "tldw_Server_API/app/api/v1/endpoints/voice_assistant.py": 1,
     "tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py": 1,
     "tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py": 1,
 }
@@ -60,14 +58,13 @@ BEARER_PARSE_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/api/v1/endpoints/auth.py": 1,
     "tldw_Server_API/app/api/v1/endpoints/authnz_debug.py": 1,
     "tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_auth.py": 1,
-    "tldw_Server_API/app/api/v1/endpoints/persona.py": 3,
     "tldw_Server_API/app/api/v1/endpoints/prompts.py": 3,
     "tldw_Server_API/app/api/v1/endpoints/rpg.py": 1,
 }
 
 # Each baseline's exact total. A migration lowers its entry and this number together; any
 # other change to a baseline's total is headroom being reused, and fails.
-SEED_TOTALS: dict[str, int] = {"LOOKS_LIKE_JWT_BASELINE": 5, "BEARER_PARSE_BASELINE": 10}
+SEED_TOTALS: dict[str, int] = {"LOOKS_LIKE_JWT_BASELINE": 3, "BEARER_PARSE_BASELINE": 7}
 
 # The only way to raise a count: (baseline name, module) -> (allowed count, reason). The
 # reason must cite a task or PR, e.g. "security fix in persona_stream needs one (TASK-1234)".
@@ -198,6 +195,9 @@ QUERY_SHIM = "resolve_ws_principal_or_deprecated_query"
 QUERY_SHIM_CALLERS = frozenset(
     {
         "tldw_Server_API/app/api/v1/endpoints/agent_client_protocol.py",
+        # persona-stream.ts falls back to ?token= / ?api_key= for a credential that is not
+        # subprotocol-safe (TASK-13950.61 moves it).
+        "tldw_Server_API/app/api/v1/endpoints/persona.py",
         "tldw_Server_API/app/api/v1/endpoints/watchlists.py",
     }
 )

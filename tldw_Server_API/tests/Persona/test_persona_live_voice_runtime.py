@@ -780,7 +780,10 @@ def test_voice_preparation_preserves_credentials_for_auth_watchdog(
     import threading
 
     from fastapi.testclient import TestClient
+    from loguru import logger
 
+    from tldw_Server_API.app.core.AuthNZ import websocket_principal
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
     from tldw_Server_API.app.core.Persona import live_conversation
     from tldw_Server_API.tests.Persona.test_persona_ws import _recv_until, _seed_persona_session, fastapi_app
 
@@ -788,18 +791,17 @@ def test_voice_preparation_preserves_credentials_for_auth_watchdog(
     revalidated = threading.Event()
     observed_credentials = []
 
-    async def authenticate(ws: Any, token: str | None, api_key: str | None) -> Any:
-        credential, _ = persona_ep._extract_auth_credentials(ws, token, api_key)
+    async def verify(request: Any) -> Any:  # HTTP's verifier, behind the real core resolver
         if preparation_started.is_set():
-            observed_credentials.append(credential)
+            observed_credentials.append(request.headers.get("authorization"))
             revalidated.set()
-        return "1", True, True
+        return AuthPrincipal(kind="user", user_id=1, token_type="access")
 
     def resolve_target() -> Any:
         preparation_started.set()
         return object()
 
-    monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", authenticate)
+    monkeypatch.setattr(websocket_principal, "get_auth_principal", verify)
     monkeypatch.setattr(persona_ep, "_get_persona_ws_auth_revalidate_interval_s", lambda: 0.01)
     monkeypatch.setattr(live_conversation, "require_persona_voice_conversation_credentials", resolve_target)
     _seed_persona_session(tmp_path, monkeypatch, user_id="1", session_id="voice-owned", mode="session_scoped")
@@ -809,12 +811,20 @@ def test_voice_preparation_preserves_credentials_for_auth_watchdog(
         url += "?token=original-credential"
     else:
         protocols = ["bearer", "original-credential"]
-    with TestClient(fastapi_app) as client, client.websocket_connect(url, subprotocols=protocols) as ws:
-        ws.receive_json()
-        ws.send_json({"type": "voice_prepare", "session_id": "voice-owned", "client_message_id": "prepare-auth"})
-        _recv_until(ws, lambda value: value.get("event") == "voice_readiness")
-        assert revalidated.wait(2), "The auth watchdog must validate after preparation starts"
-        assert observed_credentials == ["original-credential"] * len(observed_credentials)
+    warned: list[str] = []
+    sink = logger.add(lambda message: warned.append(message.record["message"]), level="WARNING")
+    try:
+        with TestClient(fastapi_app) as client, client.websocket_connect(url, subprotocols=protocols) as ws:
+            ws.receive_json()
+            ws.send_json({"type": "voice_prepare", "session_id": "voice-owned", "client_message_id": "prepare-auth"})
+            _recv_until(ws, lambda value: value.get("event") == "voice_readiness")
+            assert revalidated.wait(2), "The auth watchdog must validate after preparation starts"
+            assert observed_credentials == ["Bearer original-credential"] * len(observed_credentials)
+    finally:
+        logger.remove(sink)
+    # The deprecated query channel is reported once per socket, not at every revalidation.
+    deprecations = [message for message in warned if "Deprecated WebSocket credential channel" in message]
+    assert len(deprecations) == (1 if source == "query" else 0), deprecations
 
 
 def test_voice_stop_cancels_only_the_owned_session_tasks(voice_socket: Any) -> None:

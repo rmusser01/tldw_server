@@ -10,13 +10,22 @@ import asyncio
 import base64
 import contextlib
 import json
-import os
 import time
 import uuid
 from typing import Any, Optional
 
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+    WebSocketException,
+    status,
+)
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -67,7 +76,7 @@ from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError
 from tldw_Server_API.app.core.TTS.tts_request_resolution import (
     resolve_tts_request_defaults,
 )
-from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime
+from tldw_Server_API.app.core.AuthNZ.websocket_principal import DEPRECATED_WS_CHANNEL, verify_ws_credential
 from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
     cookie_websocket_rejection_code,
     resolve_single_user_cookie_websocket,
@@ -118,9 +127,6 @@ router = APIRouter(
 # WebSocket router (separate to avoid auth middleware conflicts)
 ws_router = APIRouter()
 
-_AUTH_ACCESS_KIND = "access"
-
-
 # Helper functions
 
 def _action_type_to_voice(action_type: ActionType) -> VoiceActionType:
@@ -152,80 +158,18 @@ def _voice_command_to_info(command: VoiceCommand) -> VoiceCommandInfo:
     )
 
 
-def _looks_like_jwt(token: Optional[str]) -> bool:
-    return isinstance(token, str) and token.count(".") == 2
+async def _authenticate_websocket(websocket: WebSocket, token: str) -> tuple[bool, Optional[int]]:
+    """Verify an AUTH-frame token (a JWT or an API key) on the shared WebSocket path.
 
-
-async def _authenticate_websocket(
-    websocket: WebSocket,
-    token: Optional[str] = None,
-) -> tuple[bool, Optional[int]]:
+    ``verify_ws_credential`` hands it to HTTP's verifier as ``Authorization: Bearer``, so revocation,
+    the API key's ``read`` scope and the single-user key and IP allowlist follow HTTP (TASK-13950.7).
+    Returns ``(authenticated, user_id)``; a service token has no user and is refused.
     """
-    Authenticate WebSocket connection.
-
-    Args:
-        websocket: The WebSocket connection
-        token: JWT token or API key
-
-    Returns:
-        Tuple of (authenticated, user_id)
-    """
-    if not token:
-        return False, None
-
-    if _looks_like_jwt(token):
-        try:
-            from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidTokenError, TokenExpiredError
-            from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
-            from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
-
-            jwt_service = get_jwt_service()
-            payload = await jwt_service.verify_token_async(token, token_type=_AUTH_ACCESS_KIND)
-            session_manager = await get_session_manager()
-            if await session_manager.is_token_blacklisted(token, payload.get("jti")):
-                return False, None
-
-            user_id = payload.get("user_id") or payload.get("sub")
-            if isinstance(user_id, str):
-                try:
-                    user_id = int(user_id)
-                except (TypeError, ValueError):
-                    user_id = None
-            if isinstance(user_id, int):
-                return True, user_id
-        except (InvalidTokenError, TokenExpiredError):
-            pass
-        except (AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError):
-            pass
-
     try:
-        from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
-        from tldw_Server_API.app.core.AuthNZ.ip_allowlist import is_single_user_ip_allowed, resolve_client_ip
-        from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-
-        settings = get_settings()
-        client_ip = resolve_client_ip(websocket, settings)
-        if getattr(settings, "AUTH_MODE", None) == "single_user":
-            allowed_keys: set[str] = set()
-            primary_key = getattr(settings, "SINGLE_USER_API_KEY", None)
-            if primary_key:
-                allowed_keys.add(primary_key)
-            if is_explicit_pytest_runtime():
-                test_key = os.getenv("SINGLE_USER_TEST_API_KEY")
-                if test_key:
-                    allowed_keys.add(test_key)
-            if token in allowed_keys and is_single_user_ip_allowed(client_ip, settings):
-                return True, int(getattr(settings, "SINGLE_USER_FIXED_ID", 1))
-            return False, None
-
-        api_mgr = await get_api_key_manager()
-        info = await api_mgr.validate_api_key(api_key=token, required_scope="read", ip_address=client_ip)
-        if info and info.get("user_id") is not None:
-            return True, int(info["user_id"])
-    except (AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError):
-        pass
-
-    return False, None
+        principal = await verify_ws_credential(websocket, token=token, required_scope="read")
+    except WebSocketException:
+        return False, None
+    return principal.user_id is not None, principal.user_id
 
 
 async def _generate_tts_audio(
@@ -1035,7 +979,7 @@ async def websocket_voice_assistant(
     WebSocket endpoint for real-time voice assistant sessions.
 
     Protocol:
-    1. Client sends AUTH message with token
+    1. Client sends AUTH message with token (or, deprecated, ``?token=`` when the frame has none)
     2. Server responds with AUTH_OK or AUTH_ERROR
     3. Client sends CONFIG message with preferences
     4. Server responds with CONFIG_ACK
@@ -1080,7 +1024,10 @@ async def websocket_voice_assistant(
             await websocket.close(code=4400)
             return
 
-        auth_token = auth_data.get("token") or token
+        auth_token = auth_data.get("token")
+        if not auth_token and token:  # the voice SDKs also send it in the URL, which access logs keep
+            logger.warning(DEPRECATED_WS_CHANNEL, "query token", websocket.url.path)
+            auth_token = token
         if auth_token:
             authenticated, user_id = await _authenticate_websocket(websocket, auth_token)
         elif cookie_identity is not None:
