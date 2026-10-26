@@ -288,7 +288,9 @@ async def test_initialize_psycopg_connect_fallback_log_omits_raw_exception_and_u
 
     monkeypatch.setattr(pgvector_adapter, "logger", logger_stub)
     monkeypatch.setitem(sys.modules, "psycopg", psycopg)
-    monkeypatch.delitem(sys.modules, "psycopg_pool", raising=False)
+    # None makes the import raise ImportError; deleting the entry would just
+    # re-import the installed package (psycopg-pool is a core dependency).
+    monkeypatch.setitem(sys.modules, "psycopg_pool", None)
     monkeypatch.setitem(sys.modules, "psycopg2", psycopg2)
     monkeypatch.setattr(adapter, "_register_vector_support", _noop_register_vector_support)
     monkeypatch.setattr(adapter, "_exec", _noop_exec)
