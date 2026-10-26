@@ -296,6 +296,7 @@ jobs:
             tldw_Server_API/tests/CI/test_merge_queue_license_dispatch.py \
             tldw_Server_API/tests/lint/test_function_size_ratchet.py \
             tldw_Server_API/tests/lint/test_charactersragdb_surface_ratchet.py \
+            tldw_Server_API/tests/lint/test_http_usage_guard.py \
             tldw_Server_API/tests/lint/test_private_coercion_ratchet.py \
             tldw_Server_API/tests/lint/test_first_party_source_pinning.py \
             tldw_Server_API/tests/CI/test_backlog_task_format_ratchet.py \
