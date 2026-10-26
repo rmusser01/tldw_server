@@ -2390,6 +2390,211 @@ async def test_podcast_rss_publish_rejects_non_http_seed_url(monkeypatch, tmp_pa
     assert result.get("error") == "invalid_remote_seed_url"
 
 
+_PUBLIC_SEED_URL = "http://93.184.216.34/feed.xml"
+_SEED_FEED_XML = (
+    b'<?xml version="1.0" encoding="utf-8"?>'
+    b"<rss version=\"2.0\"><channel><title>Seed</title>"
+    b"<item><guid>seed-episode</guid><title>Seed Episode</title>"
+    b"<pubDate>Thu, 12 Feb 2026 20:00:00 +0000</pubDate></item>"
+    b"</channel></rss>"
+)
+
+
+def _route_seed_fetch_through_mock_transport(monkeypatch, handler):
+    """Send the adapter's seed fetch through the real ``afetch`` over a MockTransport.
+
+    Egress, redirect and size checks all run for real; only the socket layer is
+    replaced. A direct stdlib fetch fails loudly instead of touching the network.
+    """
+    import socket
+
+    import httpx
+
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Workflows.adapters.integration import podcast_rss
+
+    def _no_real_network(*_args, **_kwargs):
+        raise AssertionError("podcast_rss seed fetch bypassed core.http_client")
+
+    monkeypatch.setattr(socket, "create_connection", _no_real_network)
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+    client = http_client.create_async_client(transport=httpx.MockTransport(handler))
+
+    async def _afetch_via_mock(**kwargs):
+        return await http_client.afetch(client=client, **kwargs)
+
+    monkeypatch.setattr(podcast_rss, "afetch", _afetch_via_mock, raising=False)
+    return client
+
+
+async def _publish_with_seed(tmp_path, source_feed_url):
+    from tldw_Server_API.app.core.Workflows.adapters.integration import (
+        run_podcast_rss_publish_adapter,
+    )
+
+    return await run_podcast_rss_publish_adapter(
+        {
+            "feed_uri": "file://feeds/podcast.xml",
+            "source_feed_url": source_feed_url,
+            "allow_remote_fetch": True,
+            "episode": {
+                "guid": "episode-new",
+                "title": "New Episode",
+                "audio_url": "https://cdn.example.com/new.mp3",
+                "published_at": "2026-02-13T20:00:00Z",
+            },
+        },
+        {"user_id": "test_user", "tenant_id": "default"},
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "seed_url",
+    [
+        "http://127.0.0.1/feed.xml",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://10.0.0.5/feed.xml",
+    ],
+)
+async def test_podcast_rss_seed_refuses_private_address_without_fetching(monkeypatch, tmp_path, seed_url):
+    """A seed URL on loopback, link-local or a private range is refused before any request."""
+    monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+    requested: list[str] = []
+
+    def handler(request):
+        import httpx
+
+        requested.append(str(request.url))
+        return httpx.Response(200, request=request, stream=httpx.ByteStream(_SEED_FEED_XML))
+
+    client = _route_seed_fetch_through_mock_transport(monkeypatch, handler)
+    try:
+        result = await _publish_with_seed(tmp_path, seed_url)
+    finally:
+        await client.aclose()
+
+    assert result == {"error": "remote_seed_blocked_egress", "published": False}
+    assert requested == []
+    assert not (tmp_path / "feeds" / "podcast.xml").exists()
+
+
+@pytest.mark.asyncio
+async def test_podcast_rss_seed_refuses_redirect_to_private_address(monkeypatch, tmp_path):
+    """A public seed URL that redirects to link-local metadata is refused at the redirect."""
+    monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+    requested: list[str] = []
+
+    def handler(request):
+        import httpx
+
+        requested.append(str(request.url))
+        if request.url.host == "93.184.216.34":
+            return httpx.Response(
+                302,
+                request=request,
+                headers={"Location": "http://169.254.169.254/latest/meta-data/"},
+            )
+        return httpx.Response(200, request=request, stream=httpx.ByteStream(_SEED_FEED_XML))
+
+    client = _route_seed_fetch_through_mock_transport(monkeypatch, handler)
+    try:
+        result = await _publish_with_seed(tmp_path, _PUBLIC_SEED_URL)
+    finally:
+        await client.aclose()
+
+    assert result == {"error": "remote_seed_blocked_egress", "published": False}
+    assert requested == [_PUBLIC_SEED_URL]
+    assert not (tmp_path / "feeds" / "podcast.xml").exists()
+
+
+@pytest.mark.asyncio
+async def test_podcast_rss_seed_refuses_oversized_body(monkeypatch, tmp_path):
+    """A seed body over the byte cap is refused by http_client's max_response_bytes."""
+    from tldw_Server_API.app.core.Workflows.adapters.integration import podcast_rss
+
+    monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(podcast_rss, "_MAX_SEED_FEED_BYTES", 1024, raising=False)
+    padded_feed = _SEED_FEED_XML.replace(b"</channel>", b"<!--" + b"x" * 4096 + b"--></channel>")
+    chunks = [padded_feed[i : i + 512] for i in range(0, len(padded_feed), 512)]
+    yielded: list[int] = []
+
+    import httpx
+
+    class _CountingStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            for chunk in chunks:
+                yielded.append(len(chunk))
+                yield chunk
+
+    def handler(request):
+        return httpx.Response(200, request=request, stream=_CountingStream())
+
+    client = _route_seed_fetch_through_mock_transport(monkeypatch, handler)
+    try:
+        result = await _publish_with_seed(tmp_path, _PUBLIC_SEED_URL)
+    finally:
+        await client.aclose()
+
+    assert result == {"error": "remote_seed_fetch_failed", "published": False}
+    # The cap stopped the read: only enough chunks to cross 1024 bytes were pulled.
+    assert 1024 < sum(yielded) <= 1024 + 512
+    assert len(yielded) < len(chunks)
+    assert not (tmp_path / "feeds" / "podcast.xml").exists()
+
+
+@pytest.mark.asyncio
+async def test_podcast_rss_seed_non_2xx_is_fetch_failure(monkeypatch, tmp_path):
+    """A non-2xx seed response is a fetch failure, as it was under urlopen."""
+    monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+
+    def handler(request):
+        import httpx
+
+        return httpx.Response(404, request=request, stream=httpx.ByteStream(b"not found"))
+
+    client = _route_seed_fetch_through_mock_transport(monkeypatch, handler)
+    try:
+        result = await _publish_with_seed(tmp_path, _PUBLIC_SEED_URL)
+    finally:
+        await client.aclose()
+
+    assert result == {"error": "remote_seed_fetch_failed", "published": False}
+
+
+@pytest.mark.asyncio
+async def test_podcast_rss_seed_public_feed_still_parses(monkeypatch, tmp_path):
+    """A valid public seed feed is fetched through http_client and merged as before."""
+    monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+    user_agents: list[str | None] = []
+
+    def handler(request):
+        import httpx
+
+        user_agents.append(request.headers.get("user-agent"))
+        return httpx.Response(200, request=request, stream=httpx.ByteStream(_SEED_FEED_XML))
+
+    client = _route_seed_fetch_through_mock_transport(monkeypatch, handler)
+    try:
+        result = await _publish_with_seed(tmp_path, _PUBLIC_SEED_URL)
+    finally:
+        await client.aclose()
+
+    assert result == {
+        "published": True,
+        "feed_uri": f"file://{(tmp_path / 'feeds' / 'podcast.xml').resolve()}",
+        "item_guid": "episode-new",
+        "item_count": 2,
+        "version": 2,
+        "replaced_existing_guid": False,
+        "source_feed_url": _PUBLIC_SEED_URL,
+    }
+    assert user_agents == ["tldw-workflows/0.2"]
+    channel = ET.parse(tmp_path / "feeds" / "podcast.xml").getroot().find("channel")  # nosec B314
+    assert channel is not None
+    assert [item.findtext("guid") for item in channel.findall("item")] == ["episode-new", "seed-episode"]
+
+
 # ==============================================================================
 # Import Tests
 # ==============================================================================
