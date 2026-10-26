@@ -33,7 +33,17 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[3]
 APP_ROOT = REPO_ROOT / "tldw_Server_API" / "app"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "backend-required.yml"
+THIS_FILE = "tldw_Server_API/tests/lint/test_test_seam_env_reads_guarded.py"
+GUARD_FILE = "tldw_Server_API/app/core/testing.py"
+# The guard and refusal tests this task adds; the required gate must keep running them.
+GUARD_TESTS = (
+    "tldw_Server_API/tests/Services/test_startup_test_runtime_guard.py",
+    "tldw_Server_API/tests/AuthNZ/unit/test_runtime_environment.py",
+    "tldw_Server_API/tests/AuthNZ/unit/test_test_mode_runtime_guard.py",
+)
 _TEST_NAME = re.compile(r"[A-Z0-9_]*TEST[A-Z0-9_]*")
+# TEST as its own word (TEST_MODE, IN_TESTS, PYTEST_X); otherwise it is inside a word (LATEST).
+_SEAM_SHAPED = re.compile(r"(?:^|_)(?:PY)?TEST(?:S|ING)?(?:_|$)")
 
 _UNDER_TEST_MODE = (
     "only consulted while TEST_MODE/TESTING is on, which startup refuses in a production-like runtime"
@@ -41,12 +51,15 @@ _UNDER_TEST_MODE = (
 _UNDER_PYTEST = "only consulted under PYTEST_CURRENT_TEST, and only to opt back into production behaviour"
 _NOT_A_SEAM = "not a test seam: TEST is part of a domain word (A/B test, contested claim, test cases, probe)"
 _PYTEST_MARKER = (
-    "pytest's own marker: every pytest run sets it, so startup cannot refuse it. The startup "
-    "guard and the AuthNZ JWT/API-key fallbacks ignore it in a production-like runtime; this "
-    "list freezes the other readers so a new one is a reviewed change"
+    "pytest's own marker, set on every pytest run, so startup cannot refuse it outright. In a "
+    "production-like runtime startup refuses it unless pytest is actually loaded, and the "
+    "AuthNZ JWT/API-key fallbacks ignore it. This list covers modules that name the literal; "
+    "callers of core/testing.is_explicit_pytest_runtime() are not listed"
 )
 
-# env name -> (reason, modules under app/ that read it). Entries may only shrink.
+# env name -> (reason, modules under app/ that read it). Adding a name or a module is a
+# baseline bump: give the reason here and get it reviewed in the PR. Remove pairs as the
+# reads go away (the stale check enforces it).
 ALLOWLIST: dict[str, tuple[str, tuple[str, ...]]] = {
     "PYTEST_CURRENT_TEST": (
         _PYTEST_MARKER,
@@ -188,12 +201,11 @@ def seam_env_names(source: str, filename: str = "<memory>") -> set[str]:
     }
 
 
-
-def _current_reads() -> dict[str, set[str]]:
-    """env name -> modules (relative to app/) that read it."""
+def current_reads(app_root: Path = APP_ROOT) -> dict[str, set[str]]:
+    """env name -> modules (relative to ``app_root``) that read it."""
     reads: dict[str, set[str]] = {}
-    for path in sorted(APP_ROOT.rglob("*.py")):
-        rel = path.relative_to(APP_ROOT)
+    for path in sorted(app_root.rglob("*.py")):
+        rel = path.relative_to(app_root)
         if "tests" in rel.parts:
             continue
         text = path.read_text(encoding="utf-8")
@@ -210,20 +222,30 @@ def ratchet_violations(
     """One line per unguarded, unallowlisted (name, module) read, and per stale allowlist pair."""
     allowed = {(name, module) for name, (_reason, modules) in allowlist.items() for module in modules}
     found = {(name, module) for name, modules in reads.items() for module in modules}
-    problems = [
-        f"app/{module}: reads {name}, which validate_test_runtime_flags() does not guard. Add it to "
-        "core/testing.GUARDED_TEST_SEAM_KEYS, or allowlist the (name, module) here with a reason."
-        for name, module in sorted(found - allowed)
-    ]
+    problems = [_unallowlisted(name, module) for name, module in sorted(found - allowed)]
     problems += [
-        f"app/{module}: ALLOWLIST pair for {name} is stale (no longer read there). Remove it."
+        f"app/{module}: ALLOWLIST pair for {name} is stale (no longer read there). "
+        f"Remove it from ALLOWLIST in {THIS_FILE}."
         for name, module in sorted(allowed - found)
     ]
     return problems
 
 
+def _unallowlisted(name: str, module: str) -> str:
+    if not _SEAM_SHAPED.search(name):
+        return (
+            f"app/{module}: {name} contains TEST only inside a word, so it is not a test seam. "
+            f"Allowlist ({name!r}, {module!r}) with reason _NOT_A_SEAM in {THIS_FILE}."
+        )
+    return (
+        f"app/{module}: reads {name}, which validate_test_runtime_flags() does not guard. Add it to "
+        f"GUARDED_TEST_SEAM_KEYS in {GUARD_FILE}, or allowlist ({name!r}, {module!r}) with a reason "
+        f"in {THIS_FILE} (a reviewed baseline bump)."
+    )
+
+
 def test_every_test_env_read_is_guarded_or_allowlisted() -> None:
-    problems = ratchet_violations(_current_reads(), ALLOWLIST)
+    problems = ratchet_violations(current_reads(), ALLOWLIST)
     assert not problems, "\n".join(problems)
 
 
@@ -243,10 +265,16 @@ def test_every_allowlist_entry_has_a_reason_and_no_guarded_name() -> None:
 def test_matcher_sees_seeded_violations(snippet: str, name: str) -> None:
     assert seam_env_names(snippet) == {name}
     problems = ratchet_violations({name: {"core/new.py"}}, {})
-    assert problems == [
-        f"app/core/new.py: reads {name}, which validate_test_runtime_flags() does not guard. Add it to "
-        "core/testing.GUARDED_TEST_SEAM_KEYS, or allowlist the (name, module) here with a reason."
-    ]
+    assert len(problems) == 1
+    assert problems[0].startswith(f"app/core/new.py: reads {name}, which validate_test_runtime_flags()")
+    assert GUARD_FILE in problems[0] and THIS_FILE in problems[0]
+
+
+def test_a_domain_word_points_to_the_not_a_seam_reason() -> None:
+    assert seam_env_names('x = os.getenv("SHOW_LATEST")\n') == {"SHOW_LATEST"}
+    (problem,) = ratchet_violations({"SHOW_LATEST": {"core/new.py"}}, {})
+    assert "_NOT_A_SEAM" in problem and THIS_FILE in problem
+    assert "GUARDED_TEST_SEAM_KEYS" not in problem
 
 
 def test_matcher_skips_guarded_names_docstrings_and_comments() -> None:
@@ -265,7 +293,33 @@ def test_a_new_reader_of_an_allowlisted_name_fails() -> None:
 
 def test_stale_allowlist_pair_fails() -> None:
     assert ratchet_violations({}, {"GONE_TEST": ("reason", ("main.py",))}) == [
-        "app/main.py: ALLOWLIST pair for GONE_TEST is stale (no longer read there). Remove it."
+        f"app/main.py: ALLOWLIST pair for GONE_TEST is stale (no longer read there). "
+        f"Remove it from ALLOWLIST in {THIS_FILE}."
+    ]
+
+
+def test_scan_finds_seeded_files(tmp_path: Path) -> None:
+    files = {
+        "core/new_seam.py": 'import os\nX = os.getenv("SKIP_AUTH_IN_TESTS")\n',
+        "core/reader.py": "import os\nX = os.environ.get('PYTEST_CURRENT_TEST')\n",
+        "core/guarded.py": 'import os\nX = os.getenv("TEST_MODE")\nY = os.getenv("RG_TEST_NEW")\n',
+        "core/Thing/tests/test_x.py": 'X = "OTHER_TEST_FLAG"\n',  # test code under app/ is skipped
+        "core/docs_only.py": '"""Reads NEW_TEST_FLAG."""\n# os.getenv("NEW_TEST_FLAG")\n',
+    }
+    for rel, text in files.items():
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    reads = current_reads(tmp_path)
+
+    assert reads == {"SKIP_AUTH_IN_TESTS": {"core/new_seam.py"}, "PYTEST_CURRENT_TEST": {"core/reader.py"}}
+    allowlist: dict[str, tuple[str, tuple[str, ...]]] = {"PYTEST_CURRENT_TEST": ("reason", ("main.py",))}
+    assert [problem.split(",")[0] for problem in ratchet_violations(reads, allowlist)] == [
+        "app/core/reader.py: reads PYTEST_CURRENT_TEST",
+        "app/core/new_seam.py: reads SKIP_AUTH_IN_TESTS",
+        f"app/main.py: ALLOWLIST pair for PYTEST_CURRENT_TEST is stale (no longer read there). "
+        f"Remove it from ALLOWLIST in {THIS_FILE}.",
     ]
 
 
@@ -277,11 +331,23 @@ def test_backend_required_runs_this_ratchet() -> None:
         if step.get("name") == "Enforce CI contracts and code ratchets"
     ]
     assert len(steps) == 1
-    assert "tldw_Server_API/tests/lint/test_test_seam_env_reads_guarded.py" in steps[0]["run"]
+    assert THIS_FILE in steps[0]["run"]
+
+
+def test_backend_required_runs_the_guard_tests() -> None:
+    """AC#7: the startup guard and the AuthNZ refusals run in the required gate."""
+    steps = [
+        step
+        for job in yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"].values()
+        for step in job.get("steps", [])
+        if step.get("name") == "Enforce CI contracts and code ratchets"
+    ]
+    assert len(steps) == 1
+    assert [path for path in GUARD_TESTS if path not in steps[0]["run"]] == []
 
 
 if __name__ == "__main__":
-    current = _current_reads()
+    current = current_reads()
     for env_name in sorted(current):
         print(f"{env_name}: {', '.join(sorted(current[env_name]))}")
     print(f"{len(current)} names in {sum(len(m) for m in current.values())} (name, module) pairs")
