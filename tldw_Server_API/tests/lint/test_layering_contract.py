@@ -41,8 +41,12 @@ directory inside the app (core/MCP_unified/tests, core/Scheduler/tests) are test
 never imports, so they are not scanned; a module named ``tests.py`` is.
 
 Known limits:
-  * ``importlib.import_module``/``__import__`` calls are not counted (6 literal ones in the
-    app at the time of writing, none breaking a rule).
+  * ``importlib.import_module``/``__import__`` calls are not counted. At the time of writing
+    3 of them, named by a module-level string constant, reach pairs that static imports
+    already baseline: core.Evaluations -> api.v1.endpoints.embeddings_v5_production_enhanced
+    (Evaluations/recipes/embeddings_recipe_hints.py) and core.MCP_unified -> services, twice
+    (MCP_unified/adapters/tldw_policy.py). Turning a pair's last static import into an
+    importlib call is not a cut, so reviewers must not accept a deleted line on that basis.
   * Only direct edges are ruled, so a same-layer rule can be laundered through an unruled
     package of the same layer: core.LLM_Calls -> core.X -> core.Chat passes the sibling
     bans. An upward edge cannot be laundered: the second hop is still upward.
@@ -55,6 +59,8 @@ Rules. A (importer, target) pair is ratcheted when it
     router assembly (ROUTER_ASSEMBLY), so endpoint code cannot be re-exported through
     api/v1/utils, schemas or API_Deps. Shared code moves, without a re-export, into
     api/v1/utils or a core/service module;
+  * imports the router assembly from anywhere but ASSEMBLERS (main and the router
+    registry) ("router assembly"), so the exempt assembly cannot launder endpoints either;
   * is a sibling ban ("sibling ban"): core.LLM_Calls -> core.Chat and -> core.AuthNZ.
 tests/lint/test_core_to_api_import_boundary.py is a view of the core -> api pairs.
 
@@ -65,6 +71,8 @@ an edge that is gone or fell is stale and fails until its line is deleted or low
 (``--tighten`` does it). The
 baseline is Phase 1's progress gate, so every cut is locked in by the PR that makes it,
 and an edge cut in one PR cannot quietly come back under its old count in the next.
+On a baseline conflict or a stale failure after merging dev, take dev's side, run
+``--tighten``, and re-add any ``# bump:`` lines of your own.
 
 Bump with reason. A new pair, or a raised count, needs a reason on its line,
 ``<importer> -> <target>: <n>  # bump: <reason> (TASK-<n> or #<PR>)``: non-empty, citing a
@@ -135,11 +143,13 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 SIBLING_BANS = frozenset({("core.LLM_Calls", "core.Chat"), ("core.LLM_Calls", "core.AuthNZ")})
 ROUTER_ASSEMBLY = frozenset({"api.v1.router_groups", "api.v1.router_registry", "api.v2.router"})
+ASSEMBLERS = frozenset({"main", "api.v1.router_registry"})  # the only importers of ROUTER_ASSEMBLY
 _SHARE = "Move the code (don't re-export it) into api/v1/utils or a core/service module."
 FIXES = {
     "upward": "Invert it: move the shared code down to the importer's layer, or inject it from above.",
     "endpoint -> endpoint": _SHARE,
     "api -> endpoint": f"Endpoint modules are not a library. {_SHARE}",
+    "router assembly": f"Only main and api/v1/router_registry import the router assembly. {_SHARE}",
     "sibling ban": "core.LLM_Calls must not depend on core.Chat or core.AuthNZ: have the caller pass it in.",
 }
 
@@ -190,6 +200,8 @@ def rule(importer: str, target: str) -> str | None:
         return "sibling ban"
     if _is_endpoint(importer) and _is_endpoint(target):
         return "endpoint -> endpoint"
+    if target in ROUTER_ASSEMBLY and importer not in ASSEMBLERS:
+        return "router assembly"
     if _is_endpoint(target) and importer.split(".")[0] == "api" and importer not in ROUTER_ASSEMBLY:
         return "api -> endpoint"
     low, high = layer_of(importer), layer_of(target)
@@ -430,7 +442,9 @@ def violations(measured: Mapping[Pair, Counter[str]], baseline: Mapping[Pair, tu
                 else f"baseline {cap} but {now} measured. Lower it to {now}"
             )
             problems.append(
-                f"{name}: stale, {gone} in {_shown(BASELINE)} to lock the cut in, or run: {COMMAND} --tighten"
+                f"{name}: stale, {gone} in {_shown(BASELINE)} to lock the cut in, or run: {COMMAND} --tighten. "
+                "After merging dev, take dev's side of a baseline conflict, run --tighten, and re-add any "
+                "'# bump:' lines of your own."
             )
     return problems
 
@@ -658,6 +672,22 @@ def test_re_exporting_endpoint_code_through_another_api_package_fails(tmp_path: 
     assert "[api -> endpoint]" in problem and "don't re-export it" in problem
 
 
+def test_only_main_and_the_registry_import_the_router_assembly(tmp_path: Path) -> None:
+    files = {
+        "api/v1/endpoints/chat.py": f"from {APP}.api.v1.router_groups import content\n",  # launders endpoints
+        "api/v1/router_registry.py": f"from {APP}.api.v1.router_groups import content\n",
+        "api/v2/router.py": "",
+        "main.py": f"from {APP}.api.v1 import router_registry\nfrom {APP}.api.v2 import router\n",
+    }
+
+    (problem,) = violations(measure(_seed(tmp_path / "app", files)), {})
+
+    assert problem.startswith("api.v1.endpoints.chat -> api.v1.router_groups: 1 statement, not in the baseline"), (
+        problem
+    )
+    assert "[router assembly]" in problem
+
+
 def test_package_scc_sizes_report_module_level_and_function_level_cycles(tmp_path: Path) -> None:
     files = {
         "core/Chat/a.py": f"from {APP}.core.RAG import x\n",
@@ -694,7 +724,8 @@ def test_tighten_only_lowers_and_drops_and_write_baseline_reports_what_it_raises
         ("core.Utils", "main"): (1, ""),
     }
     assert raised == ["core.Utils -> main: 1 (new)", "core.Utils -> services: 2 (was 1)"]
-    assert "--tighten" in violations(measured, baseline)[0]  # the stale message names the quick fix
+    stale = violations(measured, baseline)[0]
+    assert "--tighten" in stale and "take dev's side" in stale  # the quick fix and the merge recipe
 
 
 def test_the_baseline_round_trips_with_its_bump_reasons_and_rejects_malformed_lines(tmp_path: Path) -> None:
