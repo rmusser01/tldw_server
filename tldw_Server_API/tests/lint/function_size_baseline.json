@@ -175,7 +175,7 @@
   "tldw_Server_API.app.core.Streaming.speech_chat_service:run_speech_chat_turn": {"lines": 563, "params": 5, "reason": null},
   "tldw_Server_API.app.core.Sync.v2.service:SyncV2Service._attachment_lifecycle_diagnostics": {"lines": 549, "params": 8, "reason": null},
   "tldw_Server_API.app.core.Sync.v2.service:SyncV2Service._expand_task_client_push": {"lines": 308, "params": 4, "reason": null},
-  "tldw_Server_API.app.core.Sync.v2.service:SyncV2Service.push": {"lines": 536, "params": 8, "reason": null},
+  "tldw_Server_API.app.core.Sync.v2.service:SyncV2Service.push": {"lines": 538, "params": 8, "reason": null},
   "tldw_Server_API.app.core.Sync.v2.service:SyncV2Service.restore_preview": {"lines": 646, "params": 10, "reason": null},
   "tldw_Server_API.app.core.TTS.tts_jobs_worker:_handle_tts_job": {"lines": 412, "params": 1, "reason": null},
   "tldw_Server_API.app.core.TTS.tts_service_v2:TTSServiceV2.generate_speech": {"lines": 539, "params": 10, "reason": null},

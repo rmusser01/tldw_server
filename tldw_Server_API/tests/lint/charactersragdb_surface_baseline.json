@@ -1,5 +1,5 @@
 {
-  "delegated_methods": {"count": 302, "reason": null},
+  "delegated_methods": {"count": 306, "reason": null},
   "methods": {"count": 862, "reason": null},
-  "private_member_reaches": {"count": 547, "reason": null}
+  "private_member_reaches": {"count": 548, "reason": null}
 }
