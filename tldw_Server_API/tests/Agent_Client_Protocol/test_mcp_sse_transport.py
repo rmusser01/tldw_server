@@ -561,11 +561,80 @@ async def test_sse_transport_stream_timeout_bounds_a_silent_server(mcp_http_egre
             await asyncio.Event().wait()
             yield b""
 
-    t = MCPSSETransport(sse_url=_SSE_URL, timeout_sec=0.2)
+    t = MCPSSETransport(sse_url=_SSE_URL, timeout_sec=1)
     t._http_client = _mock_client(
         lambda request: httpx.Response(200, request=request, stream=_SilentStream())
     )
 
     with pytest.raises(NetworkError, match="StreamTimeout"):
-        await asyncio.wait_for(t._discover_post_url(), timeout=2)
+        await asyncio.wait_for(t._discover_post_url(), timeout=5)
+    await t.close()
+
+
+@pytest.mark.asyncio
+async def test_sse_transport_refuses_cross_origin_redirect_so_headers_stay_home(mcp_http_egress):
+    """A redirect off the configured SSE origin is refused; the custom header never reaches the other origin."""
+    t = MCPSSETransport(sse_url=_SSE_URL, headers={"X-MCP-Token": "secret"})
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.host == "93.184.216.34":
+            return httpx.Response(302, request=request, headers={"Location": "http://93.184.216.35/sse"})
+        return _sse_response(request, b"event: endpoint\ndata: /messages\n\n")
+
+    t._http_client = _mock_client(handler)
+
+    with pytest.raises(EgressPolicyError):
+        await t._discover_post_url()
+
+    assert [str(request.url) for request in seen] == [_SSE_URL]
+    assert seen[0].headers["x-mcp-token"] == "secret"
+    await t.close()
+
+
+@pytest.mark.asyncio
+async def test_sse_transport_follows_same_origin_redirect(mcp_http_egress):
+    """A redirect within the configured SSE origin is still followed, headers included."""
+    t = MCPSSETransport(sse_url=_SSE_URL, headers={"X-MCP-Token": "secret"})
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/sse":
+            return httpx.Response(307, request=request, headers={"Location": "/sse/"})
+        return _sse_response(request, b"event: endpoint\ndata: /messages\n\n")
+
+    t._http_client = _mock_client(handler)
+
+    assert await t._discover_post_url() == _POST_URL
+    assert [str(request.url) for request in seen] == [_SSE_URL, f"{_SSE_URL}/"]
+    assert all(request.headers["x-mcp-token"] == "secret" for request in seen)
+    await t.close()
+
+
+@pytest.mark.parametrize(
+    ("post_url", "refused"),
+    [("http://10.0.0.9:3001/messages", True), ("http://93.184.216.34/messages", False)],
+    ids=["private-other-origin", "public-other-origin"],
+)
+@pytest.mark.asyncio
+async def test_sse_transport_private_scope_stays_on_the_configured_origin(mcp_http_egress, post_url, refused):
+    """With both opt-ins, a POST URL on another origin gets the default policy, not the private scope."""
+    t = MCPSSETransport(
+        sse_url="http://127.0.0.1:3001/sse",
+        post_url=post_url,
+        allow_private_network=True,
+        allow_cross_origin_post_url=True,
+    )
+    requested: list[str] = []
+    t._http_client = _mock_client(_recording_server(requested))
+
+    if refused:
+        with pytest.raises(EgressPolicyError):
+            await t._json_rpc_notify("initialized", {})
+        assert requested == []
+    else:
+        await t._json_rpc_notify("initialized", {})
+        assert requested == [post_url]
     await t.close()

@@ -91,3 +91,44 @@ async def test_sse_configured_endpoint_admits_its_private_origin_and_refuses_oth
         assert len(requested) == 2
     finally:
         await client.aclose()
+
+
+@requires_httpx
+@pytest.mark.asyncio
+async def test_sse_same_origin_redirects_only_refuses_a_cross_origin_hop(monkeypatch):
+    """allow_cross_origin_redirects=False follows same-origin hops and refuses others before requesting them."""
+    import httpx
+
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+    from tldw_Server_API.app.core.http_client import astream_sse, create_async_client
+
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if request.url.path == "/same":
+            return httpx.Response(302, request=request, headers={"Location": "/stream"})
+        if request.url.path == "/cross":
+            return httpx.Response(302, request=request, headers={"Location": "http://93.184.216.35/stream"})
+        return httpx.Response(200, request=request, content=b"data: ok\n\n", headers={"Content-Type": "text/event-stream"})
+
+    client = create_async_client(transport=httpx.MockTransport(handler))
+    try:
+        events = [
+            ev
+            async for ev in astream_sse(
+                url="http://93.184.216.34/same", client=client, allow_cross_origin_redirects=False
+            )
+        ]
+        assert [ev.data for ev in events] == ["ok"]
+        assert requested == ["http://93.184.216.34/same", "http://93.184.216.34/stream"]
+
+        with pytest.raises(EgressPolicyError) as refused:
+            async for _ev in astream_sse(
+                url="http://93.184.216.34/cross", client=client, allow_cross_origin_redirects=False
+            ):
+                pass
+        assert refused.value.reason_code == "origin_mismatch"
+        assert requested[2:] == ["http://93.184.216.34/cross"]
+    finally:
+        await client.aclose()

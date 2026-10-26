@@ -43,7 +43,8 @@ class MCPSSETransport(MCPTransport):
 
     Both channels go through ``core.http_client``: the egress policy is checked
     on the address each connection uses and on every SSE redirect hop, and env
-    proxies are not read. POSTs do not follow redirects.
+    proxies are not read. The SSE stream follows same-origin redirects only;
+    POSTs do not follow redirects.
     """
 
     def __init__(
@@ -158,6 +159,8 @@ class MCPSSETransport(MCPTransport):
                 self._sse_url,
                 allow_private_network=self._allow_private_network,
             ),
+            # Configured headers (tokens) must not follow a redirect to another origin.
+            allow_cross_origin_redirects=False,
         )
 
     async def _post(self, message: dict[str, Any]) -> None:
@@ -166,6 +169,11 @@ class MCPSSETransport(MCPTransport):
             raise RuntimeError("HTTP client not initialized")
         if self._post_url is None:
             raise RuntimeError("post_url must be set before making calls")
+        # The private-network scope belongs to the operator-configured SSE origin. A
+        # server-supplied POST URL on another origin gets the default policy instead.
+        scope = mcp_http_egress_scope(self._sse_url, allow_private_network=self._allow_private_network)
+        if scope is not None and not scope.matches(self._post_url):
+            scope = None
         response = await afetch(
             method="POST",
             url=self._post_url,
@@ -175,10 +183,7 @@ class MCPSSETransport(MCPTransport):
             timeout=httpx.Timeout(self._timeout_sec),
             allow_redirects=False,
             retry=RetryPolicy(attempts=1),
-            configured_endpoint=mcp_http_egress_scope(
-                self._post_url,
-                allow_private_network=self._allow_private_network,
-            ),
+            configured_endpoint=scope,
         )
         response.raise_for_status()
 

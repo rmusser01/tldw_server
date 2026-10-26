@@ -951,6 +951,7 @@ class TransportAdapter(Protocol):
         cert_pinning: dict[str, set[str]] | None = None,
         sensitive_observability: bool = False,
         configured_endpoint: ConfiguredEndpointScope | None = None,
+        allow_cross_origin_redirects: bool = True,
     ) -> AsyncIterator[SSEEvent]: ...
 
 
@@ -1109,6 +1110,7 @@ class HttpxAdapter:
         cert_pinning: dict[str, set[str]] | None = None,
         sensitive_observability: bool = False,
         configured_endpoint: ConfiguredEndpointScope | None = None,
+        allow_cross_origin_redirects: bool = True,
     ) -> AsyncGenerator[SSEEvent, None]:
         stream = _astream_sse_httpx(
             url=url,
@@ -1124,6 +1126,7 @@ class HttpxAdapter:
             cert_pinning=cert_pinning,
             sensitive_observability=sensitive_observability,
             configured_endpoint=configured_endpoint,
+            allow_cross_origin_redirects=allow_cross_origin_redirects,
         )
         scoped_stream = _iterate_sensitive_http_items(
             stream,
@@ -1254,6 +1257,7 @@ class AiohttpAdapter:
         cert_pinning: dict[str, set[str]] | None = None,
         sensitive_observability: bool = False,
         configured_endpoint: ConfiguredEndpointScope | None = None,
+        allow_cross_origin_redirects: bool = True,
     ) -> AsyncGenerator[SSEEvent, None]:
         stream = _astream_sse_aiohttp(
             url=url,
@@ -1269,6 +1273,7 @@ class AiohttpAdapter:
             cert_pinning=cert_pinning,
             sensitive_observability=sensitive_observability,
             configured_endpoint=configured_endpoint,
+            allow_cross_origin_redirects=allow_cross_origin_redirects,
         )
         scoped_stream = _iterate_sensitive_http_items(
             stream,
@@ -1976,6 +1981,12 @@ def _is_cross_origin(original_url: str, target_url: str) -> bool:
     if original is None or target is None:
         return True
     return original != target
+
+
+def _refuse_cross_origin_hop(original_url: str, hop_url: str, allowed: bool) -> None:
+    """Refuse a redirect hop off the original origin when cross-origin hops are not allowed."""
+    if not allowed and _is_cross_origin(original_url, hop_url):
+        raise EgressPolicyError("Cross-origin redirect refused", reason_code="origin_mismatch")
 
 
 @overload
@@ -5975,6 +5986,7 @@ async def _astream_sse_httpx(
     cert_pinning: dict[str, set[str]] | None = None,
     sensitive_observability: bool = False,
     configured_endpoint: ConfiguredEndpointScope | None = None,
+    allow_cross_origin_redirects: bool = True,
 ) -> AsyncGenerator[SSEEvent, None]:
     sensitive_observability = _effective_sensitive_observability(
         sensitive_observability
@@ -6020,6 +6032,7 @@ async def _astream_sse_httpx(
                     configured_endpoint=configured_endpoint,
                     sensitive_observability=sensitive_observability,
                 )
+                _refuse_cross_origin_hop(url, cur_url, allow_cross_origin_redirects)
                 try:
                     # Optional cert pinning
                     try:
@@ -6190,6 +6203,7 @@ async def _astream_sse_aiohttp(
     cert_pinning: dict[str, set[str]] | None = None,
     sensitive_observability: bool = False,
     configured_endpoint: ConfiguredEndpointScope | None = None,
+    allow_cross_origin_redirects: bool = True,
 ) -> AsyncGenerator[SSEEvent, None]:
     if aiohttp is None:  # pragma: no cover
         raise RuntimeError("aiohttp is not available")  # noqa: TRY003
@@ -6230,6 +6244,7 @@ async def _astream_sse_aiohttp(
                 configured_endpoint=configured_endpoint,
                 sensitive_observability=sensitive_observability,
             )
+            _refuse_cross_origin_hop(url, cur_url, allow_cross_origin_redirects)
             try:
                 # Optional cert pinning
                 try:
@@ -6395,12 +6410,16 @@ async def astream_sse(
     cert_pinning: dict[str, set[str]] | None = None,
     sensitive_observability: bool = False,
     configured_endpoint: ConfiguredEndpointScope | None = None,
+    allow_cross_origin_redirects: bool = True,
 ) -> AsyncGenerator[SSEEvent, None]:
     """Stream SSE events, checking egress on the URL and every redirect hop.
 
     ``configured_endpoint`` scopes every hop to one trusted origin, as it does for
     ``afetch``: that origin may be loopback or private (never metadata or
     link-local), and a redirect to any other origin is refused.
+    ``allow_cross_origin_redirects=False`` refuses a hop off the URL's origin
+    (``origin_mismatch``) without granting any private access, so caller headers
+    never reach another origin.
     """
     sensitive_observability = _effective_sensitive_observability(
         sensitive_observability
@@ -6424,6 +6443,7 @@ async def astream_sse(
         cert_pinning=cert_pinning,
         sensitive_observability=sensitive_observability,
         configured_endpoint=configured_endpoint,
+        allow_cross_origin_redirects=allow_cross_origin_redirects,
     )
     try:
         async for event in stream:
