@@ -105,7 +105,6 @@ def ensure_postgres_post_core_structures(
     """Ensure non-core PostgreSQL schema structures after base bootstrap or migration."""
 
     ensure_postgres_sync_log_contract(db, conn)
-    ensure_postgres_keyword_identity(db, conn)
     db._ensure_postgres_collections_tables(conn)
     db._ensure_postgres_tts_history(conn)
     db._ensure_postgres_audio_presets(conn)
@@ -118,6 +117,8 @@ def ensure_postgres_post_core_structures(
     # Sequence repair belongs to explicit migrations. A routine unscoped
     # handle may see no rows under forced RLS and must not rewind global IDs.
     ensure_postgres_policies(db, conn)
+    # Last: it locks keywords, and requests lock media (RLS) before keywords.
+    ensure_postgres_keyword_identity(db, conn)
 
 
 def bootstrap_postgres_schema(db: SupportsPostgresPostCoreStructures) -> None:

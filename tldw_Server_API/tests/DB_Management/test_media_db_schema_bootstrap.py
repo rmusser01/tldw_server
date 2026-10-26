@@ -248,7 +248,6 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
 
     assert calls == [
         ("sync_contract", db, conn),
-        ("keyword_identity", db, conn),
         ("collections", conn),
         ("tts_history", conn),
         ("audio_presets", conn),
@@ -263,6 +262,7 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
         ("claims_extensions", conn),
         ("email_schema", conn),
         ("policies", db, conn),
+        ("keyword_identity", db, conn),
     ]
 
 

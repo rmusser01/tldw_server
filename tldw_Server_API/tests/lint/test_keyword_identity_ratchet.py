@@ -97,8 +97,6 @@ KEYWORD_NORMALIZATION_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py": 2,
     "tldw_Server_API/app/core/DB_Management/media_db/repositories/clone_snapshot_repository.py": 1,
     "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py": 1,  # bump: chunk_type in add_media_with_keywords, not identity
-    "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_search_repository.py": 2,
-    "tldw_Server_API/app/core/DB_Management/media_db/runtime/safe_metadata_search_ops.py": 2,
     "tldw_Server_API/app/core/Ingestion_Media_Processing/Books/Book_Processing_Lib.py": 1,
     "tldw_Server_API/app/core/Ingestion_Media_Processing/Upload_Sink.py": 1,
     "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py": 5,

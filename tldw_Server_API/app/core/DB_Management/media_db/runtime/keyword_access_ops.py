@@ -29,8 +29,8 @@ def fetch_media_for_keywords(
 ) -> dict[str, list[dict[str, Any]]]:
     """Group active media by requested keyword, keyed by ``normalize_keyword_identity``.
 
-    Each keyword resolves through ``KeywordsRepository.find``, so a request in any
-    case (including ß/SS and accented capitals) finds the stored keyword.
+    Keywords resolve in one batch through ``KeywordsRepository.match_identities``, so a
+    request in any case (including ß/SS and accented capitals) finds every stored variant.
     """
     if not isinstance(keywords, list):
         raise TypeError("Input 'keywords' must be a list of strings.")  # noqa: TRY003
@@ -60,12 +60,10 @@ def fetch_media_for_keywords(
 
     try:
         conn = self.get_connection()
-        repository = KeywordsRepository.from_legacy_db(self)
-        identity_by_id: dict[int, str] = {}
-        for keyword in requested:
-            row = repository.find(conn, keyword, include_deleted=False)
-            if row:
-                identity_by_id[int(row["id"])] = normalize_keyword_identity(keyword)
+        matches = KeywordsRepository.from_legacy_db(self).match_identities(
+            conn, requested, include_deleted=False, all_matches=True
+        )
+        identity_by_id = {int(row["id"]): identity for identity, rows in matches.items() for row in rows}
         if not identity_by_id:
             return results_by_keyword
 

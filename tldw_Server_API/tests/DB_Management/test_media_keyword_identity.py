@@ -19,7 +19,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-from tldw_Server_API.app.core.DB_Management.media_db.api import fetch_keywords_for_media
+from tldw_Server_API.app.core.DB_Management.media_db.api import fetch_keywords_for_media, search_media
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
 NON_ASCII_VARIANTS = [
@@ -107,6 +107,58 @@ def test_non_ascii_case_variants_share_one_keyword(db, stored: str, probe: str) 
     assert len(_active_keywords(db)) == 1
     found = db.fetch_media_for_keywords([stored])
     assert [item["id"] for item in next(iter(found.values()))] == [media_id]
+
+
+SEARCH_VARIANTS = [
+    pytest.param("Éclair", "éclair", id="accented-capital"),
+    pytest.param("Éclair", "ÉCLAIR", id="accented-upper"),
+    pytest.param("Straße", "STRASSE", id="sharp-s"),
+]
+
+
+@pytest.mark.parametrize(("stored", "probe"), SEARCH_VARIANTS)
+def test_search_keyword_filters_match_every_case_variant(db, stored: str, probe: str) -> None:
+    tagged = _add_media(db, [stored], title="tagged")
+    other = _add_media(db, ["plain"], title="other")
+
+    for variant in (stored, probe):
+        rows, total = search_media(db, None, must_have_keywords=[variant])
+        assert (total, [row["id"] for row in rows]) == (1, [tagged]), variant
+        rows, total = search_media(db, None, must_not_have_keywords=[variant])
+        assert (total, [row["id"] for row in rows]) == (1, [other]), variant
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("stored", "probe"), SEARCH_VARIANTS)
+def test_safe_metadata_keyword_filters_match_every_case_variant(tmp_path, stored: str, probe: str) -> None:
+    # SQLite only: search_by_safe_metadata already fails on Postgres without any keyword filter.
+    db = MediaDatabase(db_path=str(tmp_path / "safe_metadata.db"), client_id="913950")
+    try:
+        tagged = _add_media(db, [stored], title="tagged")
+        other = _add_media(db, ["plain"], title="other")
+        for variant in (stored, probe):
+            rows, total = db.search_by_safe_metadata(must_have_keywords=[variant])
+            assert (total, [row["media_id"] for row in rows]) == (1, [tagged]), variant
+            rows, total = db.search_by_safe_metadata(must_not_have_keywords=[variant])
+            assert (total, [row["media_id"] for row in rows]) == (1, [other]), variant
+    finally:
+        db.close_connection()
+
+
+def test_an_active_identity_match_wins_over_a_deleted_sql_match(db) -> None:
+    deleted_id, _ = db.add_keyword("strasse")
+    assert db.soft_delete_keyword("strasse") is True
+    # Legacy data: NOCASE and LOWER() keep "Straße" apart from the deleted "strasse".
+    db.execute_query(
+        "INSERT INTO Keywords (keyword, uuid, last_modified, version, client_id, deleted) "
+        "VALUES (?, ?, ?, 1, ?, ?)",
+        ("Straße", "uuid-strasse-active", "2026-10-01T00:00:00Z", "913950", False),
+        commit=True,
+    )
+    active_id = db.execute_query("SELECT id FROM Keywords WHERE uuid = ?", ("uuid-strasse-active",)).fetchone()["id"]
+
+    assert db.add_keyword("STRASSE")[0] == active_id != deleted_id
+    assert _active_keywords(db) == ["Straße"]
 
 
 # --- Postgres: merge existing case-variant duplicates, then enforce LOWER uniqueness ---
@@ -205,5 +257,38 @@ def test_postgres_keyword_identity_ensure_is_a_no_op_once_the_index_exists(pg_da
             ensure_postgres_keyword_identity(db, conn)
             monkeypatch.undo()
         assert len(statements) == 1 and "pg_indexes" in statements[0]
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.integration
+def test_postgres_keyword_lookups_can_use_indexes(pg_database_config, monkeypatch) -> None:
+    """The shared keywords table is never read whole: each lookup has an index path."""
+    from tldw_Server_API.app.core.DB_Management.media_db.repositories.keywords_repository import (
+        KeywordsRepository,
+    )
+
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(db_path=":memory:", client_id="913950", backend=backend)
+    try:
+        lookups: list[tuple[str, tuple]] = []
+        with db.transaction() as conn:
+            real_fetchall = db._fetchall_with_connection
+
+            def recording_fetchall(c, query, params=()):
+                lookups.append((query, params))
+                return real_fetchall(c, query, params)
+
+            monkeypatch.setattr(db, "_fetchall_with_connection", recording_fetchall)
+            repository = KeywordsRepository(db)
+            repository.match_identities(conn, ["Straße"], include_deleted=True)
+            repository.match_identities(conn, ["Straße"], include_deleted=False)
+            monkeypatch.undo()
+            assert len(lookups) == 4  # SQL plus the non-ASCII fallback, for each
+            backend.execute("SET LOCAL enable_seqscan = off", connection=conn)
+            for query, params in lookups:
+                prepared, prepared_params = db._prepare_backend_statement(query, params)
+                plan = backend.execute(f"EXPLAIN {prepared}", prepared_params, connection=conn).rows
+                assert "Index" in " ".join(str(row) for row in plan), query
     finally:
         db.close_connection()

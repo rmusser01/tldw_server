@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterable
 from contextlib import suppress
 from typing import Any
 
@@ -14,7 +15,11 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import MediaDbLike
 from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
-from tldw_Server_API.app.core.Utils.keyword_identity import dedupe_keywords, normalize_keyword_identity
+from tldw_Server_API.app.core.Utils.keyword_identity import (
+    dedupe_keywords,
+    normalize_keyword_identity,
+    rank_identity_matches,
+)
 
 
 class KeywordsRepository:
@@ -44,40 +49,86 @@ class KeywordsRepository:
             logger.error("Keyword lookup failed (error_type={})", exception_type_for_log(exc))
             raise DatabaseError(f"Failed fetch keywords {media_id}") from exc  # noqa: TRY003
 
-    def find(self, conn: Any, keyword: str, *, include_deleted: bool = True) -> dict[str, Any] | None:
-        """Return the keyword row whose ``normalize_keyword_identity`` matches ``keyword``.
+    def match_identities(
+        self,
+        conn: Any | None,
+        keywords: Iterable[object],
+        *,
+        include_deleted: bool = True,
+        all_matches: bool = False,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Map each requested keyword's ``normalize_keyword_identity`` to its stored rows.
 
-        Active rows win over soft-deleted ones, then the earliest row. SQLite's
-        ``COLLATE NOCASE`` column and Postgres ``LOWER()`` find ASCII case variants, but
-        neither folds ß/SS, NFC forms or (SQLite) accented capitals, so a SQL miss
-        compares helper identities in Python (TASK-13950.5).
+        Rows come active first, then oldest. One SQL lookup asks the NOCASE column
+        (SQLite) or ``LOWER(keyword)`` (Postgres, indexed) for the requested texts and
+        their identities, which finds every ASCII row: an ASCII row's casefold is its
+        lowercase. Only rows with a non-ASCII character can still match by identity
+        (ß/SS, É/é on SQLite, NFC forms), so the fallback reads just those, and only when
+        an identity has no active hit or ``all_matches`` wants every legacy duplicate
+        (TASK-13950.5). ``conn=None`` reads through ``execute_query``.
         """
         db = self.session
-        text = keyword.strip()
-        # Legacy DB-likes without backend_type are SQLite (see api._supports_keyword_delete_repository).
+        terms = dedupe_keywords(keywords)
+        wanted = {normalize_keyword_identity(term) for term in terms}
+        if not wanted:
+            return {}
+        # A DB-like without backend_type is SQLite (see api._supports_keyword_delete_repository).
         postgres = getattr(db, "backend_type", None) == BackendType.POSTGRESQL
-        match = "LOWER(keyword) = LOWER(?)" if postgres else "keyword = ?"
-        active = "" if include_deleted else " AND deleted = ?"
-        params: tuple[Any, ...] = (text,) if include_deleted else (text, False)
-        select = "SELECT id, uuid, keyword, deleted, version FROM Keywords"
-        row: dict[str, Any] | None = db._fetchone_with_connection(
-            conn,
-            f"{select} WHERE {match}{active} ORDER BY deleted, id LIMIT 1",  # nosec B608
-            params,
+        values = [*terms, *(wanted - set(terms))]
+        placeholders = ", ".join(["LOWER(?)" if postgres else "?"] * len(values))
+        active = "" if include_deleted else (" AND deleted = FALSE" if postgres else " AND deleted = 0")
+        select = "SELECT id, uuid, keyword, deleted, version FROM Keywords WHERE "
+        match = f"{'LOWER(keyword)' if postgres else 'keyword'} IN ({placeholders})"
+        rows = self._fetch_rows(conn, f"{select}{match}{active}", tuple(values))  # nosec B608
+        groups = rank_identity_matches(wanted, rows)
+        if all_matches or any(identity not in groups or groups[identity][0]["deleted"] for identity in wanted):
+            # ponytail: reads every non-ASCII keyword row (a partial-index scan on Postgres, a table
+            # scan on SQLite); add a stored identity column if non-ASCII vocabularies get large.
+            non_ascii = "keyword ~ '[^[:ascii:]]'" if postgres else "keyword GLOB '*[^ -~]*'"
+            rows += self._fetch_rows(conn, f"{select}{non_ascii}{active}")  # nosec B608
+            groups = rank_identity_matches(wanted, rows)
+        return groups
+
+    def find(self, conn: Any | None, keyword: str, *, include_deleted: bool = True) -> dict[str, Any] | None:
+        """Return the stored row for ``keyword``'s identity: active first, then oldest."""
+        rows = self.match_identities(conn, [keyword], include_deleted=include_deleted).get(
+            normalize_keyword_identity(keyword)
         )
-        if row:
-            return row
-        # ponytail: O(keywords) scan per miss; add a stored identity column if that gets slow.
-        identity = normalize_keyword_identity(text)
-        rows = db._fetchall_with_connection(conn, f"{select} ORDER BY deleted, id")  # nosec B608
-        return next(
-            (
-                r
-                for r in rows
-                if (include_deleted or not r["deleted"]) and normalize_keyword_identity(r["keyword"]) == identity
-            ),
-            None,
-        )
+        return rows[0] if rows else None
+
+    def filter_clauses(
+        self,
+        must_have: Iterable[object] | None,
+        must_not_have: Iterable[object] | None,
+        media_column: str = "m.id",
+    ) -> tuple[list[str], list[Any]]:
+        """Return SQL predicates (and params) on ``media_column`` for keyword filters.
+
+        Filters match by keyword identity over every active variant; a must-have keyword
+        that does not exist matches nothing.
+        """
+        required = dedupe_keywords(must_have or [])
+        excluded = dedupe_keywords(must_not_have or [])
+        found = self.match_identities(None, [*required, *excluded], include_deleted=False, all_matches=True)
+        clauses: list[str] = []
+        params: list[Any] = []
+        link = f"SELECT 1 FROM MediaKeywords mk WHERE mk.media_id = {media_column} AND mk.keyword_id IN"
+        for keyword in required:
+            ids = [row["id"] for row in found.get(normalize_keyword_identity(keyword), [])]
+            if not ids:
+                return ["1 = 0"], []
+            clauses.append(f"EXISTS ({link} ({', '.join('?' * len(ids))}))")
+            params.extend(ids)
+        excluded_ids = [row["id"] for keyword in excluded for row in found.get(normalize_keyword_identity(keyword), [])]
+        if excluded_ids:
+            clauses.append(f"NOT EXISTS ({link} ({', '.join('?' * len(excluded_ids))}))")
+            params.extend(excluded_ids)
+        return clauses, params
+
+    def _fetch_rows(self, conn: Any | None, query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+        if conn is None:
+            return [dict(row) for row in self.session.execute_query(query, params).fetchall()]
+        return list(self.session._fetchall_with_connection(conn, query, params))
 
     def add(self, keyword: str, conn: Any | None = None) -> tuple[int | None, str | None]:
         """Return the keyword matching ``keyword``'s identity, restoring or creating it.

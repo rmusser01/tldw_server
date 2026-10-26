@@ -395,6 +395,13 @@ def ensure_postgres_sync_log_contract(db: SupportsPostgresCoreMediaSchema, conn:
 
 
 _KEYWORD_IDENTITY_INDEX = "idx_keywords_keyword_identity"
+# Lookup indexes for KeywordsRepository.match_identities: every row by LOWER(keyword)
+# (restoring a soft-deleted keyword needs deleted rows too) and the non-ASCII rows its
+# identity fallback reads.
+_KEYWORD_LOOKUP_INDEXES = {
+    "idx_keywords_lower_keyword": "ON keywords (LOWER(keyword))",
+    "idx_keywords_non_ascii": "ON keywords (id) WHERE keyword ~ '[^[:ascii:]]'",
+}
 
 
 def ensure_postgres_keyword_identity(db: Any, conn: Any) -> None:
@@ -406,16 +413,18 @@ def ensure_postgres_keyword_identity(db: Any, conn: Any) -> None:
     does: the earliest active row survives with its casing, the others' MediaKeywords
     links move to it without duplicates, and they are soft-deleted (version + 1,
     ``merge_parent_uuid`` = survivor uuid). Like every schema migration, this writes
-    no sync_log rows (sync_log is FORCE RLS-scoped per user). The index gates it, so it
-    runs once; the table lock serializes concurrent bootstraps.
+    no sync_log rows (sync_log is FORCE RLS-scoped per user). The indexes gate it, so it
+    runs once; the table lock serializes concurrent bootstraps. Bootstrap calls it after
+    the RLS policy ensures, so it takes the keywords lock last.
     """
     backend = db.backend
-    exists = backend.execute(
-        "SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = %s",
-        (_KEYWORD_IDENTITY_INDEX,),
+    names = (_KEYWORD_IDENTITY_INDEX, *_KEYWORD_LOOKUP_INDEXES)
+    existing = backend.execute(
+        "SELECT indexname FROM pg_indexes WHERE schemaname = current_schema() AND indexname IN (%s, %s, %s)",
+        names,
         connection=conn,
     )
-    if exists.rows:
+    if len(existing.rows) == len(names):
         return
     backend.execute("LOCK TABLE keywords IN SHARE ROW EXCLUSIVE MODE", connection=conn)
     merges = backend.execute(
@@ -446,6 +455,8 @@ def ensure_postgres_keyword_identity(db: Any, conn: Any) -> None:
         f"CREATE UNIQUE INDEX IF NOT EXISTS {_KEYWORD_IDENTITY_INDEX} ON keywords (LOWER(keyword)) WHERE deleted = FALSE",
         connection=conn,
     )
+    for name, definition in _KEYWORD_LOOKUP_INDEXES.items():
+        backend.execute(f"CREATE INDEX IF NOT EXISTS {name} {definition}", connection=conn)
 
 
 def apply_postgres_core_media_schema(
