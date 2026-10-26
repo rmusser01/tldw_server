@@ -6,14 +6,18 @@ import asyncio
 import json
 import math
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any, NoReturn
 
 import httpx
 from anyio import fail_after
 
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, NetworkError
+from tldw_Server_API.app.core.http_client import RetryPolicy, astream_bytes, create_async_client
 from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
+from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 from tldw_Server_API.app.core.Slides.standalone_html_config import (
     CLOSED_ADAPTER_CATALOG,
     MAX_DOCUMENT_BYTES,
@@ -36,7 +40,6 @@ _FENCE = re.compile(
     re.IGNORECASE,
 )
 _CATALOG_BY_ID = {adapter.adapter_id: adapter for adapter in CLOSED_ADAPTER_CATALOG}
-_AsyncClient = httpx.AsyncClient
 
 
 class StandaloneHtmlProviderError(RuntimeError):
@@ -253,12 +256,13 @@ def _strict_json_loads(raw: bytes) -> object:
     return decoded
 
 
-def _raw_header_values(headers: httpx.Headers, name: bytes) -> list[bytes]:
-    lowered = name.lower()
-    return [value for key, value in headers.raw if key.lower() == lowered]
+def _raw_header_values(headers: Mapping[str, str], name: bytes) -> list[bytes]:
+    # http_client joins repeated fields with ", ", so a duplicate carries a comma and fails below.
+    value = headers.get(name.decode("ascii"))
+    return [] if value is None else [value.encode("latin-1", "replace")]
 
 
-def _validate_content_encoding(headers: httpx.Headers) -> None:
+def _validate_content_encoding(headers: Mapping[str, str]) -> None:
     values = _raw_header_values(headers, b"content-encoding")
     if not values:
         return
@@ -273,7 +277,7 @@ def _validate_content_encoding(headers: httpx.Headers) -> None:
         _fail("standalone_html_provider_response_invalid")
 
 
-def _declared_content_length(headers: httpx.Headers) -> int | None:
+def _declared_content_length(headers: Mapping[str, str]) -> int | None:
     values = _raw_header_values(headers, b"content-length")
     if not values:
         return None
@@ -475,10 +479,10 @@ async def _request_once(
     initial_config: SlidesStandaloneHtmlConfig,
     current_config_loader: Callable[[], SlidesStandaloneHtmlConfig],
 ) -> bytes:
-    async with _AsyncClient(
+    async with create_async_client(
         timeout=_provider_timeout(initial_config),
         trust_env=False,
-        follow_redirects=False,
+        http2=False,
     ) as client:
         current = _load_current_config(current_config_loader)
         response_limit, document_limit = _validated_runtime_limits(current)
@@ -493,52 +497,81 @@ async def _request_once(
             )
             request_timeout = _provider_timeout(current)
             current = _verify_current_target(target, current)
-            async with client.stream(
-                "POST",
-                target.endpoint_identity,
+            return await _consume_response(
+                client,
+                target=target,
                 headers=headers,
-                json=payload,
+                payload=payload,
                 timeout=request_timeout,
-            ) as response:
-                return await _consume_response(
-                    response,
-                    target=target,
-                    response_limit=response_limit,
-                    document_limit=document_limit,
-                )
+                response_limit=response_limit,
+                document_limit=document_limit,
+            )
+
+
+def _configured_scope(target: ResolvedExecutionTarget) -> ConfiguredEndpointScope | None:
+    """Scope the private-network exception to the code-owned loopback catalog entry.
+
+    The official HTTPS adapters keep the default policy (public addresses only).
+    """
+    adapter = _CATALOG_BY_ID[target.adapter_id]
+    if adapter.verified_https:
+        return None
+    return ConfiguredEndpointScope.from_url(adapter.endpoint_identity)
 
 
 async def _consume_response(
-    response: httpx.Response,
+    client: httpx.AsyncClient,
     *,
     target: ResolvedExecutionTarget,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+    timeout: httpx.Timeout,
     response_limit: int,
     document_limit: int,
 ) -> bytes:
-    _validate_content_encoding(response.headers)
-    declared_length = _declared_content_length(response.headers)
-    if declared_length is not None and declared_length > response_limit:
-        _fail("standalone_html_provider_response_too_large")
+    seen: dict[str, Any] = {}
 
-    success = 200 <= response.status_code < 300
-    body = bytearray() if success else None
-    preflight = _ProviderJsonPreflight() if success else None
-    received = 0
-    async for chunk in response.aiter_raw():
-        received += len(chunk)
-        if received > response_limit:
+    def on_response(status_code: int, response_headers: Mapping[str, str]) -> None:
+        _validate_content_encoding(response_headers)
+        declared = _declared_content_length(response_headers)
+        if declared is not None and declared > response_limit:
             _fail("standalone_html_provider_response_too_large")
-        if preflight is not None:
-            preflight.feed(chunk)
-            body.extend(chunk)
+        seen["status"] = status_code
+        seen["declared"] = declared
 
+    body = bytearray()
+    preflight = _ProviderJsonPreflight()
+    received = 0
+    # Egress (DNS/IP checks, pinning) runs inside astream_bytes, one attempt, no redirects followed.
+    async with aclosing(
+        astream_bytes(
+            method="POST",
+            url=target.endpoint_identity,
+            client=client,
+            headers=headers,
+            json=payload,
+            timeout=timeout,
+            retry=RetryPolicy(attempts=1),
+            sensitive_observability=True,
+            on_response=on_response,
+            raise_for_status=False,
+            configured_endpoint=_configured_scope(target),
+        )
+    ) as chunks:
+        async for chunk in chunks:
+            received += len(chunk)
+            if received > response_limit:
+                _fail("standalone_html_provider_response_too_large")
+            if 200 <= seen["status"] < 300:
+                preflight.feed(chunk)
+                body.extend(chunk)
+
+    status = seen["status"]
+    declared_length = seen["declared"]
     if declared_length is not None and received != declared_length:
         _fail("standalone_html_provider_response_invalid")
-    if not success:
-        _fail(
-            "standalone_html_provider_http_error",
-            status_code=response.status_code,
-        )
+    if not 200 <= status < 300:
+        _fail("standalone_html_provider_http_error", status_code=status)
     preflight.finish()
     decoded = _strict_json_loads(bytes(body))
     text = _extract_text(decoded, target)
@@ -579,11 +612,15 @@ async def generate_standalone_html(
         )
     except asyncio.CancelledError:
         raise
-    except StandaloneHtmlProviderError:
+    except StandaloneHtmlProviderError as exc:
+        # on_response runs inside http_client's status handler; drop that frame's exception.
+        exc.__context__ = None
         raise
+    except EgressPolicyError:
+        failure_code = "standalone_html_endpoint_not_allowed"
     except (TimeoutError, httpx.TimeoutException):
         failure_code = "standalone_html_provider_timeout"
-    except (httpx.HTTPError, OSError):
+    except (httpx.HTTPError, NetworkError, OSError):
         failure_code = "standalone_html_provider_unavailable"
     _fail(failure_code)
 

@@ -122,10 +122,6 @@ ALLOWLIST: dict[str, str] = {
         "migrate: defaults client_factory to httpx.AsyncClient (a reference the regex guard missed). "
         "It checks its own origin allowlist, not the egress policy; default to create_async_client."
     ),
-    "tldw_Server_API/app/core/Slides/standalone_html_provider.py": (
-        "migrate: streams provider completions through _AsyncClient = httpx.AsyncClient (an alias the "
-        "regex guard missed), with no egress policy; use create_async_client with a configured endpoint."
-    ),
     "tldw_Server_API/app/core/Workflows/adapters/integration/podcast_rss.py": (
         "migrate: fetches a workflow-supplied source_feed_url with urllib urlopen: scheme check only, "
         "no egress policy, redirects followed, body unbounded. Use fetch with a byte cap."

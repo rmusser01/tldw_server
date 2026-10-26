@@ -15,6 +15,7 @@ and this project adheres to Some kind of Versioning
 
 ### Fixed
 
+- **Standalone HTML generation egress:** provider completions now go through `core.http_client` (`astream_bytes`) instead of a bare `httpx.AsyncClient`, so a provider host that resolves to a private address is refused before any request and the loopback llama.cpp/Ollama adapters are allowed only on their own configured origin; `astream_bytes` gained `configured_endpoint=` (TASK-13950.11).
 
 ### Removed
 
