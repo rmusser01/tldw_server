@@ -67,6 +67,9 @@ from tldw_Server_API.app.core.testing import (
 from tldw_Server_API.app.core.testing import (
     is_truthy as _is_truthy,
 )
+from tldw_Server_API.app.core.testing import (
+    runtime_environment as _runtime_environment,
+)
 
 SECURE_KEY_INIT_COMMAND = "python -m tldw_Server_API.app.core.AuthNZ.initialize"
 SECURE_KEY_GUIDANCE = f"Generate a secure key via:\n  {SECURE_KEY_INIT_COMMAND}"
@@ -85,15 +88,22 @@ SINGLE_USER_KEY_TOO_SHORT = (
     f"{SECURE_KEY_GUIDANCE}"
 )
 SINGLE_USER_KEY_PRODUCTION_FORMAT = (
-    "In production (tldw_production=true or ENVIRONMENT/APP_ENV=production), SINGLE_USER_API_KEY must use the "
+    "SINGLE_USER_API_KEY must use the "
     "server-generated format (tldw_<kid>.<secret>). "
     f"{SECURE_KEY_GUIDANCE}\n"
     "or set TLDW_ALLOW_LEGACY_SINGLE_USER_KEY=true to temporarily bypass."
 )
 SINGLE_USER_KEY_PRODUCTION_WEAK = (
-    "In production (tldw_production=true or ENVIRONMENT/APP_ENV=production), SINGLE_USER_API_KEY must be set to a secure value (>=24 chars) "
+    "SINGLE_USER_API_KEY must be set to a secure value (>=24 chars) "
     f"and must not use defaults.\n{SECURE_KEY_GUIDANCE}"
 )
+
+
+def _in_production() -> str:
+    """Prefix for a production hard-fail, naming the key that made the runtime production-like."""
+    return f"In a production-like runtime ({_runtime_environment().source_key}), "
+
+
 SINGLE_USER_API_KEY_PLACEHOLDERS = {
     "CHANGE_ME_TO_SECURE_API_KEY",
     "default-secret-key-for-single-user",
@@ -927,7 +937,7 @@ class Settings(BaseSettings):
                 default_values = {"CHANGE_ME_TO_SECURE_RANDOM_KEY_MIN_32_CHARS"}
                 if self.JWT_SECRET_KEY in default_values:
                     raise ValueError(
-                        "In production (tldw_production=true or ENVIRONMENT/APP_ENV=production), JWT_SECRET_KEY must not use default template values.\n"
+                        _in_production() + "JWT_SECRET_KEY must not use default template values.\n"
                         "Set a strong key via environment or .env. Example:\n"
                         "  export JWT_SECRET_KEY=$(python -c \"import secrets; print(secrets.token_urlsafe(32))\")"
                     )
@@ -1014,7 +1024,7 @@ class Settings(BaseSettings):
 
                 if not is_new_format and not allow_legacy:
                     if prod_flag:
-                        raise ValueError(SINGLE_USER_KEY_PRODUCTION_FORMAT)
+                        raise ValueError(_in_production() + SINGLE_USER_KEY_PRODUCTION_FORMAT)
                     logger.warning(
                         "SINGLE_USER_API_KEY uses a legacy format; "
                         "generate a new server-generated key for improved security."
@@ -1026,7 +1036,7 @@ class Settings(BaseSettings):
                     or len(self.SINGLE_USER_API_KEY) < 24
                 )
                 if weak:
-                    raise ValueError(SINGLE_USER_KEY_PRODUCTION_WEAK)
+                    raise ValueError(_in_production() + SINGLE_USER_KEY_PRODUCTION_WEAK)
 
     def _apply_enterprise_guardrails(self) -> None:
         """Log guardrail decisions for enterprise-only feature flags."""
@@ -1274,7 +1284,7 @@ class Settings(BaseSettings):
             # In production, disallow SQLite for multi-user mode
             if _is_production_like_env():
                 raise ValueError(
-                    "In production (tldw_production=true or ENVIRONMENT/APP_ENV=production) with AUTH_MODE=multi_user, SQLite is not supported.\n"
+                    _in_production() + "AUTH_MODE=multi_user does not support SQLite.\n"
                     "Please configure PostgreSQL via DATABASE_URL. Examples:\n"
                     "  export DATABASE_URL=postgresql://tldw_user:TestPassword123!@localhost:5432/tldw_users\n"
                     "  # With docker-compose service name:\n"

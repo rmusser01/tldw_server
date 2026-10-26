@@ -180,6 +180,22 @@ _VALUE_SEAMS = (
 _SWITCH_SEAMS = sorted(set(_GUARDED_SEAMS) - set(_VALUE_SEAMS))
 
 
+def test_guarded_seam_list_matches_core_testing() -> None:
+    """A seam added to core/testing.py alone fails here, so no_seams and these tests cover it."""
+    from tldw_Server_API.app.core.testing import GUARDED_TEST_SEAM_KEYS, GUARDED_TEST_SEAM_PREFIXES
+
+    assert {seam for seam in _GUARDED_SEAMS if not seam.startswith("RG_TEST_")} == set(GUARDED_TEST_SEAM_KEYS)
+    assert GUARDED_TEST_SEAM_PREFIXES == ("RG_TEST_",)
+
+
+def test_value_vs_switch_classification_is_pinned() -> None:
+    """Exactly _VALUE_SEAMS are armed by "0"; a new seam cannot silently get switch semantics."""
+    from tldw_Server_API.app.core.testing import GUARDED_TEST_SEAM_KEYS, armed_test_seams
+
+    armed_by_zero = {seam for seam in GUARDED_TEST_SEAM_KEYS if armed_test_seams({seam: "0"})}
+    assert armed_by_zero == set(_VALUE_SEAMS)
+
+
 @pytest.mark.parametrize("value", ["0", "false", ""])
 @pytest.mark.parametrize("seam", _SWITCH_SEAMS)
 def test_guard_ignores_a_switch_seam_switched_off_in_production(

@@ -234,6 +234,24 @@ def test_runtime_environment_sees_env_changes_without_a_cache_reset(neutral_env:
     assert runtime_environment().is_production is False
 
 
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda: _settings(AUTH_MODE="single_user", SINGLE_USER_API_KEY="test-api-key-12345"),
+        lambda: _settings(AUTH_MODE="multi_user", JWT_SECRET_KEY=_JWT_TEMPLATE, DATABASE_URL=_POSTGRES_URL),
+        lambda: _settings(AUTH_MODE="multi_user", JWT_SECRET_KEY="x" * 40, DATABASE_URL="sqlite:///./users.db"),
+    ],
+    ids=["single-user-key", "jwt-template", "multi-user-sqlite"],
+)
+def test_settings_hard_fail_names_the_production_marker(
+    neutral_env: pytest.MonkeyPatch, build: Callable[[], Any]
+) -> None:
+    neutral_env.setenv("DEPLOYMENT_ENV", "production")
+
+    with pytest.raises(ValueError, match=r"In a production-like runtime \(DEPLOYMENT_ENV\), "):
+        build()
+
+
 def test_settings_refuses_the_test_jwt_fallback_in_production_under_pytest(neutral_env: pytest.MonkeyPatch) -> None:
     neutral_env.setenv("tldw_production", "1")
     neutral_env.setenv("PYTEST_CURRENT_TEST", "x")
