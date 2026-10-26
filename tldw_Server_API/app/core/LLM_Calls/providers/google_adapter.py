@@ -444,6 +444,9 @@ class GoogleAdapter(ChatProvider):
                 "completion_tokens": usage_src.get("candidatesTokenCount"),
                 "total_tokens": usage_src.get("totalTokenCount"),
             }
+            if isinstance(usage_src.get("cachedContentTokenCount"), int):
+                # The cached part of prompt_tokens, costed at the cache-read rate (TASK-13936).
+                usage["cachedContentTokenCount"] = usage_src["cachedContentTokenCount"]
             return {
                 "id": data.get("id") or data.get("responseId"),
                 "object": "chat.completion",

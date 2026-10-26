@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.Usage.llm_call_context import (
     in_accounted_call,
 )
 from tldw_Server_API.app.core.Usage.llm_quota_gate import check_user_async, check_user_sync, user_to_check
+from tldw_Server_API.app.core.Usage.llm_usage_normalizer import usage_with_service_tier
 
 _ACCOUNTED_METHODS = ("chat", "achat", "stream", "astream")
 _MARK = "__llm_accounted__"
@@ -137,7 +138,7 @@ class _StreamUsage:
                     continue
                 if not isinstance(data, dict):
                     continue
-                usage = data.get("usage")
+                usage = usage_with_service_tier(data)  # an OpenAI chunk names its service tier beside the usage
                 event = data.get("type")
                 if event == "message_start":  # Anthropic Messages: input tokens arrive here, output in message_delta
                     message = data.get("message")
@@ -208,7 +209,7 @@ def _submit_record(
 def _record_response(provider: Any, plan: _CallPlan, request: Any, response: Any, started: float) -> None:
     """Record a non-streaming call from its usage block, or an estimate; never raises."""
     try:
-        usage = response.get("usage") if isinstance(response, dict) else None
+        usage = usage_with_service_tier(response)
         if isinstance(usage, dict) and usage:
             prompt_tokens, completion_tokens = _usage_tokens(usage)
             if (prompt_tokens, completion_tokens) != (0, 0):
