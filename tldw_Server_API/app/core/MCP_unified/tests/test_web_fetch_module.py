@@ -650,7 +650,8 @@ def _recording_transport(requested: list[str], handler: Any | None = None) -> An
     def _handle(request: httpx.Request) -> httpx.Response:
         requested.append(str(request.url))
         if handler is not None:
-            return handler(request)
+            response: httpx.Response = handler(request)
+            return response
         return httpx.Response(200, request=request, headers={"Content-Type": "text/html"}, content=_RICH_HTML)
 
     return httpx.MockTransport(_handle)

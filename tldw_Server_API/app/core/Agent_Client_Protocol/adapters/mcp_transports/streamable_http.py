@@ -123,7 +123,7 @@ class MCPStreamableHTTPTransport(MCPTransport):
             allow_private_network=self._allow_private_network,
             label="MCP streamable HTTP endpoint",
         )
-        resp = await afetch(
+        resp: httpx.Response = await afetch(
             method="POST",
             url=self._endpoint,
             client=self._http_client,

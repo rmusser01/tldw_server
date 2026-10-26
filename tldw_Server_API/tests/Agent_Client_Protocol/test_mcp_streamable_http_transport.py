@@ -236,7 +236,8 @@ def _counting_server(requested: list[str]):
 
     def handler(request: httpx.Request) -> httpx.Response:
         requested.append(str(request.url))
-        return inner(request)
+        response: httpx.Response = inner(request)
+        return response
 
     return handler
 
