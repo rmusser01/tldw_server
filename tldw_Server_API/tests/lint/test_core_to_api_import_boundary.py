@@ -11,10 +11,10 @@ shapes, which are not equally bad:
 * Schema-only imports from ``api/v1/schemas/*`` -- the common case. The honest reading
   is that those schemas are in the wrong package, not that core is wrong to need them.
 * True inversions: core importing ``api/v1/endpoints/*`` or ``api/v1/API_Deps/*``.
-  ``Ingestion_Media_Processing/persistence.py`` has one: its background embedding task
-  lazily imports ``generate_embeddings_for_media`` and ``get_media_content`` from
-  ``api.v1.endpoints.media_embeddings`` (around line 2592), so core calls into an
-  endpoint module at request time.
+  ``Ingestion_Media_Processing/persistence.py`` has one: the background embedding task
+  that ``schedule_media_add_embeddings`` schedules (``generate_embeddings_task``) lazily
+  imports ``generate_embeddings_for_media`` and ``get_media_content`` from
+  ``api.v1.endpoints.media_embeddings``, so core calls into an endpoint module.
 
 Pair-based since TASK-13950.9. This is the core -> api view of the layering contract
 (test_layering_contract.py), which counts module- and function-level import statements
