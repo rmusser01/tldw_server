@@ -3,6 +3,10 @@
 Single HTTP endpoint.  Client POSTs JSON-RPC requests.  Server responds with
 either ``application/json`` (single response) or ``text/event-stream`` (SSE
 stream of JSON-RPC response events).  This transport handles both transparently.
+
+Every request goes through ``core.http_client.afetch``: the egress policy is
+checked on the resolved address the connection then uses, env proxies are not
+read, and redirects are not followed (a 3xx is an HTTP error, as before).
 """
 from __future__ import annotations
 
@@ -14,7 +18,11 @@ import httpx
 from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_transport import (
     MCPTransport,
 )
-from tldw_Server_API.app.core.Agent_Client_Protocol.hardening import validate_mcp_http_url
+from tldw_Server_API.app.core.Agent_Client_Protocol.hardening import (
+    mcp_http_egress_scope,
+    validate_mcp_http_url,
+)
+from tldw_Server_API.app.core.http_client import RetryPolicy, afetch, create_async_client
 
 
 class MCPStreamableHTTPTransport(MCPTransport):
@@ -104,10 +112,33 @@ class MCPStreamableHTTPTransport(MCPTransport):
 
     def _create_http_client(self) -> httpx.AsyncClient:
         """Create the async HTTP client. Extracted so tests can replace it."""
-        return httpx.AsyncClient(
-            headers=self._headers,
-            timeout=self._timeout_sec,
+        return create_async_client()
+
+    async def _post(self, payload: dict[str, Any]) -> httpx.Response:
+        """POST one JSON-RPC message to the endpoint and raise on a non-2xx status."""
+        if self._http_client is None:
+            raise RuntimeError("Not connected")
+        validate_mcp_http_url(
+            self._endpoint,
+            allow_private_network=self._allow_private_network,
+            label="MCP streamable HTTP endpoint",
         )
+        resp = await afetch(
+            method="POST",
+            url=self._endpoint,
+            client=self._http_client,
+            headers=self._headers,
+            json=payload,
+            timeout=self._timeout_sec,
+            allow_redirects=False,
+            retry=RetryPolicy(attempts=1),
+            configured_endpoint=mcp_http_egress_scope(
+                self._endpoint,
+                allow_private_network=self._allow_private_network,
+            ),
+        )
+        resp.raise_for_status()
+        return resp
 
     async def _json_rpc_call(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         """Send a JSON-RPC *request* (has ``id``) and return the result."""
@@ -119,15 +150,7 @@ class MCPStreamableHTTPTransport(MCPTransport):
             "method": method,
             "params": params,
         }
-        if self._http_client is None:
-            raise RuntimeError("Not connected")
-        validate_mcp_http_url(
-            self._endpoint,
-            allow_private_network=self._allow_private_network,
-            label="MCP streamable HTTP endpoint",
-        )
-        resp = await self._http_client.post(self._endpoint, json=payload)
-        resp.raise_for_status()
+        resp = await self._post(payload)
 
         content_type = resp.headers.get("content-type", "")
         if "text/event-stream" in content_type:
@@ -145,15 +168,7 @@ class MCPStreamableHTTPTransport(MCPTransport):
             "method": method,
             "params": params,
         }
-        if self._http_client is None:
-            raise RuntimeError("Not connected")
-        validate_mcp_http_url(
-            self._endpoint,
-            allow_private_network=self._allow_private_network,
-            label="MCP streamable HTTP endpoint",
-        )
-        resp = await self._http_client.post(self._endpoint, json=payload)
-        resp.raise_for_status()
+        await self._post(payload)
 
     def _parse_sse_response(self, text: str, expected_id: str) -> dict[str, Any]:
         """Parse SSE text body to extract the JSON-RPC response for *expected_id*."""

@@ -15,6 +15,7 @@ and this project adheres to Some kind of Versioning
 
 ### Fixed
 
+- **ACP MCP streamable-HTTP transport SSRF:** requests now go through `core.http_client`, so the egress policy is checked on the address the connection uses (a DNS answer that changes to loopback after `validate_mcp_http_url` is refused) and env proxies are no longer read. Redirects are still not followed. With `allow_private_network` (or `ACP_ALLOW_PRIVATE_MCP_HTTP`) the configured private origin is admitted on any port, but cloud metadata and link-local addresses are refused. Without it, the default egress port list (80, 443, 8080; `WORKFLOWS_EGRESS_ALLOWED_PORTS`) now applies (TASK-13950.11).
 
 ### Removed
 
