@@ -107,9 +107,14 @@ async def verify_ws_credential(
     """Verify a credential found elsewhere in the handshake as ``Authorization: Bearer`` or
     ``X-API-KEY``, on the same path as ``resolve_ws_principal``.
 
-    For a route's deprecated channel; call it only when ``has_ws_credential`` is False, so no
-    header credential competes. Raises ``WebSocketException`` as ``resolve_ws_principal`` does.
+    ``resolve_ws_principal`` uses it for the bearer subprotocol, and a route for a deprecated
+    channel; call it when no ``Authorization`` header competes (a route shim: when
+    ``has_ws_credential`` is False). Raises ``WebSocketException`` as ``resolve_ws_principal``
+    does, and 4401 when given no credential: the handshake's own headers are never verified
+    here, or a bare cookie would reach the session check without its Origin check.
     """
+    if not token and not api_key:
+        raise WebSocketException(code=WS_UNAUTHENTICATED, reason="authentication_required")
     headers = list(websocket.scope.get("headers") or [])
     try:
         if token:

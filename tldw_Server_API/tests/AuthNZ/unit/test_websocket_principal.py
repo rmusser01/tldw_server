@@ -131,3 +131,20 @@ async def test_verify_ws_credential_refuses_a_credential_no_header_can_carry(mon
 
     assert (refused.value.code, refused.value.reason) == (4401, "invalid_token")
     verifier.assert_not_awaited()
+
+
+@pytest.mark.parametrize("credential", [{}, {"token": "", "api_key": ""}])
+@pytest.mark.asyncio
+async def test_verify_ws_credential_without_a_credential_never_reaches_the_cookie(
+    monkeypatch: pytest.MonkeyPatch, credential: dict[str, str]
+) -> None:
+    """The cookie needs resolve_ws_principal's Origin check; this helper must not verify it."""
+    verifier = AsyncMock()
+    monkeypatch.setattr(websocket_principal, "get_auth_principal", verifier)
+    cross_site_cookie = _websocket([(b"cookie", b"tldw_session=s"), (b"origin", b"https://evil.example")])
+
+    with pytest.raises(WebSocketException) as refused:
+        await websocket_principal.verify_ws_credential(cross_site_cookie, **credential)
+
+    assert (refused.value.code, refused.value.reason) == (4401, "authentication_required")
+    verifier.assert_not_awaited()
