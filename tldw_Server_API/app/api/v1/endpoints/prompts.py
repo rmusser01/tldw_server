@@ -100,6 +100,7 @@ from tldw_Server_API.app.core.Prompt_Management.structured_prompts.single_text_r
     render_single_text_recipe_template,
 )
 from tldw_Server_API.app.core.testing import env_flag_enabled
+from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 
 from .llm_providers import get_configured_providers
 
@@ -1555,9 +1556,9 @@ async def bulk_update_prompt_keywords(
 
     def _normalize_for_compare(value: str) -> str:
         try:
-            return db._normalize_keyword(value).casefold()
+            return normalize_keyword_identity(db._normalize_keyword(value))
         except (AttributeError, TypeError, ValueError):
-            return str(value).strip().casefold()
+            return normalize_keyword_identity(str(value))
 
     remove_set = {
         _normalize_for_compare(k)

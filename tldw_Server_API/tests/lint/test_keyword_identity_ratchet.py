@@ -74,7 +74,7 @@ KEYWORD_NORMALIZATION_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/api/v1/endpoints/media/listing.py": 2,
     "tldw_Server_API/app/api/v1/endpoints/notes.py": 1,  # YAML front-matter key match, not identity
     "tldw_Server_API/app/api/v1/endpoints/paper_search.py": 1,
-    "tldw_Server_API/app/api/v1/endpoints/prompts.py": 3,
+    "tldw_Server_API/app/api/v1/endpoints/prompts.py": 2,
     "tldw_Server_API/app/api/v1/endpoints/vector_stores_openai.py": 1,
     "tldw_Server_API/app/api/v1/endpoints/watchlists.py": 2,
     "tldw_Server_API/app/api/v1/schemas/chat_dictionary_schemas.py": 1,
@@ -88,7 +88,6 @@ KEYWORD_NORMALIZATION_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/core/Collections/reading_importers.py": 3,
     "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py": 2,
     "tldw_Server_API/app/core/DB_Management/Collections_DB.py": 1,
-    "tldw_Server_API/app/core/DB_Management/Prompts_DB.py": 2,
     "tldw_Server_API/app/core/DB_Management/Watchlists_DB.py": 1,
     "tldw_Server_API/app/core/DB_Management/chacha/character_store.py": 4,
     "tldw_Server_API/app/core/DB_Management/chacha/conversation_store.py": 1,
