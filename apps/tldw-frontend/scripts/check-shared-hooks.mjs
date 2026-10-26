@@ -111,7 +111,7 @@ export async function checkSharedHooks({
   }
   for (const key of Object.keys(suppressions)) {
     if (!linted.has(key)) {
-      failures.push({ filePath: path.join(appsRoot, key), message: `Stale suppression: file is gone or no longer linted; ${pruneHint}` })
+      failures.push({ filePath: path.join(appsRoot, key), message: `Stale suppression: file is gone or no longer linted; delete its entry from ${suppressionsName}` })
     }
   }
   return { fileCount: files.length, failures, suppressedCount }
