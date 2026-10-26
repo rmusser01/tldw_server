@@ -545,9 +545,10 @@ async def test_sse_transport_refuses_redirect_to_private_address_at_the_hop(mcp_
 
     t._http_client = _mock_client(handler)
 
-    with pytest.raises(EgressPolicyError):
+    with pytest.raises(EgressPolicyError) as refused:
         await t._discover_post_url()
 
+    assert refused.value.reason_code == "address_forbidden"
     assert requested == [_SSE_URL]
     await t.close()
 
