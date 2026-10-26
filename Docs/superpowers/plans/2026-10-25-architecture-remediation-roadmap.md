@@ -39,7 +39,7 @@
 - **Review gates.** Each AI-authored PR carries a `## Change summary` (ADR-004) and gets a clean-subagent `/superpowers:requesting-code-review` before merge. Each task's own plan gets an independent review plus a dry run before execution.
 - **Owner decisions (2026-10-25), binding on these tasks:**
   - **Moderation** covers every LLM surface but stays optional and policy-configured. Global `[Moderation] enabled = False` disables the default policy on every surface; explicit per-user overrides and Guardian supervised overlays still enable it, as they do today.
-  - **Note keywords** are case-insensitive: casefold plus NFC via the existing `normalize_keyword_identity`, with display casing preserved.
+  - **Keywords and tags** are case-insensitive in every store (ChaCha, Media, Prompts, Collections, Watchlists): casefold plus NFC via the existing `normalize_keyword_identity`, with display casing preserved. Kanban labels are out of scope.
   - **Scheduler** folds into Jobs (`.48`; no fold work existed when re-checked on 2026-10-25). `.39` covers the recurring APScheduler wrappers and test collection around it.
   - **Admin** consolidates onto tldw-admin (`/admin-ui`).
 
@@ -177,19 +177,22 @@ These eleven tasks have no dependencies on each other and can run in parallel. E
 - [ ] **Step 2: Implement.** Use a lock and publish only after `initialize()`; `reset_session_manager()` creates a new lock. Run and confirm PASS.
 - [ ] **Step 3: Write the MCP thread test.** Run `get_mcp_server` from 8 threads with a slow `MCPServer` constructor and assert one instance. Implement a `threading.Lock`, run and confirm PASS, then commit.
 
-### Task 0.5 (`TASK-13950.5`): case-insensitive keyword identity
+### Task 0.5 (`TASK-13950.5`): case-insensitive keyword and tag identity in every store
 
 **Files:**
-- Reuse: `normalize_keyword_identity`, today a `@staticmethod` at `tldw_Server_API/app/core/DB_Management/chacha/organization_sync_store.py:163`. Extract it to a module-level helper and keep the static method delegating to it.
-- Modify: the call sites listed in the task, plus the Postgres keyword lookup behind `chacha/keyword_store.py:138` (`_get_generic_item_by_unique_text`)
-- Test: `tldw_Server_API/tests/Notes/test_keyword_identity.py` (new) and a Postgres case in `tldw_Server_API/tests/ChaChaNotesDB/`
+- Extract: `normalize_keyword_identity`, today a `@staticmethod` at `tldw_Server_API/app/core/DB_Management/chacha/organization_sync_store.py:163`, into a module-level helper; the static method delegates to it.
+- Modify (slice 1, ChaCha): the call sites listed in the task (notes endpoints and schemas, WebClipper, chat, MCP notes, organization sync) and the Postgres lookup behind `chacha/keyword_store.py:138` (`_get_generic_item_by_unique_text`).
+- Modify (slice 2, Media and Prompts): `media_db/runtime/keyword_access_ops.py` (stop lowercasing on write; case-insensitive lookup), the Media DB Postgres keyword uniqueness, `Prompts_DB.py` keyword lookups.
+- Modify (slice 3, tags): `Collections_DB.py` and the Media DB copies of `collection_tags`, and `Watchlists_DB.py` `tags`, with a migration that merges case-variant duplicates and relinks items, on SQLite and Postgres.
+- Test: `tldw_Server_API/tests/Notes/test_keyword_identity.py` (new; a parametrized per-store test) plus Postgres cases next to each store's existing tests.
 
-- [ ] **Step 1: Write the failing tests.**
-  - Linking `["Foo", "foo"]` to a note that already has `foo` yields one link on SQLite and on Postgres.
-  - `get_keyword_by_text("FOO")` finds `foo` on Postgres.
-  - The MCP path keeps display casing.
-  - Non-ASCII cases (`"Straße"`/`"STRASSE"`, accented capitals) assert the chosen behaviour and document any SQLite `NOCASE` limit.
-- [ ] **Step 2: Implement.** Route callers through the helper and make the Postgres lookup case-insensitive. Add a lint guard against new ad hoc keyword normalization, run and confirm PASS, then commit.
+- [ ] **Step 1 (each slice): Write the failing tests.**
+  - For each store in the slice, adding `"Foo"` then `"foo"` yields one entry, and a lookup in either case finds it, on SQLite and on Postgres.
+  - Slice 1 also covers: linking `["Foo", "foo"]` to a note that already has `foo` yields one link, and MCP keeps display casing.
+  - Slice 3 also covers: the migration merges existing `"Foo"`/`"foo"` rows and relinks their items.
+  - Non-ASCII cases (`"Straße"`/`"STRASSE"`, accented capitals) assert the chosen behaviour and document SQLite's ASCII-only `NOCASE`.
+- [ ] **Step 2 (each slice): Implement.** Route the slice's stores and call sites through the helper. On Postgres, use `LOWER(...)` or `citext` for uniqueness and lookups instead of the stripped `NOCASE`. Run and confirm PASS, then commit and open the slice's PR.
+- [ ] **Step 3 (slice 1): Add the guard.** It fails on new ad hoc keyword or tag normalization outside the helper. Baseline it, wire it into backend-required with a workflow-contract assertion, then commit.
 
 ### Task 0.6 (`TASK-13950.6`): test-seam guard and one production detector
 
