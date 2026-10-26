@@ -1966,7 +1966,7 @@ async def generate_quiz_from_sources(
         llm_kwargs: dict[str, Any] = {
             "prompt": prompt,
             "model": model,
-            "max_tokens": min(8000, max(2000, num_questions * 220)),
+            "max_tokens": min(8000, max(2000, num_questions * 1000)),
         }
         if api_provider:
             llm_kwargs["api_provider"] = api_provider

@@ -7,7 +7,7 @@ ADR required: no. Restore existing migration and retry contracts; retain ADR-003
 
 ## Current UAT tracking index — 2026-10-25
 
-**X04 selected functional and human UX acceptance is complete; S01 is In Progress.** Candidate34643a04b511f637b7ba3fd695702b29d53166c2 contains the locally qualified S01 provider repair and X04 fixes on frozen dev a412f6580b7ed0cf48fd7d222a47a20cfc0dde92, including3309/3310/3311. Completed X04 composes API package a264, extension5b834 and existing private WebUI build eSscMqvjgbFlezbusZlXw as disclosed below; no fresh live-dev or broader release qualification claim. Original runtime/canonical data/URL/draft are preserved. Selected acceptance37/43, six open. Heartbeat paused.
+**X04 selected functional and human UX acceptance is complete; S01 is In Progress.** Candidate based on38c1746b3855cb48983412ecc7e479ba32d49d8b contains the locally qualified S01 provider/citation-prompt/output-budget repairs and X04 fixes on frozen dev a412f6580b7ed0cf48fd7d222a47a20cfc0dde92, including3309/3310/3311. Completed X04 composes API package a264, extension5b834 and existing private WebUI build eSscMqvjgbFlezbusZlXw as disclosed below; no fresh live-dev or broader release qualification claim. Original runtime/canonical data/URL/draft are preserved. Selected acceptance37/43, six open. Heartbeat paused.
 
 The43 IDs below are existing workflow families in [the release catalog](../../apps/tldw-frontend/scripts/live-tier-uat/release-catalog-data.mjs), with426 planned variants. C01 through C12, X01 through X04 selected acceptances are closed; six families remain open. Selected acceptance does not close broader release gates or convert historical failed runs into passing runs.
 
