@@ -2051,7 +2051,8 @@ async def test_afetch_content_is_sent_byte_for_byte(body):
                 retry=hc.RetryPolicy(attempts=1),
             )
 
-    assert sent == [body if isinstance(body, bytes) else body.encode("utf-8")]
+    (sent_body,) = sent
+    assert sent_body == (body if isinstance(body, bytes) else body.encode("utf-8"))
 
 
 @pytest.mark.asyncio
