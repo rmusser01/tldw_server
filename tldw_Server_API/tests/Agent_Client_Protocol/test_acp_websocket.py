@@ -457,6 +457,27 @@ class TestACPWebSocketConnection:
             assert websocket.receive_json()["type"] == "connected"
         assert fake_verifier == [("Bearer valid-token", None)]
 
+    @pytest.mark.parametrize(
+        ("headers", "subprotocols", "verified"),
+        [
+            ({"Authorization": "Bearer revoked-token"}, None, ("Bearer revoked-token", None)),
+            ({"X-API-KEY": "revoked-key"}, None, (None, "revoked-key")),
+            ({}, ["bearer", "revoked-token"], ("Bearer revoked-token", None)),
+        ],
+        ids=["bearer-header", "x-api-key-header", "bearer-subprotocol"],
+    )
+    def test_a_refused_resolver_credential_is_not_rescued_by_a_valid_query_token(
+        self, client_user_only, mock_get_runner_client, fake_verifier, headers, subprotocols, verified
+    ):
+        """The shim runs only without a resolver credential, so it never retries a refused one."""
+        with pytest.raises(WebSocketDisconnect) as rejection:
+            with client_user_only.websocket_connect(
+                f"{STREAM}?token=valid-token", headers=headers, subprotocols=subprotocols
+            ):
+                pytest.fail("A valid query token rescued a refused header credential")
+        assert rejection.value.code == 4401
+        assert fake_verifier == [verified]
+
     def test_websocket_connect_with_revoked_token_fails(
         self, client_user_only, mock_get_runner_client, fake_verifier
     ):

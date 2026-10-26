@@ -453,14 +453,53 @@ def test_acp_header_credentials_need_no_shim(env: SimpleNamespace, route: str) -
     assert _deprecations(warned) == []
 
 
+def _single_user(monkeypatch: pytest.MonkeyPatch, **environ: str) -> None:
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    for name, value in environ.items():
+        monkeypatch.setenv(name, value)
+    reset_settings()
+
+
 @pytest.mark.parametrize("route", SHIM_ACCEPTING)
 def test_acp_deprecated_query_admits_the_single_user_key(
     env: SimpleNamespace, route: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The single-user WebUI outside cookie quickstart, and the extension, send ``?api_key=``."""
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    _single_user(monkeypatch)
+    url = ROUTES[route][0]
+    with _warnings() as warned:
+        with env.client.websocket_connect(_with_query(url, "api_key", SINGLE_USER_KEY)):
+            pass
+        assert _outcome(env.client, _with_query(url, "api_key", f"{SINGLE_USER_KEY}-wrong")) == "close 4401"
+    deprecations = _deprecations(warned)
+    assert len(deprecations) == 2 and all("query api_key" in message for message in deprecations), warned
+    assert not [message for message in warned if SINGLE_USER_KEY in message]
 
-    monkeypatch.setenv("AUTH_MODE", "single_user")
-    reset_settings()
-    with env.client.websocket_connect(_with_query(ROUTES[route][0], "api_key", SINGLE_USER_KEY)):
-        pass
+
+@pytest.mark.parametrize("route", SHIM_ACCEPTING)
+def test_acp_deprecated_query_keeps_the_single_user_ip_allowlist(
+    env: SimpleNamespace, route: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The verifier sees the socket's peer (request.client), so the allowlist still binds."""
+    _single_user(monkeypatch, SINGLE_USER_ALLOWED_IPS="10.1.2.3")
+    url = _with_query(ROUTES[route][0], "api_key", SINGLE_USER_KEY)
+    outside, inside = TestClient(env.app, client=("10.9.9.9", 50000)), TestClient(env.app, client=("10.1.2.3", 50000))
+    try:
+        assert _outcome(outside, url) in {"close 4401", "close 4403"}
+        assert _outcome(inside, url) == "accepted"
+    finally:
+        outside.close()
+        inside.close()
+
+
+@pytest.mark.parametrize("route", SHIM_ACCEPTING)
+def test_acp_deprecated_query_pair_resolves_like_both_http_headers(env: SimpleNamespace, route: str) -> None:
+    """``?token=&api_key=`` goes to the verifier as both headers, as HTTP resolves them: the JWT
+    first, and the API key only when the JWT is refused with 401."""
+    url = ROUTES[route][0]
+    key = env.write_key if SHIM_ACCEPTING[route] == "write" else env.api_key
+    assert _outcome(env.client, f"{url}?token={env.valid}&api_key=tldw_ws-matrix-unknown-key") == "accepted"
+    assert _outcome(env.client, f"{url}?token={env.revoked}&api_key={key}") == "accepted"
+    assert _outcome(env.client, f"{url}?token={env.revoked}&api_key=tldw_ws-matrix-unknown-key") == "close 4401"
