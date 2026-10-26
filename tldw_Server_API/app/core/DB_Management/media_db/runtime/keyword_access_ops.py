@@ -82,8 +82,14 @@ def fetch_media_for_keywords(
         """.format_map(locals())  # nosec B608
         params = tuple(media_params + list(identity_by_id))
 
+        seen: set[tuple[str, int]] = set()
         for row in self._fetchall_with_connection(conn, query, params):
-            results_by_keyword[identity_by_id[int(row["keyword_id"])]].append(
+            identity = identity_by_id[int(row["keyword_id"])]
+            # Legacy duplicate keyword rows can link the same media twice.
+            if (identity, row["media_id"]) in seen:
+                continue
+            seen.add((identity, row["media_id"]))
+            results_by_keyword[identity].append(
                 {
                     "id": row["media_id"],
                     "uuid": row["media_uuid"],

@@ -170,6 +170,30 @@ def test_an_active_identity_match_wins_over_a_deleted_sql_match(db) -> None:
     assert _active_keywords(db) == ["Straße"]
 
 
+def test_fetch_media_for_keywords_lists_a_media_once_across_legacy_duplicates(tmp_path) -> None:
+    # SQLite NOCASE keeps "Éclair" and "éclair" apart, so legacy data can link both.
+    db = MediaDatabase(db_path=str(tmp_path / "legacy.db"), client_id="913950")
+    try:
+        media_id = _add_media(db, ["Éclair"])
+        db.execute_query(
+            "INSERT INTO Keywords (keyword, uuid, last_modified, version, client_id, deleted) "
+            "VALUES ('éclair', 'uuid-eclair-duplicate', '2026-10-01T00:00:00Z', 1, '913950', 0)",
+            commit=True,
+        )
+        db.execute_query(
+            "INSERT INTO MediaKeywords (media_id, keyword_id) "
+            "SELECT ?, id FROM Keywords WHERE uuid = 'uuid-eclair-duplicate'",
+            (media_id,),
+            commit=True,
+        )
+
+        found = db.fetch_media_for_keywords(["ÉCLAIR"])
+
+        assert {identity: [item["id"] for item in items] for identity, items in found.items()} == {"éclair": [media_id]}
+    finally:
+        db.close_connection()
+
+
 # --- Postgres: LOWER() folds the dotted capital I, the identity does not ---------
 # Postgres LOWER('İstanbul') is 'istanbul', but normalize_keyword_identity keeps the dot
 # ('i̇stanbul'), so the identity lookup misses a row the unique LOWER(keyword) index holds.
