@@ -208,8 +208,9 @@ const comparisonNodes = (source: Source, modelId: string) => {
     root = nextRound.get(root.id)
   }
   if (rounds !== common.size || !rounds) fail("ambiguous_comparison_round")
+  const nodeById = new Map(source.snapshot.nodes.map((node) => [node.id, node]))
   return ordered.map((row) => ({
-    ...source.snapshot.nodes.find((node) => node.id === row.id)!,
+    ...nodeById.get(row.id)!,
     comparison: {
       cluster_id: row.clusterId!,
       model_id: row.messageType === "compare:user" ? null : modelId,

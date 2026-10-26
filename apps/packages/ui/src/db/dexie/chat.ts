@@ -1093,8 +1093,10 @@ export class PageAssistDatabase {
         if (mergeData) {
           // Merge files arrays
           const mergedFiles = [...existingSessionFile.files];
+          const mergedFileIds = new Set(mergedFiles.map((f) => f.id));
           for (const newFile of sessionFile.files) {
-            if (!mergedFiles.find(f => f.id === newFile.id)) {
+            if (!mergedFileIds.has(newFile.id)) {
+              mergedFileIds.add(newFile.id);
               mergedFiles.push(newFile);
             }
           }

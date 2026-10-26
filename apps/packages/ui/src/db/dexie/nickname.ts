@@ -57,16 +57,14 @@ export class ModelNickname {
   ): Promise<void> {
     const { replaceExisting = false, mergeData = true } = options
 
-    for (const oai of data) {
-      console.log("Saving x")
-
-      await db.modelNickname.put({
+    await db.modelNickname.bulkPut(
+      data.map((oai) => ({
         id: oai.model_id,
         model_id: oai.model_id,
         model_name: oai.model_name,
         model_avatar: oai.model_avatar
-      })
-    }
+      }))
+    )
     invalidateModelNicknameCache()
   }
 }

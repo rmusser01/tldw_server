@@ -962,33 +962,39 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
 
       getKeywordsForFolder: (folderId) => {
         const state = get()
-        const keywordIds = state.folderKeywordLinks
-          .filter(l => l.folder_id === folderId)
-          .map(l => l.keyword_id)
-        return state.keywords.filter(k => keywordIds.includes(k.id) && !k.deleted)
+        const keywordIds = new Set(
+          state.folderKeywordLinks
+            .filter(l => l.folder_id === folderId)
+            .map(l => l.keyword_id)
+        )
+        return state.keywords.filter(k => keywordIds.has(k.id) && !k.deleted)
       },
 
       getKeywordsForConversation: (conversationId) => {
         const state = get()
-        const keywordIds = state.conversationKeywordLinks
-          .filter((l) => l.conversation_id === conversationId)
-          .map((l) => l.keyword_id)
+        const keywordIds = new Set(
+          state.conversationKeywordLinks
+            .filter((l) => l.conversation_id === conversationId)
+            .map((l) => l.keyword_id)
+        )
         return state.keywords.filter(
-          (k) => keywordIds.includes(k.id) && !k.deleted
+          (k) => keywordIds.has(k.id) && !k.deleted
         )
       },
 
       getFoldersForConversation: (conversationId) => {
         const state = get()
         // Get keyword IDs for this conversation
-        const keywordIds = state.conversationKeywordLinks
-          .filter(l => l.conversation_id === conversationId)
-          .map(l => l.keyword_id)
+        const keywordIds = new Set(
+          state.conversationKeywordLinks
+            .filter(l => l.conversation_id === conversationId)
+            .map(l => l.keyword_id)
+        )
 
         // Get folder IDs that contain these keywords
         const folderIds = new Set(
           state.folderKeywordLinks
-            .filter(l => keywordIds.includes(l.keyword_id))
+            .filter(l => keywordIds.has(l.keyword_id))
             .map(l => l.folder_id)
         )
 
@@ -1000,14 +1006,16 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
         if (!state.folders.some(folder => folder.id === folderId && !folder.deleted)) return []
         const activeKeywordIds = new Set(state.keywords.filter(keyword => !keyword.deleted).map(keyword => keyword.id))
         // Match the active keyword membership used by the visible folder tree.
-        const keywordIds = state.folderKeywordLinks
-          .filter(l => l.folder_id === folderId && activeKeywordIds.has(l.keyword_id))
-          .map(l => l.keyword_id)
+        const keywordIds = new Set(
+          state.folderKeywordLinks
+            .filter(l => l.folder_id === folderId && activeKeywordIds.has(l.keyword_id))
+            .map(l => l.keyword_id)
+        )
 
         // Get conversation IDs that have these keywords
         const conversationIds = new Set(
           state.conversationKeywordLinks
-            .filter(l => keywordIds.includes(l.keyword_id))
+            .filter(l => keywordIds.has(l.keyword_id))
             .map(l => l.conversation_id)
         )
 
