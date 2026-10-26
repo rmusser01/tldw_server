@@ -207,12 +207,16 @@ The WebSocket endpoint is:
 WS /api/v1/persona/stream
 ```
 
-The stream accepts JWT or API-key authentication. Query auth is supported for
-WebSocket clients that cannot set headers:
+The stream authenticates like HTTP: send `Authorization: Bearer <JWT or API key>`
+or `X-API-KEY`. Browsers, which cannot set WebSocket headers, send the
+`bearer, <JWT or API key>` subprotocol instead, and the server echoes `bearer`:
 
 ```bash
-websocat "ws://127.0.0.1:8000/api/v1/persona/stream?api_key=$API_KEY"
+websocat -H "X-API-KEY: $API_KEY" "ws://127.0.0.1:8000/api/v1/persona/stream"
 ```
+
+The `?token=` / `?api_key=` query still works but is deprecated (it ends up in
+access logs) and logs a warning. MCP-issued tokens are not accepted.
 
 Send a user turn:
 
