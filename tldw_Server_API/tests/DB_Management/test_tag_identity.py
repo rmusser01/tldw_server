@@ -10,10 +10,12 @@ Names keep their first-seen casing and compare by ``normalize_keyword_identity``
 SQLite's unique index is ``(user_id, name COLLATE NOCASE)`` and Postgres's is
 ``(user_id, LOWER(name))``. Neither folds ß/SS or NFC forms (SQLite NOCASE also
 leaves accented capitals apart), so lookups compare identities over the owner's
-non-ASCII names, and the merge groups by identity before the SQL fold. Postgres
-LOWER() folds the dotted capital I ("İstanbul" and "istanbul" share a LOWER slot)
-while the identity keeps the dot, so they are one tag on Postgres and two on
-SQLite: a documented backend difference.
+non-ASCII names, and the merge groups by identity before the SQL fold. Where
+Postgres LOWER('İ') is a plain 'i' (glibc locales, as in the test container),
+"İstanbul" and "istanbul" share a LOWER slot while the identity keeps the dot, so
+they are one tag there; under the C locale or an ICU collation LOWER() keeps them
+apart, as SQLite does, and they are two tags. The dotted-I tests ask the server
+which fold it has (``_lower_folds_dotted_i``) instead of assuming one.
 
 Postgres cases run as a NOBYPASSRLS role (``pg_restricted_backend``), so the
 bootstrap merge is proven to see every owner's rows without a user scope.
@@ -24,7 +26,7 @@ from __future__ import annotations
 import re
 from functools import cached_property
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -290,11 +292,19 @@ def test_tag_filters_include_identity_duplicates_left_by_a_race(store: _TagStore
     assert store.find(["straße", "missing"]) == []
 
 
+def _lower_folds_dotted_i(backend: DatabaseBackend) -> bool:
+    """Whether this server's SQL fold puts "İstanbul" and "istanbul" in one slot (Postgres under glibc)."""
+    if backend.backend_type != BackendType.POSTGRESQL:
+        return False
+    row = backend.execute("SELECT LOWER(?) = LOWER(?) AS same", ("İstanbul", "istanbul")).first
+    return bool(row and row["same"])
+
+
 def test_the_dotted_capital_i_follows_each_backends_fold(store: _TagStore) -> None:
     [first] = store.ensure(["İstanbul"])
     second = store.ensure(["istanbul"])
 
-    if store.backend.backend_type != BackendType.POSTGRESQL:
+    if not _lower_folds_dotted_i(store.backend):
         assert second != [first]
         return
     assert second == [first]
@@ -350,7 +360,7 @@ def test_reopening_merges_a_pair_only_the_postgres_fold_joins(store: _TagStore) 
     reopened = store.reopen()
 
     assert reopened.has_identity_index()
-    if store.backend.backend_type != BackendType.POSTGRESQL:
+    if not _lower_folds_dotted_i(store.backend):
         assert reopened.names() == ["İstanbul", "istanbul"]
         return
     assert reopened.names() == ["İstanbul"]
@@ -478,5 +488,47 @@ def test_collections_merge_rewrites_the_fts_rows_of_relinked_items(tmp_path: Pat
         assert reopened.tags_of(item) == ["straße"]
         assert item in _fts_ids(backend, "straße")
         assert item not in _fts_ids(backend, "strasse")
+    finally:
+        backend.get_pool().close_all()
+
+
+@pytest.mark.unit
+def test_an_interrupted_fts_rebuild_rolls_back_the_merge(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = SQLiteBackend(DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=str(tmp_path / "Media_DB_v2.db")))
+    try:
+        store = CollectionsTags(backend)
+        items = [store.tag_new(f"item{n}", ["straße"]) for n in range(6)]
+        store.drop_identity_index()
+        store.insert_tag("1", "strasse")
+        execute = backend.execute
+        fts_inserts = 0
+
+        def failing_execute(query, params=None, *args, **kwargs):
+            nonlocal fts_inserts
+            if query.lstrip().startswith("INSERT INTO content_items_fts(rowid"):
+                fts_inserts += 1
+                if fts_inserts == 3:
+                    raise DatabaseError("simulated interruption")
+            return execute(query, params, *args, **kwargs)
+
+        monkeypatch.setattr(backend, "execute", failing_execute)
+        with pytest.raises(DatabaseError):
+            store.reopen()
+        monkeypatch.undo()
+
+        # Nothing committed: the duplicate is still there, the index is absent and FTS is whole.
+        assert not store.has_identity_index()
+        assert store.names() == ["straße", "strasse"]
+        assert _fts_ids(backend, "straße") == items
+
+        reopened = store.reopen()
+
+        assert reopened.has_identity_index()
+        assert reopened.names() == ["straße"]
+        assert _fts_ids(backend, "straße") == items
+        assert [_fts_ids(backend, f"item{n}") for n in range(6)] == [[item] for item in items]
+        cast(CollectionsTags, reopened).db._rebuild_content_fts(batch_size=4)  # spans two batches
+        assert [_fts_ids(backend, f"item{n}") for n in range(6)] == [[item] for item in items]
+        assert _fts_ids(backend, "straße") == items
     finally:
         backend.get_pool().close_all()

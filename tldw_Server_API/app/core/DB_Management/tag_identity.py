@@ -9,10 +9,13 @@ lookups, the unique index and the duplicate merge all group by ``user_id`` first
 ``ensure_tag_identity`` merges each owner's existing case-variant duplicates and then adds a
 unique ``(user_id, name COLLATE NOCASE)`` index on SQLite or ``(user_id, LOWER(name))`` on
 Postgres. Neither SQL fold equals the identity (NOCASE folds ASCII only; LOWER keeps the
-German sharp s and folds the dotted capital I, which casefold keeps), so lookups take the SQL
-matches for each name and its identity, compare identities over the owner's non-ASCII names
-for the rest, and on Postgres finally reuse the row holding the name's LOWER() slot. That makes
-"İstanbul" and "istanbul" one tag on Postgres and two on SQLite (a documented difference).
+German sharp s, and under glibc locales folds the dotted capital I to a plain i, which casefold
+keeps dotted), so lookups take the SQL matches for each name and its identity, compare
+identities over the owner's non-ASCII names for the rest, and on Postgres finally reuse the row
+holding the name's LOWER() slot. "İstanbul" and "istanbul" are therefore one tag on Postgres
+where LOWER('İ') is 'i' (glibc locales) and two on SQLite, or on Postgres under the C locale or
+an ICU collation (a documented difference); merge pass 2 and the slot fallback follow whatever
+fold the server's LOWER() applies, so every locale is handled.
 Filters resolve every matching id, since concurrent first inserts of two spellings the fold
 index tells apart can both succeed; substring search (``tags_containing``) compares identities.
 """
@@ -118,7 +121,10 @@ def tags_containing(
     *,
     connection: Any | None = None,
 ) -> list[dict[str, Any]]:
-    """Return the owner's tag rows whose identity contains the identity of ``text``, by identity then id."""
+    """Return the owner's tag rows whose identity contains the identity of ``text``, by identity then id.
+
+    A plain substring test: ``%`` and ``_`` in ``text`` are literal, not LIKE wildcards.
+    """
     # ponytail: filters the owner's whole tag vocabulary in Python on each search; per-user
     # vocabularies are small, and SQL LIKE/LOWER cannot casefold on SQLite.
     needle = normalize_keyword_identity(text)

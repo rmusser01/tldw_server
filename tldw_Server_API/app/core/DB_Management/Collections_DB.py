@@ -778,44 +778,45 @@ class CollectionsDatabase:
 
     def _ensure_schema_and_tag_identity(self) -> None:
         self.ensure_schema()
-        if ensure_tag_identity(self.backend, COLLECTION_TAGS) and self._fts_available:
-            self._rebuild_content_fts()
+        if not self._fts_available:  # Postgres: no FTS table to keep in step
+            ensure_tag_identity(self.backend, COLLECTION_TAGS)
+            return
+        # One SQLite transaction (the merge's own joins it on the thread's connection): the
+        # index gates the merge, so it must not commit unless the FTS rebuild does too.
+        with self.backend.transaction():
+            if ensure_tag_identity(self.backend, COLLECTION_TAGS):
+                self._rebuild_content_fts()
 
-    def _rebuild_content_fts(self) -> None:
+    def _rebuild_content_fts(self, batch_size: int = 500) -> None:
         """Re-index every content item after a tag merge changed tag text (TASK-13950.5).
 
         The contentless FTS table can only drop a row given the exact text it indexed, which a
-        merge no longer has, so the index is cleared and rebuilt from current rows.
+        merge no longer has, so the index is cleared and rebuilt from current rows, in batches.
+        Errors propagate so the caller's transaction rolls the merge back with it.
         """
-        try:
-            clear = (
-                "DELETE FROM content_items_fts"
-                if self._fts_supports_direct_delete
-                else "INSERT INTO content_items_fts(content_items_fts) VALUES('delete-all')"
-            )
-            self.backend.execute(clear, ())
-            rows = self.backend.execute("SELECT id, title, summary, notes, metadata_json FROM content_items", ()).rows
-            tag_rows = self.backend.execute(
-                "SELECT cit.item_id AS item_id, ct.name AS name FROM content_item_tags cit "
-                "JOIN collection_tags ct ON ct.id = cit.tag_id",
-                (),
-            ).rows
-        except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning("collections: FTS rebuild after a tag merge failed: {}", exc)
-            return
-        tags_by_item: dict[int, list[str]] = {}
-        for tag_row in tag_rows:
-            tags_by_item.setdefault(int(tag_row["item_id"]), []).append(str(tag_row["name"]))
-        for row in rows:
-            item_id = int(row["id"])
-            self._update_content_fts_entry(
-                item_id,
-                title=row.get("title"),
-                summary=row.get("summary"),
-                notes=row.get("notes"),
-                tags=sorted(tags_by_item.get(item_id, []), key=normalize_keyword_identity),
-                metadata_json=row.get("metadata_json"),
-            )
+        clear = (
+            "DELETE FROM content_items_fts"
+            if self._fts_supports_direct_delete
+            else "INSERT INTO content_items_fts(content_items_fts) VALUES('delete-all')"
+        )
+        self.backend.execute(clear, ())
+        last_id = 0
+        while rows := self.backend.execute(
+            "SELECT id, title, summary, notes, metadata_json FROM content_items WHERE id > ? ORDER BY id LIMIT ?",
+            (last_id, batch_size),
+        ).rows:
+            tags_map = self._fetch_tags_for_item_ids([int(row["id"]) for row in rows])
+            for row in rows:
+                last_id = int(row["id"])
+                metadata_text = self._build_content_fts_metadata_text(
+                    notes=row.get("notes"),
+                    tags=tags_map.get(last_id, []),
+                    metadata_json=row.get("metadata_json"),
+                )
+                self.backend.execute(
+                    "INSERT INTO content_items_fts(rowid, title, summary, metadata) VALUES (?, ?, ?, ?)",
+                    (last_id, row.get("title") or "", row.get("summary") or "", metadata_text),
+                )
 
     def _run_backend_bootstrap(self) -> None:
         self._ensure_schema_and_tag_identity()
@@ -4101,7 +4102,8 @@ class CollectionsDatabase:
 
         def _apply_like_search(where_clause: list[str], clause_params: list[Any]) -> None:
             q_like = f"%{q.lower()}%"
-            # Tags match by identity substring: SQLite LOWER() cannot fold "É" or "ß".
+            # Tags match by identity substring (SQLite LOWER() cannot fold "É" or "ß"), so "%" and
+            # "_" in q are literal for tags while title/summary/notes still treat them as LIKE wildcards.
             tag_ids = [int(row["id"]) for row in tags_containing(self.backend, COLLECTION_TAGS, self.user_id, q or "")]
             tag_match = f"cit_q.tag_id IN ({', '.join('?' for _ in tag_ids)})" if tag_ids else "1 = 0"  # nosec B608
             where_clause.append(

@@ -1877,7 +1877,11 @@ class WatchlistsDatabase:
         return ensure_owner_tag_ids(self.backend, WATCHLIST_TAGS, self.user_id, names)
 
     def list_tags(self, q: str | None, limit: int, offset: int) -> tuple[list[TagRow], int]:
-        """List this owner's tags by identity; ``q`` matches an identity substring ("ss" finds "Straße")."""
+        """List this owner's tags by identity; ``q`` matches an identity substring ("ss" finds "Straße").
+
+        ``%`` and ``_`` in ``q`` are literal characters (not LIKE wildcards), and tags are ordered
+        by identity code point, then id.
+        """
         rows = tags_containing(self.backend, WATCHLIST_TAGS, self.user_id, q or "")
         return [TagRow(**row) for row in rows[offset : offset + limit]], len(rows)
 
