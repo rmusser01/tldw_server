@@ -75,3 +75,43 @@ def test_soft_delete_in_another_case_then_readd_restores_the_same_keyword(db, st
     assert db.get_active_keyword_by_text(stored) is None
     assert db.add_keyword(probe)[0] == keyword_id
     assert db.fetch_all_keywords() == [stored]
+
+
+def _insert_keyword(db: PromptsDatabase, keyword: str, uuid: str) -> int:
+    """Seed a row the store itself would not create (legacy data)."""
+    cursor = db.execute_query(
+        "INSERT INTO PromptKeywordsTable (keyword, uuid, last_modified, version, client_id, deleted) "
+        "VALUES (?, ?, '2026-10-01T00:00:00Z', 1, '913950', 0)",
+        (keyword, uuid),
+        commit=True,
+    )
+    assert cursor.lastrowid is not None
+    return cursor.lastrowid
+
+
+def test_an_active_identity_match_wins_over_a_deleted_sql_match(db) -> None:
+    deleted_id, _ = db.add_keyword("strasse")
+    assert db.soft_delete_keyword("strasse") is True
+    active_id = _insert_keyword(db, "Straße", "uuid-strasse-active")
+
+    assert db.add_keyword("STRASSE")[0] == active_id != deleted_id
+    found = db.get_active_keyword_by_text("STRASSE")
+    assert found is not None and found["id"] == active_id
+    assert db.fetch_all_keywords() == ["Straße"]
+
+
+def test_keyword_search_finds_prompts_on_every_existing_identity_duplicate(db) -> None:
+    db.add_prompt("P1", "author", "details", keywords=["Éclair"])
+    db.add_prompt("P2", "author", "details")
+    duplicate_id = _insert_keyword(db, "éclair", "uuid-eclair-duplicate")
+    prompt = db.get_prompt_by_name("P2")
+    assert prompt is not None
+    db.execute_query(
+        "INSERT INTO PromptKeywordLinks (prompt_id, keyword_id) VALUES (?, ?)",
+        (prompt["id"], duplicate_id),
+        commit=True,
+    )
+
+    results, total = db.search_prompts("keyword:ÉCLAIR")
+
+    assert total == 2 and sorted(row["name"] for row in results) == ["P1", "P2"]
