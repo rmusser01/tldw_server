@@ -12,11 +12,14 @@ and this project adheres to Some kind of Versioning
 
 ### Changed
 
+- Deprecated: ACP and Prompt Studio WebSockets (`/api/v1/acp/multiplex`, `/api/v1/acp/sessions/{id}/stream`, `/api/v1/acp/sessions/{id}/ssh`, `/api/v1/prompt-studio/ws`, `/api/v1/prompt-studio/ws/{project_id}`): credentials in the `?token=` / `?api_key=` query and in the `x-api-key, <key>` subprotocol still work but log a deprecation warning; send `Authorization: Bearer`, `X-API-KEY`, or the `bearer, <token or key>` subprotocol instead. These routes now authenticate through the core WebSocket resolver, so revocation, API-key scope and single-user rules match HTTP (TASK-13950.7).
 
 ### Fixed
 
 
 ### Removed
+
+- ACP and Prompt Studio WebSockets no longer accept `Authorization: X-API-KEY <key>` or the `api-key, <key>` subprotocol; no client sent either (TASK-13950.7).
 
 ## [0.1.46] - 2026-10-01
 
