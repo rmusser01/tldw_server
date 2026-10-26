@@ -282,6 +282,8 @@ class AdminWebhooksService:
                     }
                     # One attempt per loop pass; redirects are returned, not followed. The
                     # timeout must be explicit: afetch passes timeout=None to httpx as no timeout.
+                    # sensitive_observability keeps the URL (Slack/Discord put the secret in
+                    # the path) out of http_client's logs, spans and the stdlib httpx log.
                     resp = await afetch(
                         method="POST",
                         url=webhook.url,
@@ -291,6 +293,7 @@ class AdminWebhooksService:
                         timeout=webhook.timeout_seconds,
                         allow_redirects=False,
                         retry=RetryPolicy(attempts=1),
+                        sensitive_observability=True,
                     )
                     latency_ms = int((time.monotonic() - start) * 1000)
                     status_code = resp.status_code
@@ -305,7 +308,8 @@ class AdminWebhooksService:
                     # Nothing was sent: drop any earlier attempt's status and body.
                     status_code = None
                     response_body = None
-                    error_message = f"egress policy refused: {exc}"[:1024]
+                    # The sensitive-mode message is generic; the reason code says why.
+                    error_message = f"egress policy refused: {exc.reason_code or 'denied'}"
                     logger.warning("Webhook delivery to {} {}", _url_for_logs(webhook.url), error_message)
                     break
                 except Exception as exc:

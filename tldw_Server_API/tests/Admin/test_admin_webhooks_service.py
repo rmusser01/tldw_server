@@ -445,8 +445,7 @@ async def test_deliver_refuses_private_target_at_delivery_time(svc: AdminWebhook
     logged = log.await_args.kwargs
     assert logged["status_code"] is None
     assert logged["delivered_at"] is None
-    assert logged["error_message"].startswith("egress policy refused: ")
-    assert "private or reserved" in logged["error_message"]
+    assert logged["error_message"] == "egress policy refused: address_forbidden"
     # A policy refusal is final: no backoff, no second attempt.
     assert logged["retry_attempt"] == 0
     sleep.assert_not_awaited()
@@ -556,7 +555,7 @@ async def test_deliver_refuses_a_hostname_resolving_to_a_private_address(
     assert requests == []
     logged = log.await_args.kwargs
     assert logged["status_code"] is None
-    assert logged["error_message"].startswith("egress policy refused: ")
+    assert logged["error_message"] == "egress policy refused: address_forbidden"
 
 
 @pytest.mark.unit
@@ -582,34 +581,81 @@ async def test_deliver_rechecks_egress_on_every_attempt(
     assert logged["retry_attempt"] == 1
     assert logged["status_code"] is None
     assert logged["response_body"] is None
-    assert logged["error_message"].startswith("egress policy refused: ")
+    assert logged["error_message"] == "egress policy refused: address_forbidden"
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("failure", ["egress", "transport"])
+@pytest.mark.parametrize("outcome", ["egress", "transport", "delivered"])
 async def test_delivery_warnings_log_only_the_url_origin(
-    svc: AdminWebhooksService, http_route, monkeypatch: pytest.MonkeyPatch, failure,
+    svc: AdminWebhooksService, http_route, monkeypatch: pytest.MonkeyPatch, outcome,
 ):
-    """Slack/Discord-style URLs carry their secret in the path; warnings show only the origin."""
+    """Slack/Discord-style URLs carry their secret in the path.
+
+    It must not reach the service's warnings, http_client's loguru records (DEBUG included,
+    extras serialized), span attributes, or the stdlib httpx log; warnings keep the origin.
+    """
+    import json
+    import logging
+    from contextlib import asynccontextmanager, contextmanager
+
     import httpx
 
+    from tldw_Server_API.app.core import http_client
     from tldw_Server_API.app.services.admin_webhooks_service import logger
 
     _requests, replies, _log = http_route
-    if failure == "egress":
+    if outcome == "egress":
         monkeypatch.setenv("EGRESS_DENYLIST", "hooks.slack.com")
-    else:
+    elif outcome == "transport":
         replies.append(httpx.ConnectError("refused"))
-    messages: list[str] = []
-    sink = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    else:
+        replies.append((200, {}, b"ok"))
+
+    span_attributes: list[dict[str, Any]] = []
+
+    class _SpanRecorder:
+        @contextmanager
+        def span(self, _name: str, *, attributes: dict[str, Any]):
+            span_attributes.append(dict(attributes))
+            yield None
+
+        @asynccontextmanager
+        async def async_span(self, _name: str, *, attributes: dict[str, Any]):
+            span_attributes.append(dict(attributes))
+            yield None
+
+        def set_attributes(self, attributes: dict[str, Any]) -> None:
+            span_attributes.append(dict(attributes))
+
+        def add_event(self, _name: str, attributes: dict[str, Any] | None = None) -> None:
+            span_attributes.append(dict(attributes or {}))
+
+    monkeypatch.setattr(http_client, "get_tracing_manager", _SpanRecorder)
+    loguru_records: list[str] = []
+    stdlib_records: list[str] = []
+
+    class _StdlibCapture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            stdlib_records.append(f"{record.name}: {record.getMessage()}")
+
+    httpx_logger = logging.getLogger("httpx")
+    previous_level = httpx_logger.level
+    capture = _StdlibCapture(level=logging.DEBUG)
+    httpx_logger.setLevel(logging.DEBUG)
+    httpx_logger.addHandler(capture)
+    sink = logger.add(lambda message: loguru_records.append(str(message)), level="DEBUG", serialize=True)
     try:
         await svc.deliver(
             _hook("https://hooks.slack.com/services/T000/B000/SECRETTOKEN?x=1"), "test.event", {"key": "value"},
         )
     finally:
         logger.remove(sink)
+        httpx_logger.removeHandler(capture)
+        httpx_logger.setLevel(previous_level)
 
-    warning = "".join(messages)
-    assert "https://hooks.slack.com" in warning
-    assert "SECRETTOKEN" not in warning
-    assert "/services/" not in warning
+    observed = "\n".join([*loguru_records, *stdlib_records, json.dumps(span_attributes, default=str)])
+    assert loguru_records, "the loguru sink captured nothing"
+    assert "SECRETTOKEN" not in observed
+    assert "/services/T000" not in observed
+    if outcome != "delivered":
+        assert "https://hooks.slack.com" in "".join(loguru_records)
