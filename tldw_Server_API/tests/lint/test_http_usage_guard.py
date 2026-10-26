@@ -278,6 +278,88 @@ def test_outbound_http_goes_through_core_http_client() -> None:
     assert not found, "\n\n".join(found)
 
 
+# --- Pin: who may pass configured_endpoint= -------------------------------------------------------
+# ``configured_endpoint=<scope>`` is the private-network opt-in: it lets one exact origin through the
+# egress policy. Only a module whose origin comes from operator configuration or a code-owned catalog
+# may build a scope, never from a user-supplied or server-discovered URL. The scan fails on any call
+# keyword ``configured_endpoint=<expr>`` outside SCOPE_ALLOWLIST. Passing a parameter of the same name
+# through (``configured_endpoint=configured_endpoint``) is plumbing, not a source, and is exempt.
+# Group A's MCP transports (sse.py, streamable_http.py) join this set when that branch merges.
+SCOPE_ALLOWLIST: dict[str, str] = {
+    "tldw_Server_API/app/api/v1/endpoints/llm_providers.py": (
+        "scope built from the configured provider endpoint URL for the provider calls it makes."
+    ),
+    "tldw_Server_API/app/core/LLM_Calls/providers/openai_adapter.py": (
+        "scope required by the strict call policy (required_endpoint_scope), checked against the request URL."
+    ),
+    "tldw_Server_API/app/core/LLM_Calls/providers/custom_openai_adapter.py": (
+        "scope from the operator-configured custom endpoint (endpoint.scope)."
+    ),
+    "tldw_Server_API/app/core/LLM_Calls/providers/local_adapters.py": (
+        "scope from the operator-configured local-LLM (llama.cpp, Ollama, ...) base URL."
+    ),
+    "tldw_Server_API/app/core/Local_LLM/llamacpp_snapshot_operations.py": (
+        "scope from the configured llama.cpp server origin."
+    ),
+    "tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Qwen3ASR.py": (
+        "scope from the operator-configured Qwen3-ASR server URL."
+    ),
+    "tldw_Server_API/app/core/Slides/standalone_html_provider.py": (
+        "scope from the code-owned loopback adapter catalog (llama.cpp / Ollama); never a request URL."
+    ),
+}
+
+
+def scope_uses(tree: ast.Module) -> list[str]:
+    """Lines of call keywords ``configured_endpoint=<expr>`` that are not a same-name pass-through."""
+    return [
+        f"line {node.lineno}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        for kw in node.keywords
+        if kw.arg == "configured_endpoint"
+        and not (isinstance(kw.value, ast.Name) and kw.value.id == "configured_endpoint")
+    ]
+
+
+def scope_scan(repo_root: Path = REPO_ROOT) -> dict[str, list[str]]:
+    """Repo-relative path -> lines that set a configured_endpoint scope, under tldw_Server_API/app."""
+    repo_root = repo_root.resolve()
+    app = repo_root / "tldw_Server_API" / "app"
+    found: dict[str, list[str]] = {}
+    for path, tree in parse_tree(app).items():
+        if "tests" not in path.relative_to(app).parts and (hits := scope_uses(tree)):
+            found[path.relative_to(repo_root).as_posix()] = hits
+    return found
+
+
+def scope_problems(found: dict[str, list[str]], allowlist: dict[str, str]) -> list[str]:
+    out = [
+        f"{path} passes configured_endpoint= ({'; '.join(found[path])}), the private-network opt-in. "
+        "Build the scope only from operator configuration or a code-owned catalog, never from a user or "
+        f"server-supplied URL; then add an entry to SCOPE_ALLOWLIST in {GUARD} saying where the origin "
+        "comes from:\n"
+        f'    "{path}": "<where the configured origin comes from>",'
+        for path in sorted(found.keys() - allowlist.keys())
+    ]
+    out += [
+        f"SCOPE_ALLOWLIST entry {path} is stale: the file is gone or no longer sets configured_endpoint=. "
+        f"Delete it from {GUARD}."
+        for path in sorted(allowlist.keys() - found.keys())
+    ]
+    out += [
+        f"SCOPE_ALLOWLIST entry {path} has no reason. Say where the configured origin comes from."
+        for path, reason in sorted(allowlist.items())
+        if not reason.strip()
+    ]
+    return out
+
+
+def test_only_allowlisted_modules_set_a_configured_endpoint_scope() -> None:
+    found = scope_problems(scope_scan(), SCOPE_ALLOWLIST)
+    assert not found, "\n\n".join(found)
+
+
 # --- Self-tests: each seeds a tree under a fresh tmp root and runs the real scan ---------------
 
 
@@ -443,3 +525,40 @@ def test_stale_and_reasonless_entries_fail(tmp_path: Path) -> None:
     ], out
     assert "is stale" in out[0] and "is stale" in out[1] and "has no reason" in out[2]
     assert problems(found, {"tldw_Server_API/app/core/a.py": "loopback-only sidecar"}) == []
+
+
+# --- Pin: who may pass configured_endpoint= (the private-network opt-in) --------------------------
+
+
+def test_a_seeded_module_passing_configured_endpoint_fails(tmp_path: Path) -> None:
+    root = _seed(
+        tmp_path,
+        {
+            "core/new.py": "from x import afetch, Scope\nafetch(url=u, configured_endpoint=Scope.from_url(u))\n",
+            "core/passthrough.py": "def f(configured_endpoint=None):\n    g(configured_endpoint=configured_endpoint)\n",
+            "core/other_kw.py": "g(configured=1, endpoint=2)\n",
+        },
+    )
+    found = scope_scan(root)
+
+    assert list(found) == ["tldw_Server_API/app/core/new.py"]
+    out = scope_problems(found, {})
+    assert len(out) == 1 and "core/new.py" in out[0] and "SCOPE_ALLOWLIST" in out[0]
+
+
+def test_stale_and_reasonless_scope_entries_fail(tmp_path: Path) -> None:
+    root = _seed(tmp_path, {"core/a.py": "g(configured_endpoint=s)\n", "core/clean.py": "g(x=1)\n"})
+    found = scope_scan(root)
+    out = scope_problems(
+        found,
+        {
+            "tldw_Server_API/app/core/a.py": " ",
+            "tldw_Server_API/app/core/clean.py": "operator endpoint",
+            "tldw_Server_API/app/core/gone.py": "operator endpoint",
+        },
+    )
+
+    assert "is stale" in out[0] and "clean.py" in out[0]
+    assert "is stale" in out[1] and "gone.py" in out[1]
+    assert "has no reason" in out[2] and "a.py" in out[2]
+    assert scope_problems(found, {"tldw_Server_API/app/core/a.py": "operator endpoint"}) == []
