@@ -1,27 +1,28 @@
 """Guard: outbound HTTP goes through core.http_client (TASK-13950.11).
 
 ``tldw_Server_API.app.core.http_client`` holds the egress policy, DNS pinning,
-``trust_env=False`` and the TLS floor. A module that builds its own httpx or requests
-client skips all of them. This guard fails on any such use in tldw_Server_API/app
-(``tests`` directories excluded) outside ALLOWLIST. It always runs: there is no env gate.
+``trust_env=False`` and the TLS floor. A module that builds its own HTTP client (httpx,
+requests, aiohttp, urllib.request, http.client) skips all of them. This guard fails on
+any such use in tldw_Server_API/app (``tests`` directories excluded) outside ALLOWLIST.
+It always runs: there is no env gate.
 
 What counts as a use (the only definition; ``uses`` implements it): any value read of
-``<httpx|requests>[.<submodule>...].<name>`` for a name in ENTRY_POINTS (the clients,
+``<library>[.<submodule>...].<name>`` for a library and name in TARGETS (the clients,
 sessions and request functions), resolved through the file's imports:
 ``import httpx``, ``import httpx as hx``, ``from httpx import AsyncClient as C``,
-``import requests.sessions``, ``from httpx import *``, and imports inside functions.
-A call is a use, and so is storing or passing the class (``factory = httpx.AsyncClient``).
-Type annotations, exception classes (``httpx.HTTPError``) and other members
-(``httpx.Timeout``) are not. Imports are collected file-wide, so a name imported in one
-function counts in every function of the file (it fails closed).
-Known limits: ``importlib.import_module("httpx")`` is not seen, and only httpx and
-requests are covered (the libraries the regex guard covered); aiohttp and urllib.request
-are not, yet.
+``import requests.sessions``, ``from urllib import request``, ``from httpx import *``,
+and imports inside functions. A call is a use, and so is storing or passing the class
+(``factory = httpx.AsyncClient``). Type annotations, exception classes
+(``httpx.HTTPError``, ``aiohttp.ClientError``) and other members (``httpx.Timeout``) are
+not. Imports are collected file-wide, so a name imported in one function counts in every
+function of the file (it fails closed).
+Known limits: ``importlib.import_module("httpx")`` is not seen. urllib3 is not listed:
+app code does not use it directly.
 
-ALLOWLIST maps a repo-relative path to why it may use httpx/requests directly: why
-core.http_client cannot apply, or ``"migrate: ..."`` for an offender a later PR moves
-onto it. The test fails on a use in an unlisted file, on an entry whose file is gone or
-no longer uses httpx/requests directly (delete it), and on an entry with no reason.
+ALLOWLIST maps a repo-relative path to why it may use an HTTP client library directly:
+why core.http_client cannot apply, or ``"migrate: ..."`` for an offender a later PR
+moves onto it. The test fails on a use in an unlisted file, on an entry whose file is
+gone or no longer uses one directly (delete it), and on an entry with no reason.
 Adding an entry is a bump-with-reason, reviewed in the PR.
 """
 
@@ -39,11 +40,15 @@ from tldw_Server_API.tests.lint._ast_cache import REPO_ROOT, parse_tree
 pytestmark = pytest.mark.unit
 
 GUARD = "tldw_Server_API/tests/lint/test_http_usage_guard.py"
-LIBRARIES = frozenset({"httpx", "requests"})
-ENTRY_POINTS = frozenset(
-    {"Client", "AsyncClient", "Session", "session"}
-    | {"request", "stream", "get", "post", "put", "patch", "delete", "head", "options"}
-)
+_VERBS = frozenset({"request", "get", "post", "put", "patch", "delete", "head", "options"})
+# Library module -> its clients, sessions and request functions (the entry points).
+TARGETS: dict[str, frozenset[str]] = {
+    "httpx": _VERBS | {"Client", "AsyncClient", "stream"},
+    "requests": _VERBS | {"Session", "session"},
+    "aiohttp": frozenset({"ClientSession", "request"}),
+    "urllib.request": frozenset({"urlopen", "Request", "build_opener", "urlretrieve"}),
+    "http.client": frozenset({"HTTPConnection", "HTTPSConnection"}),
+}
 
 _ASGI = (
     "In-process dispatch: an httpx.ASGITransport client posts to this app's own "
@@ -61,6 +66,11 @@ ALLOWLIST: dict[str, str] = {
         "CDP transport: GETs /json from an operator-configured Chrome debugger, loopback-only "
         "unless allow_non_loopback is set. The CDP session itself runs over a websockets "
         "connection core.http_client cannot carry, so moving the GET alone gains nothing."
+    ),
+    "tldw_Server_API/app/core/TTS/adapters/vibevoice_realtime_adapter.py": (
+        "WebSocket transport: aiohttp ClientSession.ws_connect to the realtime TTS backend, which "
+        "core.http_client cannot carry. It already runs evaluate_url_policy on the URL and pins the "
+        "resolved IPs (_PinnedWebSocketResolver)."
     ),
     "tldw_Server_API/app/core/TTS/adapters/omnivoice_sidecar_supervisor.py": (
         "Loopback-only local sidecar this process spawns and supervises (validate_loopback_host, "
@@ -104,6 +114,19 @@ ALLOWLIST: dict[str, str] = {
         "migrate: streams provider completions through _AsyncClient = httpx.AsyncClient (an alias the "
         "regex guard missed), with no egress policy; use create_async_client with a configured endpoint."
     ),
+    "tldw_Server_API/app/core/Workflows/adapters/integration/podcast_rss.py": (
+        "migrate: fetches a workflow-supplied source_feed_url with urllib urlopen: scheme check only, "
+        "no egress policy, redirects followed, body unbounded. Use fetch with a byte cap."
+    ),
+    "tldw_Server_API/app/core/Ingestion_Sources/git_repository.py": (
+        "migrate: GitHub API sync via urllib urlopen. Only the first URL is pinned to api.github.com; "
+        "urlopen follows redirects and honours env proxies. Use fetch/fetch_json."
+    ),
+    "tldw_Server_API/app/core/Ingestion_Media_Processing/OCR/runtime_support.py": (
+        "migrate: http.client readiness probe (GET /health) for the managed OCR server. The host "
+        "defaults to 127.0.0.1 but comes unchecked from CHATLLM_OCR_HOST, LLAMACPP_OCR_HOST or the "
+        "OCR profile; use create_client/fetch."
+    ),
 }
 
 
@@ -121,19 +144,32 @@ def _imports(tree: ast.Module) -> Iterator[ast.Import | ast.ImportFrom]:
                 stack.append(child)
 
 
+def _library(module: str) -> str | None:
+    """The TARGETS library ``module`` is, or is inside."""
+    return next((lib for lib in TARGETS if module == lib or module.startswith(f"{lib}.")), None)
+
+
+def _related(dotted: str) -> bool:
+    """``dotted`` is a library, inside one, or a package above one (``urllib``)."""
+    return _library(dotted) is not None or any(lib.startswith(f"{dotted}.") for lib in TARGETS)
+
+
 def _bindings(tree: ast.Module) -> dict[str, str]:
-    """Local name -> the dotted httpx/requests object an import binds it to."""
+    """Local name -> the dotted library object an import binds it to."""
     bound: dict[str, str] = {}
     for node in _imports(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                root = alias.name.partition(".")[0]
-                if root in LIBRARIES:  # ``import a.b`` binds ``a``; ``import a.b as c`` binds ``c``.
-                    bound[alias.asname or root] = alias.name if alias.asname else root
-        elif node.level == 0 and (node.module or "").partition(".")[0] in LIBRARIES:
+                # ``import a.b`` binds ``a``; ``import a.b as c`` binds ``c`` to ``a.b``.
+                target = alias.name if alias.asname else alias.name.partition(".")[0]
+                if _related(target):
+                    bound[alias.asname or target] = target
+        elif node.level == 0 and node.module:
+            star = TARGETS.get(_library(node.module) or "", frozenset())
             for alias in node.names:
-                for name in sorted(ENTRY_POINTS) if alias.name == "*" else [alias.name]:
-                    bound[alias.asname or name] = f"{node.module}.{name}"
+                for name in sorted(star) if alias.name == "*" else [alias.name]:
+                    if _related(f"{node.module}.{name}"):
+                        bound[alias.asname or name] = f"{node.module}.{name}"
     return bound
 
 
@@ -163,9 +199,9 @@ def uses(tree: ast.Module) -> list[str]:
             continue
         path = _dotted(node)
         if path and path[0] in bound:
-            target = [*bound[path[0]].split("."), *path[1:]]
-            if target[-1] in ENTRY_POINTS:
-                found.add((node.lineno, ".".join(target)))
+            *module, name = [*bound[path[0]].split("."), *path[1:]]
+            if name in TARGETS.get(_library(".".join(module)) or "", ()):
+                found.add((node.lineno, ".".join([*module, name])))
     return [f"line {line}: {name}" for line, name in sorted(found)]
 
 
@@ -183,16 +219,16 @@ def scan(repo_root: Path = REPO_ROOT) -> dict[str, list[str]]:
 def problems(found: dict[str, list[str]], allowlist: dict[str, str]) -> list[str]:
     """Unlisted uses, stale entries and entries without a reason, each with its fix."""
     out = [
-        f"{path} uses httpx/requests directly ({'; '.join(found[path])}). Send outbound HTTP through "
-        "tldw_Server_API.app.core.http_client (create_async_client/create_client, afetch/fetch, "
-        "astream_sse, astream_bytes) so the egress policy applies. If it cannot (an in-process "
+        f"{path} uses an HTTP client library directly ({'; '.join(found[path])}). Send outbound "
+        "HTTP through tldw_Server_API.app.core.http_client (create_async_client/create_client, "
+        "afetch/fetch, astream_sse, astream_bytes) so the egress policy applies. If it cannot (an in-process "
         f"ASGI call, a loopback-only sidecar), add an entry to ALLOWLIST in {GUARD} with the "
         f'reason; it is reviewed in the PR:\n    "{path}": "<why core.http_client cannot apply>",'
         for path in sorted(found.keys() - allowlist.keys())
     ]
     out += [
-        f"ALLOWLIST entry {path} is stale: the file is gone or no longer uses httpx/requests "
-        f"directly. Delete it from {GUARD}."
+        f"ALLOWLIST entry {path} is stale: the file is gone or no longer uses an HTTP "
+        f"client library directly. Delete it from {GUARD}."
         for path in sorted(allowlist.keys() - found.keys())
     ]
     out += [
@@ -240,7 +276,7 @@ def test_a_seeded_aliased_from_import_fails(tmp_path: Path) -> None:
     )
     (problem,) = problems(scan(root), {})
     assert problem.startswith(
-        "tldw_Server_API/app/core/sneaky.py uses httpx/requests directly (line 5: httpx.AsyncClient)"
+        "tldw_Server_API/app/core/sneaky.py uses an HTTP client library directly (line 5: httpx.AsyncClient)"
     ), problem
     assert "tldw_Server_API.app.core.http_client" in problem
     assert GUARD in problem and '"tldw_Server_API/app/core/sneaky.py": "<why' in problem
@@ -258,8 +294,19 @@ def test_a_seeded_aliased_from_import_fails(tmp_path: Path) -> None:
         ("from httpx import *\nstream('GET', 'u')\n", "httpx.stream"),
         # A reference is a use too: ace_step.py and standalone_html_provider.py build clients this way.
         ("import httpx\nclient_factory = httpx.AsyncClient\n", "httpx.AsyncClient"),
+        # aiohttp and urllib.request bypass the same egress policy.
+        ("from aiohttp import ClientSession as S\nS()\n", "aiohttp.ClientSession"),
+        ("def f():\n    import aiohttp\n    return aiohttp.request('GET', 'u')\n", "aiohttp.request"),
+        ("import urllib.request\nurllib.request.urlopen('u')\n", "urllib.request.urlopen"),
+        ("from urllib import request as r\nr.build_opener()\n", "urllib.request.build_opener"),
+        ("from urllib.request import Request as R\nR('u')\n", "urllib.request.Request"),
+        ("import http.client\nhttp.client.HTTPSConnection('h')\n", "http.client.HTTPSConnection"),
     ],
-    ids=["import", "import-as", "from-import", "submodule", "submodule-as", "in-function", "star", "reference"],
+    ids=[
+        *("import", "import-as", "from-import", "submodule", "submodule-as", "in-function", "star", "reference"),
+        *("aiohttp-from-as", "aiohttp-in-function", "urllib-import", "urllib-from-submodule", "urllib-from-as"),
+        "http-client",
+    ],
 )
 def test_every_import_form_is_seen(tmp_path: Path, source: str, expected: str) -> None:
     assert _names(scan(_seed(tmp_path, {"core/m.py": source})), "tldw_Server_API/app/core/m.py") == [expected]
@@ -282,6 +329,16 @@ def test_annotations_exceptions_other_members_and_lookalikes_are_not_uses(tmp_pa
                 """,
             # Resource_Governance/policy_eval.py's shape: a dict named ``requests``. The regex flagged it.
             "core/lookalike.py": "requests = {'burst': 2.0}\nburst = requests.get('burst')\n",
+            # Exception classes and helpers only (paper_search.py, eval_runner.py): not clients.
+            "core/errors_only.py": """\
+                import aiohttp
+                import urllib.parse
+                import urllib.request
+                from urllib.error import HTTPError
+
+                ERRORS = (aiohttp.ClientError, HTTPError)
+                URL = urllib.parse.urljoin("https://a/", urllib.request.pathname2url("b"))
+                """,
             "core/tests/test_x.py": "import httpx\nhttpx.Client()\n",
         },
     )
