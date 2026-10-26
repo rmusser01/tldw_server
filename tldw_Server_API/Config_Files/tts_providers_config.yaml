@@ -183,7 +183,9 @@ providers:
     extra_params:
       managed: false
       allow_remote_base_url: false
-      allow_private_network: false  # Admit a private/LAN remote base_url at exactly its origin (never metadata/link-local)
+      # allow_private_network admits exactly the base_url origin, private/LAN or public (any port; no
+      # EGRESS_ALLOWLIST entry needed under strict); cloud metadata and link-local stay refused.
+      allow_private_network: false
       retain_request_artifacts: false
       external_voice_reference_mode: "disabled"  # disabled | shared_path
       request_option_allowlist:

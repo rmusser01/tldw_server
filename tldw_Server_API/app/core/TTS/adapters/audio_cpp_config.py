@@ -39,6 +39,20 @@ def validate_base_url(base_url: str | None, *, allow_remote_base_url: bool = Fal
             provider=PROVIDER_KEY,
             error_code="invalid_base_url",
         )
+    if parsed.username is not None or parsed.password is not None:
+        raise TTSValidationError(
+            "audio.cpp base_url must not contain userinfo (user:password@)",
+            provider=PROVIDER_KEY,
+            error_code="invalid_base_url",
+        )
+    try:
+        parsed.port  # noqa: B018 - raises ValueError for a non-numeric or out-of-range port
+    except ValueError as exc:
+        raise TTSValidationError(
+            "audio.cpp base_url has an invalid port",
+            provider=PROVIDER_KEY,
+            error_code="invalid_base_url",
+        ) from exc
     if not allow_remote_base_url and not _is_loopback_host(parsed.hostname):
         raise TTSValidationError(
             "audio.cpp base_url must be loopback unless allow_remote_base_url is enabled",

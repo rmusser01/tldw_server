@@ -256,30 +256,26 @@ async def test_transport_timeout_maps_to_tts_timeout_error(egress_policy):
 
 @pytest.fixture
 def lan_egress(monkeypatch):
-    """Production egress policy (default ports too) with DNS stubbed and sockets blocked.
+    """Production egress policy (default ports too) with DNS stubbed.
 
-    Returns ``(seen, connects, dns)``: requests that reached the MockTransport, attempted
-    socket connects, and the DNS answers (host -> list of addresses) tests may fill in.
-    Under pytest, http_client skips the private-address check for an unscoped hostname, so
-    unscoped refusals are only provable with literal addresses.
+    Returns ``(seen, dns)``: requests that reached the MockTransport, and the DNS answers
+    (host -> list of addresses) tests may fill in. http_client's test-mode carve-out, which
+    skips the private-address check for an unscoped hostname under pytest, is switched off so
+    unscoped hostnames are vetted as in production. The MockTransport is the socket layer, so
+    an empty ``seen`` proves nothing was sent.
     """
-    import socket
-
+    from tldw_Server_API.app.core import http_client
     from tldw_Server_API.app.core.Security import egress
 
     seen: list[httpx.Request] = []
-    connects: list[object] = []
     dns: dict[str, list[str]] = {}
 
-    def no_connect(address, *_args, **_kwargs):
-        connects.append(address)
-        raise OSError("network disabled in this test")
-
-    monkeypatch.setattr(socket, "create_connection", no_connect)
+    for name in ("is_explicit_pytest_runtime", "is_test_mode", "env_flag_enabled"):
+        monkeypatch.setattr(http_client, name, lambda *_args, **_kwargs: False)
     monkeypatch.setattr(egress, "_resolve_host_ips", lambda host, **_kwargs: list(dns.get(host, [])))
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
     monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWED_PORTS", "80,443,8080")
-    return seen, connects, dns
+    return seen, dns
 
 
 _LAN_TARGETS = [
@@ -291,7 +287,7 @@ _LAN_TARGETS = [
 @pytest.mark.unit
 @pytest.mark.parametrize(("base_url", "answers"), _LAN_TARGETS)
 async def test_private_network_opt_in_reaches_the_configured_lan_server(lan_egress, base_url, answers):
-    seen, connects, dns = lan_egress
+    seen, dns = lan_egress
     dns.update(answers)
     async with _recording_client(seen, _healthy) as http_client:
         client = AudioCppClient(
@@ -305,13 +301,20 @@ async def test_private_network_opt_in_reaches_the_configured_lan_server(lan_egre
     [request] = seen
     assert request.url.path == "/health"
     assert request.headers["host"] == base_url.removeprefix("http://")
-    assert connects == []
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("base_url", ["http://192.168.1.50:8080", "http://192.168.1.50:9000"])
-async def test_lan_base_url_without_the_opt_in_is_still_refused(lan_egress, base_url):
-    seen, connects, _dns = lan_egress
+@pytest.mark.parametrize(
+    ("base_url", "answers"),
+    [
+        ("http://192.168.1.50:8080", {}),
+        ("http://192.168.1.50:9000", {}),
+        ("http://gpu-box.lan:8080", {"gpu-box.lan": ["192.168.1.50"]}),
+    ],
+)
+async def test_lan_base_url_without_the_opt_in_is_still_refused(lan_egress, base_url, answers):
+    seen, dns = lan_egress
+    dns.update(answers)
     async with _recording_client(seen, _healthy) as http_client:
         client = AudioCppClient(base_url=base_url, http_client=http_client, allow_remote_base_url=True)
         with pytest.raises(TTSConfigurationError) as error:
@@ -319,7 +322,6 @@ async def test_lan_base_url_without_the_opt_in_is_still_refused(lan_egress, base
 
     assert error.value.error_code == "EGRESS_DENIED"
     assert seen == []
-    assert connects == []
 
 
 @pytest.mark.unit
@@ -328,7 +330,7 @@ async def test_lan_base_url_without_the_opt_in_is_still_refused(lan_egress, base
     ["http://192.168.1.51:8080/health", "http://192.168.1.50:9090/health", "http://169.254.169.254/latest"],
 )
 async def test_private_network_opt_in_does_not_follow_a_redirect_to_another_origin(lan_egress, location):
-    seen, connects, _dns = lan_egress
+    seen, _dns = lan_egress
 
     def redirect(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(302, headers={"location": location})
@@ -345,7 +347,6 @@ async def test_private_network_opt_in_does_not_follow_a_redirect_to_another_orig
 
     assert error.value.error_code == "HTTP_302"
     assert [str(request.url) for request in seen] == ["http://192.168.1.50:8080/health"]
-    assert connects == []
 
 
 @pytest.mark.unit
@@ -381,7 +382,7 @@ async def test_private_network_scope_admits_only_the_configured_origin(lan_egres
     ],
 )
 async def test_private_network_opt_in_still_refuses_metadata_and_link_local(lan_egress, base_url, answers):
-    seen, connects, dns = lan_egress
+    seen, dns = lan_egress
     dns.update(answers)
     async with _recording_client(seen, _healthy) as http_client:
         client = AudioCppClient(
@@ -395,4 +396,15 @@ async def test_private_network_opt_in_still_refuses_metadata_and_link_local(lan_
 
     assert error.value.error_code == "EGRESS_DENIED"
     assert seen == []
-    assert connects == []
+
+
+@pytest.mark.unit
+def test_private_network_opt_in_rejects_userinfo_in_base_url_as_a_validation_error():
+    from tldw_Server_API.app.core.TTS.tts_exceptions import TTSValidationError
+
+    with pytest.raises(TTSValidationError, match="userinfo"):
+        AudioCppClient(
+            base_url="http://u:p@192.168.1.50:8080",
+            allow_remote_base_url=True,
+            allow_private_network=True,
+        )

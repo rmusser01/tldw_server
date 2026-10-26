@@ -196,3 +196,16 @@ def test_allow_private_network_is_read_from_extra_params_and_defaults_off(token,
         extra["allow_private_network"] = token
     config = AudioCppConfig.from_provider_config(_provider_config(extra_params=extra))
     assert config.allow_private_network is expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "base_url",
+    ["http://u:p@192.168.1.50:8080", "http://user@127.0.0.1:8080", "http://127.0.0.1:99999"],
+)
+def test_validate_base_url_rejects_userinfo_and_invalid_ports(base_url):
+    """These would otherwise surface as a raw ValueError when the egress scope is built."""
+    with pytest.raises(TTSValidationError) as error:
+        validate_base_url(base_url, allow_remote_base_url=True)
+    assert error.value.error_code == "invalid_base_url"
+    assert "p@" not in str(error.value)
