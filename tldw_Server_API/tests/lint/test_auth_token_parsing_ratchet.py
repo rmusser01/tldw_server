@@ -47,9 +47,7 @@ ENDPOINTS_ROOT = APP_ROOT / "api" / "v1" / "endpoints"
 LOOKS_LIKE_JWT_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/api/v1/API_Deps/auth_deps.py": 1,
     "tldw_Server_API/app/api/v1/endpoints/persona.py": 1,
-    "tldw_Server_API/app/api/v1/endpoints/sandbox.py": 1,
     "tldw_Server_API/app/api/v1/endpoints/voice_assistant.py": 1,
-    "tldw_Server_API/app/api/v1/endpoints/watchlists.py": 1,
     "tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py": 1,
     "tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py": 1,
 }
@@ -61,13 +59,11 @@ BEARER_PARSE_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/api/v1/endpoints/persona.py": 3,
     "tldw_Server_API/app/api/v1/endpoints/prompts.py": 3,
     "tldw_Server_API/app/api/v1/endpoints/rpg.py": 1,
-    "tldw_Server_API/app/api/v1/endpoints/sandbox.py": 1,
-    "tldw_Server_API/app/api/v1/endpoints/watchlists.py": 1,
 }
 
 # Each baseline's exact total. A migration lowers its entry and this number together; any
 # other change to a baseline's total is headroom being reused, and fails.
-SEED_TOTALS: dict[str, int] = {"LOOKS_LIKE_JWT_BASELINE": 7, "BEARER_PARSE_BASELINE": 12}
+SEED_TOTALS: dict[str, int] = {"LOOKS_LIKE_JWT_BASELINE": 5, "BEARER_PARSE_BASELINE": 10}
 
 # The only way to raise a count: (baseline name, module) -> (allowed count, reason). The
 # reason must cite a task or PR, e.g. "security fix in persona_stream needs one (TASK-1234)".

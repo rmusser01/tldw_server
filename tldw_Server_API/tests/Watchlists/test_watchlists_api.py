@@ -843,9 +843,12 @@ def test_forum_sources_feature_flag(client_with_user, monkeypatch):
 
 
 def test_watchlists_run_stream_ws(client_with_user, tmp_path):
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import create_access_token
+    """The socket authenticates itself through the core resolver, not get_request_user. A browser
+    sends the single-user key in the bearer subprotocol, which must be echoed (TASK-13950.7)."""
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 
-    db = WatchlistsDatabase.for_user(555)
+    settings = get_settings()
+    db = WatchlistsDatabase.for_user(settings.SINGLE_USER_FIXED_ID)
     job = db.create_job(
         name="Job",
         description=None,
@@ -863,8 +866,10 @@ def test_watchlists_run_stream_ws(client_with_user, tmp_path):
     log_path.write_text("first line\n", encoding="utf-8")
     db.update_run(run.id, stats_json=json.dumps({"items_found": 1}), log_path=str(log_path))
 
-    token = create_access_token(555, "wluser", "admin")
-    with client_with_user.websocket_connect(f"/api/v1/watchlists/runs/{run.id}/stream?token={token}") as ws:
+    with client_with_user.websocket_connect(
+        f"/api/v1/watchlists/runs/{run.id}/stream", subprotocols=["bearer", settings.SINGLE_USER_API_KEY]
+    ) as ws:
+        assert ws.accepted_subprotocol == "bearer"
         message = ws.receive_json()
         assert message["type"] == "snapshot"
         assert message["run"]["id"] == run.id

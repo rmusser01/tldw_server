@@ -14,10 +14,11 @@ and checks its route list against the ratchet's ``WS`` baseline lines:
   parameter, and, for first-frame routes, in the auth frame.
 - A valid AuthNZ access token must get past authentication on every route (the control
   column), so a refusal above means something.
-- ACP and prompt-studio still take the query ``token``/``api_key`` and the ``x-api-key``
-  subprotocol that shipped clients send, through a deprecated shim that hands them to the
-  resolver's own verification. Their section below proves the shim admits, refuses and
-  warns like the resolver, and that the retired channels are refused.
+- ACP, prompt-studio and watchlists still take the query ``token``/``api_key`` that shipped
+  clients send (ACP and prompt-studio also the ``x-api-key`` subprotocol), through a
+  deprecated shim that hands them to the resolver's own verification. Their section below
+  proves the shim admits, refuses and warns like the resolver, and that the retired
+  channels are refused. Sandbox had no such client, so its query credentials are retired.
 
 The revoked token is a real AuthNZ access token whose jti is on the token blacklist, the
 check HTTP auth runs in verify_jwt_and_fetch_user. Known gaps are strict xfails naming
@@ -94,12 +95,21 @@ FRAME_TIMEOUT_S = 10.0
 # credential and is waiting for its config frame.
 ADMITTED_AFTER_S = 1.0
 MAX_FRAMES = 8
-# Routes whose deprecated credential shim (agent_client_protocol._authenticate_ws) reads the
-# query and the x-api-key subprotocol; and of those, the ones that accept once authenticated,
-# with the API-key scope each needs.
-SHIM_ROUTES = {path for path in ROUTES if path.startswith(("/api/v1/acp/", "/api/v1/prompt-studio/"))}
-SHIM_ACCEPTING = {"/api/v1/acp/multiplex": "write", "/api/v1/prompt-studio/ws": "read"}
-DEPRECATED_CHANNELS = ("query token", "query api_key", "x-api-key subprotocol")
+SANDBOX = "/api/v1/sandbox/runs/{run_id}/stream"
+WATCHLISTS = "/api/v1/watchlists/runs/{run_id}/stream"
+# Routes whose deprecated credential shim (websocket_principal.resolve_ws_principal_or_deprecated_query)
+# reads the query, and for ACP and prompt-studio (agent_client_protocol._authenticate_ws) the
+# x-api-key subprotocol too; and of those, the ones that accept once authenticated, with the
+# API-key scope each needs. The watchlists URL names run 1, which the fixture seeds.
+SHIM_ROUTES = {path for path in ROUTES if path.startswith(("/api/v1/acp/", "/api/v1/prompt-studio/", WATCHLISTS))}
+SHIM_ACCEPTING = {"/api/v1/acp/multiplex": "write", "/api/v1/prompt-studio/ws": "read", WATCHLISTS: "read"}
+QUERY_CHANNELS = ("query token", "query api_key")
+DEPRECATED_CHANNELS = (*QUERY_CHANNELS, "x-api-key subprotocol")
+SHIM_CASES = [
+    (route, channel)
+    for route in SHIM_ACCEPTING
+    for channel in (QUERY_CHANNELS if route == WATCHLISTS else DEPRECATED_CHANNELS)
+]
 DEPRECATION_MARK = "Deprecated WebSocket credential channel"
 
 def _with_query(url: str, name: str, value: str) -> str:
@@ -140,6 +150,29 @@ async def _seed_user_and_tokens() -> tuple[int, str, str, str, str]:
     return user_id, valid, revoked, api_key, write_key
 
 
+def _seed_watchlists_runs(user_id: int) -> None:
+    """Give the matrix user and the single user a completed run 1, so the watchlists URL in
+    ROUTES names a run each owns."""
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+    from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
+
+    for owner in {user_id, get_settings().SINGLE_USER_FIXED_ID}:
+        db = WatchlistsDatabase.for_user(owner)
+        job = db.create_job(
+            name="ws-auth-matrix",
+            description=None,
+            scope_json="{}",
+            schedule_expr=None,
+            schedule_timezone=None,
+            active=False,
+            max_concurrency=None,
+            per_host_delay_ms=None,
+            retry_policy_json=None,
+            output_prefs_json=None,
+        )
+        assert db.create_run(job_id=job.id, status="completed").id == 1
+
+
 def _reset_auth_singletons() -> None:
     from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -175,6 +208,7 @@ def full_app(tmp_path_factory: pytest.TempPathFactory) -> Iterator[SimpleNamespa
         user_id, valid, revoked, api_key, write_key = asyncio.run(_seed_user_and_tokens())
         config._route_toggle_policy.cache_clear()
         app = reload_app_main().app
+        _seed_watchlists_runs(user_id)
     client = TestClient(app)
     workflows_db = WorkflowsDatabase(str(data_dir / "workflows.db"))
     try:
@@ -527,13 +561,12 @@ def _deprecated_request(env: SimpleNamespace, route: str, channel: str, *, valid
     return key, {"url": url, "subprotocols": ["x-api-key", key]}
 
 
-@pytest.mark.parametrize("channel", DEPRECATED_CHANNELS)
-@pytest.mark.parametrize("route", SHIM_ACCEPTING)
-def test_acp_deprecated_channel_admits_a_valid_credential_with_one_warning(
+@pytest.mark.parametrize(("route", "channel"), SHIM_CASES)
+def test_deprecated_channel_admits_a_valid_credential_with_one_warning(
     env: SimpleNamespace, route: str, channel: str
 ) -> None:
     """Shipped clients (useACPSession, ACPWebSocketClient, prompt-studio-stream, the ACP SSH
-    panel) still send these; the shim keeps them working until the clients move."""
+    panel, watchlists-stream) still send these; the shim keeps them working until the clients move."""
     credential, request = _deprecated_request(env, route, channel, valid=True)
     with _warnings() as warned:
         echoed = _accepted_subprotocol(env.client, **request)  # type: ignore[arg-type]
@@ -544,9 +577,8 @@ def test_acp_deprecated_channel_admits_a_valid_credential_with_one_warning(
     assert not [message for message in warned if credential in message]
 
 
-@pytest.mark.parametrize("channel", DEPRECATED_CHANNELS)
-@pytest.mark.parametrize("route", SHIM_ACCEPTING)
-def test_acp_deprecated_channel_refuses_a_revoked_or_unknown_credential(
+@pytest.mark.parametrize(("route", "channel"), SHIM_CASES)
+def test_deprecated_channel_refuses_a_revoked_or_unknown_credential(
     env: SimpleNamespace, route: str, channel: str
 ) -> None:
     credential, request = _deprecated_request(env, route, channel, valid=False)
@@ -557,7 +589,7 @@ def test_acp_deprecated_channel_refuses_a_revoked_or_unknown_credential(
 
 
 @pytest.mark.parametrize("route", SHIM_ACCEPTING)
-def test_acp_retired_channels_are_refused(env: SimpleNamespace, route: str) -> None:
+def test_retired_channels_are_refused(env: SimpleNamespace, route: str) -> None:
     """``Authorization: X-API-KEY <key>`` and the ``api-key, <key>`` subprotocol had no client."""
     url = ROUTES[route][0]
     key = env.write_key if SHIM_ACCEPTING[route] == "write" else env.api_key
@@ -566,7 +598,7 @@ def test_acp_retired_channels_are_refused(env: SimpleNamespace, route: str) -> N
 
 
 @pytest.mark.parametrize("route", SHIM_ACCEPTING)
-def test_acp_header_credentials_need_no_shim(env: SimpleNamespace, route: str) -> None:
+def test_header_credentials_need_no_shim(env: SimpleNamespace, route: str) -> None:
     """The resolver's own channels: no deprecation warning, and the bearer marker is echoed."""
     key = env.write_key if SHIM_ACCEPTING[route] == "write" else env.api_key
     url = ROUTES[route][0]
@@ -587,7 +619,7 @@ def _single_user(monkeypatch: pytest.MonkeyPatch, **environ: str) -> None:
 
 
 @pytest.mark.parametrize("route", SHIM_ACCEPTING)
-def test_acp_deprecated_query_admits_the_single_user_key(
+def test_deprecated_query_admits_the_single_user_key(
     env: SimpleNamespace, route: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The single-user WebUI outside cookie quickstart, and the extension, send ``?api_key=``."""
@@ -602,7 +634,7 @@ def test_acp_deprecated_query_admits_the_single_user_key(
 
 
 @pytest.mark.parametrize("route", SHIM_ACCEPTING)
-def test_acp_deprecated_query_keeps_the_single_user_ip_allowlist(
+def test_deprecated_query_keeps_the_single_user_ip_allowlist(
     env: SimpleNamespace, route: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The verifier sees the socket's peer (request.client), so the allowlist still binds."""
@@ -621,7 +653,7 @@ BASIC_PROXY_AUTH = {"Authorization": "Basic cHJveHktdXNlcjpwcm94eS1wYXNz"}
 
 
 @pytest.mark.parametrize("route", SHIM_ACCEPTING)
-def test_acp_a_proxy_basic_authorization_is_not_a_credential(
+def test_a_proxy_basic_authorization_is_not_a_credential(
     env: SimpleNamespace, route: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A Basic-auth reverse proxy makes the browser attach its ``Authorization`` to the upgrade.
@@ -639,7 +671,7 @@ def test_acp_a_proxy_basic_authorization_is_not_a_credential(
 
 
 @pytest.mark.parametrize("route", SHIM_ACCEPTING)
-def test_acp_deprecated_query_pair_resolves_like_both_http_headers(env: SimpleNamespace, route: str) -> None:
+def test_deprecated_query_pair_resolves_like_both_http_headers(env: SimpleNamespace, route: str) -> None:
     """``?token=&api_key=`` goes to the verifier as both headers, as HTTP resolves them: the JWT
     first, and the API key only when the JWT is refused with 401."""
     url = ROUTES[route][0]
@@ -647,3 +679,27 @@ def test_acp_deprecated_query_pair_resolves_like_both_http_headers(env: SimpleNa
     assert _outcome(env.client, f"{url}?token={env.valid}&api_key=tldw_ws-matrix-unknown-key") == "accepted"
     assert _outcome(env.client, f"{url}?token={env.revoked}&api_key={key}") == "accepted"
     assert _outcome(env.client, f"{url}?token={env.revoked}&api_key=tldw_ws-matrix-unknown-key") == "close 4401"
+
+
+def test_sandbox_retired_its_query_credentials(env: SimpleNamespace) -> None:
+    """``?auth_token=`` and, with signed URLs off, ``?token=`` had no client, so they are gone
+    rather than deprecated (TASK-13950.7). A signed URL's ``token`` is its HMAC, not a credential."""
+    url = ROUTES[SANDBOX][0]
+    with _warnings() as warned:
+        assert _outcome(env.client, _with_query(url, "auth_token", env.valid)) == "close 4401"
+        assert _outcome(env.client, _with_query(url, "token", env.valid)) == "close 4401"
+    assert _deprecations(warned) == []
+
+
+@pytest.mark.parametrize("route", [SANDBOX, WATCHLISTS])
+def test_browser_bearer_subprotocol_and_single_user_key(
+    env: SimpleNamespace, route: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Browsers cannot set WebSocket headers. Before the core resolver these routes ignored the
+    bearer subprotocol, so a browser could only reach them through a query credential; the
+    single-user key in ``X-API-KEY`` already worked and still does."""
+    url = ROUTES[route][0]
+    assert _accepted_subprotocol(env.client, url, subprotocols=["bearer", env.valid]) == "bearer"
+    _single_user(monkeypatch)
+    assert _accepted_subprotocol(env.client, url, headers={"X-API-KEY": SINGLE_USER_KEY}) is None
+    assert _accepted_subprotocol(env.client, url, subprotocols=["bearer", SINGLE_USER_KEY]) == "bearer"
