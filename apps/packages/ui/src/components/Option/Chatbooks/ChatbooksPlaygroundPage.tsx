@@ -3626,24 +3626,10 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
                         )
                       },
                       {
-                        value: "overwrite",
-                        label: t(
-                          "settings:chatbooksPlayground.conflictOverwrite",
-                          "Overwrite"
-                        )
-                      },
-                      {
                         value: "rename",
                         label: t(
                           "settings:chatbooksPlayground.conflictRename",
                           "Rename"
-                        )
-                      },
-                      {
-                        value: "merge",
-                        label: t(
-                          "settings:chatbooksPlayground.conflictMerge",
-                          "Merge"
                         )
                       }
                     ]}
