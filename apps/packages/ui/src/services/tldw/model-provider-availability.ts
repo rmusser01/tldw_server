@@ -1,5 +1,9 @@
+/** Provider health as reported by the server, reduced to what the UI can claim. */
+export type ProviderHealthSignal = "working" | "unreachable" | "unknown"
+
 export type ProviderAvailability = {
   default_model?: string
+  health?: ProviderHealthSignal
   is_configured?: boolean
   provider_enabled?: boolean
   availability?: string
@@ -88,6 +92,43 @@ export const normalizeProviderAvailabilityKey = (
   )
 }
 
+/**
+ * The failure streak at which the server marks a provider unhealthy
+ * (`provider_manager.py`). The chat path also records client-side errors such
+ * as a 400 for an over-long prompt, so fewer failures prove nothing about the
+ * provider.
+ */
+const PROVIDER_UNHEALTHY_FAILURE_STREAK = 3
+
+/**
+ * Reduce the server's provider health report to a claim the UI can make.
+ * "healthy" counts only once the provider has answered at least once. A
+ * provider that reached the server's failure streak is unreachable even before
+ * the server's periodic re-evaluation changes its status; a shorter streak
+ * makes no claim either way.
+ */
+export const toProviderHealthSignal = (health: unknown): ProviderHealthSignal => {
+  if (typeof health === "string") {
+    const status = health.trim().toLowerCase()
+    if (status === "working" || status === "unreachable") return status
+    return "unknown"
+  }
+  if (!health || typeof health !== "object") return "unknown"
+  const record = health as Record<string, unknown>
+  const status = typeof record.status === "string" ? record.status.trim().toLowerCase() : ""
+  const successCount = Number(record.success_count ?? 0)
+  const consecutiveFailures = Number(record.consecutive_failures ?? 0)
+  if (status === "unhealthy" || status === "circuit_open" || status === "open") {
+    return "unreachable"
+  }
+  if (consecutiveFailures >= PROVIDER_UNHEALTHY_FAILURE_STREAK) return "unreachable"
+  if (consecutiveFailures > 0) return "unknown"
+  if ((status === "healthy" || status === "degraded") && successCount > 0) {
+    return "working"
+  }
+  return "unknown"
+}
+
 const asProviderRecord = (
   provider: TldwProviderEntry
 ): Exclude<TldwProviderEntry, string> | null =>
@@ -159,7 +200,8 @@ export const buildProviderAvailabilityMap = async (
         readiness_message:
           toNonEmptyProviderString(record?.readiness_message) ?? undefined,
         chat_provider:
-          toNonEmptyProviderString(record?.chat_provider) ?? undefined
+          toNonEmptyProviderString(record?.chat_provider) ?? undefined,
+        health: toProviderHealthSignal(record?.health)
       })
     } catch (error) {
       if (import.meta.env?.DEV) {

@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 import { MessageActionsBar } from "../MessageActionsBar"
@@ -64,6 +64,29 @@ describe("MessageActionsBar feedback visibility", () => {
 
     expect(screen.getByText("Was this helpful?")).toBeInTheDocument()
     expect(container.firstElementChild).toHaveClass("justify-between")
+  })
+
+  // CM-10 (#3101): each reply shows one "..." (More actions). The feedback
+  // details button keeps its place and name but uses its own icon.
+  it("shows a single ellipsis per reply next to the feedback row", () => {
+    const onOpenDetails = vi.fn()
+    const { container } = render(
+      <MessageActionsBar
+        {...baseProps()}
+        isBot
+        canSaveToNotes
+        showFeedbackControls
+        onOpenDetails={onOpenDetails}
+      />
+    )
+
+    expect(screen.getByRole("button", { name: "More actions" })).toBeInTheDocument()
+    expect(container.querySelectorAll("button svg.lucide-ellipsis")).toHaveLength(1)
+
+    const details = screen.getByRole("button", { name: "More feedback" })
+    expect(details.querySelector("svg.lucide-ellipsis")).toBeNull()
+    fireEvent.click(details)
+    expect(onOpenDetails).toHaveBeenCalledTimes(1)
   })
 
   it("hides feedback row when showFeedbackControls is false", () => {

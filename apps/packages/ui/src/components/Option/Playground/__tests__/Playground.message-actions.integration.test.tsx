@@ -218,6 +218,13 @@ describe(
           expect(visibleNotifications().join(" ")).not.toMatch(/unsupported_history|invalid_history/)
           expect(view.server.chats.get("saved-chat")!.messages.map(row => row.content)).toEqual(["Saved question", "Saved answer"])
           expect(screen.getByText("Saved answer")).toBeInTheDocument()
+          // The refusal is definitive: no "unconfirmed" recovery is left behind, and
+          // the button now says why instead of failing again on the next click.
+          await waitForChatIdle()
+          expect(screen.queryByText(/New reply unconfirmed|New reply refused/)).toBeNull()
+          await waitFor(() => expect(screen.getByRole("button", { name: "Regenerate" })).toBeDisabled(), HARNESS_WAIT)
+          expect(screen.getByRole("button", { name: "Regenerate" })).toHaveAttribute("title", expect.stringMatching(/New Branch/))
+          expect(view.server.completionRequests()).toHaveLength(1)
         })
       }
     )
@@ -350,5 +357,112 @@ describe("native admitted regeneration through the actual Playground", { timeout
         expect(visibleNotifications().join(" ")).not.toMatch(/unsupported_history|invalid_history/)
       })
     } finally { hold.resolve(); await waitForChatIdle() }
+  })
+})
+
+const savedAssistantRow = () =>
+  screen.getAllByTestId("chat-message").filter(row => row.getAttribute("data-role") === "assistant").at(-1)!
+
+const moreActions = async (view: Awaited<ReturnType<typeof renderPlayground>>) => {
+  await view.user.click(within(savedAssistantRow()).getByRole("button", { name: "More actions" }))
+}
+
+const clickContinue = async (view: Awaited<ReturnType<typeof renderPlayground>>) => {
+  await view.user.click(within(savedAssistantRow()).getByRole("button", { name: "More actions" }))
+  await view.user.click(await screen.findByRole("button", { name: "Continue Response" }, HARNESS_WAIT))
+}
+
+describe("native admitted continuation through the actual Playground", { timeout: 60_000 }, () => {
+  beforeEach(async () => { await resetPlaygroundHarness() })
+
+  it("CM-01 continues a saved reply as one longer saved alternative and keeps the original", async () => {
+    const { view, chat } = await renderWithAdmittedExchange()
+    const original = structuredClone(chat.messages)
+    const priorCompletions = view.server.completionRequests().length
+    view.server.planCompletion({ reply: " and the rest of it." })
+    await view.user.type(view.composer, "UNSENT NEXT QUESTION")
+    await withUnhandledRejectionsRecorded(async () => {
+      await clickContinue(view)
+      await waitFor(() => expect(view.server.completionRequests()).toHaveLength(priorCompletions + 1), HARNESS_WAIT)
+      await waitForChatIdle()
+      expect(visibleNotifications().join(" ")).not.toMatch(/unsupported_history|invalid_history/)
+      await waitFor(() => expect(savedAssistantRow()).toHaveTextContent("Saved answer and the rest of it."), HARNESS_WAIT)
+      expect(chat.messages.filter(row => original.some(old => old.id === row.id))).toEqual(original)
+      const alternative = chat.messages.filter(row => !original.some(old => old.id === row.id))
+      expect(alternative).toEqual([expect.objectContaining({
+        role: "assistant", content: "Saved answer and the rest of it.", parent_message_id: original[0].id })])
+      const request = view.server.completionRequests().at(-1)!.body!
+      expect(request).toMatchObject({ save_to_db: true, tldw_history_branch: true,
+        metadata: { tldw_continue_from_message_id: original[1].id },
+        tldw_history_selection_v1: { cursor: { kind: "after_message", message_id: original[1].id } } })
+      expect(request.metadata).not.toHaveProperty("tldw_regenerate_from_message_id")
+      expect(view.server.find("POST", new RegExp(`/chats/${chat.id}/messages$`)).filter(row => row.body?.role === "user")).toHaveLength(1)
+      expect(view.composer).toHaveValue("UNSENT NEXT QUESTION")
+      // The original reply stays available as the other version of this answer.
+      expect(within(savedAssistantRow()).getByTestId("variant-count-label")).toHaveTextContent("2 of 2")
+      // The pager follows the saved versions: back to the original reply and forward again.
+      await view.user.click(within(savedAssistantRow()).getByRole("button", { name: "Previous response" }))
+      await waitFor(() => expect(within(savedAssistantRow()).getByTestId("variant-count-label")).toHaveTextContent("1 of 2"), HARNESS_WAIT)
+      expect(savedAssistantRow()).toHaveTextContent("Saved answer")
+      expect(savedAssistantRow()).not.toHaveTextContent("and the rest of it.")
+      await view.user.click(within(savedAssistantRow()).getByRole("button", { name: "Next response" }))
+      await waitFor(() => expect(savedAssistantRow()).toHaveTextContent("Saved answer and the rest of it."), HARNESS_WAIT)
+      expect(within(savedAssistantRow()).getByTestId("variant-count-label")).toHaveTextContent("2 of 2")
+    })
+  })
+
+  it("CM-01 explains a refused Continue in plain words and keeps the saved reply", async () => {
+    const view = await renderWithSavedChat()
+    await withUnhandledRejectionsRecorded(async () => {
+      await clickContinue(view)
+      await waitFor(() => expect(visibleNotifications().length).toBeGreaterThan(0), HARNESS_WAIT)
+      const notices = visibleNotifications().join(" ")
+      expect(notices).not.toMatch(/unsupported_history|invalid_history/)
+      expect(notices).toMatch(/continue/i)
+      expect(notices).toContain("original exchange and draft are kept")
+      expect(view.server.chats.get("saved-chat")!.messages.map(row => row.content)).toEqual(["Saved question", "Saved answer"])
+      expect(screen.getByText("Saved answer")).toBeInTheDocument()
+      // The refusal is remembered: Continue is no longer offered on this reply.
+      await waitForChatIdle()
+      expect(screen.queryByText(/New reply unconfirmed|New reply refused/)).toBeNull()
+      await moreActions(view)
+      expect(screen.queryByRole("button", { name: "Continue Response" })).toBeNull()
+      expect(view.server.completionRequests()).toHaveLength(1)
+    })
+  })
+})
+
+describe("saved-reply action availability (CM-01)", { timeout: 60_000 }, () => {
+  beforeEach(async () => { await resetPlaygroundHarness() })
+
+  it("CM-01 keeps the rail Regenerate available on a saved reply that can be regenerated", async () => {
+    const { view } = await renderWithAdmittedExchange()
+    const rail = screen.getByTestId("playground-runtime-inspector")
+    const regenerate = within(rail).getByRole("button", { name: "Regenerate last response", hidden: true })
+    expect(regenerate).toBeEnabled()
+    expect(rail).not.toHaveTextContent(/unavailable for selected history/i)
+    const before = view.server.completionRequests().length
+    view.server.planCompletion({ reply: "Rail alternative" })
+    await view.user.click(regenerate)
+    await waitFor(() => expect(view.server.completionRequests()).toHaveLength(before + 1), HARNESS_WAIT)
+    await waitForChatIdle()
+    expect(view.server.completionRequests().at(-1)!.body).toMatchObject({ metadata: { tldw_regenerate_from_message_id: expect.any(String) } })
+  })
+
+  it("CM-01 disables Regenerate with a plain reason and offers no Continue when the saved reply has no question", async () => {
+    const server = createFakeTldwServer()
+    server.seedChat({ id: "greeting-chat", title: "Greeting only", turns: [{ role: "assistant", content: "Hello from the saved greeting" }] })
+    const view = await renderPlayground({ server, extras: <SidebarServerChatButton chatId="greeting-chat" title="Greeting only" /> })
+    await openSavedServerChat(view, { title: "Greeting only", lastMessage: "Hello from the saved greeting" })
+    const regenerate = within(savedAssistantRow()).getByRole("button", { name: "Regenerate" })
+    expect(regenerate).toBeDisabled()
+    expect(regenerate).toHaveAttribute("title", expect.stringMatching(/can't be regenerated here.*New Branch/))
+    await moreActions(view)
+    expect(screen.queryByRole("button", { name: "Continue Response" })).toBeNull()
+    expect(screen.getByRole("button", { name: "New Branch" })).toBeInTheDocument()
+    const rail = screen.getByTestId("playground-runtime-inspector")
+    expect(within(rail).getByRole("button", { name: "Regenerate last response", hidden: true })).toBeDisabled()
+    expect(rail).toHaveTextContent(/can't be regenerated here/)
+    expect(server.completionRequests()).toHaveLength(0)
   })
 })

@@ -188,7 +188,8 @@ export function useNotesExport(deps: UseNotesExportDeps) {
         offset: String(offset),
         include_keywords: 'true',
         sort_by: 'created_at',
-        sort_order: 'asc'
+        sort_order: 'asc',
+        legacy_aliases: 'false'
       })
       const res = await bgRequest<ExportResponse | ExportNote[]>({
         path: `/api/v1/notes/?${params.toString()}` as `/${string}`,

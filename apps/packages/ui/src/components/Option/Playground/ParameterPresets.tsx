@@ -199,14 +199,12 @@ export const ParameterPresets: React.FC<Props> = ({
     };
   });
 
+  const groupLabel = t("playground:presets.generationStyle", "Generation style");
+
   return (
     <div className={className}>
       <Segmented
-        aria-label={
-          compact
-            ? t("playground:presets.generationStyle", "Generation style")
-            : undefined
-        }
+        aria-label={groupLabel}
         options={options}
         value={currentPreset}
         onChange={handlePresetChange}
