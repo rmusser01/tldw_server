@@ -8,12 +8,17 @@ const scopes = ['packages/ui/src', 'tldw-frontend/pages']
 // Vendored, minified assets; eslint.config.mjs ignores the same directory.
 const vendored = ['packages/ui/src/public']
 const hookRules = ['react-hooks/purity', 'react-hooks/static-components', 'react-hooks/use-memo']
+const sizeRules = ['max-lines', 'max-lines-per-function']
 // An inline disable of these rules must say why ("-- <reason>"): it is a reviewed exception.
-const reasonedRules = [...hookRules, 'no-restricted-imports', 'no-restricted-syntax', 'max-lines', 'max-lines-per-function']
+const reasonedRules = [...hookRules, ...sizeRules, 'no-restricted-imports', 'no-restricted-syntax']
+// The suppressions file may never freeze these: hook errors get fixed, and a frozen file's
+// size ceiling is raised only by a reviewed "bump:" in eslint.config.mjs.
+const unfreezable = [...hookRules, ...sizeRules]
 // Written by `bun run lint:ui --suppress-all` (ESLint 9 bulk suppressions), keyed by
 // file path relative to apps/ and rule id.
 const suppressionsName = 'tldw-frontend/eslint-suppressions.packages-ui.json'
 const pruneHint = 'run `bun run lint:ui --prune-suppressions` from apps/tldw-frontend and commit the file'
+const renameHint = `if you moved or renamed this file, move its entry in ${suppressionsName} (or run \`bun run lint:ui --suppress-all\` and review the diff)`
 const frozenHint =
   'this file is frozen (TASK-13950.10): move code out into a new module instead of growing it, or raise its ceiling in eslint.config.mjs with a "bump: <reason>" comment on that line'
 
@@ -38,7 +43,7 @@ function loadSuppressions(filePath) {
 }
 
 function fixHint({ ruleId, message }) {
-  if (ruleId === 'max-lines' || ruleId === 'max-lines-per-function') return frozenHint
+  if (sizeRules.includes(ruleId)) return frozenHint
   if (message.includes('eslint-disable-next-line')) return undefined // the rule message says it
   return `fix it, or if it must stay, disable that line with "// eslint-disable-next-line ${ruleId} -- <reason>"`
 }
@@ -81,6 +86,7 @@ export async function checkSharedHooks({
   }
   const suppressions = loadSuppressions(suppressionsFile)
   const linted = new Set()
+  const unfrozen = []
   let suppressedCount = 0
   for (const result of await eslint.lintFiles(files)) {
     const key = path.relative(appsRoot, result.filePath).split(path.sep).join('/')
@@ -112,28 +118,38 @@ export async function checkSharedHooks({
       }
     }
     for (const [ruleId, messages] of Object.entries(errors)) {
-      const limit = frozen[ruleId]?.count ?? 0
+      const limit = unfreezable.includes(ruleId) ? 0 : (frozen[ruleId]?.count ?? 0)
       if (messages.length <= limit) {
         suppressedCount += messages.length
         continue
       }
       for (const message of messages) {
-        failures.push({ filePath: result.filePath, ...message, hint: fixHint(message) })
+        const failure = { filePath: result.filePath, ...message, hint: fixHint(message) }
+        if (!suppressions[key]) unfrozen.push(failure)
+        failures.push(failure)
       }
     }
     for (const [ruleId, { count }] of Object.entries(frozen)) {
       const found = errors[ruleId]?.length ?? 0
       if (hookRules.includes(ruleId)) {
         failures.push({ filePath: result.filePath, ruleId, message: `${suppressionsName} must not freeze hook rules; fix the hook error instead` })
+      } else if (unfreezable.includes(ruleId)) {
+        failures.push({ filePath: result.filePath, ruleId, message: `${suppressionsName} must not freeze ${ruleId}: delete this entry; a frozen file's size ceiling is raised only with a "bump: <reason>" comment in eslint.config.mjs` })
       } else if (found < count) {
         failures.push({ filePath: result.filePath, ruleId, message: `Stale suppression: ${found} errors left of ${count} frozen; ${pruneHint}` })
       }
     }
   }
-  for (const key of Object.keys(suppressions)) {
-    if (!linted.has(key)) {
-      failures.push({ filePath: path.join(appsRoot, key), message: `Stale suppression: file is gone or no longer linted; delete its entry from ${suppressionsName}` })
-    }
+  const gone = Object.keys(suppressions).filter((key) => !linted.has(key))
+  for (const key of gone) {
+    failures.push({
+      filePath: path.join(appsRoot, key),
+      message: `Stale suppression: file is gone or no longer linted; ${pruneHint} (prune keeps the entry of a file that still exists but is ignored: delete that one from ${suppressionsName} by hand)`
+    })
+  }
+  // A frozen file that moved shows up as a gone entry plus "new" errors in a file with none.
+  for (const failure of gone.length ? unfrozen : []) {
+    failure.hint = [failure.hint, renameHint].filter(Boolean).join('; ')
   }
   return { fileCount: files.length, failures, suppressedCount }
 }

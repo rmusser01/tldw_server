@@ -114,6 +114,16 @@ describe('shared UI lint and hook enforcement', () => {
       ruleId: 'no-empty',
       hint: expect.stringContaining('eslint-disable-next-line no-empty -- <reason>')
     })
+    expect(result.failures[0].hint).not.toContain('moved or renamed')
+  })
+  it('suggests moving the entry when a frozen file seems to have moved', async () => {
+    const result = await checkSharedHooks(
+      fixture(emptyBlocks(1), '', { 'packages/ui/src/Old.tsx': { 'no-empty': { count: 1 } } })
+    )
+    expect(result.failures.filter((failure) => failure.ruleId === 'no-empty')).toEqual([
+      expect.objectContaining({ hint: expect.stringContaining('if you moved or renamed this file, move its entry') }),
+      expect.objectContaining({ hint: expect.stringContaining('bun run lint:ui --suppress-all') })
+    ])
   })
   it('passes errors frozen by ESLint bulk suppressions', async () => {
     const frozen = { 'no-empty': { count: 2 } }
@@ -137,7 +147,7 @@ describe('shared UI lint and hook enforcement', () => {
     )
     expect(result.failures.map((failure) => failure.message)).toEqual([
       expect.stringMatching(/^Stale suppression: 0 errors left of 1 frozen; run `bun run lint:ui --prune-suppressions`/),
-      expect.stringMatching(/^Stale suppression: file is gone or no longer linted/)
+      expect.stringMatching(/^Stale suppression: file is gone or no longer linted; run `bun run lint:ui --prune-suppressions`/)
     ])
   })
   it('never lets the suppressions file freeze a hook rule', async () => {
@@ -160,8 +170,8 @@ describe('shared UI lint and hook enforcement', () => {
 })
 
 // Seeded violations of the TASK-13950.10 boundary rules, linted with the real configuration.
-async function lintSeeds(seeds: Record<string, string>) {
-  const options = fixture()
+async function lintSeeds(seeds: Record<string, string>, suppressions?: Record<string, Record<string, { count: number }>>) {
+  const options = fixture(valid, '', suppressions)
   for (const [file, source] of Object.entries(seeds)) {
     mkdirSync(path.dirname(path.join(options.appsRoot, file)), { recursive: true })
     writeFileSync(path.join(options.appsRoot, file), source)
@@ -215,6 +225,21 @@ describe('shared UI boundary rules', () => {
       'packages/ui/src/routes/sidepanel-chat.tsx': `export function Big() {\n${body}\n  return v0\n}`
     })
     expect(ruleIds.sort()).toEqual(['max-lines', 'max-lines-per-function'])
+  })
+  it('never lets the suppressions file freeze a chat file size', async () => {
+    const file = 'packages/ui/src/routes/sidepanel-chat.tsx'
+    const body = Array.from({ length: 3600 }, (_, index) => `  const v${index} = ${index}`).join('\n')
+    const options = fixture(valid, '', { [file]: { 'max-lines': { count: 1 }, 'max-lines-per-function': { count: 1 } } })
+    mkdirSync(path.join(options.appsRoot, 'packages/ui/src/routes'))
+    writeFileSync(path.join(options.appsRoot, file), `export function Big() {\n${body}\n  return v0\n}`)
+    const { failures } = await checkSharedHooks(options)
+    const refused = (ruleId: string) => `must not freeze ${ruleId}: delete this entry; a frozen file's size ceiling is raised only with a "bump: <reason>" comment`
+    expect(failures.map((failure) => failure.message)).toEqual([
+      expect.stringMatching(/^Function 'Big' has too many lines \(3603\)/),
+      expect.stringMatching(/^File has too many lines \(3603\)/),
+      expect.stringContaining(refused('max-lines')),
+      expect.stringContaining(refused('max-lines-per-function'))
+    ])
   })
   it('freezes only files that still exist', () => {
     expect(frozenUiFilePaths).toHaveLength(5)
