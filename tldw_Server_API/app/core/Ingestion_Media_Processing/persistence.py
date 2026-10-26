@@ -82,7 +82,7 @@ from tldw_Server_API.app.core.testing import (
     is_test_mode,
 )
 from tldw_Server_API.app.core.Usage import concurrency_quota, quota_checks
-from tldw_Server_API.app.core.Utils.keyword_identity import dedupe_keywords
+from tldw_Server_API.app.core.Utils.keyword_identity import dedupe_keywords, normalize_keyword_identity
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
@@ -3697,13 +3697,13 @@ async def persist_primary_av_item(
     )
     extracted_keywords = metadata_for_db.get("keywords", [])
 
-    combined_keywords = set(getattr(form_data, "keywords", []) or [])
+    combined_keywords = list(getattr(form_data, "keywords", []) or [])
     if isinstance(extracted_keywords, list):
-        combined_keywords.update(
+        combined_keywords.extend(
             k.strip() for k in extracted_keywords if k and isinstance(k, str) and k.strip()
         )
-    # Display casing is kept; case variants collapse to one (TASK-13950.5).
-    final_keywords_list = dedupe_keywords(sorted(combined_keywords))
+    # First-seen display casing wins; case variants collapse to one (TASK-13950.5).
+    final_keywords_list = sorted(dedupe_keywords(combined_keywords), key=normalize_keyword_identity)
 
     # Use original input ref for default title to match previous endpoint behavior.
     default_title = FilePath(str(original_input_ref)).stem if original_input_ref else "Untitled"
@@ -5469,12 +5469,9 @@ async def process_document_like_item(
                                 ]
                         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                             base_keywords = []
-                        merged = dedupe_keywords(
-                            sorted(
-                                set(
-                                    (final_result.get("keywords") or []) + base_keywords + [archive_keyword],
-                                ),
-                            ),
+                        merged = sorted(
+                            dedupe_keywords((final_result.get("keywords") or []) + base_keywords + [archive_keyword]),
+                            key=normalize_keyword_identity,
                         )
                         final_result["keywords"] = merged
                 except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
@@ -5699,9 +5696,9 @@ async def persist_doc_item_and_children(
             final_result["metadata"] = metadata_for_db
 
     extracted_keywords = final_result.get("keywords", [])
-    combined_keywords = set(getattr(form_data, "keywords", None) or [])
+    combined_keywords = list(getattr(form_data, "keywords", None) or [])
     if isinstance(extracted_keywords, list):
-        combined_keywords.update(k.strip() for k in extracted_keywords if isinstance(k, str) and k.strip())
+        combined_keywords.extend(k.strip() for k in extracted_keywords if isinstance(k, str) and k.strip())
 
     try:
         if media_type == "email":
@@ -5712,7 +5709,7 @@ async def persist_doc_item_and_children(
                         child_keywords = child.get("keywords") or []
                         for kw in child_keywords:
                             if isinstance(kw, str) and kw.strip():
-                                combined_keywords.add(kw.strip())
+                                combined_keywords.append(kw.strip())
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
         pass
 
@@ -5728,7 +5725,7 @@ async def persist_doc_item_and_children(
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                 parent_msg_id = None
             if parent_msg_id:
-                combined_keywords.add(f"email_group:{str(parent_msg_id)}")
+                combined_keywords.append(f"email_group:{str(parent_msg_id)}")
         if media_type == "email" and (
             getattr(form_data, "accept_archives", False)
             or getattr(form_data, "accept_mbox", False)
@@ -5740,20 +5737,20 @@ async def persist_doc_item_and_children(
                     lower = str(arch_name).lower()
                     if lower.endswith(".zip"):
                         arch_tag = f"email_archive:{FilePath(arch_name).stem}"
-                        combined_keywords.add(arch_tag)
+                        combined_keywords.append(arch_tag)
                     elif lower.endswith(".mbox"):
                         arch_tag = f"email_mbox:{FilePath(arch_name).stem}"
-                        combined_keywords.add(arch_tag)
+                        combined_keywords.append(arch_tag)
                     elif lower.endswith(".pst") or lower.endswith(".ost"):
                         pst_tag = f"email_pst:{FilePath(arch_name).stem}"
-                        combined_keywords.add(pst_tag)
+                        combined_keywords.append(pst_tag)
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                 pass
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
         pass
 
-    # Display casing is kept; case variants collapse to one (TASK-13950.5).
-    final_keywords_list = dedupe_keywords(sorted(combined_keywords))
+    # First-seen display casing wins; case variants collapse to one (TASK-13950.5).
+    final_keywords_list = sorted(dedupe_keywords(combined_keywords), key=normalize_keyword_identity)
     try:
         final_result["keywords"] = final_keywords_list
         if media_type == "email":

@@ -5,7 +5,11 @@ SQLite. ``PromptKeywordsTable.keyword`` is ``UNIQUE COLLATE NOCASE``, which
 folds ASCII only; lookups fall back to ``normalize_keyword_identity`` so
 "Éclair"/"éclair", "Straße"/"STRASSE" and NFC forms are one keyword. Display
 casing is the first-seen casing. Known limit: non-ASCII duplicates that already
-exist are not merged; lookups resolve them to the earliest row.
+exist are not merged. A lookup takes the NOCASE matches for the requested text and
+its identity first (active, then oldest) and scans the non-ASCII rows only when
+none is active, so the row returned depends on the spelling asked for: with legacy
+"Straße" (id 1) and "STRASSE" (id 2), "strasse" resolves to id 2 and "Straße" to
+id 1. The ``keyword:`` search and export filters use every active match.
 """
 
 from __future__ import annotations

@@ -10,7 +10,11 @@ rows, created after active case-variant duplicates are merged. Neither folds
 the German sharp s, accented capitals (SQLite) or NFC forms, so
 ``KeywordsRepository.find`` falls back to comparing helper identities in Python.
 Known limit: duplicates that only the helper folds (ß/SS, NFC) and that already
-exist are not merged; lookups resolve them to the earliest row.
+exist are not merged. A lookup takes the SQL matches for the requested text and
+its identity first (active, then oldest) and scans the non-ASCII rows only when
+SQL finds no active row, so the row returned depends on the spelling asked for:
+with legacy "Straße" (id 1) and "STRASSE" (id 2) on SQLite, "strasse" resolves to
+id 2 and "Straße" to id 1.
 """
 
 from __future__ import annotations

@@ -720,3 +720,60 @@ async def test_persist_doc_item_and_children_routes_archive_children_through_med
     assert len(_RepoBackedWorkerDB.instances) == 1
     assert _RepoBackedWorkerDB.instances[0].upsert_calls
     assert _RepoBackedWorkerDB.instances[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_persist_primary_av_item_keeps_first_seen_casing_of_extracted_keywords(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    """Extracted keywords keep display casing; case variants store once (TASK-13950.5)."""
+    from tldw_Server_API.app.core.DB_Management.media_db.api import (
+        create_media_database,
+        fetch_keywords_for_media,
+    )
+
+    async def _noop(**_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(ingestion_persistence, "_enforce_chunk_consistency_after_persist", _noop)
+    monkeypatch.setattr(ingestion_persistence, "persist_claims_if_applicable", _noop)
+    db_path = str(tmp_path / "keywords.db")
+    process_result = {
+        "status": "Success",
+        "input_ref": "talk.mp3",
+        "processing_source": "talk.mp3",
+        "metadata": {"keywords": ["machine learning", "Machine Learning", "NLP"]},
+        "content": "hello world.",
+        "transcript": "hello world.",
+        "summary": None,
+        "analysis": None,
+        "analysis_details": {},
+        "warnings": None,
+        "error": None,
+    }
+
+    await ingestion_persistence.persist_primary_av_item(
+        process_result=process_result,
+        form_data=SimpleNamespace(
+            keywords=["Talks"],
+            custom_prompt=None,
+            overwrite_existing=True,
+            transcription_model=None,
+            chunk_consistency_policy="warn",
+        ),
+        media_type="audio",
+        original_input_ref="talk.mp3",
+        chunk_options=None,
+        path_kind="upload",
+        db_path=db_path,
+        client_id="1",
+        loop=asyncio.get_running_loop(),
+        claims_context=None,
+    )
+
+    db = create_media_database("1", db_path=db_path)
+    try:
+        assert fetch_keywords_for_media(db, int(process_result["db_id"])) == ["machine learning", "NLP", "Talks"]
+    finally:
+        db.close_connection()
