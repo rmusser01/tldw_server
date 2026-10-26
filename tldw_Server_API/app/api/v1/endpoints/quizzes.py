@@ -935,6 +935,26 @@ async def generate_quiz(
         ) from e
     except ChatConfigurationError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except ChatAuthenticationError:
+        raise HTTPException(
+            status_code=400,
+            detail="The chat provider rejected its credentials. Check provider settings or ask your server administrator.",
+        ) from None
+    except ChatBadRequestError:
+        raise HTTPException(
+            status_code=400,
+            detail="The chat provider rejected the request. Check the selected provider and model.",
+        ) from None
+    except ChatRateLimitError:
+        raise HTTPException(
+            status_code=429,
+            detail="The chat provider is rate limited. Try again shortly.",
+        ) from None
+    except ChatAPIError:
+        raise HTTPException(
+            status_code=502,
+            detail="The chat provider could not generate the quiz. Try again shortly.",
+        ) from None
     except (InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to generate quiz") from exc
     except ValueError as e:
