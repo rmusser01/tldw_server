@@ -1,6 +1,7 @@
-"""Merge-queue contract of frontend-required.yml (spec sections 4.6, 4.8 and 4.9).
+"""Contract of frontend-required.yml that backend-required enforces.
 
-Spec: Docs/superpowers/specs/2026-10-04-merge-queue-design.md
+Merge-queue sections 4.6, 4.8 and 4.9 (spec: Docs/superpowers/specs/2026-10-04-merge-queue-design.md),
+and the shared UI ratchets of TASK-13950.10, which must keep running in the gate.
 """
 
 from __future__ import annotations
@@ -167,3 +168,25 @@ def test_queue_tick_holds_only_actions_write_checks_nothing_out_and_nothing_wait
     assert jobs[TICK]["permissions"] == {"actions": "write"}
     assert not any("uses" in step for step in jobs[TICK]["steps"])
     assert all(TICK not in _needs(job) for job in jobs.values())
+
+
+# --- TASK-13950.10: the shared UI ratchets stay in the gate -----------------------------------
+
+SHARED_UI_RATCHETS = {
+    "Run shared UI lint and hook enforcement": "bun scripts/check-shared-hooks.mjs",
+}
+
+
+@pytest.mark.parametrize(("name", "command"), SHARED_UI_RATCHETS.items())
+def test_gate_runs_the_shared_ui_ratchets(name: str, command: str):
+    """packages/ui has no lint of its own: these steps are the only thing enforcing its ratchets."""
+    steps = _jobs()[GATE]["steps"]
+    names = [step.get("name") for step in steps]
+    assert names.count(name) == 1, f"frontend-required must run {name!r}"
+    step = steps[names.index(name)]
+    lint = steps[names.index("Run frontend lint")]
+    assert step["run"] == command
+    assert step["working-directory"] == "apps/tldw-frontend"
+    assert step["if"] == lint["if"], "runs whenever the WebUI lint does"
+    assert "continue-on-error" not in step
+    assert names.index("Install frontend dependencies") < names.index(name)

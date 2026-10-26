@@ -1,0 +1,289 @@
+{
+  "packages/ui/src/ambient.d.ts": {
+    "no-redeclare": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Agent/TerminalOutput.tsx": {
+    "no-control-regex": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Common/Playground/MessageSource.tsx": {
+    "@typescript-eslint/no-unused-expressions": {
+      "count": 3
+    }
+  },
+  "packages/ui/src/components/Common/Playground/message-types.ts": {
+    "@typescript-eslint/no-empty-object-type": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Common/SplashScreen/effects/gaming/LevelUp.ts": {
+    "no-case-declarations": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Common/__tests__/TutorialPrompt.behavior.test.tsx": {
+    "react-hooks/globals": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Icons/AliBaBaCloud.tsx": {
+    "react/no-unknown-property": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/Icons/TencentCloud.tsx": {
+    "react/no-unknown-property": {
+      "count": 3
+    }
+  },
+  "packages/ui/src/components/Knowledge/QASearchTab/SourceChunksList.tsx": {
+    "react-hooks/rules-of-hooks": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/Characters/__tests__/CharacterExpressionImagesSection.test.tsx": {
+    "@typescript-eslint/no-this-alias": {
+      "count": 1
+    },
+    "react-hooks/globals": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/DataTables/GenerationPanel.tsx": {
+    "react-hooks/rules-of-hooks": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/Evaluations/tabs/__tests__/RecipesTab.launch.test.tsx": {
+    "@typescript-eslint/no-require-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/Evaluations/tabs/recipe-configs/RagRetrievalTuningConfig.tsx": {
+    "no-extra-boolean-cast": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.answer-length.test.tsx": {
+    "react-hooks/globals": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.branch-share.test.tsx": {
+    "react-hooks/globals": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.focus-lifecycle.test.tsx": {
+    "react-hooks/globals": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.query-debounce.test.tsx": {
+    "react-hooks/globals": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/PresentationStudio/PresentationStudioIndex.tsx": {
+    "@typescript-eslint/no-unused-expressions": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/PresentationStudio/__tests__/StandaloneHtmlSourceEditor.test.tsx": {
+    "react-hooks/globals": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/PresentationStudio/standalone-html-outline-client.ts": {
+    "no-control-regex": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/PresentationStudio/standalone-html-outline.worker.ts": {
+    "no-control-regex": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/Prompt/PromptListTable.tsx": {
+    "react-hooks/rules-of-hooks": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/Prompt/__tests__/StudioTabContainer.stage6-navigation.test.tsx": {
+    "@typescript-eslint/no-this-alias": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/ResearchWorkspace/StudioPane/hooks/useQuizParsing.tsx": {
+    "@typescript-eslint/no-empty-object-type": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/Settings/FamilyGuardrailsWizard.tsx": {
+    "no-case-declarations": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/Watchlists/ItemsTab/ItemsTab.tsx": {
+    "no-extra-boolean-cast": {
+      "count": 1
+    },
+    "no-unsafe-finally": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/Option/Watchlists/TemplatesTab/TemplateCodeEditor.tsx": {
+    "no-import-assign": {
+      "count": 1
+    },
+    "no-redeclare": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/WorldBooks/Manager.tsx": {
+    "@typescript-eslint/no-non-null-asserted-optional-chain": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/WritingPlayground/hooks/useWritingInspectorPanels.ts": {
+    "no-unsafe-finally": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/Review/__tests__/MediaReviewPage.stage1.selectionLimit.test.tsx": {
+    "@typescript-eslint/no-require-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Review/__tests__/MediaReviewPage.stage3.search-filter-sort.test.tsx": {
+    "@typescript-eslint/no-require-imports": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/Review/__tests__/MediaReviewPage.stage4.stack-virtualization.test.tsx": {
+    "@typescript-eslint/no-require-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Review/__tests__/MediaReviewPage.stage5.export-trash-handoff.test.tsx": {
+    "@typescript-eslint/no-require-imports": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/Review/__tests__/MediaReviewPage.stage6.focus-recovery.test.tsx": {
+    "@typescript-eslint/no-require-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Review/__tests__/MediaReviewPage.stage6.keyboard-scope.test.tsx": {
+    "@typescript-eslint/no-require-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Review/__tests__/MediaReviewPage.stage6.mobile-parity.test.tsx": {
+    "@typescript-eslint/no-require-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Review/__tests__/MediaReviewPage.stage6.touch-status-a11y.test.tsx": {
+    "@typescript-eslint/no-require-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Review/__tests__/MediaReviewPage.stage7.three-panel.test.tsx": {
+    "@typescript-eslint/no-require-imports": {
+      "count": 3
+    }
+  },
+  "packages/ui/src/components/Sidepanel/Chat/ToolCallBlock.tsx": {
+    "no-case-declarations": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/context/index.tsx": {
+    "no-redeclare": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/__tests__/useServerDictation.source.test.tsx": {
+    "react-hooks/rules-of-hooks": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/__tests__/useSpeechRecognition.test.tsx": {
+    "@typescript-eslint/no-this-alias": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/chat-modes/__tests__/chatModePipeline.history-admission.test.ts": {
+    "require-yield": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/chat/__tests__/useCharacterChatMode.watchdog.test.ts": {
+    "require-yield": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/chat/useMessageOperations.ts": {
+    "no-extra-boolean-cast": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/document-workspace/__tests__/useDocumentTTS.test.tsx": {
+    "@typescript-eslint/no-this-alias": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/models/__tests__/ChatTldw.stream-metadata.test.ts": {
+    "no-empty": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/routes/hooks/usePersonaStateDocs.ts": {
+    "react-hooks/rules-of-hooks": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/routes/sidepanel-agent.tsx": {
+    "no-case-declarations": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/services/__tests__/notifications.test.ts": {
+    "require-yield": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/services/__tests__/tldw-chat.message-sanitization.test.ts": {
+    "no-empty": {
+      "count": 1
+    },
+    "require-yield": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/services/response-envelope.ts": {
+    "no-redeclare": {
+      "count": 9
+    }
+  },
+  "packages/ui/src/services/structured-prompt-transport.ts": {
+    "no-control-regex": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/utils/marked/katex.tsx": {
+    "@typescript-eslint/no-unsafe-function-type": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/utils/tts.ts": {
+    "no-control-regex": {
+      "count": 2
+    }
+  }
+}

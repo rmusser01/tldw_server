@@ -10,12 +10,23 @@ const roots: string[] = []
 const realConfig = path.resolve('eslint.config.mjs')
 const valid = 'export default function Example() { return <div>Ready</div> }'
 
-function fixture(source = valid, override = '') {
+const scopeFiles = ['packages/ui/src/Example.tsx', 'tldw-frontend/pages/Example.tsx']
+// One `no-empty` error per block; the real config makes it an error.
+const emptyBlocks = (count: number) =>
+  `export default function Example({ value }) { ${'if (value) {} '.repeat(count)}return <div /> }`
+
+function fixture(source = valid, override = '', suppressions?: Record<string, Record<string, { count: number }>>) {
   const appsRoot = mkdtempSync(path.join(tmpdir(), 'shared-hooks-'))
   roots.push(appsRoot)
-  for (const scope of ['packages/ui/src', 'tldw-frontend/pages']) {
-    mkdirSync(path.join(appsRoot, scope), { recursive: true })
-    writeFileSync(path.join(appsRoot, scope, 'Example.tsx'), source)
+  for (const file of scopeFiles) {
+    mkdirSync(path.dirname(path.join(appsRoot, file)), { recursive: true })
+    writeFileSync(path.join(appsRoot, file), source)
+  }
+  if (suppressions) {
+    writeFileSync(
+      path.join(appsRoot, 'tldw-frontend/eslint-suppressions.packages-ui.json'),
+      JSON.stringify(suppressions)
+    )
   }
   const configFile = path.join(appsRoot, 'eslint.config.mjs')
   writeFileSync(
@@ -29,7 +40,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
-describe('shared hook enforcement', () => {
+describe('shared UI lint and hook enforcement', () => {
   it('leaves nonfatal unrelated unused-disable warnings to full lint', async () => {
     const result = await checkSharedHooks(
       fixture(`// eslint-disable-next-line no-console\n${valid}`)
@@ -95,11 +106,54 @@ describe('shared hook enforcement', () => {
     rmSync(path.join(options.appsRoot, 'packages/ui/src/Example.tsx'))
     await expect(checkSharedHooks(options)).rejects.toThrow('No source files')
   })
-  it('leaves unrelated rules to the existing full lint gate', async () => {
+  it('rejects any other rule error that the suppressions file does not freeze', async () => {
+    const result = await checkSharedHooks(fixture(emptyBlocks(1)))
+    expect(result.failures).toHaveLength(2)
+    expect(result.failures[0]).toMatchObject({
+      ruleId: 'no-empty',
+      hint: expect.stringContaining('eslint-disable-next-line no-empty -- <reason>')
+    })
+  })
+  it('passes errors frozen by ESLint bulk suppressions', async () => {
+    const frozen = { 'no-empty': { count: 2 } }
     const result = await checkSharedHooks(
-      fixture('export default function Example() { 1; return <div /> }')
+      fixture(emptyBlocks(2), '', Object.fromEntries(scopeFiles.map((file) => [file, frozen])))
     )
-    expect(result.failures).toEqual([])
-    expect(result.otherErrorCount).toBeGreaterThan(0)
+    expect(result).toMatchObject({ failures: [], suppressedCount: 4 })
+  })
+  it('rejects every error of a rule whose frozen count grew', async () => {
+    const result = await checkSharedHooks(
+      fixture(emptyBlocks(2), '', { [scopeFiles[0]]: { 'no-empty': { count: 1 } } })
+    )
+    expect(result.failures.filter((failure) => failure.ruleId === 'no-empty')).toHaveLength(4)
+  })
+  it('rejects stale suppressions for fixed errors and for files no longer linted', async () => {
+    const result = await checkSharedHooks(
+      fixture(valid, '', {
+        [scopeFiles[0]]: { 'no-empty': { count: 1 } },
+        'packages/ui/src/Removed.tsx': { 'no-empty': { count: 1 } }
+      })
+    )
+    expect(result.failures.map((failure) => failure.message)).toEqual([
+      expect.stringMatching(/^Stale suppression: 0 errors left of 1 frozen; run `bun run lint:ui --prune-suppressions`/),
+      expect.stringMatching(/^Stale suppression: file is gone or no longer linted/)
+    ])
+  })
+  it('never lets the suppressions file freeze a hook rule', async () => {
+    const result = await checkSharedHooks(
+      fixture('export default function Example() { return <div>{Date.now()}</div> }', '', {
+        [scopeFiles[0]]: { 'react-hooks/purity': { count: 1 } }
+      })
+    )
+    expect(result.failures.map((failure) => failure.message)).toEqual(
+      expect.arrayContaining([expect.stringContaining('must not freeze hook rules')])
+    )
+    expect(result.failures.filter((failure) => failure.ruleId === 'react-hooks/purity')).toHaveLength(3)
+  })
+  it('skips the vendored public assets that the real configuration ignores', async () => {
+    const options = fixture()
+    mkdirSync(path.join(options.appsRoot, 'packages/ui/src/public'))
+    writeFileSync(path.join(options.appsRoot, 'packages/ui/src/public/vendor.min.js'), 'var x = ; if (')
+    expect(await checkSharedHooks(options)).toMatchObject({ fileCount: 2, failures: [] })
   })
 })

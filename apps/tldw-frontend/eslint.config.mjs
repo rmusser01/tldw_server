@@ -18,6 +18,12 @@ const tsRules = tsPlugin.configs.recommended?.rules ?? {}
 const codeFiles = ["**/*.{js,jsx,ts,tsx,mjs,cjs}"]
 const cjsFiles = ["**/*.cjs"]
 const tsFiles = ["**/*.{ts,tsx}"]
+// packages/ui has no eslint of its own (eslint and these plugins do not resolve from
+// there), so scripts/check-shared-hooks.mjs lints it with this config from apps/.
+// Globs that name packages/ui are therefore relative to apps/; `bun run lint` here
+// never reaches them.
+const ui = "packages/ui/src"
+const nextRulesOff = Object.fromEntries(Object.keys(nextRules).map((rule) => [rule, "off"]))
 const configFiles = [
   "**/*.config.js",
   "**/*.config.cjs",
@@ -30,7 +36,9 @@ export default [
     ignores: [
       ".next/**",
       "node_modules/**",
-      "public/**"
+      "public/**",
+      // Vendored, minified assets (pdf.worker.min.mjs, theme-bootstrap.js).
+      `${ui}/public/**`
     ]
   },
   {
@@ -111,6 +119,11 @@ export default [
     languageOptions: {
       parserOptions: { sourceType: "script" }
     }
+  },
+  {
+    // Shared UI is not a Next.js app; it also ships in the browser extension.
+    files: [`${ui}/**`],
+    rules: nextRulesOff
   },
   {
     files: ["e2e/**/*.ts"],

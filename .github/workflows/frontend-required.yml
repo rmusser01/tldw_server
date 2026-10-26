@@ -808,7 +808,10 @@ jobs:
         working-directory: apps/tldw-frontend
         run: bun run typecheck --incremental false
 
-      - name: Run shared UI hook enforcement
+      # Full ESLint rule set on packages/ui (which has no eslint of its own) plus the three
+      # hook rules; pre-existing errors are frozen in eslint-suppressions.packages-ui.json
+      # (TASK-13950.10). backend-required's contract tests fail if this step stops running.
+      - name: Run shared UI lint and hook enforcement
         if: needs.changes.outputs.tldw_frontend_changed == 'true'
         working-directory: apps/tldw-frontend
         run: bun scripts/check-shared-hooks.mjs
