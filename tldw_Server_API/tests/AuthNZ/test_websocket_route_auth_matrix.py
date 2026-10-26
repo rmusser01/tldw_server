@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import hmac
 import json
 import time
 from collections.abc import Iterator, Mapping
@@ -116,7 +118,7 @@ def _with_query(url: str, name: str, value: str) -> str:
     return f"{url}{'&' if '?' in url else '?'}{name}={value}"
 
 
-async def _seed_user_and_tokens() -> tuple[int, str, str, str, str]:
+async def _seed_user_and_tokens() -> tuple[int, str, str, str, str, int, str]:
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager, reset_api_key_manager
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
@@ -143,11 +145,14 @@ async def _seed_user_and_tokens() -> tuple[int, str, str, str, str]:
     api_keys = await get_api_key_manager()
     api_key = (await api_keys.create_api_key(user_id=user_id, name="ws-matrix", scope="read"))["key"]
     write_key = (await api_keys.create_api_key(user_id=user_id, name="ws-matrix-write", scope="write"))["key"]
+    # A second real user, for cross-user ownership checks.
+    other_id = await create_authnz_test_user(pool, username="ws-matrix-other", email="ws-matrix-other@example.com")
+    other_valid = jwt_service.create_access_token(user_id=other_id, username="ws-matrix-other", role="user")
     # The TestClient runs the app on its own loop, which opens its own pool.
     await reset_api_key_manager()
     await reset_token_blacklist()
     await reset_db_pool()
-    return user_id, valid, revoked, api_key, write_key
+    return user_id, valid, revoked, api_key, write_key, other_id, other_valid
 
 
 def _seed_watchlists_runs(user_id: int) -> None:
@@ -205,7 +210,7 @@ def full_app(tmp_path_factory: pytest.TempPathFactory) -> Iterator[SimpleNamespa
         patch.setenv("MINIMAL_TEST_APP", "0")
         patch.setenv("MINIMAL_TEST_INCLUDE_AUDIO", "1")
         _reset_auth_singletons()
-        user_id, valid, revoked, api_key, write_key = asyncio.run(_seed_user_and_tokens())
+        user_id, valid, revoked, api_key, write_key, other_id, other_valid = asyncio.run(_seed_user_and_tokens())
         config._route_toggle_policy.cache_clear()
         app = reload_app_main().app
         _seed_watchlists_runs(user_id)
@@ -221,6 +226,8 @@ def full_app(tmp_path_factory: pytest.TempPathFactory) -> Iterator[SimpleNamespa
             revoked=revoked,
             api_key=api_key,
             write_key=write_key,
+            other_id=other_id,
+            other_valid=other_valid,
             workflows_db=workflows_db,
         )
     finally:
@@ -599,13 +606,17 @@ def test_retired_channels_are_refused(env: SimpleNamespace, route: str) -> None:
 
 @pytest.mark.parametrize("route", SHIM_ACCEPTING)
 def test_header_credentials_need_no_shim(env: SimpleNamespace, route: str) -> None:
-    """The resolver's own channels: no deprecation warning, and the bearer marker is echoed."""
+    """The resolver's own channels: no deprecation warning, and the bearer marker is echoed. A header
+    credential wins over the query (watchlists used to verify ``?token=`` first), so a revoked
+    query token beside a valid header is never read."""
     key = env.write_key if SHIM_ACCEPTING[route] == "write" else env.api_key
     url = ROUTES[route][0]
     with _warnings() as warned:
         assert _accepted_subprotocol(env.client, url, subprotocols=["bearer", env.valid]) == "bearer"
         assert _accepted_subprotocol(env.client, url, subprotocols=["bearer", key]) == "bearer"  # key as bearer
         assert _accepted_subprotocol(env.client, url, headers={"X-API-KEY": key}) is None
+        revoked_query = _with_query(url, "token", env.revoked)
+        assert _accepted_subprotocol(env.client, revoked_query, headers={"Authorization": f"Bearer {env.valid}"}) is None
     assert _deprecations(warned) == []
 
 
@@ -703,3 +714,58 @@ def test_browser_bearer_subprotocol_and_single_user_key(
     _single_user(monkeypatch)
     assert _accepted_subprotocol(env.client, url, headers={"X-API-KEY": SINGLE_USER_KEY}) is None
     assert _accepted_subprotocol(env.client, url, subprotocols=["bearer", SINGLE_USER_KEY]) == "bearer"
+
+
+def _track_sandbox_run(owner_id: int) -> str:
+    """A run the sandbox store records as ``owner_id``'s, as ``POST /sandbox/runs`` leaves it.
+
+    Only a tracked run is owner-checked: in test mode an untracked one is streamed to anyone.
+    """
+    from tldw_Server_API.app.api.v1.endpoints import sandbox as sandbox_ep
+    from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunStatus
+
+    run_id = f"ws-matrix-owned-by-{owner_id}"
+    sandbox_ep._service._orch._store.put_run(owner_id, RunStatus(id=run_id, phase=RunPhase.completed))
+    return run_id
+
+
+@pytest.mark.parametrize("signed_url", [False, True], ids=["unsigned", "signed"])
+def test_sandbox_stream_refuses_another_users_run(
+    env: SimpleNamespace, signed_url: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A valid credential is not enough: the run must be the caller's. A signed URL names the run,
+    not the user, so a leaked one plus anyone's credential still meets the owner check (4404)."""
+    run_id = _track_sandbox_run(env.user_id)
+    url = f"/api/v1/sandbox/runs/{run_id}/stream"
+    if signed_url:
+        secret, exp = "ws-matrix-signing-secret", int(time.time()) + 300
+        monkeypatch.setenv("SANDBOX_WS_SIGNED_URLS", "true")
+        monkeypatch.setenv("SANDBOX_WS_SIGNING_SECRET", secret)
+        signature = hmac.new(secret.encode(), f"{run_id}:{exp}".encode(), hashlib.sha256).hexdigest()
+        url = f"{url}?token={signature}&exp={exp}"
+    else:
+        monkeypatch.setenv("SANDBOX_WS_SIGNED_URLS", "false")
+
+    assert _outcome(env.client, url, headers={"Authorization": f"Bearer {env.other_valid}"}) == "close 4404"
+    assert _outcome(env.client, url, headers={"Authorization": f"Bearer {env.valid}"}) == "accepted"
+
+
+@pytest.mark.parametrize("channel", ["X-API-KEY", "bearer subprotocol"])
+def test_sandbox_single_user_key_keeps_the_ip_allowlist(
+    env: SimpleNamespace, channel: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The old sandbox resolver checked SINGLE_USER_ALLOWED_IPS itself; the HTTP verifier now does,
+    from the socket's peer."""
+    _single_user(monkeypatch, SINGLE_USER_ALLOWED_IPS="10.1.2.3")
+    if channel == "X-API-KEY":
+        request: dict[str, object] = {"headers": {"X-API-KEY": SINGLE_USER_KEY}}
+    else:
+        request = {"subprotocols": ["bearer", SINGLE_USER_KEY]}
+    url = ROUTES[SANDBOX][0]
+    outside, inside = TestClient(env.app, client=("10.9.9.9", 50000)), TestClient(env.app, client=("10.1.2.3", 50000))
+    try:
+        assert _outcome(outside, url, **request) == "close 4401"  # type: ignore[arg-type]
+        assert _outcome(inside, url, **request) == "accepted"  # type: ignore[arg-type]
+    finally:
+        outside.close()
+        inside.close()
