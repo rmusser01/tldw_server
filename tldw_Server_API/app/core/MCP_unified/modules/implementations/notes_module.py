@@ -1932,9 +1932,15 @@ class NotesModule(BaseModule):
             norm_tags = self._normalize_tags(tags)
             coordinator = active_coordinator(db, user_id=getattr(context, "user_id", None))
             if coordinator is not None:
+                # Tags keep display casing, so the create key hashes their identities: a retry
+                # whose tags differ only in case resolves to the same note.
                 key = coordinator.request_fingerprint(
                     "mcp.note.create",
-                    {"title": title, "content": content, "tags": norm_tags},
+                    {
+                        "title": title,
+                        "content": content,
+                        "tags": sorted(normalize_keyword_identity(tag) for tag in norm_tags),
+                    },
                 )
                 note_id = stable_note_id("mcp-notes", key)
                 capture_note_upsert(
@@ -1945,6 +1951,7 @@ class NotesModule(BaseModule):
                     keywords=norm_tags,
                     source="mcp-notes",
                     key=key,
+                    request_fingerprint=key,
                 )
             else:
                 note_id = db.add_note(title=title, content=content)
