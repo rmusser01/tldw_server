@@ -106,10 +106,6 @@ ALLOWLIST: dict[str, str] = {
         "migrate: fetches user-supplied URLs. It re-checks the web outbound policy on every redirect "
         "hop but connects through a raw httpx.AsyncClient that honours env proxies; use astream_bytes."
     ),
-    "tldw_Server_API/app/core/TTS/adapters/audio_cpp_client.py": (
-        "migrate: audiocpp_server client. Loopback by default, but allow_remote_base_url sends to any "
-        "host through a raw httpx.AsyncClient with no egress policy; use create_async_client/afetch."
-    ),
     "tldw_Server_API/app/core/Workflows/adapters/integration/github.py": (
         "migrate: creates GitHub issues via POST https://api.github.com with a raw httpx.AsyncClient "
         "that honours env proxies; use apost/afetch."

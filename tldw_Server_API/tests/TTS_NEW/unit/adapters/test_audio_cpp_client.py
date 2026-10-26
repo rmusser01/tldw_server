@@ -4,8 +4,15 @@ import json
 import httpx
 import pytest
 
+from tldw_Server_API.app.core.http_client import create_async_client
+from tldw_Server_API.app.core.TTS.adapters import audio_cpp_client as audio_cpp_client_module
 from tldw_Server_API.app.core.TTS.adapters.audio_cpp_client import AudioCppClient
-from tldw_Server_API.app.core.TTS.tts_exceptions import TTSNetworkError, TTSProviderError
+from tldw_Server_API.app.core.TTS.tts_exceptions import (
+    TTSConfigurationError,
+    TTSNetworkError,
+    TTSProviderError,
+    TTSTimeoutError,
+)
 
 WAV_BYTES = b"RIFF\x24\x00\x00\x00WAVEfmt "
 
@@ -127,4 +134,118 @@ async def test_health_rejects_missing_or_unrecognized_status(body):
     ) as http_client:
         client = AudioCppClient(base_url="http://127.0.0.1:8080", http_client=http_client)
         with pytest.raises(TTSProviderError, match="health"):
+            await client.health()
+
+
+# --- Egress (TASK-13950.11): requests go through core.http_client.afetch ---------------------
+
+
+@pytest.fixture
+def egress_policy(monkeypatch):
+    """Production egress policy: private and loopback addresses refused unless scoped.
+
+    A refused request is proven by the MockTransport's record of requests; httpx connects
+    through anyio, so no socket patch would catch a real send.
+    """
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+
+
+def _recording_client(seen: list[httpx.Request], respond):
+    """A core.http_client client whose socket layer is an httpx.MockTransport."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return respond(request)
+
+    return create_async_client(transport=httpx.MockTransport(handler))
+
+
+def _healthy(_request: httpx.Request) -> httpx.Response:
+    return httpx.Response(200, json={"status": "ok"})
+
+
+@pytest.mark.unit
+async def test_owned_client_reaches_the_configured_loopback_server_with_the_same_request(
+    monkeypatch, egress_policy
+):
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, content=WAV_BYTES, headers={"content-type": "audio/wav"})
+
+    def factory(**kwargs):
+        return create_async_client(transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(audio_cpp_client_module, "create_async_client", factory)
+    client = AudioCppClient(base_url="http://127.0.0.1:8080", timeout=12.5)
+    try:
+        result = await client.speech({"model": "pocket-tts", "input": "hello"})
+    finally:
+        await client.close()
+
+    assert result.audio_bytes == WAV_BYTES
+    [request] = seen
+    assert (request.method, str(request.url)) == ("POST", "http://127.0.0.1:8080/v1/audio/speech")
+    assert request.headers["host"] == "127.0.0.1:8080"
+    assert request.headers["content-type"] == "application/json"
+    payload = {"model": "pocket-tts", "input": "hello"}
+    assert request.content == httpx.Request("POST", str(request.url), json=payload).content
+    assert request.extensions["timeout"] == {"connect": 12.5, "read": 12.5, "write": 12.5, "pool": 12.5}
+
+
+@pytest.mark.unit
+async def test_remote_base_url_on_a_private_address_is_refused_before_sending(egress_policy):
+    seen: list[httpx.Request] = []
+    async with _recording_client(seen, _healthy) as http_client:
+        client = AudioCppClient(
+            base_url="http://10.0.0.5:8080",
+            http_client=http_client,
+            allow_remote_base_url=True,
+        )
+        with pytest.raises(TTSConfigurationError) as error:
+            await client.health()
+
+    assert error.value.error_code == "EGRESS_DENIED"
+    assert seen == []
+
+
+@pytest.mark.unit
+async def test_remote_base_url_on_a_public_address_keeps_working(egress_policy):
+    seen: list[httpx.Request] = []
+    async with _recording_client(seen, _healthy) as http_client:
+        client = AudioCppClient(
+            base_url="http://93.184.216.34:8080",
+            http_client=http_client,
+            allow_remote_base_url=True,
+        )
+        assert await client.health() == {"status": "ok"}
+
+    assert [str(request.url) for request in seen] == ["http://93.184.216.34:8080/health"]
+
+
+@pytest.mark.unit
+async def test_redirect_to_another_private_address_is_not_followed(egress_policy):
+    seen: list[httpx.Request] = []
+
+    def redirect(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(302, headers={"location": "http://10.0.0.9:8080/health"})
+
+    async with _recording_client(seen, redirect) as http_client:
+        client = AudioCppClient(base_url="http://127.0.0.1:8080", http_client=http_client)
+        with pytest.raises(TTSProviderError) as error:
+            await client.health()
+
+    assert error.value.error_code == "HTTP_302"
+    assert [request.url.host for request in seen] == ["127.0.0.1"]
+
+
+@pytest.mark.unit
+async def test_transport_timeout_maps_to_tts_timeout_error(egress_policy):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("slow", request=request)
+
+    async with create_async_client(transport=httpx.MockTransport(handler)) as http_client:
+        client = AudioCppClient(base_url="http://127.0.0.1:8080", http_client=http_client)
+        with pytest.raises(TTSTimeoutError):
             await client.health()
