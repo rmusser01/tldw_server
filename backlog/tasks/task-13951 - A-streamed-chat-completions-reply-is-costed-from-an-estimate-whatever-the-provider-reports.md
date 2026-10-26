@@ -2,7 +2,7 @@
 id: TASK-13951
 title: A streamed /chat/completions reply is costed from an estimate whatever the
   provider reports
-status: To Do
+status: In Progress
 labels:
 - quotas
 - backend
@@ -23,6 +23,7 @@ Found by TASK-13936. chat_service records a streamed /chat/completions reply aft
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Plan: Docs/superpowers/plans/2026-10-26-stream-usage.md (owner-approved). ADR assessment: no new ADR; ADR-067's stream consequence is updated (the OpenAI adapter asks for a usage chunk; the chat pipeline shares the recorder's parser); ADR-075 governs Anthropic-shaped prompt tokens; ADR-059 the backlog tool.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
