@@ -201,7 +201,7 @@
       "count": 1
     },
     "no-restricted-syntax": {
-      "count": 23
+      "count": 25
     }
   },
   "packages/ui/src/components/Notes/hooks/useNotesWikilinkRename.tsx": {

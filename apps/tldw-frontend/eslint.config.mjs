@@ -105,15 +105,15 @@ const uiFolderRules = (folder, boundaries) => ({
   ]
 })
 
-// Frozen chat monoliths (AC#4). Ceilings in code lines, measured on dev 39093fc827:
+// Frozen chat monoliths (AC#4). Ceilings in code lines, measured on dev 2c60650739:
 // [file, function]. Shrinking needs no edit. Raising one is a reviewed exception: change
 // the number and add a "bump: <reason>" comment on that line.
 const frozenUiFiles = {
-  "components/Option/Playground/PlaygroundForm.tsx": [7552, 7067],
-  "components/Sidepanel/Chat/form.tsx": [4829, 4601],
-  "hooks/chat/useChatActions.ts": [5820, 5297],
+  "components/Option/Playground/PlaygroundForm.tsx": [7568, 7079], // bump: #3298 wave 3 growth (2c60650739)
+  "components/Sidepanel/Chat/form.tsx": [4851, 4616], // bump: #3298 wave 3 growth (2c60650739)
+  "hooks/chat/useChatActions.ts": [5833, 5309], // bump: #3298 wave 3 growth (2c60650739)
   "hooks/useMessage.tsx": [4012, 3848],
-  "routes/sidepanel-chat.tsx": [3274, 2774]
+  "routes/sidepanel-chat.tsx": [3293, 2782] // bump: #3298 wave 3 growth (2c60650739)
 }
 export const frozenUiFilePaths = Object.keys(frozenUiFiles).map((file) => `${ui}/${file}`)
 

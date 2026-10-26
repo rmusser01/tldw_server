@@ -21,11 +21,23 @@ const localSpecifier = /^(?:\.\.?|[@~])(?:\/|$)/
 export const BASELINE = [
   ['components/Review/ViewMediaPage.tsx', 'components/Review/hooks/useMediaNavigationState.ts'],
   ['db/dexie/helpers.ts', 'db/dexie/server-chat-mirror.ts'],
+  // bump: #3298 wave 3 chat-model-outcome (2c60650739). TldwApiClient -> chat-model-outcome ->
+  // utils/chat-model-readiness -> utils/chat-model-id -> utils/resolve-api-provider ->
+  // services/tldw (index) -> TldwApiClient; every edge is a value import, so `import type`
+  // cannot cut it.
   [
     'services/tldw/TldwApiClient.ts',
     'services/tldw/TldwAuth.ts',
+    'services/tldw/TldwChat.ts',
+    'services/tldw/TldwModels.ts',
     'services/tldw/auth-fetch.ts',
-    'services/tldw/domains/prototype-workspaces.ts'
+    'services/tldw/chat-model-outcome.ts',
+    'services/tldw/domains/chat-rag.ts',
+    'services/tldw/domains/prototype-workspaces.ts',
+    'services/tldw/index.ts',
+    'utils/chat-model-id.ts',
+    'utils/chat-model-readiness.ts',
+    'utils/resolve-api-provider.ts'
   ],
   [
     'store/workspace-slices/sources-slice.ts',
