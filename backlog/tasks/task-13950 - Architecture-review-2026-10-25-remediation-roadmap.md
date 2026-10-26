@@ -17,7 +17,7 @@ Root causes: (1) the 16 lint ratchets cap imports and SQL but never size, so god
 
 Owner decisions (2026-10-25): moderation applies to every LLM surface but is optional and policy-configured; keywords and tags are case-insensitive in every store; Scheduler folds into Jobs (TASK-13950.48; the owner corrected on 2026-10-25 that no fold work was in progress); admin consoles consolidate onto tldw-admin (/admin-ui); the mlx /chat/completions rejection is a confirmed bug.
 
-Review and dry run (2026-10-25): Moderation decision as applied in .27: global [Moderation] enabled = False disables the default policy on every surface, while explicit per-user overrides and Guardian supervised-account overlays still enable it, as they do today. Subtasks carry the parent in their description because backlog-py cannot set parent_task_id.
+Review and dry run (2026-10-25): Moderation decision as applied in .27: global [Moderation] enabled = False disables the default policy on every surface, while explicit per-user overrides and Guardian supervised-account overlays still enable it, as they do today. Subtasks carry the parent in their description because backlog-py cannot set parent_task_id. Follow-ups found during execution are filed as .49 onward.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -27,6 +27,7 @@ Review and dry run (2026-10-25): Moderation decision as applied in .27: global [
 - [ ] #3 Phase 2 (injection seams) subtasks .18-.21 are Done
 - [ ] #4 Phase 3 (hotspot decomposition) subtasks .22-.30 are Done
 - [ ] #5 Phase 4 (consolidation) subtasks .31-.48 are Done or explicitly descoped with a recorded reason
+- [ ] #6 Follow-up subtasks filed during execution (.49 onward) are Done or explicitly descoped with a recorded reason
 <!-- AC:END -->
 
 ## Implementation Notes

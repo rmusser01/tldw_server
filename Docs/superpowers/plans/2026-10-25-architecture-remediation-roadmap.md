@@ -332,6 +332,15 @@ These eleven tasks have no dependencies on each other and can run in parallel. E
 | `.47` dead stubs | S | Any time |
 | `.48` fold Scheduler into Jobs | L | Supersede ADR-003 first; migrate one submit site per PR (briefing delivery's dependency via `add_job_dependency`); upgrade drain/migration test on SQLite and Postgres; delete `core/Scheduler` last. Start after `.39` collects the Scheduler tests |
 
+## Follow-ups found during execution (`.49` onward)
+
+| Task | Source | Notes |
+|---|---|---|
+| `.49` annotation unload hardening | #3324 merge review | Stale unload context, header refresh, poison-batch drop, logout clear, unmount persist, missing tests, `client_ids` limits |
+| `.50` order-dependent MCP hub tests | `.4` baseline run | Pre-existing on `dev`; fix the leaked fixture state, not the test order |
+| `.51` content-viewer Sync annotations button | #3324 merge review | Sends server ids as client ids; first click still duplicates once |
+| `.52` regression-test polish | `.1` and `.4` reviews | Thread-join timeouts, fixture leftovers, test placement and markers |
+
 ## Measuring progress
 
 Seed each number from the counter script committed by the owning task (review figures in parentheses; matcher differences are expected). Record the numbers in TASK-13950's notes at each phase exit.
