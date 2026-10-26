@@ -447,7 +447,9 @@ def test_remote_github_sync_refuses_a_redirect_off_api_github_com(monkeypatch, l
     seen: list[httpx.Request] = []
     routes = {_REPO_API_URL: httpx.Response(302, headers={"Location": location})}
 
-    with pytest.raises(ValueError, match="GitHub API HTTPS URLs"):
+    import tldw_Server_API.app.core.Ingestion_Sources.git_repository as git_repository
+
+    with pytest.raises(git_repository.GitHubAPIError, match="GitHub API HTTPS URLs"):
         _sync_remote(monkeypatch, _serve(routes, seen))
 
     assert [str(r.url) for r in seen] == [_REPO_API_URL]
@@ -565,3 +567,44 @@ def test_github_api_failures_carry_their_http_status(monkeypatch, failure, statu
 
     assert raised.value.status_code == status_code
     assert isinstance(raised.value, ValueError)
+
+
+@pytest.mark.unit
+def test_remote_github_sync_stops_an_endless_redirect_loop(monkeypatch):
+    """A redirect loop on api.github.com ends with GitHubAPIError after urllib's limit of 10."""
+    import httpx
+
+    import tldw_Server_API.app.core.Ingestion_Sources.git_repository as git_repository
+
+    seen: list[httpx.Request] = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(302, headers={"Location": _REPO_API_URL})
+
+    with pytest.raises(git_repository.GitHubAPIError, match="redirected too many times"):
+        _sync_remote(monkeypatch, handler)
+
+    assert len(seen) == 11
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("bad_char", ["\x01", "\x7f"])
+def test_github_api_url_with_a_control_character_is_a_github_api_error(monkeypatch, bad_char):
+    """httpx raises InvalidURL, which is not a ValueError; it must not escape the worker's tuple."""
+    import httpx
+
+    import tldw_Server_API.app.core.Ingestion_Sources.git_repository as git_repository
+
+    seen: list[httpx.Request] = []
+    client = _route_github_api_through_mock_transport(monkeypatch, _serve({}, seen))
+    try:
+        with pytest.raises(git_repository.GitHubAPIError) as raised:
+            git_repository._github_api_get_json(
+                f"https://api.github.com/repos/own{bad_char}er/project", access_token=None,
+            )
+    finally:
+        client.close()
+
+    assert raised.value.status_code is None
+    assert seen == []

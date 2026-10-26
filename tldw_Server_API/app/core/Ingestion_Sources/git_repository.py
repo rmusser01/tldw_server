@@ -363,7 +363,7 @@ def _iter_local_repository_candidates(
 def _validate_github_api_url(url: str) -> str:
     parsed = urlparse(url)
     if parsed.scheme != "https" or parsed.netloc.lower() != "api.github.com":
-        raise ValueError("Git repository remote sync only allows GitHub API HTTPS URLs")
+        raise GitHubAPIError("Git repository remote sync only allows GitHub API HTTPS URLs")
     return url
 
 
@@ -416,10 +416,11 @@ def _github_api_get_json(
                             )
                         chunks.append(chunk)
                     payload_bytes = b"".join(chunks)
-        except (EgressPolicyError, httpx.HTTPError) as exc:
+        # InvalidURL (e.g. a control character in a stored owner/repo) is not an HTTPError.
+        except (EgressPolicyError, httpx.HTTPError, httpx.InvalidURL) as exc:
             raise GitHubAPIError(f"GitHub API request failed: {exc}") from exc
         return json.loads(payload_bytes.decode("utf-8"))
-    raise ValueError("GitHub API request redirected too many times")
+    raise GitHubAPIError("GitHub API request redirected too many times")
 
 
 def _github_repository_ref(
