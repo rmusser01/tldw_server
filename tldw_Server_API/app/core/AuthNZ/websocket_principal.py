@@ -98,7 +98,9 @@ async def resolve_ws_principal(
     """
     token = _subprotocol_token(websocket)
     if token and not _extract_bearer_token(websocket):
-        return await verify_ws_credential(websocket, token=token, required_scope=required_scope)
+        # The browser's Authorization header: it rides with X-API-KEY as the two HTTP headers do.
+        api_key = websocket.headers.get("x-api-key")
+        return await verify_ws_credential(websocket, token=token, api_key=api_key, required_scope=required_scope)
     if not has_ws_credential(websocket):
         cookie = await resolve_single_user_cookie_websocket(websocket, ignore_signed_url_token=ignore_signed_url_token)
         if cookie is not None:
@@ -142,13 +144,14 @@ async def verify_ws_credential(
     api_key: str | None = None,
     required_scope: str | None = None,
 ) -> AuthPrincipal:
-    """Verify a credential found elsewhere in the handshake as ``Authorization: Bearer`` or
-    ``X-API-KEY``, on the same path as ``resolve_ws_principal``.
+    """Verify a credential found elsewhere (the bearer subprotocol, a deprecated query channel, a
+    first-message frame) as ``Authorization: Bearer`` or ``X-API-KEY``, on the same path as
+    ``resolve_ws_principal``.
 
-    ``resolve_ws_principal`` uses it for the bearer subprotocol, and a route for a deprecated
-    channel; call it when no ``Authorization: Bearer`` header competes (a route shim: when
-    ``has_ws_credential`` is False). An ``Authorization`` header of another scheme (a proxy's
-    Basic auth) is replaced by the token, so the verifier sees the token.
+    Only the credentials given are verified: the handshake's own ``Authorization`` (a proxy's
+    Basic auth, say) and ``X-API-KEY`` are dropped, so a first-frame token stands alone and is
+    not rescued by HTTP's fall-back to a handshake key. A route shim calls it when
+    ``has_ws_credential`` is False.
 
     Raises ``WebSocketException`` as ``resolve_ws_principal`` does, and 4401 when given no
     credential: the handshake's own headers are never verified here, or a bare cookie would
@@ -156,11 +159,8 @@ async def verify_ws_credential(
     """
     if not token and not api_key:
         raise WebSocketException(code=WS_UNAUTHENTICATED, reason="authentication_required")
-    replaced: set[bytes] = {b"authorization"} if token else set()
-    if api_key:
-        replaced.add(b"x-api-key")
     handshake = websocket.scope.get("headers") or []
-    headers = [(name, value) for name, value in handshake if name not in replaced]
+    headers = [(name, value) for name, value in handshake if name not in (b"authorization", b"x-api-key")]
     try:
         if token:
             headers.append((b"authorization", f"Bearer {token}".encode("latin-1")))

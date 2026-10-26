@@ -753,6 +753,18 @@ def test_voice_reads_a_deprecated_query_token_only_without_a_frame_token(env: Si
     assert _deprecations(warned) == []
 
 
+def test_voice_frame_token_is_not_rescued_by_a_handshake_api_key(env: SimpleNamespace) -> None:
+    """The auth frame's token decides alone: a valid ``X-API-KEY`` on the upgrade must not turn a
+    revoked frame JWT into ``auth_ok`` through HTTP's key fallback."""
+    url = ROUTES[VOICE][0]
+    assert _outcome(env.client, url, headers={"X-API-KEY": env.api_key}, frame={"type": "auth", "token": env.revoked}) == (
+        "closed 4401"
+    )
+    assert _outcome(env.client, url, headers={"X-API-KEY": env.api_key}, frame={"type": "auth", "token": env.valid}) == (
+        "answered auth_ok"
+    )
+
+
 def test_voice_auth_frame_takes_the_single_user_key_and_keeps_its_ip_allowlist(
     env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:

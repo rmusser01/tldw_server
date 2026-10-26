@@ -296,3 +296,25 @@ async def test_the_query_shim_warns_once_per_connection(monkeypatch: pytest.Monk
 
     assert len([message for message in warned if "Deprecated WebSocket credential channel" in message]) == 1
     assert not [message for message in warned if "a.b.c" in message]
+
+
+@pytest.mark.asyncio
+async def test_verify_ws_credential_verifies_only_the_credential_it_is_given(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A first-frame route's token stands alone: the handshake's own X-API-KEY must not rescue it when
+    HTTP refuses the token with 401. The bearer subprotocol still rides with X-API-KEY, as the two
+    HTTP headers do."""
+    seen: list[tuple[str | None, str | None]] = []
+
+    async def verifier(request):
+        seen.append((request.headers.get("authorization"), request.headers.get("x-api-key")))
+        return _ACCESS
+
+    monkeypatch.setattr(websocket_principal, "get_auth_principal", verifier)
+    handshake = [(b"authorization", b"Bearer header-token"), (b"x-api-key", b"header-key")]
+
+    await websocket_principal.verify_ws_credential(_websocket(handshake), token="frame-token")
+    await websocket_principal.resolve_ws_principal(
+        _websocket([(b"sec-websocket-protocol", b"bearer, a.b.c"), (b"x-api-key", b"header-key")])
+    )
+
+    assert seen == [("Bearer frame-token", None), ("Bearer a.b.c", "header-key")]
