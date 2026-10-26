@@ -2222,37 +2222,54 @@ def _get_httpx_client(
         return client
 
 
-def _get_aiohttp_session() -> aiohttp.ClientSession:
+def create_aiohttp_session(
+    *,
+    timeout: float | aiohttp.ClientTimeout | None = None,
+    trust_env: bool = DEFAULT_TRUST_ENV,
+) -> aiohttp.ClientSession:
+    """Create a caller-owned aiohttp session with this module's defaults.
+
+    It carries the default User-Agent, the TLS floor and the ``HTTP_CERT_PINS``
+    certificate pins, like the shared session ``afetch`` uses. A number ``timeout``
+    is the total timeout; None uses the module defaults. Like ``create_async_client``
+    it installs no egress check: send every request through ``afetch``,
+    ``astream_bytes`` or ``astream_sse``. The caller closes it.
+    """
     if aiohttp is None:  # pragma: no cover
         raise RuntimeError("aiohttp is not available")  # noqa: TRY003
+    connector = None
+    try:
+        ssl_ctx = _build_ssl_context(ENFORCE_TLS_MIN, TLS_MIN_VERSION)
+        connector = aiohttp.TCPConnector(
+            limit=int(os.getenv("HTTP_MAX_CONNECTIONS", "100")),
+            limit_per_host=int(os.getenv("HTTP_MAX_KEEPALIVE_CONNECTIONS", "20")),
+            ssl=ssl_ctx if ssl_ctx is not None else True,
+        )
+    except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
+        connector = None
+    session = aiohttp.ClientSession(
+        connector=connector,
+        timeout=_aiohttp_timeout_from_value(timeout),
+        trust_env=trust_env,
+        headers=_build_default_headers(),
+    )
+    try:
+        env_pins = _parse_pins_from_env()
+        if env_pins:
+            setattr(session, "_tldw_cert_pinning", env_pins)  # noqa: B010 - dynamic transport metadata
+    except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
+        pass
+    return session
+
+
+def _get_aiohttp_session() -> aiohttp.ClientSession:
     loop = asyncio.get_running_loop()
     key = id(loop)
     with _AIOHTTP_SESSION_LOCK:
         session = _AIOHTTP_SESSION_CACHE.get(key)
         if session is not None and not getattr(session, "closed", False):
             return session
-        connector = None
-        try:
-            ssl_ctx = _build_ssl_context(ENFORCE_TLS_MIN, TLS_MIN_VERSION)
-            connector = aiohttp.TCPConnector(
-                limit=int(os.getenv("HTTP_MAX_CONNECTIONS", "100")),
-                limit_per_host=int(os.getenv("HTTP_MAX_KEEPALIVE_CONNECTIONS", "20")),
-                ssl=ssl_ctx if ssl_ctx is not None else True,
-            )
-        except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-            connector = None
-        session = aiohttp.ClientSession(
-            connector=connector,
-            timeout=_aiohttp_timeout_from_defaults(),
-            trust_env=DEFAULT_TRUST_ENV,
-            headers=_build_default_headers(),
-        )
-        try:
-            env_pins = _parse_pins_from_env()
-            if env_pins:
-                session._tldw_cert_pinning = env_pins
-        except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-            pass
+        session = create_aiohttp_session()
         _AIOHTTP_SESSION_CACHE[key] = session
         return session
 
@@ -6718,6 +6735,7 @@ __all__ = [
     "SSEEvent",
     "build_limits",
     "validate_proxies_or_raise",
+    "create_aiohttp_session",
     "create_async_client",
     "create_client",
     "afetch",

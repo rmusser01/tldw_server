@@ -122,13 +122,6 @@ ALLOWLIST: dict[str, str] = {
         "migrate: GitHub API sync via urllib urlopen. Only the first URL is pinned to api.github.com; "
         "urlopen follows redirects and honours env proxies. Use fetch/fetch_json."
     ),
-    "tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_AudioCpp.py": (
-        "migrate: builds a raw aiohttp.ClientSession via _http_client.aiohttp (a reach-through the "
-        "first guard missed). Every request still goes through afetch(configured_endpoint=..., "
-        "allow_redirects=False, verify=True), so egress and the TLS floor apply, but the session "
-        "lacks the env cert pins and default headers http_client's own aiohttp session carries; "
-        "add a public aiohttp factory to http_client."
-    ),
     "tldw_Server_API/app/core/Ingestion_Media_Processing/OCR/runtime_support.py": (
         "migrate: http.client readiness probe (GET /health) for the managed OCR server. The host "
         "defaults to 127.0.0.1 but comes unchecked from CHATLLM_OCR_HOST, LLAMACPP_OCR_HOST or the "
@@ -327,7 +320,7 @@ def test_a_seeded_aliased_from_import_fails(tmp_path: Path) -> None:
         ("from urllib.request import Request as R\nR('u')\n", "urllib.request.Request"),
         ("import http.client\nhttp.client.HTTPSConnection('h')\n", "http.client.HTTPSConnection"),
         ("from curl_cffi.requests import AsyncSession as S\nS()\n", "curl_cffi.requests.AsyncSession"),
-        # Reached through another module's attribute (Audio_Transcription_AudioCpp.py's shape).
+        # Reached through another module's attribute (the shape Audio_Transcription_AudioCpp.py used).
         ("from tldw_Server_API.app.core import http_client as hc\nhc.httpx.AsyncClient()\n", "hc.httpx.AsyncClient"),
         (
             "from tldw_Server_API.app.core import http_client as hc\nhc.aiohttp.ClientSession()\n",
