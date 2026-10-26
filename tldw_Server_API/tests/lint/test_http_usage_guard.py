@@ -98,10 +98,6 @@ ALLOWLIST: dict[str, str] = {
         "migrate: MCP streamable-HTTP client for a user-configured remote URL. Raw httpx.AsyncClient "
         "with only its own SSRF check (validate_mcp_http_url); use create_async_client/afetch."
     ),
-    "tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Qwen3ASR.py": (
-        "migrate: the unplanned vLLM branch posts with a raw httpx.Client; the planned branch beside "
-        "it already uses create_client + fetch(configured_endpoint=...)."
-    ),
     "tldw_Server_API/app/core/MCP_unified/modules/implementations/web_fetch_module.py": (
         "migrate: fetches user-supplied URLs. It re-checks the web outbound policy on every redirect "
         "hop but connects through a raw httpx.AsyncClient that honours env proxies; use astream_bytes."
