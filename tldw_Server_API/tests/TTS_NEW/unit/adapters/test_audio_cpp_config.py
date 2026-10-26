@@ -183,3 +183,16 @@ def test_negative_or_unknown_managed_and_retain_tokens_resolve_false(token):
     config = AudioCppConfig.from_provider_config(_provider_config(extra_params=extra))
     assert config.managed is False
     assert config.retain_request_artifacts is False
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("token", "expected"),
+    [(None, False), (True, True), ("true", True), ("yes", True), (False, False), ("n", False), ("garbage", False)],
+)
+def test_allow_private_network_is_read_from_extra_params_and_defaults_off(token, expected):
+    extra = dict(_provider_config()["extra_params"])
+    if token is not None:
+        extra["allow_private_network"] = token
+    config = AudioCppConfig.from_provider_config(_provider_config(extra_params=extra))
+    assert config.allow_private_network is expected

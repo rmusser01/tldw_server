@@ -183,6 +183,7 @@ providers:
     extra_params:
       managed: false
       allow_remote_base_url: false
+      allow_private_network: false  # Admit a private/LAN remote base_url at exactly its origin (never metadata/link-local)
       retain_request_artifacts: false
       external_voice_reference_mode: "disabled"  # disabled | shared_path
       request_option_allowlist:

@@ -4,7 +4,9 @@ Every request goes through ``core.http_client.afetch``: one attempt, no redirect
 egress policy checked on the address the connection uses. A loopback ``base_url`` (the
 default, and the managed sidecar) is admitted by a ``ConfiguredEndpointScope`` for its exact
 origin. A remote one (``allow_remote_base_url``) gets the default egress policy, so a private
-address is refused unless the operator's egress settings allow it.
+address is refused unless the operator's egress settings allow it, or unless the operator sets
+``allow_private_network``: then the remote origin gets the same exact-origin scope, which admits
+private and LAN addresses there but never cloud metadata or link-local ones.
 """
 
 from __future__ import annotations
@@ -57,6 +59,7 @@ class AudioCppClient:
         http_client: httpx.AsyncClient | None = None,
         timeout: float = 300.0,
         allow_remote_base_url: bool = False,
+        allow_private_network: bool = False,
     ) -> None:
         """Use an injected client or own a proxy-independent HTTP client."""
         self.base_url = validate_base_url(
@@ -64,9 +67,10 @@ class AudioCppClient:
             allow_remote_base_url=allow_remote_base_url,
         )
         self.timeout = timeout
+        # allow_private_network is operator provider config only, never request input.
         self._endpoint_scope = (
             ConfiguredEndpointScope.from_url(self.base_url)
-            if _is_loopback_host(urlparse(self.base_url).hostname)
+            if allow_private_network or _is_loopback_host(urlparse(self.base_url).hostname)
             else None
         )
         self._http_client = http_client or create_async_client(timeout=timeout, trust_env=False)

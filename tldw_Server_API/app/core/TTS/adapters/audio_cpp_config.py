@@ -104,6 +104,7 @@ class AudioCppConfig:
     timeout: int
     managed: bool
     allow_remote_base_url: bool
+    allow_private_network: bool
     external_voice_reference_mode: str
     retain_request_artifacts: bool
     request_option_allowlist: tuple[str, ...]
@@ -137,6 +138,9 @@ class AudioCppConfig:
             timeout=int(config.get("timeout") or 300),
             managed=parse_bool(extra_params.get("managed"), default=False, key="audio_cpp.managed"),
             allow_remote_base_url=allow_remote,
+            allow_private_network=parse_bool(
+                extra_params.get("allow_private_network"), default=False, key="audio_cpp.allow_private_network"
+            ),
             external_voice_reference_mode=mode,
             retain_request_artifacts=parse_bool(extra_params.get("retain_request_artifacts"), default=False, key="audio_cpp.retain_request_artifacts"),
             request_option_allowlist=tuple(str(item) for item in allowlist),

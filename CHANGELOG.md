@@ -9,6 +9,7 @@ and this project adheres to Some kind of Versioning
 
 ### Added
 
+- **audio.cpp TTS private-network opt-in:** `providers.audio_cpp.extra_params.allow_private_network` (default `false`, operator config only) lets a remote `base_url` (`allow_remote_base_url`) on a private or LAN address work without relaxing the global egress settings. It scopes requests to exactly the configured origin; cloud metadata and link-local addresses stay refused (TASK-13950.11).
 
 ### Changed
 
