@@ -209,7 +209,8 @@ WS /api/v1/persona/stream
 
 The stream authenticates like HTTP: send `Authorization: Bearer <JWT or API key>`
 or `X-API-KEY`. Browsers, which cannot set WebSocket headers, send the
-`bearer, <JWT or API key>` subprotocol instead, and the server echoes `bearer`:
+`bearer, <JWT or API key>` subprotocol instead, and the server echoes the marker
+as the client offered it (`bearer` or `Bearer`), never the credential:
 
 ```bash
 websocat -H "X-API-KEY: $API_KEY" "ws://127.0.0.1:8000/api/v1/persona/stream"
