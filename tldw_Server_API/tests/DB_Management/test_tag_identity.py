@@ -91,9 +91,8 @@ class _TagStore:
     def insert_tag(self, user_id: str, name: str) -> int:
         """Insert a raw tag row the way a pre-migration database could hold it."""
         self.backend.execute(f"INSERT INTO {self.table} (user_id, name) VALUES (?, ?)", (user_id, name))
-        row = self.backend.execute(f"SELECT id FROM {self.table} WHERE user_id = ? AND name = ?", (user_id, name)).first
-        assert row is not None
-        return int(row["id"])
+        sql = f"SELECT id FROM {self.table} WHERE user_id = ? AND name = ?"
+        return int(self.backend.execute(sql, (user_id, name)).rows[0]["id"])
 
     def link(self, row_id: int, tag_id: int) -> None:
         self.backend.execute(f"INSERT INTO {self.link_table} ({self.link_column}, tag_id) VALUES (?, ?)", (row_id, tag_id))
@@ -112,7 +111,7 @@ class _TagStore:
         """Construct the store again as a new process would, re-running its schema bootstrap."""
         self.forget_schema()
         fresh = self.as_user(self.user_id)
-        assert fresh.db is not None
+        _ = fresh.db  # constructing the database runs the bootstrap; a failure raises here
         return fresh
 
     @property
