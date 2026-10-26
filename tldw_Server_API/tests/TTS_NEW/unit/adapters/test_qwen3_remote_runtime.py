@@ -622,6 +622,7 @@ async def test_remote_runtime_passes_its_configured_timeout(monkeypatch, config_
         mode="custom_voice",
     )
     if stream:
+        assert response.audio_stream is not None
         assert [chunk async for chunk in response.audio_stream] == [b"pcm"]
 
     assert [call["timeout"] for call in calls] == [expected]

@@ -353,7 +353,7 @@ async def test_only_the_final_address_gets_the_full_connect_timeout_on_httpx(dns
 
 
 @pytest.mark.asyncio
-async def test_only_the_final_address_gets_the_full_connect_timeout_on_aiohttp(dns, sockets):
+async def test_only_the_final_address_gets_the_full_connect_timeout_on_aiohttp(dns, sockets, monkeypatch):
     seen: list[tuple[str, str, object]] = []
     session = _AiohttpSession(seen)
     timeouts: list[aiohttp.ClientTimeout] = []
@@ -363,7 +363,7 @@ async def test_only_the_final_address_gets_the_full_connect_timeout_on_aiohttp(d
         timeouts.append(kwargs["timeout"])
         return request(method, url, **kwargs)
 
-    session.request = recording_request
+    monkeypatch.setattr(session, "request", recording_request)
     response = await http_client._afetch_aiohttp(
         method="GET",
         url=_LOCAL,
