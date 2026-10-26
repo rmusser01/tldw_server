@@ -25,10 +25,11 @@
   - lives in `tldw_Server_API/tests/lint/` (backend) or runs in `frontend-required` (frontend);
   - seeds its baseline from a counter script committed in the same PR (review numbers are matcher-dependent, so the committed script defines the number);
   - keys entries by module or qualified name, never by line number;
-  - fails both on growth and on a stale baseline entry;
+  - fails on growth and on a stale entry (an entry whose subject is gone or now under the threshold; size baselines are ceilings, so shrinking needs no baseline edit);
+  - runs in a required gate: appended to backend-required's "Enforce CI contracts and code ratchets" step (frontend: frontend-required), with a workflow-contract assertion like `tests/CI/test_backlog_task_format_ratchet.py`; a ratchet that only runs in the optional full-suite shards enforces nothing (today `test_core_to_api_import_boundary.py` is in that state, and `.9` wires it in);
   - ships with a self-test that seeds one violation and asserts the ratchet fails.
 - **Raising a baseline.** It is allowed only through a documented bump-with-reason entry, reviewed in the PR, so that security fixes inside frozen functions are not blocked.
-- **AST caching.** Backend AST ratchets share one cached parse; a full-tree scan takes about 9 s.
+- **AST caching.** Backend AST ratchets share one cached parse in `tests/lint/_ast_cache.py`, which `.8` creates and `.9`/`.11` reuse; a full-tree scan takes about 9 s.
 - **Line-keyed legacy baseline.** `Helper_Scripts/ci/scope_predicate_baseline.txt` is still keyed by line number until `.23` re-keys it. Any PR that shifts lines in a file it lists regenerates it with `--write-baseline`.
 - **Shims.** A move keeps a re-export shim at the old import path until `git grep` shows no importer and no string monkeypatch target still uses it.
 - **Postgres proof.** Postgres-dependent acceptance criteria are proven in the Postgres shard with `TLDW_TEST_POSTGRES_REQUIRED=1`. A local skip is not evidence.
@@ -86,6 +87,7 @@ Phases overlap. A task can start as soon as its `dependencies:` are Done; the ph
                        ├─> .40 React Query state
                        └─> .45 source-text tests
 .33 domain errors ──> .37 services split (+ .9)
+.39 Scheduler tests collected ──> .48 Scheduler folded into Jobs
 ```
 
 The chain to the owner's moderation priority is `.9 -> .13 -> .27`. Start `.9` in week one; `.13` begins when `.9` merges.
@@ -126,7 +128,7 @@ These eleven tasks have no dependencies on each other and can run in parallel. E
 
 **Files:**
 - Modify: `tldw_Server_API/app/api/v1/endpoints/media/document_annotations.py` (sync endpoint becomes idempotent on `client_id`)
-- Modify: the annotations store, so the client id is stored with a uniqueness constraint per user, media and client id
+- Modify: `tldw_Server_API/app/core/DB_Management/media_db/repositories/document_workspace_repository.py` and `media_db/schema/document_workspace_schema.py`: store the client id with a unique index per user, media and client id, via a Media DB migration on both SQLite and Postgres
 - Modify: `apps/packages/ui/src/hooks/document-workspace/useAnnotationSync.ts:21-71,321-334`
 - Modify: `apps/packages/ui/src/services/tldw/request-core.ts:557` (export `applyTldwAuthHeaders` or a wrapper)
 - Test: a backend replay test next to the existing document-annotation tests
@@ -178,7 +180,7 @@ These eleven tasks have no dependencies on each other and can run in parallel. E
 ### Task 0.5 (`TASK-13950.5`): case-insensitive keyword identity
 
 **Files:**
-- Reuse: `normalize_keyword_identity` (`tldw_Server_API/app/core/DB_Management/organization_sync_store.py:163`). Move it to a neutral module if needed, with a re-export.
+- Reuse: `normalize_keyword_identity`, today a `@staticmethod` at `tldw_Server_API/app/core/DB_Management/chacha/organization_sync_store.py:163`. Extract it to a module-level helper and keep the static method delegating to it.
 - Modify: the call sites listed in the task, plus the Postgres keyword lookup behind `chacha/keyword_store.py:138` (`_get_generic_item_by_unique_text`)
 - Test: `tldw_Server_API/tests/Notes/test_keyword_identity.py` (new) and a Postgres case in `tldw_Server_API/tests/ChaChaNotesDB/`
 
@@ -223,12 +225,12 @@ These eleven tasks have no dependencies on each other and can run in parallel. E
 
 - [ ] **Step 1: Write the self-tests.** A scratch 301-line function fails the function ratchet, a seeded `_delegate_store_method` registration fails the surface ratchet, and a raised entry without a `reason` fails.
 - [ ] **Step 2: Generate the baselines.** Write them with `--write-baseline`: expect about 209 functions and 34 handlers; re-measure on the PR base. Confirm the ratchets pass on dev and fail when one function grows by one line.
-- [ ] **Step 3: Add the stale-entry check. Commit.**
+- [ ] **Step 3: Add the stale-entry check.** An entry is stale only when its function is gone or now at or under 300 lines; baselines are ceilings, so shrinking a function needs no baseline edit, and an optional `--tighten` flag lowers ceilings. Append both ratchets to backend-required's ratchet step with a workflow-contract assertion. Commit.
 
 ### Task 0.9 (`TASK-13950.9`): layering contract
 
 **Files:**
-- Create: `tldw_Server_API/tests/lint/test_layering_contract.py`, `tldw_Server_API/tests/lint/layering_baseline.txt` (lines `"<importer module> -> <target package>"`)
+- Create: `tldw_Server_API/tests/lint/test_layering_contract.py`, `tldw_Server_API/tests/lint/layering_baseline.txt` (lines `"<importer package> -> <target package>: <statement count>"`; importing modules are printed on failure, so moves inside a package do not touch the baseline)
 - Modify: `tldw_Server_API/tests/lint/test_core_to_api_import_boundary.py` (pair-based; correct the stale `persistence.py` docstring)
 
 **Interfaces:**
@@ -239,7 +241,7 @@ These eleven tasks have no dependencies on each other and can run in parallel. E
   - A `TYPE_CHECKING` import is not reported.
   - A rename (the same edge moving from module A to module B while A's entry is deleted in the same diff) passes.
 - [ ] **Step 2: Implement the scanner over the shared AST cache** and generate the baseline: expect 311 entries on `dca11342de` and re-measure on the PR base.
-- [ ] **Step 3: Add the pair ratchets** for endpoint->endpoint, services->api and DB_Management->domain. Run and confirm PASS, then commit.
+- [ ] **Step 3: Add the pair ratchets** for endpoint->endpoint, services->api and DB_Management->domain. Append the new tests and the existing `test_core_to_api_import_boundary.py` to backend-required's ratchet step with a workflow-contract assertion. Run and confirm PASS, then commit.
 
 ### Task 0.10 (`TASK-13950.10`): packages/ui lint and boundaries
 
@@ -275,7 +277,7 @@ These eleven tasks have no dependencies on each other and can run in parallel. E
 | `.14` schema defaults | S | 1 | After `.13` is Done (frontmatter dependency) |
 | `.15` schemas -> core models | M | 1 per context, Evaluations first | Add an OpenAPI snapshot diff test before the first move |
 | `.16` DB_Management logic | M | 4: kanban, resume store, webhooks, Sync contracts | Webhooks slice after #2855 |
-| `.17` Provider_Credentials | M | 2 | Security path: run `tests/AuthNZ` in both shards |
+| `.17` Provider_Credentials | M | 2 | Security path: run `tests/AuthNZ` in both shards; LLM_Calls imports the new package directly so `LLM_Calls -> AuthNZ` reaches 0 |
 
 **Phase exit check:** run the `.9` contract. Its baseline has no foundation-upward, `LLM_Calls -> Chat/AuthNZ`, `core -> api.schemas` or `DB_Management -> domain-logic` entries. Record both SCC measures and the baseline size in TASK-13950's notes.
 
@@ -284,7 +286,7 @@ These eleven tasks have no dependencies on each other and can run in parallel. E
 | Task | Effort | PR slices | Notes |
 |---|---|---|---|
 | `.18` service container | L | 1 per service: db_pool, session_manager, jwt_service, MCP server, ChaCha runtime | Keep `get_x()` as a deprecated fallback that reads the container; check shutdown order (ADR-021) every slice; `reset_db_pool` callers under 50 |
-| `.19` test-mode seams | L | 1 per seam, security seams first | Add the `TEST_MODE`-unset CI job in the first slice (AuthNZ, http_client and Security tests) |
+| `.19` test-mode seams | L | 1 per seam, security seams first | Add the `TEST_MODE`-unset CI job as a required check in the first slice (AuthNZ, http_client and Security tests) |
 | `.20` endpoint shared code | L | pagination, route-less modules, then each core reach-in | Commit the monkeypatch counter first; lower the baseline every PR |
 | `.21` config consolidation | M | ratchets first, then one shared key per PR | After `.6` |
 
