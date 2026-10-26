@@ -2,7 +2,7 @@
 
 ``tldw_Server_API.app.core.http_client`` holds the egress policy, DNS pinning,
 ``trust_env=False`` and the TLS floor. A module that builds its own HTTP client (httpx,
-requests, aiohttp, urllib.request, http.client) skips all of them. This guard fails on
+requests, aiohttp, urllib.request, http.client, curl_cffi) skips all of them. This guard fails on
 any such use in tldw_Server_API/app (``tests`` directories excluded) outside ALLOWLIST.
 It always runs: there is no env gate.
 
@@ -11,15 +11,18 @@ What counts as a use (the only definition; ``uses`` implements it): any value re
 sessions and request functions), resolved through the file's imports:
 ``import httpx``, ``import httpx as hx``, ``from httpx import AsyncClient as C``,
 ``import requests.sessions``, ``from urllib import request``, ``from httpx import *``,
-and imports inside functions. A call is a use, and so is storing or passing the class
-(``factory = httpx.AsyncClient``). Type annotations, exception classes
-(``httpx.HTTPError``, ``aiohttp.ClientError``) and other members (``httpx.Timeout``) are
-not. Imports are collected file-wide, so a name imported in one function counts in every
-function of the file (it fails closed).
-Known limits: ``importlib.import_module("httpx")``, ``getattr(httpx, "AsyncClient")(...)``
-and module rebinding (``m = httpx; m.AsyncClient()``) are not seen. urllib3 is not
-listed: app code does not use it directly. ``isinstance``/``cast`` against a client class
-counts as a use (it reads the class outside an annotation), which fails closed.
+and imports inside functions. So is a library reached through another imported name's
+attributes (``from ...core import http_client as hc; hc.aiohttp.ClientSession()``).
+A call is a use, and so is storing or passing the class (``factory = httpx.AsyncClient``).
+These are not: type annotations, the class argument of ``isinstance``/``issubclass``, the
+type argument of ``cast``, exception classes (``httpx.HTTPError``, ``aiohttp.ClientError``)
+and other members (``httpx.Timeout``). Imports are collected file-wide, so a name imported
+in one function counts in every function of the file (it fails closed).
+Known limits: ``importlib.import_module("httpx")``, ``getattr(httpx, "AsyncClient")(...)``,
+module rebinding (``m = httpx; m.AsyncClient()``) and a library re-exported under its own
+name (``from pkg import httpx``) are not seen. A factory in an allowlisted file hides its
+callers: ``omnivoice_adapter.py`` gets a raw client from ``create_sidecar_async_client``.
+urllib3 is not listed: app code does not use it directly.
 
 ALLOWLIST maps a repo-relative path to why it may use an HTTP client library directly:
 why core.http_client cannot apply, or ``"migrate: ..."`` for an offender a later PR
@@ -50,6 +53,7 @@ TARGETS: dict[str, frozenset[str]] = {
     "aiohttp": frozenset({"ClientSession", "request"}),
     "urllib.request": frozenset({"urlopen", "Request", "build_opener", "urlretrieve"}),
     "http.client": frozenset({"HTTPConnection", "HTTPSConnection"}),
+    "curl_cffi.requests": _VERBS | {"Session", "AsyncSession"},
 }
 
 _ASGI = (
@@ -77,7 +81,13 @@ ALLOWLIST: dict[str, str] = {
     "tldw_Server_API/app/core/TTS/adapters/omnivoice_sidecar_supervisor.py": (
         "Loopback-only local sidecar this process spawns and supervises (validate_loopback_host, "
         "trust_env=False, per-run token). The egress policy is for outbound URLs and refuses "
-        "its 127.0.0.1 port by default."
+        "its 127.0.0.1 port by default. Its public create_sidecar_async_client() factory also "
+        "hands omnivoice_adapter.py a raw httpx.AsyncClient for the same loopback sidecar."
+    ),
+    "tldw_Server_API/app/core/Web_Scraping/preflight/adapters/http.py": (
+        "Impersonating probe transport: curl_cffi AsyncSession, which core.http_client has no async "
+        "path for. Each dispatch takes a fresh ProbeEgressGuard decision, pins DNS to the decided "
+        "IPs (CURLOPT_RESOLVE), refuses proxies and re-checks every redirect hop."
     ),
     # To migrate onto core.http_client, one PR each (TASK-13950.11 follow-up slices).
     "tldw_Server_API/app/core/Agent_Client_Protocol/adapters/mcp_transports/sse.py": (
@@ -124,6 +134,13 @@ ALLOWLIST: dict[str, str] = {
         "migrate: GitHub API sync via urllib urlopen. Only the first URL is pinned to api.github.com; "
         "urlopen follows redirects and honours env proxies. Use fetch/fetch_json."
     ),
+    "tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_AudioCpp.py": (
+        "migrate: builds a raw aiohttp.ClientSession via _http_client.aiohttp (a reach-through the "
+        "first guard missed). Every request still goes through afetch(configured_endpoint=..., "
+        "allow_redirects=False, verify=True), so egress and the TLS floor apply, but the session "
+        "lacks the env cert pins and default headers http_client's own aiohttp session carries; "
+        "add a public aiohttp factory to http_client."
+    ),
     "tldw_Server_API/app/core/Ingestion_Media_Processing/OCR/runtime_support.py": (
         "migrate: http.client readiness probe (GET /health) for the managed OCR server. The host "
         "defaults to 127.0.0.1 but comes unchecked from CHATLLM_OCR_HOST, LLAMACPP_OCR_HOST or the "
@@ -151,27 +168,27 @@ def _library(module: str) -> str | None:
     return next((lib for lib in TARGETS if module == lib or module.startswith(f"{lib}.")), None)
 
 
-def _related(dotted: str) -> bool:
-    """``dotted`` is a library, inside one, or a package above one (``urllib``)."""
-    return _library(dotted) is not None or any(lib.startswith(f"{dotted}.") for lib in TARGETS)
+def _is_target(parts: list[str]) -> bool:
+    """``parts`` is a library module path (or one inside it) followed by one of its entry points."""
+    return parts[-1] in TARGETS.get(_library(".".join(parts[:-1])) or "", ())
 
 
 def _bindings(tree: ast.Module) -> dict[str, str]:
-    """Local name -> the dotted library object an import binds it to."""
+    """Local name -> the dotted object an import binds it to, for every import in the file."""
     bound: dict[str, str] = {}
     for node in _imports(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 # ``import a.b`` binds ``a``; ``import a.b as c`` binds ``c`` to ``a.b``.
                 target = alias.name if alias.asname else alias.name.partition(".")[0]
-                if _related(target):
-                    bound[alias.asname or target] = target
-        elif node.level == 0 and node.module:
-            star = TARGETS.get(_library(node.module) or "", frozenset())
+                bound[alias.asname or target] = target
+        else:
+            # A relative import keeps its leading dots, so it never resolves to a library.
+            module = "." * node.level + (f"{node.module}." if node.module else "")
+            star = TARGETS.get(_library(node.module or "") or "", frozenset()) if not node.level else frozenset()
             for alias in node.names:
                 for name in sorted(star) if alias.name == "*" else [alias.name]:
-                    if _related(f"{node.module}.{name}"):
-                        bound[alias.asname or name] = f"{node.module}.{name}"
+                    bound[alias.asname or name] = module + name
     return bound
 
 
@@ -183,27 +200,45 @@ def _dotted(node: ast.AST) -> list[str] | None:
     return [node.id, *reversed(parts)] if isinstance(node, ast.Name) else None
 
 
+# Calls whose argument at this index is only read as a type, like an annotation.
+_TYPE_ARGUMENT = {"isinstance": 1, "issubclass": 1, "cast": 0}
+
+
+def _type_only(tree: ast.Module) -> set[int]:
+    """ids of nodes only read as types: annotations, isinstance/issubclass classes, cast's type."""
+    roots: list[object] = []
+    for node in ast.walk(tree):
+        roots += [getattr(node, "annotation", None), getattr(node, "returns", None)]
+        if isinstance(node, ast.Call):
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else ""
+            index = _TYPE_ARGUMENT.get(name)
+            if index is not None and len(node.args) > index:
+                roots.append(node.args[index])
+    return {id(child) for root in roots if isinstance(root, ast.AST) for child in ast.walk(root)}
+
+
 def uses(tree: ast.Module) -> list[str]:
     """``"line N: httpx.AsyncClient"`` for every use in ``tree``; see the module docstring."""
     bound = _bindings(tree)
     if not bound:
         return []
-    annotations: set[int] = set()
-    for node in ast.walk(tree):
-        for annotation in (getattr(node, "annotation", None), getattr(node, "returns", None)):
-            if isinstance(annotation, ast.AST):
-                annotations.update(map(id, ast.walk(annotation)))
-    found: set[tuple[int, str]] = set()
+    candidates: list[tuple[ast.AST, int, str]] = []
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Name, ast.Attribute)) or not isinstance(node.ctx, ast.Load):
             continue
-        if id(node) in annotations:
-            continue
         path = _dotted(node)
-        if path and path[0] in bound:
-            *module, name = [*bound[path[0]].split("."), *path[1:]]
-            if name in TARGETS.get(_library(".".join(module)) or "", ()):
-                found.add((node.lineno, ".".join([*module, name])))
+        if not path or path[0] not in bound:
+            continue
+        resolved = [*bound[path[0]].split("."), *path[1:]]
+        if _is_target(resolved):  # ``httpx.AsyncClient``, ``C`` from ``from httpx import AsyncClient as C``
+            candidates.append((node, node.lineno, ".".join(resolved)))
+        elif any(_is_target(path[i:]) for i in range(1, len(path) - 1)):  # ``hc.httpx.AsyncClient``
+            candidates.append((node, node.lineno, ".".join(path)))
+    if not candidates:
+        return []
+    type_only = _type_only(tree)
+    found = {(line, name) for node, line, name in candidates if id(node) not in type_only}
     return [f"line {line}: {name}" for line, name in sorted(found)]
 
 
@@ -303,11 +338,24 @@ def test_a_seeded_aliased_from_import_fails(tmp_path: Path) -> None:
         ("from urllib import request as r\nr.build_opener()\n", "urllib.request.build_opener"),
         ("from urllib.request import Request as R\nR('u')\n", "urllib.request.Request"),
         ("import http.client\nhttp.client.HTTPSConnection('h')\n", "http.client.HTTPSConnection"),
+        ("from curl_cffi.requests import AsyncSession as S\nS()\n", "curl_cffi.requests.AsyncSession"),
+        # Reached through another module's attribute (Audio_Transcription_AudioCpp.py's shape).
+        ("from tldw_Server_API.app.core import http_client as hc\nhc.httpx.AsyncClient()\n", "hc.httpx.AsyncClient"),
+        (
+            "from tldw_Server_API.app.core import http_client as hc\nhc.aiohttp.ClientSession()\n",
+            "hc.aiohttp.ClientSession",
+        ),
+        # cast's type argument is exempt; the client it wraps is not (one hit, on the second line).
+        (
+            "import httpx\nfrom typing import cast\nc = cast(\n    httpx.AsyncClient,\n    httpx.AsyncClient(),\n)\n",
+            "httpx.AsyncClient",
+        ),
     ],
     ids=[
         *("import", "import-as", "from-import", "submodule", "submodule-as", "in-function", "star", "reference"),
         *("aiohttp-from-as", "aiohttp-in-function", "urllib-import", "urllib-from-submodule", "urllib-from-as"),
         "http-client",
+        *("curl-cffi", "reach-through-httpx", "reach-through-aiohttp", "cast-wraps-a-client"),
     ],
 )
 def test_every_import_form_is_seen(tmp_path: Path, source: str, expected: str) -> None:
@@ -337,11 +385,16 @@ def test_annotations_exceptions_other_members_and_lookalikes_are_not_uses(tmp_pa
         tmp_path,
         {
             "core/typed.py": """\
+                import typing
+
                 import httpx
 
 
                 def f(client: httpx.AsyncClient) -> httpx.Client:
                     kept: httpx.AsyncClient = client
+                    assert isinstance(kept, httpx.AsyncClient)
+                    assert issubclass(type(kept), (httpx.Client, httpx.AsyncClient))
+                    kept = typing.cast(httpx.AsyncClient, kept)
                     try:
                         return httpx.Timeout(5)
                     except httpx.HTTPError:
@@ -358,6 +411,13 @@ def test_annotations_exceptions_other_members_and_lookalikes_are_not_uses(tmp_pa
 
                 ERRORS = (aiohttp.ClientError, HTTPError)
                 URL = urllib.parse.urljoin("https://a/", urllib.request.pathname2url("b"))
+                """,
+            # Reach-through to a library member that is not an entry point (AudioCpp's guard and timeout).
+            "core/reach_other.py": """\
+                from tldw_Server_API.app.core import http_client as hc
+
+                if hc.aiohttp is not None:
+                    TIMEOUT = hc.aiohttp.ClientTimeout(total=5)
                 """,
             "core/tests/test_x.py": "import httpx\nhttpx.Client()\n",
         },
