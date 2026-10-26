@@ -809,12 +809,18 @@ jobs:
         run: bun run typecheck --incremental false
 
       # Full ESLint rule set on packages/ui (which has no eslint of its own) plus the three
-      # hook rules; pre-existing errors are frozen in eslint-suppressions.packages-ui.json
-      # (TASK-13950.10). backend-required's contract tests fail if this step stops running.
+      # hook rules; pre-existing errors are frozen in eslint-suppressions.packages-ui.json.
+      # This step and the import-cycle ratchet below are TASK-13950.10's; backend-required's
+      # contract tests fail if either stops running.
       - name: Run shared UI lint and hook enforcement
         if: needs.changes.outputs.tldw_frontend_changed == 'true'
         working-directory: apps/tldw-frontend
         run: bun scripts/check-shared-hooks.mjs
+
+      - name: Run shared UI import-cycle ratchet
+        if: needs.changes.outputs.tldw_frontend_changed == 'true'
+        working-directory: apps/tldw-frontend
+        run: bun scripts/check-ui-import-cycles.mjs
 
       - name: Run strict shared-boundary typecheck
         if: needs.changes.outputs.tldw_frontend_changed == 'true'

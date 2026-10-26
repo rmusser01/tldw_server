@@ -174,6 +174,7 @@ def test_queue_tick_holds_only_actions_write_checks_nothing_out_and_nothing_wait
 
 SHARED_UI_RATCHETS = {
     "Run shared UI lint and hook enforcement": "bun scripts/check-shared-hooks.mjs",
+    "Run shared UI import-cycle ratchet": "bun scripts/check-ui-import-cycles.mjs",
 }
 
 
