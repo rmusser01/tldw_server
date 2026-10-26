@@ -36,7 +36,7 @@ const taskLineNumber = (task: NoteTask): number | null => {
   return Number.isFinite(lineNumber) && lineNumber > 0 ? Math.trunc(lineNumber) : null
 }
 
-const buildTaskLineMap = (tasks: NoteTask[]): Map<number, NoteTask> => {
+export const buildTaskLineMap = (tasks: NoteTask[]): Map<number, NoteTask> => {
   const out = new Map<number, NoteTask>()
   for (const task of tasks) {
     const lineNumber = taskLineNumber(task)

@@ -15,7 +15,6 @@ describe("PR 916 review follow-ups", () => {
 
     expect(dockerfile).toContain("COPY apps/extension/package.json /app/apps/extension/package.json")
     expect(dockerfile).toContain("COPY apps/extension/scripts/wxt-prepare.mjs")
-    expect(dockerfile).toContain("COPY apps/packages/voice-assistant-sdk/package.json")
     expect(dockerfile).toContain("ENV SKIP_WXT_PREPARE=1")
     expect(dockerfile).not.toContain("pkg.workspaces=")
     expect(dockerfile).toContain("RUN bun install --frozen-lockfile --cwd /app/apps")

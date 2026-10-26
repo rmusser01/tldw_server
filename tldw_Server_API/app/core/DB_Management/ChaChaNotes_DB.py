@@ -827,11 +827,18 @@ class BackendManagedTransaction:
         self._wrapper: BackendConnectionWrapper | None = None
         self._managed = False
         self._depth = 0
+        self._claimed = False
 
     def __enter__(self):
         self._state = self._db._connection_state()
         self._use = self._state.use() if isinstance(self._state, ConnectionState) else contextlib.nullcontext()
         self._use.__enter__()
+        try:
+            # An operation's threads share this state: one transaction at a time (TASK-13899).
+            self._claimed = isinstance(self._state, ConnectionState) and self._state.enter_transaction()
+        except BaseException:
+            self._use.__exit__(*sys.exc_info())
+            raise
         self._depth = getattr(self._state, "tx_depth", 0)
         try:
             self._raw_conn = self._db._get_thread_connection()
@@ -849,6 +856,8 @@ class BackendManagedTransaction:
             return self._wrapper
         except BaseException:
             self._state.tx_depth = self._depth
+            if self._claimed:
+                self._state.leave_transaction()
             self._use.__exit__(*sys.exc_info())
             raise
 
@@ -887,6 +896,8 @@ class BackendManagedTransaction:
                         )
         finally:
             self._state.tx_depth = self._depth
+            if self._claimed:
+                self._state.leave_transaction()
             self._wrapper = None
             self._raw_conn = None
             cleanup_error = sys.exc_info()
@@ -1146,7 +1157,9 @@ class CharactersRAGDB:
 
         def count_notes(self, include_deleted: bool = False, only_deleted: bool = False) -> int: ...
 
-        def count_notes_matching_keywords(self, search_term: str | None, keyword_tokens: list[str]) -> int: ...
+        def count_notes_matching_keywords(
+            self, search_term: str | None, keyword_tokens: list[str], match: str = "all"
+        ) -> int: ...
 
         def get_conversation_by_id(
             self, conversation_id: str, include_deleted: bool = False
@@ -1259,6 +1272,7 @@ class CharactersRAGDB:
             keyword_tokens: list[str],
             limit: int = 10,
             offset: int = 0,
+            match: str = "all",
         ) -> list[dict[str, Any]]: ...
 
         def soft_delete_conversation(self, conversation_id: str, expected_version: int) -> bool | None: ...
@@ -28216,7 +28230,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             sync_owned_postgres_sequences,
         )
 
-        sync_owned_postgres_sequences(self, conn, self._POSTGRES_SEQUENCE_TABLES)
+        sync_owned_postgres_sequences(
+            self, conn, self._POSTGRES_SEQUENCE_TABLES, continue_on_error=True
+        )
 
     # --- Internal Helpers ---
     def _get_current_utc_timestamp_iso(self) -> str:

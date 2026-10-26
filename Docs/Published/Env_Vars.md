@@ -346,7 +346,8 @@ The Resource Governor (RG) is the **primary enforcement path** for all rate limi
 - `RG_POLICY_RELOAD_ENABLED`: Enable hot-reload of policy changes (`true|false`). Default `true`.
 - `RG_POLICY_RELOAD_INTERVAL_SEC`: Policy reload check interval in seconds. Default `10`.
 - `RG_ROUTE_MAP_AUDIT`: When `true` (the default), the startup audit logs routes not covered by the RG route map.
-- `RG_REDIS_FAIL_MODE`: Behavior when Redis is unavailable (`fail_open` | `fail_closed` | `fallback_memory`). Default `fallback_memory`.
+- `RG_REDIS_FAIL_MODE`: Behavior when Redis is unavailable (`fail_open` | `fail_closed` | `fallback_memory`). Default `fallback_memory`. Once a Redis command and a PING right after it both fail, RG stops calling Redis for `RG_REDIS_UNREACHABLE_COOLDOWN_SEC` and answers by this fail mode, so the fail mode lasts up to about 15 s after Redis returns (the cooldown after the last failed probe, plus one 5 s timeout); under `fail_closed`, a user refused in that time keeps a `Retry-After` of up to 60 s, so 429s can last about 75 s after Redis recovers (ADR-081).
+- `RG_REDIS_UNREACHABLE_COOLDOWN_SEC`: Seconds the RG Redis backend stops calling a Redis it could not reach before it probes again. Default `10`; `0` turns the cooldown off, so every Redis call waits its own 5 s timeout while Redis does not answer. Below `10`, probes can overlap on a Redis that does not answer. An unset, negative or non-numeric value uses the default. Read when each governor is built (at startup, or on a limiter's first use). RG's Redis client waits at most 5 s to connect and for each reply; `socket_timeout` and `socket_connect_timeout` options in `REDIS_URL` override that (ADR-081).
 
 ### Client Identity
 - `RG_TRUSTED_PROXIES`: Comma-separated trusted-proxy host/CIDR list. This is opt-in: forwarding is used only when the physical peer is a valid IP in this list.

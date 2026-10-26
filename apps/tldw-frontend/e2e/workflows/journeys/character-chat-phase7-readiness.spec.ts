@@ -560,7 +560,7 @@ function roleplayCompletionCallPredicate(url: string, method = "POST"): boolean 
 }
 
 async function clickPrimaryComposerAction(page: Page, name: RegExp): Promise<void> {
-  const input = page.getByPlaceholder(/type a message/i).first()
+  const input = page.getByTestId("chat-input").first()
   const composerForm = page.locator("form").filter({ has: input }).last()
   await composerForm.getByRole("button", { name }).first().click()
 }
@@ -616,7 +616,7 @@ test.describe("Character Chat Phase 7 real-backend readiness", () => {
     const capture = captureAllApiCalls(page)
     try {
       await openCharacterChatWithCharacter(page, character.name, failureModel)
-      const input = page.getByPlaceholder(/type a message/i).first()
+      const input = page.getByTestId("chat-input").first()
       const composer = page.locator("form").filter({ has: input }).last()
       const question = "Trigger the real provider configuration failure."
       await input.fill(question)
@@ -667,7 +667,8 @@ test.describe("Character Chat Phase 7 real-backend readiness", () => {
       expect((await pending())[0]).toMatchObject({ operation_id: original.operation_id, input_id: admission.message_id, roleplay_resume: original.roleplay_resume })
       const recoveryDraft = "Continue this character chat after configuring the provider."
       await input.fill(recoveryDraft)
-      await page.getByRole("button", { name: "Current Chat Model Settings", exact: true }).click()
+      await new ChatPage(page).openConversationControls()
+      await composer.getByRole("button", { name: "Chat Settings", exact: true }).click()
       const settings = page.getByRole("dialog", { name: "Current Chat Model Settings", exact: true })
       await expect(settings).toBeVisible()
       await settings.getByRole("button", { name: "Close", exact: true }).click()
@@ -719,7 +720,7 @@ test.describe("Character Chat Phase 7 real-backend readiness", () => {
       const admitted = page.waitForResponse(response => response.request().method() === "POST" &&
         /\/api\/v1\/chats\/[^/]+\/roleplay\/messages$/.test(new URL(response.url()).pathname))
       const completed = page.waitForResponse(response => roleplayCompletionCallPredicate(response.url(), response.request().method()))
-      await page.getByPlaceholder(/type a message/i).first().fill(question)
+      await page.getByTestId("chat-input").first().fill(question)
       await clickPrimaryComposerAction(page, /send/i)
       const completion = await completed
       expect(completion.status()).toBe(200)
@@ -769,7 +770,9 @@ test.describe("Character Chat Phase 7 real-backend readiness", () => {
       await waitForConnection(page)
       await chat.waitForReady()
       await expect.poll(async () => (await chat.getMessages()).filter(row => row.role === "assistant").map(row => row.content)).toEqual([answer])
-      await expect(page).toHaveURL(/\/chat$/)
+      // The handoff is consumed; a saved chat may now carry its own address (XP-05).
+      await expect(page).toHaveURL(/\/chat(?:\?chat=[^&#]+)?$/)
+      await expect(page).not.toHaveURL(/historySelection=/)
       await page.reload({ waitUntil: "domcontentloaded" })
       await waitForConnection(page)
       await chat.waitForReady()

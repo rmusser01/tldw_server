@@ -57,18 +57,16 @@ describe("render purity and event boundaries", () => {
   it("timestamps CSV downloads when clicked, without downloading during render", () => {
     render(
       <TableBlock>
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Ada</td>
-            </tr>
-          </tbody>
-        </table>
+        <thead>
+          <tr>
+            <th>Name</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Ada</td>
+          </tr>
+        </tbody>
       </TableBlock>
     )
     expect(downloads).toEqual([])

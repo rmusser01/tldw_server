@@ -1,3 +1,4 @@
+import type { ChatMessageView } from "@/services/settings/ui-settings"
 import { getMessageDeleteFeedback } from "@/utils/message-delete-feedback"
 import { replaceUserDisplayNamePlaceholders } from "@/utils/chat-display-name"
 import { ChatAttachmentImage } from "./ChatAttachmentImage"
@@ -18,6 +19,7 @@ import { useTTS, type TtsClipMeta } from "@/hooks/useTTS"
 import { useChatMoodBadgePreference } from "@/hooks/useChatMoodBadgePreference"
 import { tagColors } from "@/utils/color"
 import { removeModelSuffix } from "@/db/dexie/models"
+import { formatChatMessageAuthorName } from "@/utils/chat-model-label"
 import {
   parseReasoning, isReasoningStarted, isReasoningOnlyResponse, MISSING_FINAL_ANSWER_MESSAGE
 } from "@/libs/reasoning"
@@ -27,6 +29,7 @@ import {
 } from "@/utils/chat-error-message"
 import { useStorage } from "@plasmohq/storage/hook"
 import { PlaygroundUserMessageBubble } from "./PlaygroundUserMessage"
+import { resolveAssistantDisplayName, USER_TURN_TINT_STYLE } from "./turn-presentation"
 import { DocumentProcessingTurn } from "./DocumentProcessingTurn"
 import { copyToClipboard } from "@/utils/clipboard"
 import { ChatDocuments } from "@/models/ChatTypes"
@@ -77,6 +80,8 @@ import { DynamicMessageRenderer } from "@/components/Common/DynamicUI/DynamicMes
 import { DynamicUISourceFallback } from "@/components/Common/DynamicUI/DynamicUISourceFallback"
 import { normalizeDynamicUIEnvelope } from "@/utils/dynamic-ui"
 import { formatCost } from "@/utils/model-pricing"
+import { isOutputLimitedReply } from "@/utils/output-limit-reply"
+import { incompleteReplyRecoveryActions } from "./incomplete-reply-actions"
 import {
   resolveMessageCostUsd,
   resolveMessageUsage,
@@ -128,6 +133,12 @@ const savedPartialStatusCopy = {
     "Output limit reached",
     "lengthSummary",
     "This reply reached the model's output limit. The saved content is kept."
+  ],
+  lengthLive: [
+    "lengthLabel",
+    "Output limit reached",
+    "lengthLiveSummary",
+    "The model reached its output limit, so this reply may be cut off."
   ],
   error: [
     "generationFailedLabel",
@@ -228,6 +239,7 @@ const EmptyAssistantResponseNotice: React.FC<{
 )
 
 type Props = {
+  messageView?: ChatMessageView
   message: string
   message_type?: string
   hideCopy?: boolean
@@ -241,6 +253,11 @@ type Props = {
   totalMessages: number
   onRegenerate: () => void
   regenerateDisabledReason?: string | null
+  /**
+   * This reply's Continue and Retry run on the server's saved reply (D7), so its
+   * recorded output-limit or interrupted status may offer them (CM-03).
+   */
+  savedStatusActions?: boolean
   onEditFormSubmit: (
     value: string,
     isSend: boolean,
@@ -424,6 +441,7 @@ const arePlaygroundMessagePropsEqual = (prev: Props, next: Props): boolean => {
 }
 
 const PlaygroundMessageImpl = (props: Props) => {
+  const [sourcesExpanded, setSourcesExpanded] = useState<boolean | null>(null)
   const articleRef = useRef<HTMLElement | null>(null)
   const [isBtnPressed, setIsBtnPressed] = React.useState(false)
   const [editPresentation, setEditPresentation] = React.useState<"flat" | "bubble" | null>(null)
@@ -577,10 +595,16 @@ const PlaygroundMessageImpl = (props: Props) => {
   const hasSavedGenerationStatus = Boolean(savedGeneration?.status)
   const savedPartialStatus =
     savedGeneration?.status !== "complete" ? savedGeneration?.status : undefined
+  // CM-03: a reply the model cut off at its output limit, before any saved status.
+  const liveOutputLimited =
+    !hasSavedGenerationStatus && props.isBot && props.role !== "system" &&
+    !isImageGenerationMessageType(props.message_type) && isOutputLimitedReply(props.generationInfo)
+  const recordedIncomplete = props.savedStatusActions === true &&
+    (savedPartialStatus === "length" || savedPartialStatus === "interrupted")
   const savedUsage = savedGeneration?.usage
   const savedPartialCopy = savedPartialStatus
     ? savedPartialStatusCopy[savedPartialStatus]
-    : null
+    : liveOutputLimited ? savedPartialStatusCopy.lengthLive : null
   const resolvedResponseModel = React.useMemo(() => {
     if (savedGeneration?.model) return savedGeneration.model
     const info = props.generationInfo as Record<string, unknown> | undefined
@@ -611,7 +635,7 @@ const PlaygroundMessageImpl = (props: Props) => {
     [props.generationInfo, savedGeneration]
   )
   const showUsageMetadata =
-    isProMode &&
+    (isProMode || props.messageView === "research") &&
     props.isBot &&
     (Boolean(savedUsage) ||
       (!savedGeneration?.model &&
@@ -1070,7 +1094,7 @@ const PlaygroundMessageImpl = (props: Props) => {
   const resolvedModelName =
     shouldUseCharacterIdentity && props.characterIdentity?.name
       ? props.characterIdentity.name
-      : props.modelName || props.name
+      : resolveAssistantDisplayName(props.modelName || props.name, savedGeneration?.model)
   const resolvedUserPersonaImage = React.useMemo(() => {
     const raw =
       typeof userPersonaImage === "string" ? userPersonaImage.trim() : ""
@@ -1096,7 +1120,8 @@ const PlaygroundMessageImpl = (props: Props) => {
   const portraitSide: "left" | "right" = messageRenderSide
   const shouldShowPortrait =
     Boolean(showCharacterPortraits) && Boolean(portraitImage)
-  const shouldShowAvatarColumn = !shouldShowPortrait
+  const shouldShowAvatarColumn = !shouldShowPortrait &&
+    (!props.messageView || props.messageView === "conversation" || shouldUseCharacterIdentity || Boolean(props.botAvatar) || Boolean(props.userAvatar) || (!props.isBot && Boolean(resolvedUserPersonaImage)))
   const avatarColumnAlignmentClass = resolveAvatarColumnAlignment(
     messageRenderSide
   )
@@ -1884,6 +1909,23 @@ const PlaygroundMessageImpl = (props: Props) => {
     t
   ])
 
+  const outputLimitRecoveryActions = React.useMemo(
+    () =>
+      (!liveOutputLimited && !recordedIncomplete) || !isLastMessage || errorPayload || responseRecoveryBusy
+        ? []
+        : incompleteReplyRecoveryActions({
+            t: (key, fallback) => t(key, fallback) as string,
+            disabledReason: props.regenerateDisabledReason,
+            onRetry: () => runResponseRecovery(props.onRegenerate, true),
+            onSwitchModel: () => runResponseRecovery(handleOpenModelSettings),
+            onContinue: props.onContinue && !props.hideContinue
+              ? () => runResponseRecovery(() => props.onContinue?.(), true) : undefined
+          }),
+    [liveOutputLimited, recordedIncomplete, isLastMessage, errorPayload, responseRecoveryBusy, runResponseRecovery,
+      handleOpenModelSettings, props.hideContinue, props.onContinue, props.onRegenerate,
+      props.regenerateDisabledReason, t]
+  )
+
   const emptyResponseRecoveryActions = React.useMemo(
     () => responseRecoveryBusy ? [] : [
       {
@@ -1924,7 +1966,7 @@ const PlaygroundMessageImpl = (props: Props) => {
     ]
   )
 
-  const actionRowVisibility = isProMode || (props.isBot && isLastMessage)
+  const actionRowVisibility = isProMode || props.messageView === "research" || (props.isBot && isLastMessage)
     ? "flex"
     : "hidden group-hover:flex group-focus-within:flex"
   const showInlineActions = !props.isProcessing && !editMode
@@ -2189,16 +2231,27 @@ const PlaygroundMessageImpl = (props: Props) => {
     ? `gap-2 px-4 pt-3 ${hasSources ? "pb-4" : "pb-2.5"}`
     : `gap-1.5 px-3 pt-2 ${hasSources ? "pb-3" : "pb-2"}`
   const messageCardClass = isSystemMessage
-    ? `flex max-w-[calc(100%-1.75rem)] flex-col rounded-2xl border border-dashed border-warn/30 bg-warn/10 shadow-sm ${messageSpacing}`
-    : props.isBot
-      ? `flex max-w-[calc(100%-1.75rem)] flex-col rounded-2xl border border-border/50 shadow-sm border-l-2 border-l-primary/20 ${messageSpacing}`
-      : `flex max-w-[calc(100%-1.75rem)] flex-col rounded-2xl border border-border/50 shadow-sm ${messageSpacing}`
-  const messageCardStyle = isSystemMessage
+    ? props.messageView
+      ? `flex max-w-full flex-col rounded-xl border border-dashed border-warn/30 bg-warn/10 ${messageSpacing}`
+      : `flex max-w-[calc(100%-1.75rem)] flex-col rounded-2xl border border-dashed border-warn/30 bg-warn/10 shadow-sm ${messageSpacing}`
+    : props.messageView === "transcript"
+      ? props.isBot
+        ? "flex max-w-full flex-col gap-3 py-2 text-text"
+        : "flex max-w-full flex-col gap-2 rounded-xl border border-border px-4 py-3"
+      : props.messageView === "research"
+        ? "flex max-w-full flex-col gap-2 border-b border-border/70 pb-4 pt-2"
+        : props.messageView === "conversation"
+          ? `flex ${props.isBot ? "max-w-full" : "max-w-[85%] self-end"} flex-col rounded-2xl border border-border ${messageSpacing}`
+          : props.isBot
+            ? `flex max-w-[calc(100%-1.75rem)] flex-col rounded-2xl border border-border/50 shadow-sm border-l-2 border-l-primary/20 ${messageSpacing}`
+            : `flex max-w-[calc(100%-1.75rem)] flex-col rounded-2xl border border-border/50 shadow-sm ${messageSpacing}`
+  const messageCardStyle = isSystemMessage || props.messageView === "research" || (props.messageView === "transcript" && props.isBot)
     ? undefined
     : ({
         backgroundColor: `rgb(var(${
           props.isBot ? "--color-surface" : "--color-surface2"
-        }) / ${CHAT_MESSAGE_OPACITY_ALPHA})`
+        }) / ${CHAT_MESSAGE_OPACITY_ALPHA})`,
+        ...(props.isBot ? null : USER_TURN_TINT_STYLE)
       } as React.CSSProperties)
   const chatCharacterImageOpacityStyle = {
     opacity: CHAT_CHARACTER_IMAGE_OPACITY_ALPHA
@@ -2276,6 +2329,7 @@ const PlaygroundMessageImpl = (props: Props) => {
     <article
       ref={articleRef}
       data-testid="chat-message"
+      data-message-view={props.messageView}
       data-role={messageRole}
       data-message-type={props.message_type}
       data-index={props.currentMessageIndex}
@@ -2287,8 +2341,8 @@ const PlaygroundMessageImpl = (props: Props) => {
       tabIndex={hasMessageKeyboardShortcuts ? 0 : undefined}
       onKeyDown={hasMessageKeyboardShortcuts ? handleMessageShortcut : undefined}
       className={`group relative flex w-full max-w-5xl flex-col items-end justify-center text-text ${
-        isProMode ? "pb-3 md:px-5" : "pb-2 md:px-4"
-      } ${checkWideMode ? "max-w-none" : ""} ${
+        props.messageView === "transcript" ? "pb-6 px-2 md:px-4" : isProMode ? "pb-3 md:px-5" : "pb-2 md:px-4"
+      } ${props.messageView ? "[&_[data-source-feedback]]:flex-wrap [&_[data-source-feedback]_button]:min-h-11 [&_[data-source-feedback]_button]:min-w-11 [&_[data-source-feedback]_button]:text-xs [&_[data-source-feedback]_summary]:min-h-11" : ""} ${checkWideMode ? "max-w-none" : ""} ${
         props.searchMatch === "active"
           ? "rounded-lg ring-2 ring-primary/60 ring-offset-2 ring-offset-bg"
           : props.searchMatch === "match"
@@ -2329,7 +2383,7 @@ const PlaygroundMessageImpl = (props: Props) => {
         }`}>
         {portraitSide === "left" ? portraitPanel : null}
         {portraitSide === "left" ? avatarColumn : null}
-        <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <div className={`flex min-w-0 flex-1 flex-col gap-2 ${props.messageView === "transcript" && !checkWideMode ? "max-w-[72ch]" : ""}`}>
           <div className={messageCardClass} style={messageCardStyle}>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-2">
@@ -2340,12 +2394,7 @@ const PlaygroundMessageImpl = (props: Props) => {
                 ) : (
                   <span className="text-caption font-semibold text-text">
                     {props.isBot
-                      ? removeModelSuffix(
-                          `${resolvedModelName || props?.name}`?.replaceAll(
-                            /accounts\/[^\/]+\/models\//g,
-                            ""
-                          )
-                        )
+                      ? formatChatMessageAuthorName(resolvedModelName || props?.name)
                       : userDisplayName.trim() || t("common:you", "You")}
                   </span>
                 )}
@@ -3009,7 +3058,7 @@ const PlaygroundMessageImpl = (props: Props) => {
                   savedPartialCopy[3]
                 ) as string
               }
-              recoveryActions={[]}
+              recoveryActions={outputLimitRecoveryActions}
             />
           )}
           {showPartialSaveMarker && (
@@ -3107,6 +3156,7 @@ const PlaygroundMessageImpl = (props: Props) => {
 
           {showInlineActions && (
             <MessageActionsBar
+              messageView={props.messageView}
               t={t}
               isProMode={isProMode}
               isBot={props.isBot}
@@ -3220,12 +3270,15 @@ const PlaygroundMessageImpl = (props: Props) => {
 
           {props.isBot && props?.sources && props?.sources.length > 0 && (
             <Collapse
-              className="mt-6"
+              className={props.messageView ? "order-10 mt-2" : "mt-6"}
+              data-testid="message-sources"
+              activeKey={(sourcesExpanded ?? props.messageView === "research") ? ["1"] : []}
               ghost
               onChange={(activeKey) => {
                 const opened = Array.isArray(activeKey)
                   ? activeKey.length > 0
                   : Boolean(activeKey)
+                setSourcesExpanded(opened)
                 if (opened) {
                   trackSourcesExpanded()
                 }
@@ -3235,7 +3288,9 @@ const PlaygroundMessageImpl = (props: Props) => {
                   key: "1",
                   label: (
                     <div className="italic text-text-muted">
-                      {t("citations")}
+                      {props.messageView
+                        ? t("playground:messageViews.sourcesCount", props.sources.length === 1 ? "{{count}} source" : "{{count}} sources", { count: props.sources.length })
+                        : t("citations")}
                     </div>
                   ),
                   children: (

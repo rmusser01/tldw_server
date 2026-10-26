@@ -174,6 +174,7 @@ from tldw_Server_API.app.core.custom_openai_providers import (
 )
 from tldw_Server_API.app.core.exceptions import EgressPolicyError, LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls import adapter_registry as _adapter_registry
+from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
 from tldw_Server_API.app.core.LLM_Calls.error_utils import (
     privacy_safe_chat_error,
@@ -1019,7 +1020,8 @@ def is_model_known_for_provider(provider: str, model: str) -> bool | None:
     # so treat namespaced and non-namespaced forms as equivalent.
     if provider_key not in {"openrouter", "huggingface", "novita", "poe", "together"}:
         known_lower = {str(item).strip().lower() for item in known_models}
-        return model_key in known_lower
+        # A saved dotted Anthropic name (claude-sonnet-4.5) is known when its dashed API ID is.
+        return model_key in known_lower or canonical_anthropic_model_id(model_key).lower() in known_lower
 
     def _aliases(raw_model: str) -> set[str]:
         normalized = (raw_model or "").strip().lower()
@@ -1620,13 +1622,20 @@ def infer_provider_from_model_catalog(
         return current_provider, debug
 
     debug["attempted"] = True
-    has_current_match = _provider_has_model_cached(current_provider, model_value)
+    # A saved dotted name (claude-sonnet-4.5) finds the catalog entry of its dashed API ID; the name as written
+    # is tried first, so a provider that lists the dotted name itself keeps it.
+    lookup_model = canonical_anthropic_model_id(model_value)
+    has_current_match = _provider_has_model_cached(current_provider, model_value) or _provider_has_model_cached(
+        current_provider, lookup_model
+    )
     debug["current_provider_has_model"] = has_current_match
     if has_current_match:
         debug["reason"] = "current_provider_match"
         return current_provider, debug
 
-    candidates = list(_find_catalog_providers_for_model_cached(model_value))
+    candidates = list(
+        _find_catalog_providers_for_model_cached(model_value) or _find_catalog_providers_for_model_cached(lookup_model)
+    )
     debug["candidates"] = candidates
     if not candidates:
         debug["reason"] = "no_catalog_match"
@@ -4203,15 +4212,28 @@ async def build_context_and_messages(
     regenerate_reply_id = request_metadata.get("tldw_regenerate_from_message_id") if isinstance(request_metadata, dict) else None
     if regenerate_reply_id is not None:
         if not isinstance(regenerate_reply_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", regenerate_reply_id):
-            raise HTTPException(status_code=422, detail="A valid saved reply ID is required for regeneration.")
+            # 400: the chat endpoint turns statuses outside its allow-list (422) into 500.
+            raise HTTPException(status_code=400, detail="A valid saved reply ID is required for regeneration.")
         if (not final_conversation_id or explicit_failed_retry
                 or getattr(request_data, "tldw_continuation", None) is not None):
             raise HTTPException(status_code=409, detail="Regeneration requires an existing saved answered turn.")
+    from tldw_Server_API.app.core.Chat.history_continuation import (
+        continued_reply_prefix,
+        parse_continue_reply_id,
+    )
+
+    continue_reply_id = parse_continue_reply_id(
+        request_data,
+        conversation_id=final_conversation_id,
+        regenerate_reply_id=regenerate_reply_id,
+        explicit_failed_retry=explicit_failed_retry,
+    )
+    continue_prefix: str | None = None
     reuse_saved_turn = explicit_failed_retry or regenerate_reply_id is not None
 
     server_existing_input = getattr(request_data, "tldw_history_server_existing_input_v1", None)
     history_selection = getattr(request_data, "tldw_history_selection_v1", None) or server_existing_input
-    if history_selection is not None and (explicit_failed_retry or (server_existing_input is not None and regenerate_reply_id is not None)):
+    if history_selection is not None and (explicit_failed_retry or (server_existing_input is not None and (regenerate_reply_id is not None or continue_reply_id is not None))):
         raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "unsupported_history_legacy_retry"})
     versioned = history_selection is not None
     history_runtime = runtime_state or {}
@@ -4233,6 +4255,7 @@ async def build_context_and_messages(
         edit_target = getattr(request_data, "tldw_history_edit_v1", None)
         edit_target = edit_target.model_dump(mode="json") if edit_target is not None else None
         owner = history_runtime["history_owner_key"]
+        continuation_holder: dict[str, str] = {}
 
         def accept_history() -> tuple[
             HistorySelectionSnapshotV1,
@@ -4274,11 +4297,16 @@ async def build_context_and_messages(
                     except InputError as exc:
                         raise HistorySelectionError("unsupported_history_context_dictionaries") from exc
                 _format_selected_history_messages(snap, content, context[0] or {})
+                reused_reply_id = regenerate_reply_id if regenerate_reply_id is not None else continue_reply_id
+                unsupported_code = (
+                    "unsupported_history_continuation" if continue_reply_id is not None
+                    else "unsupported_history_regeneration"
+                )
                 if server_existing_input is not None:
                     accepted = None
-                elif regenerate_reply_id is not None:
+                elif reused_reply_id is not None:
                     if getattr(request_data, "tldw_history_branch", None) is not True:
-                        raise HistorySelectionError("unsupported_history_regeneration")
+                        raise HistorySelectionError(unsupported_code)
                     inputs = [
                         message.model_dump(exclude_none=True)
                         for message in request_data.messages
@@ -4286,14 +4314,19 @@ async def build_context_and_messages(
                     ]
                     if len(inputs) != 1 or inputs[0].get("role") != "user":
                         raise HistorySelectionError("invalid_regeneration_input")
-                    accepted = chat_db.reuse_selected_history_admission(
-                        final_conversation_id,
-                        selection,
-                        regenerate_reply_id,
-                        owner_client_id=history_runtime["history_owner_client_id"],
-                        owner_key=owner,
-                        conn=conn,
-                    )
+                    try:
+                        accepted = chat_db.reuse_selected_history_admission(
+                            final_conversation_id,
+                            selection,
+                            reused_reply_id,
+                            owner_client_id=history_runtime["history_owner_client_id"],
+                            owner_key=owner,
+                            conn=conn,
+                        )
+                    except HistorySelectionError as exc:
+                        if exc.code == "unsupported_history_regeneration":
+                            raise HistorySelectionError(unsupported_code) from exc
+                        raise
                     original = next(item for item in content if item["id"] == accepted["input_message_id"])
                     extra = original.get("extra_metadata") or {}
                     if (
@@ -4301,7 +4334,7 @@ async def build_context_and_messages(
                         or extra.get("function_call") is not None
                         or extra.get("tool_call_id") is not None
                     ):
-                        raise HistorySelectionError("unsupported_history_regeneration")
+                        raise HistorySelectionError(unsupported_code)
                     text = _saved_image_text(
                         {
                             "sender": "user",
@@ -4324,7 +4357,13 @@ async def build_context_and_messages(
                         or inputs[0].get("name") not in (None, extra.get("sender_name"))
                     ):
                         raise HistorySelectionError("regeneration_input_changed")
-                    content = tuple(item for item in content if item["id"] != regenerate_reply_id)
+                    if continue_reply_id is not None:
+                        # Continue keeps the saved reply as the final context message.
+                        continuation_holder["prefix"] = continued_reply_prefix(
+                            next(item for item in content if item["id"] == continue_reply_id)
+                        )
+                    else:
+                        content = tuple(item for item in content if item["id"] != regenerate_reply_id)
                 else:
                     accepted = chat_db.append_selected_history_inputs(
                         final_conversation_id,
@@ -4343,10 +4382,12 @@ async def build_context_and_messages(
         except HistorySelectionError as exc:
             failure = (
                 "unsupported_history_capability"
-                if (exc.code.startswith("unsupported_history_context") or exc.code == "unsupported_history_regeneration")
+                if (exc.code.startswith("unsupported_history_context")
+                    or exc.code in {"unsupported_history_regeneration", "unsupported_history_continuation"})
                 else "stale_selection"
             )
             raise HTTPException(409, detail={"status": failure, "code": exc.code, **exc.details}) from exc
+        continue_prefix = continuation_holder.get("prefix")
         character_card, character_db_id, assistant_context = context
         for field, value in assistant_context.pop("history_sampling", {}).items():
             if field not in request_data.model_fields_set:
@@ -4431,7 +4472,7 @@ async def build_context_and_messages(
         )
         should_persist = False
 
-    if regenerate_reply_id:
+    if regenerate_reply_id or continue_reply_id:
         if (not should_persist or not existing_conversation
                 or existing_conversation.get("client_id") != client_id_from_db
                 or not (is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation or versioned
@@ -4833,7 +4874,7 @@ async def build_context_and_messages(
                         )
 
     if versioned:
-        if regenerate_reply_id is not None:
+        if regenerate_reply_id is not None or continue_reply_id is not None:
             overlap_cut = len(request_messages)
         formatted_history = _format_selected_history_messages(history_snapshot, selected_content, character_card)
         if server_existing_input is not None:
@@ -4848,6 +4889,8 @@ async def build_context_and_messages(
             runtime_state["tldw_history_server_existing_input_v1"] = history_selection.model_dump(mode="json")
         else:
             runtime_state["tldw_history_admission_v1"] = admission
+        if continue_prefix is not None:
+            runtime_state["history_continue_prefix"] = continue_prefix
 
     if retry_user_message_id and any(message.get("role") == "user" for message in request_messages[overlap_cut:-1]):
         raise HTTPException(status_code=409, detail="This retry contains extra unsaved user messages. Resolve the local conversation before retrying.")

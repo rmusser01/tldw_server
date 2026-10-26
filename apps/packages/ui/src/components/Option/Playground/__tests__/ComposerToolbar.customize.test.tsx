@@ -1,4 +1,8 @@
-import { spyOnStorageGet, spyOnStorageSet, storageOriginal } from "@/hooks/chat/__tests__/native-plasmo-storage-fixture"
+import {
+  spyOnStorageGet,
+  spyOnStorageSet,
+  storageOriginal
+} from "@/hooks/chat/__tests__/native-plasmo-storage-fixture"
 import React from "react"
 import {
   act,
@@ -16,6 +20,7 @@ import { I18nextProvider } from "react-i18next"
 import playground from "@/assets/locale/en/playground.json"
 import common from "@/assets/locale/en/common.json"
 import { ComposerToolbar } from "../ComposerToolbar"
+import { useCasualComposerDisclosure } from "../hooks/useCasualComposerDisclosure"
 import { PlaygroundMcpControl } from "../PlaygroundMcpControl"
 import { PlaygroundModeLauncher } from "../PlaygroundModeLauncher"
 import { PlaygroundToolsPopover } from "../PlaygroundToolsPopover"
@@ -96,6 +101,8 @@ await translations.init({
 })
 type Props = React.ComponentProps<typeof ComposerToolbar>
 const props = (overrides: Partial<Props> = {}): Props => ({
+  onToggleOptions: vi.fn(),
+  onOpenKnowledgePanel: vi.fn(),
   isProMode: false,
   isMobile: false,
   isConnectionReady: true,
@@ -152,11 +159,24 @@ const props = (overrides: Partial<Props> = {}): Props => ({
   contextItems: [],
   ...overrides
 })
+const StoredToolbar = (value: Props) => {
+  const { open, setExplicitOpen, loading, unavailable } =
+    useCasualComposerDisclosure("playgroundComposerOptionsExpanded")
+  return (
+    <ComposerToolbar
+      {...value}
+      optionsExpanded={open}
+      optionsLoading={loading}
+      optionsUnavailable={unavailable}
+      onToggleOptions={() => setExplicitOpen(!open)}
+    />
+  )
+}
 const mount = (value = props()) => {
   const node = (next: Props) => (
     <ConfigProvider theme={{ token: { motion: false } }}>
       <I18nextProvider i18n={translations}>
-        <ComposerToolbar {...next} />
+        <StoredToolbar {...next} />
       </I18nextProvider>
     </ConfigProvider>
   )
@@ -166,14 +186,11 @@ const mount = (value = props()) => {
     rerenderToolbar: (next: Props) => rendered.rerender(node(next))
   }
 }
-const customize = () => screen.getByRole("button", { name: "Customize chat" })
-const openCustomize = async (includeAdvanced = true) => {
+const customize = () => screen.getByTestId("composer-options-toggle")
+const openCustomize = async () => {
   await waitFor(() => expect(customize()).toBeEnabled())
   fireEvent.click(customize())
-  const region = await screen.findByRole("region", { name: "Customize chat" });
-  const disclosure = within(region).getByText("Advanced customization");
-  if (includeAdvanced && !disclosure.closest("details")?.open) fireEvent.click(disclosure);
-  return region;
+  return screen.findByRole("region", { name: "Composer tools" })
 }
 beforeEach(() => {
   io.realAssistant = false
@@ -184,53 +201,43 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks())
 
 describe("Casual task-based customization", () => {
-  it("returns focus to Advanced customization if its focused controls become hidden", async () => {
-    mount();
-    const region = await openCustomize();
-    const summary = within(region).getByText("Advanced customization");
-    within(region).getByRole("button", { name: "Tools" }).focus();
-    fireEvent.click(summary);
-    await waitFor(() => expect(summary).toHaveFocus());
-    expect(within(region).getByRole("button", { name: "Tools", hidden: true })).not.toBeVisible();
-  });
-
-  it("keeps common actions visible and puts specialist actions behind Advanced customization", async () => {
-    const settings = vi.fn();
-    mount(props({ onOpenModelSettings: settings }));
-    const region = await openCustomize(false);
-    expect(within(region).getByRole("button", { name: "Search & Context" })).toBeVisible();
-    expect(within(region).getByRole("button", { name: "Role-play setup" })).toBeVisible();
-    expect(within(region).getByRole("button", { name: "Generation style", hidden: true })).not.toBeVisible();
-    const disclosure = within(region).getByText("Advanced customization");
-    fireEvent.click(disclosure);
-    expect(within(region).getByRole("button", { name: "Generation style" })).toBeVisible();
-    expect(within(region).getByRole("button", { name: "System prompts" })).toBeVisible();
-    expect(within(region).getByRole("button", { name: "Tools" })).toBeVisible();
-  });
-
-  it("uses the visible message fallback when mode replacement has no visible toolbar control", async () => {
-    const Harness = ({ pro }: { pro: boolean }) => {
-      const fallback = React.useRef<HTMLInputElement>(null)
-      return (
-        <I18nextProvider i18n={translations}>
-          <input aria-label="Message" ref={fallback} />
-          <ComposerToolbar
-            {...props({
-              isProMode: pro,
-              optionsExpanded: false,
-              focusFallbackRef: fallback
-            })}
-          />
-        </I18nextProvider>
-      )
-    }
-    const view = render(<Harness pro={false} />)
+  it("returns focus to Tools if its focused controls become hidden", async () => {
+    mount()
     const region = await openCustomize()
-    within(region).getByRole("button", { name: "MCP tools" }).focus()
-    view.rerender(<Harness pro />)
-    await waitFor(() =>
-      expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus()
-    )
+    within(region).getByRole("button", { name: "Tools" }).focus()
+    fireEvent.click(customize())
+    await waitFor(() => expect(customize()).toHaveFocus())
+    expect(
+      within(region).getByRole("button", { name: "Tools", hidden: true })
+    ).not.toBeVisible()
+  })
+
+  it("puts existing editors in the three task groups behind one disclosure", async () => {
+    mount()
+    const region = await openCustomize()
+    expect(
+      within(region).getByRole("button", { name: "Search & Context" })
+    ).toBeVisible()
+    expect(
+      within(region).getByRole("button", { name: "Role-play setup" })
+    ).toBeVisible()
+    expect(
+      within(region).getByRole("button", { name: "Generation style" })
+    ).toBeVisible()
+    expect(
+      within(region).getByRole("button", { name: "System prompts" })
+    ).toBeVisible()
+    expect(within(region).getByRole("button", { name: "Tools" })).toBeVisible()
+  })
+
+  it("keeps a focused common control mounted across mode changes", async () => {
+    const value = props()
+    const view = mount(value)
+    const region = await openCustomize()
+    const control = within(region).getByRole("button", { name: "MCP tools" })
+    control.focus()
+    view.rerenderToolbar({ ...value, isProMode: true })
+    expect(control).toHaveFocus()
   })
 
   it("preserves focus on another task when the actual picker closes after a watched close", async () => {
@@ -240,7 +247,7 @@ describe("Casual task-based customization", () => {
       <ConfigProvider theme={{ token: { motion: false } }}>
         <I18nextProvider i18n={translations}>
           <button>Other task</button>
-          <ComposerToolbar {...props()} />
+          <StoredToolbar {...props()} />
         </I18nextProvider>
       </ConfigProvider>
     )
@@ -249,10 +256,7 @@ describe("Casual task-based customization", () => {
     const tab = await screen.findByRole("tab", { name: "Characters" })
     tab.focus()
     await act(async () => {
-      await new Storage().set(
-        "playgroundComposerCasualAdvancedControlsOpen",
-        false
-      )
+      await new Storage().set("playgroundComposerOptionsExpanded", false)
     })
     await user.click(screen.getByRole("button", { name: "Other task" }))
     await act(async () => {
@@ -274,10 +278,7 @@ describe("Casual task-based customization", () => {
     const tab = await screen.findByRole("tab", { name: "Characters" })
     tab.focus()
     await act(async () => {
-      await new Storage().set(
-        "playgroundComposerCasualAdvancedControlsOpen",
-        false
-      )
+      await new Storage().set("playgroundComposerOptionsExpanded", false)
     })
     expect(customize()).toHaveAttribute("aria-expanded", "false")
     expect(tab).toBeVisible()
@@ -291,10 +292,7 @@ describe("Casual task-based customization", () => {
     const region = await openCustomize()
     within(region).getByRole("button", { name: "MCP tools" }).focus()
     await act(async () => {
-      await new Storage().set(
-        "playgroundComposerCasualAdvancedControlsOpen",
-        false
-      )
+      await new Storage().set("playgroundComposerOptionsExpanded", false)
     })
     expect(customize()).toHaveAttribute("aria-expanded", "false")
     expect(customize()).toHaveFocus()
@@ -304,17 +302,14 @@ describe("Casual task-based customization", () => {
     render(
       <I18nextProvider i18n={translations}>
         <button>Other task</button>
-        <ComposerToolbar {...props()} />
+        <StoredToolbar {...props()} />
       </I18nextProvider>
     )
     const region = await openCustomize()
     within(region).getByRole("button", { name: "MCP tools" }).focus()
     screen.getByRole("button", { name: "Other task" }).focus()
     await act(async () => {
-      await new Storage().set(
-        "playgroundComposerCasualAdvancedControlsOpen",
-        false
-      )
+      await new Storage().set("playgroundComposerOptionsExpanded", false)
     })
     expect(customize()).toHaveAttribute("aria-expanded", "false")
     expect(screen.getByRole("button", { name: "Other task" })).toHaveFocus()
@@ -322,10 +317,8 @@ describe("Casual task-based customization", () => {
 
   it("keeps customization usable for this visit after a failed preference read, without overwriting the unread preference", async () => {
     const original = storageOriginal.get
-    spyOnStorageGet("sync").mockImplementation(function (
-      key: string
-    ) {
-      return key === "playgroundComposerCasualAdvancedControlsOpen"
+    spyOnStorageGet("sync").mockImplementation(function (key: string) {
+      return key === "playgroundComposerOptionsExpanded"
         ? Promise.reject(new Error("read unavailable"))
         : original.call(this, key)
     })
@@ -335,7 +328,7 @@ describe("Casual task-based customization", () => {
     expect(region).toBeVisible()
     expect(
       screen.getByText(
-        "Display preference unavailable. Customize chat still works for this visit."
+        "Display preference unavailable. Tools still work for this visit."
       )
     ).toBeVisible()
     fireEvent.click(customize())
@@ -351,11 +344,11 @@ describe("Casual task-based customization", () => {
     )
     fireEvent.click(customize())
     expect(
-      await screen.findByRole("region", { name: "Customize chat" })
+      await screen.findByRole("region", { name: "Composer tools" })
     ).toBeVisible()
     expect(
       await screen.findByText(
-        "Display preference unavailable. Customize chat still works for this visit."
+        "Display preference unavailable. Tools still work for this visit."
       )
     ).toBeVisible()
     fireEvent.click(customize())
@@ -366,10 +359,8 @@ describe("Casual task-based customization", () => {
     const original = storageOriginal.get
     let finish!: (value: boolean) => void
     let held = false
-    spyOnStorageGet("sync").mockImplementation(function (
-      key: string
-    ) {
-      if (key === "playgroundComposerCasualAdvancedControlsOpen" && !held) {
+    spyOnStorageGet("sync").mockImplementation(function (key: string) {
+      if (key === "playgroundComposerOptionsExpanded" && !held) {
         held = true
         return new Promise((resolve) => {
           finish = resolve
@@ -379,10 +370,7 @@ describe("Casual task-based customization", () => {
     })
     mount()
     await act(async () => {
-      await new Storage().set(
-        "playgroundComposerCasualAdvancedControlsOpen",
-        false
-      )
+      await new Storage().set("playgroundComposerOptionsExpanded", false)
     })
     await waitFor(() => expect(customize()).toBeEnabled())
     await act(async () => {
@@ -489,7 +477,7 @@ describe("Casual task-based customization", () => {
           <MemoryRouter>
             <ConfigProvider theme={{ token: { motion: false } }}>
               <I18nextProvider i18n={translations}>
-                <ComposerToolbar
+                <StoredToolbar
                   {...props({
                     nestedDisclosureOpen: open,
                     ...(kind === "MCP"
@@ -547,13 +535,12 @@ describe("Casual task-based customization", () => {
     async (layout) => {
       mount(props(layout))
       await waitFor(() => expect(customize()).toBeEnabled())
-      for (const name of ["Choose model", "Attach", "Send", "Customize chat"])
+      for (const name of ["Choose model", "Attach", "Send"])
         expect(screen.getByRole("button", { name })).toBeVisible()
       for (const name of [
         "MCP tools",
         "Choose character or persona",
         "Choose system prompt",
-        "Tools",
         "Research",
         "Chat modes",
         "Compare models",
@@ -561,16 +548,18 @@ describe("Casual task-based customization", () => {
         "Voice chat",
         "Start dictation"
       ])
-        expect(screen.queryByRole("button", { name })).not.toBeInTheDocument()
+        expect(
+          screen.queryByRole("button", { name, exact: true })
+        ).not.toBeInTheDocument()
       const region = await openCustomize()
-      const research = within(region).getByRole("group", {
-        name: "Research & context"
+      const research = within(region).getByRole("region", {
+        name: "Context setup"
       })
-      const character = within(region).getByRole("group", {
-        name: "Character & your role"
+      const character = within(region).getByRole("region", {
+        name: "Prompts & people"
       })
-      const response = within(region).getByRole("group", {
-        name: "Response settings"
+      const response = within(region).getByRole("region", {
+        name: "Prompts & people"
       })
       expect(
         within(research).getByRole("button", { name: "MCP tools" })
@@ -598,16 +587,16 @@ describe("Casual task-based customization", () => {
 
   it("uses the established explicit disclosure preference without mount or mode writes", async () => {
     const store = new Storage()
-    await store.set("playgroundComposerCasualAdvancedControlsOpen", true)
+    await store.set("playgroundComposerOptionsExpanded", true)
     const writes = spyOnStorageSet("sync")
     const value = props()
     const rendered = mount(value)
-    await screen.findByRole("region", { name: "Customize chat" })
+    await screen.findByRole("region", { name: "Composer tools" })
     expect(writes).not.toHaveBeenCalled()
     rendered.rerenderToolbar({ ...value, isProMode: true })
     rendered.rerenderToolbar(value)
     expect(
-      await screen.findByRole("region", { name: "Customize chat" })
+      await screen.findByRole("region", { name: "Composer tools" })
     ).toBeVisible()
     expect(writes).not.toHaveBeenCalled()
     fireEvent.click(customize())
@@ -619,7 +608,7 @@ describe("Casual task-based customization", () => {
     await waitFor(() => expect(customize()).toBeEnabled())
     expect(customize()).toHaveAttribute("aria-expanded", "false")
     expect(writes).toHaveBeenCalledExactlyOnceWith(
-      "playgroundComposerCasualAdvancedControlsOpen",
+      "playgroundComposerOptionsExpanded",
       false
     )
   })
@@ -627,10 +616,8 @@ describe("Casual task-based customization", () => {
   it("waits for the saved disclosure read before accepting a conflicting toggle", async () => {
     const original = storageOriginal.get
     let finish!: (value: boolean) => void
-    spyOnStorageGet("sync").mockImplementation(function (
-      key: string
-    ) {
-      if (key === "playgroundComposerCasualAdvancedControlsOpen")
+    spyOnStorageGet("sync").mockImplementation(function (key: string) {
+      if (key === "playgroundComposerOptionsExpanded")
         return new Promise((resolve) => {
           finish = resolve
         })
@@ -646,7 +633,7 @@ describe("Casual task-based customization", () => {
       finish(true)
     })
     expect(
-      await screen.findByRole("region", { name: "Customize chat" })
+      await screen.findByRole("region", { name: "Composer tools" })
     ).toBeVisible()
     expect(customize()).toBeEnabled()
     expect(writes).not.toHaveBeenCalled()
@@ -663,7 +650,7 @@ describe("Casual task-based customization", () => {
             id: "rolePlayIdentity",
             label: "Character",
             value: "Mira",
-            tone: "active",
+            tone: "neutral",
             onClick: clear
           },
           {
@@ -681,14 +668,14 @@ describe("Casual task-based customization", () => {
         ]
       })
     )
-    const chip = screen.getByRole("button", { name: /Character: Mira/ })
+    const chip = screen.getByTitle("Character: Mira")
     fireEvent.click(chip)
     expect(setup).toHaveBeenCalledTimes(1)
     expect(clear).not.toHaveBeenCalled()
     expect(screen.getByText("Excluded in this mode")).toBeVisible()
     expect(screen.getByText("2 pinned")).toBeVisible()
     expect(
-      screen.queryByRole("region", { name: "Customize chat" })
+      screen.queryByRole("region", { name: "Composer tools" })
     ).not.toBeInTheDocument()
   })
 
@@ -740,7 +727,7 @@ describe("Casual task-based customization", () => {
     fireEvent.click(button)
     expect(stop).toHaveBeenCalledOnce()
     expect(
-      screen.queryByRole("region", { name: "Customize chat" })
+      screen.queryByRole("region", { name: "Composer tools" })
     ).not.toBeInTheDocument()
   })
 
@@ -777,33 +764,20 @@ describe("Casual task-based customization", () => {
     expect(customize()).toBeVisible()
   })
 
-  it("retains Pro direct selectors and expert controls instead of a compulsory disclosure", async () => {
+  it("keeps Pro presets and costs reachable through the shared disclosure", async () => {
     mount(
-      props({ isProMode: true, messages: [{ role: "user", content: "Hello" }] })
+      props({
+        isProMode: true,
+        messages: [{ role: "user", content: "Hello" }]
+      })
     )
-    for (const name of [
-      "Choose model",
-      "Attach",
-      "Send",
-      "MCP tools",
-      "Choose character or persona",
-      "Choose system prompt",
-      "Tools",
-      "Compare models",
-      "Interactive response",
-      "Voice chat",
-      "Start dictation"
-    ])
-      expect(screen.getByRole("button", { name })).toBeVisible()
+    const region = await openCustomize()
     expect(
-      screen.queryByRole("button", { name: "Customize chat" })
-    ).not.toBeInTheDocument()
-    await waitFor(() => expect(screen.getByRole("button", { name: "Advanced controls" })).toBeEnabled())
-    fireEvent.click(screen.getByRole("button", { name: "Advanced controls" }))
-    expect(
-      await screen.findByRole("button", { name: "Parameter presets" })
+      within(region).getByRole("button", { name: "Parameter presets" })
     ).toBeVisible()
-    expect(screen.getByRole("button", { name: "Session cost" })).toBeVisible()
+    expect(
+      within(region).getByRole("button", { name: "Session cost" })
+    ).toBeVisible()
   })
 
   it("keyboard opens customization and Escape returns focus to its persistent visible trigger", async () => {
@@ -812,7 +786,9 @@ describe("Casual task-based customization", () => {
     await waitFor(() => expect(customize()).toBeEnabled())
     customize().focus()
     await user.keyboard("{Enter}")
-    const region = await screen.findByRole("region", { name: "Customize chat" })
+    const region = await screen.findByRole("region", {
+      name: "Composer tools"
+    })
     within(region).getByRole("button", { name: "MCP tools" }).focus()
     await user.keyboard("{Escape}")
     await waitFor(() =>
@@ -848,13 +824,13 @@ describe("Casual task-based customization", () => {
     expect(customize()).toHaveFocus()
   })
 
-  it("mode replacement cannot strand focus when the old focused control unmounts", async () => {
+  it("mode replacement cannot strand focus when a Pro-only control unmounts", async () => {
     const value = props({ isProMode: true })
     const rendered = mount(value)
-    screen.getByRole("button", { name: "MCP tools" }).focus()
+    const region = await openCustomize()
+    within(region).getByRole("button", { name: "Parameter presets" }).focus()
     rendered.rerenderToolbar({ ...value, isProMode: false })
-    await waitFor(() => expect(customize()).toBeEnabled())
-    expect(customize()).toHaveFocus()
+    await waitFor(() => expect(customize()).toHaveFocus())
   })
 
   it("mode replacement leaves an unrelated focused control alone", async () => {
@@ -862,7 +838,7 @@ describe("Casual task-based customization", () => {
     const node = (next: Props) => (
       <I18nextProvider i18n={translations}>
         <button>Other task</button>
-        <ComposerToolbar {...next} />
+        <StoredToolbar {...next} />
       </I18nextProvider>
     )
     const rendered = render(node(value))
@@ -885,7 +861,7 @@ describe("Casual task-based customization", () => {
             onChange={(event) => setMessage(event.target.value)}
           />
           <button onClick={() => setPro(!pro)}>Change UI mode</button>
-          <ComposerToolbar {...value} isProMode={pro} />
+          <StoredToolbar {...value} isProMode={pro} />
         </I18nextProvider>
       )
     }
@@ -902,77 +878,121 @@ describe("Casual task-based customization", () => {
   })
 })
 
-
-it("waits for the original Pro preference before accepting an Advanced toggle", async () => {
+it("waits for the shared Tools preference before accepting a Pro toggle", async () => {
   let release!: (value: boolean) => void
-  const held = new Promise<boolean>(resolve => { release = resolve })
+  const held = new Promise<boolean>((resolve) => {
+    release = resolve
+  })
   let initialRead = true
   const read = spyOnStorageGet("sync").mockImplementation(function (key) {
-    if (key === "playgroundComposerAdvancedControlsOpen" && initialRead) {
+    if (key === "playgroundComposerOptionsExpanded" && initialRead) {
       initialRead = false
       return held
     }
     return storageOriginal.get.call(this, key)
   })
   const writes = spyOnStorageSet("sync")
-  mount(props({ isProMode: true, messages: [{ role: "user", content: "Hello" }] }))
+  mount(
+    props({ isProMode: true, messages: [{ role: "user", content: "Hello" }] })
+  )
   try {
-    const toggle = screen.getByRole("button", { name: "Advanced controls" })
+    const toggle = customize()
     expect(toggle).toBeDisabled()
     expect(toggle).toHaveAttribute("aria-busy", "true")
     fireEvent.click(toggle)
     expect(writes).not.toHaveBeenCalled()
-  } finally { release(false) }
-  await waitFor(() => expect(screen.getByRole("button", { name: "Advanced controls" })).toBeEnabled())
-  expect(read).toHaveBeenCalledWith("playgroundComposerAdvancedControlsOpen")
-  fireEvent.click(screen.getByRole("button", { name: "Advanced controls" }))
-  await waitFor(() => expect(screen.getByRole("button", { name: "Parameter presets" })).toBeVisible())
-  await waitFor(() => expect(writes).toHaveBeenCalledWith("playgroundComposerAdvancedControlsOpen", true))
+  } finally {
+    release(false)
+  }
+  await waitFor(() => expect(customize()).toBeEnabled())
+  expect(read).toHaveBeenCalledWith("playgroundComposerOptionsExpanded")
+  fireEvent.click(customize())
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Parameter presets" })
+    ).toBeVisible()
+  )
+  await waitFor(() =>
+    expect(writes).toHaveBeenCalledWith(
+      "playgroundComposerOptionsExpanded",
+      true
+    )
+  )
 })
 
-
-it("keeps Pro Advanced controls usable for this visit after an unread preference fails", async () => {
+it("keeps Pro Tools usable for this visit after an unread preference fails", async () => {
   spyOnStorageGet("sync").mockImplementation(function (key) {
-    return key === "playgroundComposerAdvancedControlsOpen"
+    return key === "playgroundComposerOptionsExpanded"
       ? Promise.reject(new Error("Pro preference unavailable"))
       : storageOriginal.get.call(this, key)
   })
   const writes = spyOnStorageSet("sync")
-  mount(props({ isProMode: true, messages: [{ role: "user", content: "Hello" }] }))
-  await screen.findByText("Display preference unavailable. Advanced controls still work for this visit.")
-  expect(screen.getByRole("button", { name: "Advanced controls" })).toBeEnabled()
-  fireEvent.click(screen.getByRole("button", { name: "Advanced controls" }))
-  await waitFor(() => expect(screen.getByRole("button", { name: "Parameter presets" })).toBeVisible())
+  mount(
+    props({ isProMode: true, messages: [{ role: "user", content: "Hello" }] })
+  )
+  await screen.findByText(
+    "Display preference unavailable. Tools still work for this visit."
+  )
+  expect(customize()).toBeEnabled()
+  fireEvent.click(customize())
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Parameter presets" })
+    ).toBeVisible()
+  )
   expect(writes).not.toHaveBeenCalled()
 })
 
-
 it("keeps a newer watched Pro choice when the original preference read resolves late", async () => {
   let release!: (value: boolean) => void
-  const held = new Promise<boolean>(resolve => { release = resolve })
+  const held = new Promise<boolean>((resolve) => {
+    release = resolve
+  })
   let initialRead = true
   spyOnStorageGet("sync").mockImplementation(function (key) {
-    if (key === "playgroundComposerAdvancedControlsOpen" && initialRead) {
+    if (key === "playgroundComposerOptionsExpanded" && initialRead) {
       initialRead = false
       return held
     }
     return storageOriginal.get.call(this, key)
   })
-  mount(props({ isProMode: true, messages: [{ role: "user", content: "Hello" }] }))
+  mount(
+    props({ isProMode: true, messages: [{ role: "user", content: "Hello" }] })
+  )
   try {
-    await act(async () => { await new Storage().set("playgroundComposerAdvancedControlsOpen", true) })
-    await waitFor(() => expect(screen.getByRole("button", { name: "Parameter presets" })).toBeVisible())
-  } finally { release(false) }
-  await act(async () => { await held })
-  expect(screen.getByRole("button", { name: "Advanced controls" })).toHaveAttribute("aria-expanded", "true")
-  expect(screen.getByRole("button", { name: "Parameter presets" })).toBeVisible()
+    await act(async () => {
+      await new Storage().set("playgroundComposerOptionsExpanded", true)
+    })
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Parameter presets" })
+      ).toBeVisible()
+    )
+  } finally {
+    release(false)
+  }
+  await act(async () => {
+    await held
+  })
+  expect(customize()).toHaveAttribute("aria-expanded", "true")
+  expect(
+    screen.getByRole("button", { name: "Parameter presets" })
+  ).toBeVisible()
 })
 it("retains Pro session controls when saving its display choice fails", async () => {
-  mount(props({ isProMode: true, messages: [{ role: "user", content: "Hello" }] }))
-  await waitFor(() => expect(screen.getByRole("button", { name: "Advanced controls" })).toBeEnabled())
-  spyOnStorageSet("sync").mockRejectedValueOnce(new Error("Pro display write unavailable"))
-  fireEvent.click(screen.getByRole("button", { name: "Advanced controls" }))
-  await screen.findByText("Display preference unavailable. Advanced controls still work for this visit.")
-  expect(screen.getByRole("button", { name: "Parameter presets" })).toBeVisible()
-  expect(screen.getByRole("button", { name: "Advanced controls" })).toHaveAttribute("aria-expanded", "true")
+  mount(
+    props({ isProMode: true, messages: [{ role: "user", content: "Hello" }] })
+  )
+  await waitFor(() => expect(customize()).toBeEnabled())
+  spyOnStorageSet("sync").mockRejectedValueOnce(
+    new Error("Pro display write unavailable")
+  )
+  fireEvent.click(customize())
+  await screen.findByText(
+    "Display preference unavailable. Tools still work for this visit."
+  )
+  expect(
+    screen.getByRole("button", { name: "Parameter presets" })
+  ).toBeVisible()
+  expect(customize()).toHaveAttribute("aria-expanded", "true")
 })

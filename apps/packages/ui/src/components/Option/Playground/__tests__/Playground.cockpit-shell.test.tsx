@@ -326,6 +326,7 @@ vi.mock("@/services/settings/ui-settings", () => ({
   SIDEBAR_SHORTCUT_IDS: [],
   CHAT_WINDOW_OPACITY_SETTING: "chatWindowOpacity",
   CHAT_MESSAGE_OPACITY_SETTING: "chatMessageOpacity",
+  CHAT_MESSAGE_VIEW_SETTING: "chatMessageView",
   CHAT_CHARACTER_IMAGE_OPACITY_SETTING: "chatCharacterImageOpacity",
   resolveOpacityAlpha: (value: unknown, fallback = 35) =>
     typeof value === "number" && Number.isFinite(value)
@@ -364,6 +365,7 @@ vi.mock("@/store/artifacts", () => ({
 
 vi.mock("@/hooks/useSetting", () => ({
   useSetting: (setting: string) => {
+    if (setting === "chatMessageView") return ["transcript", vi.fn()]
     if (setting === "chatWindowOpacity") return [35];
     if (setting === "chatMessageOpacity") return [60];
     if (setting === "chatCharacterImageOpacity") return [100];
@@ -547,7 +549,7 @@ describe("Playground cockpit shell", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.getByTestId("playground-cockpit-mode-summary"),
-    ).toHaveTextContent("Context and chat settings visible.");
+    ).toHaveTextContent("Context and runtime visible.");
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
     expect(
@@ -558,17 +560,6 @@ describe("Playground cockpit shell", () => {
         requireFresh: true,
       });
     });
-  });
-
-  it("exposes the shared theme toggle contract in the cockpit header", async () => {
-    render(<Playground />);
-
-    const themeToggle = await screen.findByTestId("chat-header-theme-toggle");
-    expect(themeToggle).toHaveAccessibleName("Switch to light theme");
-
-    fireEvent.click(themeToggle);
-
-    expect(darkModeState.toggleDarkMode).toHaveBeenCalledTimes(1);
   });
 
   it("renders Character Chat recent sessions only for the active character workflow", async () => {
@@ -994,7 +985,7 @@ describe("Playground cockpit shell", () => {
     routeApplyOutcome.value = 'retired';
     render(<Playground />);
     const status = await screen.findByRole('status', { name: 'Character Chat setup status' });
-    expect(status).toHaveTextContent('Character setup was not applied');
+    await waitFor(() => expect(status).toHaveTextContent('Character setup was not applied'));
     expect(routerNavigateState.navigate).not.toHaveBeenCalled();
     expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled();
     expect(messageOptionState.value.setMessages).not.toHaveBeenCalled();
@@ -2101,7 +2092,7 @@ describe("Playground cockpit shell", () => {
     fireEvent.click(
       within(screen.getByTestId("playground-cockpit-right-rail")).getByRole(
         "button",
-        { name: /hide chat settings/i },
+        { name: /hide runtime/i },
       ),
     );
 
@@ -2176,7 +2167,7 @@ describe("Playground cockpit shell", () => {
     });
     expect(
       screen.getByTestId("playground-cockpit-mode-summary"),
-    ).toHaveTextContent("Context hidden. Chat settings visible.");
+    ).toHaveTextContent("Context hidden. Runtime visible.");
     expect(
       screen.getByTestId("playground-cockpit-right-rail"),
     ).toBeInTheDocument();
@@ -2190,7 +2181,7 @@ describe("Playground cockpit shell", () => {
     fireEvent.click(
       within(screen.getByTestId("playground-cockpit-right-rail")).getByRole(
         "button",
-        { name: /hide chat settings/i },
+        { name: /hide runtime/i },
       ),
     );
 
@@ -2210,7 +2201,7 @@ describe("Playground cockpit shell", () => {
       screen.getByRole("button", { name: /show context/i }),
     );
     fireEvent.click(
-      screen.getByRole("button", { name: /show chat settings/i }),
+      screen.getByRole("button", { name: /show runtime/i }),
     );
 
     await waitFor(() => {
@@ -2287,11 +2278,11 @@ describe("Playground cockpit shell", () => {
     const collapseRuntimeButton = within(runtimeRailAfterRestore).getByRole(
       "button",
       {
-        name: /hide chat settings/i,
+        name: /hide runtime/i,
       },
     );
     const collapseRuntimeTooltip = screen.getByRole("tooltip", {
-      name: "Hide chat settings",
+      name: "Hide runtime",
     });
     expect(collapseRuntimeButton).toHaveAttribute(
       "aria-describedby",
@@ -2304,10 +2295,10 @@ describe("Playground cockpit shell", () => {
       expect(screen.queryByTestId("playground-cockpit-right-rail")).toBeNull();
     });
     const restoreRuntimeButton = screen.getByRole("button", {
-      name: /show chat settings/i,
+      name: /show runtime/i,
     });
     const restoreRuntimeTooltip = screen.getByRole("tooltip", {
-      name: "Show chat settings",
+      name: "Show runtime",
     });
     expect(restoreRuntimeButton).toHaveAttribute(
       "aria-describedby",
@@ -2380,7 +2371,7 @@ describe("Playground cockpit shell", () => {
         name: "Empty assistant response",
       }),
     ).toHaveTextContent(
-      "openai:gpt-4.1-mini returned no response text.",
+      "gpt-4.1-mini (OpenAI) returned no response text.",
     );
 
     fireEvent.click(

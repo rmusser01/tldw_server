@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import outside_chacha_operation
 from tldw_Server_API.app.core.DB_Management.DB_Manager import create_workflows_database, get_content_backend_instance
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.core.exceptions import AdapterError
@@ -838,6 +839,19 @@ class WorkflowEngine:
                             error_reason_code = _reason_code_from_error(e)
                             with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                                 record_span_exception(e)
+                        except asyncio.CancelledError:
+                            current = asyncio.current_task()
+                            if current is not None and current.cancelling():
+                                raise  # the run's task was cancelled: propagate, as before, with no DB read
+                            run_cancelled = True  # if the flag cannot be read, the CancelledError propagates, as on dev
+                            with contextlib.suppress(Exception):  # any read failure, e.g. the pool's unwrapped PoolTimeout
+                                run_cancelled = self.db.is_cancel_requested(run_id)
+                            if run_cancelled:
+                                raise  # the run was cancelled through the API (engine.cancel cancels no task)
+                            err = AdapterError("step_raised_cancelled_error")  # the step raised it itself (TASK-13891)
+                            error_reason_code = _reason_code_from_error(err)
+                            with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
+                                record_span_exception(err)
 
                         if err is not None:
                             failure = build_failure_envelope(err, step_type=step_type)
@@ -1136,8 +1150,12 @@ class WorkflowEngine:
         next_step_id: str | None = None,
         retry_resume: bool = False,
     ) -> None:
-        """Resume a run, with its owner as the user for LLM usage accounting."""
-        with llm_call_root(self._llm_user_for_run(run_id), operation="workflow"):
+        """Resume a run, with its owner as the user for LLM usage accounting.
+
+        Callers start it as a detached task (a route, a human step's timeout, the orphan
+        reaper), which outlives their ChaCha operation, so the run never joins it (TASK-13897).
+        """
+        with outside_chacha_operation(), llm_call_root(self._llm_user_for_run(run_id), operation="workflow"):
             await self._continue_run_impl(
                 run_id, after_step_id, last_outputs=last_outputs, next_step_id=next_step_id, retry_resume=retry_resume
             )
@@ -1371,6 +1389,17 @@ class WorkflowEngine:
                 except Exception as e:  # noqa: BLE001 - adapter/provider failures must terminally fail the step
                     err = e
                     error_reason_code = _reason_code_from_error(e)
+                except asyncio.CancelledError:
+                    current = asyncio.current_task()
+                    if current is not None and current.cancelling():
+                        raise  # the run's task was cancelled: propagate, as before, with no DB read
+                    run_cancelled = True  # if the flag cannot be read, the CancelledError propagates, as on dev
+                    with contextlib.suppress(Exception):  # any read failure, e.g. the pool's unwrapped PoolTimeout
+                        run_cancelled = self.db.is_cancel_requested(run_id)
+                    if run_cancelled:
+                        raise  # the run was cancelled through the API (engine.cancel cancels no task)
+                    err = AdapterError("step_raised_cancelled_error")  # the step raised it itself (TASK-13891)
+                    error_reason_code = _reason_code_from_error(err)
                 if err is not None:
                     failure = build_failure_envelope(err, step_type=stype)
                     self._complete_step_attempt_record(
@@ -1826,7 +1855,8 @@ class WorkflowEngine:
                 return
 
         try:
-            asyncio.create_task(_timeout_task())
+            with outside_chacha_operation():  # the task copies this context, and can outlive its creator by days
+                asyncio.create_task(_timeout_task())
         except _WF_NONCRITICAL_EXCEPTIONS:
             return
 

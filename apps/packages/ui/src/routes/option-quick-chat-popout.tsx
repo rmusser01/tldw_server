@@ -11,6 +11,7 @@ import { AlertCircle } from "lucide-react"
 import { useChatModelsSelect } from "@/hooks/useChatModelsSelect"
 import { QuickChatGuidesPanel } from "@/components/Common/QuickChatHelper/QuickChatGuidesPanel"
 import { parseQuickChatPopoutState } from "@/components/Common/QuickChatHelper/popout-state"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 
 const QuickChatPopout: React.FC = () => {
   const { t } = useTranslation(["option", "common"])
@@ -84,7 +85,7 @@ const QuickChatPopout: React.FC = () => {
   // Scroll to bottom when messages change
   useEffect(() => {
     if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" })
+      messagesEndRef.current.scrollIntoView({ behavior: smoothScrollBehavior() })
     }
   }, [messages])
 

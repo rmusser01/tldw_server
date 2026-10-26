@@ -56,6 +56,7 @@ from tldw_Server_API.app.core.LLM_Calls.anthropic_messages import (
     openai_response_to_anthropic,
     openai_stream_to_anthropic,
 )
+from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.LLM_Calls.usage_accounting import accounted_direct_stream, record_direct_response
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
@@ -1176,11 +1177,12 @@ def _build_openai_call_params(
     return call_params
 
 
-def _prepare_native_payload(request_data: Any, *, model: str) -> dict[str, Any]:
+def _prepare_native_payload(request_data: Any, *, model: str, provider: str = "") -> dict[str, Any]:
     """Prepare payload for native Messages providers."""
     payload = request_data.model_dump(exclude_none=True)
     payload.pop("api_provider", None)
-    payload["model"] = model
+    # Anthropic accepts only its documented IDs; a saved dotted name (claude-sonnet-4.5) is sent dashed.
+    payload["model"] = canonical_anthropic_model_id(model) if provider == "anthropic" else model
     return payload
 
 
@@ -2043,7 +2045,7 @@ async def _handle_messages(
         if provider in MESSAGES_NATIVE_PROVIDERS:
             base_url = _resolve_messages_base_url(provider, app_config_override)
             url = _join_messages_endpoint(base_url, "/messages")
-            payload = _prepare_native_payload(request_data, model=model)
+            payload = _prepare_native_payload(request_data, model=model, provider=provider)
             timeout = _resolve_native_timeout(provider, app_config_override)
             headers = _build_native_headers(
                 provider=provider,
@@ -2195,7 +2197,7 @@ async def _handle_count_tokens(
 
         base_url = _resolve_messages_base_url(provider, app_config_override)
         url = _join_messages_endpoint(base_url, "/messages/count_tokens")
-        payload = _prepare_native_payload(request_data, model=model)
+        payload = _prepare_native_payload(request_data, model=model, provider=provider)
         timeout = _resolve_native_timeout(provider, app_config_override)
         headers = _build_native_headers(
             provider,

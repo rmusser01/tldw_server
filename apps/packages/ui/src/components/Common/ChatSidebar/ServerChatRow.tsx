@@ -121,6 +121,17 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
   }))
   const activeMenuItems = [
     {
+      key: "pin",
+      icon: isPinned ? <PinOff className="size-3" /> : <Pin className="size-3" />,
+      label: isPinned
+        ? t("common:unpin", { defaultValue: "Unpin" })
+        : t("common:pin", { defaultValue: "Pin" }),
+      onClick: () => {
+        setOpenMenuFor(null)
+        onTogglePinned(chat.id)
+      }
+    },
+    {
       key: "settings",
       icon: <Settings2 className="size-3" />,
       label: t("playground:composer.openModelSettings", {
@@ -204,6 +215,14 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
   ]
   const menuItems = isTrashView ? trashMenuItems : activeMenuItems
 
+  // A topic that repeats the title adds nothing to the row (CS-08).
+  const topicLabel =
+    chat.topic_label &&
+    String(chat.topic_label).trim().toLowerCase() !==
+      String(chat.title ?? "").trim().toLowerCase()
+      ? String(chat.topic_label)
+      : null
+
   const renderSourceInfo = () => {
     if (chat.parent_conversation_id) {
       return (
@@ -212,7 +231,7 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
             chatId: String(chat.parent_conversation_id).slice(0, 8),
             defaultValue: "Forked from chat {{chatId}}"
           })}>
-          <span className="inline-flex items-center gap-1">
+          <span className="inline-flex max-w-full items-center gap-1">
             <GitBranch className="size-3" />
             <span>
               {t("common:serverChatForkedLabel", {
@@ -244,11 +263,11 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
   return (
     <div
       className={cn(
-        "flex py-2 px-2 items-center gap-3 relative rounded-md truncate group transition-opacity duration-300 ease-in-out border",
+        "group relative flex min-w-0 items-center gap-2 rounded-md px-2 py-2",
         isActive
-          ? "bg-surface2 border-border-strong text-text"
-          : "bg-surface text-text border-border hover:bg-surface2",
-        selectionMode && isSelected && "border-primary/40"
+          ? "bg-surface text-text"
+          : "text-text hover:bg-surface",
+        selectionMode && isSelected && "bg-surface ring-1 ring-inset ring-primary/40"
       )}>
       {selectionMode ? (
         <input
@@ -266,8 +285,9 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
         onClick={handleRowClick}
         aria-label={showReference ? `${chat.title} · ${reference}` : undefined}
         disabled={disabled || (selectionMode && readOnly)}>
-        <span className="truncate text-sm" title={chat.title}>
-          {chat.title}
+        <span className="flex w-full min-w-0 items-center gap-1.5">
+          <span className="truncate text-sm font-medium" title={chat.title}>{chat.title}</span>
+          {isPinned && <Pin role="img" aria-label={t("common:pinned", { defaultValue: "Pinned" })} className="size-3 shrink-0 text-text-muted" />}
         </span>
         {chat.match_snippet && (
           // A search matched what was said in this chat: show it, since the title alone does not explain the hit.
@@ -279,52 +299,32 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
             {chat.match_snippet}
           </span>
         )}
-        <div className="flex flex-wrap items-center gap-2 text-xs text-text-subtle mt-1">
-          <ChatStateBadge state={chat.state} />
+        <div
+          data-testid="server-chat-row-meta"
+          className="mt-1 flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-muted">
+          <ChatStateBadge state={chat.state} t={t} />
           {lastModifiedLabel && (
             <span
-              className="text-[11px] text-text-subtle"
-              title={lastModifiedTitle}>
-              {t("common:updated", { defaultValue: "Updated" })}{" "}
+              className="shrink-0 text-xs text-text-muted"
+              title={`${t("common:updated", { defaultValue: "Updated" })}: ${lastModifiedTitle}`}>
               {lastModifiedLabel}
             </span>
           )}
-          {chat.topic_label && (
+          {topicLabel && (
             <span
-              className="truncate max-w-[12rem]"
-              title={String(chat.topic_label)}>
-              {String(chat.topic_label)}
+              className="max-w-full truncate"
+              title={topicLabel}>
+              {topicLabel}
             </span>
           )}
         </div>
+        <span className="flex w-full min-w-0 text-xs text-text-muted">{renderSourceInfo()}</span>
         {showReference && (
           <span className="text-xs text-text-subtle">{reference}</span>
         )}
-        <span className="flex items-center gap-1 text-xs text-text-subtle">
-          {renderSourceInfo()}
-        </span>
       </button>
       {!selectionMode && !readOnly && (
-        <div className="flex flex-col items-center gap-1">
-          {!isTrashView && (
-            <Tooltip title={isPinned ? t("common:unpin") : t("common:pin")}>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  onTogglePinned(chat.id)
-                }}
-                className="rounded p-1 text-text-subtle hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-focus)] h-7 w-7 sm:min-w-0 sm:min-h-0"
-                aria-label={isPinned ? t("common:unpin") : t("common:pin")}
-                aria-pressed={isPinned}>
-                {isPinned ? (
-                  <PinOff className="size-3" />
-                ) : (
-                  <Pin className="size-3" />
-                )}
-              </button>
-            </Tooltip>
-          )}
+        <div className="shrink-0">
           <Dropdown
             menu={{ items: menuItems, id: `server-chat-actions-${chat.id}` }}
             trigger={["click"]}
@@ -334,7 +334,7 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
             <button
               type="button"
               onClick={(event) => event.stopPropagation()}
-              className="rounded p-1 text-text-subtle hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-focus)] h-7 w-7 sm:min-w-0 sm:min-h-0"
+              className="rounded p-1 text-text-subtle hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus h-9 w-9 sm:min-w-0 sm:min-h-0"
               aria-label={`${t("option:header.moreActions", {
                 defaultValue: "More actions"
               })}: ${chat.title}`}

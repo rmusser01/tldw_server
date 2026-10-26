@@ -124,7 +124,9 @@ vi.mock("../hooks/useCasualComposerDisclosure", () => ({
 const createToolbarProps = (
   overrides: Partial<React.ComponentProps<typeof ComposerToolbar>> = {}
 ): React.ComponentProps<typeof ComposerToolbar> => ({
-  isProMode: true,
+  isProMode: false,
+  optionsExpanded: true,
+  onToggleOptions: vi.fn(),
   isMobile: true,
   isConnectionReady: true,
   isSending: false,
@@ -147,6 +149,7 @@ const createToolbarProps = (
   persistenceTooltip: "Persist",
   contextToolsOpen: false,
   onToggleKnowledgePanel: vi.fn(),
+  onOpenKnowledgePanel: vi.fn(),
   webSearch: false,
   onToggleWebSearch: vi.fn(),
   hasWebSearch: true,
@@ -176,8 +179,8 @@ const createToolbarProps = (
   ...overrides
 })
 
-describe("ComposerToolbar mobile role-play parity", () => {
-  it("exposes system prompts and generation style from the mobile overflow", () => {
+describe("ComposerToolbar mobile role-play tools", () => {
+  it("exposes system prompts and generation style inside Tools", () => {
     const onTemplateSelect = vi.fn()
     render(
       <ComposerToolbar
@@ -187,7 +190,6 @@ describe("ComposerToolbar mobile role-play parity", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "More options" }))
 
     expect(screen.getByRole("button", { name: "System prompts" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Generation style" })).toBeInTheDocument()
@@ -202,7 +204,6 @@ describe("ComposerToolbar mobile role-play parity", () => {
       })
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "More options" }))
     fireEvent.click(screen.getByRole("button", { name: "Generation style" }))
 
     expect(screen.getByTestId("generation-style-panel")).toBeInTheDocument()
@@ -258,7 +259,7 @@ describe("ComposerToolbar mobile role-play parity", () => {
     expect(screen.getByTitle("Context: 2 pinned").tagName).toBe("SPAN")
   })
 
-  it("routes mobile role-play setup through a reusable overflow callback", () => {
+  it("routes mobile role-play setup through the existing callback", () => {
     const onOpenRolePlaySetup = vi.fn()
     render(
       <ComposerToolbar
@@ -270,52 +271,9 @@ describe("ComposerToolbar mobile role-play parity", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "More options" }))
     fireEvent.click(screen.getByRole("button", { name: "Role-play setup" }))
 
     expect(onOpenRolePlaySetup).toHaveBeenCalledTimes(1)
   })
 
-  it("keeps the mobile role-play overflow in a wrapping actions row", () => {
-    render(
-      <ComposerToolbar
-        {...createToolbarProps({
-          rolePlayActions: {
-            onOpenRolePlaySetup: vi.fn()
-          },
-          modelUsageBadge: <span>0 tokens</span>,
-          voiceChatButton: <button type="button">Voice chat</button>
-        })}
-      />
-    )
-
-    const overflowButton = screen.getByRole("button", { name: "More options" })
-    const actionsRow = overflowButton.closest(
-      '[data-playground-toolbar-row="actions"]'
-    )
-
-    expect(actionsRow?.className).toContain("flex-wrap")
-  })
-
-  it("keeps the overflow trigger from stealing focus before click", () => {
-    render(
-      <ComposerToolbar
-        {...createToolbarProps({
-          rolePlayActions: {
-            onOpenRolePlaySetup: vi.fn()
-          }
-        })}
-      />
-    )
-
-    const overflowButton = screen.getByRole("button", { name: "More options" })
-    const mouseDown = new MouseEvent("mousedown", {
-      bubbles: true,
-      cancelable: true
-    })
-
-    overflowButton.dispatchEvent(mouseDown)
-
-    expect(mouseDown.defaultPrevented).toBe(true)
-  })
 })

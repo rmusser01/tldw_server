@@ -50,11 +50,11 @@ export const NotesDockButton: React.FC<NotesDockButtonProps> = ({
       : classNames(
           "flex items-center justify-center",
           "w-9 h-9 rounded-full",
-          "bg-[color:var(--color-primary)] hover:bg-[color:var(--color-primary-strong)]",
-          "text-white shadow-sm",
+          "bg-primary hover:bg-primaryStrong",
+          "text-primary-foreground hover:text-primary-strong-foreground shadow-sm",
           "transition-colors duration-150",
-          "focus:outline-none focus:ring-2 focus:ring-[color:var(--color-focus)] focus:ring-offset-2",
-          "focus:ring-offset-[color:var(--color-surface)]"
+          "focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2",
+          "focus-visible:ring-offset-surface"
         )
 
   return (

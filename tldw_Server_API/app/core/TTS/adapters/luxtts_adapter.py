@@ -27,7 +27,7 @@ from ..tts_exceptions import (
     TTSValidationError,
 )
 from ..tts_validation import validate_tts_request
-from ..utils import hold_tts_engine, parse_bool
+from ..utils import hold_tts_engine, parse_bool, tts_model_load_lock
 
 #
 # Local Imports
@@ -184,12 +184,8 @@ class LuxTTSAdapter(TTSAdapter):
 
         LuxTTS = self._load_engine_class()
         try:
-            engine = await asyncio.to_thread(
-                LuxTTS,
-                self.model_path,
-                device=self.device,
-                threads=self.threads,
-            )
+            async with hold_tts_engine(tts_model_load_lock(self.provider_key, str(self.model_path))) as run:
+                engine = await run(LuxTTS, self.model_path, device=self.device, threads=self.threads)
         except Exception as exc:
             self._status = ProviderStatus.ERROR
             raise TTSProviderInitializationError(

@@ -297,7 +297,11 @@ vi.mock('@/hooks/useLayoutEffectsOwner', () => ({
   useLayoutEffectsOwner: () => false,
 }));
 
-vi.mock('@/hooks/useFeatureFlags', () => ({
+vi.mock('@/hooks/useFeatureFlags', async (importOriginal) => ({
+  // Spread the real module so shared help/empty-state components that read
+  // other flags (for example COMPARE_MODE) keep working; every flag reads off.
+  ...(await importOriginal<typeof import('@/hooks/useFeatureFlags')>()),
+  useFeatureFlag: () => [false, () => undefined, true],
   useChatSidebar: () => [featureFlagState.showChatSidebar],
 }));
 
@@ -335,11 +339,13 @@ vi.mock('@/components/Common/ChatSidebar', () => ({
     return (
       <aside
         data-testid="chat-sidebar"
+        className={props.className as string | undefined}
         data-history-controller={useHistorySelectionContext() ? 'present' : 'absent'}
       >
         <button onClick={() => (props.onConversationSelected as (() => void) | undefined)?.()}>
           Select saved conversation
         </button>
+        <button onClick={() => (props.onToggleCollapse as (() => void) | undefined)?.()}>Collapse sidebar</button>
         <QuickChatHelperButton />
       </aside>
     );
@@ -599,6 +605,19 @@ describe('WebLayout /chat scroll contract', () => {
     expect(capabilityProbe.paletteProps?.onToggleSidebar).toBeTypeOf('function');
     fireEvent.keyDown(document, { key: 'h', ctrlKey: true, shiftKey: true });
     expect(screen.queryByRole('dialog', { name: 'Quick Chat Helper probe' })).not.toBeInTheDocument();
+  });
+
+  it('uses a single named mobile sidebar frame and keeps its collapse action available', async () => {
+    capabilityProbe.actualDrawer = true;
+    featureFlagState.showChatSidebar = true;
+    mediaQueryState.isMobile = true;
+    render(<OptionLayout><div>Chat content</div></OptionLayout>);
+    act(() => window.dispatchEvent(new CustomEvent('tldw:open-chat-sidebar')));
+    const dialog = await screen.findByRole('dialog', { name: 'Chats' });
+    expect(within(dialog).getByRole('button', { name: 'Collapse sidebar' })).toBeVisible();
+    expect(within(dialog).queryByRole('button', { name: 'Close', exact: true })).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Collapse sidebar' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Chats' })).toBeNull());
   });
 
   it('demand-mounts the helper in a cold real mobile Drawer without opening the sidebar', async () => {

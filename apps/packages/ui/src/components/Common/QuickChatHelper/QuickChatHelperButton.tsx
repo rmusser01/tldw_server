@@ -99,12 +99,12 @@ export const QuickChatHelperButton: React.FC<QuickChatHelperButtonProps> = ({
       ? classNames(
           "flex items-center justify-center",
           "w-12 h-12 rounded-full",
-          "bg-[color:var(--color-primary)] hover:bg-[color:var(--color-primary-strong)]",
-          "text-white shadow-lg",
+          "bg-primary hover:bg-primaryStrong",
+          "text-primary-foreground hover:text-primary-strong-foreground shadow-lg",
           "transition-all duration-200",
           "hover:scale-105 active:scale-95",
-          "focus:outline-none focus:ring-2 focus:ring-[color:var(--color-focus)] focus:ring-offset-2",
-          "focus:ring-offset-[color:var(--color-surface)]"
+          "focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2",
+          "focus-visible:ring-offset-surface"
         )
       : appearance === "ghost"
         ? classNames(
@@ -117,11 +117,11 @@ export const QuickChatHelperButton: React.FC<QuickChatHelperButtonProps> = ({
         : classNames(
             "flex items-center justify-center",
             "w-9 h-9 rounded-full",
-            "bg-[color:var(--color-primary)] hover:bg-[color:var(--color-primary-strong)]",
-            "text-white shadow-sm",
+            "bg-primary hover:bg-primaryStrong",
+            "text-primary-foreground hover:text-primary-strong-foreground shadow-sm",
             "transition-colors duration-150",
-            "focus:outline-none focus:ring-2 focus:ring-[color:var(--color-focus)] focus:ring-offset-2",
-            "focus:ring-offset-[color:var(--color-surface)]"
+            "focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2",
+            "focus-visible:ring-offset-surface"
           )
   const iconClassName =
     variant === "floating"

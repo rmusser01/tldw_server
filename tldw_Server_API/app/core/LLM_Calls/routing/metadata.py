@@ -4,15 +4,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
+
 ROUTING_MODEL_RANKS: dict[str, dict[str, dict[str, int]]] = {
     "openai": {
         "gpt-4o": {"quality_rank": 20, "latency_rank": 40, "cost_rank": 60},
         "gpt-4o-mini": {"quality_rank": 60, "latency_rank": 10, "cost_rank": 10},
     },
     "anthropic": {
-        "claude-opus-4.1": {"quality_rank": 10, "latency_rank": 70, "cost_rank": 90},
-        "claude-sonnet-4.5": {"quality_rank": 20, "latency_rank": 30, "cost_rank": 50},
-        "claude-haiku-4.5": {"quality_rank": 55, "latency_rank": 10, "cost_rank": 20},
+        "claude-opus-4-1": {"quality_rank": 10, "latency_rank": 70, "cost_rank": 90},
+        "claude-sonnet-4-5": {"quality_rank": 20, "latency_rank": 30, "cost_rank": 50},
+        "claude-haiku-4-5": {"quality_rank": 55, "latency_rank": 10, "cost_rank": 20},
     },
     "google": {
         "gemini-3-pro-preview": {"quality_rank": 25, "latency_rank": 35, "cost_rank": 45},
@@ -32,6 +34,9 @@ def merge_routing_metadata(
 
     normalized_provider = (provider or "").strip().lower()
     normalized_model = (model or "").strip()
+    if normalized_provider == "anthropic":
+        # The ranks are keyed by API IDs; a saved dotted name (claude-sonnet-4.5) finds its dashed entry.
+        normalized_model = canonical_anthropic_model_id(normalized_model)
     merged = dict(metadata)
     capabilities = merged.get("capabilities")
     if not isinstance(capabilities, dict):

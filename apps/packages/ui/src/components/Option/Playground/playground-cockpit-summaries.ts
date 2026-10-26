@@ -1,8 +1,8 @@
+import type { PlaygroundAssistantSummary } from "./PlaygroundAssistantContext";
 import type { AssistantSelection } from "@/types/assistant-selection";
 import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider";
 import type { PlaygroundPromptSummary } from "./PlaygroundContextRail";
 import type {
-  RuntimeAssistantSummary,
   RuntimeToolStateCount,
   RuntimeToolSummary,
 } from "./PlaygroundRuntimeInspector";
@@ -201,7 +201,7 @@ export function buildCockpitAssistantSummary(input: {
   selectedCharacter: LegacyCharacterSelection | null | undefined;
   personaMemoryMode?: PersonaMemoryMode | null;
   copy?: AssistantSummaryCopy;
-}): RuntimeAssistantSummary {
+}): PlaygroundAssistantSummary {
   const copy = { ...defaultAssistantCopy, ...input.copy };
   const selectedAssistant = input.selectedAssistant;
   if (selectedAssistant?.kind === "persona") {

@@ -140,9 +140,7 @@ describe("Playground mature cockpit surfaces", () => {
         runtimeStatusDetail={null}
         messageCount={4}
         threadSearchOpen={false}
-        selectedCharacterName="Mira Vale"
         onOpenModelSettings={openModel}
-        onOpenCharacterSettings={vi.fn()}
         settingSummaries={[
           { label: "Temperature", value: "0.7" },
           { label: "Context", value: "8k" }
@@ -156,10 +154,10 @@ describe("Playground mature cockpit surfaces", () => {
       />
     )
 
-    expect(screen.getByText("Provider route")).toBeInTheDocument()
-    expect(screen.getByText("openai:gpt-4.1-mini")).toBeInTheDocument()
-    expect(screen.getByText("Provider:model settings")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Model & settings" })).toBeInTheDocument()
+    expect(screen.getByText("Route openai:gpt-4.1-mini")).toBeInTheDocument()
     expect(screen.getByText("Temperature")).toBeInTheDocument()
+    fireEvent.click(screen.getByText("Default settings"))
     expect(screen.getByText("0.7")).toBeInTheDocument()
     expect(screen.getByText("MCP tools")).toBeInTheDocument()
     expect(screen.getByText("Chat tool access")).toBeInTheDocument()
@@ -191,7 +189,7 @@ describe("Playground mature cockpit surfaces", () => {
 
     const status = screen.getByRole("status", { name: "Chat status" })
     expect(within(status).getByText("Streaming")).toBeInTheDocument()
-    expect(within(status).getByText("openai:gpt-4.1-mini")).toBeInTheDocument()
+    expect(within(status).getByText("gpt-4.1-mini (OpenAI)")).toBeInTheDocument()
     expect(within(status).queryByText("Context active")).toBeNull()
 
     fireEvent.click(
@@ -259,7 +257,7 @@ describe("Playground mature cockpit surfaces", () => {
     const mobilePanels = screen.getByTestId("playground-cockpit-mobile-rails")
     const panels = within(mobilePanels)
     const contextButton = panels.getByRole("button", { name: "Context" })
-    const runtimeButton = panels.getByRole("button", { name: "Chat settings" })
+    const runtimeButton = panels.getByRole("button", { name: "Runtime" })
     const contextPanel = document.getElementById(
       contextButton.getAttribute("aria-controls") ?? "",
     )
@@ -267,7 +265,7 @@ describe("Playground mature cockpit surfaces", () => {
       runtimeButton.getAttribute("aria-controls") ?? "",
     )
 
-    expect(panels.getAllByRole("button")).toHaveLength(2)
+    expect(panels.getAllByRole("button")).toHaveLength(3)
     expect(panels.queryByRole("tablist")).not.toBeInTheDocument()
     expect(contextPanel).toBe(panels.getByRole("region", { name: "Context" }))
     expect(contextPanel).toHaveAttribute("aria-labelledby", contextButton.id)
@@ -281,7 +279,7 @@ describe("Playground mature cockpit surfaces", () => {
 
     fireEvent.click(runtimeButton)
     expect(onMobilePanelChange).toHaveBeenLastCalledWith("runtime")
-    expect(runtimePanel).toBe(panels.getByRole("region", { name: "Chat settings" }))
+    expect(runtimePanel).toBe(panels.getByRole("region", { name: "Runtime" }))
     expect(contextPanel).not.toBeVisible()
     expect(runtimePanel).toBeVisible()
     expect(contextButton).toHaveAttribute("aria-expanded", "false")
@@ -326,7 +324,7 @@ describe("Playground mature cockpit surfaces", () => {
     ).toHaveTextContent(
       "Context panel active. Composer draft remains available below.",
     )
-    for (const name of ["Context", "Chat settings"]) {
+    for (const name of ["Context", "Runtime"]) {
       expect(panels.getByRole("button", { name })).toHaveClass("min-h-[44px]")
     }
 
@@ -334,8 +332,8 @@ describe("Playground mature cockpit surfaces", () => {
     draft.focus()
     rerender(shell("runtime"))
     expect(mobilePanels).toHaveAttribute("data-mobile-panel", "runtime")
-    expect(panels.getByRole("region", { name: "Chat settings" })).toBeVisible()
-    expect(panels.getByRole("button", { name: "Chat settings" })).toHaveAttribute(
+    expect(panels.getByRole("region", { name: "Runtime" })).toBeVisible()
+    expect(panels.getByRole("button", { name: "Runtime" })).toHaveAttribute(
       "aria-expanded",
       "true",
     )

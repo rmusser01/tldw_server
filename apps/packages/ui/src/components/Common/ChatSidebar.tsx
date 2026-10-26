@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 import { useTranslation } from "react-i18next"
-import { Input, Tooltip, Segmented, type InputRef } from "antd"
+import { Input, Tooltip, Radio, type InputRef } from "antd"
 import {
   Plus,
   Search,
@@ -72,6 +72,8 @@ export function ChatSidebar({
   onConversationSelected
 }: ChatSidebarProps) {
   const { t } = useTranslation(["common", "sidepanel", "option", "settings"])
+  // Lets the collapse toggles point at the sidebar they control (AX-15).
+  const sidebarId = React.useId()
   const navigate = useNavigate()
   const location = useLocation()
   const [searchQuery, setSearchQuery] = useState("")
@@ -332,6 +334,7 @@ export function ChatSidebar({
   if (collapsed) {
     return (
       <div
+        id={sidebarId}
         data-testid="chat-sidebar"
       data-chat-sidebar
         className={cn(
@@ -345,6 +348,8 @@ export function ChatSidebar({
         >
           <button
             aria-label={t("common:chatSidebar.expand", "Expand sidebar")}
+            aria-expanded={false}
+            aria-controls={sidebarId}
             data-testid="chat-sidebar-toggle"
             onClick={onToggleCollapse}
             className={cn(
@@ -446,6 +451,7 @@ export function ChatSidebar({
   // Expanded view
   return (
     <div
+      id={sidebarId}
       data-testid="chat-sidebar"
         data-chat-sidebar
       className={cn(
@@ -460,19 +466,6 @@ export function ChatSidebar({
           {t("common:chatSidebar.title", "Chats")}
         </h2>
         <div className="flex items-center gap-1">
-          <Tooltip title={t("common:chatSidebar.newChat", "New Chat")}>
-            <button
-              aria-label={t("common:chatSidebar.newChat", "New Chat")}
-              data-testid="chat-sidebar-new-chat"
-              onClick={handleNewChat}
-              className={cn(
-                "p-2 rounded text-text-muted hover:bg-surface hover:text-primary",
-                focusRingClasses
-              )}
-            >
-              <Plus className="size-4" />
-            </button>
-          </Tooltip>
           {recentHistoryVisible && (currentTab === "server" || currentTab === "all") && !temporaryChat && (
             <Tooltip
               title={
@@ -507,6 +500,8 @@ export function ChatSidebar({
           >
             <button
               aria-label={t("common:chatSidebar.collapse", "Collapse sidebar")}
+              aria-expanded={true}
+              aria-controls={sidebarId}
               data-testid="chat-sidebar-toggle"
               onClick={onToggleCollapse}
               className={cn(
@@ -520,42 +515,91 @@ export function ChatSidebar({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {/* Search stays reachable even when recent history is collapsed. */}
-        <div className="px-3 py-2 border-b border-border">
-          <label htmlFor="chat-sidebar-search-input" className="mb-1 block text-xs font-semibold text-text-muted">
-            {t("common:chatSidebar.findConversations", "Find conversations")}
+      {/* Search stays reachable even when recent history is collapsed. */}
+      <div className="shrink-0 border-b border-border px-3 pb-3 pt-2">
+        <Tooltip title={t("common:chatSidebar.newChat", "New Chat")}>
+          <button
+            aria-label={t("common:chatSidebar.newChat", "New Chat")}
+            data-testid="chat-sidebar-new-chat"
+            onClick={handleNewChat}
+            className={cn(
+              "mb-2 flex w-full items-center justify-center gap-2 rounded-md bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-elevated",
+              focusRingClasses
+            )}
+          >
+            <Plus aria-hidden="true" className="size-4" />
+            <span>{t("common:chatSidebar.newChat", "New Chat")}</span>
+          </button>
+        </Tooltip>
+        <label htmlFor="chat-sidebar-search-input" className="sr-only">
+          {t("common:chatSidebar.findConversations", "Find conversations")}
+        </label>
+        <Input
+          ref={searchInput}
+          disabled={!tabReady}
+          id="chat-sidebar-search-input"
+          data-testid="chat-sidebar-search"
+          prefix={<Search aria-hidden="true" className="size-3.5 text-text-subtle" />}
+          placeholder={currentTab === "local" ? t("common:chatSidebar.local.search", "Search on-device chats…") : t("common:chatSidebar.search", "Search chats...")}
+          aria-label={t("common:chatSidebar.findConversations", "Find conversations")}
+          aria-describedby="chat-sidebar-search-scope"
+          value={searchQuery}
+          onChange={handleSearchChange}
+          size="middle"
+          className="bg-surface"
+          allowClear
+        />
+        <p id="chat-sidebar-search-scope" className="mt-1 text-xs text-text-muted">
+          {!tabReady
+            ? t("common:loading.title", "Loading…")
+            : currentTab === "folders"
+            ? t("common:chatSidebar.searchFromFolders", "Typing searches Server and On this device history.")
+            : currentTab === "all"
+            ? t("common:chatSidebar.discovery.allScope", "Search Server and On this device history.")
+            : t("common:chatSidebar.searchScope", "Search {{source}} history.", {
+                source: currentTab === "local"
+                  ? t("common:chatSidebar.tabs.local", "On this device")
+                  : t("common:chatSidebar.tabs.server", "Server")
+              })}
+        </p>
+        <div className="mt-2">
+          <label id="chat-sidebar-tab-label" className="sr-only">
+            {t("common:chatSidebar.tabsLabel", "Chat view")}
           </label>
-          <Input
-            ref={searchInput}
-            disabled={!tabReady}
-            id="chat-sidebar-search-input"
-            data-testid="chat-sidebar-search"
-            prefix={<Search aria-hidden="true" className="size-3.5 text-text-subtle" />}
-            placeholder={currentTab === "local" ? t("common:chatSidebar.local.search", "Search on-device chats…") : t("common:chatSidebar.search", "Search chats...")}
-            aria-label={t("common:chatSidebar.findConversations", "Find conversations")}
-            aria-describedby="chat-sidebar-search-scope"
-            value={searchQuery}
-            onChange={handleSearchChange}
+          <Radio.Group
+            value={currentTab}
+            disabled={!tabReady || recentPreference?.isLoading === true}
+            onChange={(event) => {
+              void setCurrentTab(event.target.value)
+              void setRecentCollapsed(false)
+            }}
+            optionType="button"
             size="small"
-            className="bg-surface"
-            allowClear
-          />
-          <p id="chat-sidebar-search-scope" className="mt-1 text-xs text-text-muted">
-            {!tabReady
-              ? t("common:loading.title", "Loading…")
-              : currentTab === "folders"
-              ? t("common:chatSidebar.searchFromFolders", "Typing searches Server and On this device history.")
-              : currentTab === "all"
-              ? t("common:chatSidebar.discovery.allScope", "Search Server and On this device history.")
-              : t("common:chatSidebar.searchScope", "Search {{source}} history.", {
-                  source: currentTab === "local"
-                    ? t("common:chatSidebar.tabs.local", "On this device")
-                    : t("common:chatSidebar.tabs.server", "Server")
-                })}
-          </p>
+            className="!grid w-full grid-cols-2 gap-1 rounded-md border border-border p-1"
+            aria-labelledby="chat-sidebar-tab-label"
+          >
+            {tabOptions.map((option) => (
+              <Radio.Button
+                key={option.value}
+                value={option.value}
+                className={cn(
+                  "!m-0 !flex !h-auto !min-h-11 !min-w-0 !items-center !justify-center !whitespace-normal !rounded-md !border-0 !px-2 !py-1 !text-center !text-xs !leading-5 before:!hidden sm:!min-h-8 [&_.ant-radio-button-label]:!whitespace-normal",
+                  currentTab === option.value ? "!bg-surface !text-text" : "!bg-transparent !text-text-muted"
+                )}
+                onClick={() => {
+                  if (currentTab === option.value && tabReady && recentPreference?.isLoading !== true) {
+                    void setRecentCollapsed(false)
+                  }
+                }}
+              >
+                {option.label}
+              </Radio.Button>
+            ))}
+          </Radio.Group>
         </div>
+      </div>
 
+      <div className="min-h-0 flex-1 overflow-y-auto" data-chat-sidebar-scroll>
         {/* Recent Conversations */}
         <button
           type="button"
@@ -573,7 +617,7 @@ export function ChatSidebar({
             "Recent conversations"
           )}
         >
-          <span className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
+          <span className="text-xs font-semibold text-text-muted">
             {t("common:chatSidebar.recentConversations", "Recent conversations")}
           </span>
           <ChevronDown
@@ -586,27 +630,6 @@ export function ChatSidebar({
 
         {recentHistoryVisible && (
           <div id="chat-sidebar-recent-conversations">
-            {/* Tabs */}
-            <div className="px-3 py-2 border-b border-border">
-              <label id="chat-sidebar-tab-label" className="sr-only">
-                {t("common:chatSidebar.tabsLabel", "Chat view")}
-              </label>
-              <Segmented<SidebarTab>
-                value={currentTab}
-                onChange={(value) => {
-                  void setCurrentTab(value)
-                }}
-                options={tabOptions}
-                block
-                orientation="vertical"
-                className="w-full [&_.ant-segmented-item-label]:px-2"
-                styles={{
-                  label: { whiteSpace: 'normal', overflowWrap: 'anywhere', textAlign: 'left' },
-                }}
-                aria-labelledby="chat-sidebar-tab-label"
-              />
-            </div>
-
             {/* Tab Content. Temporary mode opens saved chats read-only (H1): rows stay
                 selectable without management actions, and folder management stays off. */}
             <div>
@@ -619,6 +642,10 @@ export function ChatSidebar({
                   readOnly={temporaryChat}
                   onConversationSelected={onConversationSelected}
                   onVisibleChatsChange={setVisibleServerChats}
+                  onClearSearch={() => {
+                    setSearchQuery("")
+                    searchInput.current?.focus()
+                  }}
                 />
                 </section>
               )}
@@ -665,7 +692,7 @@ export function ChatSidebar({
           )}
           title={t("common:chatSidebar.navigation", "Navigation")}
         >
-          <span className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
+          <span className="text-xs font-semibold text-text-muted">
             {t("common:chatSidebar.navigation", "Navigation")}
           </span>
           <ChevronDown
@@ -710,11 +737,11 @@ export function ChatSidebar({
           <span>{t("common:chatSidebar.settings", "Settings")}</span>
         </button>
         <div className="mt-2 border-t border-border pt-2">
-          <div className="flex items-center gap-2">
-            <div className="flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="min-w-0 flex-1 basis-40">
               <ModeToggle />
             </div>
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-wrap gap-1">
               <NotesDockButton
                 appearance="ghost"
                 className="shrink-0"

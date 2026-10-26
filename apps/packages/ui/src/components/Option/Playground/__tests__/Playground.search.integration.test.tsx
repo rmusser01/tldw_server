@@ -3,6 +3,7 @@ import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render as renderComponent, renderHook, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { mockReducedMotion } from "@/test-utils/reducedMotion"
 
 import { useSimpleForm } from "@/hooks/useSimpleForm"
 import { useSidepanelChatHandoffImport } from "../hooks/useSidepanelChatHandoffImport"
@@ -348,6 +349,7 @@ vi.mock("@/services/settings/ui-settings", () => ({
   SIDEBAR_SHORTCUT_IDS: [],
   CHAT_WINDOW_OPACITY_SETTING: "chatWindowOpacity",
   CHAT_MESSAGE_OPACITY_SETTING: "chatMessageOpacity",
+  CHAT_MESSAGE_VIEW_SETTING: "chatMessageView",
   CHAT_CHARACTER_IMAGE_OPACITY_SETTING: "chatCharacterImageOpacity",
   resolveOpacityAlpha: (value: unknown, fallback = 35) =>
     typeof value === "number" && Number.isFinite(value)
@@ -380,6 +382,7 @@ vi.mock("@/store/artifacts", () => ({
 
 vi.mock("@/hooks/useSetting", () => ({
   useSetting: (setting: string) => {
+    if (setting === "chatMessageView") return ["transcript", vi.fn()]
     if (setting === "chatWindowOpacity") return [35]
     if (setting === "chatMessageOpacity") return [60]
     if (setting === "chatCharacterImageOpacity") return [100]
@@ -587,6 +590,7 @@ describe("Playground thread search integration", () => {
     target.dataset.index = "1"
     const scroll = vi.fn()
     target.scrollIntoView = scroll
+    const restoreMatchMedia = mockReducedMotion(false)
     const page = render(<Playground />)
     try {
       smartScrollState.value.containerRef.current!.append(target)
@@ -595,7 +599,30 @@ describe("Playground thread search integration", () => {
       await waitFor(() => expect(scroll).toHaveBeenCalledWith({block: "center", behavior: count > 100 ? "auto" : "smooth"}))
     } finally {
       page.unmount()
+      restoreMatchMedia()
       messageOptionState.value.messages = previous
+    }
+  })
+
+  // AX-19 (#3124): search jumps smooth-scrolled even when the OS asks for
+  // reduced motion.
+  it("jumps to a search result without smooth scrolling under reduced motion", async () => {
+    const restoreMatchMedia = mockReducedMotion(true)
+    timelineReveal.current = vi.fn(async () => true)
+    const target = document.createElement("div")
+    target.dataset.testid = "chat-message"
+    target.dataset.index = "1"
+    const scroll = vi.fn()
+    target.scrollIntoView = scroll
+    const page = render(<Playground />)
+    try {
+      smartScrollState.value.containerRef.current!.append(target)
+      fireEvent.keyDown(window, { key: "f", ctrlKey: true })
+      fireEvent.change(screen.getByPlaceholderText("Search messages in this conversation"), {target: {value: "beta"}})
+      await waitFor(() => expect(scroll).toHaveBeenCalledWith({block: "center", behavior: "auto"}))
+    } finally {
+      page.unmount()
+      restoreMatchMedia()
     }
   })
 
@@ -619,9 +646,10 @@ describe("Playground thread search integration", () => {
 
     fireEvent.change(input, { target: { value: "beta" } })
 
+    // CS-11: the typed text is highlighted as one phrase.
     expect(screen.getByTestId("playground-chat")).toHaveAttribute(
       "data-search-query",
-      "beta"
+      '"beta"'
     )
     await waitFor(() => {
       expect(screen.getByTestId("playground-chat")).toHaveAttribute(
@@ -630,6 +658,34 @@ describe("Playground thread search integration", () => {
       )
     })
   })
+
+  // AX-09 (#3122): closing in-thread search must hand focus back to where the
+  // user was, instead of dropping it on <body>.
+  it.each(["Escape", "Close button"])(
+    "returns focus to the previously focused control after closing thread search with %s",
+    async (closeWith) => {
+      render(<Playground />)
+      const trigger = screen.getByTestId("playground-shortcuts-help-trigger")
+      trigger.focus()
+
+      fireEvent.keyDown(trigger, { key: "f", ctrlKey: true })
+      const input = screen.getByPlaceholderText(
+        "Search messages in this conversation"
+      )
+      await waitFor(() => expect(input).toHaveFocus())
+
+      if (closeWith === "Escape") {
+        fireEvent.keyDown(input, { key: "Escape" })
+      } else {
+        fireEvent.click(screen.getByRole("button", { name: "Close" }))
+      }
+
+      expect(
+        screen.queryByPlaceholderText("Search messages in this conversation")
+      ).not.toBeInTheDocument()
+      await waitFor(() => expect(trigger).toHaveFocus())
+    }
+  )
 
   it("opens the single shortcut reference from the chat header and closes back to its trigger", async () => {
     useTutorialStore.getState().closeHelpModal()

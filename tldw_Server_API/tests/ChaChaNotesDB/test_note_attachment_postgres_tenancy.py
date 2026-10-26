@@ -17,6 +17,7 @@ from tldw_Server_API.app.api.v1.endpoints import notes as notes_endpoint
 from tldw_Server_API.app.core.DB_Management import Sync_DB as sync_db_module
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase, utcnow_iso
 from tldw_Server_API.app.core.Sync.v2.adapters import SyncAdapterRegistry
@@ -346,6 +347,7 @@ def test_postgres_canonical_content_supports_all_single_byte_range_forms(
         clock=utcnow_iso,
     )
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(notes_endpoint.router, prefix="/api/v1/notes")
 
     async def _db_override() -> CharactersRAGDB:

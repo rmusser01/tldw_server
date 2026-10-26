@@ -12,6 +12,7 @@ Provides helpers for integrating skills into the chat system:
 - Skill invocation handling
 """
 
+import asyncio
 from pathlib import Path
 from typing import Any, Optional
 
@@ -143,9 +144,10 @@ async def handle_skill_tool_call(
 
     try:
         # The registry lookup gets its own operation, so its checkout is returned before a
-        # forked skill's LLM call, whatever operation the caller holds.
+        # forked skill's LLM call, whatever operation the caller holds. The service's setup
+        # (4 table statements) runs off the event loop, like the lookup itself.
         with chacha_operation(independent=True):
-            service = SkillsService(user_id=user_id, base_path=base_path, db=db)
+            service = await asyncio.to_thread(SkillsService, user_id=user_id, base_path=base_path, db=db)
             skill_data = await service.get_skill(skill_name)
 
         executor = SkillExecutor()

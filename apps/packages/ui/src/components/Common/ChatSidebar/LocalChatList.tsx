@@ -742,6 +742,7 @@ export function LocalChatList({
       {scope?.isCurrent() &&
         groups.map((group) => (
           <section
+            className="mx-2"
             key={group.key}
             aria-label={t(
               group.key === "searchResults"
@@ -802,7 +803,7 @@ export function LocalChatList({
                     void select(row);
                   }}
                   className={cn(
-                    "w-full px-3 py-2 text-left text-sm hover:bg-surface",
+                    "w-full rounded-md px-2 py-2 text-left text-sm hover:bg-surface [&[aria-current=true]]:bg-surface",
                     focusRing,
                   )}
                 >

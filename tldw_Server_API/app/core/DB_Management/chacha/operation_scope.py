@@ -23,6 +23,10 @@ class ClosedChaChaOperationError(RuntimeError):
     """An inherited operation no longer admits new commands."""
 
 
+class ConcurrentChaChaTransactionError(RuntimeError):
+    """Another thread or task already holds this operation's managed transaction (ADR-080)."""
+
+
 @dataclass
 class ConnectionState:
     """Captured state for one database within an explicit owner."""
@@ -34,6 +38,7 @@ class ConnectionState:
     lock: Any = field(default_factory=RLock)
     allocation_lock: Any = field(default_factory=RLock)
     retiring: bool = False
+    tx_owner: tuple[int, Any] | None = None
     _uses: dict[tuple[int, Any], int] = field(default_factory=dict)
 
     @staticmethod
@@ -43,6 +48,35 @@ class ConnectionState:
         except RuntimeError:
             task = None
         return get_ident(), task
+
+    def enter_transaction(self) -> bool:
+        """Claim the managed transaction for this thread and task; True if this call claimed it.
+
+        Every thread and task of an operation shares this one connection and one
+        ``tx_depth``. A transaction entered while another thread's or task's is open
+        would join it, and the depth each writes back on exit would leave every later
+        transaction in the operation uncommitted. So that raises instead (ADR-080).
+        Nesting on the owning thread and task joins as before.
+        """
+        key = self._execution_key()
+        with self.lock:
+            if self.tx_owner is None:
+                self.tx_owner = key
+                return True
+            if self.tx_owner == key:
+                return False
+        # depth=2 reports the caller's `with db.transaction()` line, past BackendManagedTransaction.__enter__,
+        # so a refusal a caller swallows as RuntimeError can still be traced to the overlapping code.
+        logger.opt(depth=2).error("A ChaCha transaction overlapped another thread's or task's in one operation")
+        raise ConcurrentChaChaTransactionError(
+            "Another thread or task holds this ChaCha operation's transaction; "
+            "give concurrent work its own chacha_operation(independent=True)"
+        )
+
+    def leave_transaction(self) -> None:
+        """Release the claim taken by the outermost ``enter_transaction()``."""
+        with self.lock:
+            self.tx_owner = None
 
     def permits_current_use(self) -> bool:
         """Only already-entered work in this task/thread may finish after close."""
@@ -213,6 +247,21 @@ def chacha_operation(
                 raise
         finally:
             _current_operation.reset(token)
+
+
+@contextmanager
+def outside_chacha_operation() -> Iterator[None]:
+    """Run without the caller's operation, for work that may outlive it, such as a detached task.
+
+    ChaCha calls inside take the thread-local fallback or open their own operations. Never
+    wrap such work in one operation of its own instead: concurrent branches would share
+    one connection and lose writes (ADR-080).
+    """
+    token = _current_operation.set(None)
+    try:
+        yield
+    finally:
+        _current_operation.reset(token)
 
 
 _F = TypeVar("_F", bound=Callable[..., Any])

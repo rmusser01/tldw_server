@@ -6,7 +6,7 @@ import { getMessageEditFeedback } from "@/utils/message-edit-feedback"
 
 import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition"
 import { excludeLocalRagDiagnostics, getLocalRagDiagnosticUser } from "@/utils/local-rag-diagnostic"
-import type { UploadedFile } from "@/db"
+import type { UploadedFile } from "@/db/dexie/types"
 import { commitLocalFork, prepareLocalFork } from "@/db/dexie/branch"
 import {
   type ForkDispatchClaim,

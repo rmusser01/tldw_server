@@ -21,7 +21,7 @@ and available to the Chat API as `provider/model`.
 
 ## Editing the Catalog
 
-- Format: JSON object by provider, then model id → `{prompt: number, completion: number}` (USD per 1K tokens), with optional `cache_read` and `cache_write`: the prompt-cache read and write rates, also per 1K tokens. Without them, cached tokens cost the `prompt` rate. An override replaces the whole entry, so an override of an entry that has cache rates must repeat them.
+- Format: JSON object by provider, then model id → `{prompt: number, completion: number}` (USD per 1K tokens), with optional `cache_read`, `cache_write` and `cache_write_1h`: the prompt-cache read, 5-minute write and 1-hour write rates, also per 1K tokens (a missing `cache_write_1h` falls back to `cache_write`). Without them, cached tokens cost the `prompt` rate. An optional `long_prompt` object (`above_tokens` plus a full rate set) replaces the entry's rates for a request whose whole prompt is longer than `above_tokens`. A tier without a positive `above_tokens` or without both `prompt` and `completion` is ignored with a warning, and the base rates apply. A tier applies only where the caller knows the prompt length (usage costing), not in the no-length estimators `get_rates` and `compute_token_cost`, which use the base rates. An optional `"hidden": true` prices a model without listing it in selectors. Anthropic dotted names such as `claude-sonnet-4.5` need no entry: lookups, the model-availability check and the outgoing request map them to the dashed API ID (`claude-sonnet-4-5`). An override replaces the whole entry, so an override of an entry that has cache rates, a `long_prompt` or `hidden` must repeat them: an override of `claude-haiku-5-5` without `long_prompt` silently loses the tier.
 - Example (OpenAI text models only):
 
 ```
@@ -40,7 +40,7 @@ Tip: Keep values conservative if you’re unsure, then update with exact rates f
 ## Provider Quick Links
 
 - Anthropic: https://platform.claude.com/docs/en/about-claude/pricing (model IDs: https://platform.claude.com/docs/en/about-claude/models/overview)
-- OpenAI (text models): https://platform.openai.com/docs/pricing
+- OpenAI (text models): https://developers.openai.com/api/docs/pricing
 - Z.ai: https://docs.z.ai/guides/overview/pricing
 - Moonshot (Kimi): https://platform.moonshot.ai/docs/pricing/chat#generation-model-kimi-k2
 - Cohere: https://docs.cohere.com/docs/models
@@ -50,13 +50,14 @@ Tip: Keep values conservative if you’re unsure, then update with exact rates f
 
 These examples illustrate the expected shape. Replace with current values from the linked pages above.
 
-Anthropic (keys are API model IDs; an override repeats the cache rates):
+Anthropic (keys are API model IDs; an override repeats the cache rates, the 1-hour rate and any `long_prompt`):
 ```
 {
   "anthropic": {
-    "claude-opus-4-7":   { "prompt": 0.005, "completion": 0.025, "cache_read": 0.0005, "cache_write": 0.00625 },
-    "claude-sonnet-4-6": { "prompt": 0.003, "completion": 0.015, "cache_read": 0.0003, "cache_write": 0.00375 },
-    "claude-haiku-4-5":  { "prompt": 0.001, "completion": 0.005, "cache_read": 0.0001, "cache_write": 0.00125 }
+    "claude-opus-4-7":   { "prompt": 0.005, "completion": 0.025, "cache_read": 0.0005, "cache_write": 0.00625, "cache_write_1h": 0.01 },
+    "claude-sonnet-4-6": { "prompt": 0.003, "completion": 0.015, "cache_read": 0.0003, "cache_write": 0.00375, "cache_write_1h": 0.006 },
+    "claude-haiku-5-5":  { "prompt": 0.0001, "completion": 0.0005, "cache_read": 0.00001, "cache_write": 0.000125, "cache_write_1h": 0.0002,
+                           "long_prompt": { "above_tokens": 100000, "prompt": 0.0005, "completion": 0.0025, "cache_read": 0.00005, "cache_write": 0.000625, "cache_write_1h": 0.001 } }
   }
 }
 ```

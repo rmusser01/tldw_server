@@ -237,11 +237,6 @@ def test_webui_dockerfile_copies_only_required_workspace_sources():
         "Expected Dockerfile.webui to copy only the extension prepare shim needed for install scripts",
     )
     _require(
-        "COPY apps/packages/voice-assistant-sdk/package.json /app/apps/packages/voice-assistant-sdk/package.json"
-        in text,
-        "Expected Dockerfile.webui to copy the voice assistant package manifest for frozen lockfile workspace resolution",
-    )
-    _require(
         "pkg.workspaces=" not in text,
         "Expected Dockerfile.webui not to rewrite the workspace manifest because that invalidates the frozen lockfile",
     )

@@ -577,12 +577,20 @@ export const modelsAudioMethods = {
   },
 
   // Admin / diagnostics helpers
-  async getSystemStats(options?: { timeoutMs?: number }): Promise<any> {
+  async getSystemStats(options?: {
+    timeoutMs?: number;
+    configSnapshot?: import("../../tldw/TldwApiClient").TldwConfig;
+    abortSignal?: AbortSignal;
+  }): Promise<any> {
+    // Forwards configSnapshot/abortSignal like the stage-3-deleted base
+    // copy: admin stats ride the captured request scope (TASK-13526).
     return await bgRequest<any>({
       path: "/api/v1/admin/stats",
       method: "GET",
-      timeoutMs: options?.timeoutMs
-    })
+      ...(options?.configSnapshot ? { servicePromptConfig: options.configSnapshot } : {}),
+      ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
+      ...(options?.timeoutMs ? { timeoutMs: options.timeoutMs } : {})
+    });
   },
 
   async getMediaIngestionBudgetDiagnostics(params: {

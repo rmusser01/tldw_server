@@ -1,3 +1,4 @@
+import type { ChatMessageView } from "@/services/settings/ui-settings"
 import { ChatAttachmentImage } from "./ChatAttachmentImage"
 import { useTTS } from "@/hooks/useTTS"
 import { useStorage } from "@plasmohq/storage/hook"
@@ -29,6 +30,7 @@ import type { MessageMetadataExtra } from "@/store/option/types"
 import { EDIT_MESSAGE_EVENT } from "@/utils/timeline-actions"
 import { Badge, type BadgeVariant } from "@/components/ui/primitives"
 import { CHAT_MESSAGE_OPACITY_ALPHA } from "@/services/settings/chat-opacity-css-vars"
+import { USER_TURN_TINT_STYLE, userBubbleWidthClass } from "./turn-presentation"
 
 const ACTION_BUTTON_CLASS =
   "flex items-center justify-center rounded-full border border-border bg-surface2 text-text-muted hover:bg-surface hover:text-text transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-focus min-w-[44px] min-h-[44px]"
@@ -64,6 +66,7 @@ const formatMessageTypeFallback = (messageType?: string): string => {
 }
 
 type Props = {
+  messageView?: ChatMessageView
   message: string
   message_type?: string
   hideCopy?: boolean
@@ -106,6 +109,10 @@ type Props = {
 }
 
 export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
+  const actionButtonClass = props.messageView
+    ? "inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus transition-colors duration-200"
+    : ACTION_BUTTON_CLASS
+  const isAlignedView = props.messageView === "transcript" || props.messageView === "research"
   const [checkWideMode] = useStorage("checkWideMode", false)
   const [userTextColor] = useStorage("chatUserTextColor", "default")
   const [userTextFont] = useStorage("chatUserTextFont", "default")
@@ -120,6 +127,14 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
   const { cancel, isSpeaking, speak } = useTTS()
   const uiMode = useUiModeStore((state) => state.mode)
   const isProMode = uiMode === "pro"
+  const bubbleShapeClass = isAlignedView
+    ? "rounded-xl border border-border px-4 py-3 w-full"
+    : "shadow-sm rounded-3xl border max-w-[calc(100%-1.75rem)] px-4 py-3 rounded-br-lg"
+  // A read-only Conversation bubble reads as the user's side of the chat
+  // (userBubbleWidthClass); the edit form keeps the full width.
+  const readBubbleShapeClass = isAlignedView
+    ? bubbleShapeClass
+    : `shadow-sm rounded-3xl border ${userBubbleWidthClass(isProMode)} px-4 py-3 rounded-br-lg`
   const setReplyTarget = useStoreMessageOption((state) => state.setReplyTarget)
   const [actionsOpen, setActionsOpen] = React.useState(false)
   const actionTriggerRef = React.useRef<HTMLButtonElement>(null)
@@ -219,7 +234,8 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
   const messageBubbleStyle = isSystemMessage
     ? undefined
     : ({
-        backgroundColor: `rgb(var(--color-surface2) / ${CHAT_MESSAGE_OPACITY_ALPHA})`
+        backgroundColor: `rgb(var(--color-surface2) / ${CHAT_MESSAGE_OPACITY_ALPHA})`,
+        ...USER_TURN_TINT_STYLE
       } as React.CSSProperties)
 
   const actionControls = (
@@ -238,7 +254,7 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
                 })
               }
             }}
-            className={`${ACTION_BUTTON_CLASS} h-11 w-11`}>
+            className={`${actionButtonClass} h-11 w-11`}>
             {!isSpeaking ? (
               <PlayIcon className="w-3 h-3 text-text-subtle group-hover:text-text" />
             ) : (
@@ -261,7 +277,7 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
                 setIsBtnPressed(false)
               }, 2000)
             }}
-            className={`${ACTION_BUTTON_CLASS} h-11 w-11`}>
+            className={`${actionButtonClass} h-11 w-11`}>
             {!isBtnPressed ? (
               <CopyIcon className="w-3 h-3 text-text-subtle group-hover:text-text" />
             ) : (
@@ -283,7 +299,7 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
                 isBot: props.isBot
               })
             }}
-            className={`${ACTION_BUTTON_CLASS} h-11 w-11`}>
+            className={`${actionButtonClass} h-11 w-11`}>
             <CornerUpLeft className="w-3 h-3 text-text-subtle group-hover:text-text" />
           </IconButton>
         </Tooltip>
@@ -294,7 +310,7 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
           <IconButton
             onClick={() => setEditMode(true)}
             ariaLabel={t("edit") as string}
-            className={`${ACTION_BUTTON_CLASS} h-11 w-11`}>
+            className={`${actionButtonClass} h-11 w-11`}>
             <Pen className="w-3 h-3 text-text-subtle group-hover:text-text" />
           </IconButton>
         </Tooltip>
@@ -304,7 +320,7 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
           <IconButton
             onClick={props.onDelete}
             ariaLabel={t("delete", "Delete") as string}
-            className={`${ACTION_BUTTON_CLASS} h-11 w-11`}>
+            className={`${actionButtonClass} h-11 w-11`}>
             <Trash2 className="w-3 h-3 text-danger group-hover:text-danger" />
           </IconButton>
         </Tooltip>
@@ -315,12 +331,13 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
   return (
     <div
       data-testid="chat-message"
+      data-message-view={props.messageView}
       data-role={isSystemMessage ? "system" : "user"}
       data-index={props.currentMessageIndex}
       data-message-id={props.messageId}
       data-server-message-id={props.serverMessageId}
-      className={`group gap-2 relative flex w-full max-w-5xl flex-col items-end justify-center pb-2 md:px-4 text-text ${checkWideMode ? "max-w-none" : ""}`}>
-      <div className="flex w-full flex-wrap items-center justify-end gap-2">
+      className={`group gap-2 relative flex w-full max-w-5xl flex-col ${isAlignedView ? "items-start" : "items-end"} justify-center ${props.messageView ? "pb-4" : "pb-2"} md:px-4 text-text ${checkWideMode ? "max-w-none" : props.messageView === "transcript" ? "max-w-[72ch]" : ""}`}>
+      <div className={`flex w-full flex-wrap items-center ${isAlignedView ? "justify-start" : "justify-end"} gap-2`}>
         <div className="flex flex-wrap items-center gap-2">
           {isSystemMessage ? (
             <Badge
@@ -398,7 +415,7 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
         <div
           dir="auto"
           data-is-not-editable={!editMode}
-          className={`message-bubble ${bubbleToneClass} shadow-sm rounded-3xl prose max-w-none dark:prose-invert break-words min-h-7 prose-p:opacity-95 prose-strong:opacity-100 border max-w-[calc(100%-1.75rem)] px-4 py-3 rounded-br-lg ${userTextClass} ${
+          className={`message-bubble ${bubbleToneClass} ${readBubbleShapeClass} prose max-w-none dark:prose-invert break-words min-h-7 prose-p:opacity-95 prose-strong:opacity-100 ${userTextClass} ${
             props.message_type && !editMode ? "italic" : ""
           }`}
           style={messageBubbleStyle}>
@@ -415,7 +432,7 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
       {editMode && (
         <div
           dir="auto"
-          className={`message-bubble w-full min-w-0 ${bubbleToneClass} shadow-sm rounded-3xl prose max-w-none dark:prose-invert break-words min-h-7 prose-p:opacity-95 prose-strong:opacity-100 border max-w-[calc(100%-1.75rem)] px-4 py-3 rounded-br-lg ${userTextClass} ${
+          className={`message-bubble w-full min-w-0 ${bubbleToneClass} ${bubbleShapeClass} prose max-w-none dark:prose-invert break-words min-h-7 prose-p:opacity-95 prose-strong:opacity-100 ${userTextClass} ${
             props.message_type && !editMode ? "italic" : ""
           }`}
           style={messageBubbleStyle}>
@@ -447,8 +464,8 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
         )}
 
       {showInlineActions && (
-        <div className="flex w-full justify-end">
-          {isProMode ? actionControls : (
+        <div className={`flex w-full ${isAlignedView ? "justify-start" : "justify-end"}`}>
+          {isProMode || props.messageView === "research" ? actionControls : (
             <Popover
               open={actionsOpen}
               onOpenChange={changeActionMenu}
@@ -473,7 +490,7 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
                 ariaLabel={t("moreActions", "More actions") as string}
                 ariaExpanded={actionsOpen}
                 ariaControls={actionsOpen ? actionMenuId : undefined}
-                className={`${ACTION_BUTTON_CLASS} h-11 w-11`}>
+                className={`${actionButtonClass} h-11 w-11`}>
                 <MoreHorizontal className="h-3 w-3" />
               </IconButton>
             </Popover>
