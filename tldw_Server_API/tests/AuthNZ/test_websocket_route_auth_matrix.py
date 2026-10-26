@@ -729,6 +729,15 @@ def _track_sandbox_run(owner_id: int) -> str:
     return run_id
 
 
+def _signed_sandbox_url(run_id: str, monkeypatch: pytest.MonkeyPatch) -> tuple[str, str]:
+    """Turn signed stream URLs on and return a valid one for ``run_id``, and its signature."""
+    secret, exp = "ws-matrix-signing-secret", int(time.time()) + 300
+    monkeypatch.setenv("SANDBOX_WS_SIGNED_URLS", "true")
+    monkeypatch.setenv("SANDBOX_WS_SIGNING_SECRET", secret)
+    signature = hmac.new(secret.encode(), f"{run_id}:{exp}".encode(), hashlib.sha256).hexdigest()
+    return f"/api/v1/sandbox/runs/{run_id}/stream?token={signature}&exp={exp}", signature
+
+
 @pytest.mark.parametrize("signed_url", [False, True], ids=["unsigned", "signed"])
 def test_sandbox_stream_refuses_another_users_run(
     env: SimpleNamespace, signed_url: bool, monkeypatch: pytest.MonkeyPatch
@@ -736,18 +745,27 @@ def test_sandbox_stream_refuses_another_users_run(
     """A valid credential is not enough: the run must be the caller's. A signed URL names the run,
     not the user, so a leaked one plus anyone's credential still meets the owner check (4404)."""
     run_id = _track_sandbox_run(env.user_id)
-    url = f"/api/v1/sandbox/runs/{run_id}/stream"
     if signed_url:
-        secret, exp = "ws-matrix-signing-secret", int(time.time()) + 300
-        monkeypatch.setenv("SANDBOX_WS_SIGNED_URLS", "true")
-        monkeypatch.setenv("SANDBOX_WS_SIGNING_SECRET", secret)
-        signature = hmac.new(secret.encode(), f"{run_id}:{exp}".encode(), hashlib.sha256).hexdigest()
-        url = f"{url}?token={signature}&exp={exp}"
+        url, _signature = _signed_sandbox_url(run_id, monkeypatch)
     else:
+        url = f"/api/v1/sandbox/runs/{run_id}/stream"
         monkeypatch.setenv("SANDBOX_WS_SIGNED_URLS", "false")
 
     assert _outcome(env.client, url, headers={"Authorization": f"Bearer {env.other_valid}"}) == "close 4404"
     assert _outcome(env.client, url, headers={"Authorization": f"Bearer {env.valid}"}) == "accepted"
+
+
+def test_sandbox_signed_url_with_the_browser_bearer_subprotocol(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The documented browser path: the signed ``log_stream_url`` plus ``bearer, <token>``. The
+    signature is checked in addition to the credential, and is not a credential itself."""
+    url, signature = _signed_sandbox_url(_track_sandbox_run(env.user_id), monkeypatch)
+    bad_signature = url.replace(signature, signature[:-1] + ("0" if signature[-1] != "0" else "1"))
+
+    assert _accepted_subprotocol(env.client, url, subprotocols=["bearer", env.valid]) == "bearer"
+    assert _outcome(env.client, bad_signature, subprotocols=["bearer", env.valid]) == "close 1008"
+    assert _outcome(env.client, url) == "close 4401"
 
 
 @pytest.mark.parametrize("channel", ["X-API-KEY", "bearer subprotocol"])
