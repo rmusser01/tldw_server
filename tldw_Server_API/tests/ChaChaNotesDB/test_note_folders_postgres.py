@@ -223,9 +223,11 @@ def test_postgres_keyword_lookup_is_case_insensitive_and_owner_scoped(
         keyword_id = db.add_keyword("foo")
         other_id = other.add_keyword("FOO")
 
-        assert db.get_keyword_by_text("FOO")["id"] == keyword_id
-        assert db.get_keyword_by_text("foo")["keyword"] == "foo"
-        assert other.get_keyword_by_text("foo")["id"] == other_id
+        found = db.get_keyword_by_text("FOO")
+        other_found = other.get_keyword_by_text("foo")
+
+        assert found is not None and (found["id"], found["keyword"]) == (keyword_id, "foo")
+        assert other_found is not None and other_found["id"] == other_id
     finally:
         db.close_connection()
         other.close_connection()

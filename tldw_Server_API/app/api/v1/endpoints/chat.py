@@ -6724,7 +6724,7 @@ def _replace_conversation_keywords(
         )
         return
     existing = db.get_keywords_for_conversation(conversation_id)
-    existing_map = {normalize_keyword_identity(str(k.get("keyword") or "")): int(k.get("id")) for k in existing if k.get("id")}
+    existing_map = {normalize_keyword_identity(str(k.get("keyword") or "")): int(k["id"]) for k in existing if k.get("id")}
     target_map: dict[str, str] = {}
     for keyword in keywords:
         if keyword is not None and str(keyword).strip():

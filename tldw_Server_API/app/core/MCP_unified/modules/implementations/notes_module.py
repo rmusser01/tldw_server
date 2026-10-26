@@ -2125,7 +2125,7 @@ class NotesModule(BaseModule):
                 return {"note_id": note_id, "tags": self._tags_for_note(db, note_id), "success": True}
             existing_rows = db.get_keywords_for_note(note_id)
             existing = {
-                normalize_keyword_identity(str(r.get("keyword"))): int(r.get("id"))
+                normalize_keyword_identity(str(r.get("keyword"))): int(r["id"])
                 for r in existing_rows
                 if r.get("keyword") is not None
             }

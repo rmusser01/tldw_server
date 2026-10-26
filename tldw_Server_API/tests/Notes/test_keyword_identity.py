@@ -50,7 +50,9 @@ def _note_keywords(db: CharactersRAGDB, note_id: str) -> list[str]:
 
 def _note_with_keyword(db: CharactersRAGDB, keyword: str) -> str:
     note_id = db.add_note(title="Keyword identity", content="Body")
-    db.link_note_to_keyword(note_id, db.add_keyword(keyword))
+    keyword_id = db.add_keyword(keyword)
+    assert note_id is not None and keyword_id is not None
+    db.link_note_to_keyword(note_id, keyword_id)
     return note_id
 
 
@@ -140,13 +142,16 @@ def test_notes_keyword_sync_links_case_variants_once(db) -> None:
     )
 
     note_id = _note_with_keyword(db, "foo")
-    foo_id = db.get_keyword_by_text("foo")["id"]
+    foo = db.get_keyword_by_text("foo")
+    assert foo is not None
+    foo_id = foo["id"]
 
     summary = _sync_note_keywords(db, note_id, ["Foo", "foo"])
 
     assert summary["failed_count"] == 0
     assert _note_keywords(db, note_id) == ["foo"]
-    assert _get_or_create_keyword_row(db, "FOO")["id"] == foo_id
+    row = _get_or_create_keyword_row(db, "FOO")
+    assert row is not None and row["id"] == foo_id
     assert db.count_keywords() == 1
 
 
@@ -207,7 +212,7 @@ async def test_mcp_note_tags_keep_display_casing(db, monkeypatch) -> None:
 
     async def tool(name: str, tags: list[str]) -> list[str]:
         result = await module.execute_tool(name, {"note_id": note_id, "tags": tags}, context=context)
-        return result["tags"]
+        return list(result["tags"])
 
     assert await tool("notes.tags.add", ["Foo", "foo"]) == ["Foo"]
     assert await tool("notes.tags.add", ["FOO", "Straße"]) == ["Foo", "Straße"]
@@ -255,9 +260,9 @@ def test_request_keyword_lists_dedupe_by_identity_and_keep_first_casing() -> Non
     raw = ["Foo", "foo", "Straße", "STRASSE", "Éclair", "éclair"]
     expected = ["Foo", "Straße", "Éclair"]
 
-    assert ConversationUpdateRequest(version=1, keywords=raw).keywords == expected
-    assert KnowledgeSaveRequest(conversation_id="c", snippet="s", tags=raw).tags == expected
-    assert NoteCreate(title="t", content="c", keywords=raw).normalized_keywords == expected
-    assert NoteUpdate(keywords=raw).normalized_keywords == expected
+    assert ConversationUpdateRequest.model_validate({"version": 1, "keywords": raw}).keywords == expected
+    assert KnowledgeSaveRequest.model_validate({"conversation_id": "c", "snippet": "s", "tags": raw}).tags == expected
+    assert NoteCreate.model_validate({"title": "t", "content": "c", "keywords": raw}).normalized_keywords == expected
+    assert NoteUpdate.model_validate({"keywords": raw}).normalized_keywords == expected
     assert _normalize_import_keywords(raw) == expected
     assert _normalize_keyword_tokens(raw) == expected
