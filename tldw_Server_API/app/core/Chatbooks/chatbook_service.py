@@ -180,6 +180,7 @@ try:
     from ..DB_Management.media_db.api import (  # type: ignore
         create_media_database,
         get_media_by_id,
+        get_document_version,
         get_media_prompts,
         get_media_transcripts,
         get_media_by_uuid,
@@ -189,6 +190,7 @@ try:
 except _CHATBOOK_NONCRITICAL_EXCEPTIONS:  # pragma: no cover
     create_media_database = None  # type: ignore
     get_media_by_id = None  # type: ignore
+    get_document_version = None  # type: ignore
     get_media_by_uuid = None  # type: ignore
     get_media_transcripts = None  # type: ignore
     get_media_prompts = None  # type: ignore
@@ -3323,7 +3325,7 @@ class ChatbookService:
             character_id_map: dict[str, int] = {}
             conversation_id_map: dict[str, str] = {}
             message_id_map: dict[tuple[str, str], str] = {}
-            media_id_map: dict[str, int] = {}
+            media_id_map: dict[str, int | None] = {}
             imported_items: dict[str, int] = {}
 
             def _run_import_for_type(
@@ -7068,13 +7070,17 @@ class ChatbookService:
             try:
                 with open(payload_path, encoding="utf-8") as f:
                     payload = json.load(f)
-                restore_explainer_chatbook_payload(
+                restored = restore_explainer_chatbook_payload(
                     repo=repo,
                     payload=payload,
                     owner_user_id=self.user_id,
                     prefix_imported=prefix_imported,
+                    conflict_resolution=conflict_resolution.value,
                 )
-                status.successful_items += 1
+                if restored is None:
+                    status.skipped_items += 1
+                else:
+                    status.successful_items += 1
             except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
                 status.failed_items += 1
                 status.warnings.append(f"Error importing Explainer session {session_id_text}: {str(exc)}")
@@ -7122,13 +7128,17 @@ class ChatbookService:
                     raise ValueError("generated document payload must be an object")
                 payload.setdefault("type", "generated_document")
                 payload.setdefault("metadata", metadata)
-                restore_explainer_chatbook_payload(
+                restored = restore_explainer_chatbook_payload(
                     repo=repo,
                     payload=payload,
                     owner_user_id=self.user_id,
                     prefix_imported=prefix_imported,
+                    conflict_resolution=conflict_resolution.value,
                 )
-                status.successful_items += 1
+                if restored is None:
+                    status.skipped_items += 1
+                else:
+                    status.successful_items += 1
             except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
                 status.failed_items += 1
                 status.warnings.append(
@@ -7326,7 +7336,7 @@ class ChatbookService:
         prefix_imported: bool,
         status: ImportJob,
         manifest_path_index: ManifestImportPathIndex | None = None,
-        media_id_map: dict[str, int] | None = None,
+        media_id_map: dict[str, int | None] | None = None,
     ) -> None:
         """Import Media DB rows, transcripts, chunks, and bundled stored artifacts."""
         media_db = self._get_media_db()
@@ -7367,6 +7377,26 @@ class ChatbookService:
                 get_by_title = getattr(media_db, "get_media_by_title", None)
                 existing = get_by_title(media_title) if callable(get_by_title) else None
                 if existing and conflict_resolution == ConflictResolution.SKIP:
+                    version = None
+                    if str(existing.get("owner_user_id")) == str(self.user_id_int) and get_document_version is not None:
+                        version = get_document_version(media_db, int(existing["id"]), include_content=False)
+                    stored_metadata = (version or {}).get("safe_metadata") or {}
+                    if isinstance(stored_metadata, str):
+                        try:
+                            stored_metadata = json.loads(stored_metadata)
+                        except ValueError:
+                            stored_metadata = {}
+                    provenance = stored_metadata.get("chatbook_import") if isinstance(stored_metadata, dict) else None
+                    if (
+                        media_id_map is not None
+                        and str(existing.get("owner_user_id")) == str(self.user_id_int)
+                        and payload.get("uuid")
+                        and isinstance(provenance, dict)
+                        and provenance.get("source_uuid") == payload["uuid"]
+                    ):
+                        self._record_imported_media_ids(
+                            media_id_map, media_id_text, payload.get("uuid"), int(existing["id"])
+                        )
                     status.skipped_items += 1
                     continue
                 if existing and conflict_resolution == ConflictResolution.RENAME:
@@ -7403,10 +7433,6 @@ class ChatbookService:
                 if not new_media_id:
                     status.failed_items += 1
                     continue
-                if media_id_map is not None:
-                    media_id_map[media_id_text] = int(new_media_id)
-                    if payload.get("uuid"):
-                        media_id_map[str(payload["uuid"])] = int(new_media_id)
                 self._restore_media_transcripts(
                     media_db=media_db,
                     media_id=int(new_media_id),
@@ -7417,9 +7443,7 @@ class ChatbookService:
                     media_db=media_db,
                     extract_dir=extract_dir,
                     media_id=int(new_media_id),
-                    stored_artifacts=[
-                        item for item in payload.get("stored_artifacts") or [] if isinstance(item, dict)
-                    ],
+                    stored_artifacts=[item for item in payload.get("stored_artifacts") or [] if isinstance(item, dict)],
                     status=status,
                 )
                 if pointer_only:
@@ -7430,10 +7454,51 @@ class ChatbookService:
                     status.warnings.append(
                         f"Restored {restored_artifacts} bundled stored media artifact(s) for media {media_id_text}."
                     )
+                if media_id_map is not None:
+                    self._record_imported_media_ids(media_id_map, media_id_text, payload.get("uuid"), int(new_media_id))
                 status.successful_items += 1
             except Exception as exc:
                 status.failed_items += 1
                 status.warnings.append(f"Error importing media {media_id_text}: {str(exc)}")
+
+    @staticmethod
+    def _record_imported_media_ids(
+        media_id_map: dict[str, int | None],
+        source_id: str,
+        source_uuid: Any,
+        destination_id: int,
+    ) -> None:
+        """Keep ambiguous archive aliases unresolved instead of binding the last writer."""
+        for key in {source_id, str(source_uuid) if source_uuid else source_id}:
+            if key in media_id_map and media_id_map[key] != destination_id:
+                media_id_map[key] = None
+            else:
+                media_id_map[key] = destination_id
+
+    def _remap_imported_media_metadata(
+        self,
+        metadata: dict[str, Any],
+        media_id_map: dict[str, int | None] | None,
+        status: ImportJob,
+    ) -> dict[str, Any]:
+        """Link collection chunks only to Media admitted by this import."""
+        result = dict(metadata)
+        references = [str(result[key]) for key in ("media_id", "media_uuid") if key in result]
+        if not references:
+            return result
+        targets = {(media_id_map or {}).get(key) for key in references}
+        record = None
+        if len(targets) == 1 and None not in targets:
+            media_db = self._get_media_db()
+            if media_db is not None and get_media_by_id is not None:
+                record = get_media_by_id(media_db, next(iter(targets)))
+        if record and str(record.get("owner_user_id")) == str(self.user_id_int):
+            result.update(media_id=int(record["id"]), media_uuid=str(record["uuid"]))
+        else:
+            result.pop("media_id", None)
+            result.pop("media_uuid", None)
+            status.warnings.append("Embedding Media reference was not imported; left unlinked.")
+        return result
 
     def _import_embeddings(
         self,
@@ -7444,7 +7509,7 @@ class ChatbookService:
         prefix_imported: bool,
         status: ImportJob,
         manifest_path_index: ManifestImportPathIndex | None = None,
-        media_id_map: dict[str, int] | None = None,
+        media_id_map: dict[str, int | None] | None = None,
     ) -> None:
         """Import Chroma collection embeddings and media vector blobs."""
         if manifest_path_index is None:
@@ -7528,7 +7593,8 @@ class ChatbookService:
                     ids.append(str(chunk.get("id") or uuid4()))
                     texts.append(str(chunk.get("document") or ""))
                     embeddings.append(chunk["embedding"])
-                    metadatas.append(chunk.get("metadata") if isinstance(chunk.get("metadata"), dict) else {})
+                    metadata = chunk.get("metadata") if isinstance(chunk.get("metadata"), dict) else {}
+                    metadatas.append(self._remap_imported_media_metadata(metadata, media_id_map, status))
                 if not ids:
                     status.skipped_items += 1
                     status.warnings.append(f"Embedding collection payload had no valid vectors: {embedding_id_text}")

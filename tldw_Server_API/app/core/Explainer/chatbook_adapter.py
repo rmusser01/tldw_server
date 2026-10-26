@@ -6,7 +6,9 @@ import copy
 import json
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
+from tldw_Server_API.app.core.DB_Management.Explainer_Repository import ExplainerRepository
 from tldw_Server_API.app.core.Explainer.models import (
     ExplainerCitation,
     ExplainerDepthPreset,
@@ -20,7 +22,6 @@ from tldw_Server_API.app.core.Explainer.models import (
     ExplainerSelectedSource,
     ExplainerSession,
 )
-from tldw_Server_API.app.core.DB_Management.Explainer_Repository import ExplainerRepository
 
 EXPLAINER_CHATBOOK_FORMAT = "tldw.explainer_session.v1"
 EXPLAINER_CHATBOOK_TYPE = "explainer_session"
@@ -95,8 +96,11 @@ def restore_explainer_chatbook_payload(
     payload: dict[str, Any],
     owner_user_id: str,
     prefix_imported: bool = False,
-) -> ExplainerSession:
-    """Restore an Explainer Chatbook payload for the importing user."""
+    conflict_resolution: str | None = None,
+) -> ExplainerSession | None:
+    """Restore a complete tree, optionally honoring the importing owner's conflict choice."""
+    if conflict_resolution not in {None, "skip", "rename"}:
+        raise ValueError("Unsupported Explainer import conflict resolution")
     explainer_payload = _unwrap_explainer_payload(payload)
     structured = explainer_payload.get("structured")
     if not isinstance(structured, dict):
@@ -115,106 +119,111 @@ def restore_explainer_chatbook_payload(
     title = _text(session_payload.get("title"), "Imported Explainer session")
     if prefix_imported:
         title = f"[Imported] {title}"
-    settings = session_payload.get("settings") if isinstance(session_payload.get("settings"), dict) else {}
-    selected_sources = [
-        _restore_selected_source(source)
-        for source in structured.get("selectedSources") or []
-        if isinstance(source, dict)
-    ]
+    with repo.db.transaction():
+        existing = repo.find_active_session_id_by_title(owner_user_id=owner_user_id, title=title)
+        if existing and conflict_resolution == "skip":
+            return None
+        if existing and conflict_resolution == "rename":
+            title = f"{title} (Imported {uuid4().hex[:8]})"
+        settings = session_payload.get("settings") if isinstance(session_payload.get("settings"), dict) else {}
+        selected_sources = [
+            _restore_selected_source(source)
+            for source in structured.get("selectedSources") or []
+            if isinstance(source, dict)
+        ]
 
-    first_root_payload = _first_root_payload(nodes_payload)
-    root_prompt = _text(first_root_payload.get("title"), title)
-    restored = repo.create_session(
-        owner_user_id=owner_user_id,
-        title=title,
-        mode=_enum_value(settings.get("mode") or session_payload.get("mode"), ExplainerMode, ExplainerMode.GOAL.value),
-        output_intent=_enum_value(
-            settings.get("outputIntent") or session_payload.get("outputIntent"),
-            ExplainerOutputIntent,
-            ExplainerOutputIntent.EXPLAIN.value,
-        ),
-        grounding=_enum_value(
-            settings.get("grounding") or session_payload.get("grounding"),
-            ExplainerGrounding,
-            ExplainerGrounding.OPEN.value,
-        ),
-        depth_preset=_enum_value(
-            settings.get("depthPreset") or session_payload.get("depthPreset"),
-            ExplainerDepthPreset,
-            ExplainerDepthPreset.STANDARD.value,
-        ),
-        selected_sources=selected_sources,
-        root_prompt=root_prompt,
-    )
+        first_root_payload = _first_root_payload(nodes_payload)
+        root_prompt = _text(first_root_payload.get("title"), title)
+        restored = repo.create_session(
+            owner_user_id=owner_user_id,
+            title=title,
+            mode=_enum_value(
+                settings.get("mode") or session_payload.get("mode"), ExplainerMode, ExplainerMode.GOAL.value
+            ),
+            output_intent=_enum_value(
+                settings.get("outputIntent") or session_payload.get("outputIntent"),
+                ExplainerOutputIntent,
+                ExplainerOutputIntent.EXPLAIN.value,
+            ),
+            grounding=_enum_value(
+                settings.get("grounding") or session_payload.get("grounding"),
+                ExplainerGrounding,
+                ExplainerGrounding.OPEN.value,
+            ),
+            depth_preset=_enum_value(
+                settings.get("depthPreset") or session_payload.get("depthPreset"),
+                ExplainerDepthPreset,
+                ExplainerDepthPreset.STANDARD.value,
+            ),
+            selected_sources=selected_sources,
+            root_prompt=root_prompt,
+        )
 
-    original_to_new: dict[str, str] = {}
-    root_node_id = restored.root_node_ids[0]
-    original_root_id = _text(first_root_payload.get("id"), "")
-    if original_root_id:
-        original_to_new[original_root_id] = root_node_id
-    _apply_node_payload(
-        repo=repo,
-        session_id=restored.id,
-        owner_user_id=owner_user_id,
-        node_id=root_node_id,
-        node_payload=first_root_payload,
-    )
+        original_to_new: dict[str, str] = {}
+        root_node_id = restored.root_node_ids[0]
+        original_root_id = _text(first_root_payload.get("id"), "")
+        if original_root_id:
+            original_to_new[original_root_id] = root_node_id
+        _apply_node_payload(
+            repo=repo,
+            session_id=restored.id,
+            owner_user_id=owner_user_id,
+            node_id=root_node_id,
+            node_payload=first_root_payload,
+        )
 
-    remaining = [
-        node for node in nodes_payload
-        if isinstance(node, dict) and node is not first_root_payload
-    ]
-    while remaining:
-        progressed = False
-        next_remaining: list[dict[str, Any]] = []
-        for node_payload in remaining:
-            original_id = _text(node_payload.get("id"), "")
-            original_parent_id = node_payload.get("parentId")
-            if original_parent_id in ("", None):
-                parent_id = None
-            elif str(original_parent_id) in original_to_new:
-                parent_id = original_to_new[str(original_parent_id)]
-            else:
-                next_remaining.append(node_payload)
-                continue
+        remaining = [node for node in nodes_payload if isinstance(node, dict) and node is not first_root_payload]
+        while remaining:
+            progressed = False
+            next_remaining: list[dict[str, Any]] = []
+            for node_payload in remaining:
+                original_id = _text(node_payload.get("id"), "")
+                original_parent_id = node_payload.get("parentId")
+                if original_parent_id in ("", None):
+                    parent_id = None
+                elif str(original_parent_id) in original_to_new:
+                    parent_id = original_to_new[str(original_parent_id)]
+                else:
+                    next_remaining.append(node_payload)
+                    continue
 
-            created = repo.create_node(
-                restored.id,
-                owner_user_id=owner_user_id,
-                parent_id=parent_id,
-                title=_text(node_payload.get("title"), "Untitled"),
-                body=node_payload.get("body") if isinstance(node_payload.get("body"), str) else None,
-                kind=_enum_value(node_payload.get("kind"), ExplainerNodeKind, ExplainerNodeKind.EXPLANATION.value),
-                intent=_enum_value(node_payload.get("intent"), ExplainerOutputIntent, restored.output_intent),
-                status=_enum_value(node_payload.get("status"), ExplainerNodeStatus, ExplainerNodeStatus.IDLE.value),
-                evidence_state=_enum_value(
-                    node_payload.get("evidenceState"),
-                    ExplainerEvidenceState,
-                    ExplainerEvidenceState.UNCITED.value,
-                ),
-                outside_knowledge_used=bool(node_payload.get("outsideKnowledgeUsed")),
-                citations=[],
-            )
-            if created is None:
-                raise ValueError("Failed to restore Explainer node")
-            if original_id:
-                original_to_new[original_id] = created.id
-            _apply_node_payload(
-                repo=repo,
-                session_id=restored.id,
-                owner_user_id=owner_user_id,
-                node_id=created.id,
-                node_payload=node_payload,
-            )
-            progressed = True
-        if not progressed:
-            raise ValueError("Explainer payload node parent references could not be resolved")
-        remaining = next_remaining
+                created = repo.create_node(
+                    restored.id,
+                    owner_user_id=owner_user_id,
+                    parent_id=parent_id,
+                    title=_text(node_payload.get("title"), "Untitled"),
+                    body=node_payload.get("body") if isinstance(node_payload.get("body"), str) else None,
+                    kind=_enum_value(node_payload.get("kind"), ExplainerNodeKind, ExplainerNodeKind.EXPLANATION.value),
+                    intent=_enum_value(node_payload.get("intent"), ExplainerOutputIntent, restored.output_intent),
+                    status=_enum_value(node_payload.get("status"), ExplainerNodeStatus, ExplainerNodeStatus.IDLE.value),
+                    evidence_state=_enum_value(
+                        node_payload.get("evidenceState"),
+                        ExplainerEvidenceState,
+                        ExplainerEvidenceState.UNCITED.value,
+                    ),
+                    outside_knowledge_used=bool(node_payload.get("outsideKnowledgeUsed")),
+                    citations=[],
+                )
+                if created is None:
+                    raise ValueError("Failed to restore Explainer node")
+                if original_id:
+                    original_to_new[original_id] = created.id
+                _apply_node_payload(
+                    repo=repo,
+                    session_id=restored.id,
+                    owner_user_id=owner_user_id,
+                    node_id=created.id,
+                    node_payload=node_payload,
+                )
+                progressed = True
+            if not progressed:
+                raise ValueError("Explainer payload node parent references could not be resolved")
+            remaining = next_remaining
 
-    loaded = repo.get_session(restored.id, owner_user_id=owner_user_id)
-    if loaded is None:
-        raise ValueError("Restored Explainer session could not be reloaded")
-    return loaded
+        loaded = repo.get_session(restored.id, owner_user_id=owner_user_id)
+        if loaded is None:
+            raise ValueError("Restored Explainer session could not be reloaded")
+        return loaded
 
 
 def _unwrap_explainer_payload(payload: dict[str, Any]) -> dict[str, Any]:

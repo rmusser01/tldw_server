@@ -255,6 +255,21 @@ class ExplainerRepository:
             int(total),
         )
 
+    def find_active_session_id_by_title(self, *, owner_user_id: str, title: str) -> str | None:
+        """Find an importing owner's active title without loading every session tree."""
+        owner_user_id = _require_text(owner_user_id, "owner_user_id")
+        title = _require_text(title, "title")
+        row = (
+            self.db.get_connection()
+            .execute(
+                "SELECT id FROM explainer_sessions WHERE owner_user_id = ? AND title = ? "
+                "AND archived_at IS NULL ORDER BY created_at, id LIMIT 1",
+                (owner_user_id, title),
+            )
+            .fetchone()
+        )
+        return str(row["id"]) if row is not None else None
+
     def get_session(
         self,
         session_id: str,
