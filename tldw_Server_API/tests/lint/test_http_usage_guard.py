@@ -16,8 +16,10 @@ and imports inside functions. A call is a use, and so is storing or passing the 
 (``httpx.HTTPError``, ``aiohttp.ClientError``) and other members (``httpx.Timeout``) are
 not. Imports are collected file-wide, so a name imported in one function counts in every
 function of the file (it fails closed).
-Known limits: ``importlib.import_module("httpx")`` is not seen. urllib3 is not listed:
-app code does not use it directly.
+Known limits: ``importlib.import_module("httpx")``, ``getattr(httpx, "AsyncClient")(...)``
+and module rebinding (``m = httpx; m.AsyncClient()``) are not seen. urllib3 is not
+listed: app code does not use it directly. ``isinstance``/``cast`` against a client class
+counts as a use (it reads the class outside an annotation), which fails closed.
 
 ALLOWLIST maps a repo-relative path to why it may use an HTTP client library directly:
 why core.http_client cannot apply, or ``"migrate: ..."`` for an offender a later PR
@@ -310,6 +312,24 @@ def test_a_seeded_aliased_from_import_fails(tmp_path: Path) -> None:
 )
 def test_every_import_form_is_seen(tmp_path: Path, source: str, expected: str) -> None:
     assert _names(scan(_seed(tmp_path, {"core/m.py": source})), "tldw_Server_API/app/core/m.py") == [expected]
+
+
+def test_a_file_mixing_exception_imports_and_one_call_flags_only_the_call(tmp_path: Path) -> None:
+    source = """\
+        import httpx
+        from httpx import HTTPError as _HTTP_ERROR
+
+        ERRORS = (httpx.RequestError, _HTTP_ERROR)
+
+
+        def fetch(url: str) -> bytes:
+            try:
+                return httpx.get(url).content
+            except httpx.HTTPStatusError:
+                raise
+        """
+    found = scan(_seed(tmp_path, {"core/mixed.py": source}))
+    assert found == {"tldw_Server_API/app/core/mixed.py": ["line 9: httpx.get"]}
 
 
 def test_annotations_exceptions_other_members_and_lookalikes_are_not_uses(tmp_path: Path) -> None:
