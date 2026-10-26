@@ -65,7 +65,11 @@ class KeywordsRepository:
         lowercase. Only rows with a non-ASCII character can still match by identity
         (ß/SS, É/é on SQLite, NFC forms), so the fallback reads just those, and only when
         an identity has no active hit or ``all_matches`` wants every legacy duplicate
-        (TASK-13950.5). ``conn=None`` reads through ``execute_query``.
+        (TASK-13950.5). On Postgres an identity still without an active row takes the
+        active row the unique ``LOWER(keyword)`` index holds for it: LOWER() folds some
+        letters the identity keeps apart (``LOWER('İ')`` is ``i``; the identity keeps the
+        dot), and the index treats them as one keyword. ``conn=None`` reads through
+        ``execute_query``.
         """
         db = self.session
         terms = dedupe_keywords(keywords)
@@ -87,6 +91,12 @@ class KeywordsRepository:
             non_ascii = "keyword ~ '[^[:ascii:]]'" if postgres else "keyword GLOB '*[^ -~]*'"
             rows += self._fetch_rows(conn, f"{select}{non_ascii}{active}")  # nosec B608
             groups = rank_identity_matches(wanted, rows)
+        for term in terms if postgres else []:
+            identity = normalize_keyword_identity(term)
+            if identity not in groups or groups[identity][0]["deleted"]:
+                holder = self.active_lower_match(conn, term)
+                if holder:
+                    groups[identity] = [holder, *groups.get(identity, [])]
         return groups
 
     def find(self, conn: Any | None, keyword: str, *, include_deleted: bool = True) -> dict[str, Any] | None:
@@ -142,6 +152,7 @@ class KeywordsRepository:
         keyword = keyword.strip()
         current_time = db._get_current_utc_timestamp_str()
         client_id = db.client_id
+        postgres = db.backend_type == BackendType.POSTGRESQL
 
         try:
             if conn is not None:
@@ -182,8 +193,9 @@ class KeywordsRepository:
                     "INSERT INTO Keywords (keyword, uuid, last_modified, version, client_id) "
                     "VALUES (?, ?, ?, ?, ?)"
                 )
-                if db.backend_type == BackendType.POSTGRESQL:
-                    insert_sql += " RETURNING id"
+                if postgres:
+                    # A concurrent add or a LOWER()-only fold may already hold the slot.
+                    insert_sql += " ON CONFLICT DO NOTHING RETURNING id"
 
                 insert_cursor = db._execute_with_connection(
                     conn,
@@ -191,9 +203,14 @@ class KeywordsRepository:
                     (keyword, new_uuid, current_time, new_version, client_id),
                 )
 
-                if db.backend_type == BackendType.POSTGRESQL:
+                if postgres:
                     inserted_row = insert_cursor.fetchone()
-                    kw_id = inserted_row["id"] if inserted_row else None
+                    if not inserted_row:
+                        holder = self.active_lower_match(conn, keyword)
+                        if not holder:
+                            raise DatabaseError("Keyword insert conflicted with a row it cannot reuse.")  # noqa: TRY003, TRY301
+                        return holder["id"], holder["uuid"]
+                    kw_id = inserted_row["id"]
                 else:
                     kw_id = insert_cursor.lastrowid
 
@@ -219,6 +236,16 @@ class KeywordsRepository:
         except Exception as exc:
             logger.error("Keyword persistence failed unexpectedly (error_type={})", exception_type_for_log(exc))
             raise DatabaseError(f"Unexpected error adding/updating keyword: {exc}") from exc  # noqa: TRY003
+
+    def active_lower_match(self, conn: Any | None, keyword: str) -> dict[str, Any] | None:
+        """Postgres: the active row holding ``keyword``'s slot in the unique LOWER(keyword) index."""
+        rows = self._fetch_rows(
+            conn,
+            "SELECT id, uuid, keyword, deleted, version FROM Keywords "
+            "WHERE LOWER(keyword) = LOWER(?) AND deleted = FALSE",
+            (keyword,),
+        )
+        return rows[0] if rows else None
 
     def replace_keywords(
         self,

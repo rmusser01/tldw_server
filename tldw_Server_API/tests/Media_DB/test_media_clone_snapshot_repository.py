@@ -1048,6 +1048,41 @@ def test_operation_owned_clone_promotion_reuses_display_cased_keywords(
 
 
 @pytest.mark.integration
+@pytest.mark.postgres
+def test_postgres_clone_promotion_reuses_a_lower_only_fold(pg_database_config: DatabaseConfig) -> None:
+    """Postgres LOWER('İstanbul') is 'istanbul'; the lowercase pending keyword must reuse that row."""
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db: Any = MediaDatabase(db_path=":memory:", client_id="901", backend=backend)
+    try:
+        with scoped_context(user_id=901, org_ids=[], team_ids=[], is_admin=True):
+            _seed_media(
+                db,
+                title="Dotted capital owner",
+                content="dotted capital owner content",
+                chunk_text="dotted capital owner chunk",
+                transcript_text="dotted capital owner transcript",
+                keywords=["İstanbul"],
+            )
+            snapshot = _operation_snapshot(keywords=("istanbul",))
+            expected_hash = media_db_api.hash_media_clone_snapshot(snapshot)
+            created = db.insert_operation_owned_clone_media(
+                snapshot=snapshot,
+                operation_id="clone-operation-dotted-capital",
+                source_identity="workspace-source-dotted-capital",
+                expected_content_hash=expected_hash,
+            )
+            assert db.confirm_operation_owned_clone_media(
+                operation_id="clone-operation-dotted-capital",
+                source_identity="workspace-source-dotted-capital",
+                expected_content_hash=expected_hash,
+            ) == 1
+            assert media_db_api.fetch_keywords_for_media(db, created.media_id) == ["İstanbul"]
+            assert db.fetch_all_keywords() == ["İstanbul"]
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.integration
 def test_sqlite_v26_migration_releases_real_v25_keyword_graph_and_replays(
     tmp_path: Path,
 ) -> None:

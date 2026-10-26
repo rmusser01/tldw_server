@@ -14,10 +14,15 @@ exist are not merged. A lookup takes the SQL matches for the requested text and
 its identity first (active, then oldest) and scans the non-ASCII rows only when
 SQL finds no active row, so the row returned depends on the spelling asked for:
 with legacy "Straße" (id 1) and "STRASSE" (id 2) on SQLite, "strasse" resolves to
-id 2 and "Straße" to id 1.
+id 2 and "Straße" to id 1. Postgres LOWER() also folds the dotted capital I
+(LOWER('İstanbul') is 'istanbul') while the identity keeps the dot, so on Postgres
+"İstanbul" and "Istanbul" share the unique LOWER(keyword) slot and resolve to one
+keyword; SQLite keeps them apart (a documented backend difference).
 """
 
 from __future__ import annotations
+
+import time
 
 import pytest
 
@@ -165,6 +170,69 @@ def test_an_active_identity_match_wins_over_a_deleted_sql_match(db) -> None:
     assert _active_keywords(db) == ["Straße"]
 
 
+# --- Postgres: LOWER() folds the dotted capital I, the identity does not ---------
+# Postgres LOWER('İstanbul') is 'istanbul', but normalize_keyword_identity keeps the dot
+# ('i̇stanbul'), so the identity lookup misses a row the unique LOWER(keyword) index holds.
+
+
+@pytest.fixture
+def pg_db(pg_database_config):
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    database = MediaDatabase(db_path=":memory:", client_id="913950", backend=backend)
+    yield database
+    database.close_connection()
+
+
+@pytest.mark.integration
+def test_postgres_a_lower_only_fold_reuses_the_stored_keyword(pg_db) -> None:
+    keyword_id, _ = pg_db.add_keyword("İstanbul")
+
+    assert pg_db.add_keyword("istanbul")[0] == keyword_id
+    media_id = _add_media(pg_db, ["Istanbul"])
+    assert fetch_keywords_for_media(pg_db, media_id) == ["İstanbul"]
+    assert _active_keywords(pg_db) == ["İstanbul"]
+    rows, total = search_media(pg_db, None, must_have_keywords=["ISTANBUL"])
+    assert (total, [row["id"] for row in rows]) == (1, [media_id])
+
+
+@pytest.mark.integration
+def test_postgres_restoring_a_keyword_reuses_an_active_lower_match(pg_db) -> None:
+    deleted_id, _ = pg_db.add_keyword("İstanbul")
+    assert pg_db.soft_delete_keyword("İstanbul") is True
+    active_id, _ = pg_db.add_keyword("Istanbul")
+
+    assert pg_db.add_keyword("İstanbul")[0] == active_id != deleted_id
+    assert _active_keywords(pg_db) == ["Istanbul"]
+
+
+@pytest.mark.integration
+def test_postgres_concurrent_case_variant_adds_resolve_to_one_keyword(pg_database_config) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    from tldw_Server_API.app.core.DB_Management.media_db.repositories.keywords_repository import (
+        KeywordsRepository,
+    )
+
+    first = MediaDatabase(
+        db_path=":memory:", client_id="913950", backend=DatabaseBackendFactory.create_backend(pg_database_config)
+    )
+    second = MediaDatabase(
+        db_path=":memory:", client_id="913950", backend=DatabaseBackendFactory.create_backend(pg_database_config)
+    )
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            with first.transaction() as conn:
+                first_id, _ = KeywordsRepository(first).add("Concurrent", conn=conn)
+                racing = pool.submit(second.add_keyword, "concurrent")
+                # Let the second add reach the unique index and wait on this open transaction.
+                time.sleep(0.5)
+            assert racing.result(timeout=30)[0] == first_id
+        assert _active_keywords(first) == ["Concurrent"]
+    finally:
+        first.close_connection()
+        second.close_connection()
+
+
 # --- Postgres: merge existing case-variant duplicates, then enforce LOWER uniqueness ---
 
 
@@ -288,7 +356,7 @@ def test_postgres_keyword_lookups_can_use_indexes(pg_database_config, monkeypatc
             repository.match_identities(conn, ["Straße"], include_deleted=True)
             repository.match_identities(conn, ["Straße"], include_deleted=False)
             monkeypatch.undo()
-            assert len(lookups) == 4  # SQL plus the non-ASCII fallback, for each
+            assert len(lookups) == 6  # SQL, the non-ASCII fallback and the LOWER() holder, for each
             backend.execute("SET LOCAL enable_seqscan = off", connection=conn)
             for query, params in lookups:
                 prepared, prepared_params = db._prepare_backend_statement(query, params)
