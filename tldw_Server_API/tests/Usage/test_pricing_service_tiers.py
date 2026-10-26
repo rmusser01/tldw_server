@@ -337,3 +337,80 @@ def test_a_provider_without_a_batch_price_is_not_discounted() -> None:
     assert compute_costs("mistral", "mistral-large-2512", 1000, 100, service_tier="batch") == compute_costs(
         "mistral", "mistral-large-2512", 1000, 100
     )
+
+
+# --- Gemini cached content (AC #1) ---
+
+# ai.google.dev/gemini-api/docs/pricing, Standard tier, paid, text/image/video, fetched 2026-10-26:
+# (input, output, context caching) per million tokens, prompts up to 200k tokens.
+GEMINI_PRICES: dict[str, tuple[float, float, float]] = {
+    "gemini-3.1-pro-preview": (2.00, 12.00, 0.20),
+    "gemini-3.1-flash-lite": (0.25, 1.50, 0.025),
+    "gemini-3-flash-preview": (0.50, 3.00, 0.05),
+    "gemini-2.5-pro": (1.25, 10.00, 0.125),
+    "gemini-2.5-flash": (0.30, 2.50, 0.03),
+    "gemini-2.5-flash-lite": (0.10, 0.40, 0.01),
+}
+# The same rows for prompts over 200k tokens.
+GEMINI_LONG_PRICES: dict[str, tuple[float, float, float]] = {
+    "gemini-3.1-pro-preview": (4.00, 18.00, 0.40),
+    "gemini-2.5-pro": (2.50, 15.00, 0.25),
+}
+# Catalogued -preview entries the page does not list, priced exactly as their GA model, so they take its cache rate.
+# The 2.0 Flash entries are off the page too, and Google publishes no cache rate for them, so they get none.
+GEMINI_PREVIEW_ALIASES: dict[str, str] = {
+    "gemini-2.5-flash-preview": "gemini-2.5-flash",
+    "gemini-2.5-flash-preview-09-2025": "gemini-2.5-flash",
+    "gemini-2.5-flash-lite-preview": "gemini-2.5-flash-lite",
+    "gemini-2.5-flash-lite-preview-09-2025": "gemini-2.5-flash-lite",
+}
+
+
+@pytest.mark.parametrize(("model", "prices"), sorted(GEMINI_PRICES.items()))
+def test_a_gemini_model_carries_its_published_context_caching_rate(
+    model: str, prices: tuple[float, float, float]
+) -> None:
+    got, _estimated = PricingCatalog().get_rate_details("google", model, prompt_tokens=200_000)
+
+    assert got == pytest.approx(_rates(prices))
+
+
+@pytest.mark.parametrize(("model", "ga_model"), sorted(GEMINI_PREVIEW_ALIASES.items()))
+def test_a_gemini_2_5_preview_entry_carries_its_ga_model_context_caching_rate(model: str, ga_model: str) -> None:
+    got, _estimated = PricingCatalog().get_rate_details("google", model)
+
+    assert got == pytest.approx(_rates(GEMINI_PRICES[ga_model]))
+
+
+@pytest.mark.parametrize(("model", "prices"), sorted(GEMINI_LONG_PRICES.items()))
+def test_a_gemini_prompt_over_200k_tokens_pays_the_long_prompt_rates(
+    model: str, prices: tuple[float, float, float]
+) -> None:
+    got, _estimated = PricingCatalog().get_rate_details("google", model, prompt_tokens=200_001)
+
+    assert got == pytest.approx(_rates(prices))
+
+
+async def test_a_gemini_reply_costs_its_cached_tokens_at_the_cache_read_rate(costed_rows: list[dict[str, Any]]) -> None:
+    """The adapter keeps cachedContentTokenCount, which promptTokenCount includes."""
+    from tldw_Server_API.app.core.LLM_Calls.providers.google_adapter import GoogleAdapter
+
+    shaped = GoogleAdapter._normalize_to_openai_shape(
+        {
+            "candidates": [{"content": {"parts": [{"text": "ok"}]}, "finishReason": "STOP"}],
+            "usageMetadata": {
+                "promptTokenCount": 10_000,
+                "candidatesTokenCount": 100,
+                "totalTokenCount": 10_100,
+                "cachedContentTokenCount": 8_000,
+            },
+        }
+    )
+
+    await _log("google", "gemini-2.5-flash", shaped["usage"], 10_000, 100)
+
+    (row,) = costed_rows
+    assert row["cache_read_input_tokens"] == 8_000
+    # gemini-2.5-flash per 1M: input $0.30, context caching $0.03, output $2.50.
+    assert row["prompt_cost_usd"] == pytest.approx((2_000 * 0.30 + 8_000 * 0.03) / 1_000_000)
+    assert row["completion_cost_usd"] == pytest.approx(100 * 2.50 / 1_000_000)
