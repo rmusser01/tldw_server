@@ -959,6 +959,8 @@ async def _authenticate_ws(
     token: str | None = None,
     api_key: str | None = None,
     required_scope: str = "read",
+    *,
+    _from_headers: bool = False,
 ) -> int | None:
     """Authenticate a WebSocket connection. Returns user_id or None."""
     # Try JWT token first
@@ -1006,13 +1008,22 @@ async def _authenticate_ws(
         except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS as e:
             logger.debug("API key auth failed for WebSocket: {}", e)
 
+    # A credential taken from the headers below is tried once. Re-reading the headers for
+    # it retried the same rejected token until RecursionError (TASK-13950.7).
+    if _from_headers:
+        return None
+
     # Try Authorization header
     auth_header = websocket.headers.get("authorization") or websocket.headers.get("Authorization")
     if auth_header:
         if auth_header.lower().startswith("bearer "):
-            return await _authenticate_ws(websocket, token=auth_header[7:].strip(), required_scope=required_scope)
+            return await _authenticate_ws(
+                websocket, token=auth_header[7:].strip(), required_scope=required_scope, _from_headers=True
+            )
         elif auth_header.lower().startswith("x-api-key "):
-            return await _authenticate_ws(websocket, api_key=auth_header[10:].strip(), required_scope=required_scope)
+            return await _authenticate_ws(
+                websocket, api_key=auth_header[10:].strip(), required_scope=required_scope, _from_headers=True
+            )
 
     # Try Sec-WebSocket-Protocol: bearer,<token> or x-api-key,<key>
     proto_header = websocket.headers.get("sec-websocket-protocol") or websocket.headers.get("Sec-WebSocket-Protocol")
@@ -1022,9 +1033,9 @@ async def _authenticate_ws(
             scheme = parts[idx].lower()
             value = parts[idx + 1]
             if scheme == "bearer" and value:
-                return await _authenticate_ws(websocket, token=value, required_scope=required_scope)
+                return await _authenticate_ws(websocket, token=value, required_scope=required_scope, _from_headers=True)
             if scheme in {"x-api-key", "api-key"} and value:
-                return await _authenticate_ws(websocket, api_key=value, required_scope=required_scope)
+                return await _authenticate_ws(websocket, api_key=value, required_scope=required_scope, _from_headers=True)
 
     return None
 

@@ -12,8 +12,8 @@ forces on:
   token. Voice's 4400 ("Expected AUTH message") counts: the frame is refused unread.
 
 The revoked token is a real AuthNZ access token whose jti is on the token blacklist, the
-check HTTP auth runs in verify_jwt_and_fetch_user. Known gaps are strict xfails naming
-the slice that fixes them, so the fix turns them red until the mark is removed.
+check HTTP auth runs in verify_jwt_and_fetch_user. A gap found later belongs here as a
+strict xfail naming the slice that fixes it, so the fix turns it red until the mark goes.
 """
 
 from __future__ import annotations
@@ -25,7 +25,6 @@ from collections.abc import Iterator, Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
 from fastapi.routing import APIWebSocketRoute
@@ -66,39 +65,10 @@ ROUTES: dict[str, tuple[str, str]] = {
     "/v1/realtime": ("/v1/realtime", HANDSHAKE),
 }
 
-_ACP_RECURSION = (
-    "TASK-13950.7 ACP slice: {route} rejects a revoked bearer by recursing in "
-    "agent_client_protocol._authenticate_ws (it re-reads the header it just rejected) "
-    "until RecursionError, instead of a policy close"
-)
-KNOWN_GAPS: dict[tuple[str, str], str] = {
-    ("revoked", route): _ACP_RECURSION.format(route=route)
-    for route in (
-        "/api/v1/acp/multiplex",
-        "/api/v1/acp/sessions/{session_id}/ssh",
-        "/api/v1/acp/sessions/{session_id}/stream",
-        "/api/v1/prompt-studio/ws",
-        "/api/v1/prompt-studio/ws/{project_id}",
-    )
-}
-
 REFUSED = {"close 1008", "close 4401", "http 401"}
 FIRST_FRAME_REFUSED = REFUSED | {"close 4400"}
 DATA_FRAME = {"type": "config"}
 SINGLE_USER_KEY = "ws-auth-matrix-single-user-key-0123456789"
-
-
-def _cases(kind: str) -> list[Any]:
-    return [
-        pytest.param(
-            route,
-            id=route,
-            marks=[pytest.mark.xfail(strict=True, reason=KNOWN_GAPS[(kind, route)])]
-            if (kind, route) in KNOWN_GAPS
-            else [],
-        )
-        for route in ROUTES
-    ]
 
 
 async def _seed_user_and_tokens() -> tuple[int, str, str]:
@@ -228,7 +198,7 @@ def test_matrix_covers_every_mounted_websocket_route(env: SimpleNamespace) -> No
     assert served == set(ROUTES), "Add the new WebSocket route to ROUTES (and its auth to resolve_ws_principal)"
 
 
-@pytest.mark.parametrize("route", _cases("missing"))
+@pytest.mark.parametrize("route", ROUTES)
 def test_rejects_missing_credentials(env: SimpleNamespace, route: str) -> None:
     url, style = ROUTES[route]
     if style == HANDSHAKE:
@@ -237,7 +207,7 @@ def test_rejects_missing_credentials(env: SimpleNamespace, route: str) -> None:
         assert _refusal(env.client, url, frame=DATA_FRAME) in FIRST_FRAME_REFUSED
 
 
-@pytest.mark.parametrize("route", _cases("missing"))
+@pytest.mark.parametrize("route", ROUTES)
 def test_rejects_missing_credentials_in_single_user_mode(
     env: SimpleNamespace, route: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -253,7 +223,7 @@ def test_rejects_missing_credentials_in_single_user_mode(
         assert _refusal(env.client, url, frame=DATA_FRAME) in FIRST_FRAME_REFUSED
 
 
-@pytest.mark.parametrize("route", _cases("revoked"))
+@pytest.mark.parametrize("route", ROUTES)
 def test_rejects_a_revoked_jwt(env: SimpleNamespace, route: str) -> None:
     url, style = ROUTES[route]
     revoked_header = {"Authorization": f"Bearer {env.revoked}"}

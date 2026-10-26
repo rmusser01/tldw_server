@@ -452,6 +452,31 @@ class TestACPWebSocketConnection:
             ):
                 pass
 
+    def test_rejected_bearer_header_is_verified_once_and_closes_4401(
+        self, client_user_only, mock_get_runner_client, monkeypatch
+    ):
+        """A rejected header bearer was re-read and re-verified until RecursionError (TASK-13950.7)."""
+        import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+        verified: list[str] = []
+
+        class RevokedJWTManager:
+            async def verify_token(self, token: str):
+                verified.append(token)
+                return None
+
+        monkeypatch.setattr(acp_endpoints, "get_jwt_manager", lambda: RevokedJWTManager())
+
+        with pytest.raises(WebSocketDisconnect) as rejection:
+            with client_user_only.websocket_connect(
+                "/api/v1/acp/sessions/test-session/stream",
+                headers={"Authorization": "Bearer revoked-token"},
+            ):
+                pytest.fail("A revoked bearer was accepted")
+
+        assert rejection.value.code == 4401
+        assert verified == ["revoked-token"]
+
     def test_websocket_connect_with_api_key(
         self, client_user_only, mock_get_runner_client, monkeypatch
     ):
