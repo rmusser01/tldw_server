@@ -433,7 +433,7 @@ def _seed(root: Path, files: dict[str, str]) -> Path:
     return root
 
 
-def _counts(measured: dict) -> dict[tuple[str, str], int]:
+def _counts(measured: Mapping[Pair, Counter[str]]) -> dict[Pair, int]:
     return {pair: sum(modules.values()) for pair, modules in measured.items()}
 
 
@@ -528,6 +528,7 @@ def test_import_forms_resolve_to_their_target_package(tmp_path: Path) -> None:
         "core/Utils/mod.py": source,
         "core/Utils/pkg/__init__.py": "from ... import Chat\nfrom ...Chat.sub import thing\nfrom .. import mod\n",
         "api/v1/endpoints/media/__init__.py": "",
+        "core/Utils/tests/test_mod.py": f"from {APP}.main import app\n",  # in-app test code: not scanned
     }
     root = _seed(tmp_path / "app", files)
 
