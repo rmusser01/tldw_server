@@ -9,6 +9,19 @@
       "count": 1
     }
   },
+  "packages/ui/src/components/Common/NotesDock/NotesDockPanel.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 7
+    }
+  },
+  "packages/ui/src/components/Common/PersonaBuddy/BuddyManagementModal.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
   "packages/ui/src/components/Common/Playground/MessageSource.tsx": {
     "@typescript-eslint/no-unused-expressions": {
       "count": 3
@@ -19,13 +32,62 @@
       "count": 1
     }
   },
+  "packages/ui/src/components/Common/QuickIngest/queue-items.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Common/QuickIngest/useIngestSSE.ts": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Common/ShareModal.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
   "packages/ui/src/components/Common/SplashScreen/effects/gaming/LevelUp.ts": {
     "no-case-declarations": {
       "count": 1
     }
   },
+  "packages/ui/src/components/Common/Workflow/steps/AnalyzeBookWorkflow.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Common/Workflow/steps/SummarizePageWorkflow.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
   "packages/ui/src/components/Common/__tests__/TutorialPrompt.behavior.test.tsx": {
     "react-hooks/globals": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Common/hooks/useIngestOptions.tsx": {
+    "no-restricted-syntax": {
+      "count": 4
+    }
+  },
+  "packages/ui/src/components/ContentReview/ContentReviewPage.tsx": {
+    "no-restricted-imports": {
+      "count": 2
+    },
+    "no-restricted-syntax": {
+      "count": 7
+    }
+  },
+  "packages/ui/src/components/DocumentWorkspace/DocumentWorkspacePage.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
       "count": 1
     }
   },
@@ -44,6 +106,173 @@
       "count": 1
     }
   },
+  "packages/ui/src/components/Knowledge/hooks/useKnowledgeSearch.ts": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Media/AnalysisEditModal.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/Media/AnalysisModal.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 6
+    }
+  },
+  "packages/ui/src/components/Media/ContentEditModal.tsx": {
+    "no-restricted-imports": {
+      "count": 2
+    },
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/Media/VersionHistoryPanel.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 7
+    }
+  },
+  "packages/ui/src/components/Media/hooks/useContentEditState.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 4
+    }
+  },
+  "packages/ui/src/components/Media/hooks/useContentViewerModals.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 26
+    }
+  },
+  "packages/ui/src/components/Notes/NotesManagerPage.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 21
+    }
+  },
+  "packages/ui/src/components/Notes/hooks/useNotesEditorState.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 11
+    }
+  },
+  "packages/ui/src/components/Notes/hooks/useNotesExport.tsx": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/Notes/hooks/useNotesImport.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/Notes/hooks/useNotesKeywords.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 8
+    }
+  },
+  "packages/ui/src/components/Notes/hooks/useNotesListManagement.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 23
+    }
+  },
+  "packages/ui/src/components/Notes/hooks/useNotesWikilinkRename.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 3
+    }
+  },
+  "packages/ui/src/components/Notes/hooks/useNotesWikilinks.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/Option/ACPPlayground/ACPPlaygroundRecovery.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/ACPPlayground/ACPWorkspacePanel.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/ACPPlayground/index.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/Admin/BillingDashboardPage.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/Admin/MonitoringDashboardPage.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/Admin/RateLimitingPage.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/AgentRegistry/index.tsx": {
+    "no-restricted-syntax": {
+      "count": 4
+    }
+  },
+  "packages/ui/src/components/Option/AgentTasks/index.tsx": {
+    "no-restricted-syntax": {
+      "count": 3
+    }
+  },
+  "packages/ui/src/components/Option/AudioStudio/AudioStudioPage.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/AudiobookStudio/ContentInput/ImportFromKnowledgeBase.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
   "packages/ui/src/components/Option/Characters/__tests__/CharacterExpressionImagesSection.test.tsx": {
     "@typescript-eslint/no-this-alias": {
       "count": 1
@@ -52,8 +281,82 @@
       "count": 1
     }
   },
+  "packages/ui/src/components/Option/Characters/hooks/useCharacterCrud.tsx": {
+    "no-restricted-syntax": {
+      "count": 4
+    }
+  },
+  "packages/ui/src/components/Option/Characters/hooks/useCharacterTagManagement.tsx": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/Option/Characters/utils.ts": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/Option/Chatbooks/ChatbooksPlaygroundPage.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 14
+    }
+  },
+  "packages/ui/src/components/Option/ChunkingPlayground/MediaSelector.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/Option/ChunkingPlayground/index.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
   "packages/ui/src/components/Option/DataTables/GenerationPanel.tsx": {
     "react-hooks/rules-of-hooks": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/Evaluations/tabs/DatasetsTab.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/Evaluations/tabs/EvaluationsTab.tsx": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/Option/Evaluations/tabs/HistoryTab.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/Evaluations/tabs/RecipesTab.tsx": {
+    "no-restricted-syntax": {
+      "count": 3
+    }
+  },
+  "packages/ui/src/components/Option/Evaluations/tabs/RunsTab.tsx": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/Option/Evaluations/tabs/SyntheticReviewTab.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/Evaluations/tabs/WebhooksTab.tsx": {
+    "no-restricted-syntax": {
       "count": 1
     }
   },
@@ -65,6 +368,21 @@
   "packages/ui/src/components/Option/Evaluations/tabs/recipe-configs/RagRetrievalTuningConfig.tsx": {
     "no-extra-boolean-cast": {
       "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/Integrations/IntegrationManagementPage.tsx": {
+    "no-restricted-syntax": {
+      "count": 7
+    }
+  },
+  "packages/ui/src/components/Option/KnowledgeQA/ConversationThread.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/KnowledgeQA/KnowledgeQAProvider.tsx": {
+    "no-restricted-syntax": {
+      "count": 5
     }
   },
   "packages/ui/src/components/Option/KnowledgeQA/__tests__/KnowledgeQAProvider.answer-length.test.tsx": {
@@ -87,8 +405,43 @@
       "count": 1
     }
   },
+  "packages/ui/src/components/Option/KnowledgeQA/hooks/useCitationPersistence.ts": {
+    "no-restricted-syntax": {
+      "count": 4
+    }
+  },
+  "packages/ui/src/components/Option/KnowledgeQA/hooks/useSearchHistory.ts": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/MCPHub/DeploymentDiagnosticsPanel.tsx": {
+    "no-restricted-syntax": {
+      "count": 3
+    }
+  },
+  "packages/ui/src/components/Option/MCPHub/ExternalServersTab.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/Models/AvailableModelsList.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/Playground/hooks/usePlaygroundRawPreview.ts": {
+    "no-restricted-syntax": {
+      "count": 8
+    }
+  },
   "packages/ui/src/components/Option/PresentationStudio/PresentationStudioIndex.tsx": {
     "@typescript-eslint/no-unused-expressions": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/PresentationStudio/StandaloneHtmlWorkspace.tsx": {
+    "no-restricted-imports": {
       "count": 1
     }
   },
@@ -117,13 +470,116 @@
       "count": 1
     }
   },
+  "packages/ui/src/components/Option/ResearchWorkspace/StudioPane/QuickNotesSection.tsx": {
+    "no-restricted-imports": {
+      "count": 2
+    },
+    "no-restricted-syntax": {
+      "count": 8
+    }
+  },
   "packages/ui/src/components/Option/ResearchWorkspace/StudioPane/hooks/useQuizParsing.tsx": {
     "@typescript-eslint/no-empty-object-type": {
       "count": 1
     }
   },
+  "packages/ui/src/components/Option/ResearchWorkspace/WorkspaceACPHistoryModal.tsx": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/Option/ResearchWorkspace/WorkspaceAgentTaskHandoffModal.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/ResearchWorkspace/index.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/Option/ResearchWorkspace/workspace-server-restore.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 4
+    }
+  },
+  "packages/ui/src/components/Option/ScheduledTasks/ScheduledTasksPage.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
   "packages/ui/src/components/Option/Settings/FamilyGuardrailsWizard.tsx": {
     "no-case-declarations": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/Settings/GuardianSettings.tsx": {
+    "no-restricted-syntax": {
+      "count": 4
+    }
+  },
+  "packages/ui/src/components/Option/Settings/health-status.tsx": {
+    "no-restricted-syntax": {
+      "count": 8
+    }
+  },
+  "packages/ui/src/components/Option/Settings/server-health-probe.ts": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/Option/Settings/tldw.tsx": {
+    "no-restricted-imports": {
+      "count": 2
+    },
+    "no-restricted-syntax": {
+      "count": 11
+    }
+  },
+  "packages/ui/src/components/Option/Setup/hooks/useAudioInstaller.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 4
+    }
+  },
+  "packages/ui/src/components/Option/Share/index.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/Skills/Manager.tsx": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/Option/Skills/SkillsWorkspace.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/Sources/SourcesAvailabilityGate.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/Sources/SourcesWorkspacePage.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Option/Speech/SpeechPlaygroundPage.tsx": {
+    "no-restricted-syntax": {
       "count": 1
     }
   },
@@ -132,6 +588,11 @@
       "count": 1
     },
     "no-unsafe-finally": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/Option/Watchlists/OutputsTab/OutputPreviewDrawer.tsx": {
+    "no-restricted-syntax": {
       "count": 2
     }
   },
@@ -148,8 +609,80 @@
       "count": 1
     }
   },
+  "packages/ui/src/components/Option/WritingPlayground/hooks/useWritingFeedback.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
   "packages/ui/src/components/Option/WritingPlayground/hooks/useWritingInspectorPanels.ts": {
     "no-unsafe-finally": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/Option/WritingPlayground/index.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/PersonaGarden/AssistantDefaultsPanel.tsx": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/PersonaGarden/BuddyStarterArtwork.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/PersonaGarden/CommandsPanel.tsx": {
+    "no-restricted-syntax": {
+      "count": 6
+    }
+  },
+  "packages/ui/src/components/PersonaGarden/ConnectionsPanel.tsx": {
+    "no-restricted-syntax": {
+      "count": 5
+    }
+  },
+  "packages/ui/src/components/PersonaGarden/PoliciesPanel.tsx": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/PersonaGarden/ScopesPanel.tsx": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/components/PersonaGarden/TestLabPanel.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/components/Review/MediaTrashPage.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 6
+    }
+  },
+  "packages/ui/src/components/Review/ReviewPage.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 32
+    }
+  },
+  "packages/ui/src/components/Review/ViewMediaPage.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
       "count": 2
     }
   },
@@ -198,6 +731,43 @@
       "count": 3
     }
   },
+  "packages/ui/src/components/Review/hooks/useMediaNavigationState.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 6
+    }
+  },
+  "packages/ui/src/components/Review/hooks/useMediaReviewActions.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 6
+    }
+  },
+  "packages/ui/src/components/Review/hooks/useMediaSearch.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 15
+    }
+  },
+  "packages/ui/src/components/Review/hooks/useMediaSelection.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 21
+    }
+  },
+  "packages/ui/src/components/Review/mediaMetadataSearchRequest.ts": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
   "packages/ui/src/components/Sidepanel/Chat/ToolCallBlock.tsx": {
     "no-case-declarations": {
       "count": 1
@@ -238,12 +808,160 @@
       "count": 1
     }
   },
+  "packages/ui/src/hooks/document-workspace/offlineQueue.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/document-workspace/useAnnotationSync.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/document-workspace/useAnnotations.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/document-workspace/useCitation.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/document-workspace/useDocumentMetadata.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/document-workspace/useEpubOutline.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/document-workspace/useEpubSettings.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/document-workspace/usePdfOutline.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/document-workspace/useReadingProgress.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/playground/useModelSelector.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/playground/useSlashCommands.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/useAudioStudioGeneration.tsx": {
+    "no-restricted-imports": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/hooks/useAudioStudioProjects.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/useCharacterGreetingStart.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/useComparisonTranscribe.ts": {
+    "no-restricted-imports": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/hooks/useMediaCapabilities.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/useMediaNavigation.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/useMultiRenderState.ts": {
+    "no-restricted-imports": {
+      "count": 3
+    }
+  },
+  "packages/ui/src/hooks/useOmniSearchDeps.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/usePresentationPrincipalScope.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/useQuickChat.tsx": {
+    "no-restricted-imports": {
+      "count": 3
+    }
+  },
+  "packages/ui/src/hooks/useSplashScreen.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/useTranscriptionModelsCatalog.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/useTtsPlayground.tsx": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/hooks/useWorkflowSuggestions.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
   "packages/ui/src/models/__tests__/ChatTldw.stream-metadata.test.ts": {
     "no-empty": {
       "count": 2
     }
   },
+  "packages/ui/src/routes/hooks/usePersonaAnalytics.tsx": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/routes/hooks/usePersonaGovernanceContext.tsx": {
+    "no-restricted-syntax": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/routes/hooks/usePersonaLiveSession.tsx": {
+    "no-restricted-syntax": {
+      "count": 9
+    }
+  },
+  "packages/ui/src/routes/hooks/usePersonaSetupOrchestrator.ts": {
+    "no-restricted-syntax": {
+      "count": 8
+    }
+  },
   "packages/ui/src/routes/hooks/usePersonaStateDocs.ts": {
+    "no-restricted-syntax": {
+      "count": 5
+    },
     "react-hooks/rules-of-hooks": {
       "count": 1
     }
@@ -251,6 +969,11 @@
   "packages/ui/src/routes/sidepanel-agent.tsx": {
     "no-case-declarations": {
       "count": 1
+    }
+  },
+  "packages/ui/src/routes/sidepanel-persona.tsx": {
+    "no-restricted-syntax": {
+      "count": 2
     }
   },
   "packages/ui/src/services/__tests__/notifications.test.ts": {
@@ -266,6 +989,44 @@
       "count": 1
     }
   },
+  "packages/ui/src/services/chat-settings.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/services/companion.ts": {
+    "no-restricted-syntax": {
+      "count": 15
+    }
+  },
+  "packages/ui/src/services/evaluations.ts": {
+    "no-restricted-syntax": {
+      "count": 30
+    }
+  },
+  "packages/ui/src/services/flashcards.ts": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/services/note-keywords.ts": {
+    "no-restricted-syntax": {
+      "count": 3
+    }
+  },
+  "packages/ui/src/services/notes-studio.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    },
+    "no-restricted-syntax": {
+      "count": 4
+    }
+  },
+  "packages/ui/src/services/notifications.ts": {
+    "no-restricted-syntax": {
+      "count": 9
+    }
+  },
   "packages/ui/src/services/response-envelope.ts": {
     "no-redeclare": {
       "count": 9
@@ -274,11 +1035,89 @@
   "packages/ui/src/services/structured-prompt-transport.ts": {
     "no-control-regex": {
       "count": 1
+    },
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/services/studySuggestions.ts": {
+    "no-restricted-syntax": {
+      "count": 4
+    }
+  },
+  "packages/ui/src/services/tldw/conference-collections.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/services/tldw/ingest-job-results.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/services/tldw/quick-ingest-batch.ts": {
+    "no-restricted-imports": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/services/tldw/quick-ingest-session-reattach.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/services/tldw/server-capabilities.ts": {
+    "no-restricted-syntax": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/services/watchlists.ts": {
+    "no-restricted-syntax": {
+      "count": 85
+    }
+  },
+  "packages/ui/src/store/document-workspace.ts": {
+    "no-restricted-imports": {
+      "count": 2
+    }
+  },
+  "packages/ui/src/store/persona-visual-runtime.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/store/quick-ingest-session.ts": {
+    "no-restricted-imports": {
+      "count": 3
+    }
+  },
+  "packages/ui/src/store/workflow-editor.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/utils/flashcards-error-recovery-telemetry.ts": {
+    "no-restricted-imports": {
+      "count": 1
+    }
+  },
+  "packages/ui/src/utils/knowledge-note-provenance.ts": {
+    "no-restricted-imports": {
+      "count": 1
     }
   },
   "packages/ui/src/utils/marked/katex.tsx": {
     "@typescript-eslint/no-unsafe-function-type": {
       "count": 2
+    }
+  },
+  "packages/ui/src/utils/provider-registry.ts": {
+    "no-restricted-imports": {
+      "count": 24
+    }
+  },
+  "packages/ui/src/utils/quick-ingest-open.ts": {
+    "no-restricted-imports": {
+      "count": 4
     }
   },
   "packages/ui/src/utils/tts.ts": {

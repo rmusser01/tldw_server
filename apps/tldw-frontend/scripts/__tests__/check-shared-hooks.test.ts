@@ -1,10 +1,11 @@
 // @vitest-environment node
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { checkSharedHooks } from '../check-shared-hooks.mjs'
+import { frozenUiFilePaths } from '../../eslint.config.mjs'
 
 const roots: string[] = []
 const realConfig = path.resolve('eslint.config.mjs')
@@ -155,5 +156,56 @@ describe('shared UI lint and hook enforcement', () => {
     mkdirSync(path.join(options.appsRoot, 'packages/ui/src/public'))
     writeFileSync(path.join(options.appsRoot, 'packages/ui/src/public/vendor.min.js'), 'var x = ; if (')
     expect(await checkSharedHooks(options)).toMatchObject({ fileCount: 2, failures: [] })
+  })
+})
+
+// Seeded violations of the TASK-13950.10 boundary rules, linted with the real configuration.
+async function lintSeeds(seeds: Record<string, string>) {
+  const options = fixture()
+  for (const [file, source] of Object.entries(seeds)) {
+    mkdirSync(path.dirname(path.join(options.appsRoot, file)), { recursive: true })
+    writeFileSync(path.join(options.appsRoot, file), source)
+  }
+  const { failures } = await checkSharedHooks(options)
+  return Object.keys(seeds).map((file) =>
+    failures
+      .filter((failure) => failure.filePath === path.join(options.appsRoot, file))
+      .map((failure) => failure.ruleId)
+  )
+}
+
+describe('shared UI boundary rules', () => {
+  it.each([
+    ['hooks importing components', 'packages/ui/src/hooks/useSeed.ts', 'import { Foo } from "@/components/Foo"\nexport const useSeed = () => Foo', 'no-restricted-imports'],
+    ['utils re-exporting components', 'packages/ui/src/utils/seed.ts', 'export { Foo } from "../components/Foo"', 'no-restricted-imports'],
+    ['store importing components lazily', 'packages/ui/src/store/seed.ts', 'export const load = () => import("~/components/Foo")', 'no-restricted-syntax'],
+    ['components importing entries', 'packages/ui/src/components/Seed.tsx', 'import { Prompt } from "~/entries/shared/route-leave-prompt"\nexport default Prompt', 'no-restricted-imports'],
+    ['routes importing background-proxy', 'packages/ui/src/routes/seed.tsx', 'import { bgRequest } from "@/services/background-proxy"\nexport default bgRequest', 'no-restricted-imports'],
+    ['hooks importing background-proxy lazily', 'packages/ui/src/hooks/useLazy.ts', 'export const load = () => import("../services/background-proxy")', 'no-restricted-syntax'],
+    ['a component hard-coding /api/v1/', 'packages/ui/src/components/Seed.tsx', 'export const url = (base: string) => `${base}/api/v1/media`', 'no-restricted-syntax'],
+    ['an API path cast as any', 'packages/ui/src/services/seed.ts', 'export const path = (id: string) => `/api/v1/notes/${id}` as any', 'no-restricted-syntax']
+  ])('rejects %s', async (_name, file, source, ruleId) => {
+    expect(await lintSeeds({ [file]: source })).toEqual([[ruleId]])
+  })
+  it('leaves tests, services, prose and type-level paths alone', async () => {
+    const results = await lintSeeds({
+      'packages/ui/src/components/__tests__/Seed.test.tsx':
+        'import { bgRequest } from "@/services/background-proxy"\nexport const call = () => bgRequest({ path: "/api/v1/media" as any })',
+      'packages/ui/src/services/seed.ts': 'export { bgRequest } from "./background-proxy"\nexport const path = "/api/v1/media"',
+      'packages/ui/src/components/Seed.tsx':
+        'export type NotePath = `/api/v1/notes/${string}`\nexport const hint = "This server does not advertise /api/v1/notes."'
+    })
+    expect(results).toEqual([[], [], []])
+  })
+  it('rejects growth of a frozen chat file and of its largest function', async () => {
+    const body = Array.from({ length: 3300 }, (_, index) => `  const v${index} = ${index}`).join('\n')
+    const [ruleIds] = await lintSeeds({
+      'packages/ui/src/routes/sidepanel-chat.tsx': `export function Big() {\n${body}\n  return v0\n}`
+    })
+    expect(ruleIds.sort()).toEqual(['max-lines', 'max-lines-per-function'])
+  })
+  it('freezes only files that still exist', () => {
+    expect(frozenUiFilePaths).toHaveLength(5)
+    expect(frozenUiFilePaths.filter((file) => !existsSync(path.resolve('..', file)))).toEqual([])
   })
 })

@@ -12,6 +12,9 @@ const hookRules = ['react-hooks/purity', 'react-hooks/static-components', 'react
 // file path relative to apps/ and rule id.
 const suppressionsName = 'tldw-frontend/eslint-suppressions.packages-ui.json'
 const pruneHint = 'run `bun run lint:ui --prune-suppressions` from apps/tldw-frontend and commit the file'
+const frozenHint =
+  'this file is frozen (TASK-13950.10): move code out into a new module instead of growing it, or raise its ceiling in eslint.config.mjs with a "bump: <reason>" comment on that line'
+
 function sourceFiles(directory, appsRoot) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const entryPath = path.join(directory, entry.name)
@@ -32,7 +35,9 @@ function loadSuppressions(filePath) {
   }
 }
 
-function fixHint(ruleId) {
+function fixHint({ ruleId, message }) {
+  if (ruleId === 'max-lines' || ruleId === 'max-lines-per-function') return frozenHint
+  if (message.includes('eslint-disable-next-line')) return undefined // the rule message says it
   return `fix it, or if it must stay, disable that line with "// eslint-disable-next-line ${ruleId} -- <reason>"`
 }
 
@@ -92,7 +97,7 @@ export async function checkSharedHooks({
         continue
       }
       for (const message of messages) {
-        failures.push({ filePath: result.filePath, ...message, hint: fixHint(ruleId) })
+        failures.push({ filePath: result.filePath, ...message, hint: fixHint(message) })
       }
     }
     for (const [ruleId, { count }] of Object.entries(frozen)) {
