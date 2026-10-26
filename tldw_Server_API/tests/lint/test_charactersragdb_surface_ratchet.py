@@ -37,12 +37,17 @@ db's public API instead of a private member. If growth is unavoidable, raise the
 with a "reason" (reviewed in the PR; see _ceilings.py). A count below its ceiling passes;
 lock the gain in with
 ``python -m tldw_Server_API.tests.lint.test_charactersragdb_surface_ratchet --tighten``.
+A failing count is followed by where it comes from: per chacha/ file for reaches (the
+``__getattr__``-forwarded channel listed apart), per store for delegations, and class body
+vs module-level bindings for methods.
 """
 
 from __future__ import annotations
 
 import ast
+from collections import Counter
 from collections.abc import Iterable, Iterator
+from functools import cache
 from pathlib import Path
 from typing import TypeGuard
 
@@ -122,19 +127,31 @@ def _bound_value(statement: ast.stmt) -> ast.expr | None:
     return None
 
 
-def _bindings(tree: ast.Module) -> tuple[int, int]:
-    """(delegated, other) bindings onto the class from module code. Fails closed on shapes it cannot count."""
+def _store_of(call: ast.Call, wrappers: dict[str, str]) -> str:
+    """The store a delegate call forwards to: its literal first argument, or the wrapper's store."""
+    name = call.func.id if isinstance(call.func, ast.Name) else ""
+    first = call.args[0] if call.args else None
+    if name == DELEGATE and isinstance(first, ast.Constant) and isinstance(first.value, str):
+        return first.value
+    return wrappers.get(name, name)
+
+
+def _bindings(tree: ast.Module) -> tuple[Counter[str], int]:
+    """(delegated bindings per store, other bindings) onto the class from module code. Fails closed."""
     wrappers = {
-        fn.name
+        fn.name: _store_of(s.value, {})
         for fn in tree.body
         if isinstance(fn, ast.FunctionDef)
-        and any(isinstance(s, ast.Return) and _is_call_to(s.value, {DELEGATE}) for s in fn.body)
+        for s in fn.body
+        if isinstance(s, ast.Return) and _is_call_to(s.value, {DELEGATE})
     }
     delegates = {DELEGATE, *wrappers}
     counted: set[int] = set()
-    totals = {"delegated": 0, "other": 0}
+    delegated: Counter[str] = Counter()
+    other = 0
 
     def visit(statements: list[ast.stmt], times: int | None) -> None:
+        nonlocal other
         for statement in statements:
             if isinstance(statement, (ast.FunctionDef, ast.ClassDef)) and statement.name in {*delegates, CLASS}:
                 continue  # definitions, not bindings; the class body is counted as methods
@@ -142,7 +159,10 @@ def _bindings(tree: ast.Module) -> tuple[int, int]:
             if value is not None:
                 if times is None:
                     raise ValueError(f"{DB_MODULE}:{statement.lineno}: cannot size the loop around this binding")
-                totals["delegated" if _is_call_to(value, delegates) else "other"] += times
+                if _is_call_to(value, delegates):
+                    delegated[_store_of(value, wrappers)] += times
+                else:
+                    other += times
                 counted.add(id(value))
             if isinstance(statement, (ast.For, ast.AsyncFor, ast.While)):
                 items = getattr(statement, "iter", None)
@@ -161,7 +181,7 @@ def _bindings(tree: ast.Module) -> tuple[int, int]:
     for node in ast.walk(tree):
         if _is_call_to(node, delegates) and id(node) not in counted | definitions:
             raise ValueError(f"{DB_MODULE}:{node.lineno}: cannot attribute this {DELEGATE} call to a {CLASS} binding")
-    return totals["delegated"], totals["other"]
+    return delegated, other
 
 
 def _is_db(node: ast.AST) -> bool:
@@ -210,11 +230,16 @@ def _reaches_privately(node: ast.AST) -> bool:
     return _is_db(target) and isinstance(name, ast.Constant) and isinstance(name.value, str) and _private(name.value)
 
 
-def _private_reaches(tree: ast.Module) -> int:
-    return sum(
-        _forwarded_reaches(node) if isinstance(node, ast.ClassDef) else _reaches_privately(node)
-        for node in ast.walk(tree)
-    )
+def _private_reaches(tree: ast.Module, label: str) -> Counter[str]:
+    """Reaches in one module: direct ones under ``label``, forwarded ones under their class."""
+    found: Counter[str] = Counter()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            if forwarded := _forwarded_reaches(node):
+                found[f"{label} via {node.name}.__getattr__"] += forwarded
+        elif _reaches_privately(node):
+            found[label] += 1
+    return found
 
 
 def _mentions(source: bytes) -> bool:
@@ -250,7 +275,9 @@ def _outside_bindings(path: Path, tree: ast.Module) -> list[str]:
     return found
 
 
-def measure(repo_root: Path = REPO_ROOT) -> dict[str, dict[str, int]]:
+@cache
+def sources(repo_root: Path) -> dict[str, Counter[str]]:
+    """Each count, split by where it comes from. Cached per root, like the parse it reads."""
     app = (repo_root / "tldw_Server_API" / "app").resolve()
     trees = parse_tree(app)
     db_tree = trees[app / DB_MODULE]
@@ -266,12 +293,30 @@ def measure(repo_root: Path = REPO_ROOT) -> dict[str, dict[str, int]]:
             f"cannot count it. Register store methods in {DB_MODULE}:\n  " + "\n  ".join(outside)
         )
     delegated, other = _bindings(db_tree)
-    reaches = sum(_private_reaches(tree) for path, tree in trees.items() if path.is_relative_to(app / STORE_DIR))
-    return {
-        "methods": {"count": _class_body_defs(_the_class(db_tree).body) + other},
-        "delegated_methods": {"count": delegated},
-        "private_member_reaches": {"count": reaches},
-    }
+    reaches: Counter[str] = Counter()
+    for path, tree in trees.items():
+        if path.is_relative_to(app / STORE_DIR):
+            reaches += _private_reaches(tree, path.relative_to(app).as_posix())
+    methods = Counter({f"{DB_MODULE.as_posix()} class body": _class_body_defs(_the_class(db_tree).body)})
+    methods[f"{DB_MODULE.as_posix()} module-level bindings"] += other
+    return {"methods": methods, "delegated_methods": delegated, "private_member_reaches": reaches}
+
+
+def measure(repo_root: Path = REPO_ROOT) -> dict[str, dict[str, int]]:
+    return {key: {"count": found.total()} for key, found in sources(repo_root).items()}
+
+
+def surface_problems(repo_root: Path, baseline: _ceilings.Baseline) -> list[str]:
+    """The ratchet's failures; each grown count is followed by its sources, largest first."""
+    found = sources(repo_root)
+    problems = []
+    for problem in _ceilings.violations(SURFACE, measure(repo_root), baseline):
+        where = found.get(problem.split(":", 1)[0], Counter())
+        if where:
+            ranked = sorted(where.items(), key=lambda item: (-item[1], item[0]))
+            problem += "\n    By source: " + ", ".join(f"{label} {count}" for label, count in ranked)
+        problems.append(problem)
+    return problems
 
 
 # --- Self-tests: each seeds a tree under a fresh tmp root and runs the real scan ---------------
@@ -447,6 +492,20 @@ def test_using_the_class_outside_chachanotes_db_is_not_a_binding(tmp_path: Path)
     assert _measure_seeded(tmp_path, other=use) == _SEEDED
 
 
+def test_a_failure_says_where_the_count_grew(tmp_path: Path) -> None:
+    store = _STORE.replace("        self._prepare()", "        self._prepare()\n        self._commit()")
+    _measure_seeded(tmp_path, store=store)
+
+    (problem,) = surface_problems(tmp_path, _baseline(_SEEDED))
+
+    assert problem.startswith("private_member_reaches: count 5 > ceiling 4")
+    where = problem.split("By source: ", 1)[1]
+    assert where == (
+        "core/DB_Management/chacha/note_store.py 3, "
+        "core/DB_Management/chacha/note_store.py via ForwardingStore.__getattr__ 2"
+    )
+
+
 def test_shrinking_passes_without_a_baseline_edit(tmp_path: Path) -> None:
     shrunk = _DB.replace("CharactersRAGDB.get = _patched_get\n", "")
 
@@ -457,17 +516,16 @@ def test_shrinking_passes_without_a_baseline_edit(tmp_path: Path) -> None:
 
 
 def test_charactersragdb_surface_does_not_grow() -> None:
-    counts = measure()
     baseline = _ceilings.load(SURFACE.baseline)
 
-    problems = _ceilings.violations(SURFACE, counts, baseline)
+    problems = surface_problems(REPO_ROOT, baseline)
 
     assert not problems, "\n".join(problems)
-    _ceilings.warn_if_tightenable(SURFACE, counts, baseline)
+    _ceilings.warn_if_tightenable(SURFACE, measure(), baseline)
 
 
 def test_raised_surface_ceilings_carry_a_new_reason() -> None:
-    problems = _ceilings.reasonless_bumps(SURFACE)
+    problems = _ceilings.reasonless_bumps(SURFACE, measure())
     assert not problems, "\n".join(problems)
 
 
