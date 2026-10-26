@@ -41,6 +41,7 @@ from tldw_Server_API.app.core.Chat.generation_metadata import (
 )
 from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.LLM_Calls.sse import SSE_CONTROL_FIELD_PREFIXES, is_done_line, sse_data, sse_done, sse_event
+from tldw_Server_API.app.core.LLM_Calls.usage_accounting import _StreamUsage
 from tldw_Server_API.app.core.testing import is_truthy
 
 #######################################################################################################################
@@ -1431,6 +1432,12 @@ class StreamingResponseHandler:
         # as opposed to a local policy, size or transform failure.
         self.finish_reason: Optional[str] = None
         self.usage: Optional[dict[str, int]] = None
+        # The provider's whole usage block (tier, cache counts, cost), read as the
+        # provider-level recorder reads it; it goes to the usage record, not to metadata.
+        self.stream_usage = _StreamUsage()
+        # OpenAI sends a usage chunk with empty choices only to a client that asks
+        # (stream_options.include_usage); the chat pipeline sets False when its client did not.
+        self.forward_usage_chunk = True
         self.stop_requested = False
         self.provider_interrupted = False
         self._settlement_started = False
@@ -1819,7 +1826,8 @@ class StreamingResponseHandler:
             stream: The stream to process (sync or async iterator)
             save_callback: Optional callback to save the full response. When it
                 accepts a ``generation`` keyword it also receives
-                ``generation_snapshot()``.
+                ``generation_snapshot()``. When it accepts ``provider_usage`` and
+                the provider sent a usage block, it receives that whole block.
             finalize_callback: Optional callback invoked on error/cancel to finalize state
             on_first_output: Optional callback invoked once after the first valid provider output
             partial_save_callback: Optional ``callback(text, *, generation)`` that
@@ -1964,6 +1972,7 @@ class StreamingResponseHandler:
                         return outputs, True
                     if isinstance(data, dict) and data.get("usage") is not None:
                         self._record_usage(data.get("usage"))
+                    self.stream_usage.feed_event(data)
                     if isinstance(data, dict):
                         choices = data.get("choices")
                         if isinstance(choices, list) and choices:
@@ -2076,6 +2085,10 @@ class StreamingResponseHandler:
                             self.update_activity()
                             return outputs, False
                     if isinstance(data, dict):
+                        if not self.forward_usage_chunk and data.get("choices") == [] and data.get("usage") is not None:
+                            # A usage chunk the client did not ask for: read above for the usage record, not sent.
+                            self.update_activity()
+                            return outputs, False
                         self._attach_stream_metadata(data)
                     elif data not in (None, "", [], {}):
                         self.semantic_output_seen = True
@@ -2447,6 +2460,8 @@ class StreamingResponseHandler:
                         if _accepts_keyword(save_callback, "generation")
                         else {}
                     )
+                    if self.stream_usage.usage and _accepts_keyword(save_callback, "provider_usage"):
+                        generation_kwargs["provider_usage"] = dict(self.stream_usage.usage)
                     try:
                         # Support flexible callback signatures (text only or extended)
                         maybe_result = None
@@ -2587,6 +2602,7 @@ async def create_streaming_response_with_timeout(
     history_persistence_ack: bool = False,
     user_message_id: Optional[str] = None,
     partial_save_callback: Optional[Callable[..., Any]] = None,
+    forward_usage_chunk: bool = True,
 ) -> AsyncIterator[str]:
     """
     Create a streaming response with timeout and error handling.
@@ -2606,6 +2622,8 @@ async def create_streaming_response_with_timeout(
         history_persistence_ack: Reserve native owner fields and emit saved IDs independently of optional metadata
         partial_save_callback: Optional ``callback(text, *, generation)`` that keeps an
             unfinished reply; see ``StreamingResponseHandler.safe_stream_generator``
+        forward_usage_chunk: False keeps a usage chunk with empty ``choices`` from the client
+            (it is still read for the usage record)
 
     Yields:
         SSE formatted messages
@@ -2620,6 +2638,7 @@ async def create_streaming_response_with_timeout(
     handler.system_message_id = system_message_id
     handler.history_persistence_ack = history_persistence_ack
     handler.user_message_id = user_message_id
+    handler.forward_usage_chunk = forward_usage_chunk
     if isinstance(continuation_metadata, dict) and continuation_metadata:
         handler.continuation_metadata = dict(continuation_metadata)
 

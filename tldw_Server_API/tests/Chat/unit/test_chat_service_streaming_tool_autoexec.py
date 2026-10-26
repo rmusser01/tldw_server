@@ -17,6 +17,8 @@ from tldw_Server_API.app.core.Chat.tool_auto_exec import (
     ToolExecutionBatchResult,
     ToolExecutionRecord,
 )
+from tldw_Server_API.app.core.Usage import usage_tracker
+from tldw_Server_API.app.core.Usage.pricing_catalog import reset_pricing_catalog
 
 
 class _DummyStreamTracker:
@@ -198,6 +200,7 @@ async def _run_execute_streaming_call(
     queue_execution_enabled: bool = False,
     enable_provider_fallback: bool = False,
     refresh_provider_params=None,
+    rg_commit_cb=None,
 ) -> StreamingResponse:
     cleaned_args = {
         "api_endpoint": selected_provider,
@@ -240,6 +243,7 @@ async def _run_execute_streaming_call(
         llm_call_func=llm_call_func,
         refresh_provider_params=refresh_provider_params or (lambda *_args, **_kwargs: ({}, None)),
         moderation_getter=lambda: _NoModeration(),
+        rg_commit_cb=rg_commit_cb,
     )
 
 
@@ -1031,3 +1035,218 @@ async def test_chat_sse_forbids_proxy_compression(monkeypatch, unified, reject):
         assert "no-transform" in response.headers["cache-control"]  # nosec B101: Required SSE proxy behavior.
     finally:
         await _collect_sse_chunks(response)
+
+
+# --- A streamed reply is recorded from the provider's usage chunk (TASK-13951) ---
+
+
+@pytest.fixture
+def stream_usage_rows(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """The llm_usage_log rows the stream's real log_llm_usage inserts, costed by the shipped catalog."""
+    rows: list[dict[str, Any]] = []
+
+    class _Repo:
+        """Stands in for AuthnzUsageRepo and keeps the inserted rows."""
+
+        def __init__(self, _pool: Any) -> None:
+            """No database."""
+
+        async def insert_llm_usage_log(self, **kwargs: Any) -> None:
+            """Record the row instead of writing it."""
+            rows.append(kwargs)
+
+    async def _none() -> None:
+        """No pool and no daily ledger."""
+
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+    monkeypatch.setenv("LLM_USAGE_ENABLED", "true")
+    monkeypatch.setattr(usage_tracker, "get_db_pool", _none)
+    monkeypatch.setattr(usage_tracker, "_get_tokens_daily_ledger", _none)
+    monkeypatch.setattr(usage_tracker, "AuthnzUsageRepo", _Repo)
+    monkeypatch.setattr(chat_service, "get_topic_monitoring_service", lambda: None)
+    reset_pricing_catalog()
+    yield rows
+    reset_pricing_catalog()
+
+
+def _reply_then(*frames: dict[str, Any]) -> Any:
+    """A provider call that streams "hello world!", stops, then sends ``frames`` before DONE."""
+
+    def _call() -> Any:
+        def _stream() -> Any:
+            yield 'data: {"choices": [{"delta": {"content": "hello world!"}}]}\n\n'
+            yield 'data: {"choices": [{"delta": {}, "finish_reason": "stop"}]}\n\n'
+            for frame in frames:
+                yield f"data: {json.dumps(frame)}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return _stream()
+
+    return _call
+
+
+async def _save_nothing(*_args: Any, **_kwargs: Any) -> str:
+    return "message-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("provider", "model", "usage_chunk", "tier", "total_cost", "forwarded"),
+    [
+        # OpenAI Fast, reported as priority: 2,000 uncached and 8,000 cached input tokens and 1,000 output tokens
+        # at gpt-4o-mini's priority rates ($0.25, $0.125 and $1.00 per million).
+        (
+            "openai",
+            "gpt-4o-mini",
+            {
+                "service_tier": "priority",
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 10_000,
+                    "completion_tokens": 1_000,
+                    "total_tokens": 11_000,
+                    "prompt_tokens_details": {"cached_tokens": 8_000},
+                },
+            },
+            "priority",
+            (2_000 * 0.25 + 8_000 * 0.125 + 1_000 * 1.00) / 1_000_000,
+            False,
+        ),
+        # OpenRouter reports the call's cost; an uncatalogued model is not costed at the unknown-model rate.
+        # Its usage chunk carries one content-free choice, not empty choices (OpenRouter's streaming reference).
+        (
+            "openrouter",
+            "acme/brand-new-model",
+            {
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": "", "role": "assistant"},
+                        "finish_reason": "stop",
+                        "native_finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 10_000, "completion_tokens": 1_000, "total_tokens": 11_000, "cost": 0.0042},
+            },
+            None,
+            0.0042,
+            True,
+        ),
+    ],
+    ids=["openai-fast-cached", "openrouter-reported-cost"],
+)
+async def test_a_streamed_reply_is_recorded_from_the_usage_chunk_its_provider_sends(
+    stream_usage_rows, provider, model, usage_chunk, tier, total_cost, forwarded
+) -> None:
+    """Its service tier, cache rate and reported cost apply, as for a reply that is not streamed (AC #1)."""
+    committed: list[int] = []
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=_reply_then(usage_chunk),
+        save_message_fn=_save_nothing,
+        selected_provider=provider,
+        provider=provider,
+        model=model,
+        rg_commit_cb=committed.append,
+    )
+    chunks = await _collect_sse_chunks(response)
+
+    (row,) = stream_usage_rows
+    assert row["estimate_source"] == "provider_usage"
+    assert row["estimated"] is False
+    assert (row["prompt_tokens"], row["completion_tokens"]) == (10_000, 1_000)
+    assert row["total_cost_usd"] == pytest.approx(total_cost)
+    assert json.loads(row["raw_usage_metadata_json"]).get("service_tier") == tier
+    assert committed == [11_000]
+    # This client did not ask for usage: OpenAI's empty-choices chunk is not forwarded, and OpenRouter's,
+    # which carries a choice, reaches it as today (Decision 2).
+    assert [payload["usage"] for _, payload in _json_payload_chunks(chunks) if payload.get("usage")] == (
+        [usage_chunk["usage"]] if forwarded else []
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "frames",
+    [
+        (),
+        ({"choices": [], "usage": None},),
+        ({"choices": [], "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}},),
+    ],
+    ids=["no-usage-chunk", "null-usage", "zero-usage"],
+)
+async def test_a_streamed_reply_without_usage_is_recorded_from_the_estimate(stream_usage_rows, frames) -> None:
+    """No usable usage chunk: the row is the stream estimate, as before (AC #2)."""
+    committed: list[int] = []
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=_reply_then(*frames),
+        save_message_fn=_save_nothing,
+        rg_commit_cb=committed.append,
+    )
+    await _collect_sse_chunks(response)
+
+    (row,) = stream_usage_rows
+    assert row["estimate_source"] == "stream_estimate"
+    assert row["estimated"] is True
+    assert row["completion_tokens"] == len("hello world!") // 4
+    assert row["raw_usage_metadata_json"] is None
+    assert committed == [row["total_tokens"]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_a_usage_block_without_completion_tokens_counts_the_reply_from_the_estimate(stream_usage_rows) -> None:
+    """A block with prompt tokens only does not count the reply received as nothing (TASK-13951)."""
+    committed: list[int] = []
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=_reply_then({"choices": [], "usage": {"prompt_tokens": 50}}),
+        save_message_fn=_save_nothing,
+        rg_commit_cb=committed.append,
+    )
+    await _collect_sse_chunks(response)
+
+    (row,) = stream_usage_rows
+    assert (row["prompt_tokens"], row["completion_tokens"]) == (50, len("hello world!") // 4)
+    assert row["estimated"] is True
+    assert committed == [row["total_tokens"]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_a_streamed_tool_call_reply_is_recorded_once_from_its_usage_chunk(
+    monkeypatch: pytest.MonkeyPatch, stream_usage_rows
+) -> None:
+    """Auto-executed tools add no row of their own; the reply's usage chunk is recorded (TASK-13951)."""
+    executed: list[str] = []
+
+    async def fake_autoexec(**kwargs):
+        executed.extend(call["id"] for call in kwargs["tool_calls"])
+        return ToolExecutionBatchResult(0, 0, 0, 0, False, [])
+
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
+    monkeypatch.setattr(chat_service, "execute_assistant_tool_calls", fake_autoexec)
+    usage_chunk = {"choices": [], "usage": {"prompt_tokens": 300, "completion_tokens": 40, "total_tokens": 340}}
+
+    def llm_call_func() -> Any:
+        def _stream() -> Any:
+            *frames, done = _tool_call_stream()
+            yield from frames
+            yield f"data: {json.dumps(usage_chunk)}\n\n"
+            yield done
+
+        return _stream()
+
+    async def save_message_fn(_db, _conv_id, payload, use_transaction=True):
+        return "m-1"
+
+    response = await _run_execute_streaming_call(llm_call_func=llm_call_func, save_message_fn=save_message_fn)
+    await _collect_sse_chunks(response)
+
+    assert executed == ["c1"]
+    (row,) = stream_usage_rows
+    assert (row["prompt_tokens"], row["completion_tokens"]) == (300, 40)
+    assert row["estimate_source"] == "provider_usage"

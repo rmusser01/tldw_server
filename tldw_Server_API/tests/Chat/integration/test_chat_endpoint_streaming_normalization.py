@@ -595,3 +595,51 @@ def test_endpoint_non_stream_auto_continue_returns_followup_assistant_content():
             getattr(_app, "dependency_overrides", {}).pop(get_chacha_db_for_user, None)
         except Exception:
             _ = None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("request_fields", "forwarded"),
+    [
+        ({}, False),
+        ({"stream_options": {"include_usage": True}}, True),
+        ({"extra_body": {"stream_options": {"include_usage": True}}}, True),
+    ],
+    ids=["not-asked", "asked-top-level", "asked-in-extra-body"],
+)
+def test_endpoint_forwards_an_empty_choices_usage_chunk_only_to_a_client_that_asked(request_fields, forwarded):
+    """OpenAI sends its usage chunk only to a client that asks, so the server forwards it only then (TASK-13951)."""
+    db, db_path = _make_test_db()
+    usage = {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}
+
+    def upstream_stream():
+        yield 'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n'
+        yield 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+        yield f"data: {json.dumps({'choices': [], 'usage': usage})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    _app: Any = app
+    _app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    try:
+        with (
+            _make_test_client(db) as client,
+            patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=False),
+            patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "sk-test"}),
+            patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=upstream_stream()),
+        ):
+            body = {
+                "api_provider": "openai",
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": True,
+                **request_fields,
+            }
+            r = _post_with_csrf(client, "/api/v1/chat/completions", json=body, headers=_auth_headers(client))
+        assert r.status_code == 200, r.text
+        usage_chunks = [payload for payload in _json_sse_payloads(r.text) if payload.get("choices") == []]
+        assert [payload.get("usage") for payload in usage_chunks] == ([usage] if forwarded else [])
+    finally:
+        _app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        for path in (db_path, db_path + "-wal", db_path + "-shm"):
+            if os.path.exists(path):
+                os.unlink(path)
