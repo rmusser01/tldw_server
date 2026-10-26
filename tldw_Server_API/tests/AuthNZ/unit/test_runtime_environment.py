@@ -9,6 +9,7 @@ tests/lint/test_production_detector_single_source.py bans the key reads elsewher
 
 from __future__ import annotations
 
+import os
 from types import SimpleNamespace
 from typing import Any, Callable, cast
 
@@ -58,10 +59,63 @@ def _testing() -> bool:
     return is_production_like_env()
 
 
+def _config() -> bool:
+    from tldw_Server_API.app.core.config import is_production_environment
+
+    return is_production_environment()
+
+
+def _rg_startup_guard() -> bool:
+    from tldw_Server_API.app.core.AuthNZ.rg_startup_guard import is_production_like_env
+
+    return is_production_like_env()
+
+
 def _user_db_handling() -> bool:
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import _is_production_like_env
 
     return _is_production_like_env()
+
+
+def _program_evaluator() -> bool:
+    from tldw_Server_API.app.core.Prompt_Management.prompt_studio.program_evaluator import ProgramEvaluator
+
+    return ProgramEvaluator.is_production_like_environment()
+
+
+def _admin_webhooks() -> bool:
+    from tldw_Server_API.app.core.Admin_Webhooks.config import is_production_environment_mapping
+
+    return is_production_environment_mapping(dict(os.environ))
+
+
+def _connectors_require_encryption() -> bool:
+    from tldw_Server_API.app.core.External_Sources.connectors_service import (
+        _connector_secret_encryption_required,
+    )
+
+    return _connector_secret_encryption_required()
+
+
+def _embeddings_enforce_rg() -> bool:
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create import (
+        _should_enforce_rg_in_production,
+    )
+
+    return _should_enforce_rg_in_production()
+
+
+def _rag_retriever_production_mode() -> bool:
+    from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import BaseRetriever
+
+    class _Retriever(BaseRetriever):
+        async def retrieve(self, *args: Any, **kwargs: Any) -> list:
+            return []
+
+        async def get_metadata(self, doc_id: str) -> dict[str, Any]:
+            return {}
+
+    return bool(_Retriever(None, db_adapter=object())._production_mode)
 
 
 def _crypto_refuses_test_fallback() -> bool:
@@ -83,13 +137,21 @@ def _settings_refuses_jwt_template() -> bool:
 CALLERS: dict[str, Callable[[], bool]] = {
     "testing.runtime_environment": _runtime,
     "testing.is_production_like_env": _testing,
+    "config.is_production_environment": _config,
+    "rg_startup_guard.is_production_like_env": _rg_startup_guard,
     "User_DB_Handling._is_production_like_env": _user_db_handling,
+    "ProgramEvaluator.is_production_like_environment": _program_evaluator,
+    "Admin_Webhooks.is_production_environment_mapping": _admin_webhooks,
+    "connectors_service._connector_secret_encryption_required": _connectors_require_encryption,
+    "database_retrievers.BaseRetriever._production_mode": _rag_retriever_production_mode,
     "crypto_utils refuses the test fallback key": _crypto_refuses_test_fallback,
     "settings hard-fails a weak single-user key": _settings_refuses_weak_single_user_key,
     "settings hard-fails the default JWT template": _settings_refuses_jwt_template,
 }
 # Callers that exempt pytest and TEST_MODE: asked with both cleared.
-OUTSIDE_TEST_CALLERS: dict[str, Callable[[], bool]] = {}
+OUTSIDE_TEST_CALLERS: dict[str, Callable[[], bool]] = {
+    "Embeddings_Create._should_enforce_rg_in_production": _embeddings_enforce_rg,
+}
 
 
 @pytest.fixture()

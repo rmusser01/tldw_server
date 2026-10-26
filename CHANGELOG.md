@@ -12,6 +12,9 @@ and this project adheres to Some kind of Versioning
 
 ### Changed
 
+- **Production detection is unified; upgrade warning.** `ENVIRONMENT`, `APP_ENV`, `DEPLOYMENT_ENV`, `FASTAPI_ENV`, `TLDW_ENV` or `ENV` set to `prod`, `production` or `live` (any case) now marks the runtime as production everywhere `tldw_production=true` did, and the reverse. An install that sets, for example, `ENVIRONMENT=production` or `APP_ENV=production` without `tldw_production` will now **refuse to start** on a weak or default secret: a `SINGLE_USER_API_KEY` that is a placeholder, shorter than 24 characters or not in the server-generated `tldw_<kid>.<secret>` format (unless `TLDW_ALLOW_LEGACY_SINGLE_USER_KEY=true`), the template `JWT_SECRET_KEY`, or SQLite under `AUTH_MODE=multi_user`. Set strong secrets before upgrading (`python -m tldw_Server_API.app.core.AuthNZ.initialize`). The same marker also turns on the other production-only guards: required connector-secret encryption, stricter RAG guardrails, no raw-SQL RAG fallback, fatal evaluations-migration failures, and Resource Governor enforcement for embeddings (TASK-13950.6).
+- **Test seams are refused in production.** Startup now fails in a production-like runtime when any test seam is set: `TEST_MODE`, `TESTING`, `TLDW_TEST_MODE`, `TLDW_ALLOW_TEST_FALLBACK_KEYS`, `SINGLE_USER_TEST_API_KEY`, `E2E_TEST_BASE_URL`, `MINIMAL_TEST_APP`, `JWT_SECRET_TEST_KEY`, `ENABLE_ADMIN_E2E_TEST_MODE`, `EVALUATIONS_TEST_DB_PATH`, `JOBS_TEST_NOW_EPOCH` or any `RG_TEST_*`. `PYTEST_CURRENT_TEST` no longer unlocks the public test JWT secret or the test API key in production (TASK-13950.6).
+
 
 ### Fixed
 

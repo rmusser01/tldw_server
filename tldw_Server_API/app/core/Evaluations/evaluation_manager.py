@@ -35,6 +35,7 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlit
 from tldw_Server_API.app.core.Evaluations.identity import canonical_evaluations_user_scope
 from tldw_Server_API.app.core.Evaluations.scoring import normalize_judge_score
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.testing import is_production_like_env
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 
 
@@ -182,10 +183,10 @@ class EvaluationManager:
             error_msg = f"CRITICAL: Failed to apply database migrations to {self.db_path}: {e}"
             logger.critical(error_msg)
 
-            # Check if we're in a production environment
-            env = os.getenv('ENVIRONMENT', 'development').lower()
+            # Production (runtime_environment) or an ENVIRONMENT=staging tier
+            staging = os.getenv("ENVIRONMENT", "").strip().lower() == "staging"
 
-            if env in ['production', 'staging']:
+            if is_production_like_env() or staging:
                 # Fail loudly in production/staging
                 raise RuntimeError(error_msg) from e
             else:
