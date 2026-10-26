@@ -60,7 +60,6 @@ BEARER_PARSE_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/api/v1/endpoints/rpg.py": 1,
     "tldw_Server_API/app/api/v1/endpoints/sandbox.py": 1,
     "tldw_Server_API/app/api/v1/endpoints/watchlists.py": 1,
-    "tldw_Server_API/app/api/v1/endpoints/workflows.py": 1,
 }
 
 _FIX = (

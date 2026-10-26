@@ -264,10 +264,6 @@ def test_rejects_a_revoked_jwt(env: SimpleNamespace, route: str) -> None:
         assert _refusal(env.client, url, headers=revoked_header, frame=DATA_FRAME) in FIRST_FRAME_REFUSED
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="TASK-13950.7: workflows verifies tokens with the MCP JWT manager; resolve_ws_principal fixes it next",
-)
 def test_workflows_ws_accepts_an_authnz_access_token_and_rejects_it_revoked(env: SimpleNamespace) -> None:
     """AC#5: the workflows WebSocket verified tokens with the MCP JWT manager, so it
     rejected every AuthNZ access token and never consulted the blacklist."""

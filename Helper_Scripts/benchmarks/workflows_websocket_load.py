@@ -270,25 +270,23 @@ async def _measure(db, url: str, args) -> tuple[list[dict], dict]:
     from websockets.asyncio.client import connect
     from websockets.exceptions import InvalidStatus
 
-    from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
-
-    manager = get_jwt_manager()
-    token = manager.create_access_token(subject="1")
-    foreign = manager.create_access_token(subject="2")
-    run_id = uuid4().hex
-    db.create_run(
-        run_id=run_id,
-        tenant_id="benchmark",
-        user_id="1",
-        inputs={},
-        workflow_id=None,
-        definition_version=1,
-        definition_snapshot={"name": "auth-control", "version": 1, "steps": []},
-    )
+    # Single-user server: a bearer credential is the API key, and it authenticates as user 1.
+    token = os.environ["SINGLE_USER_API_KEY"]
+    run_id, foreign_run_id = uuid4().hex, uuid4().hex
+    for owner, target in (("1", run_id), ("2", foreign_run_id)):
+        db.create_run(
+            run_id=target,
+            tenant_id="benchmark",
+            user_id=owner,
+            inputs={},
+            workflow_id=None,
+            definition_version=1,
+            definition_snapshot={"name": "auth-control", "version": 1, "steps": []},
+        )
     authorization = {}
     for label, target, credential in [
         ("missing", run_id, None),
-        ("foreign_owner", run_id, foreign),
+        ("foreign_owner", foreign_run_id, token),
         ("missing_run", uuid4().hex, token),
     ]:
         headers = {"Authorization": f"Bearer {credential}"} if credential else {}

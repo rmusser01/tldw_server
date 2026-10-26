@@ -27,6 +27,7 @@ from fastapi import (
     Response,
     WebSocket,
     WebSocketDisconnect,
+    WebSocketException,
     status,
 )
 from fastapi.responses import FileResponse, StreamingResponse
@@ -76,10 +77,7 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
     WORKFLOWS_RUNS_READ,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
-    cookie_websocket_rejection_code,
-    resolve_single_user_cookie_websocket,
-)
+from tldw_Server_API.app.core.AuthNZ.websocket_principal import auth_subprotocol, resolve_ws_principal
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     create_workflows_database,
@@ -93,7 +91,6 @@ from tldw_Server_API.app.core.exceptions import (
 )
 from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
 from tldw_Server_API.app.core.http_client import afetch as _http_afetch
-from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
 from tldw_Server_API.app.core.Security.egress import (
     ALLOWED_PORTS_ENV,
     DEFAULT_ALLOWED_PORTS,
@@ -4647,35 +4644,16 @@ def _workflow_history_budget() -> _WorkflowHistoryBudget:
 async def workflows_ws(
     websocket: WebSocket,
     run_id: str,
-    token: Optional[str] = Query(None),
     types: Optional[list[str]] = Query(None),
     db: WorkflowsDatabase = Depends(_get_db),
 ):
-    cookie_identity = await resolve_single_user_cookie_websocket(websocket)
-    authenticated_user_id: str | None = str(cookie_identity.user_id) if cookie_identity is not None else None
-    # Extract token: prefer query param; fallback to Authorization header
-    if not token:
-        auth_hdr = websocket.headers.get("authorization") or websocket.headers.get("Authorization")
-        if auth_hdr and auth_hdr.lower().startswith("bearer "):
-            token = auth_hdr.split(" ", 1)[1].strip()
-    if not token and authenticated_user_id is None:
-        cookie_code = cookie_websocket_rejection_code(websocket)
-        await _close_workflows_websocket(
-            websocket,
-            cookie_code or 4401,
-            "cookie_auth_rejected" if cookie_code is not None else "authentication_required",
-        )
+    try:
+        principal = await resolve_ws_principal(websocket, required_scope="read")
+    except WebSocketException as exc:
+        await _close_workflows_websocket(websocket, exc.code, exc.reason)
         return
-
-    # Verify token
-    if authenticated_user_id is None:
-        try:
-            jwtm = get_jwt_manager()
-            token_data = jwtm.verify_token(token)
-            authenticated_user_id = str(token_data.sub)
-        except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as exc:
-            await _close_workflows_websocket(websocket, 4401, "invalid_token", error_type=type(exc).__name__)
-            return
+    # A service principal has no user id, and str(None) must never match a run owner.
+    authenticated_user_id = str(principal.user_id) if principal.user_id is not None else None
 
     # Enforce the existing owner-only rule.
     try:
@@ -4691,7 +4669,7 @@ async def workflows_ws(
         await _close_workflows_websocket(websocket, 4403, "not_run_owner")
         return
 
-    await websocket.accept()
+    await websocket.accept(subprotocol=auth_subprotocol(websocket))
     # Wrap for metrics and activity tracking; keep domain frames unchanged
     stream = WebSocketStream(
         websocket,
