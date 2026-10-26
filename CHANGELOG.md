@@ -13,6 +13,7 @@ and this project adheres to Some kind of Versioning
 ### Changed
 
 - Deprecated: ACP and Prompt Studio WebSockets (`/api/v1/acp/multiplex`, `/api/v1/acp/sessions/{id}/stream`, `/api/v1/acp/sessions/{id}/ssh`, `/api/v1/prompt-studio/ws`, `/api/v1/prompt-studio/ws/{project_id}`): credentials in the `?token=` / `?api_key=` query and in the `x-api-key, <key>` subprotocol still work but log a deprecation warning; send `Authorization: Bearer`, `X-API-KEY`, or the `bearer, <token or key>` subprotocol instead. These routes now authenticate through the core WebSocket resolver, so revocation, API-key scope and single-user rules match HTTP, which narrows two things ACP did on its own: the `API_KEY` environment variable is no longer accepted as a second single-user key next to a different `SINGLE_USER_API_KEY` (it still applies when `SINGLE_USER_API_KEY` is unset), and a `?token=&api_key=` pair is resolved by `get_auth_principal`, the shared HTTP resolver, as it resolves both headers: the JWT first, and the API key only when the JWT is refused with 401. It also widens one: `SINGLE_USER_TEST_API_KEY` is now accepted wherever HTTP accepts it, under pytest or with `TEST_MODE`, `TLDW_TEST_MODE` or `TESTING` set (ACP required an explicit pytest runtime). Only a Bearer-scheme `Authorization` header counts as a WebSocket credential, so a reverse proxy's `Authorization: Basic` on the upgrade no longer hides the query or bearer-subprotocol credential. An API key without the route's scope now closes with 4403 instead of 4401, and the ACP clients no longer retry 4403 (TASK-13950.7).
+- Deprecated: the Watchlists run stream WebSocket (`/api/v1/watchlists/runs/{run_id}/stream`) still takes `?token=` / `?api_key=`, which the WebUI's watchlists-stream client sends, but logs a deprecation warning. It and the Sandbox run stream (`/api/v1/sandbox/runs/{run_id}/stream`) now authenticate through the core WebSocket resolver, so they accept the `bearer, <token or key>` subprotocol (and echo `bearer`) and match HTTP: a JWT for a missing or inactive user is refused (they only decoded it before), a JWT is not accepted in single-user mode, `SINGLE_USER_TEST_API_KEY` is accepted under pytest or with `TEST_MODE`, `TLDW_TEST_MODE` or `TESTING` set (they required an explicit pytest runtime), a Watchlists `?token=&api_key=` pair falls back to the key when the JWT is refused with 401, and an API key without the `read` scope closes with 4403 instead of 4401 (TASK-13950.7).
 
 ### Fixed
 
@@ -20,6 +21,7 @@ and this project adheres to Some kind of Versioning
 ### Removed
 
 - ACP and Prompt Studio WebSockets no longer accept `Authorization: X-API-KEY <key>` or the `api-key, <key>` subprotocol; no client sent either (TASK-13950.7).
+- The Sandbox run stream WebSocket no longer reads a credential from `?auth_token=` or, with signed URLs off, `?token=`; no client sent either. A signed `log_stream_url`'s `token` and `exp` are unchanged (TASK-13950.7).
 
 ## [0.1.46] - 2026-10-01
 
