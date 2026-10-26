@@ -61,7 +61,10 @@ async def resolve_ws_principal(
     Args:
         websocket: The connection, not yet accepted.
         required_scope: API-key scope the route needs ("read", "write", ...). JWT and
-            single-user callers are not scoped, as on HTTP.
+            single-user callers are not scoped, as on HTTP. The check is HTTP's
+            ``require_api_key_scope`` without its admin-claim bypass: that helper lives in
+            the API layer, which core may not import, so a WebSocket stays on the stricter
+            side and an admin's key needs the scope too.
 
     Raises:
         WebSocketException: 4401 when credentials are missing or rejected, 4403 when they

@@ -2,34 +2,41 @@
 
 WebSocket routes authenticate inside their handlers, which the route-auth ratchet cannot
 see, so it only lists them (kind 4 in Helper_Scripts/ci/route_auth_baseline.txt). This
-matrix proves the behaviour on the full app, built with the route families the ratchet
-forces on:
+matrix proves the behaviour on the full app, built with the ratchet's own route policy,
+and checks its route list against the ratchet's ``WS`` baseline lines:
 
 - Handshake routes must refuse before accept: a policy close (4401, 1008) or an HTTP 401
   denial.
 - First-message-frame routes accept, then must close with a policy code, without
   answering anything but an error, when the first frame is data or carries a revoked
   token. Voice's 4400 ("Expected AUTH message") counts: the frame is refused unread.
+- The revoked token is tried in the Authorization header, in the ``token`` query
+  parameter, and, for first-frame routes, in the auth frame.
+- A valid AuthNZ access token must get past authentication on every route (the control
+  column), so a refusal above means something.
 
 The revoked token is a real AuthNZ access token whose jti is on the token blacklist, the
-check HTTP auth runs in verify_jwt_and_fetch_user. A gap found later belongs here as a
-strict xfail naming the slice that fixes it, so the fix turns it red until the mark goes.
+check HTTP auth runs in verify_jwt_and_fetch_user. Known gaps are strict xfails naming
+the slice that fixes them (none today), so the fix turns them red until the mark goes.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
-import os
 from collections.abc import Iterator, Mapping
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FrameTimeout
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from fastapi import FastAPI, WebSocket
 from fastapi.routing import APIWebSocketRoute
 from fastapi.testclient import TestClient
-from Helper_Scripts.ci.route_auth_ratchet import ROUTE_POLICY_ENV
+from Helper_Scripts.ci.route_auth_ratchet import ROUTE_POLICY_ENV, read_baseline
 from starlette.testclient import WebSocketDenialResponse
 from starlette.websockets import WebSocketDisconnect
 
@@ -67,11 +74,23 @@ ROUTES: dict[str, tuple[str, str]] = {
 
 REFUSED = {"close 1008", "close 4401", "http 401"}
 FIRST_FRAME_REFUSED = REFUSED | {"close 4400"}
+# A valid token is refused if the route answers like this; anything else (accepted, an
+# answered frame, a resource-level 4404) is past authentication.
+AUTH_REFUSED = FIRST_FRAME_REFUSED | {"close 4403", "http 403"}
 DATA_FRAME = {"type": "config"}
 SINGLE_USER_KEY = "ws-auth-matrix-single-user-key-0123456789"
+FRAME_TIMEOUT_S = 10.0
+# A refused auth frame is answered at once; a route still silent after this has taken the
+# credential and is waiting for its config frame.
+ADMITTED_AFTER_S = 1.0
+MAX_FRAMES = 8
+
+def _with_query(url: str, name: str, value: str) -> str:
+    return f"{url}{'&' if '?' in url else '?'}{name}={value}"
 
 
-async def _seed_user_and_tokens() -> tuple[int, str, str]:
+async def _seed_user_and_tokens() -> tuple[int, str, str, str]:
+    from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager, reset_api_key_manager
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
@@ -94,10 +113,12 @@ async def _seed_user_and_tokens() -> tuple[int, str, str]:
         token_type="access",  # nosec B106 - token kind label, not a credential
         reason="ws-auth-matrix",
     )
+    api_key = (await (await get_api_key_manager()).create_api_key(user_id=user_id, name="ws-matrix", scope="read"))["key"]
     # The TestClient runs the app on its own loop, which opens its own pool.
+    await reset_api_key_manager()
     await reset_token_blacklist()
     await reset_db_pool()
-    return user_id, valid, revoked
+    return user_id, valid, revoked, api_key
 
 
 def _reset_auth_singletons() -> None:
@@ -110,7 +131,8 @@ def _reset_auth_singletons() -> None:
 
 @pytest.fixture(scope="module")
 def full_app(tmp_path_factory: pytest.TempPathFactory) -> Iterator[SimpleNamespace]:
-    """The full app on a SQLite AuthNZ store, plus a user and a valid and a revoked token.
+    """The full app on a SQLite AuthNZ store, plus a user, a valid and a revoked token, and a
+    read-scope API key.
 
     The root conftest restores auth env vars and ``app.main`` after every test, so the
     import-time route switches apply only while the app is built here, and ``env``
@@ -124,29 +146,32 @@ def full_app(tmp_path_factory: pytest.TempPathFactory) -> Iterator[SimpleNamespa
         "SINGLE_USER_API_KEY": SINGLE_USER_KEY,
         "USER_DB_BASE_DIR": str(data_dir / "user_databases"),
     }
-    route_keys = {*os.getenv("ROUTES_ENABLE", "").split(","), *ROUTE_POLICY_ENV["ROUTES_ENABLE"].split(",")}
     original_main = snapshot_app_main()
     with pytest.MonkeyPatch.context() as patch:
-        for key, value in environ.items():
+        for key, value in {**environ, **ROUTE_POLICY_ENV}.items():  # the ratchet's own route policy
             patch.setenv(key, value)
         patch.setenv("MINIMAL_TEST_APP", "0")
         patch.setenv("MINIMAL_TEST_INCLUDE_AUDIO", "1")
-        patch.setenv("ROUTES_ENABLE", ",".join(sorted(key for key in route_keys if key)))
         _reset_auth_singletons()
-        user_id, valid, revoked = asyncio.run(_seed_user_and_tokens())
+        user_id, valid, revoked, api_key = asyncio.run(_seed_user_and_tokens())
         config._route_toggle_policy.cache_clear()
         app = reload_app_main().app
+    client = TestClient(app)
+    workflows_db = WorkflowsDatabase(str(data_dir / "workflows.db"))
     try:
         yield SimpleNamespace(
             app=app,
-            client=TestClient(app),
+            client=client,
             environ=environ,
             user_id=user_id,
             valid=valid,
             revoked=revoked,
-            workflows_db=WorkflowsDatabase(str(data_dir / "workflows.db")),
+            api_key=api_key,
+            workflows_db=workflows_db,
         )
     finally:
+        client.close()
+        workflows_db.close()
         restore_app_main(original_main)
         config._route_toggle_policy.cache_clear()
         _reset_auth_singletons()
@@ -162,33 +187,74 @@ def env(full_app: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> SimpleNam
     return full_app
 
 
-def _refusal(
+def _receive(ws: object, timeout: float) -> dict[str, object] | None:
+    """The next server message, or None if none arrives within ``timeout`` seconds.
+
+    WebSocketTestSession.receive() blocks forever, and a route that accepts and then
+    waits would hang the required gate instead of failing it.
+    """
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        message: dict[str, object] = pool.submit(ws.receive).result(timeout=timeout)  # type: ignore[attr-defined]
+        return message
+    except FrameTimeout:
+        return None
+    finally:
+        pool.shutdown(wait=False)
+
+
+def _outcome(
     client: TestClient,
     url: str,
     *,
     headers: dict[str, str] | None = None,
     frame: Mapping[str, object] | None = None,
+    timeout: float = FRAME_TIMEOUT_S,
 ) -> str:
-    """Connect, send ``frame`` if accepted, and describe how the server refused.
+    """Connect, send ``frame`` if accepted, and describe what the server did.
 
-    Fails the test if a handshake route accepts, or if a first-frame route answers the
-    frame with anything other than an error before closing.
+    Returns ``"close <code>"`` or ``"http <status>"`` for a refusal, ``"accepted"`` when a
+    handshake succeeds and no frame is sent, ``"answered <type>"`` when the first
+    non-error reply to the frame arrives, and ``"silent"`` when nothing arrives in time.
     """
     try:
-        with client.websocket_connect(url, headers=dict(headers or {})) as ws:
-            if frame is None:
-                pytest.fail(f"{url} accepted the connection")
-            ws.send_json(frame)
-            while True:
-                message = ws.receive()
-                if message["type"] == "websocket.close":
-                    return f"close {message.get('code')}"
-                payload = json.loads(message.get("text") or "{}")
-                assert payload.get("type") in {"error", "auth_error"}, f"{url} processed a frame: {payload}"
+        ws = client.websocket_connect(url, headers=dict(headers or {})).__enter__()
     except WebSocketDenialResponse as denial:
         return f"http {denial.status_code}"
     except WebSocketDisconnect as closed:
         return f"close {closed.code}"
+    try:
+        if frame is None:
+            return "accepted"
+        ws.send_json(frame)
+        for _ in range(MAX_FRAMES):
+            message = _receive(ws, timeout)
+            if message is None:
+                return "silent"
+            if message["type"] == "websocket.close":
+                return f"close {message.get('code')}"
+            payload = json.loads(str(message.get("text") or "{}"))
+            if payload.get("type") not in {"error", "auth_error"}:
+                return f"answered {payload.get('type')}"
+        return "silent"
+    finally:
+        # Leaving delivers a disconnect; a route that raises on it has already answered.
+        with contextlib.suppress(WebSocketDisconnect):
+            ws.__exit__(None, None, None)
+
+
+def test_outcome_returns_when_a_route_accepts_and_waits() -> None:
+    """Self-test: a route that takes a frame and never answers must not hang the gate."""
+    app = FastAPI()
+
+    @app.websocket("/waits")
+    async def waits(websocket: WebSocket) -> None:
+        await websocket.accept()
+        await websocket.receive_json()
+        await websocket.receive_json()  # never arrives
+
+    with TestClient(app) as client:
+        assert _outcome(client, "/waits", frame=DATA_FRAME, timeout=0.2) == "silent"
 
 
 def test_matrix_covers_every_mounted_websocket_route(env: SimpleNamespace) -> None:
@@ -198,13 +264,19 @@ def test_matrix_covers_every_mounted_websocket_route(env: SimpleNamespace) -> No
     assert served == set(ROUTES), "Add the new WebSocket route to ROUTES (and its auth to resolve_ws_principal)"
 
 
+def test_matrix_matches_the_route_auth_ratchet_baseline() -> None:
+    """The ratchet lists every WebSocket route as a reviewed entry; each must be proven here."""
+    baselined = {entry.removeprefix("WS ") for entry in read_baseline() if entry.startswith("WS ")}
+    assert baselined == set(ROUTES)
+
+
 @pytest.mark.parametrize("route", ROUTES)
 def test_rejects_missing_credentials(env: SimpleNamespace, route: str) -> None:
     url, style = ROUTES[route]
     if style == HANDSHAKE:
-        assert _refusal(env.client, url) in REFUSED
+        assert _outcome(env.client, url) in REFUSED
     else:
-        assert _refusal(env.client, url, frame=DATA_FRAME) in FIRST_FRAME_REFUSED
+        assert _outcome(env.client, url, frame=DATA_FRAME) in FIRST_FRAME_REFUSED
 
 
 @pytest.mark.parametrize("route", ROUTES)
@@ -218,9 +290,9 @@ def test_rejects_missing_credentials_in_single_user_mode(
     assert get_settings().AUTH_MODE == "single_user"
     url, style = ROUTES[route]
     if style == HANDSHAKE:
-        assert _refusal(env.client, url) in REFUSED
+        assert _outcome(env.client, url) in REFUSED
     else:
-        assert _refusal(env.client, url, frame=DATA_FRAME) in FIRST_FRAME_REFUSED
+        assert _outcome(env.client, url, frame=DATA_FRAME) in FIRST_FRAME_REFUSED
 
 
 @pytest.mark.parametrize("route", ROUTES)
@@ -228,10 +300,32 @@ def test_rejects_a_revoked_jwt(env: SimpleNamespace, route: str) -> None:
     url, style = ROUTES[route]
     revoked_header = {"Authorization": f"Bearer {env.revoked}"}
     if style == HANDSHAKE:
-        assert _refusal(env.client, url, headers=revoked_header) in REFUSED
+        assert _outcome(env.client, url, headers=revoked_header) in REFUSED
     else:
-        assert _refusal(env.client, url, frame={"type": "auth", "token": env.revoked}) in REFUSED
-        assert _refusal(env.client, url, headers=revoked_header, frame=DATA_FRAME) in FIRST_FRAME_REFUSED
+        assert _outcome(env.client, url, frame={"type": "auth", "token": env.revoked}) in REFUSED
+        assert _outcome(env.client, url, headers=revoked_header, frame=DATA_FRAME) in FIRST_FRAME_REFUSED
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_rejects_a_revoked_jwt_in_the_query(env: SimpleNamespace, route: str) -> None:
+    url, style = ROUTES[route]
+    url = _with_query(url, "token", env.revoked)
+    if style == HANDSHAKE:
+        assert _outcome(env.client, url) in REFUSED
+    else:
+        # An auth frame without a token makes a route fall back to the query token.
+        assert _outcome(env.client, url, frame={"type": "auth"}) in FIRST_FRAME_REFUSED
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_lets_a_valid_authnz_access_token_through(env: SimpleNamespace, route: str) -> None:
+    """Control column: without it, a route that refuses everyone passes the matrix."""
+    url, style = ROUTES[route]
+    if style == HANDSHAKE:
+        outcome = _outcome(env.client, url, headers={"Authorization": f"Bearer {env.valid}"})
+    else:
+        outcome = _outcome(env.client, url, frame={"type": "auth", "token": env.valid}, timeout=ADMITTED_AFTER_S)
+    assert outcome not in AUTH_REFUSED, outcome
 
 
 def test_workflows_ws_accepts_an_authnz_access_token_and_rejects_it_revoked(env: SimpleNamespace) -> None:
@@ -253,4 +347,6 @@ def test_workflows_ws_accepts_an_authnz_access_token_and_rejects_it_revoked(env:
     with env.client.websocket_connect(url, subprotocols=["bearer", env.valid]) as ws:
         assert ws.accepted_subprotocol == "bearer"  # browsers fail a handshake that echoes nothing
         assert ws.receive_json()["type"] == "snapshot"
-    assert _refusal(env.client, url, headers={"Authorization": f"Bearer {env.revoked}"}) == "close 4401"
+    with env.client.websocket_connect(url, headers={"X-API-KEY": env.api_key}) as ws:  # multi-user key
+        assert ws.receive_json()["type"] == "snapshot"
+    assert _outcome(env.client, url, headers={"Authorization": f"Bearer {env.revoked}"}) == "close 4401"
