@@ -16,6 +16,7 @@ and this project adheres to Some kind of Versioning
 ### Fixed
 
 - **audio.cpp TTS client SSRF:** requests now go through `core.http_client`: one attempt, no redirects, and the egress policy checked on the address the connection uses. A loopback `base_url` (the default and the managed sidecar) is admitted for its exact origin. With `allow_remote_base_url` a remote server now gets the default egress policy, so a private, link-local or metadata address is refused (`TTSConfigurationError`, `EGRESS_DENIED`) unless the operator's egress settings allow it, only ports 80, 443 and 8080 are allowed unless `WORKFLOWS_EGRESS_ALLOWED_PORTS` lists others, and under the strict profile (`ENVIRONMENT=prod`) the host must be in `EGRESS_ALLOWLIST` or `WORKFLOWS_EGRESS_ALLOWLIST` (TASK-13950.11).
+- **Audio Studio ACE-Step egress:** every ACE-Step request now goes through `core.http_client` instead of a raw `httpx.AsyncClient`, scoped to the exact origin `AUDIO_STUDIO_EXTERNAL_ENDPOINT_ALLOWLIST` admitted. A local ACE-Step server on a private address and any port still works, but an allowlisted host whose DNS answer is a cloud-metadata or link-local address is refused before anything is sent (`ace_step_endpoint_refused_by_egress_policy`, not retried), the resolved address is pinned, and env proxies are no longer read unless `HTTP_TRUST_ENV` is set. Redirect handling, request bodies, the bearer header and timeouts are unchanged (TASK-13950.11).
 
 ### Removed
 

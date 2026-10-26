@@ -114,10 +114,6 @@ ALLOWLIST: dict[str, str] = {
         "migrate: delivers admin webhooks to registered URLs through a raw httpx.AsyncClient "
         "(_default_async_client_factory) with no egress check per attempt; use afetch."
     ),
-    "tldw_Server_API/app/core/Audio_Studio/providers/ace_step.py": (
-        "migrate: defaults client_factory to httpx.AsyncClient (a reference the regex guard missed). "
-        "It checks its own origin allowlist, not the egress policy; default to create_async_client."
-    ),
     "tldw_Server_API/app/core/Slides/standalone_html_provider.py": (
         "migrate: streams provider completions through _AsyncClient = httpx.AsyncClient (an alias the "
         "regex guard missed), with no egress policy; use create_async_client with a configured endpoint."
