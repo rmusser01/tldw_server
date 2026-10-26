@@ -327,6 +327,34 @@ async def _handle_export(service: ChatbookService, payload: dict[str, Any], job_
     return {"path": file_path, "download_url": download_url}
 
 
+def _record_openwebui_import_result(service: ChatbookService, job_id: str, ok: bool, message: str, result: Any) -> None:
+    """Persist chat-unit progress without exposing private source payloads."""
+    job = service._get_import_job(job_id)
+    if job is None or job.status == ImportStatus.CANCELLED:
+        return
+    data = result if isinstance(result, dict) else {}
+    successful = max(0, _coerce_int(data.get("imported_chats"), 0))
+    failed = max(0, _coerce_int(data.get("failed_chats"), 0))
+    skipped = max(0, _coerce_int(data.get("skipped_chats"), 0))
+    record_failed_import_result(
+        job,
+        {
+            "total_items": successful + failed + skipped,
+            "processed_items": successful + failed + skipped,
+            "successful_items": successful,
+            "failed_items": failed,
+            "skipped_items": skipped,
+            "warnings": data.get("warnings", []),
+            "imported_items": {"conversation": successful},
+        },
+    )
+    job.status = ImportStatus.COMPLETED if ok else ImportStatus.FAILED
+    job.completed_at = datetime.now(timezone.utc)
+    job.progress_percentage = 100
+    job.error_message = None if ok else message
+    service._save_import_job(job)
+
+
 async def _handle_import(service: ChatbookService, payload: dict[str, Any], job_id: str) -> dict[str, Any]:
     if not service._claim_import_job(job_id):
         existing = service._get_import_job(job_id)
@@ -374,19 +402,9 @@ async def _handle_import(service: ChatbookService, payload: dict[str, Any], job_
                     f"Chatbooks Jobs worker: failed to remove OpenWebUI DB import file {resolved_path}: {cleanup_err}"
                 )
 
-        ij = service._get_import_job(job_id)
+        _record_openwebui_import_result(service, job_id, ok, msg, result)
         if ok:
-            if ij and ij.status != ImportStatus.CANCELLED:
-                ij.status = ImportStatus.COMPLETED
-                ij.completed_at = datetime.now(timezone.utc)
-                service._save_import_job(ij)
             return {"openwebui_db_result": result or {}}
-
-        if ij:
-            ij.status = ImportStatus.FAILED
-            ij.completed_at = datetime.now(timezone.utc)
-            ij.error_message = msg
-            service._save_import_job(ij)
         raise ChatbooksJobError(str(msg), retryable=False)
 
     if source_format == "openwebui_json":
@@ -412,19 +430,9 @@ async def _handle_import(service: ChatbookService, payload: dict[str, Any], job_
             except Exception as cleanup_err:
                 logger.debug(f"Chatbooks Jobs worker: failed to remove OpenWebUI import file {resolved_path}: {cleanup_err}")
 
-        ij = service._get_import_job(job_id)
+        _record_openwebui_import_result(service, job_id, ok, msg, result)
         if ok:
-            if ij and ij.status != ImportStatus.CANCELLED:
-                ij.status = ImportStatus.COMPLETED
-                ij.completed_at = datetime.now(timezone.utc)
-                service._save_import_job(ij)
             return {"openwebui_result": result or {}}
-
-        if ij:
-            ij.status = ImportStatus.FAILED
-            ij.completed_at = datetime.now(timezone.utc)
-            ij.error_message = msg
-            service._save_import_job(ij)
         raise ChatbooksJobError(str(msg), retryable=False)
 
     if source_format != "chatbook":

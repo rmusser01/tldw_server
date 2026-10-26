@@ -4693,6 +4693,8 @@ class ChatbookService:
         if parsed.malformed_chat_count:
             result["failed_chats"] += parsed.malformed_chat_count
 
+        if result["failed_chats"]:
+            return False, "OpenWebUI import completed with failed chats; review the retained partial result.", result
         return True, "OpenWebUI import completed", result
 
     def import_openwebui_db(
@@ -4935,6 +4937,8 @@ class ChatbookService:
                 result["warnings"].extend(chat_warnings)
                 result["warnings"].append(f"OpenWebUI chat {chat.external_ref} failed to import: {exc}")
 
+        if result["failed_chats"]:
+            return False, "OpenWebUI database import completed with failed chats; review the retained partial result.", result
         return True, "OpenWebUI database import completed", result
 
     def _openwebui_conversation_title_exists(self, title: str) -> bool:

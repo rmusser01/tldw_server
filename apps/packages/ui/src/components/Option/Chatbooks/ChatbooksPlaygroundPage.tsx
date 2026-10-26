@@ -2746,7 +2746,8 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   const hydrationJobResult = hydrationJob?.result
   const hydrationJobSummary =
     hydrationJobResult && typeof hydrationJobResult === "object"
-      ? (hydrationJobResult as { summary?: OpenWebUIHydrationSummary }).summary
+      ? ((hydrationJobResult as { summary?: OpenWebUIHydrationSummary }).summary ??
+          (hydrationJobResult as OpenWebUIHydrationSummary))
       : undefined
 
   const importTab = (
