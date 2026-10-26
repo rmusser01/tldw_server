@@ -8915,7 +8915,14 @@ class ChatbookService:
         """Best-effort category counts for the full-account export preview."""
         if category in {"account_profile", "account_settings"}:
             return 1
-        if category in {"conversations", "notes", "characters", "world_books", "dictionaries"}:
+        if category in {
+            "conversations",
+            "notes",
+            "characters",
+            "world_books",
+            "dictionaries",
+            "tags_categories_relationships",
+        }:
             return self._scope_db_count_for_category(category)
         if category == "prompts":
             if self._scope_existing_user_path(DatabasePaths.PROMPTS_SUBDIR, DatabasePaths.PROMPTS_DB_NAME) is None:
@@ -8955,21 +8962,22 @@ class ChatbookService:
         }:
             return self._scope_media_count_for_category(category)
         if category == "embeddings":
+            media_vectors = self._scope_media_count_for_category("media_vector_embeddings")
             chroma_path = self._scope_existing_user_path(DatabasePaths.CHROMA_SUBDIR)
             if chroma_path is None:
-                return 0
+                return media_vectors
             try:
                 if not any(chroma_path.iterdir()):
-                    return 0
+                    return media_vectors
             except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
-                return 0
+                return media_vectors
             chroma = self._get_chroma_manager()
             if chroma is None:
-                return 0
+                return media_vectors
             try:
-                return sum(max(0, int(collection.count())) for collection in chroma.list_collections())
+                return media_vectors + len(chroma.list_collections())
             except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
-                return 0
+                return media_vectors
         return 0
 
     def get_full_account_export_scope(self) -> dict[str, Any]:
