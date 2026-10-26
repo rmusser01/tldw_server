@@ -55,7 +55,6 @@ LOOKS_LIKE_JWT_BASELINE: dict[str, int] = {
 }
 
 BEARER_PARSE_BASELINE: dict[str, int] = {
-    "tldw_Server_API/app/api/v1/endpoints/agent_client_protocol.py": 1,
     "tldw_Server_API/app/api/v1/endpoints/auth.py": 1,
     "tldw_Server_API/app/api/v1/endpoints/authnz_debug.py": 1,
     "tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_auth.py": 1,
@@ -68,7 +67,7 @@ BEARER_PARSE_BASELINE: dict[str, int] = {
 
 # Each baseline's exact total. A migration lowers its entry and this number together; any
 # other change to a baseline's total is headroom being reused, and fails.
-SEED_TOTALS: dict[str, int] = {"LOOKS_LIKE_JWT_BASELINE": 7, "BEARER_PARSE_BASELINE": 13}
+SEED_TOTALS: dict[str, int] = {"LOOKS_LIKE_JWT_BASELINE": 7, "BEARER_PARSE_BASELINE": 12}
 
 # The only way to raise a count: (baseline name, module) -> (allowed count, reason). The
 # reason must cite a task or PR, e.g. "security fix in persona_stream needs one (TASK-1234)".

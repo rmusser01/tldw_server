@@ -92,8 +92,11 @@ def test_first_party_websocket_auth_files_use_shared_cookie_resolver():
             assert "get_meetings_db_for_websocket" in source, relative_path
         elif relative_path.endswith("Audio/Realtime/auth.py"):
             assert "_audio_ws_authenticate" in source, relative_path
-        elif relative_path.endswith("endpoints/workflows.py"):
+        elif relative_path.endswith(("endpoints/workflows.py", "endpoints/agent_client_protocol.py")):
             assert "resolve_ws_principal" in source, relative_path
+        elif relative_path.endswith(("endpoints/acp_multiplex.py", "prompt_studio/prompt_studio_websocket.py")):
+            # ACP's _authenticate_ws: resolve_ws_principal behind the deprecated credential shim.
+            assert "_authenticate_ws" in source, relative_path
         else:
             assert "resolve_single_user_cookie_websocket" in source, relative_path
 
