@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import time
 from collections.abc import Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FrameTimeout
@@ -36,6 +37,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import anyio
 import pytest
 from fastapi import FastAPI, WebSocket
 from fastapi.routing import APIWebSocketRoute
@@ -76,11 +78,15 @@ ROUTES: dict[str, tuple[str, str]] = {
     "/v1/realtime": ("/v1/realtime", HANDSHAKE),
 }
 
+# Outcomes: "close N" / "http N" is a refusal before accept; "closed N" is a close after it.
 REFUSED = {"close 1008", "close 4401", "http 401"}
-FIRST_FRAME_REFUSED = REFUSED | {"close 4400"}
-# A valid token is refused if the route answers like this; anything else (accepted, an
-# answered frame, a resource-level 4404) is past authentication.
-AUTH_REFUSED = FIRST_FRAME_REFUSED | {"close 4403", "http 403"}
+# A revoked token in an auth frame: refused before accept or closed right after it.
+FRAME_REFUSED = REFUSED | {"closed 1008", "closed 4401"}
+# A data frame before auth also counts as refused unread with voice's 4400 ("Expected AUTH message").
+FIRST_FRAME_REFUSED = FRAME_REFUSED | {"closed 4400"}
+AUTH_CODES = {1008, 4400, 4401, 4403}
+# Before accept, only "this resource does not exist" shows a valid caller got past authentication.
+RESOURCE_MISSING = {"close 4404", "http 404"}
 DATA_FRAME = {"type": "config"}
 SINGLE_USER_KEY = "ws-auth-matrix-single-user-key-0123456789"
 FRAME_TIMEOUT_S = 10.0
@@ -217,6 +223,30 @@ def _receive(ws: object, timeout: float) -> dict[str, object] | None:
         pool.shutdown(wait=False)
 
 
+def _past_auth(outcome: str) -> bool:
+    """True when ``outcome`` shows the credential was taken: anything but an auth refusal.
+
+    After accept, any close other than an auth code counts (a route may close 1000, or 1011
+    when its backend is unavailable); before accept, only a missing resource does.
+    """
+    if outcome in {"accepted", "silent"} or outcome.startswith("answered "):
+        return True
+    if outcome.startswith("closed "):
+        return int(outcome.split()[1]) not in AUTH_CODES
+    return outcome in RESOURCE_MISSING
+
+
+def _is_teardown_noise(exc: Exception) -> bool:
+    """The route reacting to the disconnect our teardown sends.
+
+    Starlette refuses a send or receive on a closed socket with a RuntimeError ("Cannot
+    call ..."; WebSocketDisconnected from 1.10), e.g. a handler that closes twice.
+    """
+    return isinstance(exc, WebSocketDisconnect) or (
+        isinstance(exc, RuntimeError) and str(exc).startswith('Cannot call "')
+    )
+
+
 def _outcome(
     client: TestClient,
     url: str,
@@ -228,9 +258,11 @@ def _outcome(
 ) -> str:
     """Connect, send ``frame`` if accepted, and describe what the server did.
 
-    Returns ``"close <code>"`` or ``"http <status>"`` for a refusal, ``"accepted"`` when a
-    handshake succeeds and no frame is sent, ``"answered <type>"`` when the first
-    non-error reply to the frame arrives, and ``"silent"`` when nothing arrives in time.
+    Returns ``"close <code>"`` or ``"http <status>"`` when refused before accept,
+    ``"accepted"`` when a handshake succeeds and no frame is sent, ``"closed <code>"`` for a
+    close after accept, ``"answered <type>"`` for the first non-error reply to the frame,
+    ``"silent"`` when nothing arrives in time, and ``"gone"`` when the route's side of the
+    socket vanished without a close (its exception then surfaces from the teardown).
     """
     try:
         ws = client.websocket_connect(url, headers=dict(headers or {}), subprotocols=subprotocols).__enter__()
@@ -241,21 +273,55 @@ def _outcome(
     try:
         if frame is None:
             return "accepted"
-        ws.send_json(frame)
+        # A route that already closed still has its close queued for the reads below.
+        with contextlib.suppress(WebSocketDisconnect, anyio.ClosedResourceError, anyio.BrokenResourceError):
+            ws.send_json(frame)
         for _ in range(MAX_FRAMES):
-            message = _receive(ws, timeout)
+            try:
+                message = _receive(ws, timeout)
+            except (anyio.ClosedResourceError, anyio.BrokenResourceError, anyio.EndOfStream):
+                return "gone"
             if message is None:
                 return "silent"
             if message["type"] == "websocket.close":
-                return f"close {message.get('code')}"
+                return f"closed {message.get('code')}"
             payload = json.loads(str(message.get("text") or "{}"))
             if payload.get("type") not in {"error", "auth_error"}:
                 return f"answered {payload.get('type')}"
         return "silent"
     finally:
-        # Leaving delivers a disconnect; a route that raises on it has already answered.
-        with contextlib.suppress(WebSocketDisconnect):
+        # Leaving delivers a disconnect. A route's reaction to it is not part of the outcome
+        # (CI saw audio/stream/tts close twice there); any other exception is a real crash.
+        try:
             ws.__exit__(None, None, None)
+        except Exception as exc:
+            if not _is_teardown_noise(exc):
+                raise
+
+
+def _accepted_subprotocol(
+    client: TestClient,
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    subprotocols: list[str] | None = None,
+) -> str | None:
+    """Open a socket the route must accept, and return the subprotocol it echoed.
+
+    A refusal raises, so the test fails. Leaving uses ``_outcome``'s teardown, so a route's
+    reaction to our disconnect is not mistaken for a failure. The headers are copied, because
+    TestClient writes the handshake headers into the dict it is given.
+    """
+    ws = client.websocket_connect(url, headers=dict(headers or {}), subprotocols=subprotocols).__enter__()
+    try:
+        accepted: str | None = ws.accepted_subprotocol
+        return accepted
+    finally:
+        try:
+            ws.__exit__(None, None, None)
+        except Exception as exc:
+            if not _is_teardown_noise(exc):
+                raise
 
 
 @contextlib.contextmanager
@@ -275,8 +341,8 @@ def _deprecations(messages: list[str]) -> list[str]:
     return [message for message in messages if DEPRECATION_MARK in message]
 
 
-def test_outcome_returns_when_a_route_accepts_and_waits() -> None:
-    """Self-test: a route that takes a frame and never answers must not hang the gate."""
+def _scratch_app() -> FastAPI:
+    """Routes shaped like the matrix's routes' reactions to a valid auth frame."""
     app = FastAPI()
 
     @app.websocket("/waits")
@@ -285,8 +351,68 @@ def test_outcome_returns_when_a_route_accepts_and_waits() -> None:
         await websocket.receive_json()
         await websocket.receive_json()  # never arrives
 
-    with TestClient(app) as client:
-        assert _outcome(client, "/waits", frame=DATA_FRAME, timeout=0.2) == "silent"
+    @app.websocket("/backend-missing")
+    async def backend_missing(websocket: WebSocket) -> None:
+        await websocket.accept()
+        await websocket.receive_json()
+        await websocket.close(code=1011)
+
+    @app.websocket("/closes-twice")
+    async def closes_twice(websocket: WebSocket) -> None:
+        # audio/stream/tts on CI: our teardown disconnect lands in its prompt wait, and its
+        # error path closes the socket twice, which Starlette refuses.
+        await websocket.accept()
+        await websocket.receive_json()
+        try:
+            await websocket.receive_json()
+        except WebSocketDisconnect:
+            await websocket.close(code=1008)
+            await websocket.close(code=4400)
+
+    @app.websocket("/refuses")
+    async def refuses(websocket: WebSocket) -> None:
+        await websocket.accept()
+        await websocket.receive_json()
+        await websocket.close(code=4401)
+
+    @app.websocket("/refuses-before-accept")
+    async def refuses_before_accept(websocket: WebSocket) -> None:
+        await websocket.close(code=1000)
+
+    return app
+
+
+@pytest.mark.parametrize(
+    ("path", "expected", "past_auth"),
+    [
+        ("/waits", "silent", True),
+        ("/backend-missing", "closed 1011", True),
+        ("/closes-twice", "silent", True),
+        ("/refuses", "closed 4401", False),
+        ("/refuses-before-accept", "close 1000", False),
+    ],
+)
+def test_outcome_classifies_without_hanging_or_raising(
+    path: str, expected: str, past_auth: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Self-test of the helper: bounded waits, close classification, and teardown races.
+
+    The TestClient's teardown is slowed so a route always handles our disconnect before it
+    is cancelled, which is how CI ran into audio/stream/tts closing twice.
+    """
+    from starlette.testclient import WebSocketTestSession
+
+    close = WebSocketTestSession.close
+
+    def slow_close(self: WebSocketTestSession, code: int = 1000, reason: str | None = None) -> None:
+        close(self, code, reason)
+        time.sleep(0.2)
+
+    monkeypatch.setattr(WebSocketTestSession, "close", slow_close)
+    with TestClient(_scratch_app()) as client:
+        outcome = _outcome(client, path, frame={"type": "auth", "token": "t"}, timeout=0.2)
+    assert outcome == expected
+    assert _past_auth(outcome) is past_auth
 
 
 def test_matrix_covers_every_mounted_websocket_route(env: SimpleNamespace) -> None:
@@ -334,7 +460,7 @@ def test_rejects_a_revoked_jwt(env: SimpleNamespace, route: str) -> None:
     if style == HANDSHAKE:
         assert _outcome(env.client, url, headers=revoked_header) in REFUSED
     else:
-        assert _outcome(env.client, url, frame={"type": "auth", "token": env.revoked}) in REFUSED
+        assert _outcome(env.client, url, frame={"type": "auth", "token": env.revoked}) in FRAME_REFUSED
         assert _outcome(env.client, url, headers=revoked_header, frame=DATA_FRAME) in FIRST_FRAME_REFUSED
 
 
@@ -362,7 +488,7 @@ def test_lets_a_valid_authnz_access_token_through(env: SimpleNamespace, route: s
         outcome = _outcome(env.client, url, headers={"Authorization": f"Bearer {env.valid}"})
     else:
         outcome = _outcome(env.client, url, frame={"type": "auth", "token": env.valid}, timeout=ADMITTED_AFTER_S)
-    assert outcome not in AUTH_REFUSED, outcome
+    assert _past_auth(outcome), outcome
 
 
 def test_workflows_ws_accepts_an_authnz_access_token_and_rejects_it_revoked(env: SimpleNamespace) -> None:
@@ -410,9 +536,9 @@ def test_acp_deprecated_channel_admits_a_valid_credential_with_one_warning(
     panel) still send these; the shim keeps them working until the clients move."""
     credential, request = _deprecated_request(env, route, channel, valid=True)
     with _warnings() as warned:
-        with env.client.websocket_connect(**request) as ws:
-            # Browsers fail a handshake that echoes nothing; never echo the key itself.
-            assert ws.accepted_subprotocol == ("x-api-key" if channel == "x-api-key subprotocol" else None)
+        echoed = _accepted_subprotocol(env.client, **request)  # type: ignore[arg-type]
+    # Browsers fail a handshake that echoes nothing; never echo the key itself.
+    assert echoed == ("x-api-key" if channel == "x-api-key subprotocol" else None)
     deprecations = _deprecations(warned)
     assert len(deprecations) == 1 and channel in deprecations[0], warned
     assert not [message for message in warned if credential in message]
@@ -443,13 +569,11 @@ def test_acp_retired_channels_are_refused(env: SimpleNamespace, route: str) -> N
 def test_acp_header_credentials_need_no_shim(env: SimpleNamespace, route: str) -> None:
     """The resolver's own channels: no deprecation warning, and the bearer marker is echoed."""
     key = env.write_key if SHIM_ACCEPTING[route] == "write" else env.api_key
+    url = ROUTES[route][0]
     with _warnings() as warned:
-        with env.client.websocket_connect(ROUTES[route][0], subprotocols=["bearer", env.valid]) as ws:
-            assert ws.accepted_subprotocol == "bearer"
-        with env.client.websocket_connect(ROUTES[route][0], subprotocols=["bearer", key]) as ws:  # key as bearer
-            assert ws.accepted_subprotocol == "bearer"
-        with env.client.websocket_connect(ROUTES[route][0], headers={"X-API-KEY": key}):
-            pass
+        assert _accepted_subprotocol(env.client, url, subprotocols=["bearer", env.valid]) == "bearer"
+        assert _accepted_subprotocol(env.client, url, subprotocols=["bearer", key]) == "bearer"  # key as bearer
+        assert _accepted_subprotocol(env.client, url, headers={"X-API-KEY": key}) is None
     assert _deprecations(warned) == []
 
 
@@ -470,8 +594,7 @@ def test_acp_deprecated_query_admits_the_single_user_key(
     _single_user(monkeypatch)
     url = ROUTES[route][0]
     with _warnings() as warned:
-        with env.client.websocket_connect(_with_query(url, "api_key", SINGLE_USER_KEY)):
-            pass
+        assert _accepted_subprotocol(env.client, _with_query(url, "api_key", SINGLE_USER_KEY)) is None
         assert _outcome(env.client, _with_query(url, "api_key", f"{SINGLE_USER_KEY}-wrong")) == "close 4401"
     deprecations = _deprecations(warned)
     assert len(deprecations) == 2 and all("query api_key" in message for message in deprecations), warned
@@ -506,13 +629,12 @@ def test_acp_a_proxy_basic_authorization_is_not_a_credential(
     authenticates no one."""
     url = ROUTES[route][0]
     assert _outcome(env.client, url, headers=BASIC_PROXY_AUTH) == "close 4401"
-    # A copy each time: TestClient writes the handshake headers into the dict it is given.
-    with env.client.websocket_connect(url, headers=dict(BASIC_PROXY_AUTH), subprotocols=["bearer", env.valid]) as ws:
-        assert ws.accepted_subprotocol == "bearer"
+    echoed = _accepted_subprotocol(env.client, url, headers=BASIC_PROXY_AUTH, subprotocols=["bearer", env.valid])
+    assert echoed == "bearer"
     _single_user(monkeypatch)
     with _warnings() as warned:
-        with env.client.websocket_connect(_with_query(url, "api_key", SINGLE_USER_KEY), headers=dict(BASIC_PROXY_AUTH)):
-            pass
+        query_key = _with_query(url, "api_key", SINGLE_USER_KEY)
+        assert _accepted_subprotocol(env.client, query_key, headers=BASIC_PROXY_AUTH) is None
     assert [message for message in _deprecations(warned) if "query api_key" in message], warned
 
 
