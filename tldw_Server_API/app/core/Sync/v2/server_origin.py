@@ -19,6 +19,7 @@ from .adapters import (
     SyncAdapterContext,
 )
 from .errors import SyncMaterializationPredecessorError, SyncStoreError
+from .materializers.satisfied_tombstone import held_by_another_dataset, other_datasets_of_owner
 from .models import (
     CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE,
     CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_MESSAGE,
@@ -129,10 +130,10 @@ def capture_server_origin_mutation(
 ) -> ServerOriginCaptureResult:
     """Append and materialize one trusted server-origin Sync v2 mutation.
 
-    A dataset that refuses the append because of a stranded ``chat.message``
-    tombstone (see ``SyncV2Service.settle_stranded_tombstones``) is unblocked
-    first, and the append is tried once more. Every other unresolved conflict
-    still refuses it.
+    A dataset that refuses the append because of a stranded tombstone of an
+    object without Sync state (see ``SyncV2Service.settle_stranded_tombstones``)
+    is unblocked first, and the append is tried once more. Every other
+    unresolved conflict still refuses it.
     """
 
     dataset = _active_default_personal_dataset(service, user_id)
@@ -424,7 +425,8 @@ def _require_claims_publishable(
     if all(head is not None and head.apply_status == "applied" for head in heads):
         return
     # A dataset blocked by a projection conflict accepts no new history. A stranded
-    # chat.message tombstone is settled here; any other conflict refuses the write.
+    # tombstone of an object without Sync state is settled here; any other conflict
+    # refuses the write.
     blocker, settled = service.settle_stranded_tombstones(
         user_id=user_id, dataset_id=dataset.dataset_id, store=guarded
     )
@@ -449,25 +451,33 @@ def delete_unenrolled_server_origin_objects(
     user_id: str,
     objects: Sequence[tuple[SyncDomain, str]],
     delete: Callable[[Sequence[tuple[SyncDomain, str]]], None],
+    tombstones: Sequence[AppliedServerOriginObject] = (),
+    source: str = "server_api",
 ) -> list[tuple[SyncDomain, str]]:
-    """Delete, outside the log, the objects the dataset has never held, and return the rest.
+    """Delete, outside the log, the objects the dataset has never held, publish them by id, and return the rest.
 
     An object is enrolled when the dataset holds Sync history for it: a current
     head or object state. A chat that predates the profile, a row written by a
     path that publishes nothing, and a row whose capture was lost have neither.
-    Deleting such a row appends nothing. No device received the row through this
-    dataset, so the log has nothing to retract, and a ``chat.conversation``
-    tombstone without a base is refused when it is appended.
+    No device received such a row through this dataset, so its delete is not
+    sent through the log: ``delete`` removes it from the owner's database, the
+    same write the route makes when no profile is active.
 
-    So ``delete`` is called with those objects and removes them from the owner's
-    database, the same write the route makes when no profile is active. Nothing
-    is recorded in the log, and no row is published only to be deleted.
+    A device can still hold a copy by another route (§5.2 of the D7 note: an
+    adopted row, or a chat both sides had before the profile). So each object in
+    ``tombstones`` that ``delete`` removed is then published as a tombstone that
+    carries its id and no content, recorded as already applied, as an applied
+    capture records a create (owner decision Q8). A device that holds a copy
+    deletes it, and one that never had the row applies it as a no-op (§5.4).
+    Publishing is skipped while an unresolved conflict blocks the dataset (the
+    direct delete must keep working then, as it did before), and for a row
+    another dataset of the owner holds (its history is that dataset's).
 
-    The check and ``delete`` run inside the dataset projection fence, so no
-    envelope for one of these ids can be accepted or projected in between. An
-    object whose history is accepted but not applied yet is not "never seen" (a
-    device may already have pulled it); it is returned with the enrolled ones and
-    the tombstone append then settles or refuses it.
+    The check, ``delete`` and the publication run inside the dataset projection
+    fence, so no envelope for one of these ids can be accepted or projected in
+    between. An object whose history is accepted but not applied yet is not
+    "never seen" (a device may already have pulled it); it is returned with the
+    enrolled ones and the tombstone append then settles or refuses it.
 
     A request that names both kinds is refused as a whole when the dataset cannot
     take the tombstones: nothing is deleted directly if an unresolved conflict
@@ -478,7 +488,14 @@ def delete_unenrolled_server_origin_objects(
         user_id: The authenticated owner.
         objects: The ``(domain, object_id)`` pairs the route is about to delete.
         delete: Removes the given objects from the owner's database. Called at
-            most once, with the objects that have no Sync history, in order.
+            most once, with the objects that have no Sync history, in order. It
+            may leave some of them for a later call (the chat route deletes a
+            chat after its messages).
+        tombstones: The id-only tombstone to publish for each object ``delete``
+            removes, in publication order: ``operation = "tombstone"``, its
+            ``parent_id`` and a payload with no content. An object without one,
+            or that turns out to be enrolled, is not published here.
+        source: Routing label for the published envelopes.
 
     Returns:
         The objects that have Sync history, in the given order. The caller
@@ -490,10 +507,12 @@ def delete_unenrolled_server_origin_objects(
         SyncMaterializationPredecessorError: An enrolled object needs a tombstone
             and an unresolved projection conflict blocks the dataset. Raised
             before any delete.
-        SyncStoreError: The dataset, a domain or the fence is unavailable. Raised
-            before any delete. An error raised by ``delete`` itself propagates as is.
-            A fence that fails to commit after ``delete`` returned is logged and not
-            raised: the rows are deleted and the fence recorded nothing.
+        SyncStoreError: The dataset, a domain or the fence is unavailable, or a
+            tombstone is not an id-only delete of one of ``objects``. Raised
+            before any delete. An error raised by ``delete`` itself propagates as
+            is. A publication or fence that fails after ``delete`` returned is
+            logged and not raised: the rows are deleted, and the log records
+            nothing (the Sync transaction rolls back as a whole).
     """
 
     targets = list(objects)
@@ -506,9 +525,11 @@ def delete_unenrolled_server_origin_objects(
     for domain in domains:
         if domain not in dataset.domains:
             raise SyncStoreError(f"Sync domain is not enrolled for this dataset: {domain}")
+    _require_publishable_tombstones(service, tombstones, targets)
 
     enrolled: list[tuple[SyncDomain, str]] = []
     unenrolled: list[tuple[SyncDomain, str]] = []
+    published: list[tuple[SyncDomain, str]] = []
     phase = "fence"
     try:
         with service.store.projection_fence(dataset.dataset_id, domains) as guarded:
@@ -534,16 +555,57 @@ def delete_unenrolled_server_origin_objects(
             if unenrolled:
                 phase = "delete"
                 delete(unenrolled)
+                phase = "publish"
+                # A row another dataset of the owner holds came from that dataset's history
+                # (route 3 in §5.2). A replica holding it there would read a tombstone of it in
+                # this dataset as not its own to apply, and record a conflict, so none is sent.
+                deleted_now = set(unenrolled)
+                others = other_datasets_of_owner(guarded, dataset.dataset_id)
+                to_publish = [
+                    item
+                    for item in tombstones
+                    if (item.domain, item.object_id) in deleted_now
+                    and not held_by_another_dataset(
+                        guarded,
+                        dataset_id=dataset.dataset_id,
+                        domain=item.domain,
+                        object_id=item.object_id,
+                        others=others,
+                    )
+                ]
+                if to_publish and blocker is not None:
+                    logger.info(
+                        "Sync deleted objects without Sync history while the dataset is blocked; "
+                        "their tombstones are not published. dataset={} objects={} conflict={}",
+                        dataset.dataset_id,
+                        [(item.domain, item.object_id) for item in to_publish],
+                        blocker.conflict_id,
+                    )
+                elif to_publish:
+                    context = SyncAdapterContext(
+                        get_head=lambda domain, object_id: guarded.get_current_head(
+                            dataset.dataset_id, domain, object_id
+                        ),
+                        list_heads=lambda domain: service._list_current_heads_for_adapter(
+                            dataset.dataset_id, domain, store=guarded
+                        ),
+                    )
+                    for item in to_publish:
+                        _record_applied_object(
+                            service, guarded, dataset, item, user_id=user_id, source=source, context=context
+                        )
+                        published.append((item.domain, item.object_id))
                 phase = "deleted"
     except Exception as exc:
         if phase == "delete":
             raise
-        if phase == "deleted":
-            # The rows are deleted in the owner's database. The Sync transaction held only
-            # the fence and, at most, a settlement that the next write repeats, so its failure
-            # to commit changes nothing the caller relies on.
+        if phase in {"publish", "deleted"}:
+            # The rows are deleted in the owner's database. The Sync transaction held the
+            # fence, at most a settlement that the next write repeats, and the id-only
+            # tombstones; it rolled back as a whole, so nothing the caller relies on changed.
+            # A device holding a copy outside Sync is not told: the delete behaves as before Q8.
             logger.warning(
-                "Sync fence did not commit after a direct delete of objects without Sync history. "
+                "Sync did not record the id-only tombstones of a direct delete of objects without Sync history. "
                 "dataset={} objects={} error={}",
                 dataset.dataset_id,
                 unenrolled,
@@ -553,7 +615,30 @@ def delete_unenrolled_server_origin_objects(
         if isinstance(exc, SyncStoreError):
             raise
         raise SyncStoreError("Sync projection fence is unavailable") from exc
+    if published:
+        logger.info(
+            "Sync published id-only tombstones of a direct delete. dataset={} objects={}",
+            dataset.dataset_id,
+            published,
+        )
     return enrolled
+
+
+def _require_publishable_tombstones(
+    service: SyncV2Service,
+    tombstones: Sequence[AppliedServerOriginObject],
+    targets: Sequence[tuple[SyncDomain, str]],
+) -> None:
+    """Refuse, before any delete, a tombstone the direct delete could not publish."""
+
+    target_set = set(targets)
+    for item in tombstones:
+        if item.operation != "tombstone" or (item.domain, item.object_id) not in target_set:
+            raise SyncStoreError("Sync publishes only the id-only tombstone of an object it deletes directly")
+        if not service.adapters.has_domain(item.domain) or not service.adapters.supports_version(
+            item.domain, _APPLIED_CAPTURE_ADAPTER_VERSION
+        ):
+            raise SyncStoreError(f"Adapter version is not supported for {item.domain}")
 
 
 def _record_applied_object(
@@ -566,8 +651,14 @@ def _record_applied_object(
     source: str,
     context: SyncAdapterContext,
 ) -> SyncEnvelope:
-    """Append one first-revision envelope and mark it applied in the guarded transaction."""
+    """Append one first-revision envelope and mark it applied in the guarded transaction.
 
+    The object has no Sync history, so the envelope has no base. A tombstone
+    (the id-only delete of a row the server deleted directly) is recorded as a
+    deleted object.
+    """
+
+    deleted = item.operation == "tombstone"
     payload_hash, payload_size = canonical_payload_hash(item.payload)
     envelope = SyncEnvelopeCreate(
         dataset_id=dataset.dataset_id,
@@ -590,7 +681,7 @@ def _record_applied_object(
         payload_hash=payload_hash,
         payload_size_bytes=payload_size,
         created_at_client=service.clock() or None,
-        deleted=False,
+        deleted=deleted,
         encryption_metadata={"policy": DEFAULT_M1_ENCRYPTION_POLICY},
         routing_metadata={
             "source": source,
@@ -624,7 +715,7 @@ def _record_applied_object(
             object_revision=1,
             object_hash=payload_hash,
             latest_server_cursor=inserted.server_cursor,
-            deleted=False,
+            deleted=deleted,
         )
     )
     return guarded.mark_envelope_apply_status(inserted.server_cursor, apply_status="applied")
