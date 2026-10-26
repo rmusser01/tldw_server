@@ -10,7 +10,7 @@
 
 **Spec:** [Approved completion extraction design](../specs/2026-10-04-jobs-completion-extraction-design.md), approved 2026-10-20.
 
-**Tracking:** TASK-13937; assessment TASK-13421; fixture follow-up TASK-13938. Human approved the plan and selected subagent-driven execution on 2026-10-20, then authorized push and PR creation (option 2) on 2026-10-25, not merge. Earlier local implementation/reviews are complete; publication revalidation and hosted/human merge gates remain pending. Provisional Jobs TASK-13871, TASK-13875, TASK-13878 and TASK-13879 snapshots are archived because their IDs also belong to unrelated published work. Preserve those unrelated records unchanged; old IDs and temporary-artifact paths below are historical evidence, not current tracking IDs.
+**Tracking:** TASK-13937; assessment TASK-13421; fixture follow-up TASK-13938. Human approved the plan and selected subagent-driven execution on 2026-10-20, then authorized push and PR creation (option 2) on 2026-10-25, not merge. Local implementation, independent reviews and current-dev publication revalidation are complete; hosted/human merge gates remain pending. Provisional Jobs TASK-13871, TASK-13875, TASK-13878 and TASK-13879 snapshots are archived because their IDs also belong to unrelated published work. Preserve those unrelated records unchanged; old IDs and temporary-artifact paths below are historical evidence, not current tracking IDs.
 
 **Baseline:** Live dev `454974e812f8faf8532c931f3f7c8e0bf8d9445c`; this documentation branch is rebased onto it. The 16 completion/policy/context/helper function ASTs are unchanged from the approved October 4 baseline. Fresh existing completion/event/RLS baseline: 86 passed, 227 warnings, no skips; `/tmp/jobs_completion_plan_baseline_20261020.xml`. This is not foundation qualification.
 
@@ -376,6 +376,24 @@ The plan-specific ignored SDD evidence is archived at `/tmp/task13878-sdd-eviden
 
 Publication authorization 2026-10-25: the human selected push and PR creation against dev. Live dev `39093fc8273aa9c18aae88ea6c3c5a9cb2276d82` owns the old task IDs and ADR-078; complete paginated open-PR/live-dev checks found maximum task 13936 and ADR-081. Active foundation/follow-up are recreated through official Python Backlog tooling as TASK-13937/TASK-13938, and only the old Jobs records are archived byte-identically. ADR-082 changes only the unpublished identifier/title/path, not rationale. The reviewed source is preserved on `codex/jobs-completion-ownership-prepublish-20261025`. Rebase and fresh qualification follow; preserve upstream typed-acquire, quarantine policy, Notes maintenance and fixture changes. Incoming complete_job and all three moved helpers are AST-identical before rebase. Merge, backend routing, defect repairs and a requester-written Change summary are not authorized or supplied by this option.
 
-This document covers PR 1 only. Human review and subagent-driven execution selection were received before Stage 1 began. No PR/push/merge or backend-routing authorization is inferred. If no subagent tools are available, use native `superpowers:executing-plans`; do not create separate user chats as substitute agents or claim independent review that did not occur.
+### Publication Revalidation Results
+
+Source head `ad6b405f43309041c31689b881ad4b0551d2e9e1` is rebased onto live dev `39093fc8273aa9c18aae88ea6c3c5a9cb2276d82`. Only canonical/public ADR-index appends conflicted. Range-diff and exact file comparison preserve every reviewed runtime/test patch; the entire remaining JobManager class/functions, all three moved helper ASTs/SQL/signatures, and optional-driver exception policy match current dev. Incoming typed acquisition, quarantine, Notes and fixture changes remain intact. Accepted ownership ADR rationale and archived task bytes are unchanged. Exact active identifiers were rechecked against all paginated open-PR paths before publication.
+
+| Fresh Selection | Passed | Skipped | Warnings |
+| --- | ---: | ---: | ---: |
+| Standalone contracts | 93 | 0 | 200 |
+| Standalone helpers | 30 | 0 | 415 |
+| Full non-PG Jobs | 1668 | 2 inherited | 7882 |
+| Standalone paired characterization | 186 | 0 | 4922 |
+| Complete required real-PG matrix | 255 | 0 | 5530 |
+| Explicit SSE/outbox | 5 | 0 | 312 |
+| Docs | 212 | 0 | 441 |
+
+Only the two known invalid-key fixture cases skip, tracked separately as TASK-13938. No source/fixture correction, suppression or latency-budget change is included. All runs use the supported explicit-plugin setup, required PG/opt-in outbox, CI unset and SSE enabled, with DB-heavy suites serial. Fresh logs/XML/commands/exits are under `/tmp/jobs-pr-20261025-75719a58`; runner `/tmp/jobs_pr_20261025_verify.py`. Earlier temporary artifacts have expired; committed historical evidence remains, and these are newly executed results.
+
+Touched Ruff, new-file Black, compilation and whitespace pass. Current-dev Bandit baseline comparison retains one production and fourteen test findings, zero new findings/errors/suppressions; only test B101 is excluded. Strict MkDocs passes (9.4 seconds). Two real canonical refreshes match all 493 published files with zero generated drift. The pre-rebase metadata manifest test initially saw the old unstaged ADR path; staging the intended rename resolved it (focused one case then all 212 Docs), without changing tests. Final publication metadata commits do not change qualified runtime/tests. PR creation is authorized; no merge, backend routing, defect correction or human-authored Change summary is inferred. Hosted exact-head review/required/Jobs gates remain pending.
+
+This document covers PR 1 only. Human review and subagent-driven execution selection were received before Stage 1 began; explicit push/PR authorization was later received on 2026-10-25. No merge or backend-routing authorization is inferred. If no subagent tools are available, use native `superpowers:executing-plans`; do not create separate user chats as substitute agents or claim independent review that did not occur.
 
 Self-review checklist: map every PR-1 spec requirement to the four stages; verify contract names/signatures agree across stages; verify all five review-focus conditions have named tests; retain partial optional effects and pre-commit binding without routing new code; verify current helper caller inventory and real PG fixtures; recheck new identifiers before publication.
