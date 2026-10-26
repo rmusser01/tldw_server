@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from tldw_Server_API.app.api.v1.endpoints.media import document_annotations as annotations_endpoint
@@ -25,17 +27,19 @@ def media_db(request):
         db.close_connection()
 
 
-def _user(user_id: int) -> object:
+def _user(user_id: int) -> Any:
     return type("User", (), {"id": user_id})()
 
 
 def _batch() -> annotations_endpoint.AnnotationSyncRequest:
-    return annotations_endpoint.AnnotationSyncRequest(
-        annotations=[
-            annotations_endpoint.AnnotationCreate(location="page-1", text="First"),
-            annotations_endpoint.AnnotationCreate(location="page-2", text="Second", note="n"),
-        ],
-        client_ids=["ann_client_1", "ann_client_2"],
+    return annotations_endpoint.AnnotationSyncRequest.model_validate(
+        {
+            "annotations": [
+                {"location": "page-1", "text": "First"},
+                {"location": "page-2", "text": "Second", "note": "n"},
+            ],
+            "client_ids": ["ann_client_1", "ann_client_2"],
+        }
     )
 
 
@@ -49,6 +53,7 @@ async def test_resent_sync_batch_creates_each_annotation_once(media_db) -> None:
         media_id=media_id, body=_batch(), db=media_db, current_user=_user(1)
     )
 
+    assert first.id_mapping is not None
     assert set(first.id_mapping) == {"ann_client_1", "ann_client_2"}
     assert replay.id_mapping == first.id_mapping
     assert [a.id for a in replay.annotations] == [a.id for a in first.annotations]
@@ -69,13 +74,14 @@ async def test_resent_sync_batch_creates_each_annotation_once(media_db) -> None:
     other = await annotations_endpoint.sync_annotations(
         media_id=media_id, body=_batch(), db=media_db, current_user=_user(2)
     )
+    assert other.id_mapping is not None
     assert set(other.id_mapping.values()).isdisjoint(first.id_mapping.values())
 
 
 async def test_sync_without_client_ids_still_inserts_every_time(media_db) -> None:
     media_id, _, _ = media_db.add_media_with_keywords(title="Doc", media_type="text", content="abc", keywords=None)
-    body = annotations_endpoint.AnnotationSyncRequest(
-        annotations=[annotations_endpoint.AnnotationCreate(location="page-1", text="No client id")],
+    body = annotations_endpoint.AnnotationSyncRequest.model_validate(
+        {"annotations": [{"location": "page-1", "text": "No client id"}]}
     )
 
     await annotations_endpoint.sync_annotations(media_id=media_id, body=body, db=media_db, current_user=_user(1))

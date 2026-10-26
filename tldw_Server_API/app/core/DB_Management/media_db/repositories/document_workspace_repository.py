@@ -60,7 +60,8 @@ class DocumentWorkspaceRepository:
         WHERE media_id = ? AND user_id = ?
         """
         with self.db.transaction() as conn:
-            return self.db._fetchone_with_connection(conn, query, (media_id, user_id))
+            progress: dict[str, Any] | None = self.db._fetchone_with_connection(conn, query, (media_id, user_id))
+        return progress
 
     def upsert_reading_progress(
         self,
@@ -125,7 +126,7 @@ class DocumentWorkspaceRepository:
         """
         with self.db.transaction() as conn:
             cursor = self.db._execute_with_connection(conn, delete_sql, (media_id, user_id))
-            return cursor.rowcount > 0
+            return bool(cursor.rowcount > 0)
 
     def list_annotations(self, *, media_id: int, user_id: str) -> list[dict[str, Any]]:
         """Return active annotations for a media item and user."""
@@ -136,7 +137,8 @@ class DocumentWorkspaceRepository:
         ORDER BY created_at DESC, id ASC
         """
         with self.db.transaction() as conn:
-            return self.db._fetchall_with_connection(conn, query, (media_id, user_id, _ACTIVE))
+            rows: list[dict[str, Any]] = self.db._fetchall_with_connection(conn, query, (media_id, user_id, _ACTIVE))
+        return rows
 
     def create_annotation(
         self,
@@ -192,7 +194,10 @@ class DocumentWorkspaceRepository:
         WHERE id = ? AND media_id = ? AND user_id = ? AND deleted = ?
         """
         with self.db.transaction() as conn:
-            return self.db._fetchone_with_connection(conn, query, (annotation_id, media_id, user_id, _ACTIVE))
+            row: dict[str, Any] | None = self.db._fetchone_with_connection(
+                conn, query, (annotation_id, media_id, user_id, _ACTIVE)
+            )
+        return row
 
     def update_annotation(
         self,
@@ -353,7 +358,7 @@ class DocumentWorkspaceRepository:
                 delete_sql,
                 (_DELETED, updated_at, annotation_id, media_id, user_id, _ACTIVE),
             )
-            return cursor.rowcount > 0
+            return bool(cursor.rowcount > 0)
 
     def get_parsed_references_cache(
         self,
