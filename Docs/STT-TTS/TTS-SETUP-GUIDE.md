@@ -416,6 +416,11 @@ and no request follows a redirect to another origin. The key is read only from t
 provider config, never from a request. `EGRESS_DENYLIST` and the public-only egress
 mode still apply.
 
+Credentials in `base_url` (`http://user:pass@host`) are not supported for a loopback
+`base_url` or with `allow_private_network: true`; initialization fails with a
+`TTSValidationError`. A remote `base_url` without the opt-in still sends them as Basic
+auth, for example to a reverse proxy in front of audio.cpp.
+
 Reference-audio cloning in external mode is disabled by default because this
 adapter sends `voice_ref` as a path readable by the audio.cpp server process. To use
 it with a separate server, set `external_voice_reference_mode: "shared_path"` and

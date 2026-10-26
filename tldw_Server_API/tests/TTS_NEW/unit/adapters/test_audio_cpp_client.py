@@ -270,26 +270,37 @@ def lan_egress(monkeypatch):
     seen: list[httpx.Request] = []
     dns: dict[str, list[str]] = {}
 
-    for name in ("is_explicit_pytest_runtime", "is_test_mode", "env_flag_enabled"):
-        monkeypatch.setattr(http_client, name, lambda *_args, **_kwargs: False)
+    real_env_flag_enabled = http_client.env_flag_enabled
+    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
+    monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
+    monkeypatch.setattr(
+        http_client, "env_flag_enabled", lambda name: name != "TESTING" and real_env_flag_enabled(name)
+    )
     monkeypatch.setattr(egress, "_resolve_host_ips", lambda host, **_kwargs: list(dns.get(host, [])))
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
     monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWED_PORTS", "80,443,8080")
     return seen, dns
 
 
-_LAN_TARGETS = [
-    ("http://192.168.1.50:8080", {}),
-    ("http://gpu-box.lan:9000", {"gpu-box.lan": ["192.168.1.50"]}),
-]
-
-
 @pytest.mark.unit
-@pytest.mark.parametrize(("base_url", "answers"), _LAN_TARGETS)
-async def test_private_network_opt_in_reaches_the_configured_lan_server(lan_egress, base_url, answers):
+@pytest.mark.parametrize(
+    ("base_url", "answers", "wire_url"),
+    [
+        ("http://192.168.1.50:8080", {}, "http://192.168.1.50:8080/health"),
+        ("http://gpu-box.lan:9000", {"gpu-box.lan": ["192.168.1.50"]}, "http://192.168.1.50:9000/health"),
+    ],
+)
+async def test_private_network_opt_in_reaches_the_configured_lan_server(lan_egress, base_url, answers, wire_url):
     seen, dns = lan_egress
     dns.update(answers)
-    async with _recording_client(seen, _healthy) as http_client:
+    wire: list[tuple[str, str]] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        # Captured here: http_client later rewrites the stored Request back to the logical URL.
+        wire.append((str(request.url), request.headers["host"]))
+        return _healthy(request)
+
+    async with _recording_client(seen, respond) as http_client:
         client = AudioCppClient(
             base_url=base_url,
             http_client=http_client,
@@ -298,9 +309,7 @@ async def test_private_network_opt_in_reaches_the_configured_lan_server(lan_egre
         )
         assert await client.health() == {"status": "ok"}
 
-    [request] = seen
-    assert request.url.path == "/health"
-    assert request.headers["host"] == base_url.removeprefix("http://")
+    assert wire == [(wire_url, base_url.removeprefix("http://"))]
 
 
 @pytest.mark.unit
@@ -399,12 +408,37 @@ async def test_private_network_opt_in_still_refuses_metadata_and_link_local(lan_
 
 
 @pytest.mark.unit
-def test_private_network_opt_in_rejects_userinfo_in_base_url_as_a_validation_error():
+@pytest.mark.parametrize(
+    ("base_url", "allow_remote", "opt_in"),
+    [
+        ("http://u:p@127.0.0.1:8080", False, False),
+        ("http://user@localhost:8080", False, False),
+        ("http://u:p@192.168.1.50:8080", True, True),
+    ],
+)
+def test_userinfo_in_a_scoped_base_url_is_a_validation_error(base_url, allow_remote, opt_in):
+    """The scoped egress path refuses userinfo; say so at construction, not as a raw ValueError."""
     from tldw_Server_API.app.core.TTS.tts_exceptions import TTSValidationError
 
-    with pytest.raises(TTSValidationError, match="userinfo"):
-        AudioCppClient(
-            base_url="http://u:p@192.168.1.50:8080",
-            allow_remote_base_url=True,
-            allow_private_network=True,
-        )
+    with pytest.raises(TTSValidationError, match="credentials in base_url") as error:
+        AudioCppClient(base_url=base_url, allow_remote_base_url=allow_remote, allow_private_network=opt_in)
+    assert error.value.error_code == "invalid_base_url"
+    assert "u:p" not in str(error.value)
+
+
+@pytest.mark.unit
+async def test_remote_userinfo_base_url_without_the_opt_in_still_sends_basic_auth(lan_egress):
+    """Unchanged from before the opt-in: how a basic-auth reverse proxy in front of audio.cpp is reached."""
+    seen, dns = lan_egress
+    dns["tts.example.com"] = ["93.184.216.34"]
+    authorization: list[str | None] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        authorization.append(request.headers.get("authorization"))
+        return _healthy(request)
+
+    async with _recording_client(seen, respond) as http_client:
+        client = AudioCppClient(base_url="http://u:p@tts.example.com", http_client=http_client, allow_remote_base_url=True)
+        assert await client.health() == {"status": "ok"}
+
+    assert authorization == ["Basic " + base64.b64encode(b"u:p").decode("ascii")]

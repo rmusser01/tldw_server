@@ -9,10 +9,11 @@ and this project adheres to Some kind of Versioning
 
 ### Added
 
-- **audio.cpp TTS private-network opt-in:** `providers.audio_cpp.extra_params.allow_private_network` (default `false`, operator config only) lets a remote `base_url` (`allow_remote_base_url`) on a private or LAN address work without relaxing the global egress settings. It scopes requests to exactly the configured origin, public hosts included (any port; no `EGRESS_ALLOWLIST` entry needed under the strict profile); cloud metadata and link-local addresses stay refused. A `base_url` with userinfo or an invalid port is now rejected as a `TTSValidationError` (TASK-13950.11).
+- **audio.cpp TTS private-network opt-in:** `providers.audio_cpp.extra_params.allow_private_network` (default `false`, operator config only) lets a remote `base_url` (`allow_remote_base_url`) on a private or LAN address work without relaxing the global egress settings. It scopes requests to exactly the configured origin, public hosts included (any port; no `EGRESS_ALLOWLIST` entry needed under the strict profile); cloud metadata and link-local addresses stay refused (TASK-13950.11).
 
 ### Changed
 
+- **audio.cpp TTS `base_url` credentials:** a loopback `base_url` with userinfo (`user:pass@`) has been refused since the audio.cpp client moved to `core.http_client`, as a raw `ValueError`. It, and one with `allow_private_network` on, now fails with a clear `TTSValidationError`. A remote `base_url` without the opt-in still sends its userinfo as Basic auth, as before. A `base_url` with an invalid port is now a `TTSValidationError` too (TASK-13950.11).
 
 ### Fixed
 

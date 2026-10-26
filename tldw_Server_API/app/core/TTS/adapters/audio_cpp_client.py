@@ -28,6 +28,7 @@ from ..tts_exceptions import (
     TTSNetworkError,
     TTSProviderError,
     TTSTimeoutError,
+    TTSValidationError,
 )
 from .audio_cpp_config import PROVIDER_KEY, _is_loopback_host, validate_base_url
 
@@ -68,11 +69,18 @@ class AudioCppClient:
         )
         self.timeout = timeout
         # allow_private_network is operator provider config only, never request input.
-        self._endpoint_scope = (
-            ConfiguredEndpointScope.from_url(self.base_url)
-            if allow_private_network or _is_loopback_host(urlparse(self.base_url).hostname)
-            else None
-        )
+        parsed = urlparse(self.base_url)
+        self._endpoint_scope: ConfiguredEndpointScope | None = None
+        if allow_private_network or _is_loopback_host(parsed.hostname):
+            # The scoped egress path refuses userinfo. An unscoped remote base_url keeps it
+            # (sent as Basic auth, e.g. to a reverse proxy).
+            if parsed.username is not None or parsed.password is not None:
+                raise TTSValidationError(
+                    "audio.cpp credentials in base_url are not supported for loopback or private-network endpoints",
+                    provider=PROVIDER_KEY,
+                    error_code="invalid_base_url",
+                )
+            self._endpoint_scope = ConfiguredEndpointScope.from_url(self.base_url)
         self._http_client = http_client or create_async_client(timeout=timeout, trust_env=False)
         self._owns_client = http_client is None
 
