@@ -340,6 +340,20 @@ These eleven tasks have no dependencies on each other and can run in parallel. E
 | `.50` order-dependent MCP hub tests | `.4` baseline run | Pre-existing on `dev`; fix the leaked fixture state, not the test order |
 | `.51` content-viewer Sync annotations button | #3324 merge review | Sends server ids as client ids; first click still duplicates once |
 | `.52` regression-test polish | `.1` and `.4` reviews | Thread-join timeouts, fixture leftovers, test placement and markers |
+| `.53` flashcard template names per owner | #3329 merge review | Global unique name leaks existence across tenants under RLS |
+| `.54` study-data isolation gaps | #3329 reviews | MCP flashcards shared client_id, flashcard_keywords policy, WITH CHECK tests, startup RLS presence check |
+| `.55` DSR covers study tables | #3329 merge review | Export and erasure skip decks, flashcards and templates |
+| `.56` Postgres scoping hardening | #3329, #3330 reviews | ChaCha client scope, role-switch SAVEPOINT, 503, check_connection, pgvector, scanner keying |
+| `.57` keyword identity leftovers | #3328, #3339 | Coordinator and note-graph NFC, enrichment, clone CHECK, stored identity column |
+| `.58` tests already failing on `dev` | Phase 0 baselines | Flashcard prompt contract, 10 ACP/prompt-studio tests, restricted-Postgres ordering, tts double close |
+| `.59` safe-metadata search on Postgres | #3339 reviews | `GROUP BY m.id` selects ungrouped version columns |
+| `.60` production guard leftovers | #3331 | Egress default profile, MCP server hook, `POSTGRES_TEST_*`, worker entrypoints |
+| `.61` WebSocket clients off URL credentials | #3333, #3338 | Switch four clients, delete the ACP shim, final close codes; coordinate with TASK-12113 |
+| `.62` egress gaps | #3335, #3336 | Per-tenant lists on redirect hops, uncapped feed reads, test resolver hook |
+| `.63` packages/ui frozen hook violations | #3332 | rules-of-hooks fixes, inline-config bypass, `as never` casts, contributor doc |
+| `.64` ratchet contract helpers | #3331-#3337 | One run-text parser, visible `--tighten`, macOS shard memory, guard docs |
+
+Execution order note: Phase 0 ran 0.1, 0.4, 0.2, 0.5, 0.3, 0.6, 0.7, 0.10, 0.8, 0.11, 0.9. `.11` and `.9` follow `.8` because they reuse `tests/lint/_ast_cache.py`, which `.8` creates.
 
 ## Measuring progress
 
@@ -347,8 +361,8 @@ Seed each number from the counter script committed by the owning task (review fi
 
 | Metric | Review figure (dca11342de) | Owning counter |
 |---|---|---|
-| Upward layering entries (function-level included) | 311 | `.9` |
-| Largest package SCC, module-level / with function-level | 100 / 106 | `.9` |
+| Upward layering entries (function-level included) | 311 (313 measured by `.9` on 39093fc827; gated as 262 package pairs, 683 statements) | `.9` |
+| Largest package SCC, module-level / with function-level | 100 / 106 with endpoints collapsed (102 / 130 with endpoint families split, as `.9` reports) | `.9` |
 | Endpoint-module monkeypatches | about 5,266-5,672 | `.20` |
 | `ChaChaNotes_DB.py` lines / CharactersRAGDB methods | 47,874 / 859 | `.8` |
 | `unified_rag_pipeline` lines / params | 7,063 / 233 | `.8` |
