@@ -3,13 +3,16 @@ from __future__ import annotations
 
 import asyncio
 import json
-
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import httpx
+import pytest
 
 from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_transports.sse import (
     MCPSSETransport,
 )
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, NetworkError
+from tldw_Server_API.app.core.http_client import create_async_client
 
 pytestmark = pytest.mark.unit
 
@@ -18,13 +21,80 @@ pytestmark = pytest.mark.unit
 # Helpers
 # ---------------------------------------------------------------------------
 
+_SSE_URL = "http://93.184.216.34/sse"
+_POST_URL = "http://93.184.216.34/messages"
+
+
 def _make_transport(
-    sse_url: str = "http://localhost:8080/sse",
-    post_url: str | None = "http://localhost:8080/messages",
+    sse_url: str = _SSE_URL,
+    post_url: str | None = _POST_URL,
     **kwargs,
 ) -> MCPSSETransport:
-    kwargs.setdefault("allow_private_network", True)
     return MCPSSETransport(sse_url=sse_url, post_url=post_url, **kwargs)
+
+
+def _mock_client(handler):
+    """A core.http_client client whose socket layer is an httpx.MockTransport."""
+    return create_async_client(transport=httpx.MockTransport(handler))
+
+
+def _sse_response(request: httpx.Request, body: bytes) -> httpx.Response:
+    return httpx.Response(200, request=request, headers={"content-type": "text/event-stream"}, content=body)
+
+
+def _accepting(seen: list[httpx.Request]):
+    """Handler that records each request and answers 202 Accepted."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(202, request=request)
+
+    return handler
+
+
+class _ReplyStream(httpx.AsyncByteStream):
+    """An SSE body that sends ``first`` and then whatever the server queues."""
+
+    def __init__(self, first: bytes, queue: asyncio.Queue) -> None:
+        self._first = first
+        self._queue = queue
+
+    async def __aiter__(self):
+        yield self._first
+        while True:
+            yield await self._queue.get()
+
+
+class _MCPSSEServer:
+    """In-memory MCP-over-SSE server behind an httpx.MockTransport.
+
+    Every GET opens a stream that starts with the ``endpoint`` event; JSON-RPC
+    replies to POSTed requests are queued onto the streams, as multi-line
+    ``message`` events.
+    """
+
+    def __init__(self, tools: list[dict]) -> None:
+        self.requests: list[httpx.Request] = []
+        self._tools = tools
+        self._replies: asyncio.Queue = asyncio.Queue()
+
+    async def handler(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if request.method == "GET":
+            endpoint = b"event: endpoint\ndata: /messages?session=abc\n\n"
+            return httpx.Response(
+                200,
+                request=request,
+                headers={"content-type": "text/event-stream"},
+                stream=_ReplyStream(endpoint, self._replies),
+            )
+        body = json.loads(request.content)
+        if "id" in body:
+            result = {"tools": self._tools} if body["method"] == "tools/list" else {"capabilities": {}}
+            message = json.dumps({"jsonrpc": "2.0", "id": body["id"], "result": result}, indent=1)
+            data = "data: " + message.replace("\n", "\ndata: ")
+            self._replies.put_nowait(f"event: message\n{data}\n\n".encode())
+        return httpx.Response(202, request=request)
 
 
 async def _resolve_pending(transport: MCPSSETransport, req_id: str, result: dict):
@@ -53,7 +123,7 @@ def test_sse_transport_not_connected_initially():
 @pytest.mark.asyncio
 async def test_sse_transport_connect_with_explicit_post_url():
     """connect() with explicit post_url skips discovery and performs handshake."""
-    t = _make_transport(post_url="http://localhost:8080/messages")
+    t = _make_transport(post_url=_POST_URL)
     mock_http = AsyncMock()
     mock_http.post = AsyncMock(return_value=MagicMock(status_code=200))
 
@@ -86,7 +156,7 @@ async def test_sse_transport_connect_with_explicit_post_url():
 @pytest.mark.asyncio
 async def test_sse_transport_connect_cleans_up_on_handshake_failure():
     """Failed connect handshakes should close the client and clear partial state."""
-    t = _make_transport(post_url="http://localhost:8080/messages")
+    t = _make_transport(post_url=_POST_URL)
     mock_http = AsyncMock()
     mock_http.post = AsyncMock(return_value=MagicMock(status_code=200))
 
@@ -189,13 +259,11 @@ async def test_sse_transport_call_tool_not_connected():
 
 
 @pytest.mark.asyncio
-async def test_sse_transport_json_rpc_call():
+async def test_sse_transport_json_rpc_call(mcp_http_egress):
     """_json_rpc_call posts JSON-RPC and resolves from pending future."""
     t = _make_transport()
-    t._post_url = "http://localhost:8080/messages"
-    mock_http = AsyncMock()
-    mock_http.post = AsyncMock(return_value=MagicMock(status_code=200))
-    t._http_client = mock_http
+    seen: list[httpx.Request] = []
+    t._http_client = _mock_client(_accepting(seen))
 
     expected_result = {"tools": []}
 
@@ -209,13 +277,14 @@ async def test_sse_transport_json_rpc_call():
 
     assert result == expected_result
     # Verify the POST was made with correct JSON-RPC payload
-    mock_http.post.assert_awaited_once()
-    posted_json = mock_http.post.call_args[1]["json"]
+    assert [str(request.url) for request in seen] == [_POST_URL]
+    posted_json = json.loads(seen[0].content)
     assert posted_json["jsonrpc"] == "2.0"
     assert posted_json["id"] == "1"
     assert posted_json["method"] == "tools/list"
     assert posted_json["params"] == {}
     assert "1" not in t._pending
+    await t.close()
 
 
 @pytest.mark.asyncio
@@ -231,13 +300,10 @@ async def test_sse_transport_json_rpc_call_requires_post_url():
 
 
 @pytest.mark.asyncio
-async def test_sse_transport_json_rpc_call_cleans_pending_on_timeout():
+async def test_sse_transport_json_rpc_call_cleans_pending_on_timeout(mcp_http_egress):
     """Timed-out JSON-RPC calls should not leak pending futures."""
     t = _make_transport(timeout_sec=0)
-    t._post_url = "http://localhost:8080/messages"
-    mock_http = AsyncMock()
-    mock_http.post = AsyncMock(return_value=MagicMock(status_code=200))
-    t._http_client = mock_http
+    t._http_client = _mock_client(_accepting([]))
 
     with pytest.raises(asyncio.TimeoutError):
         await t._json_rpc_call("tools/list", {})
@@ -246,37 +312,33 @@ async def test_sse_transport_json_rpc_call_cleans_pending_on_timeout():
 
 
 @pytest.mark.asyncio
-async def test_sse_transport_json_rpc_call_cleans_pending_on_post_error():
+async def test_sse_transport_json_rpc_call_cleans_pending_on_post_error(mcp_http_egress):
     """POST failures should remove any pending future for the request."""
     t = _make_transport()
-    t._post_url = "http://localhost:8080/messages"
-    mock_http = AsyncMock()
-    mock_http.post = AsyncMock(side_effect=RuntimeError("post failed"))
-    t._http_client = mock_http
+    t._http_client = _mock_client(lambda request: httpx.Response(500, request=request))
 
-    with pytest.raises(RuntimeError, match="post failed"):
+    with pytest.raises(httpx.HTTPStatusError):
         await t._json_rpc_call("tools/list", {})
 
     assert t._pending == {}
 
 
 @pytest.mark.asyncio
-async def test_sse_transport_json_rpc_notify():
+async def test_sse_transport_json_rpc_notify(mcp_http_egress):
     """_json_rpc_notify posts JSON-RPC notification (no id field)."""
     t = _make_transport()
-    t._post_url = "http://localhost:8080/messages"
-    mock_http = AsyncMock()
-    mock_http.post = AsyncMock(return_value=MagicMock(status_code=200))
-    t._http_client = mock_http
+    seen: list[httpx.Request] = []
+    t._http_client = _mock_client(_accepting(seen))
 
     await t._json_rpc_notify("initialized", {})
 
-    mock_http.post.assert_awaited_once()
-    posted_json = mock_http.post.call_args[1]["json"]
+    assert [str(request.url) for request in seen] == [_POST_URL]
+    posted_json = json.loads(seen[0].content)
     assert posted_json["jsonrpc"] == "2.0"
     assert posted_json["method"] == "initialized"
     assert posted_json["params"] == {}
     assert "id" not in posted_json
+    await t.close()
 
 
 @pytest.mark.asyncio
@@ -292,60 +354,35 @@ async def test_sse_transport_json_rpc_notify_requires_post_url():
 
 
 @pytest.mark.asyncio
-async def test_sse_transport_parse_sse_events():
-    """_parse_sse_line correctly accumulates and yields SSE events."""
+async def test_sse_transport_reader_routes_message_events(mcp_http_egress):
+    """Message events (including data-only frames) resolve pending RPCs; other events are ignored."""
     t = _make_transport()
+    t._connected = True
+    loop = asyncio.get_running_loop()
+    first, second = loop.create_future(), loop.create_future()
+    t._pending.update({"1": first, "2": second})
+    body = (
+        b"event: endpoint\ndata: /messages\n\n"
+        b'data: {"jsonrpc": "2.0", "id": "1",\ndata: "result": {"ok": true}}\n\n'
+        b"event: message\n"
+        b'data: {"jsonrpc": "2.0", "id": "2", "result": {"n": 2}}\n\n'
+    )
+    t._http_client = _mock_client(lambda request: _sse_response(request, body))
 
-    # Simulate SSE lines
-    lines = [
-        "event: endpoint",
-        "data: /messages",
-        "",  # blank = event boundary
-        "event: message",
-        'data: {"jsonrpc": "2.0", "id": "1", "result": {"ok": true}}',
-        "",
-    ]
+    await t._sse_reader_loop()
 
-    events = []
-    for line in lines:
-        evt = t._parse_sse_line(line)
-        if evt is not None:
-            events.append(evt)
-
-    assert len(events) == 2
-    assert events[0] == ("endpoint", "/messages")
-    assert events[1] == ("message", '{"jsonrpc": "2.0", "id": "1", "result": {"ok": true}}')
-
-
-def test_sse_transport_parse_sse_multiline_data_defaults_to_message():
-    """Data-only SSE frames should default to 'message' and preserve all data lines."""
-    t = _make_transport()
-
-    assert t._parse_sse_line("data: first line") is None
-    assert t._parse_sse_line("data: second line") is None
-    assert t._parse_sse_line("") == ("message", "first line\nsecond line")
+    assert first.result() == {"ok": True}
+    assert second.result() == {"n": 2}
 
 
 @pytest.mark.asyncio
-async def test_sse_transport_reader_loop_tears_down_on_stream_end():
+async def test_sse_transport_reader_loop_tears_down_on_stream_end(mcp_http_egress):
     """Reader loop should mark the transport disconnected and fail pending RPCs on EOF."""
     t = _make_transport()
     t._connected = True
     pending = asyncio.get_running_loop().create_future()
     t._pending["1"] = pending
-
-    async def empty_lines():
-        if False:
-            yield ""
-
-    mock_response = AsyncMock()
-    mock_response.aiter_lines = empty_lines
-    mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-    mock_response.__aexit__ = AsyncMock(return_value=False)
-
-    mock_http = AsyncMock()
-    mock_http.stream = MagicMock(return_value=mock_response)
-    t._http_client = mock_http
+    t._http_client = _mock_client(lambda request: _sse_response(request, b""))
 
     await t._sse_reader_loop()
 
@@ -356,27 +393,16 @@ async def test_sse_transport_reader_loop_tears_down_on_stream_end():
 
 
 @pytest.mark.asyncio
-async def test_sse_transport_discover_post_url():
+async def test_sse_transport_discover_post_url(mcp_http_egress):
     """_discover_post_url resolves relative URL against sse_url base."""
-    t = MCPSSETransport(sse_url="http://localhost:8080/sse", allow_private_network=True)
-
-    # Mock the HTTP client stream to return an endpoint event
-    async def mock_stream_lines():
-        yield "event: endpoint"
-        yield "data: /messages"
-        yield ""
-
-    mock_response = AsyncMock()
-    mock_response.aiter_lines = mock_stream_lines
-    mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-    mock_response.__aexit__ = AsyncMock(return_value=False)
-
-    mock_http = AsyncMock()
-    mock_http.stream = MagicMock(return_value=mock_response)
-    t._http_client = mock_http
+    t = MCPSSETransport(sse_url=_SSE_URL)
+    t._http_client = _mock_client(
+        lambda request: _sse_response(request, b"event: endpoint\ndata: /messages\n\n")
+    )
 
     url = await t._discover_post_url()
-    assert url == "http://localhost:8080/messages"
+    assert url == _POST_URL
+    await t.close()
 
 
 @pytest.mark.asyncio
@@ -394,25 +420,15 @@ async def test_sse_transport_rejects_loopback_endpoint_before_client_creation():
 
 
 @pytest.mark.asyncio
-async def test_sse_transport_rejects_cross_origin_discovered_post_url():
-    t = MCPSSETransport(sse_url="https://mcp.example.com/sse", allow_private_network=True)
-
-    async def mock_stream_lines():
-        yield "event: endpoint"
-        yield "data: https://evil.example.com/messages"
-        yield ""
-
-    mock_response = AsyncMock()
-    mock_response.aiter_lines = mock_stream_lines
-    mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-    mock_response.__aexit__ = AsyncMock(return_value=False)
-
-    mock_http = AsyncMock()
-    mock_http.stream = MagicMock(return_value=mock_response)
-    t._http_client = mock_http
+async def test_sse_transport_rejects_cross_origin_discovered_post_url(mcp_http_egress):
+    t = MCPSSETransport(sse_url=_SSE_URL)
+    t._http_client = _mock_client(
+        lambda request: _sse_response(request, b"event: endpoint\ndata: http://93.184.216.35/messages\n\n")
+    )
 
     with pytest.raises(ValueError, match="same origin"):
         await t._discover_post_url()
+    await t.close()
 
 
 @pytest.mark.asyncio
@@ -421,3 +437,135 @@ async def test_sse_transport_close_idempotent():
     t = _make_transport()
     await t.close()  # Should not raise
     assert t.is_connected is False
+
+
+# ---------------------------------------------------------------------------
+# Egress: every request goes through core.http_client (TASK-13950.11)
+# ---------------------------------------------------------------------------
+
+
+def _recording_server(requested: list[str]):
+    """A server that records each URL and would hand out an endpoint if reached."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if request.method == "GET":
+            return _sse_response(request, b"event: endpoint\ndata: /messages\n\n")
+        return httpx.Response(202, request=request)
+
+    return handler
+
+
+@pytest.mark.asyncio
+async def test_sse_transport_end_to_end_over_http_client(mcp_http_egress):
+    """Discovery, handshake and an RPC round-trip work against a public server."""
+    server = _MCPSSEServer(tools=[{"name": "echo"}])
+    t = MCPSSETransport(sse_url=_SSE_URL, headers={"Authorization": "Bearer tok"})
+
+    with patch.object(t, "_create_http_client", return_value=_mock_client(server.handler)):
+        await t.connect()
+    try:
+        assert t.is_connected is True
+        assert t._post_url == "http://93.184.216.34/messages?session=abc"
+        assert await t.list_tools() == [{"name": "echo"}]
+    finally:
+        await t.close()
+
+    gets = [request for request in server.requests if request.method == "GET"]
+    posts = [request for request in server.requests if request.method == "POST"]
+    assert [str(request.url) for request in gets] == [_SSE_URL, _SSE_URL]
+    assert all(request.headers["accept"] == "text/event-stream" for request in gets)
+    assert all(str(request.url) == t._post_url for request in posts)
+    assert [json.loads(request.content)["method"] for request in posts] == ["initialize", "initialized", "tools/list"]
+    assert all(request.headers["authorization"] == "Bearer tok" for request in server.requests)
+
+
+def test_sse_transport_client_ignores_env_proxies():
+    """The HTTP client comes from core.http_client, which does not read HTTP(S)_PROXY."""
+    client = MCPSSETransport(sse_url=_SSE_URL)._create_http_client()
+
+    assert client.trust_env is False
+
+
+@pytest.mark.asyncio
+async def test_sse_transport_refuses_dns_rebinding_to_loopback(mcp_dns_rebinding):
+    """validate_mcp_http_url saw a public address; the connect-time answer is loopback."""
+    t = MCPSSETransport(sse_url="http://mcp.rebind.test/sse", timeout_sec=1)
+    requested: list[str] = []
+
+    with patch.object(t, "_create_http_client", return_value=_mock_client(_recording_server(requested))):
+        with pytest.raises(EgressPolicyError):
+            await t.connect()
+
+    assert requested == []
+    assert t.is_connected is False
+
+
+@pytest.mark.asyncio
+async def test_sse_transport_private_opt_in_still_refuses_metadata(mcp_http_egress):
+    """allow_private_network admits the configured private origin, never cloud metadata."""
+    t = MCPSSETransport(
+        sse_url="http://169.254.169.254/sse",
+        allow_private_network=True,
+        timeout_sec=1,
+    )
+    requested: list[str] = []
+
+    with patch.object(t, "_create_http_client", return_value=_mock_client(_recording_server(requested))):
+        with pytest.raises(EgressPolicyError):
+            await t.connect()
+
+    assert requested == []
+
+
+@pytest.mark.asyncio
+async def test_sse_transport_private_opt_in_reaches_loopback_server(mcp_http_egress):
+    """A local MCP server on a non-standard port still works under the opt-in."""
+    t = MCPSSETransport(sse_url="http://127.0.0.1:3001/sse", allow_private_network=True)
+    requested: list[str] = []
+    t._http_client = _mock_client(_recording_server(requested))
+
+    t._post_url = await t._discover_post_url()
+    await t._json_rpc_notify("initialized", {})
+
+    assert t._post_url == "http://127.0.0.1:3001/messages"
+    assert requested == ["http://127.0.0.1:3001/sse", "http://127.0.0.1:3001/messages"]
+    await t.close()
+
+
+@pytest.mark.asyncio
+async def test_sse_transport_refuses_redirect_to_private_address_at_the_hop(mcp_http_egress):
+    """A redirect from the SSE URL into link-local metadata is refused before it is requested."""
+    t = MCPSSETransport(sse_url=_SSE_URL)
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        return httpx.Response(302, request=request, headers={"Location": "http://169.254.169.254/sse"})
+
+    t._http_client = _mock_client(handler)
+
+    with pytest.raises(EgressPolicyError):
+        await t._discover_post_url()
+
+    assert requested == [_SSE_URL]
+    await t.close()
+
+
+@pytest.mark.asyncio
+async def test_sse_transport_stream_timeout_bounds_a_silent_server(mcp_http_egress):
+    """timeout_sec bounds the wait for SSE bytes, enforced by http_client's stream timeouts."""
+
+    class _SilentStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            await asyncio.Event().wait()
+            yield b""
+
+    t = MCPSSETransport(sse_url=_SSE_URL, timeout_sec=0.2)
+    t._http_client = _mock_client(
+        lambda request: httpx.Response(200, request=request, stream=_SilentStream())
+    )
+
+    with pytest.raises(NetworkError, match="StreamTimeout"):
+        await asyncio.wait_for(t._discover_post_url(), timeout=2)
+    await t.close()

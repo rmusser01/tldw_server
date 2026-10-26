@@ -90,10 +90,6 @@ ALLOWLIST: dict[str, str] = {
         "IPs (CURLOPT_RESOLVE), refuses proxies and re-checks every redirect hop."
     ),
     # To migrate onto core.http_client, one PR each (TASK-13950.11 follow-up slices).
-    "tldw_Server_API/app/core/Agent_Client_Protocol/adapters/mcp_transports/sse.py": (
-        "migrate: MCP-over-SSE client for a user-configured remote URL. Raw httpx.AsyncClient "
-        "with only its own SSRF check (validate_mcp_http_url); use create_async_client/astream_sse."
-    ),
     "tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Qwen3ASR.py": (
         "migrate: the unplanned vLLM branch posts with a raw httpx.Client; the planned branch beside "
         "it already uses create_client + fetch(configured_endpoint=...)."

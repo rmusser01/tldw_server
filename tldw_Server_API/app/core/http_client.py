@@ -950,6 +950,7 @@ class TransportAdapter(Protocol):
         retry: RetryPolicy | None = None,
         cert_pinning: dict[str, set[str]] | None = None,
         sensitive_observability: bool = False,
+        configured_endpoint: ConfiguredEndpointScope | None = None,
     ) -> AsyncIterator[SSEEvent]: ...
 
 
@@ -1107,6 +1108,7 @@ class HttpxAdapter:
         retry: RetryPolicy | None = None,
         cert_pinning: dict[str, set[str]] | None = None,
         sensitive_observability: bool = False,
+        configured_endpoint: ConfiguredEndpointScope | None = None,
     ) -> AsyncGenerator[SSEEvent, None]:
         stream = _astream_sse_httpx(
             url=url,
@@ -1121,6 +1123,7 @@ class HttpxAdapter:
             retry=retry,
             cert_pinning=cert_pinning,
             sensitive_observability=sensitive_observability,
+            configured_endpoint=configured_endpoint,
         )
         scoped_stream = _iterate_sensitive_http_items(
             stream,
@@ -1250,6 +1253,7 @@ class AiohttpAdapter:
         retry: RetryPolicy | None = None,
         cert_pinning: dict[str, set[str]] | None = None,
         sensitive_observability: bool = False,
+        configured_endpoint: ConfiguredEndpointScope | None = None,
     ) -> AsyncGenerator[SSEEvent, None]:
         stream = _astream_sse_aiohttp(
             url=url,
@@ -1264,6 +1268,7 @@ class AiohttpAdapter:
             retry=retry,
             cert_pinning=cert_pinning,
             sensitive_observability=sensitive_observability,
+            configured_endpoint=configured_endpoint,
         )
         scoped_stream = _iterate_sensitive_http_items(
             stream,
@@ -5969,6 +5974,7 @@ async def _astream_sse_httpx(
     retry: RetryPolicy | None = None,
     cert_pinning: dict[str, set[str]] | None = None,
     sensitive_observability: bool = False,
+    configured_endpoint: ConfiguredEndpointScope | None = None,
 ) -> AsyncGenerator[SSEEvent, None]:
     sensitive_observability = _effective_sensitive_observability(
         sensitive_observability
@@ -5981,6 +5987,7 @@ async def _astream_sse_httpx(
     await _avalidate_egress_or_raise(
         url,
         dns_pin_cache=dns_pin_cache,
+        configured_endpoint=configured_endpoint,
         sensitive_observability=sensitive_observability,
     )
     _validate_proxies_or_raise(proxies)
@@ -6010,6 +6017,7 @@ async def _astream_sse_httpx(
                 await _avalidate_egress_or_raise(
                     cur_url,
                     dns_pin_cache=dns_pin_cache,
+                    configured_endpoint=configured_endpoint,
                     sensitive_observability=sensitive_observability,
                 )
                 try:
@@ -6026,6 +6034,7 @@ async def _astream_sse_httpx(
                                         int(u.port or 443),
                                         pins_map[host],
                                         TLS_MIN_VERSION,
+                                        configured_endpoint=configured_endpoint,
                                         accepted_resolved_ips=_accepted_ips_for_url(
                                             dns_pin_cache,
                                             cur_url,
@@ -6180,6 +6189,7 @@ async def _astream_sse_aiohttp(
     retry: RetryPolicy | None = None,
     cert_pinning: dict[str, set[str]] | None = None,
     sensitive_observability: bool = False,
+    configured_endpoint: ConfiguredEndpointScope | None = None,
 ) -> AsyncGenerator[SSEEvent, None]:
     if aiohttp is None:  # pragma: no cover
         raise RuntimeError("aiohttp is not available")  # noqa: TRY003
@@ -6194,6 +6204,7 @@ async def _astream_sse_aiohttp(
     await _avalidate_egress_or_raise(
         url,
         dns_pin_cache=dns_pin_cache,
+        configured_endpoint=configured_endpoint,
         sensitive_observability=sensitive_observability,
     )
     _validate_proxies_or_raise(proxies)
@@ -6216,6 +6227,7 @@ async def _astream_sse_aiohttp(
             await _avalidate_egress_or_raise(
                 cur_url,
                 dns_pin_cache=dns_pin_cache,
+                configured_endpoint=configured_endpoint,
                 sensitive_observability=sensitive_observability,
             )
             try:
@@ -6237,6 +6249,7 @@ async def _astream_sse_aiohttp(
                                 port,
                                 pins_map[host],
                                 TLS_MIN_VERSION,
+                                configured_endpoint=configured_endpoint,
                                 accepted_resolved_ips=_accepted_ips_for_url(
                                     dns_pin_cache,
                                     cur_url,
@@ -6381,7 +6394,14 @@ async def astream_sse(
     retry: RetryPolicy | None = None,
     cert_pinning: dict[str, set[str]] | None = None,
     sensitive_observability: bool = False,
+    configured_endpoint: ConfiguredEndpointScope | None = None,
 ) -> AsyncGenerator[SSEEvent, None]:
+    """Stream SSE events, checking egress on the URL and every redirect hop.
+
+    ``configured_endpoint`` scopes every hop to one trusted origin, as it does for
+    ``afetch``: that origin may be loopback or private (never metadata or
+    link-local), and a redirect to any other origin is refused.
+    """
     sensitive_observability = _effective_sensitive_observability(
         sensitive_observability
     )
@@ -6403,6 +6423,7 @@ async def astream_sse(
         retry=retry,
         cert_pinning=cert_pinning,
         sensitive_observability=sensitive_observability,
+        configured_endpoint=configured_endpoint,
     )
     try:
         async for event in stream:
