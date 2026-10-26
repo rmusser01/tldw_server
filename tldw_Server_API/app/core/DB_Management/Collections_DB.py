@@ -41,11 +41,18 @@ from tldw_Server_API.app.core.DB_Management.content_backend import (
     load_content_db_settings,
 )
 from tldw_Server_API.app.core.DB_Management.schema_once import ensure_once
+from tldw_Server_API.app.core.DB_Management.tag_identity import (
+    COLLECTION_TAGS,
+    ensure_tag_identity,
+    ensure_tag_ids,
+    match_tag_ids,
+)
 from tldw_Server_API.app.core.exceptions import (
     InvalidStorageUserIdError,
     StorageUnavailableError,
 )
 from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.core.Utils.keyword_identity import dedupe_keywords, normalize_keyword_identity
 
 from .backends.base import BackendType, DatabaseBackend, DatabaseConfig, DatabaseError
 from .backends.factory import (
@@ -673,7 +680,7 @@ class CollectionsDatabase:
             ensure_once(
                 "collections",
                 getattr(getattr(self._backend, "config", None), "sqlite_path", None),
-                self.ensure_schema,
+                self._ensure_schema_and_tag_identity,
                 verify=self._collections_schema_present,
             )
             # Deliberately outside the memo. This reconciles output templates
@@ -768,8 +775,12 @@ class CollectionsDatabase:
         found = {row["name"] for row in rows}
         return found.issuperset(_COLLECTIONS_REQUIRED_TABLES)
 
-    def _run_backend_bootstrap(self) -> None:
+    def _ensure_schema_and_tag_identity(self) -> None:
         self.ensure_schema()
+        ensure_tag_identity(self.backend, COLLECTION_TAGS)
+
+    def _run_backend_bootstrap(self) -> None:
+        self._ensure_schema_and_tag_identity()
         self._seed_watchlists_output_templates()
 
     def _mark_backend_bootstrapped(self, backend: DatabaseBackend | None) -> None:
@@ -2805,10 +2816,6 @@ class CollectionsDatabase:
     # Collections Tags helpers
     # ------------------------
     @staticmethod
-    def _normalize_collection_tag(name: str) -> str:
-        return name.strip().lower()
-
-    @staticmethod
     def _infer_output_template_type(name: str, fmt: str) -> str:
         if fmt == "html":
             return "newsletter_html"
@@ -2877,45 +2884,8 @@ class CollectionsDatabase:
         )
 
     def ensure_collection_tag_ids(self, names: Iterable[str]) -> list[int]:
-        normed: list[str] = []
-        seen: set[str] = set()
-        for raw in names or []:
-            if not raw:
-                continue
-            nm = self._normalize_collection_tag(str(raw))
-            if not nm or nm in seen:
-                continue
-            seen.add(nm)
-            normed.append(nm)
-        if not normed:
-            return []
-
-        ids: list[int] = []
-        select_sql = "SELECT id FROM collection_tags WHERE user_id = ? AND name = ?"
-        insert_sql = "INSERT INTO collection_tags (user_id, name) VALUES (?, ?)"
-        for nm in normed:
-            select_params = (self.user_id, nm)
-            row = self.backend.execute(select_sql, select_params).first
-            if row:
-                ids.append(int(row.get("id")))
-                continue
-            insert_exc: Exception | None = None
-            tag_id: int | None = None
-            try:
-                res = self._execute_insert(insert_sql, (self.user_id, nm))
-                tag_id = self._extract_lastrowid(res)
-            except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
-                insert_exc = exc
-            if tag_id is None:
-                row = self.backend.execute(select_sql, select_params).first
-                if row:
-                    tag_id = int(row.get("id"))
-            if tag_id is None:
-                if insert_exc:
-                    raise insert_exc
-                raise DatabaseError("Failed to ensure collection tag id")
-            ids.append(tag_id)
-        return ids
+        """Return this owner's tag ids for ``names``, matched by identity; new tags keep their casing."""
+        return ensure_tag_ids(self.backend, COLLECTION_TAGS, self.user_id, names)
 
     def _replace_item_tags(self, item_id: int, tag_ids: Iterable[int]) -> None:
         self.backend.execute("DELETE FROM content_item_tags WHERE item_id = ?", (item_id,))
@@ -2955,7 +2925,7 @@ class CollectionsDatabase:
             name = str(row.get("name"))
             mapping.setdefault(item_id, []).append(name)
         for tag_list in mapping.values():
-            tag_list.sort()
+            tag_list.sort(key=normalize_keyword_identity)
         return mapping
 
     def _update_content_fts_entry(
@@ -4037,7 +4007,6 @@ class CollectionsDatabase:
         where: list[str] = ["ci.user_id = ?"]
         params: list[Any] = [self.user_id]
         joins: list[str] = []
-        having = ""
 
         if ids:
             id_list = [int(i) for i in ids]
@@ -4082,19 +4051,14 @@ class CollectionsDatabase:
             where.append("ci.favorite = ?")
             params.append(1 if favorite else 0)
 
-        tag_filters: list[str] = []
-        if tags:
-            for t in tags:
-                if t:
-                    tag_filters.append(self._normalize_collection_tag(str(t)))
+        tag_filters = dedupe_keywords(tags or [])
         if tag_filters:
-            tag_filters = list(dict.fromkeys(tag_filters))
-            joins.append("INNER JOIN content_item_tags cit ON cit.item_id = ci.id")
-            joins.append("INNER JOIN collection_tags ct ON ct.id = cit.tag_id")
-            placeholders = ",".join("?" for _ in tag_filters)
-            where.append(f"ct.name IN ({placeholders})")
-            params.extend(tag_filters)
-            having = f"HAVING COUNT(DISTINCT ct.name) >= {len(tag_filters)}"
+            tag_ids = match_tag_ids(self.backend, COLLECTION_TAGS, self.user_id, tag_filters)
+            if len(tag_ids) < len(tag_filters):
+                return [], 0
+            for tag_id in dict.fromkeys(tag_ids.values()):
+                where.append("EXISTS (SELECT 1 FROM content_item_tags cit WHERE cit.item_id = ci.id AND cit.tag_id = ?)")
+                params.append(tag_id)
 
         def _apply_like_search(where_clause: list[str], clause_params: list[Any]) -> None:
             q_like = f"%{q.lower()}%"
@@ -4119,10 +4083,9 @@ class CollectionsDatabase:
             fts_joined: bool,
         ) -> tuple[list[ContentItemRow], int]:
             where_sql = " AND ".join(where_clause) if where_clause else "1=1"
-            group_by = "GROUP BY ci.id" if tag_filters else ""
             joins_sql = f" {' '.join(query_joins)}" if query_joins else ""
             base_from = f"FROM content_items ci{joins_sql}"
-            subquery = f"SELECT ci.id {base_from} WHERE {where_sql} {group_by} {having}"
+            subquery = f"SELECT ci.id {base_from} WHERE {where_sql}"
             count_sql = f"SELECT COUNT(*) AS cnt FROM ({subquery}) AS subq"  # nosec B608
 
             resolved_limit = limit if isinstance(limit, int) and limit > 0 else size
@@ -4150,8 +4113,6 @@ class CollectionsDatabase:
                     ci.source_id, ci.read_at, ci.created_at, ci.updated_at
                 {base_from}
                 WHERE {where_sql}
-                {group_by}
-                {having}
                 ORDER BY {order_by}
                 LIMIT ? OFFSET ?
             """

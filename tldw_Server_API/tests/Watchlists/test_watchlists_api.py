@@ -85,7 +85,7 @@ def test_sources_crud_and_tags(client_with_user):
     assert r.status_code == 200, r.text
     src = r.json()
     sid = src["id"]
-    assert set(src.get("tags", [])) == {"news", "tech"}
+    assert set(src.get("tags", [])) == {"News", "Tech"}  # first-seen display casing
 
     # List sources filtered by tag
     r = c.get("/api/v1/watchlists/sources", params={"tags": ["tech"]})
@@ -108,7 +108,7 @@ def test_sources_crud_and_tags(client_with_user):
     r = c.patch(f"/api/v1/watchlists/sources/{sid}", json={"tags": ["updates", "tech"]})
     assert r.status_code == 200
     up = r.json()
-    assert set(up.get("tags", [])) == {"updates", "tech"}
+    assert set(up.get("tags", [])) == {"updates", "Tech"}  # "tech" reuses the stored "Tech"
 
     # Update source: replace group membership
     r = c.patch(f"/api/v1/watchlists/sources/{sid}", json={"group_ids": [group_b["id"]]})
@@ -131,7 +131,7 @@ def test_sources_crud_and_tags(client_with_user):
     assert tags_payload["has_more"] == pagination["has_more"]
     assert tags_payload["next_offset"] == pagination["next_offset"]
     names = {t["name"] for t in tags}
-    assert {"news", "tech", "updates"}.issubset(names)
+    assert {"News", "Tech", "updates"}.issubset(names)
 
     # Delete source
     r = c.delete(f"/api/v1/watchlists/sources/{sid}")
@@ -150,7 +150,7 @@ def test_sources_crud_and_tags(client_with_user):
     assert r.status_code == 200, r.text
     restored = r.json()
     assert int(restored["id"]) == sid
-    assert set(restored.get("tags", [])) == {"updates", "tech"}
+    assert set(restored.get("tags", [])) == {"updates", "Tech"}
     assert restored.get("group_ids") == [group_b["id"]]
 
 

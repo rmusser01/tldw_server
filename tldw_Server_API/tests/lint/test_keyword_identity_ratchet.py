@@ -86,8 +86,6 @@ KEYWORD_NORMALIZATION_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/core/Collections/reading_digest_jobs.py": 4,
     "tldw_Server_API/app/core/Collections/reading_importers.py": 3,
     "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py": 2,
-    "tldw_Server_API/app/core/DB_Management/Collections_DB.py": 1,
-    "tldw_Server_API/app/core/DB_Management/Watchlists_DB.py": 1,
     "tldw_Server_API/app/core/DB_Management/chacha/character_store.py": 4,
     "tldw_Server_API/app/core/DB_Management/chacha/conversation_store.py": 1,
     "tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py": 5,
