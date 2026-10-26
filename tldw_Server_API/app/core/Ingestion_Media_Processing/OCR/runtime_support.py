@@ -404,7 +404,8 @@ def wait_for_managed_http_ready(
         return False
     probe_timeout = min(5.0, max(interval, 0.1))
     deadline = time.monotonic() + max(timeout_total, 0.0)
-    with create_client(timeout=probe_timeout) as client:
+    # Loopback and LAN probes never go through an env proxy, whatever HTTP_TRUST_ENV says.
+    with create_client(timeout=probe_timeout, trust_env=False) as client:
         while time.monotonic() < deadline:
             for path in paths:
                 try:

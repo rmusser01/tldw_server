@@ -297,3 +297,29 @@ def test_wait_for_managed_http_ready_does_not_follow_a_redirect_to_another_priva
     assert seen
     assert {httpx.URL(url).host for url, _request in seen} == {"127.0.0.1"}
     assert connects == []
+
+
+@pytest.mark.unit
+def test_wait_for_managed_http_ready_never_reads_env_proxies(ocr_probe, monkeypatch):
+    """With HTTP_TRUST_ENV=true the probe client must still ignore HTTP(S)_PROXY."""
+    import httpx
+
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR import runtime_support as runtime_mod
+
+    monkeypatch.setenv("HTTP_TRUST_ENV", "true")
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.example:3128")
+    built: list[httpx.Client] = []
+
+    def create_client(**kwargs):
+        client = http_client.create_client(
+            transport=httpx.MockTransport(lambda _request: httpx.Response(200)),
+            **{"trust_env": True, **kwargs},
+        )
+        built.append(client)
+        return client
+
+    monkeypatch.setattr(runtime_mod, "create_client", create_client)
+
+    assert runtime_mod.wait_for_managed_http_ready(host="127.0.0.1", port=8090, timeout_total=1, interval=0.1)
+    assert [client.trust_env for client in built] == [False]
