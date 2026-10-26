@@ -17,7 +17,8 @@ tag value, in any of these shapes:
 It counts only when the lowered value is a keyword or tag. That means one of:
   * the operand names a keyword or tag: a name, attribute or identifier-like string
     key whose snake_case words include one of KEYWORD_WORDS, such as ``tag``,
-    ``row["keyword"]`` or ``kw_text``;
+    ``row["keyword"]`` or ``keyword_text`` (bare ``kw`` is not one: it is the
+    ``**kw`` kwargs idiom; a ``kw`` loop variable over keywords still counts);
   * the operand is a loop or comprehension variable drawn from such an iterable,
     such as ``{k.lower() for k in keywords}``;
   * the call sits in a function whose name includes one of those words, such as
@@ -26,12 +27,16 @@ Not counted:
   * operands that mention an exception name (EXCEPTION_NAMES), as in
     ``str(exc).lower()`` error-message checks;
   * HTML-parser ``handle_*tag`` callbacks, whose tags are markup.
-AST-derived, so comments and docstrings never count.
+AST-derived, so comments and docstrings never count. Known limit: aliases are not
+followed, so ``name = row["keyword"]; name.lower()`` in a function whose name has no
+keyword word is not counted.
 
 Each entry is a ceiling with no slack. Growth fails, including any hit in a module
 that has no entry yet. A module that drops below its entry also fails, until the
-entry is lowered (or dropped when it reaches 0). Raising an entry needs a trailing
-``# bump: <reason>`` comment on it, reviewed in the PR.
+entry is lowered (or dropped when it reaches 0). A counted hit that is not keyword
+identity (a false positive) is handled the same way: raise or lower the module's
+entry in KEYWORD_NORMALIZATION_BASELINE below, with a trailing ``# bump: <reason>``
+comment on it, reviewed in the PR.
 
 backend-required's "Enforce CI contracts and code ratchets" step runs this file;
 tests/CI/test_license_first_workflow_contracts.py, which that step also runs, fails
@@ -53,9 +58,10 @@ import pytest
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+RATCHET_FILE = Path(__file__).resolve().relative_to(REPO_ROOT).as_posix()
 APP_DIR = Path("tldw_Server_API") / "app"
 
-KEYWORD_WORDS = frozenset({"kw", "kws", "keyword", "keywords", "tag", "tags"})
+KEYWORD_WORDS = frozenset({"kws", "keyword", "keywords", "tag", "tags"})
 EXCEPTION_NAMES = frozenset({"e", "err", "error", "exc"})
 NORMALIZING_METHODS = frozenset({"lower", "casefold"})
 HTML_TAG_HANDLER = re.compile(r"handle_\w*tag")
@@ -239,6 +245,10 @@ def _repo_counts() -> tuple[tuple[str, int], ...]:
 
 def ratchet_violations(counts: dict[str, int], baseline: dict[str, int]) -> list[str]:
     """Describe every module whose count differs from its baseline entry."""
+    escape_hatch = (
+        f" If a counted hit is not keyword identity, set the module's entry in KEYWORD_NORMALIZATION_BASELINE "
+        f"({RATCHET_FILE}) to {{now}} with a trailing `# bump: <reason>` comment."
+    )
     problems: list[str] = []
     for module in sorted(set(counts) | set(baseline)):
         now, seeded = counts.get(module, 0), baseline.get(module, 0)
@@ -246,12 +256,13 @@ def ratchet_violations(counts: dict[str, int], baseline: dict[str, int]) -> list
             problems.append(
                 f"{module}: {now} ad hoc keyword/tag lowercasing call(s), baseline {seeded}. Compare "
                 "normalize_keyword_identity(...) values or use dedupe_keywords (core/Utils/keyword_identity) "
-                "and keep the display casing."
+                "and keep the display casing." + escape_hatch.format(now=now)
             )
         elif now < seeded:
             problems.append(
                 f"{module}: {now} ad hoc keyword/tag normalization(s), baseline {seeded}. Migrated or removed "
-                "one? Lower its entry in KEYWORD_NORMALIZATION_BASELINE (drop it at 0) so the ratchet stays tight."
+                f"one? Lower its entry in KEYWORD_NORMALIZATION_BASELINE ({RATCHET_FILE}; drop it at 0) so the "
+                "ratchet stays tight." + escape_hatch.format(now=now)
             )
     return problems
 
@@ -266,7 +277,8 @@ def test_keyword_normalization_only_decreases() -> None:
     [
         "def link(rows):\n    return {row['keyword'].casefold() for row in rows}\n",
         "def link(tag):\n    return tag.strip().lower()\n",
-        "def link(kw_text):\n    return str(kw_text).lower()\n",
+        "def link(keyword_text):\n    return str(keyword_text).lower()\n",
+        "def link(rows):\n    for kw in rows.keywords:\n        yield kw.lower()\n",
         "def _sync_note_keywords(values):\n    return {text.lower() for text in values}\n",
         "class Store:\n    def _normalize_tags(self, values):\n        return [lambda: v.lower() for v in values]\n",
         "def link(values):\n    return {k.lower() for k in values.keywords}\n",
@@ -291,6 +303,8 @@ def test_counter_sees_each_ad_hoc_shape(source: str) -> None:
         "def title(names):\n    return {n.lower() for n in names}\n",
         "def title(names):\n    return sorted(names, key=str.lower)\n",
         "class P:\n    def handle_starttag(self, tag, attrs):\n        return tag.lower()\n",
+        "def call(**kw):\n    return kw.get('model').lower()\n",
+        "def call(*args, **kw):\n    return {k.lower(): v for k, v in kw.items()}\n",
     ],
 )
 def test_counter_ignores_non_violations(source: str) -> None:
@@ -308,6 +322,7 @@ def test_the_ratchet_rejects_a_seeded_violation() -> None:
     problems = ratchet_violations(counts, KEYWORD_NORMALIZATION_BASELINE)
 
     assert len(problems) == 1 and problems[0].startswith(module), problems
+    assert f"({RATCHET_FILE})" in problems[0] and "`# bump: <reason>`" in problems[0], problems
 
 
 def test_a_new_module_is_scanned_without_a_baseline_entry(tmp_path: Path) -> None:
@@ -330,6 +345,7 @@ def test_the_ratchet_asks_for_a_lower_entry_after_a_migration() -> None:
     problems = ratchet_violations(counts, KEYWORD_NORMALIZATION_BASELINE)
 
     assert len(problems) == 1 and "Lower its entry" in problems[0], problems
+    assert "`# bump: <reason>`" in problems[0], problems
 
 
 if __name__ == "__main__":
