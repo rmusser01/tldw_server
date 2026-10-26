@@ -35,6 +35,7 @@ _PROVIDER_JSON_MAX_MEMBERS_AND_ITEMS = 100_000
 _PROVIDER_JSON_MAX_STRING_BYTES = 7 * 1024 * 1024
 _MAX_PROVIDER_CREDENTIAL_BYTES = 4_096
 _ANTHROPIC_VERSION = "2023-06-01"
+_TRANSIENT_EGRESS_REASONS = frozenset({"dns_unresolved", "dns_changed"})
 _FENCE = re.compile(
     r"\A```(?P<label>[A-Za-z]*)[ \t]*\r?\n(?P<body>[\s\S]*?)\r?\n```[ \t]*\Z",
     re.IGNORECASE,
@@ -484,6 +485,12 @@ async def _request_once(
         trust_env=False,
         http2=False,
     ) as client:
+        async def final_recheck(_request: httpx.Request) -> None:
+            # httpx runs request hooks inside send(), after astream_bytes' egress awaits and with no await
+            # before the transport, so the kill switches are read immediately before the provider call.
+            _verify_current_target(target, _load_current_config(current_config_loader))
+
+        client.event_hooks["request"] = [*client.event_hooks.get("request", []), final_recheck]
         current = _load_current_config(current_config_loader)
         response_limit, document_limit = _validated_runtime_limits(current)
         limits = current.provider_limits
@@ -616,11 +623,20 @@ async def generate_standalone_html(
         # on_response runs inside http_client's status handler; drop that frame's exception.
         exc.__context__ = None
         raise
-    except EgressPolicyError:
-        failure_code = "standalone_html_endpoint_not_allowed"
+    except EgressPolicyError as exc:
+        # A resolver blip is retryable; only a policy refusal is terminal.
+        failure_code = (
+            "standalone_html_provider_unavailable"
+            if exc.reason_code in _TRANSIENT_EGRESS_REASONS
+            else "standalone_html_endpoint_not_allowed"
+        )
+    except NetworkError as exc:
+        # http_client reports httpx timeouts as ConnectTimeout/ReadTimeout/... or StreamTimeout:<phase>.
+        timed_out = exc.classification == "timeout" or "Timeout" in str(exc)
+        failure_code = "standalone_html_provider_timeout" if timed_out else "standalone_html_provider_unavailable"
     except (TimeoutError, httpx.TimeoutException):
         failure_code = "standalone_html_provider_timeout"
-    except (httpx.HTTPError, NetworkError, OSError):
+    except (httpx.HTTPError, OSError):
         failure_code = "standalone_html_provider_unavailable"
     _fail(failure_code)
 

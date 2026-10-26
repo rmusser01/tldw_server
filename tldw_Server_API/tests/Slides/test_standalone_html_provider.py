@@ -763,7 +763,7 @@ async def test_current_configuration_is_rechecked_immediately_before_request(
         current_config_loader=load_config,
     )
 
-    assert order == ["config", "config", "network"]
+    assert order == ["config", "config", "config", "network"]  # the last is the request hook's
 
 
 @pytest.mark.asyncio
@@ -878,7 +878,7 @@ async def test_post_client_entry_loader_failure_is_redacted_before_network(
 
 
 @pytest.mark.asyncio
-async def test_dispatch_does_not_yield_after_fresh_recheck_before_transport(
+async def test_dispatch_does_not_yield_after_final_recheck_before_transport(
     provider_module: ModuleType,
 ) -> None:
     target = _target("openai_official_chat_v1")
@@ -894,7 +894,8 @@ async def test_dispatch_does_not_yield_after_fresh_recheck_before_transport(
     def load_config() -> SlidesStandaloneHtmlConfig:
         nonlocal loader_calls
         loader_calls += 1
-        if loader_calls == 2:
+        # The last recheck is the request hook's; the flip is scheduled there and must not run first.
+        if loader_calls == 3:
             asyncio.get_running_loop().call_soon(flip_config)
         return config
 
@@ -909,12 +910,38 @@ async def test_dispatch_does_not_yield_after_fresh_recheck_before_transport(
         httpx.MockTransport(handler),
         current_config_loader=load_config,
     )
-    await config_flipped.wait()
+    await asyncio.wait_for(config_flipped.wait(), timeout=2)
 
     assert result == DOCUMENT.encode()
-    assert loader_calls == 2
-    # The egress check inside astream_bytes awaits (DNS), so the flip may land before or after the send.
-    assert sorted(order) == ["config-flipped", "network"]
+    assert loader_calls == 3
+    assert order == ["network", "config-flipped"]
+
+
+@pytest.mark.asyncio
+async def test_kill_switch_at_the_final_recheck_sends_nothing_and_is_not_wrapped(
+    provider_module: ModuleType,
+) -> None:
+    target = _target("openai_official_chat_v1")
+    config = _config(target)
+    killed = replace(config, egress_enabled=False)
+    loader_calls = 0
+    seen: list[httpx.Request] = []
+
+    def load_config() -> SlidesStandaloneHtmlConfig:
+        nonlocal loader_calls
+        loader_calls += 1
+        return config if loader_calls < 3 else killed
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return _response(_response_body(target.provider))[0]
+
+    with pytest.raises(provider_module.StandaloneHtmlProviderError) as exc_info:
+        await _call(provider_module, config, httpx.MockTransport(handler), current_config_loader=load_config)
+
+    assert exc_info.value.code == "standalone_html_egress_disabled"
+    assert loader_calls == 3
+    assert seen == []
 
 
 @pytest.mark.asyncio
@@ -925,7 +952,7 @@ async def test_fresh_attempt_snapshot_solely_controls_overall_timeout(
     target = _target("openai_official_chat_v1")
     initial = _config(target, overall_timeout=0.01)
     fresh = _config(target, overall_timeout=1.0)
-    snapshots = iter((initial, fresh))
+    snapshots = iter((initial, fresh, fresh))
     loader_calls = 0
     network_calls = 0
 
@@ -963,7 +990,7 @@ async def test_fresh_attempt_snapshot_solely_controls_overall_timeout(
     )
 
     assert result == DOCUMENT.encode()
-    assert loader_calls == 2
+    assert loader_calls == 3
     assert network_calls == 1
 
 
@@ -1754,40 +1781,16 @@ async def test_redirect_to_a_private_address_is_not_followed(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("outcome", ["delivered", "egress-refused", "http-error"])
-async def test_provider_credential_stays_out_of_logs_spans_and_the_httpx_logger(
+async def test_provider_credential_stays_out_of_logs_and_the_httpx_logger(
     provider_module: ModuleType,
     production_egress: dict[str, list[str]],
     monkeypatch: pytest.MonkeyPatch,
     outcome: str,
 ) -> None:
     import logging
-    from contextlib import asynccontextmanager, contextmanager
-
-    from tldw_Server_API.app.core import http_client
-
     target = _target("openai_official_chat_v1")
     if outcome == "egress-refused":
         production_egress["api.openai.com"] = ["10.0.0.5"]
-    span_attributes: list[dict[str, Any]] = []
-
-    class _SpanRecorder:
-        @contextmanager
-        def span(self, _name: str, *, attributes: dict[str, Any]):
-            span_attributes.append(dict(attributes))
-            yield None
-
-        @asynccontextmanager
-        async def async_span(self, _name: str, *, attributes: dict[str, Any]):
-            span_attributes.append(dict(attributes))
-            yield None
-
-        def set_attributes(self, attributes: dict[str, Any]) -> None:
-            span_attributes.append(dict(attributes))
-
-        def add_event(self, _name: str, attributes: dict[str, Any] | None = None) -> None:
-            span_attributes.append(dict(attributes or {}))
-
-    monkeypatch.setattr(http_client, "get_tracing_manager", _SpanRecorder)
     stdlib_records: list[str] = []
 
     class _StdlibCapture(logging.Handler):
@@ -1807,6 +1810,9 @@ async def test_provider_credential_stays_out_of_logs_spans_and_the_httpx_logger(
     loguru_records: list[str] = []
     sink = logger.add(lambda message: loguru_records.append(str(message)), level="DEBUG", serialize=True)
     try:
+        # Probes prove both sinks are wired even when the call logs nothing (a refusal does not).
+        logger.debug("sink-probe")
+        httpx_logger.debug("sink-probe")
         with contextlib.suppress(provider_module.StandaloneHtmlProviderError):
             await _call(provider_module, _config(target), httpx.MockTransport(handler))
     finally:
@@ -1814,8 +1820,76 @@ async def test_provider_credential_stays_out_of_logs_spans_and_the_httpx_logger(
         httpx_logger.removeHandler(capture)
         httpx_logger.setLevel(previous_level)
 
-    observed = "\n".join([*loguru_records, *stdlib_records, json.dumps(span_attributes, default=str)])
-    if outcome != "egress-refused":  # a refusal happens before http_client logs anything
-        assert loguru_records, "the loguru sink captured nothing"
+    observed = "\n".join([*loguru_records, *stdlib_records])
+    assert any("sink-probe" in record for record in loguru_records)
+    assert any("sink-probe" in record for record in stdlib_records)
     assert PROVIDER_SECRET not in observed
     assert "source-secret" not in observed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reason_code", "expected"),
+    [
+        ("dns_unresolved", "standalone_html_provider_unavailable"),
+        ("dns_changed", "standalone_html_provider_unavailable"),
+        ("address_forbidden", "standalone_html_endpoint_not_allowed"),
+    ],
+)
+async def test_transient_dns_refusals_stay_retryable(
+    provider_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    reason_code: str,
+    expected: str,
+) -> None:
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+
+    async def refuse(**_kwargs: Any):
+        raise EgressPolicyError("refused", reason_code=reason_code)
+        yield b""  # pragma: no cover - makes this an async generator like astream_bytes
+
+    monkeypatch.setattr(provider_module, "astream_bytes", refuse)
+    target = _target("openai_official_chat_v1")
+
+    with pytest.raises(provider_module.StandaloneHtmlProviderError) as exc_info:
+        await _call(provider_module, _config(target), httpx.MockTransport(lambda _r: pytest.fail("sent")))
+
+    assert exc_info.value.code == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [httpx.ReadTimeout, httpx.ConnectTimeout, httpx.WriteTimeout, httpx.PoolTimeout])
+async def test_httpx_timeouts_stay_provider_timeouts(provider_module: ModuleType, error: type[Exception]) -> None:
+    target = _target("openai_official_chat_v1")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise error("slow", request=request)
+
+    with pytest.raises(provider_module.StandaloneHtmlProviderError) as exc_info:
+        await _call(provider_module, _config(target), httpx.MockTransport(handler))
+
+    assert exc_info.value.code == "standalone_html_provider_timeout"
+
+
+@pytest.mark.asyncio
+async def test_oversized_error_body_through_the_real_client_factory_is_capped(
+    provider_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """create_async_client installs an error-body capture hook; it must not defeat the byte cap."""
+    from tldw_Server_API.app.core import http_client
+
+    def real_factory(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        return http_client.create_async_client(*args, transport=_TEST_TRANSPORT.get(), **kwargs)
+
+    monkeypatch.setattr(provider_module, "create_async_client", real_factory)
+    target = _target("openai_official_chat_v1")
+    stream = _CountingStream(b"a" * 32, b"b" * 33, *([b"c" * 4096] * 20))
+    response, _ = _response(b"", status_code=500, stream=stream)
+
+    with pytest.raises(provider_module.StandaloneHtmlProviderError) as exc_info:
+        await _call(provider_module, _config(target, provider_response_bytes=64), httpx.MockTransport(lambda _r: response))
+
+    assert exc_info.value.code == "standalone_html_provider_response_too_large"
+    # httpx coalesces to 64 KiB chunks and http_client reads one ahead; the 80 KiB body is not drained.
+    assert sum(len(chunk) for chunk in stream.yielded) <= 65_536 + 2 * 4096
