@@ -6,14 +6,34 @@ import ts from 'typescript'
 const frontendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const scriptName = 'scripts/check-ui-import-cycles.mjs'
 const howToBreak =
-  'Break it by moving the shared code down a layer, by making the import `import type` when only types are used, or by loading it lazily with import(); the cycles are listed below.'
+  'Break it by moving the shared code down a layer, by making the import `import type` when only types are used, or by loading it lazily with import(). Accepting it instead is a reviewed exception: add or extend its BASELINE entry with a "// bump: <reason>" comment.'
+// Asset imports that bundlers handle and tsc does not resolve.
+const assetSpecifier =
+  /\.(?:css|scss|sass|less|svg|png|jpe?g|gif|webp|avif|ico|bmp|woff2?|ttf|otf|eot|mp3|wav|ogg|mp4|webm|json|md|txt|html|wasm)(?:\?.*)?$|\?(?:raw|url|inline|worker)$/
+// Relative paths and the @/ and ~/ aliases, which must resolve to a file.
+const localSpecifier = /^(?:\.\.?|[@~])(?:\/|$)/
 
-// Runtime file-level import cycles in packages/ui/src (TASK-13950.10), measured by this
-// script on dev 39093fc827. The cycle count is exact: when it drops, lower it here in the
-// same PR. The largest cycle and the files in all cycles are ceilings, so a small cycle
-// cannot grow unnoticed either. Raising any of them is a reviewed exception: change the
-// number and add a "bump: <reason>" comment on that line.
-export const BASELINE = { cycles: 4, largestCycle: 4, filesInCycles: 12 }
+// The runtime import cycles in packages/ui/src (TASK-13950.10), keyed by their member files
+// as this script found them on dev 39093fc827. A cycle may shrink or split, but one that is
+// not inside a single entry fails, so trading one cycle for another fails too. When a cycle
+// is gone, delete its entry in the same PR. Adding or extending an entry is a reviewed
+// exception: put a "// bump: <reason>" comment on it.
+export const BASELINE = [
+  ['components/Review/ViewMediaPage.tsx', 'components/Review/hooks/useMediaNavigationState.ts'],
+  ['db/dexie/helpers.ts', 'db/dexie/server-chat-mirror.ts'],
+  [
+    'services/tldw/TldwApiClient.ts',
+    'services/tldw/TldwAuth.ts',
+    'services/tldw/auth-fetch.ts',
+    'services/tldw/domains/prototype-workspaces.ts'
+  ],
+  [
+    'store/workspace-slices/sources-slice.ts',
+    'store/workspace-slices/studio-slice.ts',
+    'store/workspace-slices/workspace-list-slice.ts',
+    'store/workspace.ts'
+  ]
+]
 
 // Static imports and re-exports that survive compilation. `import type`, `export type` and
 // specifier lists that are all `type` are erased; import() is lazy, so it closes no cycle.
@@ -98,57 +118,55 @@ export function findImportCycles(uiRoot = path.join(path.dirname(frontendRoot), 
   if (!files.length) throw new Error(`No source files under ${sourceRoot}`)
   const graph = new Map(files.map((file) => [file, new Set()]))
   const cache = ts.createModuleResolutionCache(uiRoot, (name) => name, options)
+  const unresolved = []
   for (const file of files) {
     const sourceFile = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest)
     for (const specifier of runtimeSpecifiers(sourceFile)) {
       const resolved = ts.resolveModuleName(specifier, file, options, ts.sys, cache).resolvedModule
       const target = resolved && path.resolve(resolved.resolvedFileName)
       if (target && graph.has(target)) graph.get(file).add(target)
+      else if (!target && localSpecifier.test(specifier) && !assetSpecifier.test(specifier)) {
+        unresolved.push(`${path.relative(sourceRoot, file)} imports "${specifier}"`)
+      }
     }
   }
   return {
     fileCount: files.length,
-    cycles: cycles(graph).map((members) => members.map((file) => path.relative(sourceRoot, file)))
+    cycles: cycles(graph).map((members) => members.map((file) => path.relative(sourceRoot, file))),
+    unresolved
   }
 }
 
-export function checkImportCycles(found, baseline = BASELINE) {
-  const count = found.length
-  const largest = Math.max(0, ...found.map((members) => members.length))
-  const files = found.reduce((total, members) => total + members.length, 0)
-  const failures = []
-  if (count > baseline.cycles) {
-    failures.push(
-      `${count} import cycles, up from ${baseline.cycles}: an import added in this change closes a new cycle. ${howToBreak}`
+export function checkImportCycles({ cycles: found, unresolved }, baseline = BASELINE) {
+  const failures = unresolved.map(
+    (edge) =>
+      `${edge}, which resolves to no file: fix the path. An import this script cannot resolve is an edge it cannot check.`
+  )
+  for (const members of found) {
+    if (baseline.some((entry) => members.every((file) => entry.includes(file)))) continue
+    const listed = members.map((file) =>
+      baseline.some((entry) => entry.includes(file)) ? file : `${file}  (not in BASELINE)`
     )
-  } else if (count < baseline.cycles) {
     failures.push(
-      `Stale baseline: ${count} import cycles, down from ${baseline.cycles}. Lower BASELINE.cycles to ${count} in ${scriptName} in this PR.`
-    )
-  }
-  if (largest > baseline.largestCycle) {
-    failures.push(
-      `The largest import cycle grew from ${baseline.largestCycle} to ${largest} files: an import added in this change pulls more files into it. ${howToBreak}`
+      `New or grown import cycle of ${members.length} files, not inside any BASELINE entry in ${scriptName}:\n  ${listed.join('\n  ')}\n${howToBreak}`
     )
   }
-  if (files > baseline.filesInCycles) {
+  for (const entry of baseline) {
+    if (found.some((members) => members.some((file) => entry.includes(file)))) continue
     failures.push(
-      `${files} files are in import cycles, up from ${baseline.filesInCycles}: an import added in this change pulls more files into a cycle. ${howToBreak}`
+      `Stale baseline: this cycle is gone; delete its BASELINE entry in ${scriptName} in this PR:\n  ${entry.join('\n  ')}`
     )
   }
-  return { count, largest, files, failures }
+  return failures
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const { fileCount, cycles: found } = findImportCycles()
-    const { count, largest, files, failures } = checkImportCycles(found)
+    const result = findImportCycles()
+    const failures = checkImportCycles(result)
     for (const failure of failures) console.error(failure)
-    if (failures.length) {
-      for (const members of found) console.error(`Cycle of ${members.length} files:\n  ${members.join('\n  ')}`)
-    }
     console.log(
-      `Shared UI import cycles: ${fileCount} files; ${count} runtime cycles (baseline ${BASELINE.cycles}); largest ${largest} files (ceiling ${BASELINE.largestCycle}); ${files} files in cycles (ceiling ${BASELINE.filesInCycles}).`
+      `Shared UI import cycles: ${result.fileCount} files; ${result.cycles.length} runtime cycles against ${BASELINE.length} baselined; ${failures.length} failures.`
     )
     process.exitCode = failures.length ? 1 : 0
   } catch (error) {

@@ -39,42 +39,58 @@ const base = {
   'ambient.d.ts': 'import { a } from "./a"\ndeclare global { const seeded: typeof a }'
 }
 
+const check = (sources: Record<string, string>, baseline: string[][]) =>
+  checkImportCycles(findImportCycles(fixture(sources)), baseline)
+
 describe('shared UI import-cycle ratchet', () => {
   it('counts runtime cycles only, resolving aliases', () => {
-    expect(findImportCycles(fixture(base)).cycles).toEqual([['a.ts', 'b.ts']])
+    expect(findImportCycles(fixture(base))).toMatchObject({ cycles: [['a.ts', 'b.ts']], unresolved: [] })
   })
-  it('passes at the baseline', () => {
-    const { cycles } = findImportCycles(fixture(base))
-    expect(checkImportCycles(cycles, { cycles: 1, largestCycle: 2, filesInCycles: 2 }).failures).toEqual([])
+  it('passes at the baseline and when a baselined cycle shrinks', () => {
+    expect(check(base, [['a.ts', 'b.ts']])).toEqual([])
+    expect(check(base, [['a.ts', 'b.ts', 'gone.ts']])).toEqual([])
   })
   it('rejects a seeded new cycle, including one closed by a re-export', () => {
-    const { cycles } = findImportCycles(
-      fixture({ ...base, 'j.ts': 'export * from "./k"\nexport const j = 1', 'k.ts': 'import { j } from "./j"\nexport const k = j' })
+    const failures = check(
+      { ...base, 'j.ts': 'export * from "./k"\nexport const j = 1', 'k.ts': 'import { j } from "./j"\nexport const k = j' },
+      [['a.ts', 'b.ts']]
     )
-    expect(checkImportCycles(cycles, { cycles: 1, largestCycle: 2, filesInCycles: 4 }).failures).toEqual([
-      expect.stringMatching(/^2 import cycles, up from 1: /)
+    expect(failures).toEqual([expect.stringMatching(/^New or grown import cycle of 2 files.*\n {2}j\.ts {2}\(not in BASELINE\)\n {2}k\.ts/)])
+  })
+  it('rejects a baselined cycle that grew, naming the new member', () => {
+    const failures = check(
+      { ...base, 'b.ts': 'import { a } from "./a"\nimport "./l"\nexport const b = () => a', 'l.ts': 'import "./b"' },
+      [['a.ts', 'b.ts']]
+    )
+    expect(failures).toEqual([expect.stringContaining('l.ts  (not in BASELINE)')])
+  })
+  it('rejects trading a baselined cycle for a new one of the same size', () => {
+    const failures = check(
+      {
+        ...base,
+        'b.ts': 'export const b = () => 1',
+        'j.ts': 'import { k } from "./k"\nexport const j = k',
+        'k.ts': 'import { j } from "./j"\nexport const k = j'
+      },
+      [['a.ts', 'b.ts']]
+    )
+    expect(failures).toEqual([
+      expect.stringMatching(/^New or grown import cycle of 2 files/),
+      expect.stringMatching(/^Stale baseline: this cycle is gone; delete its BASELINE entry in scripts\/check-ui-import-cycles\.mjs/)
     ])
   })
-  it('rejects a cycle that grew past the ceiling', () => {
-    const { cycles } = findImportCycles(
-      fixture({ ...base, 'b.ts': 'import { a } from "./a"\nimport "./l"\nexport const b = () => a', 'l.ts': 'import "./b"' })
-    )
-    expect(checkImportCycles(cycles, { cycles: 1, largestCycle: 2, filesInCycles: 3 }).failures).toEqual([
-      expect.stringMatching(/^The largest import cycle grew from 2 to 3 files/)
+  it('rejects a stale baseline entry once its cycle is gone', () => {
+    expect(check(base, [['a.ts', 'b.ts'], ['x.ts', 'y.ts']])).toEqual([
+      expect.stringMatching(/^Stale baseline: .*\n {2}x\.ts\n {2}y\.ts$/)
     ])
   })
-  it('rejects a smaller cycle that grew while staying under the largest', () => {
-    const { cycles } = findImportCycles(
-      fixture({ ...base, 'b.ts': 'import { a } from "./a"\nimport "./l"\nexport const b = () => a', 'l.ts': 'import "./b"' })
-    )
-    expect(checkImportCycles(cycles, { cycles: 1, largestCycle: 4, filesInCycles: 2 }).failures).toEqual([
-      expect.stringMatching(/^3 files are in import cycles, up from 2/)
-    ])
-  })
-  it('rejects a stale baseline once a cycle is gone', () => {
-    const { cycles } = findImportCycles(fixture(base))
-    expect(checkImportCycles(cycles, { cycles: 2, largestCycle: 2, filesInCycles: 4 }).failures).toEqual([
-      expect.stringContaining('Lower BASELINE.cycles to 1 in scripts/check-ui-import-cycles.mjs')
+  it('rejects a local import that resolves to no file, but not assets or packages', () => {
+    const sources = {
+      ...base,
+      'm.ts': 'import { z } from "./missing"\nimport "./style.css"\nimport logo from "@/logo.svg?url"\nimport "react"\nexport const m = [z, logo]'
+    }
+    expect(check(sources, [['a.ts', 'b.ts']])).toEqual([
+      'm.ts imports "./missing", which resolves to no file: fix the path. An import this script cannot resolve is an edge it cannot check.'
     ])
   })
 })
