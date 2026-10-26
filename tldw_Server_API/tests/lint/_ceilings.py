@@ -11,7 +11,10 @@ baseline: ``--write-baseline`` records every measurement and ``--tighten`` only 
 ceilings and drops stale entries. Both keep existing reasons.
 
 Bump with reason. Raising a ceiling, or adding an entry, is allowed only when the entry
-carries a new reason: non-empty, and different from the reason it had at the merge base.
+carries a new reason: non-empty, different from the reason it had at the merge base, and
+not a pasted template (any unfilled ``<...>`` placeholder, as in the failure messages, is
+no reason). A raised field must equal the code's measurement at the time of the raise:
+a bump cannot reserve headroom for later growth.
 The check compares the baseline with its version at the merge base of
 $BACKLOG_TASK_FORMAT_BASE and HEAD. backend-required sets that variable to the PR base,
 and a local run defaults to origin/dev. So every bump shows up in the PR diff, where
@@ -24,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import warnings
 from collections.abc import Callable, Mapping
@@ -36,6 +40,7 @@ from tldw_Server_API.tests.lint._ast_cache import REPO_ROOT
 
 BASE_ENV = "BACKLOG_TASK_FORMAT_BASE"
 REASON_PLACEHOLDER = "<why the growth is needed, e.g. TASK-13950.7 security fix>"
+_UNFILLED = re.compile(r"<[^<>]*>")
 
 Measured = Mapping[str, Mapping[str, int]]
 Baseline = dict[str, dict[str, Any]]
@@ -46,6 +51,7 @@ class Ratchet(NamedTuple):
     command: str  # runs the counter, e.g. "python -m tldw_Server_API.tests.lint.test_function_size_ratchet"
     fix: str  # how to fix growth in the code
     stale: str  # why an entry is no longer measured
+    new: str = ""  # extra hint for a measured key with no entry
 
 
 def load(path: Path) -> Baseline:
@@ -89,7 +95,8 @@ def violations(ratchet: Ratchet, measured: Measured, baseline: Mapping[str, Mapp
             )
         elif entry is None:
             sizes = ", ".join(f"{field} {value}" for field, value in now.items())
-            problems.append(f"{key}: {sizes}, and no ceiling. {ratchet.fix} {_bump(ratchet, key, now)}")
+            hint = f" {ratchet.new}" if ratchet.new else ""
+            problems.append(f"{key}: {sizes}, and no ceiling. {ratchet.fix}{hint} {_bump(ratchet, key, now)}")
         else:
             cap = _numbers(entry)
             grown = [f"{field} {now[field]} > ceiling {cap[field]}" for field in now if now[field] > cap[field]]
@@ -99,20 +106,37 @@ def violations(ratchet: Ratchet, measured: Measured, baseline: Mapping[str, Mapp
     return problems
 
 
-def unreasoned_raises(ratchet: Ratchet, baseline: Baseline, base: Baseline | None) -> list[str]:
-    """Entries added or raised since ``base`` without a new reason; ``base`` None means no check."""
+def unreasoned_raises(
+    ratchet: Ratchet, baseline: Baseline, base: Baseline | None, measured: Measured | None = None
+) -> list[str]:
+    """Entries added or raised since ``base`` without a new reason, or raised above ``measured``.
+
+    ``base`` None means no check; ``measured`` None skips the headroom check.
+    """
     if base is None:
         return []
     problems = []
     for key, entry in sorted(baseline.items()):
         old = base.get(key, {})
-        raised = [field for field, value in _numbers(entry).items() if field not in old or value > old[field]]
+        numbers = _numbers(entry)
+        raised = [field for field, value in numbers.items() if field not in old or value > old[field]]
         reason = str(entry.get("reason") or "").strip()
-        if raised and (not reason or reason == str(old.get("reason") or "").strip()):
+        if raised and (
+            not reason or _UNFILLED.search(reason) or reason == str(old.get("reason") or "").strip()
+        ):
             problems.append(
                 f"{key}: raises {', '.join(raised)} in {_shown(ratchet.baseline)} without a new reason. "
-                f"Say why in its \"reason\"; the raised ceiling and its reason are reviewed in the PR:\n"
-                f"    {_entry_json(key, _numbers(entry))}"
+                f"Say why in its \"reason\" (fill in any <...> placeholder); the raised ceiling and its "
+                f"reason are reviewed in the PR:\n    {_entry_json(key, numbers)}"
+            )
+        now = (measured or {}).get(key, {})
+        headroom = [field for field in raised if field in now and numbers[field] > now[field]]
+        if headroom:
+            over = ", ".join(f"{field} to {numbers[field]}, above the code's {now[field]}" for field in headroom)
+            fitted = {**numbers, **{field: now[field] for field in headroom}}
+            problems.append(
+                f"{key}: raises {over} in {_shown(ratchet.baseline)}. A bump raises a ceiling to the code's "
+                f"current size, never above it:\n    {_entry_json(key, fitted, reason or REASON_PLACEHOLDER)}"
             )
     return problems
 
@@ -133,7 +157,7 @@ def base_version(path: Path, base: str, repo_root: Path = REPO_ROOT) -> Baseline
     return entries
 
 
-def reasonless_bumps(ratchet: Ratchet) -> list[str]:
+def reasonless_bumps(ratchet: Ratchet, measured: Measured | None = None) -> list[str]:
     """The bump-with-reason check for a test: skips locally when there is no base to compare with."""
     base = os.environ.get(BASE_ENV) or "origin/dev"
     try:
@@ -142,7 +166,7 @@ def reasonless_bumps(ratchet: Ratchet) -> list[str]:
         if os.environ.get(BASE_ENV):
             raise
         pytest.skip(f"cannot find the merge base with {base}; fetch it or set {BASE_ENV} to a base commit ({exc})")
-    return unreasoned_raises(ratchet, load(ratchet.baseline), old)
+    return unreasoned_raises(ratchet, load(ratchet.baseline), old, measured)
 
 
 def warn_if_tightenable(ratchet: Ratchet, measured: Measured, baseline: Baseline) -> None:
