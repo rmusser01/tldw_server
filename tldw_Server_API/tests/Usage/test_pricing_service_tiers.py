@@ -414,3 +414,65 @@ async def test_a_gemini_reply_costs_its_cached_tokens_at_the_cache_read_rate(cos
     # gemini-2.5-flash per 1M: input $0.30, context caching $0.03, output $2.50.
     assert row["prompt_cost_usd"] == pytest.approx((2_000 * 0.30 + 8_000 * 0.03) / 1_000_000)
     assert row["completion_cost_usd"] == pytest.approx(100 * 2.50 / 1_000_000)
+
+
+# --- OpenRouter's reported cost (AC #2) ---
+
+
+async def test_an_openrouter_call_is_costed_from_the_cost_openrouter_reports(costed_rows: list[dict[str, Any]]) -> None:
+    """An uncatalogued model is not costed at the unknown-model rate when OpenRouter reports the call's cost."""
+    usage = {"prompt_tokens": 1_000, "completion_tokens": 200, "total_tokens": 1_200, "cost": 0.0042, "is_byok": False}
+
+    await _log("openrouter", "acme/brand-new-model", usage, 1_000, 200)
+
+    (row,) = costed_rows
+    assert row["total_cost_usd"] == pytest.approx(0.0042)
+    assert row["prompt_cost_usd"] + row["completion_cost_usd"] == pytest.approx(0.0042)
+    assert row["estimated"] is False
+
+
+async def test_an_openrouter_byok_call_adds_the_upstream_provider_charge(costed_rows: list[dict[str, Any]]) -> None:
+    """With BYOK, cost is OpenRouter's fee and cost_details.upstream_inference_cost what the provider charged."""
+    usage = {
+        "prompt_tokens": 194,
+        "completion_tokens": 2,
+        "total_tokens": 196,
+        "cost": 0.95,
+        "is_byok": True,
+        "cost_details": {"upstream_inference_cost": 19},
+    }
+
+    await _log("openrouter", "openai/gpt-5.5", usage, 194, 2)
+
+    (row,) = costed_rows
+    assert row["total_cost_usd"] == pytest.approx(19.95)
+
+
+@pytest.mark.parametrize("cost", [None, "0.5", -1, float("nan"), float("inf"), True])
+async def test_an_openrouter_call_without_a_usable_cost_falls_back_to_the_catalog(
+    costed_rows: list[dict[str, Any]], cost: Any
+) -> None:
+    usage = {"prompt_tokens": 1_000, "completion_tokens": 200, "total_tokens": 1_200, "cost": cost}
+
+    await _log("openrouter", "openai/gpt-5.5", usage, 1_000, 200)
+
+    (row,) = costed_rows
+    # The catalogued openrouter/openai/gpt-5.5 rate: $0.005 / $0.03 per 1K.
+    assert row["total_cost_usd"] == pytest.approx((1_000 * 0.005 + 200 * 0.03) / 1000)
+
+
+def test_only_openrouter_usage_reports_a_cost() -> None:
+    usage = {"prompt_tokens": 1_000, "completion_tokens": 200, "cost": 0.0042}
+
+    assert normalize_llm_usage(provider="openrouter", usage=usage).reported_cost_usd == pytest.approx(0.0042)
+    assert normalize_llm_usage(provider="openai", usage=usage).reported_cost_usd is None
+
+
+def test_a_reported_cost_is_split_by_the_catalog_shares() -> None:
+    prompt_cost, completion_cost, total, estimated = compute_costs(
+        "openrouter", "openai/gpt-5.5", 1_000, 200, reported_cost_usd=0.022
+    )
+
+    # Catalog: 1,000 x $0.005 + 200 x $0.03 per 1K = $0.005 + $0.006.
+    assert (prompt_cost, completion_cost, total) == pytest.approx((0.01, 0.012, 0.022))
+    assert estimated is False

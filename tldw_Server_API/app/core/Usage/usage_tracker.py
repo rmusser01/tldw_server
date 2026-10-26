@@ -267,6 +267,7 @@ def compute_costs(
     speed: str | None = None,
     inference_geo: str | None = None,
     service_tier: str | None = None,
+    reported_cost_usd: float | None = None,
 ) -> tuple[float, float, float, bool]:
     """
     Compute (prompt_cost, completion_cost, total_cost, estimated)
@@ -281,6 +282,8 @@ def compute_costs(
     ``service_tier`` is the tier the provider reports: an entry's
     ``service_tiers`` rates for it apply (OpenAI), Anthropic's ``batch`` halves
     every category, and any other tier costs the standard rates.
+    ``reported_cost_usd`` (OpenRouter's own bill) is the total cost, split
+    between prompt and completion in the catalog's proportions.
     """
     catalog = get_pricing_catalog()
     prompt_total = max(0, int(prompt_tokens or 0))
@@ -322,6 +325,12 @@ def compute_costs(
         multiplier *= ANTHROPIC_BATCH_MULTIPLIER
     prompt_cost *= multiplier
     completion_cost = (completion_total / 1000.0) * out_per_1k * multiplier
+    if reported_cost_usd is not None:
+        # The provider's own bill wins; the catalog only splits it between prompt and completion.
+        catalog_total = prompt_cost + completion_cost
+        prompt_share = prompt_cost / catalog_total if catalog_total > 0 else 1.0
+        total = float(reported_cost_usd)
+        return total * prompt_share, total * (1.0 - prompt_share), total, False
     total_cost = prompt_cost + completion_cost
     return prompt_cost, completion_cost, total_cost, est
 
@@ -401,6 +410,7 @@ async def log_llm_usage(
             speed=normalized_usage.speed,
             inference_geo=normalized_usage.inference_geo,
             service_tier=normalized_usage.service_tier,
+            reported_cost_usd=normalized_usage.reported_cost_usd,
         )
         if estimated is None:
             estimated = est_flag or normalized_usage.estimate_source != "provider_usage"
