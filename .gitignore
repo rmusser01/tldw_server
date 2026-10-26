@@ -289,6 +289,7 @@ errors.log
 !.impeccable/design.json
 !tldw_Server_API/app/core/Evaluations/data/bullshit_benchmark/questions_v2.json
 !tldw_Server_API/tests/fixtures/privilege_route_registry_snapshot.json
+!tldw_Server_API/tests/lint/*_baseline.json
 !apps/package.json
 !apps/extension/package.json
 !apps/extension/tsconfig.json
