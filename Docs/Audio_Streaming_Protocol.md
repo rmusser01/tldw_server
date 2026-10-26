@@ -7,7 +7,7 @@ Overview
 
 WebSocket Endpoint
 - Unified endpoint: `/api/v1/audio/stream/transcribe` (primary; includes auth/quotas/fallback)
-- Core demo endpoint: `/core/parakeet/stream` (portable router; no auth/quotas)
+- Core handler: `Parakeet_Core_Streaming/ws_server.websocket_parakeet_core` (no route; no auth/quotas, so an embedding server must authenticate before calling it). The sections below that mention `/core/parakeet/stream` describe its protocol.
 
 The unified endpoint uses strict audio protocol v1: the first post-auth message
 must be a config frame with `protocol_version: 1`, `mode: "dictate"` or
