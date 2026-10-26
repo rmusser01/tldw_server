@@ -122,11 +122,6 @@ ALLOWLIST: dict[str, str] = {
         "migrate: GitHub API sync via urllib urlopen. Only the first URL is pinned to api.github.com; "
         "urlopen follows redirects and honours env proxies. Use fetch/fetch_json."
     ),
-    "tldw_Server_API/app/core/Ingestion_Media_Processing/OCR/runtime_support.py": (
-        "migrate: http.client readiness probe (GET /health) for the managed OCR server. The host "
-        "defaults to 127.0.0.1 but comes unchecked from CHATLLM_OCR_HOST, LLAMACPP_OCR_HOST or the "
-        "OCR profile; use create_client/fetch."
-    ),
 }
 
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import contextlib
-import http.client
 import json
 import os
 import platform
@@ -17,6 +16,9 @@ from dataclasses import dataclass, field
 from threading import RLock
 from typing import Any
 
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, NetworkError
+from tldw_Server_API.app.core.http_client import RetryPolicy, create_client, fetch
+from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 from tldw_Server_API.app.core.Utils.Utils import logging
 
 
@@ -385,23 +387,44 @@ def wait_for_managed_http_ready(
     interval: float = 0.5,
     paths: tuple[str, ...] = ("/health", "/v1/models"),
 ) -> bool:
+    """Poll the OCR server until a GET on one of ``paths`` returns 2xx, or time runs out.
+
+    ``host`` and ``port`` come from operator config (CHATLLM_OCR_*, LLAMACPP_OCR_*, the OCR
+    profile), so each probe goes through ``core.http_client.fetch`` scoped to exactly that
+    origin: a local server on any private address and port works, redirects are not
+    followed, and an egress refusal (a cloud-metadata or link-local answer) ends the wait.
+    """
+    scheme = "https" if str(scheme).strip().lower() == "https" else "http"
+    authority = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    origin = f"{scheme}://{authority}:{port}"
+    try:
+        scope = ConfiguredEndpointScope.from_url(origin)
+    except ValueError:
+        logging.warning("Managed OCR readiness probe has an invalid host or port")
+        return False
+    probe_timeout = min(5.0, max(interval, 0.1))
     deadline = time.monotonic() + max(timeout_total, 0.0)
-    while time.monotonic() < deadline:
-        for path in paths:
-            connection_cls = http.client.HTTPSConnection if str(scheme).strip().lower() == "https" else http.client.HTTPConnection
-            connection = connection_cls(host, port, timeout=min(5.0, max(interval, 0.1)))
-            try:
-                connection.request("GET", path)
-                response = connection.getresponse()
-                if 200 <= int(response.status) < 300:
-                    response.read()
+    with create_client(timeout=probe_timeout) as client:
+        while time.monotonic() < deadline:
+            for path in paths:
+                try:
+                    response = fetch(
+                        method="GET",
+                        url=f"{origin}{path}",
+                        client=client,
+                        timeout=probe_timeout,
+                        allow_redirects=False,
+                        retry=RetryPolicy(attempts=1),
+                        configured_endpoint=scope,
+                    )
+                except EgressPolicyError:
+                    logging.warning("Managed OCR readiness probe refused by the egress policy")
+                    return False
+                except (NetworkError, OSError):
+                    continue
+                if 200 <= int(response.status_code) < 300:
                     return True
-                response.read()
-            except (ConnectionError, OSError, TimeoutError, http.client.HTTPException):
-                pass
-            finally:
-                connection.close()
-        time.sleep(max(interval, 0.05))
+            time.sleep(max(interval, 0.05))
     return False
 
 
