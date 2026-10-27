@@ -84,7 +84,10 @@ def boundary(monkeypatch):
     calls = []
     result = SimpleNamespace(status="ready", models=("current-model",))
 
-    def discover(provider, api_key, *, base_url=None, force_refresh=False, fetch_fn=None, call_policy=None):
+    def discover(
+        provider, api_key, *, base_url=None, force_refresh=False, fetch_fn=None, call_policy=None,
+        configured_endpoint=None,
+    ):
         calls.append((provider, api_key, base_url, force_refresh, threading.get_ident()))
         return result
 
@@ -231,7 +234,7 @@ def test_openrouter_current_fallbacks_match_actual_adapter_payload(boundary, mon
 def test_openrouter_dispatch_snapshots_validated_fallback_candidates(boundary, monkeypatch):
     models = ["current-model"]
 
-    def discover(_provider, _key, *, base_url):
+    def discover(_provider, _key, *, base_url, configured_endpoint=None):
         models.append("retired-model")
         return boundary.result
 
@@ -671,7 +674,7 @@ def test_explicit_cloud_user_alias_destination_requires_exact_inventory(
 def test_inventory_endpoint_remains_generation_endpoint_after_env_changes(boundary, monkeypatch):
     monkeypatch.setenv("OPENAI_BASE_URL", "https://before.invalid/v1")
 
-    def discover(_provider, _key, *, base_url):
+    def discover(_provider, _key, *, base_url, configured_endpoint=None):
         assert base_url == "https://before.invalid/v1"
         monkeypatch.setenv("OPENAI_BASE_URL", "https://after.invalid/v1")
         return boundary.result

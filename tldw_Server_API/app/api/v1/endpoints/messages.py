@@ -2031,6 +2031,7 @@ async def _resolve_messages_credentials(
             "app_config": credentials.app_config or {},
             "credentials_resolved": True,
             "base_url": _resolve_messages_base_url(provider, credentials.app_config or {}),
+            "_endpoint_provenance": getattr(credentials, "endpoint_provenance", None),
         }
         try:
             await await_bounded_sync_call(

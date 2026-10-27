@@ -27,8 +27,14 @@ these IDs and fuzzy date-stripped aliases. This can display and call retired mod
   no secret logging and no generation probes. Unsupported APIs are explicitly
   unavailable rather than inventing an inventory. It accepts `http` and `https`
   bases wherever the generation adapter would use them (gateways, the mock
-  server); egress policy decides per host, exactly as for generation. A failure
-  logs one line with provider, status and endpoint host only.
+  server). Egress follows generation's rule for server-owned endpoints: the
+  base the server's own config and environment resolve to is scoped to its
+  exact origin (`ConfiguredEndpointScope`, as for server-owned local and custom
+  endpoints), so an operator's localhost or private gateway is discoverable. A
+  BYOK or per-request base, or any base that is not the server's, keeps the
+  default policy its base_url was admitted under, never a wider scope. A call
+  policy's own scope replaces both. Cached results are keyed by that scope. A
+  failure logs one line with provider, status and endpoint host only.
 - Failures map to the errors endpoints already handle: `auth_failed` is a 401
   authentication error (refresh-and-retry safe for OAuth credentials, since no
   generation was sent); `unreachable`/`server_error` use the public code

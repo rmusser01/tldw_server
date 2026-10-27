@@ -2891,6 +2891,7 @@ def _should_enforce_strict_model_selection() -> bool:
 def _validate_explicit_model_availability(
     provider: str, model: str, *, api_key: str | None = None,
     app_config: dict[str, Any] | None = None, credentials_resolved: bool = False,
+    endpoint_provenance: str | None = None,
 ) -> dict[str, Any] | None:
     """Validate explicit model selection against known provider inventory when available."""
     provider_name = (provider or "").strip()
@@ -2903,6 +2904,7 @@ def _validate_explicit_model_availability(
             availability = is_model_known_for_provider(
                 provider_name, model_name, api_key=api_key,
                 app_config=app_config, credentials_resolved=True,
+                endpoint_provenance=endpoint_provenance,
             )
         else:
             availability = is_model_known_for_provider(provider_name, model_name)
@@ -4709,6 +4711,9 @@ async def create_chat_completion(
                         _validate_explicit_model_availability, target_api_provider, model,
                         api_key=provider_api_key, app_config=app_config_override,
                         credentials_resolved=True,
+                        endpoint_provenance=_derive_endpoint_provenance(
+                            credential_handle, request_override=_request_has_endpoint_override(request_data),
+                        ),
                     )
                     if availability_error:
                         raise HTTPException(

@@ -1087,7 +1087,10 @@ def test_qwen_unknown_base_path_never_guesses_an_inventory_route(inventory):
     ],
 )
 def test_http_base_is_discovered_where_generation_uses_it(inventory, monkeypatch, config, env, endpoint):
-    """An http gateway the adapter would call is listed through the same egress-checked fetch (review I2)."""
+    """An http gateway base resolves and is requested where the adapter calls it (review I2).
+
+    Base resolution and URL shape only; test_provider_inventory_egress_scope.py runs the real fetch and policy.
+    """
     for name, value in env.items():
         monkeypatch.setenv(name, value)
     base = inventory.resolve_provider_models_base_url("openai", config, credentials_resolved=not env)

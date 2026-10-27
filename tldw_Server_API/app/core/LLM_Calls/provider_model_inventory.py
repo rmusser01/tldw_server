@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.http_client import RetryPolicy
 from tldw_Server_API.app.core.http_client import fetch as _http_fetch
 from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
@@ -102,7 +103,8 @@ _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 # Short negative cache: a failing /models is not re-fetched on every call. Never auth_failed or not_found.
 _FAILURE_TTL_SECONDS = 20.0
 _BRIEFLY_CACHED_FAILURES = frozenset({"unreachable", "server_error"})
-_CacheKey = tuple[str, str, str]
+# The scope is part of the key: a cached result is the outcome of one egress decision.
+_CacheKey = tuple[str, str, str, ConfiguredEndpointScope | None]
 # Each entry holds the inventory and the single-model lookups checked against it (model -> result).
 _CACHE: OrderedDict[_CacheKey, tuple[float, ModelDiscoveryResult, dict[str, ModelDiscoveryResult]]] = OrderedDict()
 _FAILED: OrderedDict[_CacheKey, tuple[float, ModelDiscoveryResult]] = OrderedDict()
@@ -201,6 +203,31 @@ def resolve_provider_models_base_url(
             return None
         return _safe_base_url(base)
     except Exception:  # noqa: BLE001 - configuration failure must not reveal credentials
+        return None
+
+
+# Generation's rule for an endpoint it did not get from server config (custom_openai_adapter, local_adapters).
+_CALLER_ENDPOINT_PROVENANCE = frozenset({"byok", "request_override"})
+
+
+def inventory_endpoint_scope(
+    provider: str, base_url: str | None, *, endpoint_provenance: str | None = None,
+) -> ConfiguredEndpointScope | None:
+    """Make generation's egress decision for the discovery base (re-review I2).
+
+    A server-owned endpoint gets its exact origin, as server-owned local and custom endpoints do
+    (``resolve_trusted_provider_endpoint``), so an operator's localhost or private gateway is discoverable.
+    Only the base the server's own config and environment resolve to qualifies: caller app config is never
+    trusted. A BYOK or per-request base keeps the default policy its base_url was admitted under
+    (``validate_base_url_override``), never a wider scope.
+    """
+    if base_url is None or endpoint_provenance in _CALLER_ENDPOINT_PROVENANCE:
+        return None
+    if _safe_base_url(base_url) != resolve_provider_models_base_url(provider):
+        return None
+    try:
+        return ConfiguredEndpointScope.from_url(base_url)
+    except ValueError:
         return None
 
 
@@ -362,8 +389,10 @@ def _parse_page(provider: str, payload: Any, *, page_number: int = 1) -> tuple[l
     return models, cursor, len(rows)
 
 
-def _cache_key(provider: str, endpoint: str, api_key: str) -> _CacheKey:
-    return provider, endpoint, hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+def _cache_key(
+    provider: str, endpoint: str, api_key: str, scope: ConfiguredEndpointScope | None = None,
+) -> _CacheKey:
+    return provider, endpoint, hashlib.sha256(api_key.encode("utf-8")).hexdigest(), scope
 
 
 def _log_discovery_failure(provider: str, endpoint: str, status: str, *, lookup: bool = False) -> None:
@@ -384,6 +413,7 @@ def resolve_provider_model_selection(
     base_url: str,
     inventory: ModelDiscoveryResult,
     call_policy: ProviderCallPolicy | None = None,
+    configured_endpoint: ConfiguredEndpointScope | None = None,
     fetch_fn: Callable[..., Any] | None = None,
 ) -> ModelDiscoveryResult:
     """Confirm a request ID against its already scoped, current inventory.
@@ -407,7 +437,7 @@ def resolve_provider_model_selection(
     if not isinstance(api_key, str) or not api_key.strip() or any(ord(char) < 32 for char in api_key):
         return ModelDiscoveryResult("auth_failed")
     budget = _TIMEOUT_SECONDS
-    scope = None
+    scope = configured_endpoint
     if call_policy is not None:
         if not isinstance(call_policy, ProviderCallPolicy):
             return ModelDiscoveryResult("unsupported")
@@ -452,7 +482,7 @@ def resolve_provider_model_selection(
     elif provider != "anthropic":
         return ModelDiscoveryResult("not_found")
     # A lookup lives exactly as long as the inventory entry it was checked against (review I4).
-    cache_key = _cache_key(provider, endpoint, api_key.strip())
+    cache_key = _cache_key(provider, endpoint, api_key.strip(), scope)
     with _CACHE_LOCK:
         entry = _CACHE.get(cache_key)
         known = entry[2].get(model) if entry is not None and entry[1] is inventory else None
@@ -547,8 +577,12 @@ def discover_provider_models(
     force_refresh: bool = False,
     fetch_fn: Callable[..., Any] | None = None,
     call_policy: ProviderCallPolicy | None = None,
+    configured_endpoint: ConfiguredEndpointScope | None = None,
 ) -> ModelDiscoveryResult:
     """Return a complete authoritative inventory or a sanitized failure.
+
+    ``configured_endpoint`` is the scope ``inventory_endpoint_scope`` gives a server-owned base; a call
+    policy's own scope replaces it, as it does for generation.
 
     All pages share a five-second monotonic budget and one-attempt HTTP timeouts.
     Limits abort discovery rather than publishing a partial catalog. Only ready
@@ -564,7 +598,7 @@ def discover_provider_models(
         return ModelDiscoveryResult("auth_failed")
     key = api_key.strip()
     budget = _TIMEOUT_SECONDS
-    scope = None
+    scope = configured_endpoint
     if call_policy is not None:
         from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
 
@@ -582,7 +616,7 @@ def discover_provider_models(
         return ModelDiscoveryResult("unsupported")
     if scope is not None and not scope.matches(endpoint):
         return ModelDiscoveryResult("unsupported")
-    cache_key = _cache_key(provider, endpoint, key)
+    cache_key = _cache_key(provider, endpoint, key, scope)
     with _CACHE_LOCK:
         cached = _CACHE.get(cache_key)
         if not force_refresh and cached and time.monotonic() - cached[0] < _TTL_SECONDS:

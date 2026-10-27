@@ -68,6 +68,7 @@ from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
 from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import (
     discover_provider_models,
     has_model_listing,
+    inventory_endpoint_scope,
     resolve_provider_models_base_url,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
@@ -1609,9 +1610,11 @@ def _resolve_commercial_listing(
     )
     if base_url is None:
         return api_key_value, True, ModelDiscoveryResult("unsupported")
+    scope = inventory_endpoint_scope(provider_name, base_url)
     return api_key_value, True, discover_provider_models(
         provider_name, api_key_value, base_url=base_url,
         force_refresh=refresh_openrouter and provider_name == "openrouter",
+        **({"configured_endpoint": scope} if scope is not None else {}),
     )
 
 

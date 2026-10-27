@@ -195,6 +195,7 @@ from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import (
     CLOUD_MODEL_PROVIDERS,
     discover_provider_models,
     has_model_listing,
+    inventory_endpoint_scope,
     resolve_provider_model_selection,
     resolve_provider_models_base_url,
 )
@@ -974,8 +975,8 @@ def known_models_for_provider_cached(
             ),
             "credentials_resolved": credentials_resolved,
         }
-        base_url = _provider_inventory_base_url(provider_key, request)
-        result = discover_provider_models(provider_key, api_key, base_url=base_url)
+        base_url, discovery_options = _provider_inventory_endpoint(provider_key, request)
+        result = discover_provider_models(provider_key, api_key, base_url=base_url, **discovery_options)
         if result.status != "ready":
             _raise_inventory_failure(provider_key, result.status)
         return tuple(result.models)
@@ -1004,6 +1005,7 @@ def is_model_known_for_provider(
     api_key: str | None = None,
     app_config: dict[str, Any] | None = None,
     credentials_resolved: bool = False,
+    endpoint_provenance: str | None = None,
 ) -> bool | None:
     """Check authoritative commercial request IDs with credential context, else defer."""
     provider_key = canonical_provider_name(normalize_catalog_provider_for_chat(provider))
@@ -1020,11 +1022,12 @@ def is_model_known_for_provider(
         request = {
             "app_config": app_config if app_config is not None else ({} if credentials_resolved else None),
             "credentials_resolved": credentials_resolved,
+            "_endpoint_provenance": endpoint_provenance,
         }
-        base_url = _provider_inventory_base_url(provider_key, request)
-        inventory = discover_provider_models(provider_key, api_key, base_url=base_url)
+        base_url, discovery_options = _provider_inventory_endpoint(provider_key, request)
+        inventory = discover_provider_models(provider_key, api_key, base_url=base_url, **discovery_options)
         selection = resolve_provider_model_selection(
-            provider_key, api_key, model_key, base_url=base_url, inventory=inventory,
+            provider_key, api_key, model_key, base_url=base_url, inventory=inventory, **discovery_options,
         )
         if selection.status not in {"ready", "not_found"}:
             _raise_inventory_failure(provider_key, selection.status)
@@ -2612,10 +2615,14 @@ async def _await_with_call_policy_deadline(
     )
 
 
-def _provider_inventory_base_url(
+def _provider_inventory_endpoint(
     provider: str, request: dict[str, Any],
-) -> str:
-    """Do not let unavailable scoped configuration fall back to global discovery."""
+) -> tuple[str, dict[str, Any]]:
+    """Resolve the discovery base and the discovery options carrying generation's egress decision for it.
+
+    Unavailable scoped configuration never falls back to global discovery. A call policy's scope wins, as it
+    does for generation; otherwise ``inventory_endpoint_scope`` decides from the endpoint's provenance.
+    """
     base_url = resolve_provider_models_base_url(
         provider, request.get("app_config"),
         credentials_resolved=request.get("credentials_resolved") is True,
@@ -2625,7 +2632,13 @@ def _provider_inventory_base_url(
         raise ChatConfigurationError(
             provider=provider, message="Provider model inventory endpoint is unavailable.",
         )
-    return base_url
+    policy = request.get("call_policy")
+    if isinstance(policy, ProviderCallPolicy):
+        return base_url, {"call_policy": policy}
+    credentials = request.get(PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY)
+    provenance = request.get("_endpoint_provenance") or getattr(credentials, "endpoint_provenance", None)
+    scope = inventory_endpoint_scope(provider, base_url, endpoint_provenance=provenance)
+    return base_url, ({"configured_endpoint": scope} if scope is not None else {})
 
 
 _INVENTORY_OUTAGES = frozenset({"unreachable", "server_error"})
@@ -2682,9 +2695,8 @@ def _validate_provider_model_selection(
         fallback_models = list(raw_models)
         selected_models.extend(fallback_models)
     policy = request.get("call_policy")
-    discovery_options: dict[str, Any] = {"call_policy": policy} if isinstance(policy, ProviderCallPolicy) else {}
     discovery_started = time.monotonic()
-    base_url = _provider_inventory_base_url(provider, request)
+    base_url, discovery_options = _provider_inventory_endpoint(provider, request)
     result = discover_provider_models(
         provider, request.get("api_key"), base_url=base_url, **discovery_options,
     )
@@ -2699,9 +2711,10 @@ def _validate_provider_model_selection(
             if remaining <= 0:
                 _raise_inventory_failure(provider, "unreachable")
             selection_policy = replace(selection_policy, maximum_timeout_seconds=remaining)
+        selection_options = {"call_policy": selection_policy} if selection_policy is not None else discovery_options
         selection = resolve_provider_model_selection(
             provider, request.get("api_key"), model,
-            base_url=base_url, inventory=result, call_policy=selection_policy,
+            base_url=base_url, inventory=result, **selection_options,
         )
         if selection.status == "not_found":
             raise ChatModelNotAvailableError(provider, model)
