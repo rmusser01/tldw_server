@@ -62,6 +62,10 @@ import {
 } from "@/workspace-templates/work-product-templates"
 import { useStoreMessageOption } from "@/store/option"
 import { useStoreChatModelSettings } from "@/store/model"
+import {
+  normalizeApiProviderKey,
+  parseProviderQualifiedModelSelection
+} from "@/utils/resolve-api-provider"
 import { getWorkspaceStudioNoSourcesHint } from "../source-location-copy"
 import { WorkProductTemplateChooser } from "./WorkProductTemplateChooser"
 import {
@@ -306,10 +310,10 @@ const isStudioWorkspaceSourceUsable = (source: WorkspaceSource) => {
 const normalizeStudioChatModelId = (value: unknown): string => {
   if (typeof value !== "string") return ""
   const trimmed = value.trim()
-  if (trimmed.toLowerCase().startsWith("tldw:")) {
-    return trimmed.slice(5).trim()
-  }
-  return trimmed
+  const modelId = trimmed.toLowerCase().startsWith("tldw:")
+    ? trimmed.slice(5).trim()
+    : trimmed
+  return parseProviderQualifiedModelSelection(modelId).modelId
 }
 
 const buildSelectedModelUnavailableMessage = (
@@ -987,6 +991,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     typeof selectedModel === "string" ? selectedModel.trim() : ""
   const hasSelectedModelValue = selectedModelValue.length > 0
   const selectedModelCatalogKey = normalizeStudioChatModelId(selectedModelValue)
+  const selectedModelSelection = parseProviderQualifiedModelSelection(selectedModelValue)
   const baseModelPrerequisiteMessage = hasSelectedModelValue
     ? null
     : t(
@@ -1158,17 +1163,29 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
 
   const selectedModelMatchesChatCatalog =
     selectedModelCatalogKey.length > 0 &&
-    _chatModels.some(
-      (model) =>
-        typeof model.id === "string" &&
-        normalizeStudioChatModelId(model.id) === selectedModelCatalogKey
-    )
+    _chatModels.some((model) => {
+      if (
+        typeof model.id !== "string" ||
+        normalizeStudioChatModelId(model.id) !== selectedModelCatalogKey
+      )
+        return false
+      if (!selectedModelSelection.provider) return true
+      const catalogProvider =
+        model.chatProvider ||
+        parseProviderQualifiedModelSelection(model.id).provider ||
+        model.provider
+      return (
+        normalizeApiProviderKey(catalogProvider) ===
+        selectedModelSelection.provider
+      )
+    })
   const selectedModelIsStaleTldw =
     selectedModelValue.toLowerCase().startsWith("tldw:") &&
     !selectedModelMatchesChatCatalog
   const selectedModelLooksCatalogBacked =
     selectedModelValue.includes("/") ||
-    selectedModelValue.toLowerCase().startsWith("tldw:")
+    selectedModelValue.toLowerCase().startsWith("tldw:") ||
+    selectedModelSelection.isProviderQualified
   const unavailableSelectedModelMessage =
     hasSelectedModelValue && !selectedModelMatchesChatCatalog
       ? buildSelectedModelUnavailableMessage(

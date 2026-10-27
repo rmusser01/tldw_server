@@ -1752,6 +1752,79 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     })
   })
 
+  it.each(["llama:", "tldw:llama.cpp:"])(
+    "allows the configured repo model selected with provider prefix %s",
+    async (prefix) => {
+      const model = "unsloth/Qwen3.8-27B-GGUF:Q8_0"
+      messageOptionStoreState.selectedModel = prefix + model
+      mockGetChatModels.mockResolvedValue([
+        {
+          id: model,
+          name: model,
+          provider: "llama",
+          chatProvider: "llama.cpp",
+          type: "chat",
+          isConfigured: true,
+          providerEnabled: true,
+          availability: "enabled"
+        }
+      ])
+      renderStudioPane()
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Slides" })).toBeEnabled()
+      )
+      fireEvent.click(screen.getByRole("button", { name: "Slides" }))
+
+      await waitFor(() =>
+        expect(mockGenerateSlidesFromMedia).toHaveBeenCalledWith(
+          101,
+          expect.objectContaining({ model, provider: "llama.cpp" })
+        )
+      )
+      expect(
+        screen.queryByText(/not available in the current chat model catalog/i)
+      ).not.toBeInTheDocument()
+    }
+  )
+
+  it.each(["unsloth/Qwen3.8-27B-GGUF:Q8_0", "gemma3"])(
+    "does not borrow another provider's configured repo model %s",
+    async (model) => {
+      messageOptionStoreState.selectedModel = "ollama:" + model
+      mockGetChatModels.mockResolvedValue([
+        {
+          id: model,
+          name: model,
+          provider: "llama",
+          chatProvider: "llama.cpp",
+          type: "chat",
+          isConfigured: true,
+          providerEnabled: true,
+          availability: "enabled"
+        }
+      ])
+      renderStudioPane()
+      await act(async () => {
+        await Promise.resolve()
+      })
+      await waitFor(() =>
+        expect(
+          screen.getByText(/not available in the current chat model catalog/i)
+        ).toBeInTheDocument()
+      )
+
+      const slides = screen.getByRole("button", { name: "Slides" })
+      expect(slides).toBeDisabled()
+      fireEvent.click(slides)
+      expect(mockGenerateSlidesFromMedia).not.toHaveBeenCalled()
+      expect(mockAddArtifact).not.toHaveBeenCalled()
+    }
+  )
+
   it("uses chatProvider and raw model id for provider-qualified llama.cpp selections", async () => {
     messageOptionStoreState.selectedModel =
       "llama.cpp:gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf"
