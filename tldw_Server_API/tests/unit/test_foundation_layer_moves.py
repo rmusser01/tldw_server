@@ -105,3 +105,67 @@ def test_email_metric_families_are_defined_in_metrics() -> None:
         "email_native_persist_seconds", "email_ingestion_dedupe_total",
     }
     assert {"email_ingestion_parse_total", "email_ingestion_dedupe_total"} <= set(MetricsRegistry().metrics)
+
+
+def test_old_security_egress_path_is_the_moved_module(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+    from unittest import mock
+
+    import tldw_Server_API.app.core.Security.egress as old
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Security import egress as via_package
+    from tldw_Server_API.app.core.Utils import egress as new
+
+    # tests/conftest.py defaults this to "false"; the policy reads it per call.
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+    assert old is new and via_package is new
+    with mock.patch(
+        "tldw_Server_API.app.core.Security.egress.evaluate_url_policy",
+        return_value=SimpleNamespace(allowed=True),
+    ):
+        assert http_client._is_url_allowed("http://169.254.169.254/") is True
+    assert http_client._is_url_allowed("http://169.254.169.254/") is False
+
+
+def test_http_client_denies_metadata_ip_without_core_security() -> None:
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = (
+        "import sys\n"
+        "from tldw_Server_API.app.core import http_client\n"
+        "from tldw_Server_API.app.core.exceptions import EgressPolicyError\n"
+        "try:\n"
+        "    http_client._validate_egress_or_raise('http://169.254.169.254/latest/meta-data/')\n"
+        "except EgressPolicyError:\n"
+        "    print('denied')\n"
+        "print(sorted(m for m in sys.modules if m.startswith('tldw_Server_API.app.core.Security')))\n"
+    )
+    out = subprocess.run(  # fixed argv, no shell
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).resolve().parents[3],
+        env={**os.environ, "WORKFLOWS_EGRESS_BLOCK_PRIVATE": "true"},
+        capture_output=True, text=True, check=True, timeout=120,
+    ).stdout.splitlines()
+    assert out[-2:] == ["denied", "[]"]
+
+
+def test_old_egress_path_aliases_when_imported_first() -> None:
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = (
+        "import tldw_Server_API.app.core.Security.egress as old\n"
+        "from tldw_Server_API.app.core.Utils import egress as new\n"
+        "from tldw_Server_API.app.core.Security import egress as via_package\n"
+        "assert old is new and via_package is new\n"
+    )
+    result = subprocess.run(  # fixed argv, no shell
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).resolve().parents[3],
+        capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]

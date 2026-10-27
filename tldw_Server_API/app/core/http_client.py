@@ -140,13 +140,13 @@ from tldw_Server_API.app.core.Metrics import (  # noqa: E402
     get_metrics_registry,
 )
 from tldw_Server_API.app.core.Metrics.traces import get_tracing_manager  # noqa: E402
-from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope  # noqa: E402
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled,
     is_explicit_pytest_runtime,
     is_test_mode,
     is_truthy,
 )
+from tldw_Server_API.app.core.Utils.egress import ConfiguredEndpointScope  # noqa: E402
 
 
 class _TerminalHTTPStatusError(Exception):
@@ -1641,7 +1641,7 @@ def _parse_host_from_url(url: str) -> str:
 
 
 def _normalize_dns_pin_host(host: str) -> str:
-    from tldw_Server_API.app.core.Security.egress import (
+    from tldw_Server_API.app.core.Utils.egress import (
         _canonical_ip_literal,
         _normalize_hostname,
     )
@@ -1961,7 +1961,7 @@ def _validate_egress_or_raise(
 ) -> None:
     from urllib.parse import urlparse as _urlparse
 
-    from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
+    from tldw_Server_API.app.core.Utils.egress import evaluate_url_policy
 
     sensitive_observability = _effective_sensitive_observability(
         sensitive_observability
@@ -2064,7 +2064,7 @@ def _is_url_allowed(url: str) -> bool:
     Delegates to the central egress policy evaluator and returns a boolean.
     """
     try:
-        from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
+        from tldw_Server_API.app.core.Utils.egress import evaluate_url_policy
         if _effective_sensitive_observability():
             res = evaluate_url_policy(url, sensitive_observability=True)
         else:
@@ -2819,7 +2819,7 @@ def _instantiate_client(factory: Callable[..., _Client], kwargs: dict[str, Any])
     """
     import re as _re
 
-    from tldw_Server_API.app.core.Security.egress import public_url_policy_active
+    from tldw_Server_API.app.core.Utils.egress import public_url_policy_active
 
     while True:
         try:
@@ -5150,7 +5150,7 @@ def fetch(*args, **kwargs):
         if type(max_response_bytes) is not int or max_response_bytes <= 0:
             raise ValueError("max_response_bytes must be a positive integer")
 
-    from tldw_Server_API.app.core.Security.egress import public_url_policy_active
+    from tldw_Server_API.app.core.Utils.egress import public_url_policy_active
 
     public_capture = public_url_policy_active()
     dns_pin_cache: dict[str, tuple[str, ...]] = {}

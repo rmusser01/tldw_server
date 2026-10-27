@@ -34,6 +34,10 @@ compatibility, CPU-bound execution, and optional system checks.
   stripped, case-insensitive, three-way (unrecognised returns the caller's
   default). Use it instead of a private `_env_bool`/`_as_bool`;
   `core/testing.is_truthy` delegates to it.
+- `egress.py` is the outbound egress/SSRF policy (ADR-026): URL allow/deny,
+  private-IP and port rules, DNS drift checks and tenant webhook rules. It moved
+  from `core/Security/egress.py` (TASK-13950.12), which aliases it, because
+  `core/http_client.py` enforces it on every outbound request.
 - `metadata_utils.py` normalizes safe metadata dictionaries for media APIs.
 - `provider_identity.py` canonical provider names and aliases.
 - `pydantic_compat.py` wraps model dump/validation compatibility.
