@@ -107,6 +107,26 @@ def test_bulk_tags_and_status(client_with_user):
     assert row_a.read_at is not None
 
 
+def test_bulk_tag_actions_match_by_identity_and_keep_display_casing(client_with_user):
+    client = client_with_user
+    cdb = CollectionsDatabase.for_user(user_id=321)
+    item_id = _insert_item(cdb, url="https://example.com/casing", title="Casing", status="saved", tags=["Straße"])
+
+    r = client.post(
+        "/api/v1/items/bulk",
+        json={"item_ids": [item_id], "action": "add_tags", "tags": ["STRASSE", "Machine Learning"]},
+    )
+    assert r.status_code == 200, r.text
+    assert cdb.get_content_item(item_id).tags == ["Machine Learning", "Straße"]
+
+    r = client.post(
+        "/api/v1/items/bulk",
+        json={"item_ids": [item_id], "action": "remove_tags", "tags": ["strasse"]},
+    )
+    assert r.status_code == 200, r.text
+    assert cdb.get_content_item(item_id).tags == ["Machine Learning"]
+
+
 def test_bulk_delete_soft_and_hard(client_with_user):
     client = client_with_user
     cdb = CollectionsDatabase.for_user(user_id=321)

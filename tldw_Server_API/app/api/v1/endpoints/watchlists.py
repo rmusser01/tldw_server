@@ -86,6 +86,7 @@ from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime as _is_explicit_pytest_runtime
 from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
+from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 from tldw_Server_API.app.core.Watchlists import template_store
 from tldw_Server_API.app.core.Watchlists.briefing_contract import (
     BRIEFING_PIPELINE_KEY,
@@ -2245,11 +2246,11 @@ async def export_sources_opml(
             rows = []
         # Apply tag filter manually (AND semantics)
         if tag:
-            needed = [t.strip().lower() for t in tag if t and str(t).strip()]
+            needed = {normalize_keyword_identity(t) for t in tag if t and str(t).strip()}
 
             def _has_all_tags(src) -> bool:
-                src_tags = [str(t).strip().lower() for t in (getattr(src, "tags", []) or [])]
-                return all(n in src_tags for n in needed)
+                src_tags = {normalize_keyword_identity(str(t)) for t in (getattr(src, "tags", []) or [])}
+                return needed <= src_tags
 
             rows = [r for r in rows if _has_all_tags(r)]
     else:
