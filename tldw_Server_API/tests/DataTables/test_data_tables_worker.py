@@ -556,3 +556,23 @@ async def test_llm_request_includes_adapter_timeout(monkeypatch, tmp_path):
     assert result["row_count"] == 1
     assert "timeout" not in seen_request
     assert seen_timeout["value"] == 12
+
+
+@pytest.mark.parametrize(
+    ("provider", "section"),
+    [
+        ("llamacpp", "llama_api"),
+        ("llama.cpp", "llama_api"),
+        ("tabbyapi", "tabby_api"),
+        ("local-llm", "local_llm"),
+        ("custom-openai-api-99", "custom_openai_api_99"),
+    ],
+)
+def test_default_model_uses_registered_configuration_section(provider, section):
+    config = {section: {"model": "configured-model"}}
+    assert jobs_worker._resolve_model(provider, None, config) == "configured-model"  # nosec B101 -- default model regression.
+
+
+@pytest.mark.parametrize("provider", ["llamacpp", "openai"])
+def test_explicit_model_precedes_default_configuration(provider):
+    assert jobs_worker._resolve_model(provider, "selected-model", {}) == "selected-model"  # nosec B101 -- explicit model precedence.
