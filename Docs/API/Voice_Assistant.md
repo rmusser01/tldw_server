@@ -112,7 +112,7 @@ verified like `Authorization: Bearer` on HTTP (revocation, API-key `read` scope,
 
 A frame without a token falls back to the single-user WebUI session cookie, then to a credential on the upgrade
 request, then to the deprecated `?token=` query parameter (logged as deprecated; URLs end up in access logs).
-`?api_key=` is not read. A first message over 16 KiB is refused like any other non-`auth` message, unparsed.
+`?api_key=` is not read. A first message over 16,384 characters is refused like any other non-`auth` message, unparsed.
 
 Auth:
 

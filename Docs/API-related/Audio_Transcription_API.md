@@ -392,7 +392,7 @@ failopen_cap_minutes = 5.0
 
 - Endpoint: `ws://localhost:8000/api/v1/audio/stream/transcribe`
 - Authentication (the core WebSocket resolver, so revocation and key rules match HTTP):
-  - On the upgrade request: `Authorization: Bearer <JWT or API key>`, `X-API-KEY: <key>`, or the browser subprotocol `bearer, <JWT or key>`. A refused credential closes `4401` before the socket is accepted.
+  - On the upgrade request: `Authorization: Bearer <JWT or API key>`, `X-API-KEY: <key>`, or the browser subprotocol `bearer, <JWT or key>`. A refused credential fails the handshake before the socket is accepted (uvicorn answers HTTP 403, with no close code).
   - Otherwise the first message: `{ "type": "auth", "token": "<JWT or API key>" }` within 5 seconds. Any other first message closes `4400` unread; a missing, refused or revoked token closes `4401`.
   - Single-user WebUI sessions authenticate with their cookie and may send `config` first.
   - Multi-user API keys and scoped JWTs can be limited to endpoints (must include `audio.stream.transcribe`) and path prefixes (`4403`); quotas may be enforced per key or token.

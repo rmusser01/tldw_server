@@ -14,10 +14,10 @@ WebSocket authentication (audio streams)
   core WebSocket resolver (`websocket_principal`), so revocation, API-key handling and single-user rules match HTTP.
 - A handshake credential is verified before the socket is accepted, and no frame is read for auth:
   `Authorization: Bearer <JWT or API key>`, `X-API-KEY: <key>`, or the browser subprotocol `bearer, <JWT or key>`
-  (the server echoes `bearer`). A refused one closes before accept with `4401`.
+  (the server echoes `bearer`). A refused one fails the handshake before accept: uvicorn answers HTTP 403, with no close code (the Starlette test client reports `4401`).
 - Without one, the server accepts the socket only to read one auth frame, `{"type": "auth", "token": "<JWT or API key>"}`,
   within 5 seconds, and reads nothing after it until the caller is known:
-  - a first frame that is not an auth frame closes `4400`, unread (one over 16 KiB is never parsed);
+  - a first frame that is not an auth frame closes `4400`, unread (one over 16,384 characters is never parsed);
   - a missing, refused or revoked token, or no frame in time, closes `4401`;
   - each refusal sends `{"type": "error", "message": "..."}` first; the message never contains the credential.
 - The single-user WebUI session cookie (trusted Origin only) also authenticates. Its clients may skip the auth frame and
