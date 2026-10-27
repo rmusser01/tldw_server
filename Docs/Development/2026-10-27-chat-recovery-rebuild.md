@@ -160,4 +160,3 @@ No critical findings. Fixed:
 Not changed: the nested `role="status"`/`role="alert"` in the recovery card
 predates this branch; the catalog's unique-id fallback for a selection
 without a provider can differ from the request's provider resolution.
-

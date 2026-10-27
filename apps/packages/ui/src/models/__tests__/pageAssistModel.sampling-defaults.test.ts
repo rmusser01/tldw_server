@@ -133,4 +133,3 @@ describe("sampling settings reach the request (#3283)", () => {
     expect(options.minP).toBeUndefined()
   })
 })
-
