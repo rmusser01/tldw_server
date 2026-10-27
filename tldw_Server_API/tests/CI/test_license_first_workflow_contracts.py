@@ -1442,7 +1442,14 @@ def test_backend_required_enforces_layering_ratchets(ratchet: str) -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("guard", ["tldw_Server_API/tests/lint/test_direct_llm_adapter_calls_ratchet.py"])
+@pytest.mark.parametrize(
+    "guard",
+    [
+        "tldw_Server_API/tests/lint/test_direct_llm_adapter_calls_ratchet.py",
+        "tldw_Server_API/tests/lint/test_llm_calls_import_isolation.py",
+        "tldw_Server_API/tests/lint/test_no_inline_sse_frames.py",
+    ],
+)
 def test_backend_required_enforces_llm_gateway_guards(guard: str) -> None:
     """TASK-13950.13: the gateway's guards run in a required step, with the PR base their reason check reads."""
     import shlex
