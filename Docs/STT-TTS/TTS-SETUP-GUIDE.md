@@ -400,7 +400,10 @@ providers:
 
 The adapter checks `/health` and `/v1/models` during initialization. By default,
 `base_url` must be loopback. Set `allow_remote_base_url: true` only when an
-admin intentionally exposes a trusted remote audio.cpp server.
+admin intentionally exposes a trusted remote audio.cpp server. A remote server is
+reached under the default egress policy: private and link-local addresses are
+refused, and only ports 80, 443 and 8080 are allowed unless the `WORKFLOWS_EGRESS_*`
+settings say otherwise.
 
 Reference-audio cloning in external mode is disabled by default because this
 adapter sends `voice_ref` as a path readable by the audio.cpp server process. To use

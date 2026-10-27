@@ -2794,3 +2794,77 @@ def test_audio_cpp_registry_reset_clears_discovery_cache(
 
     assert calls == ["reset"]
     assert spa._REGISTRY is None
+
+
+# --- Egress (TASK-13950.11) -----------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_audio_cpp_aiohttp_client_carries_http_client_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import aiohttp
+
+    monkeypatch.setenv("HTTP_CERT_PINS", "audio.example.test=AbCd")
+    monkeypatch.setenv("HTTP_DEFAULT_USER_AGENT", "tldw-test-agent")
+    session = audio_cpp._create_audio_cpp_client(transport="aiohttp", timeout_seconds=17.25)
+    assert isinstance(session, aiohttp.ClientSession)
+    try:
+        assert session.headers["User-Agent"] == "tldw-test-agent"
+        assert session._tldw_cert_pinning == {"audio.example.test": {"abcd"}}
+        assert session.timeout.total == 17.25
+        assert session.trust_env is False
+    finally:
+        await session.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["success", "redirect"])
+async def test_audio_cpp_configured_loopback_server_through_the_real_helpers(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    outcome: str,
+) -> None:
+    """The configured loopback origin is admitted by scope; a redirect elsewhere is not followed."""
+    import httpx
+
+    from tldw_Server_API.app.core.http_client import create_async_client
+
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+    seen: list[httpx.Request] = []
+
+    class Body(httpx.AsyncByteStream):
+        """An unread body: max_response_bytes streams it, so it cannot be pre-read bytes."""
+
+        def __init__(self, content: bytes) -> None:
+            self.content = content
+
+        async def __aiter__(self):
+            yield self.content
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if outcome == "redirect":
+            return httpx.Response(302, headers={"location": "http://10.0.0.9:18080/health"})
+        return httpx.Response(200, stream=Body(_successful_audio_cpp_response(str(request.url)).content))
+
+    monkeypatch.setattr(
+        audio_cpp,
+        "create_async_client",
+        lambda **kwargs: create_async_client(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    request: dict[str, Any] = _audio_cpp_request_kwargs(tmp_path, transport="httpx")
+
+    if outcome == "redirect":
+        with pytest.raises(STTTranscriptionError):
+            await audio_cpp.transcribe_audio_cpp_async(**request)
+        assert [str(item.url) for item in seen] == ["http://127.0.0.1:18080/health"]
+        return
+    outcome_value = await audio_cpp.transcribe_audio_cpp_async(**request)
+    assert outcome_value.artifact["text"] == "hello"
+    assert [(item.method, str(item.url)) for item in seen] == [
+        ("GET", "http://127.0.0.1:18080/health"),
+        ("GET", "http://127.0.0.1:18080/v1/models"),
+        ("POST", "http://127.0.0.1:18080/v1/audio/transcriptions"),
+    ]
+    assert all(item.extensions["timeout"]["read"] == 17.25 for item in seen)

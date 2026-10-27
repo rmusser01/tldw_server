@@ -34,8 +34,16 @@ from collections.abc import (  # noqa: E402
     Iterable,
     Iterator,
     Mapping,
+    Sequence,
 )
-from contextlib import asynccontextmanager, contextmanager, nullcontext, suppress  # noqa: E402
+from contextlib import (  # noqa: E402
+    AsyncExitStack,
+    ExitStack,
+    asynccontextmanager,
+    contextmanager,
+    nullcontext,
+    suppress,
+)
 from dataclasses import dataclass  # noqa: E402
 from functools import wraps  # noqa: E402
 from pathlib import Path  # noqa: E402
@@ -1746,6 +1754,153 @@ def _restore_httpx_response_url(response: Any, original_url: str) -> None:
         response.request.url = httpx.URL(original_url)
 
 
+# A pinned connection tries the vetted addresses in resolution order, at most this many.
+# Every try but the last has its connect phase capped at DEFAULT_CONNECT_TIMEOUT
+# (HTTP_CONNECT_TIMEOUT); the last gets the request's own connect timeout. A host whose
+# addresses all fail therefore costs at most 3 * DEFAULT_CONNECT_TIMEOUT plus the
+# request's connect timeout.
+_PINNED_ADDRESS_ATTEMPTS = 4
+
+# Failures that happen before any request byte is sent, so the next address is safe to try.
+_PINNED_CONNECT_FAILURES: tuple[type[BaseException], ...] = tuple(
+    cls
+    for cls in (
+        getattr(httpx, "ConnectError", None),
+        getattr(httpx, "ConnectTimeout", None),
+        getattr(aiohttp, "ClientConnectorError", None),
+        getattr(aiohttp, "ConnectionTimeoutError", None),
+    )
+    if isinstance(cls, type)
+)
+
+
+def _pinned_transport_targets(
+    url: str,
+    headers: dict[str, str] | None,
+    accepted_resolved_ips: tuple[str, ...],
+) -> list[tuple[str, dict[str, str] | None, str | None]]:
+    """``(transport_url, headers, sni_hostname)`` per address to try, or the unpinned URL.
+
+    Every address passed this hop's egress check together, so falling back from one to the
+    next never reaches an address the policy did not approve, and nothing is re-resolved.
+    Host and SNI are the same for every target. A dual-stack ``localhost`` answering ``::1``
+    first still reaches a server listening only on 127.0.0.1. The certificate-pin preflight
+    (``_check_cert_pinning``) connects on its own, so with several vetted addresses it may
+    verify a different one than the request then lands on; that gap predates the fallback.
+    """
+    if not accepted_resolved_ips:
+        return [(url, headers, None)]
+    return [
+        _prepare_pinned_transport_target(url, headers, (address,))
+        for address in accepted_resolved_ips[:_PINNED_ADDRESS_ATTEMPTS]
+    ]
+
+
+def _first_connected(
+    targets: Sequence[tuple[Any, ...]],
+    attempt: Callable[..., _Result],
+    *,
+    failures: tuple[type[BaseException], ...] = _PINNED_CONNECT_FAILURES,
+) -> _Result:
+    """``attempt(*target, final=...)`` until one connects; the last failure propagates.
+
+    ``final`` is False on every target but the last, so the attempt caps its connect
+    timeout (``_httpx_fallback_timeout``/``_aiohttp_fallback_timeout``) while another
+    address is still left to try.
+    """
+    for target in targets[:-1]:
+        try:
+            return attempt(*target, final=False)
+        except failures:
+            logger.debug("pinned connect failed; trying the next vetted address")
+    return attempt(*targets[-1], final=True)
+
+
+async def _afirst_connected(
+    targets: Sequence[tuple[Any, ...]],
+    attempt: Callable[..., Awaitable[_Result]],
+) -> _Result:
+    """``await attempt(*target, final=...)`` until one connects; see ``_first_connected``."""
+    for target in targets[:-1]:
+        try:
+            return await attempt(*target, final=False)
+        except _PINNED_CONNECT_FAILURES:
+            logger.debug("pinned connect failed; trying the next vetted address")
+    return await attempt(*targets[-1], final=True)
+
+
+def _capped_connect(seconds: float | None) -> float:
+    return DEFAULT_CONNECT_TIMEOUT if seconds is None else min(float(seconds), DEFAULT_CONNECT_TIMEOUT)
+
+
+def _httpx_fallback_timeout(timeout: Any, client: Any) -> Any:
+    """``timeout`` (or the client's, for USE_CLIENT_DEFAULT) with its connect phase capped."""
+    base = getattr(client, "timeout", None) if timeout is httpx.USE_CLIENT_DEFAULT else timeout
+    try:
+        resolved = httpx.Timeout(base)
+    except (TypeError, ValueError):
+        return timeout
+    return httpx.Timeout(
+        connect=_capped_connect(resolved.connect),
+        read=resolved.read,
+        write=resolved.write,
+        pool=resolved.pool,
+    )
+
+
+def _aiohttp_fallback_timeout(timeout: Any) -> Any:
+    """An aiohttp ``ClientTimeout`` with its connect phases capped."""
+    if aiohttp is None or not isinstance(timeout, aiohttp.ClientTimeout):
+        return timeout
+    return aiohttp.ClientTimeout(
+        total=timeout.total,
+        connect=_capped_connect(timeout.connect),
+        sock_read=timeout.sock_read,
+        sock_connect=_capped_connect(timeout.sock_connect),
+    )
+
+
+def _enter_pinned_httpx_stream(
+    stack: ExitStack,
+    client: httpx.Client,
+    method: str,
+    url: str,
+    headers: dict[str, str] | None,
+    accepted_resolved_ips: tuple[str, ...],
+    **options: Any,
+) -> httpx.Response:
+    """Enter ``client.stream`` on the first vetted address that connects."""
+
+    def open_stream(
+        transport_url: str,
+        transport_headers: dict[str, str] | None,
+        sni_hostname: str | None,
+        *,
+        final: bool,
+    ) -> httpx.Response:
+        stream_options = dict(options, headers=transport_headers)
+        if sni_hostname:
+            stream_options["extensions"] = {"sni_hostname": sni_hostname}
+        if not final:
+            stream_options["timeout"] = _httpx_fallback_timeout(
+                options.get("timeout", httpx.USE_CLIENT_DEFAULT), client
+            )
+        return stack.enter_context(client.stream(method, transport_url, **stream_options))
+
+    response = _first_connected(
+        _pinned_transport_targets(url, headers, accepted_resolved_ips),
+        open_stream,
+    )
+    if accepted_resolved_ips:
+        _restore_httpx_response_url(response, url)
+    return response
+
+
+def _timeout_or_client_default(timeout: Any | None) -> Any:
+    """None means the client's configured timeout; httpx itself reads None as no timeout."""
+    return httpx.USE_CLIENT_DEFAULT if timeout is None else timeout
+
+
 def _pins_for_host(
     pins_map: dict[str, set[str]] | None,
     host: str,
@@ -2248,37 +2403,54 @@ def _get_httpx_client(
         return client
 
 
-def _get_aiohttp_session() -> aiohttp.ClientSession:
+def create_aiohttp_session(
+    *,
+    timeout: float | aiohttp.ClientTimeout | None = None,
+    trust_env: bool = DEFAULT_TRUST_ENV,
+) -> aiohttp.ClientSession:
+    """Create a caller-owned aiohttp session with this module's defaults.
+
+    It carries the default User-Agent, the TLS floor and the ``HTTP_CERT_PINS``
+    certificate pins, like the shared session ``afetch`` uses. A number ``timeout``
+    is the total timeout; None uses the module defaults. Like ``create_async_client``
+    it installs no egress check: send every request through ``afetch``,
+    ``astream_bytes`` or ``astream_sse``. The caller closes it.
+    """
     if aiohttp is None:  # pragma: no cover
         raise RuntimeError("aiohttp is not available")  # noqa: TRY003
+    connector = None
+    try:
+        ssl_ctx = _build_ssl_context(ENFORCE_TLS_MIN, TLS_MIN_VERSION)
+        connector = aiohttp.TCPConnector(
+            limit=int(os.getenv("HTTP_MAX_CONNECTIONS", "100")),
+            limit_per_host=int(os.getenv("HTTP_MAX_KEEPALIVE_CONNECTIONS", "20")),
+            ssl=ssl_ctx if ssl_ctx is not None else True,
+        )
+    except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
+        connector = None
+    session = aiohttp.ClientSession(
+        connector=connector,
+        timeout=_aiohttp_timeout_from_value(timeout),
+        trust_env=trust_env,
+        headers=_build_default_headers(),
+    )
+    try:
+        env_pins = _parse_pins_from_env()
+        if env_pins:
+            setattr(session, "_tldw_cert_pinning", env_pins)  # noqa: B010 - dynamic transport metadata
+    except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
+        pass
+    return session
+
+
+def _get_aiohttp_session() -> aiohttp.ClientSession:
     loop = asyncio.get_running_loop()
     key = id(loop)
     with _AIOHTTP_SESSION_LOCK:
         session = _AIOHTTP_SESSION_CACHE.get(key)
         if session is not None and not getattr(session, "closed", False):
             return session
-        connector = None
-        try:
-            ssl_ctx = _build_ssl_context(ENFORCE_TLS_MIN, TLS_MIN_VERSION)
-            connector = aiohttp.TCPConnector(
-                limit=int(os.getenv("HTTP_MAX_CONNECTIONS", "100")),
-                limit_per_host=int(os.getenv("HTTP_MAX_KEEPALIVE_CONNECTIONS", "20")),
-                ssl=ssl_ctx if ssl_ctx is not None else True,
-            )
-        except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-            connector = None
-        session = aiohttp.ClientSession(
-            connector=connector,
-            timeout=_aiohttp_timeout_from_defaults(),
-            trust_env=DEFAULT_TRUST_ENV,
-            headers=_build_default_headers(),
-        )
-        try:
-            env_pins = _parse_pins_from_env()
-            if env_pins:
-                session._tldw_cert_pinning = env_pins
-        except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-            pass
+        session = create_aiohttp_session()
         _AIOHTTP_SESSION_CACHE[key] = session
         return session
 
@@ -2528,9 +2700,18 @@ def _check_cert_pinning(
             ctx.minimum_version = _tls_min_version_from_str(min_ver)
         except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
             ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-        connect_host = accepted_resolved_ips[0] if accepted_resolved_ips else host
-        with socket.create_connection((connect_host, port), timeout=DEFAULT_CONNECT_TIMEOUT) as sock, \
-             ctx.wrap_socket(sock, server_hostname=host) as ssock:
+        # Synchronous, and it runs on the event loop in the async paths: every address
+        # shares one DEFAULT_CONNECT_TIMEOUT budget, so the fallback never blocks longer
+        # than the single connect did.
+        deadline = time.monotonic() + DEFAULT_CONNECT_TIMEOUT
+        sock = _first_connected(
+            [(address,) for address in accepted_resolved_ips[:_PINNED_ADDRESS_ATTEMPTS] or (host,)],
+            lambda address, *, final: socket.create_connection(
+                (address, port), timeout=max(deadline - time.monotonic(), 0.001)
+            ),
+            failures=(OSError,),
+        )
+        with sock, ctx.wrap_socket(sock, server_hostname=host) as ssock:
             der = ssock.getpeercert(binary_form=True)
         if not der:
             raise EgressPolicyError(
@@ -2813,24 +2994,33 @@ def _httpx_request_io(
     accepted_resolved_ips: tuple[str, ...] = (),
 ) -> httpx.Response:
     method_upper = str(method).upper()
-    transport_url, headers, sni_hostname = _prepare_pinned_transport_target(
-        url,
-        headers,
-        accepted_resolved_ips,
-    )
+    request_timeout = _timeout_or_client_default(timeout)
     if accepted_resolved_ips:
-        response = client.request(
-            method_upper,
-            transport_url,
-            headers=headers,
-            cookies=cookies,
-            params=params,
-            json=json,
-            data=data,
-            files=files,
-            timeout=timeout,
-            follow_redirects=follow_redirects,
-            extensions={"sni_hostname": sni_hostname},
+
+        def send(
+            transport_url: str,
+            pinned_headers: dict[str, str] | None,
+            sni_hostname: str | None,
+            *,
+            final: bool,
+        ) -> httpx.Response:
+            return client.request(
+                method_upper,
+                transport_url,
+                headers=pinned_headers,
+                cookies=cookies,
+                params=params,
+                json=json,
+                data=data,
+                files=files,
+                timeout=request_timeout if final else _httpx_fallback_timeout(request_timeout, client),
+                follow_redirects=follow_redirects,
+                extensions={"sni_hostname": sni_hostname},
+            )
+
+        response = _first_connected(
+            _pinned_transport_targets(url, headers, accepted_resolved_ips),
+            send,
         )
         _restore_httpx_response_url(response, url)
         return response
@@ -2843,7 +3033,7 @@ def _httpx_request_io(
             json=json,
             data=data,
             files=files,
-            timeout=timeout,
+            timeout=request_timeout,
             follow_redirects=follow_redirects,
         )
     if method_upper == "GET" and hasattr(client, "get"):
@@ -2852,7 +3042,7 @@ def _httpx_request_io(
             headers=headers,
             cookies=cookies,
             params=params,
-            timeout=timeout,
+            timeout=request_timeout,
             follow_redirects=follow_redirects,
         )
     req_kwargs: dict[str, Any] = {
@@ -2862,7 +3052,7 @@ def _httpx_request_io(
         "json": json,
         "data": data,
         "files": files,
-        "timeout": timeout,
+        "timeout": request_timeout,
         "follow_redirects": follow_redirects,
     }
     return client.request(method_upper, url, **req_kwargs)
@@ -2889,76 +3079,94 @@ async def _httpx_arequest_io(
     method_upper = str(method).upper()
     # Only sent when set, so client stubs that predate ``content`` keep working.
     body_kwargs: dict[str, Any] = {"content": content} if content is not None else {}
-    transport_url, headers, sni_hostname = _prepare_pinned_transport_target(
-        url,
-        headers,
-        accepted_resolved_ips,
-    )
+    request_timeout = _timeout_or_client_default(timeout)
+    targets = _pinned_transport_targets(url, headers, accepted_resolved_ips)
     if max_response_bytes is not None:
         if type(max_response_bytes) is not int or max_response_bytes < 0:
             raise ValueError("max_response_bytes must be a non-negative integer")
-        headers = _force_identity_accept_encoding(headers)
-        stream_kwargs: dict[str, Any] = {
-            "headers": headers,
-            "cookies": cookies,
-            "params": params,
-            "json": json,
-            "data": data,
-            **body_kwargs,
-            "files": files,
-            "timeout": timeout,
-            "follow_redirects": follow_redirects,
-        }
-        stream_kwargs["extensions"] = {
-            _BOUNDED_RESPONSE_EXTENSION: True,
-        }
-        if accepted_resolved_ips:
-            stream_kwargs["extensions"]["sni_hostname"] = sni_hostname
-        async with client.stream(
-            method_upper,
-            transport_url,
-            **stream_kwargs,
-        ) as streamed:
-            body = bytearray()
-            if 200 <= int(streamed.status_code) < 300:
-                if _uses_compressed_content_encoding(streamed.headers):
-                    raise NetworkError(
-                        "Compressed responses are not allowed with "
-                        "max_response_bytes"
-                    )
-                async for chunk in streamed.aiter_raw():
-                    if len(body) + len(chunk) > max_response_bytes:
+        bound = max_response_bytes
+
+        async def read_bounded(
+            transport_url: str,
+            pinned_headers: dict[str, str] | None,
+            sni_hostname: str | None,
+            *,
+            final: bool,
+        ) -> httpx.Response:
+            stream_kwargs: dict[str, Any] = {
+                "headers": _force_identity_accept_encoding(pinned_headers),
+                "cookies": cookies,
+                "params": params,
+                "json": json,
+                "data": data,
+                **body_kwargs,
+                "files": files,
+                "timeout": request_timeout if final else _httpx_fallback_timeout(request_timeout, client),
+                "follow_redirects": follow_redirects,
+            }
+            stream_kwargs["extensions"] = {
+                _BOUNDED_RESPONSE_EXTENSION: True,
+            }
+            if sni_hostname:
+                stream_kwargs["extensions"]["sni_hostname"] = sni_hostname
+            async with client.stream(
+                method_upper,
+                transport_url,
+                **stream_kwargs,
+            ) as streamed:
+                body = bytearray()
+                if 200 <= int(streamed.status_code) < 300:
+                    if _uses_compressed_content_encoding(streamed.headers):
                         raise NetworkError(
-                            "Response exceeds max_response_bytes limit"
+                            "Compressed responses are not allowed with "
+                            "max_response_bytes"
                         )
-                    body.extend(chunk)
-            copied_headers = httpx.Headers(streamed.headers)
-            response = httpx.Response(
-                status_code=streamed.status_code,
-                content=bytes(body),
-                request=streamed.request,
-                extensions=streamed.extensions,
-                history=streamed.history,
-            )
-            response.headers = copied_headers
+                    async for chunk in streamed.aiter_raw():
+                        if len(body) + len(chunk) > bound:
+                            raise NetworkError(
+                                "Response exceeds max_response_bytes limit"
+                            )
+                        body.extend(chunk)
+                copied_headers = httpx.Headers(streamed.headers)
+                bounded = httpx.Response(
+                    status_code=streamed.status_code,
+                    content=bytes(body),
+                    request=streamed.request,
+                    extensions=streamed.extensions,
+                    history=streamed.history,
+                )
+                bounded.headers = copied_headers
+            return bounded
+
+        response = await _afirst_connected(targets, read_bounded)
         if accepted_resolved_ips:
             _restore_httpx_response_url(response, url)
         return response
     if accepted_resolved_ips:
-        response = await client.request(
-            method_upper,
-            transport_url,
-            headers=headers,
-            cookies=cookies,
-            params=params,
-            json=json,
-            data=data,
-            **body_kwargs,
-            files=files,
-            timeout=timeout,
-            follow_redirects=follow_redirects,
-            extensions={"sni_hostname": sni_hostname},
-        )
+
+        async def send(
+            transport_url: str,
+            pinned_headers: dict[str, str] | None,
+            sni_hostname: str | None,
+            *,
+            final: bool,
+        ) -> httpx.Response:
+            return await client.request(
+                method_upper,
+                transport_url,
+                headers=pinned_headers,
+                cookies=cookies,
+                params=params,
+                json=json,
+                data=data,
+                **body_kwargs,
+                files=files,
+                timeout=request_timeout if final else _httpx_fallback_timeout(request_timeout, client),
+                follow_redirects=follow_redirects,
+                extensions={"sni_hostname": sni_hostname},
+            )
+
+        response = await _afirst_connected(targets, send)
         _restore_httpx_response_url(response, url)
         return response
     if method_upper == "POST" and hasattr(client, "post") and verify is None:
@@ -2973,7 +3181,7 @@ async def _httpx_arequest_io(
             data=data,
             **body_kwargs,
             files=files,
-            timeout=timeout,
+            timeout=request_timeout,
             follow_redirects=follow_redirects,
         )
     if method_upper == "GET" and hasattr(client, "get") and verify is None:
@@ -2984,7 +3192,7 @@ async def _httpx_arequest_io(
             headers=headers,
             cookies=cookies,
             params=params,
-            timeout=timeout,
+            timeout=request_timeout,
             follow_redirects=follow_redirects,
         )
     with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
@@ -2997,7 +3205,7 @@ async def _httpx_arequest_io(
         "data": data,
         **body_kwargs,
         "files": files,
-        "timeout": timeout,
+        "timeout": request_timeout,
         "follow_redirects": follow_redirects,
     }
     return await client.request(method_upper, url, **req_kwargs)
@@ -3022,69 +3230,76 @@ async def _aiohttp_request_io(
     max_response_bytes: int | None = None,
 ) -> _AiohttpResponse:
     original_url = url
-    url, headers, server_hostname = _prepare_pinned_transport_target(
-        url,
-        headers,
-        accepted_resolved_ips,
-    )
+    targets = _pinned_transport_targets(url, headers, accepted_resolved_ips)
     if max_response_bytes is not None:
         if type(max_response_bytes) is not int or max_response_bytes < 0:
             raise ValueError("max_response_bytes must be a non-negative integer")
-        headers = _force_identity_accept_encoding(headers)
     req_timeout = _aiohttp_timeout_from_value(timeout)
-    proxy = _resolve_proxy_for_url(url, proxies)
-    req_kwargs: dict[str, Any] = {
-        "headers": headers,
-        "cookies": cookies,
-        "params": params,
-        "timeout": req_timeout,
-        "allow_redirects": False,
-    }
-    if max_response_bytes is not None:
-        req_kwargs["auto_decompress"] = False
-    if proxy:
-        req_kwargs["proxy"] = proxy
-    if ssl_override is not None:
-        req_kwargs["ssl"] = ssl_override
-    if server_hostname and urlsplit(original_url).scheme.lower() == "https":
-        req_kwargs["server_hostname"] = server_hostname
-    if files is not None:
-        _rewind_files(files)
-        req_kwargs["data"] = _build_aiohttp_form(data, files)
-    else:
-        if json is not None:
-            req_kwargs["json"] = json
-        if data is not None:
-            req_kwargs["data"] = data
-        if content is not None:
-            req_kwargs["data"] = content
-    async with session.request(str(method).upper(), url, **req_kwargs) as resp:
-        if max_response_bytes is None:
-            body = await resp.read()
+
+    async def send(
+        transport_url: str,
+        pinned_headers: dict[str, str] | None,
+        server_hostname: str | None,
+        *,
+        final: bool,
+    ) -> _AiohttpResponse:
+        if max_response_bytes is not None:
+            pinned_headers = _force_identity_accept_encoding(pinned_headers)
+        proxy = _resolve_proxy_for_url(transport_url, proxies)
+        req_kwargs: dict[str, Any] = {
+            "headers": pinned_headers,
+            "cookies": cookies,
+            "params": params,
+            "timeout": req_timeout if final else _aiohttp_fallback_timeout(req_timeout),
+            "allow_redirects": False,
+        }
+        if max_response_bytes is not None:
+            req_kwargs["auto_decompress"] = False
+        if proxy:
+            req_kwargs["proxy"] = proxy
+        if ssl_override is not None:
+            req_kwargs["ssl"] = ssl_override
+        if server_hostname and urlsplit(original_url).scheme.lower() == "https":
+            req_kwargs["server_hostname"] = server_hostname
+        if files is not None:
+            _rewind_files(files)
+            req_kwargs["data"] = _build_aiohttp_form(data, files)
         else:
-            bounded_body = bytearray()
-            if 200 <= int(getattr(resp, "status", 0)) < 300:
-                if _uses_compressed_content_encoding(resp.headers):
-                    raise NetworkError(
-                        "Compressed responses are not allowed with "
-                        "max_response_bytes"
-                    )
-                while True:
-                    remaining = max_response_bytes - len(bounded_body)
-                    chunk = await resp.content.read(remaining + 1)
-                    if not chunk:
-                        break
-                    if len(bounded_body) + len(chunk) > max_response_bytes:
+            if json is not None:
+                req_kwargs["json"] = json
+            if data is not None:
+                req_kwargs["data"] = data
+            if content is not None:
+                req_kwargs["data"] = content
+        async with session.request(str(method).upper(), transport_url, **req_kwargs) as resp:
+            if max_response_bytes is None:
+                body = await resp.read()
+            else:
+                bounded_body = bytearray()
+                if 200 <= int(getattr(resp, "status", 0)) < 300:
+                    if _uses_compressed_content_encoding(resp.headers):
                         raise NetworkError(
-                            "Response exceeds max_response_bytes limit"
+                            "Compressed responses are not allowed with "
+                            "max_response_bytes"
                         )
-                    bounded_body.extend(chunk)
-            body = bytes(bounded_body)
-        wrapped = _AiohttpResponse(resp, body)
-        if accepted_resolved_ips:
-            wrapped.url = original_url
-            wrapped.request.url = original_url
-        return wrapped
+                    while True:
+                        remaining = max_response_bytes - len(bounded_body)
+                        chunk = await resp.content.read(remaining + 1)
+                        if not chunk:
+                            break
+                        if len(bounded_body) + len(chunk) > max_response_bytes:
+                            raise NetworkError(
+                                "Response exceeds max_response_bytes limit"
+                            )
+                        bounded_body.extend(chunk)
+                body = bytes(bounded_body)
+            wrapped = _AiohttpResponse(resp, body)
+            if accepted_resolved_ips:
+                wrapped.url = original_url
+                wrapped.request.url = original_url
+            return wrapped
+
+    return await _afirst_connected(targets, send)
 
 
 @asynccontextmanager
@@ -3104,27 +3319,38 @@ async def _httpx_stream_io(
     accepted_resolved_ips: tuple[str, ...] = (),
 ) -> AsyncIterator[tuple[httpx.Response, AsyncIterator[bytes]]]:
     original_url = url
-    url, headers, sni_hostname = _prepare_pinned_transport_target(
-        url,
-        headers,
-        accepted_resolved_ips,
-    )
-    extensions: dict[str, Any] = {"tldw_stream_response": True}
-    if sni_hostname:
-        extensions["sni_hostname"] = sni_hostname
-    async with client.stream(
-        str(method).upper(),
-        url,
-        headers=headers,
-        cookies=cookies,
-        params=params,
-        json=json,
-        data=data,
-        files=files,
-        timeout=timeout,
-        follow_redirects=False,
-        extensions=extensions,
-    ) as resp:
+    async with AsyncExitStack() as stack:
+
+        async def open_stream(
+            transport_url: str,
+            pinned_headers: dict[str, str] | None,
+            sni_hostname: str | None,
+            *,
+            final: bool,
+        ) -> httpx.Response:
+            extensions: dict[str, Any] = {"tldw_stream_response": True}
+            if sni_hostname:
+                extensions["sni_hostname"] = sni_hostname
+            return await stack.enter_async_context(
+                client.stream(
+                    str(method).upper(),
+                    transport_url,
+                    headers=pinned_headers,
+                    cookies=cookies,
+                    params=params,
+                    json=json,
+                    data=data,
+                    files=files,
+                    timeout=timeout if final else _httpx_fallback_timeout(timeout, client),
+                    follow_redirects=False,
+                    extensions=extensions,
+                )
+            )
+
+        resp = await _afirst_connected(
+            _pinned_transport_targets(url, headers, accepted_resolved_ips),
+            open_stream,
+        )
         if accepted_resolved_ips:
             _restore_httpx_response_url(resp, original_url)
         if chunk_size is None:
@@ -3152,35 +3378,46 @@ async def _aiohttp_stream_io(
     accepted_resolved_ips: tuple[str, ...] = (),
 ) -> AsyncIterator[tuple[Any, AsyncIterator[bytes]]]:
     original_url = url
-    url, headers, server_hostname = _prepare_pinned_transport_target(
-        url,
-        headers,
-        accepted_resolved_ips,
-    )
     req_timeout = _aiohttp_timeout_from_value(timeout)
-    proxy = _resolve_proxy_for_url(url, proxies)
-    req_kwargs: dict[str, Any] = {
-        "headers": headers,
-        "cookies": cookies,
-        "params": params,
-        "timeout": req_timeout,
-        "allow_redirects": False,
-    }
-    if proxy:
-        req_kwargs["proxy"] = proxy
-    if ssl_override is not None:
-        req_kwargs["ssl"] = ssl_override
-    if server_hostname and urlsplit(original_url).scheme.lower() == "https":
-        req_kwargs["server_hostname"] = server_hostname
-    if files is not None:
-        _rewind_files(files)
-        req_kwargs["data"] = _build_aiohttp_form(data, files)
-    else:
-        if json is not None:
-            req_kwargs["json"] = json
-        if data is not None:
-            req_kwargs["data"] = data
-    async with session.request(str(method).upper(), url, **req_kwargs) as resp:
+    async with AsyncExitStack() as stack:
+
+        async def open_stream(
+            transport_url: str,
+            pinned_headers: dict[str, str] | None,
+            server_hostname: str | None,
+            *,
+            final: bool,
+        ) -> Any:
+            proxy = _resolve_proxy_for_url(transport_url, proxies)
+            req_kwargs: dict[str, Any] = {
+                "headers": pinned_headers,
+                "cookies": cookies,
+                "params": params,
+                "timeout": req_timeout if final else _aiohttp_fallback_timeout(req_timeout),
+                "allow_redirects": False,
+            }
+            if proxy:
+                req_kwargs["proxy"] = proxy
+            if ssl_override is not None:
+                req_kwargs["ssl"] = ssl_override
+            if server_hostname and urlsplit(original_url).scheme.lower() == "https":
+                req_kwargs["server_hostname"] = server_hostname
+            if files is not None:
+                _rewind_files(files)
+                req_kwargs["data"] = _build_aiohttp_form(data, files)
+            else:
+                if json is not None:
+                    req_kwargs["json"] = json
+                if data is not None:
+                    req_kwargs["data"] = data
+            return await stack.enter_async_context(
+                session.request(str(method).upper(), transport_url, **req_kwargs)
+            )
+
+        resp = await _afirst_connected(
+            _pinned_transport_targets(url, headers, accepted_resolved_ips),
+            open_stream,
+        )
         if chunk_size is None:
             yield resp, resp.content.iter_any()
         else:
@@ -4638,18 +4875,17 @@ def stream_response(
                 configured_endpoint=configured_endpoint,
                 accepted_resolved_ips=_accepted_ips_for_url(dns_pin_cache, url),
             )
-        transport_url, transport_headers, sni_hostname = _prepare_pinned_transport_target(
-            url,
-            options.get("headers"),
-            _accepted_ips_for_url(dns_pin_cache, url),
-        )
-        options["headers"] = transport_headers
-        if sni_hostname:
-            options["extensions"] = {"sni_hostname": sni_hostname}
-        with sc.stream(str(method).upper(), transport_url, **options) as response:
-            if transport_url != url:
-                _restore_httpx_response_url(response, url)
-            yield response
+        headers = options.pop("headers", None)
+        with ExitStack() as stack:
+            yield _enter_pinned_httpx_stream(
+                stack,
+                sc,
+                str(method).upper(),
+                url,
+                headers,
+                _accepted_ips_for_url(dns_pin_cache, url),
+                **options,
+            )
     finally:
         if owns_client:
             with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
@@ -6619,23 +6855,17 @@ def download(
                                 )
                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
                     raise DownloadError(str(e))  # noqa: B904
-                transport_url, transport_headers, sni_hostname = _prepare_pinned_transport_target(
-                    url,
-                    req_headers,
-                    _accepted_ips_for_url(dns_pin_cache, url),
-                )
-                stream_options: dict[str, Any] = {
-                    "headers": transport_headers,
-                    "params": params,
-                    "timeout": timeout,
-                }
-                if sni_hostname:
-                    stream_options["extensions"] = {
-                        "sni_hostname": sni_hostname
-                    }
-                with sc.stream("GET", transport_url, **stream_options) as resp:
-                    if transport_url != url:
-                        _restore_httpx_response_url(resp, url)
+                with ExitStack() as stack:
+                    resp = _enter_pinned_httpx_stream(
+                        stack,
+                        sc,
+                        "GET",
+                        url,
+                        req_headers,
+                        _accepted_ips_for_url(dns_pin_cache, url),
+                        params=params,
+                        timeout=timeout,
+                    )
                     if resp.status_code in (200, 206):
                         # Optional content-type enforcement
                         if require_content_type:
@@ -6802,6 +7032,7 @@ __all__ = [
     "SSEEvent",
     "build_limits",
     "validate_proxies_or_raise",
+    "create_aiohttp_session",
     "create_async_client",
     "create_client",
     "afetch",

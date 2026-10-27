@@ -89,31 +89,6 @@ ALLOWLIST: dict[str, str] = {
         "path for. Each dispatch takes a fresh ProbeEgressGuard decision, pins DNS to the decided "
         "IPs (CURLOPT_RESOLVE), refuses proxies and re-checks every redirect hop."
     ),
-    # To migrate onto core.http_client, one PR each (TASK-13950.11 follow-up slices).
-    "tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Qwen3ASR.py": (
-        "migrate: the unplanned vLLM branch posts with a raw httpx.Client; the planned branch beside "
-        "it already uses create_client + fetch(configured_endpoint=...)."
-    ),
-    "tldw_Server_API/app/core/TTS/adapters/audio_cpp_client.py": (
-        "migrate: audiocpp_server client. Loopback by default, but allow_remote_base_url sends to any "
-        "host through a raw httpx.AsyncClient with no egress policy; use create_async_client/afetch."
-    ),
-    "tldw_Server_API/app/core/Audio_Studio/providers/ace_step.py": (
-        "migrate: defaults client_factory to httpx.AsyncClient (a reference the regex guard missed). "
-        "It checks its own origin allowlist, not the egress policy; default to create_async_client."
-    ),
-    "tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_AudioCpp.py": (
-        "migrate: builds a raw aiohttp.ClientSession via _http_client.aiohttp (a reach-through the "
-        "first guard missed). Every request still goes through afetch(configured_endpoint=..., "
-        "allow_redirects=False, verify=True), so egress and the TLS floor apply, but the session "
-        "lacks the env cert pins and default headers http_client's own aiohttp session carries; "
-        "add a public aiohttp factory to http_client."
-    ),
-    "tldw_Server_API/app/core/Ingestion_Media_Processing/OCR/runtime_support.py": (
-        "migrate: http.client readiness probe (GET /health) for the managed OCR server. The host "
-        "defaults to 127.0.0.1 but comes unchecked from CHATLLM_OCR_HOST, LLAMACPP_OCR_HOST or the "
-        "OCR profile; use create_client/fetch."
-    ),
 }
 
 
@@ -493,7 +468,7 @@ def test_a_seeded_aliased_from_import_fails(tmp_path: Path) -> None:
         ("from requests import sessions as s\ns.session()\n", "requests.sessions.session"),
         ("def f():\n    import requests\n    return requests.post('u')\n", "requests.post"),
         ("from httpx import *\nstream('GET', 'u')\n", "httpx.stream"),
-        # A reference is a use too: ace_step.py and standalone_html_provider.py build clients this way.
+        # A reference is a use too: a stored class (a client_factory default, an alias) builds clients later.
         ("import httpx\nclient_factory = httpx.AsyncClient\n", "httpx.AsyncClient"),
         # aiohttp and urllib.request bypass the same egress policy.
         ("from aiohttp import ClientSession as S\nS()\n", "aiohttp.ClientSession"),
@@ -503,7 +478,7 @@ def test_a_seeded_aliased_from_import_fails(tmp_path: Path) -> None:
         ("from urllib.request import Request as R\nR('u')\n", "urllib.request.Request"),
         ("import http.client\nhttp.client.HTTPSConnection('h')\n", "http.client.HTTPSConnection"),
         ("from curl_cffi.requests import AsyncSession as S\nS()\n", "curl_cffi.requests.AsyncSession"),
-        # Reached through another module's attribute (Audio_Transcription_AudioCpp.py's shape).
+        # Reached through another module's attribute (the shape Audio_Transcription_AudioCpp.py used).
         ("from tldw_Server_API.app.core import http_client as hc\nhc.httpx.AsyncClient()\n", "hc.httpx.AsyncClient"),
         (
             "from tldw_Server_API.app.core import http_client as hc\nhc.aiohttp.ClientSession()\n",
