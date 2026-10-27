@@ -68,6 +68,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_latest_transcription,
     get_media_by_id,
 )
+from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.exceptions import DataTablesJobError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
@@ -743,6 +744,18 @@ def _get_chacha_db(user_id: str) -> CharactersRAGDB:
     return db
 
 
+def _extract_owned_media_text(db: Any, media_id: int, user_id: str) -> str:
+    """Read the source as its validated table owner, never an ambient caller."""
+    try:
+        owner = int(user_id)
+    except (TypeError, ValueError):
+        raise DataTablesJobError("invalid_media_owner", retryable=False) from None
+    if owner <= 0 or str(owner) != user_id:
+        raise DataTablesJobError("invalid_media_owner", retryable=False)
+    with scoped_context(user_id=owner, is_admin=False):
+        return _extract_media_text(db, media_id)
+
+
 def _extract_media_text(db: Any, media_id: int) -> str:
     media_item = get_media_by_id(db, media_id)
     if not media_item:
@@ -1075,7 +1088,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
                         media_id = int(source_id)
                     except (TypeError, ValueError) as exc:
                         raise DataTablesJobError("invalid_media_id", retryable=False) from exc
-                    text = _extract_media_text(db, media_id)
+                    text = _extract_owned_media_text(db, media_id, user_id)
             elif source_type == "rag_query":
                 query = source_id
                 if not text:
