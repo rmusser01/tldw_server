@@ -604,8 +604,10 @@ def test_endpoint_non_stream_auto_continue_returns_followup_assistant_content():
         ({}, False),
         ({"stream_options": {"include_usage": True}}, True),
         ({"extra_body": {"stream_options": {"include_usage": True}}}, True),
+        ({"stream_options": {"include_usage": False}}, False),
+        ({"stream_options": "yes"}, False),
     ],
-    ids=["not-asked", "asked-top-level", "asked-in-extra-body"],
+    ids=["not-asked", "asked-top-level", "asked-in-extra-body", "include-usage-false", "malformed-stream-options"],
 )
 def test_endpoint_forwards_an_empty_choices_usage_chunk_only_to_a_client_that_asked(request_fields, forwarded):
     """OpenAI sends its usage chunk only to a client that asks, so the server forwards it only then (TASK-13951)."""

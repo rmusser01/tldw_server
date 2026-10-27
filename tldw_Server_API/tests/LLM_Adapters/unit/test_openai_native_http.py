@@ -223,3 +223,15 @@ def test_an_openai_provider_stream_to_another_server_is_not_asked_for_usage(monk
     payload = _streamed_payload(monkeypatch)
 
     assert "stream_options" not in payload
+
+
+def test_a_malformed_base_url_fails_the_stream_as_a_sanitized_provider_error(monkeypatch):
+    """The usage-request host check does not raise a bare ValueError past the adapter's error handling."""
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://[::1")
+
+    with pytest.raises(ChatAPIError) as excinfo:
+        _streamed_payload(monkeypatch)
+
+    assert excinfo.value.__cause__ is None

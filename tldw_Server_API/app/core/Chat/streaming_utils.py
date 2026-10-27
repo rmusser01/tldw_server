@@ -1308,6 +1308,24 @@ STREAM_SETTLEMENT_TASK_MAX_ACTIVE = daemon_capacity_from_env(
 )
 
 
+def is_empty_choices_usage_chunk(chunk: Any) -> bool:
+    """Whether ``chunk`` is OpenAI's stream usage chunk: empty ``choices`` and a usage block (TASK-13951).
+
+    OpenAI sends it only to a client that asks (``stream_options.include_usage``), so a stream forwarder sends
+    it on only then. ``chunk`` is a parsed payload, or the text of one SSE line (``data: {...}``) or bare JSON.
+    Anything else, malformed or non-JSON text included, is not one. Never raises.
+    """
+    if isinstance(chunk, (str, bytes, bytearray)):
+        try:
+            text = (chunk.decode("utf-8") if isinstance(chunk, (bytes, bytearray)) else chunk).strip()
+            if text[:5].lower() == "data:":
+                text = text[5:]
+            chunk = json.loads(text)
+        except (ValueError, RecursionError):
+            return False
+    return isinstance(chunk, dict) and chunk.get("choices") == [] and chunk.get("usage") is not None
+
+
 def _accepts_keyword(callback: Any, name: str) -> bool:
     """Return whether ``callback`` can take ``name`` as a keyword argument."""
 
@@ -2085,7 +2103,7 @@ class StreamingResponseHandler:
                             self.update_activity()
                             return outputs, False
                     if isinstance(data, dict):
-                        if not self.forward_usage_chunk and data.get("choices") == [] and data.get("usage") is not None:
+                        if not self.forward_usage_chunk and is_empty_choices_usage_chunk(data):
                             # A usage chunk the client did not ask for: read above for the usage record, not sent.
                             self.update_activity()
                             return outputs, False

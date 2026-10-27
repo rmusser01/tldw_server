@@ -22,6 +22,7 @@ Found by TASK-13951, which asks only api.openai.com for a stream's usage chunk (
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Final-review note (TASK-13951, Minor 5): a top-level stream_options from an OpenAI-SDK client never reaches the provider. ChatCompletionRequest keeps it in model_extra, and /chat/completions uses it only to decide whether to forward the usage chunk, but _build_openai_payload drops it and only extra_body is merged into the provider payload. So such a client gets the usage chunk from OpenAI (the adapter asks anyway) and from OpenRouter (always), but from no other OpenAI-compatible provider, even one that accepts the field. Consider forwarding the client's top-level stream_options into extra_body (or into the provider payload) alongside asking each provider.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -1198,19 +1198,32 @@ async def test_a_streamed_reply_without_usage_is_recorded_from_the_estimate(stre
 
 @pytest.mark.asyncio
 @pytest.mark.unit
-async def test_a_usage_block_without_completion_tokens_counts_the_reply_from_the_estimate(stream_usage_rows) -> None:
-    """A block with prompt tokens only does not count the reply received as nothing (TASK-13951)."""
+@pytest.mark.parametrize(
+    ("usage", "expected_tokens"),
+    [
+        ({"prompt_tokens": 50}, (50, len("hello world!") // 4)),
+        (
+            {"completion_tokens": 7},
+            (chat_service._estimate_tokens_from_messages([{"role": "user", "content": "hi"}]), 7),
+        ),
+    ],
+    ids=["prompt-only", "completion-only"],
+)
+async def test_a_usage_block_without_completion_tokens_counts_the_reply_from_the_estimate(
+    stream_usage_rows, usage, expected_tokens
+) -> None:
+    """A block that counts one side takes the other from the estimate, so neither counts as nothing (TASK-13951)."""
     committed: list[int] = []
 
     response = await _run_execute_streaming_call(
-        llm_call_func=_reply_then({"choices": [], "usage": {"prompt_tokens": 50}}),
+        llm_call_func=_reply_then({"choices": [], "usage": usage}),
         save_message_fn=_save_nothing,
         rg_commit_cb=committed.append,
     )
     await _collect_sse_chunks(response)
 
     (row,) = stream_usage_rows
-    assert (row["prompt_tokens"], row["completion_tokens"]) == (50, len("hello world!") // 4)
+    assert (row["prompt_tokens"], row["completion_tokens"]) == expected_tokens
     assert row["estimated"] is True
     assert committed == [row["total_tokens"]]
 
