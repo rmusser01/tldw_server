@@ -311,6 +311,15 @@
   "currentChatModelSettings": {
     "message": "Current Chat Model Settings"
   },
+  "modelSettings_samplingNotSupported": {
+    "message": "Not supported by {{provider}}"
+  },
+  "modelSettings_samplingThisProvider": {
+    "message": "this provider"
+  },
+  "modelSettings_samplingSupportUnknown": {
+    "message": "Not sent: the server doesn't list whether this model accepts it"
+  },
   "modelSettings_label": {
     "message": "Model Settings"
   },

@@ -202,6 +202,9 @@
   "complexArguments": "[Complex arguments]",
   "currentChatModelSettings": "Current Chat Model Settings",
   "modelSettings": {
+    "samplingNotSupported": "Not supported by {{provider}}",
+    "samplingThisProvider": "this provider",
+    "samplingSupportUnknown": "Not sent: the server doesn't list whether this model accepts it",
     "label": "Model Settings",
     "description": "Set the model options globally for all chats",
     "form": {

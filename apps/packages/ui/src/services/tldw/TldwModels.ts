@@ -84,6 +84,12 @@ const hasUsableApiKey = (value: unknown): boolean => {
   return Boolean(key && !isPlaceholderApiKey(key))
 }
 
+/** A list of strings, or undefined when the server didn't send one. */
+const toOptionalStringList = (value: unknown): string[] | undefined =>
+  Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : undefined
+
 export interface ModelInfo {
   id: string
   isServerDefault?: boolean
@@ -101,6 +107,8 @@ export interface ModelInfo {
   readinessMessage?: string
   chatProvider?: string
   providerHealth?: string
+  /** Optional sampling fields the provider accepts ("top_k", "min_p"; #3283). */
+  samplingFields?: string[]
   catalogOnly?: boolean
   modalities?: {
     input?: string[]
@@ -746,6 +754,9 @@ export class TldwModelsService {
       ),
       providerHealth: toOptionalString(
         rawModel.provider_health ?? rawModel.providerHealth
+      ),
+      samplingFields: toOptionalStringList(
+        rawModel.sampling_fields ?? rawModel.samplingFields
       )
     }
   }

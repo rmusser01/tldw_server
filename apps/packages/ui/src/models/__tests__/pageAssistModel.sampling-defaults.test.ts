@@ -39,6 +39,22 @@ const sentSampling = async () => {
   }
 }
 
+/** The request options pageAssistModel hands the transport. */
+const sentOptions = async () => {
+  const chat = await pageAssistModel({ model: "tldw:shared", saveToDb: false })
+  for await (const _ of await chat.stream([new HumanMessage("Hello")])) {
+    /* consume */
+  }
+  return mocks.stream.mock.calls[0][1]
+}
+
+const modelWith = (sampling_fields?: string[]) => {
+  // The provider only has to match the default one; what it accepts comes from the server.
+  const model = { id: "shared", provider: "openai", capabilities: [], ...(sampling_fields ? { samplingFields: sampling_fields } : {}) }
+  mocks.getModels.mockResolvedValue([model])
+  mocks.getModel.mockResolvedValue(model)
+}
+
 describe("sampling defaults shown in the side panel (XS-16)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -73,3 +89,48 @@ describe("sampling defaults shown in the side panel (XS-16)", () => {
     )
   })
 })
+
+// #3283: these settings were stored and shown, but never sent.
+describe("sampling settings reach the request (#3283)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.userDefaults = {}
+    useStoreChatModelSettings.getState().reset()
+    mocks.stream.mockImplementation(async function* () {
+      yield "Hello"
+    })
+  })
+
+  it("sends the chat's frequency and presence penalties", async () => {
+    modelWith(["top_k", "min_p"])
+    useStoreChatModelSettings.getState().updateSetting("frequencyPenalty", 0.4)
+    useStoreChatModelSettings.getState().updateSetting("presencePenalty", 0.2)
+    expect(await sentOptions()).toMatchObject({ frequencyPenalty: 0.4, presencePenalty: 0.2 })
+  })
+
+  it("sends Top K and Min P when the model's provider accepts them", async () => {
+    modelWith(["top_k", "min_p"])
+    useStoreChatModelSettings.getState().updateSetting("topK", 40)
+    useStoreChatModelSettings.getState().updateSetting("minP", 0.05)
+    expect(await sentOptions()).toMatchObject({ topK: 40, minP: 0.05 })
+  })
+
+  it("leaves out what the provider would reject", async () => {
+    modelWith(["top_k"])
+    useStoreChatModelSettings.getState().updateSetting("topK", 40)
+    useStoreChatModelSettings.getState().updateSetting("minP", 0.05)
+    const options = await sentOptions()
+    expect(options.topK).toBe(40)
+    expect(options.minP).toBeUndefined()
+  })
+
+  it("sends neither when the server doesn't say what the provider accepts", async () => {
+    modelWith(undefined)
+    useStoreChatModelSettings.getState().updateSetting("topK", 40)
+    useStoreChatModelSettings.getState().updateSetting("minP", 0.05)
+    const options = await sentOptions()
+    expect(options.topK).toBeUndefined()
+    expect(options.minP).toBeUndefined()
+  })
+})
+

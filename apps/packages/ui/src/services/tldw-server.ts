@@ -131,6 +131,7 @@ const mapTldwModelToUi = (model: any) => ({
     typeof model.chatProvider === "string" ? model.chatProvider : undefined,
   provider_health:
     typeof model.providerHealth === "string" ? model.providerHealth : undefined,
+  sampling_fields: Array.isArray(model.samplingFields) ? model.samplingFields : undefined,
   details: {
     provider: model.provider,
     capabilities: model.capabilities,

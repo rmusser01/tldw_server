@@ -112,6 +112,21 @@ updated (not run locally: disk space).
 
 ### Stage 5: sampling settings (#3283)
 **Goal:** the owner decision above.
-**Tests:** `pageAssistModel` and `TldwChat` request-body tests; control gating
-tests.
-**Status:** Not Started
+**Success criteria:**
+- The chat request carries the frequency and presence penalties from the
+  chat's settings (model, chat, then saved defaults), not the 0 fallback.
+- `/api/v1/llm/models/metadata` lists each model's `sampling_fields`
+  (`top_k`, `min_p`) from the capability registry. The request sends Top K
+  and Min P (`topk`, `minp`) only when the selected model lists them, and
+  neither when the catalog doesn't say.
+- The side panel's model parameters and the full page's Advanced Sampling
+  disable Top K and Min P with "Not supported by <provider>" (or "Not sent:
+  the server doesn't list whether this model accepts it"). They read the
+  catalog the composer already loaded and never fetch it.
+- The side panel's "Default (x)" for the penalties follows the saved
+  defaults, matching what is now sent.
+**Tests:** backend metadata tests (OpenAI none, OpenRouter both, image
+backends none); `pageAssistModel` request options; request body field names;
+catalog normalization; the support resolver and hook; both settings
+surfaces.
+**Status:** Complete

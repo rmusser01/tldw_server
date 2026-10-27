@@ -230,3 +230,29 @@ def test_llm_models_filter_type_openrouter_image_hints(monkeypatch, client_user_
     image_models = set(image_resp.json())
     assert "openrouter/black-forest-labs/flux.1-schnell" in image_models
     assert "openrouter/openai/gpt-4o-mini" not in image_models
+
+
+def test_llm_models_metadata_lists_optional_sampling_fields_per_provider(monkeypatch, client_user_only):
+    """#3283: the chat UI sends Top K and Min P only to providers that accept them."""
+    _patch_llm_providers(monkeypatch)
+
+    payload = client_user_only.get("/api/v1/llm/models/metadata").json()
+    by_name = {model.get("name"): model for model in payload.get("models", [])}
+
+    # OpenAI rejects top_k and min_p (capability_registry.validate_payload).
+    assert by_name["gpt-4o-mini"]["sampling_fields"] == []
+    # Image backends take no chat sampling settings.
+    assert "sampling_fields" not in by_name["stable_diffusion_cpp"]
+
+
+def test_llm_models_metadata_lists_top_k_and_min_p_for_openrouter(monkeypatch, client_user_only):
+    import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_providers
+
+    _patch_llm_providers(monkeypatch)
+    monkeypatch.setattr(llm_providers, "load_comprehensive_config", _fake_config_openrouter_mixed)
+
+    payload = client_user_only.get("/api/v1/llm/models/metadata").json()
+    openrouter = [model for model in payload.get("models", []) if model.get("provider") == "openrouter"]
+
+    assert openrouter
+    assert all(model["sampling_fields"] == ["top_k", "min_p"] for model in openrouter)
