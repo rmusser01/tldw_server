@@ -19,6 +19,7 @@ const routerMocks = vi.hoisted(() => ({
 
 const clientMocks = vi.hoisted(() => ({
   createPresentation: vi.fn(),
+  patchPresentation: vi.fn(),
   getPresentationMetadata: vi.fn(),
   getSlidesCapabilities: vi.fn(),
   getPresentation: vi.fn(),
@@ -58,6 +59,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     style ? { ...style } : null,
   tldwClient: {
     createPresentation: (...args: unknown[]) => clientMocks.createPresentation(...args),
+    patchPresentation: (...args: unknown[]) => clientMocks.patchPresentation(...args),
     getPresentationMetadata: (...args: unknown[]) => clientMocks.getPresentationMetadata(...args),
     getSlidesCapabilities: (...args: unknown[]) => clientMocks.getSlidesCapabilities(...args),
     getPresentation: (...args: unknown[]) => clientMocks.getPresentation(...args),
@@ -173,6 +175,7 @@ describe("PresentationStudioPage", () => {
     usePresentationStudioStore.getState().reset()
     routerMocks.navigate.mockReset()
     clientMocks.createPresentation.mockReset()
+    clientMocks.patchPresentation.mockReset()
     clientMocks.getPresentationMetadata.mockReset()
     clientMocks.getSlidesCapabilities.mockReset()
     clientMocks.getPresentation.mockReset()
@@ -230,6 +233,60 @@ describe("PresentationStudioPage", () => {
       content_kinds: { standalone_html: { read: true } },
       generation_modes: { standalone_html: { enabled: true } }
     })
+  })
+
+  it("keeps input focus inside the editor and autosaves the real draft", async () => {
+    const record = structuredRecord("presentation-focus", "Focus deck")
+    clientMocks.getPresentation.mockResolvedValue({ record, etag: 'W/"v1"' })
+    clientMocks.patchPresentation.mockImplementation(
+      async (_id: string, payload: Record<string, unknown>) => ({
+        ...record,
+        ...payload,
+        version: 2
+      })
+    )
+    render(<PresentationStudioPage mode="detail" projectId={record.id} />)
+    const title = await screen.findByLabelText("Slide title")
+
+    fireEvent.focus(title)
+    expect(clientMocks.getPresentationMetadata).toHaveBeenCalledTimes(1)
+    fireEvent.change(title, { target: { value: "Edited heading" } })
+    const content = screen.getByLabelText("Slide content")
+    fireEvent.focus(content)
+    fireEvent.change(content, { target: { value: "Edited body" } })
+
+    await waitFor(
+      () => expect(clientMocks.patchPresentation).toHaveBeenCalledTimes(1),
+      { timeout: 3000 }
+    )
+    expect(clientMocks.patchPresentation).toHaveBeenCalledWith(
+      record.id,
+      expect.objectContaining({
+        slides: [
+          expect.objectContaining({
+            title: "Edited heading",
+            content: "Edited body"
+          })
+        ]
+      }),
+      { ifMatch: 'W/"v1"' }
+    )
+    expect(clientMocks.getPresentation).toHaveBeenCalledTimes(1)
+    expect(usePresentationStudioStore.getState().isDirty).toBe(false)
+  })
+
+  it("revalidates when the browser window itself receives focus", async () => {
+    const record = structuredRecord("presentation-window-focus", "Focus deck")
+    clientMocks.getPresentation.mockResolvedValue({ record, etag: 'W/"v1"' })
+    render(<PresentationStudioPage mode="detail" projectId={record.id} />)
+    await screen.findByLabelText("Slide title")
+
+    fireEvent(window, new FocusEvent("focus"))
+
+    await waitFor(() =>
+      expect(clientMocks.getPresentation).toHaveBeenCalledTimes(2)
+    )
+    expect(screen.getByLabelText("Slide title")).toHaveValue("Focus deck slide")
   })
 
   it("creates a blank project from the precreate form and redirects to its detail route", async () => {
