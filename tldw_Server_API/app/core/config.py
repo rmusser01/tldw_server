@@ -35,6 +35,7 @@ from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provi
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled,
     is_explicit_pytest_runtime,
+    is_production_like_env,
     is_test_mode,
     is_truthy,
 )
@@ -3451,20 +3452,9 @@ def should_allow_cors_credentials() -> bool:
     return value
 
 
-@lru_cache(maxsize=1)
 def is_production_environment() -> bool:
     """Return True when runtime environment should use production safety guards."""
-    if is_truthy(os.getenv("tldw_production")):
-        return True
-
-    for env_key in ("ENV", "APP_ENV", "TLDW_ENV", "ENVIRONMENT"):
-        raw_value = os.getenv(env_key)
-        if raw_value is None:
-            continue
-        normalized = str(raw_value).strip().lower()
-        if normalized in {"prod", "production"}:
-            return True
-    return False
+    return is_production_like_env()
 
 
 def _resolve_disable_cors_value_and_source() -> tuple[bool, str]:
@@ -5999,7 +5989,6 @@ def refresh_config_cache() -> None:
     _route_toggle_policy.cache_clear()
     should_disable_cors.cache_clear()
     should_allow_cors_credentials.cache_clear()
-    is_production_environment.cache_clear()
 
 
 def clear_config_cache() -> None:

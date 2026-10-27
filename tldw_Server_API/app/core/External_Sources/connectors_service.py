@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.External_Sources.onedrive import OneDriveConnector
 from tldw_Server_API.app.core.External_Sources.sync_adapter import FileSyncAdapter
 from tldw_Server_API.app.core.External_Sources.zotero import ZoteroConnector
 from tldw_Server_API.app.core.exceptions import ConnectorServiceError
+from tldw_Server_API.app.core.testing import is_production_like_env
 
 _CONNECTORS_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -144,8 +145,7 @@ def _connector_secret_encryption_required() -> bool:
     return (
         _env_truthy("CONNECTORS_REQUIRE_TOKEN_ENCRYPTION")
         or auth_mode == "multi_user"
-        or _env_truthy("tldw_production")
-        or _env_truthy("TLDW_PRODUCTION")
+        or is_production_like_env()
     )
 
 

@@ -9,18 +9,61 @@ here for the existing importers of ``is_truthy``.
 from __future__ import annotations
 
 import os
+import sys
+from collections.abc import Mapping
+from dataclasses import dataclass
 
 from tldw_Server_API.app.core.Utils.coercion import env_bool, parse_bool  # noqa: F401  (re-export)
 
-_PRODUCTION_VALUES = {"production", "prod", "live"}
-_PRODUCTION_ENV_KEYS = (
+# The one production detector (TASK-13950.6). Reading these keys anywhere else in
+# app/ fails tests/lint/test_production_detector_single_source.py.
+PRODUCTION_ENV_KEYS = (
+    "tldw_production",
+    "TLDW_PRODUCTION",
     "ENVIRONMENT",
     "APP_ENV",
     "DEPLOYMENT_ENV",
     "FASTAPI_ENV",
     "TLDW_ENV",
+    "ENV",
 )
+_PRODUCTION_FLAG_KEYS = frozenset({"tldw_production", "TLDW_PRODUCTION"})  # also accept truthy values
+_PRODUCTION_VALUES = frozenset({"prod", "production", "live"})
 _TEST_FLAG_KEYS = ("TEST_MODE", "TESTING", "TLDW_TEST_MODE")
+# Test seams refused at startup in a production-like runtime, PYTEST_CURRENT_TEST or
+# not. tests/lint/test_test_seam_env_reads_guarded.py requires every other *TEST* env
+# read in app/ to be allowlisted with a reason.
+GUARDED_TEST_SEAM_KEYS = _TEST_FLAG_KEYS + (
+    "TLDW_ALLOW_TEST_FALLBACK_KEYS",
+    "SINGLE_USER_TEST_API_KEY",
+    "E2E_TEST_BASE_URL",
+    "MINIMAL_TEST_APP",
+    "JWT_SECRET_TEST_KEY",  # signing-secret fallback (settings, crypto_utils, admin_data_ops_service)
+    "ENABLE_ADMIN_E2E_TEST_MODE",  # mounts the AuthNZ seed/reset test-support router
+    "EVALUATIONS_TEST_DB_PATH",  # one evaluations DB for every user
+    "JOBS_TEST_NOW_EPOCH",  # freezes the Jobs lease clock
+)
+GUARDED_TEST_SEAM_PREFIXES = ("RG_TEST_",)
+# Seams whose consumers use the raw value (a key, a URL, a path, an epoch), so any
+# non-empty value arms them: JOBS_TEST_NOW_EPOCH=0 still freezes the clock. The
+# other seams are switches, unarmed only by an explicit falsy value.
+_VALUE_TEST_SEAM_KEYS = frozenset(
+    {
+        "SINGLE_USER_TEST_API_KEY",
+        "E2E_TEST_BASE_URL",
+        "JWT_SECRET_TEST_KEY",
+        "EVALUATIONS_TEST_DB_PATH",
+        "JOBS_TEST_NOW_EPOCH",
+    }
+)
+
+
+@dataclass(frozen=True)
+class RuntimeEnvironment:
+    """Whether the runtime is production-like, and which key said so."""
+
+    is_production: bool
+    source_key: str | None = None
 
 
 def _env_truthy(val: str | None) -> bool:
@@ -72,22 +115,24 @@ def audio_imports_enabled_for_runtime() -> bool:
     return not is_explicit_pytest_runtime() or env_flag_enabled("MINIMAL_TEST_INCLUDE_AUDIO")
 
 
-def is_production_like_env() -> bool:
-    """Detect production-like runtime from common deployment environment variables."""
-    try:
-        if _env_truthy(os.getenv("tldw_production")):
-            return True
-    except Exception:
-        return False
+def runtime_environment(environ: Mapping[str, str] | None = None) -> RuntimeEnvironment:
+    """Classify the runtime from PRODUCTION_ENV_KEYS (default: ``os.environ``).
 
-    for key in _PRODUCTION_ENV_KEYS:
-        try:
-            value = str(os.getenv(key, "")).strip().lower()
-        except Exception:
-            value = ""
-        if value in _PRODUCTION_VALUES:
-            return True
-    return False
+    Production-like when any key, case-insensitively, is ``prod``, ``production`` or
+    ``live``; ``tldw_production`` and ``TLDW_PRODUCTION`` also accept a truthy value.
+    Uncached, so a changed environment is seen on the next call.
+    """
+    env = os.environ if environ is None else environ
+    for key in PRODUCTION_ENV_KEYS:
+        value = str(env.get(key) or "").strip().lower()
+        if value in _PRODUCTION_VALUES or (key in _PRODUCTION_FLAG_KEYS and _env_truthy(value)):
+            return RuntimeEnvironment(is_production=True, source_key=key)
+    return RuntimeEnvironment(is_production=False)
+
+
+def is_production_like_env() -> bool:
+    """Return True when :func:`runtime_environment` reports a production-like runtime."""
+    return runtime_environment().is_production
 
 
 def _active_test_mode_flags() -> list[str]:
@@ -98,14 +143,46 @@ def _active_test_mode_flags() -> list[str]:
     return active
 
 
-def validate_test_runtime_flags() -> None:
-    """Fail fast when test-mode flags are enabled outside explicit pytest runtime.
+def _seam_armed(key: str, value: str) -> bool:
+    if key in _VALUE_TEST_SEAM_KEYS:
+        return bool(value)
+    return parse_bool(value, default=True)  # a switch: unrecognised values count as on
 
-    Guarded flags:
-    - TEST_MODE
-    - TESTING
-    - TLDW_TEST_MODE
+
+def armed_test_seams(environ: Mapping[str, str] | None = None) -> list[str]:
+    """Guarded test seams that are set and not explicitly switched off (fail closed)."""
+    env = os.environ if environ is None else environ
+    return sorted(
+        key
+        for key, value in env.items()
+        if (key in GUARDED_TEST_SEAM_KEYS or key.startswith(GUARDED_TEST_SEAM_PREFIXES))
+        and _seam_armed(key, value)
+    )
+
+
+def validate_test_runtime_flags() -> None:
+    """Fail fast on test seams the runtime must not honour.
+
+    - In a production-like runtime (:func:`runtime_environment`), any armed seam in
+      GUARDED_TEST_SEAM_KEYS / GUARDED_TEST_SEAM_PREFIXES raises, even when
+      PYTEST_CURRENT_TEST is set. So does PYTEST_CURRENT_TEST itself when pytest is
+      not loaded: a spoofed marker would switch off the is_explicit_pytest_runtime()
+      checks (the SSRF hostname check among them).
+    - Elsewhere, TEST_MODE, TESTING and TLDW_TEST_MODE still require an explicit
+      pytest runtime; the other seams stay usable by e2e servers started outside pytest.
     """
+    runtime = runtime_environment()
+    if runtime.is_production:
+        armed = armed_test_seams()
+        if is_explicit_pytest_runtime() and "pytest" not in sys.modules:
+            armed.append("PYTEST_CURRENT_TEST (set, but pytest is not loaded)")
+        if armed:
+            raise RuntimeError(
+                "Unsafe startup configuration: test seams are armed in a production-like runtime "
+                f"({runtime.source_key}): {', '.join(armed)}. PYTEST_CURRENT_TEST does not exempt "
+                "production; unset the test seams or the production marker."
+            )
+
     active_flags = _active_test_mode_flags()
     if not active_flags:
         return
