@@ -10,7 +10,7 @@ import os
 import time
 from collections.abc import AsyncIterator
 from functools import partial
-from typing import Any
+from typing import Any, NoReturn
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request, status
 from loguru import logger
@@ -43,18 +43,19 @@ from tldw_Server_API.app.core.Chat.bounded_daemon import (
     await_bounded_sync_call,
     await_owned_worker,
 )
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError, ChatConfigurationError
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError, ChatBadRequestError, ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_service import (
     _validate_provider_model_selection,
     perform_chat_api_call_async,
     resolve_provider_and_model,
 )
 from tldw_Server_API.app.core.Chat.streaming_utils import (
+    PROVIDER_STREAM_ERROR_MESSAGES,
     invoke_stream_close_bounded,
     normalize_provider_stream_error,
 )
 from tldw_Server_API.app.core.config import loaded_config_data
-from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.exceptions import ChatModelNotAvailableError, raise_detached_error
 from tldw_Server_API.app.core.http_client import create_async_client as async_http_client_factory
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
 from tldw_Server_API.app.core.LLM_Calls.anthropic_messages import (
@@ -2037,15 +2038,28 @@ async def _resolve_messages_credentials(
                 pool=SYNC_ADAPTER_CALL_POOL,
                 exhaustion_message="Provider model discovery capacity is exhausted",
             )
+        except ChatModelNotAvailableError as unavailable:
+            raise_detached_error(HTTPException(
+                status_code=400, detail={"error_code": unavailable.error_code, "message": str(unavailable)},
+            ))
         except ChatBadRequestError:
-            raise_detached_error(HTTPException(
-                status_code=400, detail="Selected model is not available for this provider.",
-            ))
-        except (ChatConfigurationError, DaemonCapacityError):
-            raise_detached_error(HTTPException(
-                status_code=503, detail="Provider model inventory is unavailable.",
-            ))
+            raise_detached_error(HTTPException(status_code=400, detail="Invalid model selection."))
+        except ChatAuthenticationError:
+            _raise_messages_inventory_error(502, "provider_authentication_failed")
+        except ChatConfigurationError as inventory_error:
+            _raise_messages_inventory_error(503, inventory_error.error_code)
+        except DaemonCapacityError:
+            _raise_messages_inventory_error(503, "provider_model_inventory_unavailable")
     return credentials
+
+
+def _raise_messages_inventory_error(status_code: int, code: str) -> NoReturn:
+    """The same public code and message chat completions uses for a model-list failure (review M1)."""
+    if code not in PROVIDER_STREAM_ERROR_MESSAGES:
+        code = "provider_configuration_invalid"
+    raise_detached_error(HTTPException(
+        status_code=status_code, detail={"error_code": code, "message": PROVIDER_STREAM_ERROR_MESSAGES[code]},
+    ))
 
 
 async def _handle_messages(

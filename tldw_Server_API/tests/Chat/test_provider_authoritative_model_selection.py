@@ -19,12 +19,14 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
 )
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAuthenticationError,
     ChatBadRequestError,
     ChatConfigurationError,
 )
 from tldw_Server_API.app.core.LLM_Calls import adapter_utils, provider_model_inventory
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import AuditedCallPolicyTransport
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
 from tldw_Server_API.app.core.LLM_Calls.providers import openai_adapter, openrouter_adapter
 from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
@@ -718,3 +720,43 @@ def test_bedrock_without_inventory_is_configuration_failure(boundary):
         chat_service.perform_chat_api_call(**args(api_provider="bedrock", model="retired-model"))
     assert boundary.discovery == []
     assert boundary.adapter.calls == []
+
+
+@pytest.mark.parametrize(
+    ("status", "auth_source", "expected", "code", "refresh_safe"),
+    [
+        ("auth_failed", "oauth", ChatAuthenticationError, None, True),
+        ("auth_failed", "api_key", ChatAuthenticationError, None, False),
+        ("server_error", "oauth", ChatConfigurationError, "provider_model_inventory_unavailable", False),
+        ("unreachable", None, ChatConfigurationError, "provider_model_inventory_unavailable", False),
+        ("unsupported", "oauth", ChatConfigurationError, "provider_configuration_invalid", False),
+    ],
+)
+def test_inventory_failures_map_to_the_errors_the_endpoints_handle(
+    monkeypatch, status, auth_source, expected, code, refresh_safe,
+):
+    """A model-list 401 is an authentication failure a refreshable OAuth token may retry (review I3, M1)."""
+    monkeypatch.setattr(chat_service, "discover_provider_models", lambda *_a, **_k: ModelDiscoveryResult(status))
+    request = {
+        "model": "current-model", "api_key": "synthetic-key", "base_url": "https://provider.example.invalid/v1",
+        PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: SimpleNamespace(auth_source=auth_source),
+    }
+    with pytest.raises(expected) as error:
+        chat_service._validate_provider_model_selection("openai", request)
+    if expected is ChatAuthenticationError:
+        assert error.value.status_code == 401
+    else:
+        assert error.value.error_code == code
+    assert error.value.credential_refresh_retry_safe is refresh_safe
+    assert "synthetic-key" not in str(error.value)
+
+
+def test_unlisted_model_names_the_model_provider_and_fix(monkeypatch):
+    monkeypatch.setattr(chat_service, "discover_provider_models", lambda *_a, **_k: ModelDiscoveryResult("ready", ("other",)))
+    with pytest.raises(ChatBadRequestError) as error:
+        chat_service._validate_provider_model_selection(
+            "openai", {"model": "gpt-gone", "api_key": "synthetic-key", "base_url": "https://provider.example.invalid/v1"},
+        )
+    message = str(error.value)
+    assert "'gpt-gone'" in message and "'openai'" in message
+    assert "api_provider" in message and "<provider>/<model>" in message

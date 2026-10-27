@@ -131,7 +131,7 @@ def _isolate_inventory_from_adapter_payload_units(monkeypatch, request):
         return
     from tldw_Server_API.app.core.LLM_Calls.providers.base import ChatProvider
 
-    monkeypatch.setattr(ChatProvider, "_validate_model_inventory", lambda _self, _request: None)
+    monkeypatch.setattr(ChatProvider, "_validate_model_inventory", lambda _self, _request, *_args: None)
 
 
 @pytest.fixture(autouse=True)

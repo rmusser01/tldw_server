@@ -89,10 +89,10 @@ class ChatProvider(ABC):
         )
 
         bound, credentials = bind_provider_call_credentials(self.name, request, consume=True)
-        self._validate_model_inventory(bound)
+        self._validate_model_inventory(bound, getattr(credentials, "auth_source", None) == "oauth")
         return bound, credentials
 
-    def _validate_model_inventory(self, request: dict[str, Any]) -> None:
+    def _validate_model_inventory(self, request: dict[str, Any], refreshable_oauth: bool = False) -> None:
         """Cover direct adapter callers as well as the ordinary Chat dispatcher."""
         from tldw_Server_API.app.core.Chat.chat_service import (
             _call_policy_after_model_discovery,
@@ -123,7 +123,7 @@ class ChatProvider(ABC):
         elif request.get("app_config") is None:
             request["app_config"] = {}
         started_at = time.monotonic()
-        _validate_provider_model_selection(self.name, request)
+        _validate_provider_model_selection(self.name, request, refreshable_oauth=refreshable_oauth)
         _call_policy_after_model_discovery(self.name, request, started_at)
 
     def _raise_sanitized_provider_failure(

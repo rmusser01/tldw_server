@@ -6810,6 +6810,134 @@ def test_real_openai_nonstream_auth_status_controls_oauth_refresh(
     assert sentinel not in response.text
 
 
+def _real_openai_inventory_call(client, *, discover, stream: bool = False, auth_source: str | None = "oauth"):
+    """POST one OpenAI chat through the real adapter; only the model list and generation transport are faked."""
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls.providers import openai_adapter
+
+    generation_keys: list[str] = []
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"id": "chatcmpl-inventory", "choices": [{"message": {"role": "assistant", "content": "ok"}}]}
+
+    class Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, _url, *, headers, **_kwargs):
+            generation_keys.append(headers["Authorization"].removeprefix("Bearer "))
+            return Response()
+
+    runtime_type = _credential_runtime_double(auth_source=auth_source)
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {"openai": SimpleNamespace(can_attempt_call=lambda: True)}
+    request_data = ChatCompletionRequest(
+        model="gpt-4o-mini",
+        api_provider="openai",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+        stream=stream,
+    )
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
+        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
+        patch.object(chat_endpoint, "_shared_is_test_mode", return_value=False),
+        patch.object(chat_endpoint, "_should_enforce_strict_model_selection", return_value=False),
+        patch.object(chat_service, "resolve_provider_models_base_url", lambda *_a, **_k: "https://api.openai.com/v1"),
+        patch.object(chat_service, "discover_provider_models", discover),
+        patch.object(openai_adapter, "http_client_factory", lambda **_kwargs: Client()),
+    ):
+        response = client.post("/api/v1/chat/completions", json=request_data.model_dump())
+    return response, runtime_type, generation_keys
+
+
+@pytest.mark.provider_inventory
+def test_discovery_401_reaches_the_openai_oauth_refresh_path(authenticated_client, mock_chacha_db, setup_dependencies):
+    """A rejected OAuth token on the model list refreshes once and retries, like a generation 401 (review I3)."""
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    discovery_keys: list[str] = []
+
+    def discover(_provider, key, **_kwargs):
+        discovery_keys.append(key)
+        if key == "openai-runtime-key":
+            return ModelDiscoveryResult("auth_failed")
+        return ModelDiscoveryResult("ready", ("gpt-4o-mini",))
+
+    response, runtime_type, generation_keys = _real_openai_inventory_call(authenticated_client, discover=discover)
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert discovery_keys[0] == "openai-runtime-key"
+    assert set(discovery_keys[1:]) == {"openai-refreshed-runtime-key"}
+    assert generation_keys == ["openai-refreshed-runtime-key"]
+    assert runtime_type.instances[0].resolve_calls.count(("openai", True)) == 1
+
+
+@pytest.mark.provider_inventory
+def test_discovery_401_without_oauth_is_a_provider_authentication_failure(
+    authenticated_client, mock_chacha_db, setup_dependencies,
+):
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    response, runtime_type, generation_keys = _real_openai_inventory_call(
+        authenticated_client, discover=lambda *_a, **_k: ModelDiscoveryResult("auth_failed"), auth_source=None,
+    )
+
+    assert response.status_code == status.HTTP_502_BAD_GATEWAY
+    assert response.json()["detail"]["error_code"] == "provider_authentication_failed"
+    assert generation_keys == []
+    assert runtime_type.instances[0].resolve_calls.count(("openai", True)) == 0
+
+
+@pytest.mark.provider_inventory
+@pytest.mark.parametrize("outage", ["server_error", "unreachable"])
+def test_inventory_outage_has_its_own_public_status_and_code(
+    authenticated_client, mock_chacha_db, setup_dependencies, outage,
+):
+    """A model-list outage is reported as one, not as a configuration error (review M1)."""
+    from tldw_Server_API.app.core.Chat.streaming_utils import PROVIDER_STREAM_ERROR_MESSAGES
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    response, _runtime_type, generation_keys = _real_openai_inventory_call(
+        authenticated_client, discover=lambda *_a, **_k: ModelDiscoveryResult(outage), auth_source=None,
+    )
+
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert response.json()["detail"] == {
+        "error_code": "provider_model_inventory_unavailable",
+        "message": PROVIDER_STREAM_ERROR_MESSAGES["provider_model_inventory_unavailable"],
+    }
+    assert generation_keys == []
+
+
+@pytest.mark.provider_inventory
+def test_unlisted_model_rejection_names_model_provider_and_fix(
+    authenticated_client, mock_chacha_db, setup_dependencies,
+):
+    """The non-strict rejection says which model, which provider, and how to pick another (review M2)."""
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    response, _runtime_type, generation_keys = _real_openai_inventory_call(
+        authenticated_client, discover=lambda *_a, **_k: ModelDiscoveryResult("ready", ("gpt-other",)), auth_source=None,
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST, response.text
+    text = response.text
+    assert "gpt-4o-mini" in text and "openai" in text
+    assert "api_provider" in text and "<provider>/<model>" in text
+    assert generation_keys == []
+
+
 @pytest.mark.asyncio
 async def test_real_openai_nonstream_upstream_status_is_concurrency_isolated(monkeypatch):
     import httpx

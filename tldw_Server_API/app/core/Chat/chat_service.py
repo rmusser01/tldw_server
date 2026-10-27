@@ -25,7 +25,7 @@ from collections.abc import AsyncIterator, Awaitable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from functools import lru_cache, partial
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, NoReturn
 
 from fastapi import HTTPException, status
 from fastapi.encoders import jsonable_encoder
@@ -172,7 +172,12 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_number,
     iter_custom_openai_provider_numbers,
 )
-from tldw_Server_API.app.core.exceptions import EgressPolicyError, LLMQuotaExceededError, raise_detached_error
+from tldw_Server_API.app.core.exceptions import (
+    ChatModelNotAvailableError,
+    EgressPolicyError,
+    LLMQuotaExceededError,
+    raise_detached_error,
+)
 from tldw_Server_API.app.core.LLM_Calls import adapter_registry as _adapter_registry
 from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
@@ -971,9 +976,7 @@ def known_models_for_provider_cached(
         base_url = _provider_inventory_base_url(provider_key, request)
         result = discover_provider_models(provider_key, api_key, base_url=base_url)
         if result.status != "ready":
-            raise ChatConfigurationError(
-                provider=provider_key, message="Provider model inventory is unavailable.",
-            )
+            _raise_inventory_failure(provider_key, result.status)
         return tuple(result.models)
 
     known: set[str] = set()
@@ -1021,9 +1024,7 @@ def is_model_known_for_provider(
             provider_key, api_key, model_key, base_url=base_url, inventory=inventory,
         )
         if selection.status not in {"ready", "not_found"}:
-            raise ChatConfigurationError(
-                provider=provider_key, message="Provider model inventory is unavailable.",
-            )
+            _raise_inventory_failure(provider_key, selection.status)
         return selection.status == "ready"
     known_models = known_models_for_provider_cached(provider_key)
     if not known_models:
@@ -2624,12 +2625,41 @@ def _provider_inventory_base_url(
     return base_url
 
 
+_INVENTORY_OUTAGES = frozenset({"unreachable", "server_error"})
+
+
+def _raise_inventory_failure(provider: str, status: str, *, refreshable_oauth: bool = False) -> NoReturn:
+    """Raise the typed error the endpoints already map for a model list that is not ready.
+
+    auth_failed is the provider rejecting the credential, so it is an authentication error. Discovery runs
+    before generation, so a refreshable OAuth credential may refresh and retry (review I3). An outage gets its
+    own public code (review M1); anything else is a configuration problem.
+    """
+    if status == "auth_failed":
+        error = ChatAuthenticationError(
+            provider=provider, message="The provider rejected the credential while listing its models.",
+        )
+        if refreshable_oauth:
+            error.credential_refresh_retry_safe = True
+        raise error
+    if status in _INVENTORY_OUTAGES:
+        raise ChatConfigurationError(
+            provider=provider,
+            message="Provider model inventory is temporarily unavailable.",
+            error_code="provider_model_inventory_unavailable",
+        )
+    raise ChatConfigurationError(provider=provider, message="Provider model inventory is not supported.")
+
+
 def _validate_provider_model_selection(
-    provider: str, request: dict[str, Any],
+    provider: str, request: dict[str, Any], *, refreshable_oauth: bool | None = None,
 ) -> None:
     """Authorize current IDs, confirmed aliases and explicit router fallback IDs."""
     if provider not in CLOUD_MODEL_PROVIDERS:
         return
+    if refreshable_oauth is None:
+        credentials = request.get(PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY)
+        refreshable_oauth = getattr(credentials, "auth_source", None) == "oauth"
     selected_models: list[Any] = [request.get("model")]
     extra_body = request.get("extra_body")
     fallback_models = None
@@ -2656,9 +2686,7 @@ def _validate_provider_model_selection(
         provider, request.get("api_key"), base_url=base_url, **discovery_options,
     )
     if result.status != "ready":
-        raise ChatConfigurationError(
-            provider=provider, message="Provider model inventory is unavailable.",
-        )
+        _raise_inventory_failure(provider, result.status, refreshable_oauth=refreshable_oauth)
     for model in selected_models:
         if model in result.models:
             continue
@@ -2666,22 +2694,16 @@ def _validate_provider_model_selection(
         if selection_policy is not None and selection_policy.maximum_timeout_seconds is not None:
             remaining = selection_policy.maximum_timeout_seconds - (time.monotonic() - discovery_started)
             if remaining <= 0:
-                raise ChatConfigurationError(
-                    provider=provider, message="Provider model discovery deadline expired.",
-                )
+                _raise_inventory_failure(provider, "unreachable")
             selection_policy = replace(selection_policy, maximum_timeout_seconds=remaining)
         selection = resolve_provider_model_selection(
             provider, request.get("api_key"), model,
             base_url=base_url, inventory=result, call_policy=selection_policy,
         )
         if selection.status == "not_found":
-            raise ChatBadRequestError(
-                provider=provider, message="Selected model is not available for this provider.",
-            )
+            raise ChatModelNotAvailableError(provider, model)
         if selection.status != "ready":
-            raise ChatConfigurationError(
-                provider=provider, message="Provider model inventory is unavailable.",
-            )
+            _raise_inventory_failure(provider, selection.status, refreshable_oauth=refreshable_oauth)
     # Freeze the resolved endpoint so a config/env rotation between discovery
     # and generation cannot validate one server's models and call another.
     request["base_url"] = base_url
@@ -2697,9 +2719,7 @@ def _call_policy_after_model_discovery(
         return None
     remaining = policy.maximum_timeout_seconds - (time.monotonic() - started_at)
     if remaining <= 0:
-        raise ChatConfigurationError(
-            provider=provider, message="Provider model discovery deadline expired.",
-        )
+        _raise_inventory_failure(provider, "unreachable")
     remaining_policy = replace(policy, maximum_timeout_seconds=remaining)
     request["call_policy"] = remaining_policy
     return remaining_policy
@@ -3583,14 +3603,20 @@ def _bound_provider_invocation_exception(exc: BaseException) -> BaseException:
     if _is_trusted_local_chat_http_exception(exc):
         return exc
     if isinstance(exc, ChatAuthenticationError):
-        return ChatAuthenticationError(
+        bounded = ChatAuthenticationError(
             message="The selected provider credentials could not be authenticated.",
             status_code=403 if getattr(exc, "status_code", None) == 403 else 401,
         )
+        if getattr(exc, "credential_refresh_retry_safe", None) is True:
+            bounded.credential_refresh_retry_safe = True
+        return bounded
     if isinstance(exc, ChatConfigurationError):
         return ChatConfigurationError(
             message="The selected provider configuration is invalid.",
+            error_code=getattr(exc, "error_code", "provider_configuration_invalid"),
         )
+    if isinstance(exc, ChatModelNotAvailableError):
+        return exc  # its message is built from the request's provider and model, never upstream text
     if isinstance(exc, ChatBadRequestError):
         return ChatBadRequestError(
             provider=getattr(exc, "provider", None),

@@ -243,7 +243,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.transaction_utils import (
     db_transaction,
 )
-from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, raise_detached_error
+from tldw_Server_API.app.core.exceptions import ChatModelNotAvailableError, LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.routing import (
     InMemoryRoutingDecisionStore,
     RouterRequest,
@@ -1008,7 +1008,8 @@ def _provider_credential_error_code(exc: BaseException) -> str | None:
     if isinstance(exc, ChatAuthenticationError):
         return "provider_authentication_failed"
     if isinstance(exc, ChatConfigurationError):
-        return "provider_configuration_invalid"
+        code = getattr(exc, "error_code", None)
+        return code if code in _PROVIDER_CREDENTIAL_MESSAGES else "provider_configuration_invalid"
     if isinstance(exc, ByokResolutionError):
         code = getattr(exc, "policy_code", exc.code)
         return code if code in _PROVIDER_CREDENTIAL_MESSAGES else "provider_configuration_invalid"
@@ -2882,24 +2883,31 @@ def _validate_explicit_model_availability(
     if not provider_name or not model_name:
         return None
 
-    if credentials_resolved:
-        availability = is_model_known_for_provider(
-            provider_name, model_name, api_key=api_key,
-            app_config=app_config, credentials_resolved=True,
-        )
-    else:
-        availability = is_model_known_for_provider(provider_name, model_name)
+    try:
+        if credentials_resolved:
+            availability = is_model_known_for_provider(
+                provider_name, model_name, api_key=api_key,
+                app_config=app_config, credentials_resolved=True,
+            )
+        else:
+            availability = is_model_known_for_provider(provider_name, model_name)
+    except (ChatAuthenticationError, ChatConfigurationError):
+        # The model list could not be read. Dispatch repeats the authoritative check inside the credential
+        # refresh-and-retry path, so a rejected OAuth token still refreshes (review I3).
+        return None
     if availability is None or availability:
         return None
 
+    return _model_not_available_detail(provider_name, model_name)
+
+
+def _model_not_available_detail(provider: str, model: str) -> dict[str, Any]:
+    """The 400 body for a model the provider does not list, strict pre-check or dispatch alike."""
     return {
-        "error_code": "model_not_available",
-        "message": (
-            f"Model '{model_name}' is not available for provider '{provider_name}'. "
-            "Select one of the server-advertised models for this provider."
-        ),
-        "provider": provider_name,
-        "model": model_name,
+        "error_code": ChatModelNotAvailableError.error_code,
+        "message": ChatModelNotAvailableError.message_for(provider, model),
+        "provider": provider,
+        "model": model,
     }
 
 
@@ -6078,6 +6086,16 @@ async def create_chat_completion(
                         history_admission, _provider_credential_error_code(credential_error) or "provider_configuration_invalid",
                     )
                 raise_detached_error(_provider_credential_http_exception(credential_error))
+
+            except ChatModelNotAvailableError as unavailable:
+                raise_detached_error(
+                    HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=_model_not_available_detail(
+                            str(unavailable.provider or provider), str(unavailable.model),
+                        ),
+                    )
+                )
 
             except (ChatAuthenticationError, ChatConfigurationError) as provider_error:
                 if request_data.stream and history_admission is not None:

@@ -9,7 +9,7 @@ from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints import messages
 from tldw_Server_API.app.core.Chat import chat_service
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError, ChatConfigurationError
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError, ChatBadRequestError, ChatConfigurationError
 from tldw_Server_API.app.core.LLM_Calls import provider_model_inventory as inventory
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import AuditedCallPolicyTransport
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
@@ -101,6 +101,16 @@ def test_anthropic_api_confirmed_alias_reaches_generation(boundary: SimpleNamesp
     assert 0 < call["timeout"] <= 5
 
 
+def test_aliased_model_requests_share_one_list_and_one_lookup(boundary: SimpleNamespace) -> None:
+    """The alias is confirmed once per inventory, not on every request (review I4)."""
+    _generate(boundary, "anthropic", "claude-current-alias")
+    _generate(boundary, "anthropic", "claude-current-alias")
+    assert len(boundary.adapter.calls) == 2
+    lists = [call for call in boundary.http if call["url"].endswith("/models")]
+    lookups = [call for call in boundary.http if call["url"].endswith("/models/claude-current-alias")]
+    assert (len(lists), len(lookups)) == (1, 1)
+
+
 @pytest.mark.parametrize("resolved", ("claude-retired-20000101", "CLAUDE-CURRENT-20990101", ""))
 def test_alias_cannot_resurrect_an_unlisted_destination(boundary: SimpleNamespace, resolved: str) -> None:
     boundary.resolved = resolved
@@ -117,13 +127,21 @@ def test_anthropic_404_does_not_infer_a_date_stripped_alias(boundary: SimpleName
     assert boundary.adapter.calls == []
 
 
-@pytest.mark.parametrize("status", (401, 403, 429, 500))
-def test_alias_lookup_failure_is_sanitized_and_never_generates(boundary: SimpleNamespace, status: int) -> None:
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    ((401, ChatAuthenticationError), (403, ChatAuthenticationError), (429, ChatConfigurationError), (500, ChatConfigurationError)),
+)
+def test_alias_lookup_failure_is_sanitized_and_never_generates(
+    boundary: SimpleNamespace, status: int, expected: type[Exception],
+) -> None:
+    """A rejected credential is an authentication failure (review I3); an outage is not a configuration error."""
     boundary.alias_status = status
-    with pytest.raises(ChatConfigurationError) as error:
+    with pytest.raises(expected) as error:
         _generate(boundary, "anthropic", "claude-current-alias")
     assert boundary.key not in str(error.value)
     assert boundary.adapter.calls == []
+    if expected is ChatConfigurationError:
+        assert error.value.error_code == "provider_model_inventory_unavailable"
 
 
 def test_confirmed_alias_is_known_to_credential_scoped_prevalidation(boundary: SimpleNamespace) -> None:

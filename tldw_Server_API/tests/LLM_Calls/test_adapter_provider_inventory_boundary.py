@@ -66,7 +66,7 @@ async def test_direct_async_adapter_retired_model_never_reaches_generation(monke
 def test_direct_adapter_discovery_consumes_call_policy_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.LLM_Calls.providers import base
 
-    monkeypatch.setattr(chat_service, "_validate_provider_model_selection", lambda *_args: None)
+    monkeypatch.setattr(chat_service, "_validate_provider_model_selection", lambda *_args, **_kwargs: None)
     clock = iter([10.0, 12.0])
     monkeypatch.setattr(base.time, "monotonic", lambda: next(clock, 12.0))
     monkeypatch.setenv("LLM_ADAPTERS_NATIVE_HTTP_OPENAI", "1")
