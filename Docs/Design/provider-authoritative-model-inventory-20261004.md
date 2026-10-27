@@ -17,9 +17,29 @@ these IDs and fuzzy date-stripped aliases. This can display and call retired mod
   Concurrent misses share one fetch within each caller's deadline. Forced
   refreshes supersede waiters and cache publication, not a leader's already
   authenticated response; this is request-snapshot behavior, not revocation.
+  `unreachable` and `server_error` results are cached for 20 seconds, so a
+  failing `/models` is not re-fetched on every call; `auth_failed`, `not_found`
+  and `unsupported` are never cached, and a forced refresh bypasses the window.
+  Cache hits refresh their LRU position. A confirmed alias or selector lookup
+  (ready or not_found) is stored inside its inventory entry, so it lives exactly
+  as long as that inventory.
 - Discovery uses checked HTTP egress, no redirects, bounded pagination/timeouts,
   no secret logging and no generation probes. Unsupported APIs are explicitly
-  unavailable rather than inventing an inventory.
+  unavailable rather than inventing an inventory. It accepts `http` and `https`
+  bases wherever the generation adapter would use them (gateways, the mock
+  server); egress policy decides per host, exactly as for generation. A failure
+  logs one line with provider, status and endpoint host only.
+- Failures map to the errors endpoints already handle: `auth_failed` is a 401
+  authentication error (refresh-and-retry safe for OAuth credentials, since no
+  generation was sent); `unreachable`/`server_error` use the public code
+  `provider_model_inventory_unavailable` (503) in chat completions and Messages;
+  `unsupported` stays a configuration error. An unlisted model is a 400
+  `model_not_available` that names the model and provider and says to set
+  `api_provider` or use `<provider>/<model>`. The strict pre-check defers to
+  dispatch when the list cannot be read, so OAuth refresh still runs there.
+- The provider listing discovers commercial providers concurrently (four
+  workers). A credential-store failure drops only the commercial entries; local
+  providers stay listed.
 - Shared Chat dispatch checks the exact selected ID with the effective credential
   and endpoint before generation, including saved selections and defaults.
   BYOK and audited transport restrictions must not be bypassed by discovery.
@@ -42,7 +62,9 @@ these IDs and fuzzy date-stripped aliases. This can display and call retired mod
   every explicit fallback model against the same credential-scoped inventory.
 - Override model lists restrict current IDs; they cannot restore absent IDs.
 - Browser catalogs use a five-minute TTL and a new persisted-cache version;
-  expired cached getters and failed fetches cannot return old availability.
+  expired cached getters and failed fetches cannot return old availability. An
+  aborted read (navigation, client timeout) is not a server failure and keeps
+  the catalog.
   Empty refreshes also clear the outer cache. Invalidation does not recursively
   retry an outage; callers join only an actual newer refresh.
 
