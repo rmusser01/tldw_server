@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -1559,6 +1560,41 @@ def test_backend_required_enforces_code_ratchets():
     assert not gate.get("continue-on-error", False)  # nosec B101 - regression assertion
     assert "tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py" in gate["run"]  # nosec B101
     assert "tldw_Server_API/tests/lint/test_keyword_identity_ratchet.py" in gate["run"]  # nosec B101
+
+
+def _run_words(run: str) -> set[str]:
+    """Shell words of a step's ``run`` text, with comments dropped.
+
+    A commented-out suite path must not satisfy a contract that the gate runs it. As in
+    bash, a comment ends at the physical newline, even after a line continuation.
+    """
+    return set(shlex.split(run, comments=True))
+
+
+def test_run_words_ignore_commented_out_paths():
+    run = "pytest -q \\\n  # tests/lint/test_disabled.py \\\n  tests/lint/test_enabled.py  # trailing note\n"
+    words = _run_words(run)
+    assert "tests/lint/test_enabled.py" in words  # nosec B101 - regression assertion
+    assert "tests/lint/test_disabled.py" not in words  # nosec B101 - regression assertion
+
+
+def test_backend_required_runs_the_websocket_auth_guards():
+    """TASK-13950.7: the WebSocket auth ratchet and route matrix enforce nothing unless
+    the required gate runs them. This file runs on the step's first line, so removing
+    their line cannot remove this check too."""
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    steps = workflow["jobs"]["backend-required"]["steps"]
+    gate = next(step for step in steps if step.get("name") == "Enforce CI contracts and code ratchets")
+    assert not gate.get("continue-on-error", False)  # nosec B101 - regression assertion
+    words = _run_words(gate["run"])
+    for suite in (
+        "tldw_Server_API/tests/lint/test_auth_token_parsing_ratchet.py",
+        "tldw_Server_API/tests/AuthNZ/test_websocket_route_auth_matrix.py",
+    ):
+        assert suite in words, suite  # nosec B101 - regression assertion
+    # Plugin autoload is off in this step, so the matrix is time-bounded only if it loads
+    # pytest_timeout itself (pyproject sets the limit).
+    assert "pytest_timeout" in words  # nosec B101 - regression assertion
 
 
 def _without_await_license(

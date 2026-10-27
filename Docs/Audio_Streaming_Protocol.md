@@ -7,13 +7,13 @@ Overview
 
 WebSocket Endpoint
 - Unified endpoint: `/api/v1/audio/stream/transcribe` (primary; includes auth/quotas/fallback)
-- Core demo endpoint: `/core/parakeet/stream` (portable router; no auth/quotas)
+- Core handler: `Parakeet_Core_Streaming/ws_server.websocket_parakeet_core` (no route; no auth/quotas, so an embedding server must authenticate before calling it). The "Core Handler" sections below describe its protocol.
 
 The unified endpoint uses strict audio protocol v1: the first post-auth message
 must be a config frame with `protocol_version: 1`, `mode: "dictate"` or
 `"captions"`, `audio_format: "pcm16"`, `sample_rate: 16000`, and
-`channels: 1`. Its audio frames are base64 PCM16 mono JSON frames. The core demo
-endpoint and library-level examples below use the lower-level Parakeet core
+`channels: 1`. Its audio frames are base64 PCM16 mono JSON frames. The core
+handler and library-level examples below use the lower-level Parakeet core
 Float32 contract.
 
 Server-side handler (observability-enabled)
@@ -41,8 +41,8 @@ async def handle_audio_ws(websocket):
         await stream.stop()
 ```
 
-Core Demo Config Frame
-- For `/core/parakeet/stream`, send this JSON as the first message to configure the session. All fields are optional unless noted.
+Core Handler Config Frame
+- For the core handler, send this JSON as the first message to configure the session. All fields are optional unless noted.
 
 {
   "type": "config",                       // required
@@ -57,8 +57,8 @@ Core Demo Config Frame
   "diarization": true                      // or "diarize": true; enable speaker diarization
 }
 
-Core Demo Audio Frame
-- For `/core/parakeet/stream`, send base64-encoded float32 mono PCM audio samples.
+Core Handler Audio Frame
+- For the core handler, send base64-encoded float32 mono PCM audio samples.
 
 {
   "type": "audio",

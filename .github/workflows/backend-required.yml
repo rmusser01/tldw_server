@@ -310,6 +310,13 @@ jobs:
             tldw_Server_API/tests/Services/test_startup_test_runtime_guard.py \
             tldw_Server_API/tests/AuthNZ/unit/test_runtime_environment.py \
             tldw_Server_API/tests/AuthNZ/unit/test_test_mode_runtime_guard.py
+          # TASK-13950.7: WebSocket auth guards. Their own run: the auth matrix reloads the app module.
+          # pytest_timeout, as in ci.yml's shards: a route that neither accepts nor closes fails the
+          # test in minutes instead of holding the step until the job times out.
+          pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            -p pytest_timeout -o timeout_method=signal \
+            tldw_Server_API/tests/lint/test_auth_token_parsing_ratchet.py \
+            tldw_Server_API/tests/AuthNZ/test_websocket_route_auth_matrix.py
 
       - name: Backend unit smoke
         if: needs.changes.outputs.backend_changed == 'true'

@@ -48,7 +48,6 @@ if "transformers" not in sys.modules:
 
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
-from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings as get_auth_settings
 from tldw_Server_API.app.api.v1.endpoints import workflows as wf_mod
@@ -437,35 +436,32 @@ def test_websocket_auth_and_events(client_with_workflows_db: TestClient):
     wid = client.post("/api/v1/workflows", json=definition).json()["id"]
     run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {"name": "Bob"}}).json()["run_id"]
 
-    # Token for user id 1
-    jwtm = get_jwt_manager()
-    token = jwtm.create_access_token(subject="1", username="tester", roles=["user"], permissions=[])
-
-    # Connect and receive snapshot
-    with client.websocket_connect(f"/api/v1/workflows/ws?run_id={run_id}&token={token}") as ws:
+    # The client's single-user X-API-KEY authenticates the socket as user 1, the run's owner.
+    with client.websocket_connect(f"/api/v1/workflows/ws?run_id={run_id}") as ws:
         msg = ws.receive_json()
         assert msg["type"] == "snapshot"
 
-    # Unauthorized with wrong user
-    bad_token = jwtm.create_access_token(subject="999", username="intruder", roles=["user"], permissions=[])
-    with pytest.raises(Exception):
-        with client.websocket_connect(f"/api/v1/workflows/ws?run_id={run_id}&token={bad_token}"):
+    # Another user's run is refused.
+    app.dependency_overrides[wf_mod._get_db]().create_run(
+        run_id="foreign-run",
+        tenant_id="default",
+        user_id="999",
+        inputs={},
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot=definition,
+    )
+    with pytest.raises(WebSocketDisconnect) as exc_info:
+        with client.websocket_connect("/api/v1/workflows/ws?run_id=foreign-run"):
             pass
+    assert exc_info.value.code == 4403
 
 
 def test_websocket_missing_run_closes_with_4404(client_with_workflows_db: TestClient):
     client = client_with_workflows_db
-    token = get_jwt_manager().create_access_token(
-        subject="1",
-        username="tester",
-        roles=["user"],
-        permissions=[],
-    )
 
     with pytest.raises(WebSocketDisconnect) as exc_info:
-        with client.websocket_connect(
-            f"/api/v1/workflows/ws?run_id=missing-run&token={token}"
-        ):
+        with client.websocket_connect("/api/v1/workflows/ws?run_id=missing-run"):
             pass
 
     assert exc_info.value.code == 4404
