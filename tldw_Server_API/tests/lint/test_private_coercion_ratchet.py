@@ -74,7 +74,6 @@ PRIVATE_COERCER_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/core/Audit/audit_shared_migration.py": 1,
     "tldw_Server_API/app/core/Audit/unified_audit_service.py": 3,
     "tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py": 1,
-    "tldw_Server_API/app/core/AuthNZ/settings.py": 1,
     "tldw_Server_API/app/core/Character_Chat/character_limits.py": 1,
     "tldw_Server_API/app/core/Character_Chat/character_rate_limiter.py": 1,
     "tldw_Server_API/app/core/Character_Chat/world_book_prompt_context.py": 2,

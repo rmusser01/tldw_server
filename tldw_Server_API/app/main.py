@@ -79,6 +79,9 @@ from tldw_Server_API.app.core.testing import (
     is_explicit_pytest_runtime as _shared_is_explicit_pytest_runtime,
 )
 from tldw_Server_API.app.core.testing import (
+    is_production_like_env as _is_production_like_env,
+)
+from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
@@ -1729,7 +1732,7 @@ OPENAPI_TAGS = [
 ]
 
 
-_prod_flag = _env_os.getenv("tldw_production", "false").lower() in {"true", "1", "yes", "y", "on"}
+_prod_flag = _is_production_like_env()
 
 APP_DESCRIPTION = """
     Too Long; Didn't Watch Server (tldw_server) - unified research assistant and media analysis platform.
