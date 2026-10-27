@@ -1311,7 +1311,8 @@ export const mediaMethods = {
       rows_offset?: number
       include_rows?: boolean
       include_sources?: boolean
-    }
+    },
+    options?: ScopedRequestOptions
   ): Promise<any> {
     const id = encodeURIComponent(tableId)
     const query = buildQuery({
@@ -1322,7 +1323,9 @@ export const mediaMethods = {
     } as Record<string, any>)
     const response = await bgRequest<any>({
       path: `/api/v1/data-tables/${id}${query}`,
-      method: "GET"
+      method: "GET",
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal
     })
     return response?.table ? mapApiDetailToUi(response) : response
   },
@@ -1335,7 +1338,7 @@ export const mediaMethods = {
     column_hints?: Array<{ name?: string; type?: string; description?: string; format?: string }>
     model?: string
     max_rows?: number
-  }): Promise<ApiDataTableGenerateResponse> {
+  }, options?: ScopedRequestOptions): Promise<ApiDataTableGenerateResponse> {
     const body = {
       name: payload.name,
       prompt: payload.prompt,
@@ -1348,7 +1351,9 @@ export const mediaMethods = {
     return await bgRequest<ApiDataTableGenerateResponse>({
       path: "/api/v1/data-tables/generate",
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal,
+      headers: { "Content-Type": "application/json", ...requestScopeFields(options?.requestScope).headers },
       body
     })
   },
@@ -1392,23 +1397,37 @@ export const mediaMethods = {
     })
   },
 
-  async getDataTableJob(jobId: number): Promise<ApiDataTableJobStatus> {
+  async getDataTableJob(jobId: number, options?: ScopedRequestOptions): Promise<ApiDataTableJobStatus> {
     return await bgRequest<ApiDataTableJobStatus>({
       path: `/api/v1/data-tables/jobs/${encodeURIComponent(String(jobId))}`,
-      method: "GET"
+      method: "GET",
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal
     })
   },
 
   async regenerateDataTable(
     tableId: string,
-    payload?: { prompt?: string; model?: string; max_rows?: number }
+    payload?: { prompt?: string; model?: string; max_rows?: number },
+    options?: ScopedRequestOptions
   ): Promise<ApiDataTableGenerateResponse> {
     const id = encodeURIComponent(tableId)
     return await bgRequest<ApiDataTableGenerateResponse>({
       path: `/api/v1/data-tables/${id}/regenerate`,
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal,
+      headers: { "Content-Type": "application/json", ...requestScopeFields(options?.requestScope).headers },
       body: payload || {}
+    })
+  },
+
+  async cancelDataTableJob(jobId: number, options?: ScopedRequestOptions): Promise<{ success: boolean; status: string }> {
+    return await bgRequest({
+      path: `/api/v1/data-tables/jobs/${encodeURIComponent(String(jobId))}`,
+      method: "DELETE",
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal
     })
   },
 

@@ -104,6 +104,10 @@ export const isServicePromptRequestPath = (
   const pathname = readCanonicalPathname(path)
   if (!pathname) return false
   const requestMethod = String(method || "GET").toUpperCase()
+  if (pathname === "/api/v1/data-tables/generate") return requestMethod === "POST"
+  if (/^\/api\/v1\/data-tables\/jobs\/[1-9][0-9]*$/.test(pathname)) return ["GET", "DELETE"].includes(requestMethod)
+  const tablePath = /^\/api\/v1\/data-tables\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(\/regenerate)?$/i.exec(pathname)
+  if (tablePath) return requestMethod === (tablePath[1] ? "POST" : "GET")
   if (pathname === "/openapi.json") return requestMethod === "GET"
   if (pathname === "/api/v1/config/docs-info") return requestMethod === "GET"
   if (pathname === "/api/v1/audio-studio/projects") return ["GET", "POST"].includes(requestMethod)

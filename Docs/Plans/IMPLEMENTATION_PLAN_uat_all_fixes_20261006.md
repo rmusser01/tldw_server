@@ -58,7 +58,7 @@ The43 IDs below are existing workflow families in [the release catalog](../../ap
 | X04 | Extension capture and sidepanel continuity | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by explicit native11-variant and four-mode binding/ownership composition; causal repairs, exact original preservation and guarded completed-profile disposal passed. [Closure](#x04-extension-capture-and-continuity-selected-closure). |
 | S01 | Quiz and study assistance | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by five-variant native/component and four-mode API composition; reviewed repairs, original preservation and guarded completed-payload disposal. [Closure](#s01-quiz-and-study-assistance-selected-closure). |
 | S02 | Chatbooks and portable backup | Accepted selected scope; native archive/JSON/database roundtrip and per-format failure/Retry, four-mode composition, exact saved content/assets/ownership and human UX. Original handback and completed-payload disposal pass. |
-| S03 | Artifact editors | Open |
+| S03 | Artifact editors | In Progress; [current plan](IMPLEMENTATION_PLAN_uat_s03_artifact_editors_20261026.md). |
 | S04 | Research and source workspace | Open |
 | S05 | Moderation and claims review | Open |
 | S06 | Specialized tools and discovery | Open |

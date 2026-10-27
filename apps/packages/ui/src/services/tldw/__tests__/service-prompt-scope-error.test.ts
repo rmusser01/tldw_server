@@ -518,3 +518,21 @@ it.each([
 ])("B05 scoped transcription path %s %s", (path, method, allowed) => {
   expect(isServicePromptRequestPath(path, method)).toBe(allowed);
 });
+
+
+describe('S03 captured Data Tables generation routes', () => {
+  const id = '83569797-3613-42e0-b2a2-498794fc1cd0';
+  it.each([
+    ['/api/v1/data-tables/generate', 'POST', true],
+    [`/api/v1/data-tables/${id}/regenerate`, 'POST', true],
+    [`/api/v1/data-tables/${id}`, 'GET', true],
+    ['/api/v1/data-tables/jobs/71', 'GET', true],
+    ['/api/v1/data-tables/jobs/71', 'DELETE', true],
+    ['/api/v1/data-tables/generate', 'DELETE', false],
+    [`/api/v1/data-tables/${id}`, 'DELETE', false],
+    ['/api/v1/data-tables/jobs/71/extra', 'DELETE', false],
+    ['/api/v1/data-tables/jobs/0', 'DELETE', false],
+    ['/api/v1/data-tables/jobs/a%2fb', 'DELETE', false],
+    ['/api/v1/data-tables/../regenerate', 'POST', false],
+  ])('bounds %s %s', (path, method, allowed) => expect(isServicePromptRequestPath(path, method)).toBe(allowed));
+});

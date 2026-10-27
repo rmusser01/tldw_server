@@ -121,4 +121,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 
 | [ADR-082](082-postgresql-media-source-owner-identity.md) | Proposed | Scope shared PostgreSQL Media source identity by owner while preserving reserved clone URL recovery guarantees. |
 
+| [ADR-083](083-data-table-completion-before-publication.md) | Proposed | Complete exact-attempt Data Tables Jobs before replayable owner/version-guarded Media publication. |
+
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.

@@ -2,17 +2,17 @@ import type { ApiDataTableJobStatus } from "@/services/tldw/data-tables"
 
 const sleep = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, ms)
-    if (!signal) return
     const onAbort = () => {
       clearTimeout(timer)
+      signal?.removeEventListener("abort", onAbort)
       reject(new Error("Polling cancelled"))
     }
-    if (signal.aborted) {
-      onAbort()
-      return
-    }
-    signal.addEventListener("abort", onAbort, { once: true })
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    if (signal?.aborted) onAbort()
+    else signal?.addEventListener("abort", onAbort, { once: true })
   })
 
 export const pollDataTableJob = async ({
@@ -34,6 +34,7 @@ export const pollDataTableJob = async ({
       throw new Error("Polling cancelled")
     }
     const status = await fetchJob(jobId)
+    if (signal?.aborted) throw new Error("Polling cancelled")
     const state = String(status?.status || "").toLowerCase()
     if (state && ["completed", "failed", "cancelled"].includes(state)) {
       return status
