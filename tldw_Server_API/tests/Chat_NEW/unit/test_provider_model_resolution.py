@@ -319,9 +319,8 @@ def test_resolve_provider_and_model_keeps_explicit_provider_even_when_catalog_di
 
 @pytest.mark.unit
 def test_resolve_provider_and_model_writes_back_canonical_routing_decision():
-    request = ChatCompletionRequest(
-        model="auto",
-        messages=[{"role": "user", "content": "Hello"}],
+    request = ChatCompletionRequest.model_validate(
+        {"model": "auto", "messages": [{"role": "user", "content": "Hello"}]}
     )
 
     _, _, selected_provider, selected_model, _ = resolve_provider_and_model(

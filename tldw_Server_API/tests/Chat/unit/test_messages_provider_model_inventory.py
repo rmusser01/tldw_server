@@ -108,7 +108,7 @@ async def test_messages_inventory_failures_share_the_chat_public_codes(
     with pytest.raises(HTTPException) as error:
         await messages._resolve_messages_credentials(runtime, "anthropic", "claude-wanted", operation="messages")
     assert error.value.status_code == expected_status
-    detail = error.value.detail
+    detail: Any = error.value.detail
     assert detail["error_code"] == expected_code
     if expected_code == "model_not_available":
         assert "claude-wanted" in detail["message"] and "anthropic" in detail["message"]

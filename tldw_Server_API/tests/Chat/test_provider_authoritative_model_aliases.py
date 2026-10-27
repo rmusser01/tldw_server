@@ -141,6 +141,7 @@ def test_alias_lookup_failure_is_sanitized_and_never_generates(
     assert boundary.key not in str(error.value)
     assert boundary.adapter.calls == []
     if expected is ChatConfigurationError:
+        assert isinstance(error.value, ChatConfigurationError)
         assert error.value.error_code == "provider_model_inventory_unavailable"
 
 

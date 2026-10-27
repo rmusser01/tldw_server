@@ -6,7 +6,7 @@ import threading
 import time
 import types
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -467,7 +467,10 @@ def test_unbounded_sync_fetch_does_not_add_keyword_to_legacy_io(monkeypatch):
         return httpx.Response(200, content=b"legacy", request=httpx.Request(method, url))
 
     monkeypatch.setattr(hc, "_httpx_request_io", legacy_io)
-    with hc.create_client(transport=httpx.MockTransport(lambda request: None)) as client:
+    def unused(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("never called: _httpx_request_io is replaced above")
+
+    with hc.create_client(transport=httpx.MockTransport(unused)) as client:
         response = hc.fetch(method="GET", url=URL, client=client, retry=hc.RetryPolicy(attempts=1))
     assert response.content == b"legacy"
 
@@ -481,5 +484,6 @@ async def test_deadline_bridge_refuses_a_thread_with_a_running_loop():
 
     with pytest.raises(RuntimeError, match="running event loop"):
         http_client._httpx_request_with_deadline(
-            client=object(), deadline=time.monotonic() + 5, method="GET", url="https://example.invalid/v1/models",
+            client=cast(Any, object()), deadline=time.monotonic() + 5, method="GET",
+            url="https://example.invalid/v1/models",
         )

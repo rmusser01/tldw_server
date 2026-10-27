@@ -4089,7 +4089,7 @@ def test_real_openai_401_refreshes_oauth_once_before_stream_output(
                 raise httpx.HTTPStatusError(
                     sentinel,
                     request=self.request,
-                    response=self,
+                    response=self,  # type: ignore[arg-type]  # a stand-in httpx.Response
                 )
 
         def iter_lines(self):
@@ -7151,10 +7151,10 @@ def test_queued_provider_forged_guardrail_boolean_is_sanitized(
     provider_manager.circuit_breakers = {
         "openai": SimpleNamespace(can_attempt_call=lambda: True)
     }
-    request_data = ChatCompletionRequest(
+    request_data = ChatCompletionRequest(  # type: ignore[call-arg]  # pydantic defaults
         model="gpt-4o-mini",
         api_provider="openai",
-        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],  # type: ignore[call-arg]
         stream=True,
     )
     with (
