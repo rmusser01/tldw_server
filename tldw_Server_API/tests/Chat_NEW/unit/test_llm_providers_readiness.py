@@ -768,10 +768,10 @@ def test_external_custom_openai_env_placeholder_key_is_missing_credentials(
 
 
 @pytest.mark.unit
-def test_llm_provider_readiness_marks_unsupported_catalog_alias_unavailable(
+def test_llm_provider_readiness_marks_mlx_chat_supported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Catalog providers unsupported by chat completions are unavailable."""
+    """mlx is a supported chat completions provider (TASK-13950.1)."""
     parser = _config(
         {
             "API": {},
@@ -787,7 +787,5 @@ def test_llm_provider_readiness_marks_unsupported_catalog_alias_unavailable(
 
     assert response.status_code == 200, response.text
     mlx = _provider(response.json(), "mlx")
-    assert mlx["availability"] == "unavailable"
-    assert mlx["provider_enabled"] is False
-    assert mlx["readiness_reason_code"] == "unsupported_chat_provider"
-    assert "is not supported by chat completions" in mlx["readiness_message"]
+    assert mlx["readiness_reason_code"] != "unsupported_chat_provider"
+    assert mlx["availability"] == "enabled"
