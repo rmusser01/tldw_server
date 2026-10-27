@@ -816,7 +816,10 @@ export const presentationsMethods = {
     const response = await this.request<unknown>({
       path: `/api/v1/slides/presentations/${encodeURIComponent(presentationId)}`,
       method: "GET",
-      headers: presentationNegotiationHeaders(),
+      headers: {
+        ...presentationNegotiationHeaders(),
+        "Cache-Control": "no-cache"
+      },
       ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
       returnResponse: true
     })

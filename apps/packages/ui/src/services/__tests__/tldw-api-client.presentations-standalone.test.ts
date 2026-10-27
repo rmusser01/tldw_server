@@ -198,6 +198,32 @@ describe("standalone presentation client contracts", () => {
     vi.clearAllMocks()
   })
 
+  it.each([
+    { label: "structured", detail: structuredDetail },
+    { label: "standalone", detail: standaloneDetail }
+  ])(
+    "revalidates previously cached $label detail while preserving cancellation",
+    async ({ detail }) => {
+      const client = createCore(async () => responseEnvelope(detail))
+      const controller = new AbortController()
+
+      await presentationsMethods.getPresentation.call(client, detail.id, {
+        abortSignal: controller.signal
+      })
+
+      expect(client.request).toHaveBeenCalledExactlyOnceWith({
+        path: `/api/v1/slides/presentations/${detail.id}`,
+        method: "GET",
+        headers: {
+          [ACCEPT_HEADER]: ACCEPTED_CONTENT_KINDS,
+          "Cache-Control": "no-cache"
+        },
+        abortSignal: controller.signal,
+        returnResponse: true
+      })
+    }
+  )
+
   it("normalizes structured detail and preserves the response weak ETag", async () => {
     const client = createCore(async () =>
       responseEnvelope(structuredDetail, { headers: { etag: 'W/"v3"' } })
