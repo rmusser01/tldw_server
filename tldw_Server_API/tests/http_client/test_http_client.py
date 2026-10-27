@@ -1978,27 +1978,21 @@ async def test_stream_response_duplicate_headers_aiohttp_are_comma_joined(monkey
 
 
 @pytest.mark.parametrize("grouped", [False, True])
-def test_metric_registration_suppresses_noncritical_failure(monkeypatch, grouped):
+def test_metric_registration_suppresses_noncritical_failure(grouped):
     if grouped and sys.version_info < (3, 12):
         pytest.skip("contextlib.suppress supports exception groups on Python 3.12+")
-    from tldw_Server_API.app.core import http_client as hc
+    from tldw_Server_API.app.core.Metrics import http_client_metrics
 
     def fail_registration(definition):
         error = ValueError("metric registration failed")
         raise builtins.ExceptionGroup("metrics", [error]) if grouped else error
 
-    monkeypatch.setattr(hc, "_HTTP_CLIENT_METRICS_REGISTERED", False)
-    monkeypatch.setattr(
-        hc,
-        "get_metrics_registry",
-        lambda: types.SimpleNamespace(register_metric=fail_registration),
-    )
-    hc._register_http_client_metrics_once()
-    assert hc._HTTP_CLIENT_METRICS_REGISTERED is True
+    # Must not raise: a failing registration is skipped.
+    http_client_metrics.register_http_client_metrics(types.SimpleNamespace(register_metric=fail_registration))  # type: ignore[arg-type]
 
 
-def test_metric_registration_propagates_unexpected_failure(monkeypatch):
-    from tldw_Server_API.app.core import http_client as hc
+def test_metric_registration_propagates_unexpected_failure():
+    from tldw_Server_API.app.core.Metrics import http_client_metrics
 
     class UnexpectedMetricError(Exception):
         pass
@@ -2006,14 +2000,8 @@ def test_metric_registration_propagates_unexpected_failure(monkeypatch):
     def fail_registration(definition):
         raise UnexpectedMetricError("unexpected metric failure")
 
-    monkeypatch.setattr(hc, "_HTTP_CLIENT_METRICS_REGISTERED", False)
-    monkeypatch.setattr(
-        hc,
-        "get_metrics_registry",
-        lambda: types.SimpleNamespace(register_metric=fail_registration),
-    )
     with pytest.raises(UnexpectedMetricError, match="unexpected metric failure"):
-        hc._register_http_client_metrics_once()
+        http_client_metrics.register_http_client_metrics(types.SimpleNamespace(register_metric=fail_registration))  # type: ignore[arg-type]
 
 
 # --- afetch(content=...): raw request bodies (TASK-13950.11) -----------------------------

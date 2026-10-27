@@ -241,7 +241,6 @@ core.Workflows -> api.v1.schemas: 3
 core.Workflows -> services: 2
 core.Workspaces -> api.v1.schemas: 2
 core.Workspaces -> services: 1
-core.http_client -> core.Metrics: 2
 services -> api.v1.API_Deps: 33
 services -> api.v1.endpoints.admin: 1
 services -> api.v1.endpoints.llamacpp: 1
