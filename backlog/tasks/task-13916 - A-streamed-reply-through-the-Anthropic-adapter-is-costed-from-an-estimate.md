@@ -21,6 +21,7 @@ Filed from the TASK-13878/13879/13880/13885 PR (plan Docs/superpowers/plans/2026
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+From TASK-13936 (2026-10-26): fixing the adapter's stream usage does not change /chat/completions, whose streamed replies chat_service records from an estimate; that is TASK-13951.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -100,6 +100,10 @@ import {
   type TldwProvidersResponse
 } from "@/services/tldw/model-provider-availability"
 import {
+  chatModelOutcomeTarget,
+  trackChatModelRequestOutcome
+} from "@/services/tldw/chat-model-outcome"
+import {
   buildContentPayload,
   mapApiDetailToUi,
   mapApiListToUi,
@@ -893,6 +897,8 @@ export interface TldwModel {
   readiness_reason_code?: string
   readiness_message?: string
   chat_provider?: string
+  /** Server-observed provider reachability: "working", "unreachable" or "unknown". */
+  provider_health?: string
   catalog_only?: boolean
   modalities?: {
     input?: string[]
@@ -3265,7 +3271,8 @@ export class TldwApiClientBase {
       metadata: options?.debugMetadata
     })
     const scopeFields = requestScopeFields(options?.requestScope)
-    const res = await bgRequest<Response>({
+    // Feeds the model chip's readiness (CC-01).
+    const res = await trackChatModelRequestOutcome(chatModelOutcomeTarget(request), () => bgRequest<Response>({
       path: '/api/v1/chat/completions',
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...scopeFields.headers },
@@ -3275,7 +3282,7 @@ export class TldwApiClientBase {
       ...(scopeFields.servicePromptConfig
         ? { servicePromptConfig: scopeFields.servicePromptConfig }
         : {})
-    })
+    }))
     // bgRequest throws on any non-2xx response, so a resolved value here is
     // always a successful completion. Return the parsed body unmodified — the
     // streaming path does not scrub content, and scrubbing successful replies

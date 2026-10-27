@@ -30,6 +30,7 @@ import type { MessageMetadataExtra } from "@/store/option/types"
 import { EDIT_MESSAGE_EVENT } from "@/utils/timeline-actions"
 import { Badge, type BadgeVariant } from "@/components/ui/primitives"
 import { CHAT_MESSAGE_OPACITY_ALPHA } from "@/services/settings/chat-opacity-css-vars"
+import { USER_TURN_TINT_STYLE, userBubbleWidthClass } from "./turn-presentation"
 
 const ACTION_BUTTON_CLASS =
   "flex items-center justify-center rounded-full border border-border bg-surface2 text-text-muted hover:bg-surface hover:text-text transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-focus min-w-[44px] min-h-[44px]"
@@ -112,9 +113,6 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
     ? "inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus transition-colors duration-200"
     : ACTION_BUTTON_CLASS
   const isAlignedView = props.messageView === "transcript" || props.messageView === "research"
-  const bubbleShapeClass = isAlignedView
-    ? "rounded-xl border border-border px-4 py-3 w-full"
-    : "shadow-sm rounded-3xl border max-w-[calc(100%-1.75rem)] px-4 py-3 rounded-br-lg"
   const [checkWideMode] = useStorage("checkWideMode", false)
   const [userTextColor] = useStorage("chatUserTextColor", "default")
   const [userTextFont] = useStorage("chatUserTextFont", "default")
@@ -129,6 +127,14 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
   const { cancel, isSpeaking, speak } = useTTS()
   const uiMode = useUiModeStore((state) => state.mode)
   const isProMode = uiMode === "pro"
+  const bubbleShapeClass = isAlignedView
+    ? "rounded-xl border border-border px-4 py-3 w-full"
+    : "shadow-sm rounded-3xl border max-w-[calc(100%-1.75rem)] px-4 py-3 rounded-br-lg"
+  // A read-only Conversation bubble reads as the user's side of the chat
+  // (userBubbleWidthClass); the edit form keeps the full width.
+  const readBubbleShapeClass = isAlignedView
+    ? bubbleShapeClass
+    : `shadow-sm rounded-3xl border ${userBubbleWidthClass(isProMode)} px-4 py-3 rounded-br-lg`
   const setReplyTarget = useStoreMessageOption((state) => state.setReplyTarget)
   const [actionsOpen, setActionsOpen] = React.useState(false)
   const actionTriggerRef = React.useRef<HTMLButtonElement>(null)
@@ -228,7 +234,8 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
   const messageBubbleStyle = isSystemMessage
     ? undefined
     : ({
-        backgroundColor: `rgb(var(--color-surface2) / ${CHAT_MESSAGE_OPACITY_ALPHA})`
+        backgroundColor: `rgb(var(--color-surface2) / ${CHAT_MESSAGE_OPACITY_ALPHA})`,
+        ...USER_TURN_TINT_STYLE
       } as React.CSSProperties)
 
   const actionControls = (
@@ -408,7 +415,7 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
         <div
           dir="auto"
           data-is-not-editable={!editMode}
-          className={`message-bubble ${bubbleToneClass} ${bubbleShapeClass} prose max-w-none dark:prose-invert break-words min-h-7 prose-p:opacity-95 prose-strong:opacity-100 ${userTextClass} ${
+          className={`message-bubble ${bubbleToneClass} ${readBubbleShapeClass} prose max-w-none dark:prose-invert break-words min-h-7 prose-p:opacity-95 prose-strong:opacity-100 ${userTextClass} ${
             props.message_type && !editMode ? "italic" : ""
           }`}
           style={messageBubbleStyle}>

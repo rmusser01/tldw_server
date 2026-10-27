@@ -4,22 +4,30 @@ import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return"
 import type { TFunction } from "i18next"
 import { Popover, Tooltip } from "antd"
 import {
+  BookOpenText,
   CheckIcon,
   ChevronLeft,
   ChevronRight,
   CopyIcon,
+  Eraser,
   GitBranchIcon,
   InfoIcon,
+  Languages,
   Layers,
+  Lightbulb,
+  ListCollapse,
   MoreHorizontal,
   Pen,
   PlayCircle,
   Pin,
   PinOff,
   RotateCcw,
+  Shrink,
   Square,
   StickyNote,
   FileText,
+  UserPen,
+  VenetianMask,
   Volume2Icon,
   CornerUpLeft,
   Trash2
@@ -55,26 +63,59 @@ const OverflowMenuItem: React.FC<{
   label: string
   onClick?: () => void
   disabled?: boolean
+  /** Shown under a disabled item so the user knows why it is unavailable. */
+  disabledReason?: string | null
   danger?: boolean
   active?: boolean
-}> = ({ icon, label, onClick, disabled, danger, active }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    disabled={disabled}
-    aria-disabled={disabled}
-    className={`flex min-h-[44px] min-w-[44px] w-full items-center gap-2 rounded-md px-3 py-2 text-xs transition hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50 ${
-      danger
-        ? "text-danger hover:text-danger"
-        : active
-          ? "bg-primary/10 text-primaryStrong hover:bg-primary/10 hover:text-primaryStrong"
-          : "text-text hover:text-text"
-    }`}
-  >
-    <span className="flex h-4 w-4 items-center justify-center text-text-subtle">{icon}</span>
-    <span>{label}</span>
-  </button>
+}> = ({ icon, label, onClick, disabled, disabledReason, danger, active }) => {
+  const reasonId = React.useId()
+  const reason = disabled && disabledReason ? disabledReason : null
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        aria-disabled={disabled}
+        aria-describedby={reason ? reasonId : undefined}
+        title={reason ?? undefined}
+        className={`flex min-h-[44px] min-w-[44px] w-full items-center gap-2 rounded-md px-3 py-2 text-xs transition hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50 ${
+          danger
+            ? "text-danger hover:text-danger"
+            : active
+              ? "bg-primary/10 text-primaryStrong hover:bg-primary/10 hover:text-primaryStrong"
+              : "text-text hover:text-text"
+        }`}
+      >
+        <span className="flex h-4 w-4 items-center justify-center text-text-subtle">{icon}</span>
+        <span>{label}</span>
+      </button>
+      {reason ? (
+        <p
+          id={reasonId}
+          className="-mt-1 max-w-[240px] px-3 pb-2 pl-9 text-[11px] leading-snug text-text-muted"
+        >
+          {reason}
+        </p>
+      ) : null}
+    </>
+  )
+}
+
+/** Thin divider between groups of overflow actions. */
+const OverflowMenuDivider: React.FC = () => (
+  <div role="separator" className="my-1 h-px bg-border" />
 )
+
+/** Joins non-empty groups of overflow actions with dividers. */
+const joinOverflowGroups = (groups: React.ReactNode[][]): React.ReactNode[] =>
+  groups
+    .filter((group) => group.length > 0)
+    .flatMap((group, index) =>
+      index === 0
+        ? group
+        : [<OverflowMenuDivider key={`divider-${index}`} />, ...group]
+    )
 
 type MessageActionsBarProps = {
   messageView?: ChatMessageView
@@ -228,11 +269,16 @@ export function MessageActionsBar({
   }, [overflowOpen])
   const showLeftFeedback = !editMode && showFeedbackControls
 
-  // Build overflow menu items
+  // Build overflow menu items, grouped: reuse · role-play steering ·
+  // transform · listen/feedback/pin · delete, with dividers between groups.
   const overflowItems = React.useMemo(() => {
-    const items: React.ReactNode[] = []
+    const reuse: React.ReactNode[] = []
+    const steering: React.ReactNode[] = []
+    const transform: React.ReactNode[] = []
+    const other: React.ReactNode[] = []
+    const danger: React.ReactNode[] = []
     if (canReply) {
-      items.push(
+      reuse.push(
         <OverflowMenuItem
           key="reply"
           icon={<CornerUpLeft className="w-3.5 h-3.5" />}
@@ -242,7 +288,7 @@ export function MessageActionsBar({
       )
     }
     if (isBot && onNewBranch) {
-      items.push(
+      reuse.push(
         <OverflowMenuItem
           key="branch"
           icon={<GitBranchIcon className="w-3.5 h-3.5" />}
@@ -252,7 +298,7 @@ export function MessageActionsBar({
       )
     }
     if (isBot && !hideContinue && isLastMessage && onContinue) {
-      items.push(
+      reuse.push(
         <OverflowMenuItem
           key="continue"
           icon={<PlayCircle className="w-3.5 h-3.5" />}
@@ -261,16 +307,18 @@ export function MessageActionsBar({
         />
       )
     }
+    // Role-play steering is offered only when the chat passes its handlers,
+    // which it does for character / role-play chats.
     const canControlMessageSteering =
       isBot &&
       isLastMessage &&
       onMessageSteeringModeChange &&
       onMessageSteeringForceNarrateChange
     if (canControlMessageSteering) {
-      items.push(
+      steering.push(
         <OverflowMenuItem
           key="steer-continue"
-          icon={<span className="text-[10px] leading-none font-semibold">C</span>}
+          icon={<UserPen className="w-3.5 h-3.5" />}
           label={
             t("playground:composer.steering.continue", "Continue as user") as string
           }
@@ -288,10 +336,10 @@ export function MessageActionsBar({
           active={messageSteeringMode === "continue_as_user"}
         />
       )
-      items.push(
+      steering.push(
         <OverflowMenuItem
           key="steer-impersonate"
-          icon={<span className="text-[10px] leading-none font-semibold">I</span>}
+          icon={<VenetianMask className="w-3.5 h-3.5" />}
           label={
             t("playground:composer.steering.impersonate", "Impersonate user") as string
           }
@@ -309,10 +357,10 @@ export function MessageActionsBar({
           active={messageSteeringMode === "impersonate_user"}
         />
       )
-      items.push(
+      steering.push(
         <OverflowMenuItem
           key="steer-narrate"
-          icon={<span className="text-[10px] leading-none font-semibold">N</span>}
+          icon={<BookOpenText className="w-3.5 h-3.5" />}
           label={t("playground:composer.steering.narrate", "Force narrate") as string}
           onClick={() =>
             onMessageSteeringForceNarrateChange(!messageSteeringForceNarrate)
@@ -323,10 +371,10 @@ export function MessageActionsBar({
       const steeringActive =
         messageSteeringMode !== "none" || messageSteeringForceNarrate
       if (steeringActive && onClearMessageSteering) {
-        items.push(
+        steering.push(
           <OverflowMenuItem
             key="steer-clear"
-            icon={<span className="text-[10px] leading-none font-semibold">x</span>}
+            icon={<Eraser className="w-3.5 h-3.5" />}
             label={t("common:clear", "Clear") as string}
             onClick={onClearMessageSteering}
           />
@@ -334,7 +382,7 @@ export function MessageActionsBar({
       }
     }
     if (canSaveToWorkspaceNotes && onSaveToWorkspaceNotes) {
-      items.push(
+      reuse.push(
         <OverflowMenuItem
           key="save-workspace-note"
           icon={<StickyNote className="w-3.5 h-3.5" />}
@@ -343,7 +391,7 @@ export function MessageActionsBar({
         />
       )
     } else if (isBot && canSaveToNotes) {
-      items.push(
+      reuse.push(
         <OverflowMenuItem
           key="save-note"
           icon={<StickyNote className="w-3.5 h-3.5" />}
@@ -354,7 +402,7 @@ export function MessageActionsBar({
       )
     }
     if (isBot && canSaveToFlashcards) {
-      items.push(
+      reuse.push(
         <OverflowMenuItem
           key="save-flashcard"
           icon={<Layers className="w-3.5 h-3.5" />}
@@ -365,7 +413,7 @@ export function MessageActionsBar({
       )
     }
     if (isBot && canGenerateDocument) {
-      items.push(
+      reuse.push(
         <OverflowMenuItem
           key="generate-doc"
           icon={<FileText className="w-3.5 h-3.5" />}
@@ -375,41 +423,41 @@ export function MessageActionsBar({
       )
     }
     if (isBot && onQuickMessageAction) {
-      items.push(
+      transform.push(
         <OverflowMenuItem
           key="quick-summarize"
-          icon={<span className="text-[10px] leading-none font-semibold">S</span>}
+          icon={<ListCollapse className="w-3.5 h-3.5" />}
           label={t("playground:actions.quickSummarize", "Summarize this")}
           onClick={() => onQuickMessageAction("summarize")}
         />
       )
-      items.push(
+      transform.push(
         <OverflowMenuItem
           key="quick-translate"
-          icon={<span className="text-[10px] leading-none font-semibold">T</span>}
+          icon={<Languages className="w-3.5 h-3.5" />}
           label={t("playground:actions.quickTranslate", "Translate this")}
           onClick={() => onQuickMessageAction("translate")}
         />
       )
-      items.push(
+      transform.push(
         <OverflowMenuItem
           key="quick-shorten"
-          icon={<span className="text-[10px] leading-none font-semibold">L</span>}
+          icon={<Shrink className="w-3.5 h-3.5" />}
           label={t("playground:actions.quickShorten", "Make this shorter")}
           onClick={() => onQuickMessageAction("shorten")}
         />
       )
-      items.push(
+      transform.push(
         <OverflowMenuItem
           key="quick-explain"
-          icon={<span className="text-[10px] leading-none font-semibold">E</span>}
+          icon={<Lightbulb className="w-3.5 h-3.5" />}
           label={t("playground:actions.quickExplain", "Explain this")}
           onClick={() => onQuickMessageAction("explain")}
         />
       )
     }
     if (isBot && isTtsEnabled) {
-      items.push(
+      other.push(
         <OverflowMenuItem
           key="tts"
           icon={
@@ -422,11 +470,12 @@ export function MessageActionsBar({
           label={isSpeaking ? t("ttsStop", "Stop TTS") : t("tts", "Read Aloud")}
           onClick={onToggleTts}
           disabled={ttsActionDisabled}
+          disabledReason={ttsDisabledReason}
         />
       )
     }
     if (onDelete) {
-      items.push(
+      danger.push(
         <OverflowMenuItem
           key="delete"
           icon={<Trash2 className="w-3.5 h-3.5" />}
@@ -437,7 +486,7 @@ export function MessageActionsBar({
       )
     }
     if (canPin && onTogglePinned) {
-      items.push(
+      other.push(
         <OverflowMenuItem
           key="pin-toggle"
           icon={
@@ -456,7 +505,7 @@ export function MessageActionsBar({
         />
       )
     }
-    return items
+    return joinOverflowGroups([reuse, steering, transform, other, danger])
   }, [
     canReply, onReply, isBot, onNewBranch, temporaryChat,
     hideContinue, isLastMessage, onContinue, onRunSteeredContinue,
@@ -466,7 +515,7 @@ export function MessageActionsBar({
     onClearMessageSteering,
     canSaveToFlashcards, canGenerateDocument, onGenerateDocument,
     onSaveKnowledge, savingKnowledge, isTtsEnabled, ttsActionDisabled,
-    isSpeaking, onToggleTts, onDelete, canPin, isPinned, onTogglePinned,
+    ttsDisabledReason, isSpeaking, onToggleTts, onDelete, canPin, isPinned, onTogglePinned,
     onQuickMessageAction, t
   ])
 

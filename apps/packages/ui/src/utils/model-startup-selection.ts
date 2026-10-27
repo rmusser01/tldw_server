@@ -2,12 +2,15 @@ import {
   getCanonicalModelKey,
   getFavoriteModelKeyCandidates
 } from "@/hooks/playground/modelSelectorUtils"
+import { toProviderHealthSignal } from "@/services/tldw/model-provider-availability"
 import { normalizeKnownApiProviderKey } from "./resolve-api-provider"
 
 type StartupModelDescriptor = {
   model?: unknown
   provider?: unknown
   is_server_default?: unknown
+  /** Server-observed provider reachability (see toProviderHealthSignal). */
+  provider_health?: unknown
 }
 
 type ResolveStartupSelectedModelParams = {
@@ -50,6 +53,11 @@ export const resolveStartupSelectedModel = ({
       .filter((id): id is string => Boolean(id))
   )
 
+  const health = (model: StartupModelDescriptor) =>
+    toProviderHealthSignal(model?.provider_health)
+
+  // Favourites, then the server default, then a provider the server has seen
+  // answer, then the first model not known to be down (CC-01, #3111).
   const choice =
     modelList.find(
       (model) =>
@@ -58,7 +66,15 @@ export const resolveStartupSelectedModel = ({
     ) ??
     modelList.find(
       (model) =>
-        model?.is_server_default === true && normalizeModelId(model.model)
+        model?.is_server_default === true &&
+        normalizeModelId(model.model) &&
+        health(model) !== "unreachable"
+    ) ??
+    modelList.find(
+      (model) => normalizeModelId(model?.model) && health(model) === "working"
+    ) ??
+    modelList.find(
+      (model) => normalizeModelId(model?.model) && health(model) !== "unreachable"
     ) ??
     modelList.find((model) => normalizeModelId(model?.model))
 

@@ -69,6 +69,73 @@ export const meetsNonTextContrast = (
   adjacentColor: RGBTriple
 ): boolean => contrastRatio(indicator, adjacentColor) >= 3
 
+const BLACK: RGBTriple = "0 0 0"
+const WHITE: RGBTriple = "255 255 255"
+
+/**
+ * Black or white, whichever reads better on `background`. Black wins ties.
+ * Used for text on solid primary and danger fills.
+ */
+export const readableForeground = (background: RGBTriple): RGBTriple =>
+  contrastRatio(BLACK, background) >= contrastRatio(WHITE, background)
+    ? BLACK
+    : WHITE
+
+/**
+ * Black or white, whichever keeps the higher worst-case contrast across all
+ * of `backgrounds`. For components that put one text colour on several
+ * fills (for example antd Steps on primary and danger).
+ */
+export const readableForegroundOnAll = (backgrounds: RGBTriple[]): RGBTriple => {
+  const worst = (color: RGBTriple) =>
+    Math.min(...backgrounds.map((background) => contrastRatio(color, background)))
+  return worst(BLACK) >= worst(WHITE) ? BLACK : WHITE
+}
+
+/** Mix `from` towards `to` by `amount` (0 keeps `from`, 1 gives `to`). */
+export const mixRgb = (from: RGBTriple, to: RGBTriple, amount: number): RGBTriple => {
+  const a = parseRgbTriple(from)
+  const b = parseRgbTriple(to)
+  return a.map((channel, index) => Math.round(channel + (b[index] - channel) * amount)).join(" ")
+}
+
+/**
+ * `color` moved towards `toward` in 5% steps until its lowest contrast
+ * against `backgrounds` reaches `minimum`. Used to keep a theme hue while
+ * making it readable; `toward` should itself be readable (e.g. the text
+ * colour), and is returned when no earlier step is.
+ */
+export const readableShade = (
+  color: RGBTriple,
+  toward: RGBTriple,
+  backgrounds: RGBTriple[],
+  minimum = 4.5
+): RGBTriple => {
+  const worst = (candidate: RGBTriple) =>
+    Math.min(...backgrounds.map((background) => contrastRatio(candidate, background)))
+  for (let step = 0; step <= 20; step += 1) {
+    const candidate = mixRgb(color, toward, step / 20)
+    if (worst(candidate) >= minimum) return candidate
+  }
+  return toward
+}
+
+/**
+ * The first candidate whose lowest contrast against `backgrounds` reaches
+ * `minimum`; otherwise the candidate with the best lowest contrast.
+ */
+export const firstReadableColor = (
+  candidates: RGBTriple[],
+  backgrounds: RGBTriple[],
+  minimum = 4.5
+): RGBTriple => {
+  const worst = (color: RGBTriple) =>
+    Math.min(...backgrounds.map((background) => contrastRatio(color, background)))
+  const readable = candidates.find((color) => worst(color) >= minimum)
+  if (readable) return readable
+  return candidates.reduce((best, color) => (worst(color) > worst(best) ? color : best))
+}
+
 const toAuditResult = (
   pair: string,
   foreground: RGBTriple,
