@@ -234,7 +234,6 @@ core.Sync -> api.v1.schemas: 1
 core.TTS -> api.v1.schemas: 3
 core.TTS -> services: 1
 core.UserProfiles -> services: 1
-core.Utils -> core.Context_Integrity: 2
 core.Utils -> core.DB_Management: 4
 core.VN_Assets -> api.v1.schemas: 2
 core.VN_Assets -> services: 2

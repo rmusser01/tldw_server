@@ -72,6 +72,7 @@ from tldw_Server_API.app.core.Claims_Extraction.runtime_config import (
 from tldw_Server_API.app.core.Claims_Extraction.runtime_config import (
     resolve_claims_llm_config as resolve_runtime_llm_config,
 )
+from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
 from tldw_Server_API.app.core.RAG.rag_service.types import (
     ClaimType,
     Document,
@@ -80,7 +81,6 @@ from tldw_Server_API.app.core.RAG.rag_service.types import (
     VerificationStatus,
 )
 from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_user_id, llm_call_context
-from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
 _CLAIMS_ENGINE_NONCRITICAL_EXCEPTIONS = (
     asyncio.TimeoutError,

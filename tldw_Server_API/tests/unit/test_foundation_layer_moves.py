@@ -73,3 +73,13 @@ def test_stt_observability_context_is_one_contextvar() -> None:
     with http_client.opaque_stt_http_observability(endpoint_id):
         assert old.get_opaque_stt_endpoint_id() == endpoint_id
     assert new.get_opaque_stt_endpoint_id() is None
+
+
+def test_prompt_loader_lives_in_context_integrity_with_no_utils_shim() -> None:
+    import importlib
+
+    from tldw_Server_API.app.core.Context_Integrity import prompt_loader
+
+    assert callable(prompt_loader.load_prompt)
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("tldw_Server_API.app.core.Utils.prompt_loader")

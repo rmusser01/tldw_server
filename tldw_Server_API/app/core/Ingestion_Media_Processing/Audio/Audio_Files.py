@@ -1306,11 +1306,11 @@ def process_audio_files(
                     try:
                         # Load default prompts if none provided
                         try:
-                            from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt as _load_prompt
+                            from tldw_Server_API.app.core.Context_Integrity import prompt_loader as _prompt_loader
                             if not prompts_resolved and not custom_prompt_input:
-                                custom_prompt_input = _load_prompt("audio", "Transcription Analysis Summary") or custom_prompt_input
+                                custom_prompt_input = _prompt_loader.load_prompt("audio", "Transcription Analysis Summary") or custom_prompt_input
                             if not prompts_resolved and not system_prompt_input:
-                                system_prompt_input = _load_prompt("audio", "System Prompt") or system_prompt_input
+                                system_prompt_input = _prompt_loader.load_prompt("audio", "System Prompt") or system_prompt_input
                         except _AUDIO_FILES_NONCRITICAL_EXCEPTIONS:
                             pass
                         analysis_result = analyze(

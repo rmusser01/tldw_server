@@ -23,8 +23,8 @@ from tldw_Server_API.app.core.Claims_Extraction.alignment import align_claim
 from tldw_Server_API.app.core.Claims_Extraction.runtime_config import (
     resolve_claims_prompt_validation_config,
 )
+from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
 from tldw_Server_API.app.core.exceptions import ValidationError
-from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
 _CLAIMS_TEMPLATE_FORMAT_EXCEPTIONS = (
     KeyError,
