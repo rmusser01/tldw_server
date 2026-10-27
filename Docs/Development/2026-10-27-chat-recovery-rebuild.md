@@ -88,9 +88,27 @@ temporary-chat provider failure shows its message once.
 
 ### Stage 4: history review (CC-04)
 **Goal:** the owner decision above.
-**Tests:** `history-review-presentation` unit tests; `HistorySelectionReview`
-tests; integration and side-panel parity cases; e2e helper updates.
-**Status:** Not Started
+**Success criteria:**
+- No top-level "Use no prior messages". "Start fresh" inside the review
+  hides every earlier message from the AI and moves focus to "Restore all".
+- While the AI sees only part of the conversation: "AI sees N of M
+  messages · Restore all". When it sees none, the hidden messages are listed
+  read-only and dimmed (the latest 3, then "and N earlier messages").
+  Hidden while a reply is being sent, unless the AI sees nothing; "Restore
+  all" is disabled during a send.
+- The review is offered with two exchanges or alternative replies, or when
+  it must explain something (legacy review, stale selection, partial choice,
+  retained outcomes); not for a single exchange.
+- Plain review copy: "You" and "Assistant", plain-text previews, a reply
+  never listed before its question, "4 of 4 messages included", "Hidden from
+  the AI", "AI sees this as message 2"; rows no longer overlap.
+- H1 design §112 and the 2026-10-04 remediation design record the change.
+**Tests:** `history-review-presentation` unit tests (ported from
+`8ee0bc3208`); 8 `HistorySelectionReview` cases; 2 real-harness cases
+(one exchange shows nothing; Start fresh → AI sees 0 of 4 → Restore all).
+The retry-race test now starts fresh from the review. Extension e2e helper
+updated (not run locally: disk space).
+**Status:** Complete
 
 ### Stage 5: sampling settings (#3283)
 **Goal:** the owner decision above.

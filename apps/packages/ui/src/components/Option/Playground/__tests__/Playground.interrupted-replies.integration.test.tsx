@@ -876,7 +876,9 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
           await waitFor(() => expect(retryCompletion.current).not.toBeNull(), HARNESS_WAIT)
           await waitFor(() => expect(gate.entered).toHaveBeenCalled(), HARNESS_WAIT)
           expect(gate.rows).toBeGreaterThan(0)
-          await view.user.click(screen.getByRole("button", { name: "Use no prior messages" }))
+          // CC-04: starting fresh is a choice inside the review.
+          await view.user.click(screen.getByRole("button", { name: "Review conversation history" }))
+          await view.user.click(screen.getByRole("button", { name: "Start fresh" }))
           await waitFor(() => expect(selectionRequests()).toBe(before + 1), HARNESS_WAIT)
           await waitFor(async () => expect((await savedView())?.cursor).toEqual({ kind: "empty" }), HARNESS_WAIT)
           if (destination === "ABA") {

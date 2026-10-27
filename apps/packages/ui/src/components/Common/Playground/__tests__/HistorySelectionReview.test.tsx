@@ -54,6 +54,7 @@ vi.mock("react-i18next", async () => {
   }
 })
 import { HistorySelectionReview } from "../HistorySelectionReview"
+import { resolveParentPath } from "@/utils/history-selection"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 const nodes = Array.from({ length: 20300 }, (_, i) => ({
   id: `m${i}`,
@@ -92,7 +93,7 @@ describe("history review", () => {
       name: /Include.*Message 0/
     })
     fireEvent.click(checkbox)
-    expect(screen.getByText("Omitted alternative")).toBeTruthy()
+    expect(screen.getByText("Hidden from the AI")).toBeTruthy()
     fireEvent.click(
       screen.getByRole("button", { name: "Before first included message" })
     )
@@ -530,6 +531,119 @@ it.each(['dispatching', 'unknown', 'partial'] as const)('scopes %s copy guarante
 })
 
 
+// CC-04 (owner decision 2026-10-27, superseding TASK-13550 criterion 2): there
+// is no one-click "Use no prior messages" above the chat. Starting fresh is a
+// choice inside the review, and a partial choice says so with "Restore all".
+const linkedNode = (id: string, role: "user" | "assistant", parent_id: string | null) => ({
+  id, revision: `r-${id}`, role, parent_id, settled: true, preview: `**${role}** text ${id}`
+})
+const twoExchanges = [
+  linkedNode("u1", "user", null),
+  linkedNode("a1", "assistant", "u1"),
+  linkedNode("u2", "user", "a1"),
+  linkedNode("a2", "assistant", "u2")
+]
+const readySelection = (
+  sourceNodes: ReturnType<typeof linkedNode>[],
+  cursor: { kind: "empty" } | { kind: "after_message"; message_id: string }
+) => {
+  const view = {
+    view_session_id: "view", owner_key: "owner", conversation_id: "chat",
+    interpretation: { kind: "parent_graph_v1" }, cursor, selection_revision: 1
+  }
+  return {
+    ...controller(),
+    status: "ready",
+    view,
+    capture: {
+      status: "captured", view, purpose: "send", storage_context_digest: "storage",
+      rows: resolveParentPath(sourceNodes as never, cursor as never),
+      selected_content: [],
+      snapshot: {
+        version: 1, owner_key: "owner", conversation_id: "chat",
+        fences: { conversation: "1", history: "1", settings: "1" },
+        nodes: sourceNodes, source_digest: "source", storage_context_digest: "storage",
+        interpretation_status: { kind: "parent_graph_v1" }
+      }
+    }
+  } as unknown as HistorySelectionController
+}
+
+describe("choosing what the AI sees (CC-04)", () => {
+  afterEach(() => {
+    useStoreMessageOption.setState({ isProcessing: false, streaming: false, isLoading: false })
+  })
+
+  it("shows no history controls for a single exchange", () => {
+    render(<HistorySelectionReview selection={readySelection(twoExchanges.slice(0, 2), { kind: "after_message", message_id: "a1" })} />)
+    expect(screen.queryByRole("button", { name: "Review conversation history" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Use no prior messages" })).toBeNull()
+  })
+
+  it("offers the review for two exchanges, without a one-click way to hide them", () => {
+    render(<HistorySelectionReview selection={readySelection(twoExchanges, { kind: "after_message", message_id: "a2" })} />)
+    expect(screen.getByRole("button", { name: "Review conversation history" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Use no prior messages" })).toBeNull()
+    expect(screen.queryByText(/AI sees/)).toBeNull()
+  })
+
+  it("lists the review in plain words: You and Assistant, no markdown, no path jargon", () => {
+    render(<HistorySelectionReview selection={readySelection(twoExchanges, { kind: "after_message", message_id: "a2" })} />)
+    fireEvent.click(screen.getByRole("button", { name: "Review conversation history" }))
+    expect(screen.getByText("4 of 4 messages included")).toBeInTheDocument()
+    expect(screen.getAllByText(/^You · user text u\d$/)).toHaveLength(2)
+    expect(screen.getAllByText(/^Assistant · assistant text a\d$/)).toHaveLength(2)
+    expect(screen.queryByText(/Path position|saved interpretation|Complete source/)).toBeNull()
+  })
+
+  it("Start fresh hides earlier messages, then moves focus to Restore all", () => {
+    const full = readySelection(twoExchanges, { kind: "after_message", message_id: "a2" })
+    const { rerender } = render(<HistorySelectionReview selection={full} />)
+    fireEvent.click(screen.getByRole("button", { name: "Review conversation history" }))
+    fireEvent.click(screen.getByRole("button", { name: "Start fresh" }))
+    expect(full.choose).toHaveBeenCalledWith({ kind: "empty" })
+
+    rerender(<HistorySelectionReview selection={readySelection(twoExchanges, { kind: "empty" })} />)
+    expect(screen.getByRole("button", { name: "Restore all" })).toHaveFocus()
+  })
+
+  it("says how much the AI sees, shows what it doesn't, and restores it all", () => {
+    const empty = readySelection(twoExchanges, { kind: "empty" })
+    render(<HistorySelectionReview selection={empty} />)
+    expect(screen.getByText("AI sees 0 of 4 messages")).toBeInTheDocument()
+    const hidden = screen.getByRole("list", { name: "Earlier messages, hidden from the AI" })
+    expect(within(hidden).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "You · user text u1",
+      "Assistant · assistant text a1",
+      "You · user text u2",
+      "Assistant · assistant text a2"
+    ])
+    fireEvent.click(screen.getByRole("button", { name: "Restore all" }))
+    expect(empty.choose).toHaveBeenCalledWith({ kind: "after_message", message_id: "a2" })
+  })
+
+  it("counts a partial choice without listing what the transcript already omits", () => {
+    render(<HistorySelectionReview selection={readySelection(twoExchanges, { kind: "after_message", message_id: "a1" })} />)
+    expect(screen.getByText("AI sees 2 of 4 messages")).toBeInTheDocument()
+    expect(screen.queryByRole("list", { name: "Earlier messages, hidden from the AI" })).toBeNull()
+  })
+
+  it("caps the hidden list for a long chat", () => {
+    const long = Array.from({ length: 2000 }, (_, index) =>
+      linkedNode(`n${index}`, index % 2 ? "assistant" : "user", index ? `n${index - 1}` : null))
+    render(<HistorySelectionReview selection={readySelection(long, { kind: "empty" })} />)
+    const hidden = screen.getByRole("list", { name: "Earlier messages, hidden from the AI" })
+    expect(within(hidden).getAllByRole("listitem").length).toBeLessThanOrEqual(4)
+    expect(screen.getByText("and 1,997 earlier messages")).toBeInTheDocument()
+  })
+
+  it("keeps Restore all unavailable while a reply is being sent", () => {
+    useStoreMessageOption.setState({ isProcessing: true })
+    render(<HistorySelectionReview selection={readySelection(twoExchanges, { kind: "empty" })} />)
+    expect(screen.getByRole("button", { name: "Restore all" })).toBeDisabled()
+  })
+})
+
 describe("available history-path actions (TASK-13550)", () => {
   it("hides both history choices for a ready empty source", () => {
     const selection = {
@@ -546,21 +660,6 @@ describe("available history-path actions (TASK-13550)", () => {
     ).toBeNull()
   })
 
-  it("retains the empty-path action for a ready nonempty source", () => {
-    const selection = {
-      ...controller(),
-      status: "ready",
-      capture: { snapshot: { nodes: [nodes[0]], source_digest: "one" } }
-    } as unknown as HistorySelectionController
-    render(<HistorySelectionReview selection={selection} />)
-    expect(
-      screen.getByRole("button", { name: "Review conversation history" })
-    ).toBeInTheDocument()
-    fireEvent.click(
-      screen.getByRole("button", { name: "Use no prior messages" })
-    )
-    expect(selection.choose).toHaveBeenCalledWith({ kind: "empty" })
-  })
 
   it("retains expansion and recovery when there is no history to omit", () => {
     const selection = {

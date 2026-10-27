@@ -12,6 +12,12 @@ import { keepHistoryTurnRecovery } from "@/services/history-turn-keep"
 import { canRetryHistoryTurnRecovery, type HistoryRecoveryRetryContext } from "@/services/history-turn-retry"
 import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 import type { HistoryCursorV1 } from "@/types/history-selection"
+import {
+  chronologicalHistoryNodes,
+  hasReviewableHistory,
+  partialHistoryCoverage,
+  plainHistoryPreview
+} from "./history-review-presentation"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import React from "react"
 import { useTranslation } from "react-i18next"
@@ -53,6 +59,10 @@ const forkCopy = {
 } as const
 
 /** Complete-manifest review; virtualization affects presentation, never consent. */
+/** A hidden list longer than this shows only its latest messages (CC-04). */
+const HIDDEN_PREVIEW_LIMIT = 4
+const HIDDEN_PREVIEW_SHOWN = 3
+
 export function HistorySelectionReview({
   selection,
   onExpand,
@@ -84,6 +94,16 @@ export function HistorySelectionReview({
   const { t } = useTranslation("playground")
   const text = (key: string, fallback: string) =>
     t(`historySelection.${key}`, fallback)
+  // Fill {{name}} placeholders here, so counts read the same whatever t() does.
+  const fill = (template: string, values: Record<string, string | number>) =>
+    template.replace(/\{\{(\w+)\}\}/g, (match, name: string) =>
+      name in values ? String(values[name]) : match)
+  const roleLabel = (role: string) =>
+    role === "user"
+      ? text("roleUser", "You")
+      : role === "assistant"
+        ? text("roleAssistant", "Assistant")
+        : role
   const savedSetup = useStoreMessageOption(
     (state) => state.serverChatRoleplaySetup
   )
@@ -401,6 +421,9 @@ export function HistorySelectionReview({
   const [failedRetry, setFailedRetry] = React.useState<string | null>(null)
   const [retryRefusal, setRetryRefusal] = React.useState<string | null>(null)
   const trigger = React.useRef<HTMLButtonElement>(null)
+  // "Start fresh" moves focus to "Restore all", which is its undo (CC-04).
+  const restoreAction = React.useRef<HTMLButtonElement>(null)
+  const focusRestoreAfterChoice = React.useRef(false)
   const scroller = React.useRef<HTMLDivElement>(null)
   const errorRegion = React.useRef<HTMLDivElement>(null)
   const identity = React.useId()
@@ -442,7 +465,12 @@ export function HistorySelectionReview({
   })
   const olderRecoveries = recoveries.filter((entry) => entry !== currentRecovery)
 
-  const nodes = selection.capture?.snapshot.nodes || []
+  const sourceNodes = selection.capture?.snapshot.nodes
+  // Owner order, but a reply never comes before its question (CC-04).
+  const nodes = React.useMemo(
+    () => chronologicalHistoryNodes(sourceNodes || []),
+    [sourceNodes]
+  )
   const rowId = (id: string) => `${identity}-${encodeURIComponent(id)}`
   const virtualizer = useVirtualizer({
     count: nodes.length,
@@ -456,6 +484,29 @@ export function HistorySelectionReview({
     selection.status === "pending" || selection.status === "pending_unknown"
   const stale =
     selection.status === "stale_selection" || selection.status === "error"
+  // How much of the conversation the AI sees, when it isn't all of it (CC-04).
+  const coverage = React.useMemo(
+    () =>
+      selection.status === "ready"
+        ? partialHistoryCoverage(selection.capture, selection.view)
+        : null,
+    [selection.status, selection.capture, selection.view]
+  )
+  // The review is offered once there is something to choose between, or
+  // something it must explain (CC-04): not for a single exchange.
+  const reviewAvailable =
+    nodes.length > 0 &&
+    (expanded ||
+      selection.status === "legacy_review_required" ||
+      stale ||
+      Boolean(coverage) ||
+      recoveries.length > 0 ||
+      hasReviewableHistory(nodes))
+  React.useEffect(() => {
+    if (!coverage || !focusRestoreAfterChoice.current) return
+    focusRestoreAfterChoice.current = false
+    restoreAction.current?.focus()
+  }, [coverage])
   React.useEffect(() => {
     if (previousReviewOwner.current === reviewOwner) return
     previousReviewOwner.current = reviewOwner
@@ -1149,6 +1200,62 @@ export function HistorySelectionReview({
           {olderRecoveries.map(renderRecovery)}
         </details>
       )}
+      {coverage && (!sendInProgress || coverage.seen === 0) && (
+        <div className="mb-2 rounded border border-border p-2 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <p role="status">
+              {fill(text("coverage", "AI sees {{seen}} of {{total}} messages"), {
+                seen: coverage.seen,
+                total: coverage.total
+              })}
+            </p>
+            <Button
+              ref={restoreAction}
+              variant="text"
+              size="sm"
+              disabled={
+                sendInProgress ||
+                pending ||
+                retrying !== null ||
+                openingRecovery !== null ||
+                Boolean(recoveryAction?.pending)
+              }
+              onClick={() => void selection.choose(coverage.restore)}>
+              {text("restoreAll", "Restore all")}
+            </Button>
+          </div>
+          {coverage.seen === 0 && (
+            <>
+              {coverage.hidden.length > HIDDEN_PREVIEW_LIMIT && (
+                <p className="mt-1 text-xs text-text-muted">
+                  {fill(text("hiddenMore", "and {{count}} earlier messages"), {
+                    count: (coverage.hidden.length - HIDDEN_PREVIEW_SHOWN).toLocaleString()
+                  })}
+                </p>
+              )}
+              {/* Shown for reference only: the AI doesn't see these (ADR-049
+                  keeps them out of the transcript and its actions). */}
+              <ul
+                aria-label={text("hiddenEarlier", "Earlier messages, hidden from the AI")}
+                className="mt-1 space-y-0.5 text-xs text-text-muted opacity-70">
+                {(coverage.hidden.length > HIDDEN_PREVIEW_LIMIT
+                  ? coverage.hidden.slice(-HIDDEN_PREVIEW_SHOWN)
+                  : coverage.hidden
+                ).map((node) => (
+                  <li key={node.id} className="truncate">
+                    {`${roleLabel(node.role)} · ${
+                      plainHistoryPreview(node.preview) ||
+                      (node.assets?.length
+                        ? text("imageOnly", "Image or attachment only")
+                        : text("emptyMessage", "Empty message"))
+                    }`}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         {selection.status === "ready" && selection.owner?.kind === "native" &&
           selection.capture?.status === "captured" && selection.capture.view === selection.view &&
@@ -1166,21 +1273,13 @@ export function HistorySelectionReview({
             {text("refresh", "Refresh history")}
           </Button>
         )}
-        {nodes.length > 0 && (
+        {reviewAvailable && (
           <Button
             ref={trigger}
             variant="text"
             onClick={beginReview}
             disabled={pending}>
             {text("review", "Review conversation history")}
-          </Button>
-        )}
-        {selection.status === "ready" && nodes.length > 0 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => void selection.choose({ kind: "empty" })}>
-            {text("empty", "Use no prior messages")}
           </Button>
         )}
         {onExpand && (
@@ -1195,21 +1294,35 @@ export function HistorySelectionReview({
             {text("review", "Review conversation history")}
           </h3>
           <p className="text-sm text-text-muted">
-            {text("counts", "Complete source / included path")}: {nodes.length}{" "}
-            / {included.length}
+            {fill(text("includedCount", "{{included}} of {{total}} messages included"), {
+              included: included.length,
+              total: nodes.length
+            })}
           </p>
           <p className="my-2 text-sm text-text-muted">
             {text(
               "instructions",
-              "Include messages in the order to use. Omitted messages remain alternatives. Arrow keys browse rows; Alt + arrow keys reorder included messages."
+              "Tick the messages the AI should see, in the order it should see them. Arrow keys move between messages; Alt + arrow keys reorder them."
             )}
           </p>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={pending}
+            onClick={() => {
+              // Hides every earlier message from the AI now; "Restore all" undoes it.
+              focusRestoreAfterChoice.current = true
+              setExpanded(false)
+              void selection.choose({ kind: "empty" })
+            }}>
+            {text("startFresh", "Start fresh")}
+          </Button>
           <div
             ref={scroller}
             className="max-h-[30rem] overflow-auto"
             style={{ height: Math.min(480, nodes.length * 132) }}
             role="list"
-            aria-label={text("source", "Complete source messages")}>
+            aria-label={text("source", "All messages in this chat")}>
             <div
               style={{
                 height: virtualizer.getTotalSize(),
@@ -1219,7 +1332,7 @@ export function HistorySelectionReview({
                 const node = nodes[item.index]
                 const position = included.indexOf(node.id)
                 const preview =
-                  node.preview ||
+                  plainHistoryPreview(node.preview) ||
                   (node.assets?.length
                     ? text("imageOnly", "Image or attachment only")
                     : text("emptyMessage", "Empty message"))
@@ -1233,7 +1346,7 @@ export function HistorySelectionReview({
                     aria-posinset={item.index + 1}
                     tabIndex={focusedId === node.id ? 0 : -1}
                     onFocus={() => setFocusedId(node.id)}
-                    className="absolute left-0 top-0 w-full border-b border-border p-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
+                    className="absolute left-0 top-0 w-full overflow-hidden border-b border-border p-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
                     style={{
                       transform: `translateY(${item.start}px)`,
                       minHeight: item.size
@@ -1252,17 +1365,19 @@ export function HistorySelectionReview({
                         checked={position >= 0}
                         disabled={pending}
                         onChange={() => changeIncluded(node.id)}
-                        aria-label={`${text("include", "Include")} ${node.role}: ${preview}`}
+                        aria-label={`${text("include", "Include")} ${roleLabel(node.role)}: ${preview}`}
                       />
-                      <span>
-                        <strong>{node.role}</strong> · {preview}
+                      <span className="line-clamp-2">
+                        {`${roleLabel(node.role)} · ${preview}`}
                       </span>
                     </label>
                     <div className="mt-1 flex flex-wrap items-center gap-2">
                       <span className="text-text-muted">
                         {position < 0
-                          ? text("omitted", "Omitted alternative")
-                          : `${text("position", "Path position")} ${position + 1}`}
+                          ? text("omitted", "Hidden from the AI")
+                          : fill(text("includedPosition", "AI sees this as message {{position}}"), {
+                              position: position + 1
+                            })}
                       </span>
                       {position >= 0 && (
                         <>
@@ -1334,7 +1449,7 @@ export function HistorySelectionReview({
           <p className="my-2 text-sm text-text-muted">
             {text(
               "confirmEffect",
-              "Confirm creates a saved interpretation of this complete source. It does not delete omitted alternatives."
+              "Confirming saves this choice for the chat. Nothing is deleted: messages you leave out are only hidden from the AI."
             )}
           </p>
           <div className="flex flex-wrap gap-2">

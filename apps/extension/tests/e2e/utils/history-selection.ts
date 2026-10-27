@@ -218,7 +218,7 @@ export const historyUrl = (base: string, id = 'h1-source') => `${base}?historySe
 export async function review(page: Page) {
   await expect(page.getByRole('button', { name: 'Review conversation history', exact: true })).toBeVisible({ timeout: 20000 })
   await page.getByRole('button', { name: 'Review conversation history', exact: true }).click()
-  await expect(page.getByRole('list', { name: 'Complete source messages' })).toBeVisible()
+  await expect(page.getByRole('list', { name: 'All messages in this chat' })).toBeVisible()
   await page.screenshot({ path: test.info().outputPath('selected-history-review.png') })
 }
 
@@ -291,10 +291,12 @@ export async function legacyBoundaries(page: Page) {
   await page.reload()
   expect((await readStore(page, 'historySelections')).some(row => row.client_session_id !== 'fixture-origin' && row.view.cursor.kind === 'before_message' && row.view.cursor.message_id === 'h1-user')).toBe(true)
   await expect(page.getByText('H1 original question', { exact: true })).toHaveCount(0)
-  await page.getByRole('button', { name: 'Use no prior messages', exact: true }).click()
+  // CC-04: starting fresh is a choice inside the review.
+  await review(page)
+  await page.getByRole('button', { name: 'Start fresh', exact: true }).click()
   await expect.poll(async () => (await readStore(page, 'historySelections')).some(row => row.client_session_id !== 'fixture-origin' && row.view.cursor.kind === 'empty')).toBe(true)
   await page.reload()
-  await expect(page.getByRole('button', { name: 'Use no prior messages', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Restore all', exact: true })).toBeVisible()
   expect((await readStore(page, 'historySelections')).some(row => row.client_session_id !== 'fixture-origin' && row.view.cursor.kind === 'empty')).toBe(true)
   expect((await readStore(page, 'messages')).length).toBe(3)
 }
@@ -348,8 +350,8 @@ export async function abortLocalFork(page: Page) {
 
 export async function largeLegacyReview(page: Page, fullTip = false, bubble = false) {
   await review(page)
-  await expect(page.getByText('Complete source / included path: 20001 / 20001', { exact: true })).toBeVisible()
-  const list = page.getByRole('list', { name: 'Complete source messages' })
+  await expect(page.getByText('20001 of 20001 messages included', { exact: true })).toBeVisible()
+  const list = page.getByRole('list', { name: 'All messages in this chat' })
   expect(await list.getByRole('listitem').count()).toBeLessThan(30)
   await list.evaluate(element => { element.scrollTop = element.scrollHeight })
   await expect(page.locator('[data-history-message-id="legacy-20000"]')).toBeVisible()
