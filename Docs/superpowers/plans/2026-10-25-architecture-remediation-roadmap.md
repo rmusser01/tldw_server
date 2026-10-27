@@ -356,6 +356,11 @@ These eleven tasks have no dependencies on each other and can run in parallel. E
 | `.65` setup route behind a same-host proxy | #3347 reviews | Bare `proxy_pass` or spoofed `X-Forwarded-For` looks local; pre-setup SSRF with the private opt-in |
 | `.66` stale Collections FTS on memoized instances | #3342 merge review | `_fts_supports_direct_delete` never refreshed; updates leave old text indexed |
 | `.67` remaining DB_Management imports | `.16` plan | Four named cuts leave 30 pairs of DB-loading imports; frozen by `.16`'s ratchet, emptied here |
+| `.68` persona revalidation order | #3351 review | Out-of-order revalidations can restore wider scopes for one pass (pre-existing race) |
+| `.69` test-key gate | #3351 review | `SINGLE_USER_TEST_API_KEY` accepted under TEST_MODE outside pytest, HTTP and WebSocket |
+| `.70` stale Sync contract manifest | `.16` plan review | Committed v1 manifest no longer matches the export; no freshness test |
+| `.71` retire Phase 1 aliases and shims | `.12` and `.17` plans | Egress, provider_identity, STT context and 13 AuthNZ credential aliases |
+| `.72` invert provider credential resolution | `.17` plan review | LLM_Calls still loads ~24 AuthNZ modules through provider_credential_runtime |
 
 Execution order note: Phase 0 ran 0.1, 0.4, 0.2, 0.5, 0.3, 0.6, 0.7, 0.10, 0.8, 0.11, 0.9. `.11` and `.9` follow `.8` because they reuse `tests/lint/_ast_cache.py`, which `.8` creates.
 
