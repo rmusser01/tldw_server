@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from tldw_Server_API.app.core.Utils.image_validation import DATA_URI_REDACT_RE
+from tldw_Server_API.app.core.Utils.tokenizer import estimate_segment_tokens, redact_data_uris as _sanitize_data_uris
 
 FINGERPRINT_VERSION = "prompt-v1"
 
@@ -94,20 +94,6 @@ def fingerprint_text(text: str, *, version: str = FINGERPRINT_VERSION) -> str:
     return f"{version}:sha256:{digest}"
 
 
-def estimate_segment_tokens(text: str) -> int:
-    """The chat path's one prompt-size estimate: data:image payloads redacted, 4 chars/token rounded up.
-
-    Rate limits, quota and billing reservations, queue admission, the prompt-cost guardrail,
-    the post-call stream estimates and every recorded provider call's estimate row
-    (usage_accounting) all use it (TASK-13843). Rounded up because every one of them is
-    safer over than under.
-    """
-    if not text:
-        return 0
-    sanitized = _sanitize_data_uris(text)
-    return max(0, (len(sanitized) + 3) // 4)
-
-
 def build_prompt_cost_envelope(
     messages: Sequence[Mapping[str, Any]],
     *,
@@ -184,11 +170,6 @@ def _text_segment(name: str, kind: str, text: str, *, version: str) -> PromptSeg
 
 def _canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
-
-
-def _sanitize_data_uris(text: str) -> str:
-    """Redact data:image payloads: the chat path's one redactor, for fingerprints and estimates."""
-    return DATA_URI_REDACT_RE.sub(r"\1<omitted>", text)
 
 
 def _normalize_message(message: Mapping[str, Any]) -> dict[str, Any]:

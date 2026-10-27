@@ -32,8 +32,7 @@ from tldw_Server_API.app.core.exceptions import (
     ChatConfigurationError,
     ChatRateLimitError,
 )
-from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
-from tldw_Server_API.app.core.Chat.streaming_utils import _extract_text_from_upstream_sse
+from tldw_Server_API.app.core.LLM_Calls.provider_results import _extract_text_from_upstream_sse, extract_response_content
 
 #
 # Import Local

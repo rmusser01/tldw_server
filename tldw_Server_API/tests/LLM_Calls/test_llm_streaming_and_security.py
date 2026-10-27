@@ -535,7 +535,7 @@ async def test_wrap_sync_stream_logs_close_errors(monkeypatch):
 async def test_wrap_sync_stream_admission_failure_closes_concurrently_and_recovers(
     monkeypatch,
 ):
-    from tldw_Server_API.app.core.Chat import bounded_daemon as bounded_daemon_module
+    from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
     from tldw_Server_API.app.core.Chat.bounded_daemon import (
         BoundedDaemonPool,
         DaemonCapacityError,
@@ -673,7 +673,7 @@ async def test_registered_openai_stream_disconnect_drains_blocked_read_before_ru
     from starlette.responses import StreamingResponse
 
     from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
-    from tldw_Server_API.app.core.Chat import bounded_daemon as bounded_daemon_module
+    from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
     from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
     from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
     from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter

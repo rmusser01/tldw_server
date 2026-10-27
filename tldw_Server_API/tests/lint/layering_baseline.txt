@@ -204,7 +204,7 @@ core.Ingestion_Media_Processing -> api.v1.schemas: 1
 core.Ingestion_Media_Processing -> services: 6
 core.Ingestion_Sources -> services: 1
 core.LLM_Calls -> core.AuthNZ: 7
-core.LLM_Calls -> core.Chat: 12
+core.LLM_Calls -> core.Chat: 3
 core.Local_LLM -> api.v1.schemas: 4
 core.Logging -> core.Security: 1
 core.MCP_unified -> api.v1.schemas: 1

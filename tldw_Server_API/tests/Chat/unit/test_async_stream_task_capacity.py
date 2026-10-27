@@ -11,7 +11,8 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
-from tldw_Server_API.app.core.Chat import bounded_daemon, streaming_utils
+from tldw_Server_API.app.core.Chat import streaming_utils
+from tldw_Server_API.app.core.LLM_Calls import bounded_daemon
 from tldw_Server_API.app.core.Chat import request_queue as request_queue_module
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     BoundedDaemonPool,

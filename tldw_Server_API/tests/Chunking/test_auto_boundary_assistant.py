@@ -10,7 +10,7 @@ import pytest
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
 )
-from tldw_Server_API.app.core.Chat import bounded_daemon
+from tldw_Server_API.app.core.LLM_Calls import bounded_daemon
 from tldw_Server_API.app.core.Chunking import auto_boundary_assistant as assistant_module
 from tldw_Server_API.app.core.Chunking.auto_boundary_assistant import (
     AutoChunkBoundaryAssistantRequest,

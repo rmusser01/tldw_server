@@ -41,7 +41,7 @@ from .base import ChatProvider
 def _provider_response_has_error(value: Any) -> bool:
     """Detect a protocol-owned provider error without retaining its detail."""
 
-    from tldw_Server_API.app.core.Chat.streaming_utils import (
+    from tldw_Server_API.app.core.LLM_Calls.provider_results import (
         normalize_provider_stream_error,
     )
 

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from tldw_Server_API.app.core.Chat import bounded_daemon as bounded_daemon_module
+from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.chat_service import execute_non_stream_call
 from tldw_Server_API.app.core.Chat.tool_auto_exec import (

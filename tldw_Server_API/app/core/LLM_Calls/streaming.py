@@ -16,13 +16,13 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.bounded_daemon import (
+from tldw_Server_API.app.core.LLM_Calls.bounded_daemon import (
     DaemonCapacityError,
     await_owned_worker,
     start_bounded_stream_cleanup_daemon,
     start_bounded_stream_daemon,
 )
-from tldw_Server_API.app.core.Chat.streaming_utils import (
+from tldw_Server_API.app.core.LLM_Calls.provider_results import (
     normalize_provider_stream_error,
 )
 from tldw_Server_API.app.core.http_client import RetryPolicy, astream_sse

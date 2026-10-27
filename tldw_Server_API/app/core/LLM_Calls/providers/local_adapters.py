@@ -15,7 +15,7 @@ from tldw_Server_API.app.core.exceptions import (
     ChatProviderError,
     ChatRateLimitError,
 )
-from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
+from tldw_Server_API.app.core.LLM_Calls.provider_results import extract_response_content
 from tldw_Server_API.app.core.config import load_settings
 from tldw_Server_API.app.core.exceptions import EgressPolicyError, raise_detached_error
 from tldw_Server_API.app.core.http_client import (

@@ -23,7 +23,7 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.bounded_daemon import (
+from tldw_Server_API.app.core.LLM_Calls.bounded_daemon import (
     BoundedDaemonPool,
     DaemonCapacityError,
     run_bounded_daemon_with_timeout,
