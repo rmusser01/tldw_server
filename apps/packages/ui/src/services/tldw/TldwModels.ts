@@ -427,9 +427,11 @@ export class TldwModelsService {
         if (throwOnError) throw error
         return []
       }
-      // Failed discovery has no stale fallback: drop the catalog it was meant to refresh.
+      // Failed discovery has no stale fallback. A throwOnError caller gets the
+      // failure itself and leaves the last catalog (still inside its TTL) alone;
+      // any other failure drops the catalog it was meant to refresh.
       if (cookieSession) this.invalidateCacheState()
-      else await this.clearCache()
+      else if (!throwOnError) await this.clearCache()
       if (throwOnError) throw error
       if (requireFresh) return []
       if (isAbortLikeModelFetchError(error)) {
