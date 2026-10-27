@@ -514,90 +514,126 @@ def test_transcribe_vllm_http_missing_url(monkeypatch, tmp_path):
     assert "vllm base url not configured" in str(exc_info.value).lower()
 
 
+@pytest.fixture
+def vllm_egress(monkeypatch):
+    """Run the vLLM upload under the production egress policy, without a network.
+
+    Traffic goes through the real core.http_client helpers over an httpx.MockTransport; returns
+    ``(seen, connects, dns)``: the requests the transport received, every attempted socket
+    connect (a client that bypasses the helpers reaches one), and a mutable DNS table.
+    """
+    import socket
+
+    import httpx
+
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Security import egress
+
+    seen: list[httpx.Request] = []
+    connects: list[object] = []
+    dns: dict[str, str] = {}
+    responses: list[httpx.Response] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if responses:
+            return responses.pop(0)
+        return httpx.Response(200, json={"text": "Hello world", "language": "en", "duration": 2.5})
+
+    def no_connect(address, *_args, **_kwargs):
+        connects.append(address)
+        raise OSError("network disabled in this test")
+
+    real_create_client = http_client.create_client
+    monkeypatch.setattr(socket, "create_connection", no_connect)
+    monkeypatch.setattr(
+        http_client,
+        "create_client",
+        lambda **kwargs: real_create_client(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda host, **_kwargs: [dns[host]] if host in dns else [])
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+    return seen, connects, dns, responses
+
+
+def _vllm_settings(base_url: str) -> dict:
+    return {"vllm_base_url": base_url, "request_model": "Qwen/Qwen3-ASR-1.7B", "sample_rate": 16000}
+
+
+def _no_duration(monkeypatch, qwen3) -> None:
+    import numpy as np
+
+    monkeypatch.setattr(
+        qwen3, "_load_audio", lambda *_args, **_kwargs: (np.zeros(16000, dtype="float32"), 16000, 1.0)
+    )
+
+
 @pytest.mark.unit
-def test_transcribe_vllm_http_success(monkeypatch, tmp_path):
-    """Test vLLM HTTP transcription with mocked httpx response."""
+def test_transcribe_vllm_http_success(monkeypatch, tmp_path, vllm_egress):
+    """The configured vLLM server gets the same multipart upload through core.http_client."""
     qwen3 = _import_module()
-
-    # Create a mock audio file
+    seen, connects, dns, _responses = vllm_egress
+    dns["localhost"] = "127.0.0.1"
     audio_file = tmp_path / "test.wav"
-    audio_file.write_bytes(b"\x00" * 100)
+    audio_file.write_bytes(b"RIFF-audio")
+    _no_duration(monkeypatch, qwen3)
 
-    settings = {
-        "vllm_base_url": ("http://localhost:8000/proxy?legacy=value"),
-        "request_model": "Qwen/Qwen3-ASR-1.7B",
-        "sample_rate": 16000,
-    }
+    result = qwen3._transcribe_vllm_http(
+        audio_file, _vllm_settings("http://localhost:8000/proxy?legacy=value"), "en", None
+    )
 
-    # Mock httpx.Client
-    class MockResponse:
-        def __init__(self):
-            self.status_code = 200
+    assert result["text"] == "Hello world"
+    assert result["language"] == "en"
+    assert result["metadata"]["model"] == ("vllm:http://localhost:8000/proxy?legacy=value")
+    assert result["usage"]["duration_ms"] == 2500
+    [request] = seen
+    assert request.method == "POST"
+    assert request.headers["host"] == "localhost:8000"
+    assert (request.url.path, request.url.query) == ("/proxy", b"legacy=value/v1/audio/transcriptions")
+    assert request.extensions["timeout"] == {"connect": 300.0, "read": 300.0, "write": 300.0, "pool": 300.0}
+    body = request.content
+    assert b'name="model"\r\n\r\nQwen/Qwen3-ASR-1.7B\r\n' in body
+    assert b'name="language"\r\n\r\nen\r\n' in body
+    assert b'name="file"; filename="test.wav"\r\nContent-Type: audio/wav\r\n\r\nRIFF-audio\r\n' in body
+    assert connects == []
 
-        def raise_for_status(self):
-            pass
 
-        def json(self):
-            return {
-                "text": "Hello world",
-                "language": "en",
-                "duration": 2.5,
-            }
+@pytest.mark.unit
+def test_vllm_host_resolving_to_cloud_metadata_is_refused_before_sending(monkeypatch, tmp_path, vllm_egress):
+    from tldw_Server_API.app.core.exceptions import BadRequestError
 
-    client_kwargs = {}
-    request_data = {}
-    request_urls = []
+    qwen3 = _import_module()
+    seen, connects, dns, _responses = vllm_egress
+    dns["vllm.internal"] = "169.254.169.254"
+    audio_file = tmp_path / "test.wav"
+    audio_file.write_bytes(b"RIFF-audio")
+    _no_duration(monkeypatch, qwen3)
 
-    class MockClient:
-        def __init__(self, **kwargs):
-            client_kwargs.update(kwargs)
+    with pytest.raises(BadRequestError):
+        qwen3._transcribe_vllm_http(audio_file, _vllm_settings("http://vllm.internal:8000"), None, None)
 
-        def __enter__(self):
-            return self
+    assert seen == []
+    assert connects == []
 
-        def __exit__(self, *args):
-            pass
 
-        def post(self, url, files=None, data=None):
-            request_urls.append(url)
-            request_data.update(data or {})
-            return MockResponse()
+@pytest.mark.unit
+def test_vllm_redirect_to_another_private_address_is_not_followed(monkeypatch, tmp_path, vllm_egress):
+    import httpx
 
-    # Mock httpx
-    mock_httpx = types.ModuleType("httpx")
-    mock_httpx.Client = MockClient
-    mock_httpx.HTTPStatusError = Exception
-    mock_httpx.RequestError = Exception
+    from tldw_Server_API.app.core.exceptions import BadRequestError
 
-    http_module_attr = "http" + "x"
-    monkeypatch.setattr(qwen3, http_module_attr, mock_httpx, raising=False)
+    qwen3 = _import_module()
+    seen, connects, _dns, responses = vllm_egress
+    responses.append(httpx.Response(307, headers={"location": "http://10.0.0.9:8000/v1/audio/transcriptions"}))
+    audio_file = tmp_path / "test.wav"
+    audio_file.write_bytes(b"RIFF-audio")
+    _no_duration(monkeypatch, qwen3)
 
-    # Mock _load_audio to avoid actual file reading
-    def fake_load_audio(path, *, target_sample_rate):
-        import numpy as np
+    with pytest.raises(BadRequestError, match="307"):
+        qwen3._transcribe_vllm_http(audio_file, _vllm_settings("http://127.0.0.1:8000"), None, None)
 
-        return np.zeros(16000, dtype="float32"), 16000, 1.0
-
-    monkeypatch.setattr(qwen3, "_load_audio", fake_load_audio)
-
-    # Import httpx into the module namespace for the test
-    import sys
-
-    sys.modules["httpx"] = mock_httpx
-
-    try:
-        result = qwen3._transcribe_vllm_http(audio_file, settings, "en", None)
-
-        assert result["text"] == "Hello world"
-        assert result["language"] == "en"
-        assert result["metadata"]["model"] == ("vllm:http://localhost:8000/proxy?legacy=value")
-        assert result["usage"]["duration_ms"] == 2500
-        assert client_kwargs["follow_redirects"] is False
-        assert request_data["model"] == "Qwen/Qwen3-ASR-1.7B"
-        assert request_urls == ["http://localhost:8000/proxy?legacy=value/v1/audio/transcriptions"]
-    finally:
-        if "httpx" in sys.modules and sys.modules["httpx"] is mock_httpx:
-            del sys.modules["httpx"]
+    assert [str(request.url) for request in seen] == ["http://127.0.0.1:8000/v1/audio/transcriptions"]
+    assert connects == []
 
 
 @pytest.mark.unit

@@ -98,7 +98,7 @@ class _FakeAudioWebSocket:
         self.sent_json: list[dict] = []
         self.app = FastAPI()
 
-    async def accept(self) -> None:
+    async def accept(self, subprotocol: str | None = None) -> None:
         self.accepted += 1
 
     async def close(self, code: int = 1000, reason: str = "") -> None:
@@ -120,7 +120,7 @@ class _PausingPromptStudioWebSocket(_FakeAudioWebSocket):
         self._accepted = accepted
         self._release_accept = release_accept
 
-    async def accept(self) -> None:
+    async def accept(self, subprotocol: str | None = None) -> None:
         self.accepted += 1
         self._accepted.set()
         await self._release_accept.wait()
@@ -447,11 +447,11 @@ class _UnexpectedPromptStudioStream:
     [
         (
             "websocket_endpoint_base",
-            {"token": None, "api_key": None, "project_id": None},
+            {"project_id": None},
         ),
         (
             "websocket_endpoint",
-            {"project_id": 7, "token": None, "api_key": None},
+            {"project_id": 7},
         ),
     ],
 )

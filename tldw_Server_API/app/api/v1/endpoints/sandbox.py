@@ -27,6 +27,7 @@ from fastapi import (
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
+    WebSocketException,
 )
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.routing import APIRoute
@@ -75,13 +76,11 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventType,
     AuditSeverity,
 )
-from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
-from tldw_Server_API.app.core.AuthNZ.ip_allowlist import is_single_user_ip_allowed, resolve_client_ip
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
-    cookie_websocket_rejection_code,
-    resolve_single_user_cookie_websocket,
+from tldw_Server_API.app.core.AuthNZ.websocket_principal import (
+    WS_UNAUTHENTICATED,
+    auth_subprotocol,
+    resolve_ws_principal,
 )
 from tldw_Server_API.app.core.config import settings as app_settings
 from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogram
@@ -107,7 +106,6 @@ from tldw_Server_API.app.core.Sandbox.service import (
 from tldw_Server_API.app.core.Sandbox.streams import get_hub
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.testing import (
-    is_explicit_pytest_runtime,
     is_test_mode,
     is_truthy,
 )
@@ -447,86 +445,21 @@ def _stream_reader_to_target_sync(
         raise
 
 
-def _looks_like_jwt(token: str | None) -> bool:
-    return isinstance(token, str) and token.count(".") == 2
+async def _resolve_sandbox_ws_user_id(websocket: WebSocket, *, signed_url_token: bool = False) -> int:
+    """Return the user id of a run-stream caller; call it before accept (TASK-13950.7).
 
+    ``resolve_ws_principal`` reads the bearer header or subprotocol, ``X-API-KEY`` and the
+    single-user cookie, with API keys needing the read scope. With signed URLs on, the query
+    ``token`` is the URL's signature, so it does not stop the cookie.
 
-async def _resolve_sandbox_ws_user_id(
-    websocket: WebSocket,
-    *,
-    token: str | None,
-    api_key: str | None,
-    signed_url_token: bool = False,
-) -> int:
-    if not token:
-        auth_hdr = websocket.headers.get("authorization") or websocket.headers.get("Authorization")
-        if auth_hdr and auth_hdr.lower().startswith("bearer "):
-            token = auth_hdr.split(" ", 1)[1].strip()
-    if not api_key:
-        api_key = websocket.headers.get("x-api-key") or websocket.headers.get("X-API-KEY")
-
-    if token and not api_key and not _looks_like_jwt(token):
-        api_key = token
-        token = None
-
-    if token:
-        try:
-            from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidTokenError, TokenExpiredError
-            from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
-            from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
-
-            jwt_service = get_jwt_service()
-            payload = await jwt_service.verify_token_async(token, token_type="access")  # nosec B106
-            session_manager = await get_session_manager()
-            if await session_manager.is_token_blacklisted(token, payload.get("jti")):
-                raise HTTPException(status_code=401, detail="invalid_token")
-        except HTTPException:
-            raise
-        except (InvalidTokenError, TokenExpiredError):
-            raise HTTPException(status_code=401, detail="invalid_token") from None
-        except _SANDBOX_NONCRITICAL_EXCEPTIONS:
-            raise HTTPException(status_code=401, detail="invalid_token") from None
-
-        sub = payload.get("user_id") or payload.get("sub")
-        if sub is None:
-            raise HTTPException(status_code=401, detail="invalid_token")
-        try:
-            return int(sub)
-        except _SANDBOX_NONCRITICAL_EXCEPTIONS:
-            raise HTTPException(status_code=401, detail="invalid_token") from None
-
-    if api_key:
-        settings = get_settings()
-        client_ip = resolve_client_ip(websocket, settings)
-        if getattr(settings, "AUTH_MODE", None) == "single_user":
-            allowed_keys: set[str] = set()
-            primary_key = getattr(settings, "SINGLE_USER_API_KEY", None)
-            if primary_key:
-                allowed_keys.add(primary_key)
-            if is_explicit_pytest_runtime():
-                test_key = os.getenv("SINGLE_USER_TEST_API_KEY")
-                if test_key:
-                    allowed_keys.add(test_key)
-            if api_key in allowed_keys and is_single_user_ip_allowed(client_ip, settings):
-                return int(getattr(settings, "SINGLE_USER_FIXED_ID", 1))
-            raise HTTPException(status_code=401, detail="invalid_api_key")
-
-        api_mgr = await get_api_key_manager()
-        info = await api_mgr.validate_api_key(api_key=api_key, required_scope="read", ip_address=client_ip)
-        if not info:
-            raise HTTPException(status_code=401, detail="invalid_api_key")
-        user_id = info.get("user_id")
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="invalid_api_key")
-        return int(user_id)
-
-    cookie_identity = await resolve_single_user_cookie_websocket(
-        websocket,
-        ignore_signed_url_token=signed_url_token,
-    )
-    if cookie_identity is not None:
-        return cookie_identity.user_id
-    raise HTTPException(status_code=401, detail="auth_required")
+    Raises:
+        WebSocketException: as ``resolve_ws_principal``, and 4401 for a principal that is not a
+            user (a service token), which owns no run.
+    """
+    principal = await resolve_ws_principal(websocket, required_scope="read", ignore_signed_url_token=signed_url_token)
+    if principal.user_id is None:
+        raise WebSocketException(code=WS_UNAUTHENTICATED, reason="user_principal_required")
+    return int(principal.user_id)
 
 
 def _normalize_reason(outcome: str, message: str | None) -> str:
@@ -1929,7 +1862,6 @@ async def stream_run_logs(websocket: WebSocket, run_id: str) -> None:
         websocket (WebSocket): The active WebSocket connection to send frames to.
         run_id (str): Identifier of the sandbox run whose events should be streamed.
     """
-    # Authenticate via JWT/session (Authorization header) or API key.
     signed_flag = False
     try:
         signed_env = os.getenv("SANDBOX_WS_SIGNED_URLS")
@@ -1940,29 +1872,10 @@ async def stream_run_logs(websocket: WebSocket, run_id: str) -> None:
     except _SANDBOX_NONCRITICAL_EXCEPTIONS:
         signed_flag = False
     try:
-        qp = websocket.query_params  # type: ignore[attr-defined]
-        auth_token = None
-        if qp is not None:
-            # Prefer explicit auth_token; only reuse token param when signed URLs are disabled
-            auth_token = qp.get("auth_token")
-            if not auth_token and not signed_flag:
-                auth_token = qp.get("token")
-    except _SANDBOX_NONCRITICAL_EXCEPTIONS:
-        auth_token = None
-    try:
-        api_key = websocket.headers.get("x-api-key") or websocket.headers.get("X-API-KEY")
-    except _SANDBOX_NONCRITICAL_EXCEPTIONS:
-        api_key = None
-    try:
-        user_id = await _resolve_sandbox_ws_user_id(
-            websocket,
-            token=auth_token,
-            api_key=api_key,
-            signed_url_token=signed_flag,
-        )
-    except HTTPException:
+        user_id = await _resolve_sandbox_ws_user_id(websocket, signed_url_token=signed_flag)
+    except WebSocketException as exc:
         try:
-            await websocket.close(code=cookie_websocket_rejection_code(websocket) or 4401)
+            await websocket.close(code=exc.code)
         finally:
             return  # noqa: B012
     # Ownership check before streaming
@@ -2075,7 +1988,7 @@ async def stream_run_logs(websocket: WebSocket, run_id: str) -> None:
     else:
         q = hub.subscribe_with_buffer(run_id)
 
-    await websocket.accept()
+    await websocket.accept(subprotocol=auth_subprotocol(websocket))
     # Wrap for WS metrics; keep domain frames unchanged
     stream = WebSocketStream(
         websocket,

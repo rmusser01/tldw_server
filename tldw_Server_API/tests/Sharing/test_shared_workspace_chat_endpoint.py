@@ -683,7 +683,9 @@ async def test_receipt_lease_uses_unique_catalog_provider_for_unqualified_model(
         chat_target_resolution,
     )
 
-    monkeypatch.setattr(chat_target_resolution, "get_default_provider", lambda: "openai")
+    # Catalog inference only switches between local providers; a commercial model
+    # needs a credentialed provider inventory (TASK-13460), so it never infers one.
+    monkeypatch.setattr(chat_target_resolution, "get_default_provider", lambda: "llama.cpp")
     monkeypatch.setattr(chat_service, "_load_models_with_case_cached", lambda provider: [])
     monkeypatch.setattr(
         chat_service,
@@ -693,18 +695,18 @@ async def test_receipt_lease_uses_unique_catalog_provider_for_unqualified_model(
     monkeypatch.setattr(
         chat_service,
         "_find_catalog_providers_for_model_cached",
-        lambda model: ("anthropic",),
+        lambda model: ("ollama",),
     )
     monkeypatch.setattr(
         sharing,
         "load_and_log_configs",
         lambda: {
-            "openai_api": {"api_timeout": "240"},
-            "anthropic_api": {"api_timeout": "900"},
+            "llama_api": {"api_timeout": "240"},
+            "ollama_api": {"api_timeout": "900"},
         },
     )
     body = _body().model_copy(
-        update={"provider": None, "model": "claude-special"}
+        update={"provider": None, "model": "special-model"}
     )
 
     assert (
@@ -712,6 +714,6 @@ async def test_receipt_lease_uses_unique_catalog_provider_for_unqualified_model(
             requested_provider=body.provider,
             requested_model=body.model,
         )
-        == "anthropic"
+        == "ollama"
     )
     assert sharing._shared_chat_lease_seconds(body) == 960

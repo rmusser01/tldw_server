@@ -18,6 +18,8 @@ from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
 )
 from tldw_Server_API.app.core.Security.egress import URLPolicyResult
 
+pytestmark = pytest.mark.usefixtures("healthy_no_override_tts_credential_snapshot")
+
 
 class _EmptyProviderManager:
     """Provider manager stub that reports no provider health state."""
@@ -45,7 +47,7 @@ def _client_for_config(monkeypatch: pytest.MonkeyPatch, parser: ConfigParser) ->
     monkeypatch.setattr(llm_providers, "load_comprehensive_config", lambda: parser)
     monkeypatch.setattr(llm_providers, "get_api_keys", lambda: {})
     monkeypatch.setattr(llm_providers, "get_provider_manager", lambda: _EmptyProviderManager())
-    monkeypatch.setattr(llm_providers, "list_provider_models", lambda _provider: [])
+    monkeypatch.setattr(llm_providers, "discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready"))
     monkeypatch.setattr(llm_providers, "list_image_models_for_catalog", lambda: [])
     monkeypatch.setattr(llm_providers, "discover_models_from_endpoint", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(llm_providers, "apply_llm_provider_overrides_to_listing", lambda result: result)

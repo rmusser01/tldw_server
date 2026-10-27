@@ -10,10 +10,19 @@ import threading
 import time
 from collections import OrderedDict, deque
 from datetime import datetime, timezone
-from types import SimpleNamespace
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+    WebSocketException,
+    status,
+)
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import ValidationError
@@ -64,18 +73,16 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import (
     get_runner_client,
 )
 from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPResponseError
-from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidTokenError, TokenExpiredError
-from tldw_Server_API.app.core.AuthNZ.ip_allowlist import is_single_user_ip_allowed, resolve_client_ip
-from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
-from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
-from tldw_Server_API.app.core.AuthNZ.settings import get_settings as get_auth_settings
-from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
-    cookie_websocket_rejection_code,
-    resolve_single_user_cookie_websocket,
+from tldw_Server_API.app.core.AuthNZ.websocket_principal import (
+    DEPRECATED_WS_CHANNEL,
+    WS_UNAUTHENTICATED,
+    auth_subprotocol,
+    has_ws_credential,
+    resolve_ws_principal_or_deprecated_query,
+    verify_ws_credential,
 )
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
-from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime
 from tldw_Server_API.app.services.acp_runtime_policy_service import ACPRuntimePolicyService
 from tldw_Server_API.app.services.admin_acp_sessions_service import (
     ACPSessionStore,
@@ -932,101 +939,53 @@ async def _check_prompt_governance(
 # WebSocket Authentication Helper
 # -----------------------------------------------------------------------------
 
-class _AuthNZJWTManagerCompat:
-    """Compatibility shim exposing verify_token() with token_data.user_id."""
-
-    async def verify_token(self, token: str) -> SimpleNamespace | None:
-        try:
-            payload = get_jwt_service().decode_access_token(token)
-            session_manager = await get_session_manager()
-            if await session_manager.is_token_blacklisted(token, payload.get("jti")):
-                return None
-            user_id = payload.get("user_id") or payload.get("sub")
-            if user_id is None:
-                return None
-            return SimpleNamespace(user_id=int(user_id))
-        except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-            return None
+# DEPRECATED channels that shipped clients still send (TASK-13950.7): useACPSession,
+# ACPWebSocketClient and prompt-studio-stream put the credential in ?token= / ?api_key= (read by
+# the shared resolve_ws_principal_or_deprecated_query), and the ACP SSH panel offers
+# "x-api-key, <key>". Remove them once those clients send the bearer subprotocol. Nothing here
+# parses or verifies a credential: it is handed to verify_ws_credential, the verification
+# resolve_ws_principal uses.
+_DEPRECATED_KEY_SUBPROTOCOL = "x-api-key"
 
 
-def get_jwt_manager() -> _AuthNZJWTManagerCompat:
-    """Return a compatibility JWT manager for ACP WebSocket auth and legacy tests."""
-    return _AuthNZJWTManagerCompat()
-
-
-async def _authenticate_ws(
-    websocket: WebSocket,
-    token: str | None = None,
-    api_key: str | None = None,
-    required_scope: str = "read",
-) -> int | None:
-    """Authenticate a WebSocket connection. Returns user_id or None."""
-    # Try JWT token first
-    if token:
-        try:
-            jwtm = get_jwt_manager()
-            token_data = jwtm.verify_token(token)
-            if inspect.isawaitable(token_data):
-                token_data = await token_data
-            if token_data and getattr(token_data, "user_id", None):
-                return int(token_data.user_id)
-        except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug("JWT auth failed for WebSocket: {}", e)
-
-    # Try API key (single-user mode)
-    if api_key:
-        try:
-            settings = get_auth_settings()
-            auth_mode = str(getattr(settings, "AUTH_MODE", "single_user")).strip().lower()
-            client_ip = resolve_client_ip(websocket, settings)
-            if auth_mode == "single_user":
-                allowed_keys: set[str] = set()
-                primary_key = getattr(settings, "SINGLE_USER_API_KEY", None)
-                if isinstance(primary_key, str) and primary_key.strip():
-                    allowed_keys.add(primary_key.strip())
-                env_primary = os.getenv("SINGLE_USER_API_KEY") or os.getenv("API_KEY")
-                if isinstance(env_primary, str) and env_primary.strip():
-                    allowed_keys.add(env_primary.strip())
-                if is_explicit_pytest_runtime():
-                    test_key = os.getenv("SINGLE_USER_TEST_API_KEY")
-                    if isinstance(test_key, str) and test_key.strip():
-                        allowed_keys.add(test_key.strip())
-                if api_key in allowed_keys and is_single_user_ip_allowed(client_ip, settings):
-                    return int(getattr(settings, "SINGLE_USER_FIXED_ID", 1))
-            else:
-                api_mgr = await get_api_key_manager()
-                info = await api_mgr.validate_api_key(
-                    api_key=api_key,
-                    required_scope=required_scope,
-                    ip_address=client_ip,
-                )
-                user_id = info.get("user_id") if isinstance(info, dict) else None
-                if user_id is not None:
-                    return int(user_id)
-        except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug("API key auth failed for WebSocket: {}", e)
-
-    # Try Authorization header
-    auth_header = websocket.headers.get("authorization") or websocket.headers.get("Authorization")
-    if auth_header:
-        if auth_header.lower().startswith("bearer "):
-            return await _authenticate_ws(websocket, token=auth_header[7:].strip(), required_scope=required_scope)
-        elif auth_header.lower().startswith("x-api-key "):
-            return await _authenticate_ws(websocket, api_key=auth_header[10:].strip(), required_scope=required_scope)
-
-    # Try Sec-WebSocket-Protocol: bearer,<token> or x-api-key,<key>
-    proto_header = websocket.headers.get("sec-websocket-protocol") or websocket.headers.get("Sec-WebSocket-Protocol")
-    if proto_header:
-        parts = [p.strip() for p in proto_header.split(",") if p.strip()]
-        for idx in range(len(parts) - 1):
-            scheme = parts[idx].lower()
-            value = parts[idx + 1]
-            if scheme == "bearer" and value:
-                return await _authenticate_ws(websocket, token=value, required_scope=required_scope)
-            if scheme in {"x-api-key", "api-key"} and value:
-                return await _authenticate_ws(websocket, api_key=value, required_scope=required_scope)
-
+def _deprecated_subprotocol_key(websocket: WebSocket) -> str | None:
+    """Return ``<key>`` from ``Sec-WebSocket-Protocol: x-api-key, <key>``."""
+    parts = [part.strip() for part in (websocket.headers.get("sec-websocket-protocol") or "").split(",")]
+    if len(parts) >= 2 and parts[0].lower() == _DEPRECATED_KEY_SUBPROTOCOL and parts[1]:
+        return parts[1]
     return None
+
+
+def _acp_ws_subprotocol(websocket: WebSocket) -> str | None:
+    """The subprotocol to accept with: the offered marker, never the credential after it.
+
+    Browsers fail a handshake whose offered subprotocol is not echoed.
+    """
+    deprecated = _DEPRECATED_KEY_SUBPROTOCOL if _deprecated_subprotocol_key(websocket) else None
+    return auth_subprotocol(websocket) or deprecated
+
+
+async def _authenticate_ws(websocket: WebSocket, *, required_scope: str) -> int:
+    """Return the user id of an ACP or prompt-studio WebSocket caller; call it before accept.
+
+    ``resolve_ws_principal`` reads the bearer header, the bearer subprotocol, ``X-API-KEY``
+    and the single-user cookie. Only when none of the first three is present are the
+    deprecated channels read, one warning per connection naming the channel, never the
+    credential.
+
+    Raises:
+        WebSocketException: as ``resolve_ws_principal``, and 4401 for a principal that is
+            not a user (a service token), which owns no ACP session or project.
+    """
+    api_key = None if has_ws_credential(websocket) else _deprecated_subprotocol_key(websocket)
+    if api_key:
+        logger.warning(DEPRECATED_WS_CHANNEL, "x-api-key subprotocol", websocket.url.path)
+        principal = await verify_ws_credential(websocket, api_key=api_key, required_scope=required_scope)
+    else:
+        principal = await resolve_ws_principal_or_deprecated_query(websocket, required_scope=required_scope)
+    if principal.user_id is None:
+        raise WebSocketException(code=WS_UNAUTHENTICATED, reason="user_principal_required")
+    return int(principal.user_id)
 
 
 async def _record_acp_prompt(
@@ -1223,8 +1182,6 @@ async def _session_runtime_presence(*, session_id: str, user_id: int) -> tuple[b
 async def acp_session_stream(
     websocket: WebSocket,
     session_id: str,
-    token: str | None = Query(None),
-    api_key: str | None = Query(None),
     last_sequence: int = Query(0),
 ) -> None:
     """
@@ -1248,21 +1205,16 @@ async def acp_session_stream(
     - cancel: Cancel current operation
     - prompt: Send a new prompt (alternative to REST endpoint)
 
-    Authentication:
-    - Pass token as query param: ?token=<jwt>
-    - Pass api_key as query param: ?api_key=<key>
-    - Or via Authorization header: Bearer <token>
+    Authentication (write scope for API keys):
+    - Authorization: Bearer <token>, X-API-KEY: <key>, or for browsers
+      Sec-WebSocket-Protocol: bearer, <token or key>; or the single-user cookie.
+    - Deprecated: ?token=<jwt>, ?api_key=<key>, Sec-WebSocket-Protocol: x-api-key, <key>.
     """
-    # Authenticate
-    cookie_identity = await resolve_single_user_cookie_websocket(websocket)
-    user_id = (
-        cookie_identity.user_id
-        if cookie_identity is not None
-        else await _authenticate_ws(websocket, token=token, api_key=api_key, required_scope="write")
-    )
-    if user_id is None:
+    try:
+        user_id = await _authenticate_ws(websocket, required_scope="write")
+    except WebSocketException as exc:
         with contextlib.suppress(_ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS):
-            await websocket.close(code=cookie_websocket_rejection_code(websocket) or 4401)
+            await websocket.close(code=exc.code)
         return
 
     try:
@@ -1302,6 +1254,7 @@ async def acp_session_stream(
     prompt_task: asyncio.Task | None = None
 
     try:
+        await websocket.accept(subprotocol=_acp_ws_subprotocol(websocket))
         await stream.start()
 
         # Define send callback for broadcasting
@@ -1432,19 +1385,13 @@ async def acp_session_stream(
 async def acp_session_ssh(
     websocket: WebSocket,
     session_id: str,
-    token: str | None = Query(None),
-    api_key: str | None = Query(None),
 ) -> None:
-    """WebSocket SSH proxy for an ACP sandbox session."""
-    cookie_identity = await resolve_single_user_cookie_websocket(websocket)
-    user_id = (
-        cookie_identity.user_id
-        if cookie_identity is not None
-        else await _authenticate_ws(websocket, token=token, api_key=api_key, required_scope="write")
-    )
-    if user_id is None:
+    """WebSocket SSH proxy for an ACP sandbox session; authenticates like the stream route."""
+    try:
+        user_id = await _authenticate_ws(websocket, required_scope="write")
+    except WebSocketException as exc:
         with contextlib.suppress(_ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS):
-            await websocket.close(code=cookie_websocket_rejection_code(websocket) or 4401)
+            await websocket.close(code=exc.code)
         return
 
     try:
@@ -1477,7 +1424,7 @@ async def acp_session_ssh(
             await websocket.close(code=4429)
         return
 
-    await websocket.accept()
+    await websocket.accept(subprotocol=_acp_ws_subprotocol(websocket))
     ssh_proc: asyncio.subprocess.Process | None = None
     temp_key_path: str | None = None
     try:

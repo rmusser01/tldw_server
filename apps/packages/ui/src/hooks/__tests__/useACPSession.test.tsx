@@ -97,7 +97,7 @@ describe("useACPSession", () => {
     vi.clearAllMocks()
   })
 
-  it.each([4401, 4404, 4429])("does not reconnect for fatal close code %s", async (code) => {
+  it.each([4401, 4403, 4404, 4429])("does not reconnect for fatal close code %s", async (code) => {
     const { result } = renderHook(() =>
       useACPSession({
         sessionId: "session-1",

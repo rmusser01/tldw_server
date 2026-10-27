@@ -458,11 +458,9 @@ def test_frozen_vendor_instructions_reach_actual_http_payload(resume_api, monkey
     )
 
     client, db, _, headers = resume_api
-    from tldw_Server_API.app.core.Chat.chat_service import (
-        known_models_for_provider_cached,
-    )
+    from tldw_Server_API.app.core.Usage.pricing_catalog import list_provider_models
 
-    saved_model = known_models_for_provider_cached(provider)[0]
+    saved_model = list_provider_models(provider)[0]
     card = db.add_character_card(
         {
             "name": "Vendor Ava",
@@ -623,17 +621,15 @@ def test_resume_suppresses_unsaved_sampling_modifiers_at_vendor_http_boundary(re
     import httpx
 
     from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime
-    from tldw_Server_API.app.core.Chat.chat_service import (
-        known_models_for_provider_cached,
-    )
     from tldw_Server_API.app.core.LLM_Calls.providers import (
         deepseek_adapter,
         qwen_adapter,
     )
+    from tldw_Server_API.app.core.Usage.pricing_catalog import list_provider_models
 
     client, db, _, headers = resume_api
     card = db.add_character_card({"name": "Modifier Vendor Ava"})
-    model = known_models_for_provider_cached(provider)[0]
+    model = list_provider_models(provider)[0]
     cid = create_character_conversation(
         db,
         conversation_data={

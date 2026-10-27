@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -1378,6 +1379,68 @@ def test_full_suite_summaries_fail_closed_on_skipped_shards(summary: str) -> Non
     assert '"skipped"' not in script
 
 
+@pytest.mark.unit
+def test_backend_required_enforces_http_usage_guard() -> None:
+    """TASK-13950.11: the HTTP usage guard runs in a required step that cannot soft-fail."""
+    import shlex
+
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    steps = workflow["jobs"]["backend-required"]["steps"]
+    gate = next(step for step in steps if step.get("name") == "Enforce CI contracts and code ratchets")
+    assert not gate.get("continue-on-error", False)  # nosec B101 - regression assertion
+    # Shell words, as bash reads them: a commented-out path is not an argument.
+    words = shlex.split(gate["run"].replace("\\\n", " "), comments=True)
+    assert "tldw_Server_API/tests/lint/test_http_usage_guard.py" in words  # nosec B101
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "ratchet",
+    [
+        "tldw_Server_API/tests/lint/test_function_size_ratchet.py",
+        "tldw_Server_API/tests/lint/test_charactersragdb_surface_ratchet.py",
+    ],
+)
+def test_backend_required_enforces_size_ratchets(ratchet: str) -> None:
+    """TASK-13950.8: the size ratchets run in a required step, with the PR base their reason check reads."""
+    import shlex
+
+    from tldw_Server_API.tests.lint._ceilings import BASE_ENV
+
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    steps = workflow["jobs"]["backend-required"]["steps"]
+    gate = next(step for step in steps if step.get("name") == "Enforce CI contracts and code ratchets")
+    assert not gate.get("continue-on-error", False)  # nosec B101 - regression assertion
+    # Shell words, as bash reads them: a commented-out path is not an argument.
+    assert ratchet in shlex.split(gate["run"].replace("\\\n", " "), comments=True)  # nosec B101
+    # A rename on either side would quietly drop the bump-with-reason check to its local fallback.
+    assert "base_sha" in str(gate.get("env", {}).get(BASE_ENV, ""))  # nosec B101 - regression assertion
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "ratchet",
+    [
+        "tldw_Server_API/tests/lint/test_layering_contract.py",
+        "tldw_Server_API/tests/lint/test_core_to_api_import_boundary.py",
+    ],
+)
+def test_backend_required_enforces_layering_ratchets(ratchet: str) -> None:
+    """TASK-13950.9: the layering contract and its core -> api view run in a required step."""
+    import shlex
+
+    from tldw_Server_API.tests.lint.test_layering_contract import BASE_ENV
+
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    steps = workflow["jobs"]["backend-required"]["steps"]
+    gate = next(step for step in steps if step.get("name") == "Enforce CI contracts and code ratchets")
+    assert not gate.get("continue-on-error", False)  # nosec B101 - regression assertion
+    # Shell words, as bash reads them: a commented-out path is not an argument.
+    assert ratchet in shlex.split(gate["run"].replace("\\\n", " "), comments=True)  # nosec B101
+    # The layering baseline's bump-with-reason check reads the PR base from this variable.
+    assert "base_sha" in str(gate.get("env", {}).get(BASE_ENV, ""))  # nosec B101 - regression assertion
+
+
 def test_backend_required_enforces_isolation_ratchets():
     workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
     steps = workflow["jobs"]["backend-required"]["steps"]
@@ -1487,6 +1550,51 @@ def test_frontend_required_runs_the_shared_ui_ratchets(name: str, command: str) 
     assert step["if"] == lint["if"], "runs whenever the WebUI lint does"  # nosec B101 - regression assertion
     assert not step.get("continue-on-error", False)  # nosec B101 - regression assertion
     assert names.index("Install frontend dependencies") < names.index(name)  # nosec B101 - regression assertion
+
+
+def test_backend_required_enforces_code_ratchets():
+    """This file runs in the same step, so dropping a ratchet from it fails the gate itself."""
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    steps = workflow["jobs"]["backend-required"]["steps"]
+    gate = next(step for step in steps if step.get("name") == "Enforce CI contracts and code ratchets")
+    assert not gate.get("continue-on-error", False)  # nosec B101 - regression assertion
+    assert "tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py" in gate["run"]  # nosec B101
+    assert "tldw_Server_API/tests/lint/test_keyword_identity_ratchet.py" in gate["run"]  # nosec B101
+
+
+def _run_words(run: str) -> set[str]:
+    """Shell words of a step's ``run`` text, with comments dropped.
+
+    A commented-out suite path must not satisfy a contract that the gate runs it. As in
+    bash, a comment ends at the physical newline, even after a line continuation.
+    """
+    return set(shlex.split(run, comments=True))
+
+
+def test_run_words_ignore_commented_out_paths():
+    run = "pytest -q \\\n  # tests/lint/test_disabled.py \\\n  tests/lint/test_enabled.py  # trailing note\n"
+    words = _run_words(run)
+    assert "tests/lint/test_enabled.py" in words  # nosec B101 - regression assertion
+    assert "tests/lint/test_disabled.py" not in words  # nosec B101 - regression assertion
+
+
+def test_backend_required_runs_the_websocket_auth_guards():
+    """TASK-13950.7: the WebSocket auth ratchet and route matrix enforce nothing unless
+    the required gate runs them. This file runs on the step's first line, so removing
+    their line cannot remove this check too."""
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    steps = workflow["jobs"]["backend-required"]["steps"]
+    gate = next(step for step in steps if step.get("name") == "Enforce CI contracts and code ratchets")
+    assert not gate.get("continue-on-error", False)  # nosec B101 - regression assertion
+    words = _run_words(gate["run"])
+    for suite in (
+        "tldw_Server_API/tests/lint/test_auth_token_parsing_ratchet.py",
+        "tldw_Server_API/tests/AuthNZ/test_websocket_route_auth_matrix.py",
+    ):
+        assert suite in words, suite  # nosec B101 - regression assertion
+    # Plugin autoload is off in this step, so the matrix is time-bounded only if it loads
+    # pytest_timeout itself (pyproject sets the limit).
+    assert "pytest_timeout" in words  # nosec B101 - regression assertion
 
 
 def _without_await_license(

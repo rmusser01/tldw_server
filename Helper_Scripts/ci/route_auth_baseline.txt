@@ -9,6 +9,10 @@
 #      reach loopback passes. Defensible for first-run setup, but it
 #      is not identity, so it is listed rather than hidden.
 #   3. Not yet fixed.
+#   4. WebSocket routes ("WS <path>"). They authenticate inside
+#      the handler, which a dependency walk cannot see, so each is a
+#      reviewed entry; tests/AuthNZ/test_websocket_route_auth_matrix.py
+#      proves every one rejects missing and revoked credentials.
 #
 # The list must match the tree exactly: entries may be removed when a
 # route gains auth, and adding one is a reviewable diff.
@@ -217,3 +221,22 @@ POST /api/v1/slack/events
 # TASK-13399: visible once the ratchet mounted flag-gated routers. Signed webhook: Telegram secret token header, not identity auth.
 POST /api/v1/telegram/webhook
 POST /api/v1/websub/callback/{user_id}/{callback_token}
+# TASK-13950.7: WebSocket routes, kind 4 above.
+WS /api/v1/acp/multiplex
+WS /api/v1/acp/sessions/{session_id}/ssh
+WS /api/v1/acp/sessions/{session_id}/stream
+WS /api/v1/audio/chat/stream
+WS /api/v1/audio/realtime
+WS /api/v1/audio/stream/transcribe
+WS /api/v1/audio/stream/tts
+WS /api/v1/audio/stream/tts/realtime
+WS /api/v1/mcp/ws
+WS /api/v1/meetings/sessions/{session_id}/stream
+WS /api/v1/persona/stream
+WS /api/v1/prompt-studio/ws
+WS /api/v1/prompt-studio/ws/{project_id}
+WS /api/v1/sandbox/runs/{run_id}/stream
+WS /api/v1/voice/assistant
+WS /api/v1/watchlists/runs/{run_id}/stream
+WS /api/v1/workflows/ws
+WS /v1/realtime

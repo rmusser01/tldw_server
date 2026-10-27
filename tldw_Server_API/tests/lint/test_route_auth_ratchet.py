@@ -30,6 +30,7 @@ from Helper_Scripts.ci.route_auth_ratchet import (  # noqa: E402
     diff_against_baseline,
     is_authenticated,
     iter_routes,
+    unauthenticated_routes,
 )
 
 
@@ -119,6 +120,30 @@ def test_routes_behind_nested_includes_are_inspected_with_include_time_auth() ->
 
     assert "/api/inner/leaf" in routes
     assert is_authenticated(routes["/api/inner/leaf"])
+
+
+@pytest.mark.unit
+def test_unauthenticated_websocket_route_fails_the_ratchet() -> None:
+    """A new WebSocket route is reported as unclassified, include-time prefix and all.
+
+    APIWebSocketRoute is not an APIRoute, so an APIRoute-only walk let every
+    WebSocket route ship without review (TASK-13950.7).
+    """
+    from fastapi import APIRouter, FastAPI, WebSocket
+
+    router = APIRouter()
+
+    @router.websocket("/leak")
+    async def leak(websocket: WebSocket) -> None:
+        await websocket.accept()
+
+    app = FastAPI()
+    app.include_router(router, prefix="/ws")
+
+    added, stale = diff_against_baseline(unauthenticated_routes(app), set())
+
+    assert added == ["WS /ws/leak"]
+    assert stale == []
 
 
 def _named(qualname: str):

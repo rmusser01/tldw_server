@@ -19,7 +19,9 @@ For `/api/v1/workflows/ws`, check application logs for `Workflows WS closed: cod
 | Code | Stable reason | Action |
 | --- | --- | --- |
 | 4401 | `authentication_required` | Supply a valid supported credential. |
-| 4401 | `invalid_token` | Refresh or correct the bearer token. |
+| 4401 | `invalid_token` | Refresh or correct the bearer token or API key; a revoked token lands here. |
+| 4403 | `insufficient_scope` | Use an API key with the `read` scope. |
+| 1011 | `auth_unavailable` | Investigate AuthNZ database availability. |
 | 4401 / 4403 | `cookie_auth_rejected` | Check session validity, Origin, and cookie authentication configuration. |
 | 4404 | `run_not_found` | Verify that the run exists in this server's workflow database. |
 | 4403 | `not_run_owner` | Connect as the run's creator; the existing owner-only rule still applies. |
@@ -28,7 +30,7 @@ For `/api/v1/workflows/ws`, check application logs for `Workflows WS closed: cod
 
 Refusals before WebSocket acceptance may appear in browsers as an HTTP 403 handshake failure or code 1006 rather than a close frame; use the server record to distinguish them. Accepted streams that fail internally close with 1011 and the fixed reason. A peer disconnect is logged at INFO with its close code and `peer_disconnected`.
 
-These diagnostic records contain fixed labels and exception class names, without credentials, run/owner identifiers, raw exception messages, peer-supplied reasons, or traceback locals. Do not add tokens to diagnostic captures. Authentication precedence and access rules are unchanged.
+These diagnostic records contain fixed labels and exception class names, without credentials, run/owner identifiers, raw exception messages, peer-supplied reasons, or traceback locals. Do not add tokens to diagnostic captures. Since TASK-13950.7 the route accepts the same credentials as HTTP (AuthNZ access tokens, API keys, the single-user cookie) and no longer reads a `token` query parameter or MCP JWTs.
 
 ## Investigation-First Triage
 

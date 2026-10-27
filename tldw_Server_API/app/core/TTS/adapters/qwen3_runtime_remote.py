@@ -342,6 +342,10 @@ class RemoteQwenRuntime:
     def _build_stream_retry_policy(self) -> RetryPolicy:
         return RetryPolicy(attempts=1)
 
+    def _request_timeout(self) -> float:
+        """The configured ``timeout`` (default 60 s), the value the timeout errors report."""
+        return float(self.config.get("timeout") or 60)
+
     async def _stream_audio(
         self,
         headers: dict[str, str],
@@ -356,6 +360,7 @@ class RemoteQwenRuntime:
                     client=self.client,
                     headers=headers,
                     json=payload,
+                    timeout=self._request_timeout(),
                     retry=self._build_stream_retry_policy(),
                     chunk_size=1024,
                     sensitive_observability=True,
@@ -375,6 +380,7 @@ class RemoteQwenRuntime:
             client=self.client,
             headers=headers,
             json=payload,
+            timeout=self._request_timeout(),
             sensitive_observability=True,
         )
         response.raise_for_status()

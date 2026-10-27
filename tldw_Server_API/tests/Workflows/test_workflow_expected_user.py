@@ -14,7 +14,6 @@ from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.DB_Management.Users_DB import create_user
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
-from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
 from tldw_Server_API.tests.AuthNZ.integration.test_single_user_cookie_session import (
     single_user_cookie_client as single_user_cookie_client,
 )
@@ -174,12 +173,12 @@ def test_matching_expected_owner_retains_resource_owner_and_tenant_refusal(workf
     assert context.db.get_run(context.runs[foreign]).status == "queued"  # nosec B101
 
 
-def test_workflow_socket_keeps_its_custom_auth_with_http_assertion_present(workflow_accounts):
+def test_workflow_socket_authenticates_by_token_and_ignores_the_http_expected_user_header(workflow_accounts):
+    """The WebSocket resolves bob from his AuthNZ token; the HTTP-only expected-user
+    assertion (here naming alice) is not applied to it."""
     context = workflow_accounts
-    token = get_jwt_manager().create_access_token(subject=str(context.accounts["bob"]["id"]), username="bob",
-                                                 roles=["user"], permissions=[])
-    with context.client.websocket_connect(f"{ROOT}/ws?run_id={context.runs['bob']}&token={token}",
-        headers={"X-TLDW-Expected-User-ID": str(context.accounts["alice"]["id"])}) as socket:
+    headers = {**context.accounts["bob"]["headers"], "X-TLDW-Expected-User-ID": str(context.accounts["alice"]["id"])}
+    with context.client.websocket_connect(f"{ROOT}/ws?run_id={context.runs['bob']}", headers=headers) as socket:
         event = socket.receive_json()
         assert event["type"] == "snapshot", event  # nosec B101
 

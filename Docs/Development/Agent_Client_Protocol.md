@@ -443,9 +443,15 @@ webhook errors are sanitized to stable public error codes.
 
 **URL:** `WS /api/v1/acp/sessions/{session_id}/stream`
 
+**Authentication** (the core WebSocket resolver, as HTTP; API keys need the `write` scope):
+- `Authorization: Bearer <token>` or `X-API-KEY: <key>`
+- `Sec-WebSocket-Protocol: bearer, <token or key>` for browsers; the server echoes only `bearer`
+- the single-user session cookie, from a trusted WebUI origin
+- Deprecated, with a server warning: `?token=`, `?api_key=`, and `Sec-WebSocket-Protocol: x-api-key, <key>`
+  (echoed as `x-api-key`)
+
 **Query Parameters:**
-- `token` - JWT access token (multi-user mode)
-- `api_key` - API key (single-user mode)
+- `last_sequence` - replay buffered events after this sequence on reconnect
 
 **Server → Client Messages:**
 

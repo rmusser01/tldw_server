@@ -52,16 +52,23 @@ if "transformers" not in sys.modules:
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.endpoints import workflows as wf_mod
+from tldw_Server_API.app.core.AuthNZ import websocket_principal
 from tldw_Server_API.app.core.AuthNZ.permissions import (
     WORKFLOWS_RUNS_CONTROL,
     WORKFLOWS_RUNS_READ,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.main import app
 
 pytestmark = pytest.mark.integration
+
+
+async def _owner_principal(websocket, **_kwargs):
+    """Stand in for resolve_ws_principal where a test drives the handler directly."""
+    return AuthPrincipal(kind="user", user_id=1)
 
 
 @pytest.fixture()
@@ -140,12 +147,8 @@ def test_ws_events_stream(client_with_wf: TestClient):
     wid = client.post("/api/v1/workflows", json=definition).json()["id"]
     run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}}).json()["run_id"]
 
-    # Create token via MCP JWT manager
-    from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
-    jwtm = get_jwt_manager()
-    token = jwtm.create_access_token(subject="1", username="tester", roles=["user"], permissions=[])
-
-    with client.websocket_connect(f"/api/v1/workflows/ws?run_id={run_id}&token={token}") as ws:
+    # The client's single-user X-API-KEY authenticates the socket.
+    with client.websocket_connect(f"/api/v1/workflows/ws?run_id={run_id}") as ws:
         msg = ws.receive_json()
         assert msg["type"] == "snapshot"
         # Read next few messages until run_completed
@@ -355,7 +358,6 @@ def test_ws_authorization_during_concurrent_run_reads(client_with_wf, target, cl
             definition_version=1,
             definition_snapshot={"name": "concurrent-ws", "version": 1, "steps": []},
         )
-    token = wf_mod.get_jwt_manager().create_access_token(subject="1", username="tester", roles=["user"], permissions=[])
     run_id = {"owned": "ws-run-0", "foreign": "ws-run-1", "missing": "missing-run"}[target]
     stop = Event()
     ready = Barrier(9, timeout=10)
@@ -371,11 +373,11 @@ def test_ws_authorization_during_concurrent_run_reads(client_with_wf, target, cl
             ready.wait()
             for _ in range(20):
                 if close_code is None:
-                    with client.websocket_connect(f"/api/v1/workflows/ws?run_id={run_id}&token={token}") as ws:
+                    with client.websocket_connect(f"/api/v1/workflows/ws?run_id={run_id}") as ws:
                         assert ws.receive_json()["run"]["run_id"] == "ws-run-0"
                 else:
                     with pytest.raises(WebSocketDisconnect) as rejection:
-                        with client.websocket_connect(f"/api/v1/workflows/ws?run_id={run_id}&token={token}"):
+                        with client.websocket_connect(f"/api/v1/workflows/ws?run_id={run_id}"):
                             pytest.fail("Unauthorized WebSocket was accepted")
                     assert rejection.value.code == close_code
         finally:
@@ -400,29 +402,28 @@ def test_ws_rejections_have_safe_diagnostics(client_with_wf, monkeypatch, scenar
     db.create_run(
         run_id=run_id,
         tenant_id="default",
-        user_id="1",
+        user_id="2" if scenario == "foreign_run" else "1",
         inputs={"secret": "private-input-do-not-log"},  # nosec B105: synthetic leak-detection sentinel.
         workflow_id=None,
         definition_version=1,
         definition_snapshot={"name": "diagnostics", "version": 1, "steps": []},
     )
-    token = wf_mod.get_jwt_manager().create_access_token(
-        subject="2" if scenario == "foreign_run" else "1", username="tester", roles=["user"], permissions=[]
-    )
+    token = get_settings().SINGLE_USER_API_KEY
+    headers = {"X-API-KEY": token}
     if scenario == "invalid_token":
         token = "private-token-do-not-log"  # nosec B105: deliberately invalid test credential.
+        headers = {"Authorization": f"Bearer {token}"}
+    if scenario in {"missing_credentials", "cookie_rejected"}:
+        headers = {}
     if scenario == "cookie_rejected":
 
-        async def reject_cookie(websocket):
+        async def reject_cookie(websocket, **_options):
             websocket.state.single_user_cookie_websocket_close_code = 4403
             return None
 
-        monkeypatch.setattr(wf_mod, "resolve_single_user_cookie_websocket", reject_cookie)
+        monkeypatch.setattr(websocket_principal, "resolve_single_user_cookie_websocket", reject_cookie)
     if scenario == "missing_run":
         run_id = "missing-private-run-do-not-log"
-    query = f"run_id={run_id}"
-    if scenario not in {"missing_credentials", "cookie_rejected"}:
-        query += f"&token={token}"
     records = []
     sink = wf_mod.logger.add(
         lambda message: records.append(message.record),
@@ -430,7 +431,8 @@ def test_ws_rejections_have_safe_diagnostics(client_with_wf, monkeypatch, scenar
     )
     try:
         with pytest.raises(WebSocketDisconnect) as rejection:
-            with client_with_wf.websocket_connect(f"/api/v1/workflows/ws?{query}"):
+            # A bare client: client_with_wf sends its X-API-KEY on every request.
+            with TestClient(app).websocket_connect(f"/api/v1/workflows/ws?run_id={run_id}", headers=headers):
                 pytest.fail("Rejected WebSocket was accepted")
     finally:
         wf_mod.logger.remove(sink)
@@ -446,6 +448,29 @@ def test_ws_rejections_have_safe_diagnostics(client_with_wf, monkeypatch, scenar
     diagnostic = record["message"] + str(record["extra"])
     assert all(secret not in diagnostic for secret in (token, run_id, "private-input-do-not-log"))
     assert record["exception"] is None
+
+
+def test_ws_service_principal_owns_no_run(client_with_wf, monkeypatch):
+    """A principal without a user id must not match a run whose owner reads "None"."""
+    db = app.dependency_overrides[wf_mod._get_db]()
+    db.create_run(
+        run_id="service-run",
+        tenant_id="default",
+        user_id="None",
+        inputs={},
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot={"name": "service", "version": 1, "steps": []},
+    )
+
+    async def service_principal(websocket, **_kwargs):
+        return AuthPrincipal(kind="service", subject="service:engine")
+
+    monkeypatch.setattr(wf_mod, "resolve_ws_principal", service_principal)
+    with pytest.raises(WebSocketDisconnect) as rejection:
+        with client_with_wf.websocket_connect("/api/v1/workflows/ws?run_id=service-run"):
+            pytest.fail("A service principal was treated as the run owner")
+    assert rejection.value.code == 4403
 
 
 def test_ws_stream_failure_diagnostics_exclude_exception_contents(client_with_wf, monkeypatch):
@@ -464,14 +489,13 @@ def test_ws_stream_failure_diagnostics_exclude_exception_contents(client_with_wf
         raise ValueError("private-exception-do-not-log")
 
     monkeypatch.setattr(db, "get_events", fail_events)
-    token = wf_mod.get_jwt_manager().create_access_token(subject="1", username="tester", roles=["user"], permissions=[])
     records = []
     sink = wf_mod.logger.add(
         lambda message: records.append(message.record),
         filter=lambda record: record["extra"].get("endpoint") == "workflows_ws",
     )
     try:
-        with client_with_wf.websocket_connect(f"/api/v1/workflows/ws?run_id=diagnostic-stream&token={token}") as ws:
+        with client_with_wf.websocket_connect("/api/v1/workflows/ws?run_id=diagnostic-stream") as ws:
             assert ws.receive_json()["type"] == "snapshot"
             with pytest.raises(WebSocketDisconnect) as failure:
                 ws.receive_json()
@@ -482,7 +506,7 @@ def test_ws_stream_failure_diagnostics_exclude_exception_contents(client_with_wf
     record = next(record for record in records if record["extra"].get("reason") == "stream_error")
     assert record["extra"]["error_type"] == "ValueError"
     assert "private-exception-do-not-log" not in record["message"]
-    assert token not in record["message"]
+    assert get_settings().SINGLE_USER_API_KEY not in record["message"]
     assert record["exception"] is None
 
 
@@ -493,7 +517,6 @@ def test_ws_lookup_failure_has_safe_diagnostics(client_with_wf, monkeypatch):
         raise ValueError("private-lookup-do-not-log")
 
     monkeypatch.setattr(db, "get_run", fail_lookup)
-    token = wf_mod.get_jwt_manager().create_access_token(subject="1", username="tester", roles=["user"], permissions=[])
     records = []
     sink = wf_mod.logger.add(
         lambda message: records.append(message.record),
@@ -501,7 +524,7 @@ def test_ws_lookup_failure_has_safe_diagnostics(client_with_wf, monkeypatch):
     )
     try:
         with pytest.raises(WebSocketDisconnect) as failure:
-            with client_with_wf.websocket_connect(f"/api/v1/workflows/ws?run_id=diagnostic-lookup&token={token}"):
+            with client_with_wf.websocket_connect("/api/v1/workflows/ws?run_id=diagnostic-lookup"):
                 pytest.fail("Failed lookup was accepted")
     finally:
         wf_mod.logger.remove(sink)
@@ -528,7 +551,6 @@ def test_ws_pending_database_read_keeps_http_responsive(client_with_wf, monkeypa
         definition_version=1,
         definition_snapshot={"name": "pending-read", "version": 1, "steps": []},
     )
-    token = wf_mod.get_jwt_manager().create_access_token(subject="1")
     entered, http_completed = Event(), Event()
     released_by_http = []
     original = getattr(db, read_method)
@@ -541,7 +563,7 @@ def test_ws_pending_database_read_keeps_http_responsive(client_with_wf, monkeypa
     monkeypatch.setattr(db, read_method, pending_read)
 
     def receive_snapshot():
-        with client.websocket_connect(f"/api/v1/workflows/ws?run_id={run_id}&token={token}") as ws:
+        with client.websocket_connect(f"/api/v1/workflows/ws?run_id={run_id}") as ws:
             return ws.receive_json()
 
     with ThreadPoolExecutor(max_workers=1) as executor:
@@ -572,7 +594,7 @@ async def test_ws_peer_disconnect_finishes_without_asgi_exception(client_with_wf
         definition_version=1,
         definition_snapshot={"name": "peer-disconnect", "version": 1, "steps": []},
     )
-    token = wf_mod.get_jwt_manager().create_access_token(subject="1")
+    monkeypatch.setattr(wf_mod, "resolve_ws_principal", _owner_principal)
 
     async def receive():
         return {"type": "websocket.connect"}
@@ -595,7 +617,6 @@ async def test_ws_peer_disconnect_finishes_without_asgi_exception(client_with_wf
         await wf_mod.workflows_ws(
             WebSocket({"type": "websocket", "headers": []}, receive, send),
             run_id,
-            token=token,
             types=None,
             db=db,
         )
@@ -610,7 +631,7 @@ async def test_ws_peer_disconnect_finishes_without_asgi_exception(client_with_wf
 
 
 @pytest.mark.asyncio
-async def test_ws_history_burst_allows_other_loop_work(client_with_wf):
+async def test_ws_history_burst_allows_other_loop_work(client_with_wf, monkeypatch):
     """A writable transport must not let a whole history page monopolize the loop."""
     db = app.dependency_overrides[wf_mod._get_db]()
     run_id = uuid4().hex
@@ -625,7 +646,7 @@ async def test_ws_history_burst_allows_other_loop_work(client_with_wf):
     )
     for index in range(500):
         db.append_event("default", run_id, "history", {"index": index})
-    token = wf_mod.get_jwt_manager().create_access_token(subject="1")
+    monkeypatch.setattr(wf_mod, "resolve_ws_principal", _owner_principal)
     event_sequences, probe_counts = [], []
 
     async def receive():
@@ -645,7 +666,6 @@ async def test_ws_history_burst_allows_other_loop_work(client_with_wf):
     await wf_mod.workflows_ws(
         WebSocket({"type": "websocket", "headers": []}, receive, send),
         run_id,
-        token=token,
         types=None,
         db=db,
     )

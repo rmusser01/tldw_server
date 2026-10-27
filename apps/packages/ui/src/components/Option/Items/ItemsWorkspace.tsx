@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next"
 import { PageShell } from "@/components/Common/PageShell"
 import WorkspaceConnectionGate from "@/components/Common/WorkspaceConnectionGate"
 import { safeExternalUrl } from "@/utils/safe-external-url"
+import { dedupeTags } from "@/utils/tag-identity"
 import { useTldwApiClient } from "@/hooks/useTldwApiClient"
 import { useUndoNotification } from "@/hooks/useUndoNotification"
 import {
@@ -58,14 +59,7 @@ const STATUS_OPTIONS: Array<{ value: ItemStatus | "all"; label: string }> = [
   { value: "archived", label: "Archived" }
 ]
 
-const normalizeBulkTags = (raw: string): string[] => {
-  if (!raw) return []
-  const tags = raw
-    .split(",")
-    .map((entry) => entry.trim().toLowerCase())
-    .filter((entry) => entry.length > 0)
-  return Array.from(new Set(tags))
-}
+const normalizeBulkTags = (raw: string): string[] => (raw ? dedupeTags(raw.split(",")) : [])
 
 const getBulkFailureLines = (response: SharedItemsBulkResponse, maxLines = 10): string[] => {
   if (!Array.isArray(response.results) || maxLines <= 0) return []
@@ -643,10 +637,7 @@ export const ItemsWorkspace: React.FC = () => {
           mode="tags"
           value={tagsFilter}
           onChange={(tags: string[]) => {
-            const normalized = tags
-              .map((tag) => tag.trim().toLowerCase())
-              .filter(Boolean)
-            setTagsFilter(Array.from(new Set(normalized)))
+            setTagsFilter(dedupeTags(tags))
             setItemsPage(1)
           }}
           options={availableTags.map((tag) => ({ value: tag, label: tag }))}

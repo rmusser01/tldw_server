@@ -77,7 +77,7 @@ Runs:
 - `GET /runs/{run_id}/audio`
 - `GET /runs/{run_id}/tallies.csv`
 - `GET /runs/export.csv`
-- `WS /runs/{run_id}/stream`
+- `WS /runs/{run_id}/stream`: authenticate with `Authorization: Bearer <token>`, `X-API-KEY: <key>` (`read` scope), the `bearer, <token or key>` subprotocol (browsers; the server echoes `bearer`), or the single-user cookie. Deprecated: `?token=` / `?api_key=` still work but log a warning.
 
 Items:
 - `GET /items`

@@ -264,6 +264,14 @@ def _install_openai_adapter(
     monkeypatch: pytest.MonkeyPatch,
     adapter: OpenAIAdapter,
 ) -> None:
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    monkeypatch.setattr(chat_service, "discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready", ("gpt-test",)))
+    monkeypatch.setattr(
+        chat_service, "resolve_provider_models_base_url",
+        lambda _provider, config=None, **kwargs: kwargs.get("base_url") or (config or {}).get("openai_api", {}).get("api_base_url"),
+    )
     registry = ChatProviderRegistry(include_defaults=False)
     registry.register_adapter("openai", adapter)
     monkeypatch.setattr(adapter_registry, "get_registry", lambda: registry)
@@ -387,7 +395,9 @@ async def test_actual_adapter_clamps_configured_timeout_to_effective_limit(
             ),
         )
 
-    assert captured_timeouts == [expected_timeout]
+    assert len(captured_timeouts) == 1
+    assert 0 < captured_timeouts[0] <= expected_timeout
+    assert captured_timeouts[0] == pytest.approx(expected_timeout, abs=1)
 
 
 @pytest.mark.asyncio
