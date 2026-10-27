@@ -23,9 +23,6 @@ core.DB_Management.chacha.native_fork_store -> core.Chat.native_fork_projection:
 core.DB_Management.chacha.persona_state_store -> core.Personalization.companion_activity: 1
 core.DB_Management.jobs_failed_requeue -> core.Jobs.operations.postgres.admission: 1
 core.DB_Management.jobs_failed_requeue -> core.Jobs.operations.sqlite.admission: 1
-core.DB_Management.kanban_vector_search -> core.Embeddings.ChromaDB_Library: 1
-core.DB_Management.kanban_vector_search -> core.Embeddings.redis_pipeline: 1
-core.DB_Management.kanban_vector_search -> core.Jobs.manager: 1
 core.DB_Management.media_db.legacy_maintenance -> core.RAG.rag_service.agentic_chunker: 1
 core.DB_Management.media_db.repositories.clone_snapshot_repository -> core.Sharing.clone_models: 4
 core.DB_Management.media_db.repositories.media_repository -> core.Monitoring.topic_monitoring_service: 1

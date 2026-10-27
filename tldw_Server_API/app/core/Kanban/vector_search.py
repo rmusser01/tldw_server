@@ -1,9 +1,9 @@
-# kanban_vector_search.py
+# vector_search.py
 # Description: Optional ChromaDB vector search integration for Kanban cards.
 #
 """
-kanban_vector_search.py
------------------------
+vector_search.py
+----------------
 
 Provides optional vector search functionality for Kanban cards using ChromaDB.
 Gracefully degrades to FTS-only search when ChromaDB is not available.

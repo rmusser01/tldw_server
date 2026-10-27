@@ -164,12 +164,11 @@ core.DB_Management -> core.Character_Chat: 12
 core.DB_Management -> core.Chat: 25
 core.DB_Management -> core.CodeGraph: 1
 core.DB_Management -> core.Collections: 1
-core.DB_Management -> core.Embeddings: 2
 core.DB_Management -> core.Evaluations: 1
 core.DB_Management -> core.Explainer: 1
 core.DB_Management -> core.Flashcards: 4
 core.DB_Management -> core.Ingestion_Media_Processing: 9
-core.DB_Management -> core.Jobs: 4
+core.DB_Management -> core.Jobs: 3
 core.DB_Management -> core.Monitoring: 1
 core.DB_Management -> core.Notes: 3
 core.DB_Management -> core.Notes_Graph: 3

@@ -29,6 +29,7 @@ import os  # noqa: E402
 import sqlite3  # noqa: E402
 import threading  # noqa: E402
 import uuid as uuid_module  # noqa: E402
+from collections.abc import Callable  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
 from pathlib import Path  # noqa: E402
 from typing import Any  # noqa: E402
@@ -37,8 +38,10 @@ from loguru import logger  # noqa: E402
 
 from tldw_Server_API.app.core.config import settings  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths, _is_test_context  # noqa: E402
-from tldw_Server_API.app.core.DB_Management.kanban_vector_search import create_kanban_vector_search  # noqa: E402
 from tldw_Server_API.app.core.exceptions import StorageUnavailableError  # noqa: E402
+
+# Builds the vector index from (user_id, embedding_config); the openers pass core.Kanban's factory.
+KanbanVectorSearchFactory = Callable[[str, dict[str, Any]], Any]
 
 _KANBAN_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -268,7 +271,13 @@ class KanbanDB:
         ("impl", "done", 1, 0, None, None, None, 0, 1),
     )
 
-    def __init__(self, db_path: str, user_id: str) -> None:
+    def __init__(
+        self,
+        db_path: str,
+        user_id: str,
+        *,
+        vector_search_factory: KanbanVectorSearchFactory | None = None,
+    ) -> None:
         """
         Initialize the KanbanDB instance.
 
@@ -277,6 +286,8 @@ class KanbanDB:
                 user-scoped database directory.
             user_id: The user ID for this database instance. In test context,
                 purely numeric IDs are stored as test_user_<id>.
+            vector_search_factory: Builds the vector index from (user_id, embedding_config).
+                Without one, the DB does no vector indexing or search.
         """
         raw_user_id = str(user_id)
         if not raw_user_id.strip():
@@ -288,6 +299,7 @@ class KanbanDB:
             raw_user_id,
         )
         self._memory_conn: _KanbanMemoryConnection | None = None
+        self._vector_search_factory = vector_search_factory
         self._vector_search = None
         self._vector_search_initialized = False
         self._vector_index_retry_pending: set[tuple[str, int]] = set()
@@ -3834,6 +3846,8 @@ END;
         with self._lock:
             if self._vector_search_initialized:
                 return self._vector_search
+            if self._vector_search_factory is None:
+                return None
             embedding_config = dict(settings.get("EMBEDDING_CONFIG") or {})
             user_db_base_dir = None
             if not self._is_memory_db:
@@ -3850,7 +3864,7 @@ END;
                 user_db_base_dir = settings.get("USER_DB_BASE_DIR")
             if user_db_base_dir:
                 embedding_config["USER_DB_BASE_DIR"] = user_db_base_dir
-            self._vector_search = create_kanban_vector_search(self.user_id, embedding_config)
+            self._vector_search = self._vector_search_factory(self.user_id, embedding_config)
             self._vector_search_initialized = True
             return self._vector_search
 
