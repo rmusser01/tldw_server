@@ -253,12 +253,16 @@ def test_installed_tracing_manager_feeds_x_request_id(monkeypatch: pytest.Monkey
     assert http_client._inject_trace_headers({})["X-Request-Id"] == "rid-1"
 
 
-def test_http_client_metric_families_register_on_a_fresh_registry() -> None:
-    from tldw_Server_API.app.core.Metrics.http_client_metrics import register_http_client_metrics
+def test_http_client_metric_families_register_on_a_fresh_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Metrics import http_client_metrics
     from tldw_Server_API.app.core.Metrics.metrics_manager import MetricsRegistry
 
     registry = MetricsRegistry()
-    register_http_client_metrics(registry)
+    monkeypatch.setattr(http_client_metrics, "get_metrics_registry", lambda: registry)
+    monkeypatch.setattr(http_client, "_metrics_registry_getter", None)
+    monkeypatch.setattr(http_client, "_tracing_manager_getter", None)
+    http_client_metrics.install_http_client_observability()
     assert {
         "http_client_requests_total", "http_client_request_duration_seconds",
         "http_client_retries_total", "http_client_egress_denials_total",

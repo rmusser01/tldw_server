@@ -1983,12 +1983,16 @@ def test_metric_registration_suppresses_noncritical_failure(grouped):
         pytest.skip("contextlib.suppress supports exception groups on Python 3.12+")
     from tldw_Server_API.app.core.Metrics import http_client_metrics
 
+    calls: list[str] = []
+
     def fail_registration(definition):
+        calls.append(definition.name)
         error = ValueError("metric registration failed")
         raise builtins.ExceptionGroup("metrics", [error]) if grouped else error
 
-    # Must not raise: a failing registration is skipped.
+    # Must not raise: each family's failing registration is skipped on its own.
     http_client_metrics.register_http_client_metrics(types.SimpleNamespace(register_metric=fail_registration))  # type: ignore[arg-type]
+    assert len(calls) == 4
 
 
 def test_metric_registration_propagates_unexpected_failure():

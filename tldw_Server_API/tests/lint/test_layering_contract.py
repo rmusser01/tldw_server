@@ -896,7 +896,9 @@ def test_foundation_and_metrics_import_only_foundation() -> None:
 
 
 def test_foundation_and_metrics_load_only_foundation_at_import_time() -> None:
-    assert upper_layer_loads(foundation_modules()) == {"failed": [], "upper": []}
+    modules = foundation_modules()
+    assert {"core.http_client", "core.Utils.egress"} <= set(modules)  # the pin is not vacuous
+    assert upper_layer_loads(modules) == {"failed": [], "upper": []}
     assert upper_layer_loads(["core.Metrics"]) == {"failed": [], "upper": ["core.Metrics"]}
 
 
