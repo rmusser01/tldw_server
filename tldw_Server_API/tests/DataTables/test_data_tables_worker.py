@@ -9,7 +9,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDa
 from tldw_Server_API.app.core.exceptions import DataTablesJobError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("healthy_no_override_tts_credential_snapshot")]
 
 
 
