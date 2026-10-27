@@ -515,7 +515,9 @@ async def _audio_ws_authenticate_impl(
     deprecated query shim. On success a streaming route's socket is left accepted; a refusal is sent
     as an error frame when the socket is open, then closed with the refusal's code.
     """
-    # Audio enforces a scoped token's own limits below, as an HTTP route with require_token_scope does.
+    # Audio enforces a scoped token's own limits below, as an HTTP route with require_token_scope does; only
+    # this module may set the mark (tests/lint/test_auth_token_parsing_ratchet.py). Not checked here yet: the
+    # token's ``scope`` claim and ``allowed_methods``, which HTTP's TokenScopeGuard applies (TASK-13950.73).
     websocket.state.ws_token_scope_enforced = True
     try:
         if not has_ws_credential(websocket) and _allow_query_token_auth() and websocket.query_params.get("token"):

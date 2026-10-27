@@ -58,7 +58,7 @@ LOOKS_LIKE_JWT_BASELINE: dict[str, int] = {
 BEARER_PARSE_BASELINE: dict[str, int] = {
     # Strips a case-sensitive "Bearer " from an X-API-KEY value; core bearer_credential matches any
     # case and trims, so it would admit X-API-KEY "bearer <key>", which fails today. It goes when the
-    # evaluations auth moves onto the AuthNZ dependencies.
+    # evaluations auth moves onto the AuthNZ dependencies (TASK-13950.74).
     "tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_auth.py": 1,
 }
 
@@ -233,6 +233,36 @@ def query_shim_problems(callers: set[str]) -> list[str]:
         for module in sorted(QUERY_SHIM_CALLERS - callers)
     ]
     return added + gone
+
+
+# A WebSocket route that sets this mark tells the core resolver to admit scoped tokens, as an HTTP route
+# that depends on require_token_scope does; it must then enforce their limits itself. Only audio does.
+SCOPE_MARK = "ws_token_scope_enforced"
+SCOPE_MARK_SETTERS = frozenset({"tldw_Server_API/app/core/Audio/streaming_service.py"})
+
+
+def count_scope_marks(tree: ast.AST) -> int:
+    """Return how many places in ``tree`` set ``<x>.ws_token_scope_enforced``, directly or by ``setattr``."""
+    return sum(
+        1
+        for node in ast.walk(tree)
+        if (isinstance(node, ast.Attribute) and node.attr == SCOPE_MARK and isinstance(node.ctx, ast.Store))
+        or (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "setattr"
+            and len(node.args) > 1
+            and isinstance(node.args[1], ast.Constant)
+            and node.args[1].value == SCOPE_MARK
+        )
+    )
+
+
+def test_only_audio_tells_the_core_it_enforces_token_scope() -> None:
+    """Self-test included: both ways of setting the mark count, reading it does not (TASK-13950.73)."""
+    seeded = ast.parse(f"ws.state.{SCOPE_MARK} = True\nsetattr(ws.state, '{SCOPE_MARK}', True)\nx = ws.state.{SCOPE_MARK}\n")
+    assert count_scope_marks(seeded) == 2
+    assert set(_counts(APP_ROOT, SCOPE_MARK, count_scope_marks)) == SCOPE_MARK_SETTERS
 
 
 def test_looks_like_jwt_copies_only_decrease() -> None:
