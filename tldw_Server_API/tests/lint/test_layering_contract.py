@@ -263,11 +263,11 @@ def _walk(
                 yield from _walk(body, inner, guarded or (catches and scope == "body"), type_checking)
 
 
-def _targets(node: ast.Import | ast.ImportFrom, module: str, is_package: bool, known: frozenset[str]) -> set[str]:
-    """The app packages one import statement reads from."""
+def target_modules(node: ast.Import | ast.ImportFrom, module: str, is_package: bool, known: frozenset[str]) -> set[str]:
+    """The app-relative modules (or packages) one import statement reads from."""
     if isinstance(node, ast.Import):
         names = [_app_relative(alias.name) for alias in node.names]
-        return {package_of(name) for name in names if name is not None}
+        return {name for name in names if name is not None}
     if node.level:
         parts = module.split(".") if module else []
         parts = parts if is_package else parts[:-1]
@@ -281,8 +281,13 @@ def _targets(node: ast.Import | ast.ImportFrom, module: str, is_package: bool, k
         name = _app_relative(f"{base}.{alias.name}")
         name = name if name in known else _app_relative(base)
         if name is not None:
-            targets.add(package_of(name))
+            targets.add(name)
     return targets
+
+
+def _targets(node: ast.Import | ast.ImportFrom, module: str, is_package: bool, known: frozenset[str]) -> set[str]:
+    """The app packages one import statement reads from."""
+    return {package_of(name) for name in target_modules(node, module, is_package, known)}
 
 
 def scan(root: Path = APP_ROOT) -> tuple[Import, ...]:
@@ -291,10 +296,17 @@ def scan(root: Path = APP_ROOT) -> tuple[Import, ...]:
 
 
 @cache
+def module_names(root: Path) -> tuple[Mapping[Path, str], frozenset[str]]:
+    """Per-file app-relative module names, and every module and package prefix."""
+    names = {path: _module_name(path.relative_to(root)) for path in parse_tree(root)}
+    known = frozenset(".".join(n.split(".")[:i]) for n in names.values() for i in range(n.count(".") + 2))
+    return names, known
+
+
+@cache
 def _scan(root: Path) -> tuple[Import, ...]:
     trees = parse_tree(root)
-    names = {path: _module_name(path.relative_to(root)) for path in trees}
-    known = frozenset(".".join(n.split(".")[:i]) for n in names.values() for i in range(n.count(".") + 2))
+    names, known = module_names(root)
     records = []
     for path, tree in trees.items():
         module = names[path]
@@ -450,7 +462,10 @@ def violations(measured: Mapping[Pair, Counter[str]], baseline: Mapping[Pair, tu
 
 
 def unreasoned_bumps(
-    baseline: Mapping[Pair, tuple[int, str]], base: Mapping[Pair, tuple[int, str]] | None
+    baseline: Mapping[Pair, tuple[int, str]],
+    base: Mapping[Pair, tuple[int, str]] | None,
+    *,
+    path: Path = BASELINE,
 ) -> list[str]:
     """Pairs added or raised since ``base`` without a new reason; ``base`` None means no check."""
     if base is None:
@@ -463,7 +478,7 @@ def unreasoned_bumps(
         if reason and reason != old_reason and _REFERENCE.search(reason) and not _UNFILLED.search(reason):
             continue
         problems.append(
-            f"{pair[0]} -> {pair[1]}: raised to {count} without a new reason in {_shown(BASELINE)}. Give one that "
+            f"{pair[0]} -> {pair[1]}: raised to {count} without a new reason in {_shown(path)}. Give one that "
             f"cites the task or PR; the raise and its reason are reviewed in the PR:\n"
             f"    {pair[0]} -> {pair[1]}: {count}  # bump: {REASON_PLACEHOLDER}"
         )
