@@ -36,6 +36,7 @@ compatibility, CPU-bound execution, and optional system checks.
   `core/testing.is_truthy` delegates to it.
 - `metadata_utils.py` normalizes safe metadata dictionaries for media APIs.
 - `prompt_loader.py` loads prompt resources from configured namespaces.
+- `provider_identity.py` canonical provider names and aliases.
 - `pydantic_compat.py` wraps model dump/validation compatibility.
 - `executor_registry.py` and `cpu_bound_handler.py` coordinate executor reuse.
 - `torch_import_guard.py` keeps optional ML imports explicit and diagnosable.

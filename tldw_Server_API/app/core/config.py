@@ -31,7 +31,6 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_section_name,
     iter_custom_openai_provider_numbers,
 )
-from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled,
     is_explicit_pytest_runtime,
@@ -39,6 +38,7 @@ from tldw_Server_API.app.core.testing import (
     is_test_mode,
     is_truthy,
 )
+from tldw_Server_API.app.core.Utils.provider_identity import canonical_provider_name
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.config_sections import ConfigSections
