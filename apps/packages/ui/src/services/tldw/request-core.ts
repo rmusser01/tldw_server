@@ -651,6 +651,27 @@ const applyTldwAuthHeaders = (
   return null
 }
 
+/**
+ * Resolves the headers (auth, CSRF, content type) a request would be sent
+ * with, without sending it, or null when credentials are unavailable. For
+ * page-unload senders: beforeunload cannot await the async runtime config,
+ * so they prepare headers ahead of time with this.
+ */
+export const resolveTldwRequestHeaders = async (
+  payload: TldwRequestPayload,
+  runtime: TldwRequestRuntime,
+): Promise<Record<string, string> | null> => {
+  const planResult = await resolveTldwRequestPlan(payload, runtime)
+  if (planResult.ok !== true) return null
+  const { plan } = planResult
+  const runtimeApiKey =
+    runtime.useRuntimeAuthOverride === false
+      ? ""
+      : String(getRuntimeSingleUserApiKeyOverride() || "").trim()
+  const authFailure = applyTldwAuthHeaders(plan.headers, { ...plan, runtimeApiKey }, runtime)
+  return authFailure ? null : plan.headers
+}
+
 export const tldwRequestRaw = async (
   payload: TldwRequestPayload,
   runtime: TldwRequestRuntime,
