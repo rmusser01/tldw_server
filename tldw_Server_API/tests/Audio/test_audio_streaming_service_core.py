@@ -364,6 +364,88 @@ async def test_stream_tts_to_websocket_propagates_parent_cancellation_during_cle
 
 
 @pytest.mark.asyncio
+async def test_stream_tts_cleanup_reraises_the_cancellation_it_caught():
+    """When the host's cancellation lands in the helper's cleanup, the helper re-raises that very
+    exception: anyio's cancel scope recognises its own by the message, and a new bare CancelledError
+    escaped the host (the TestClient's teardown error; TASK-13950.7). The wait seam returns at once with
+    both tasks still running, so the cleanup itself cancels them and the host's cancel lands there."""
+    producer_cancelled = asyncio.Event()
+
+    class SlowCancelTTSService:
+        async def generate_speech(self, *_args, **_kwargs):  # noqa: ARG002
+            try:
+                await asyncio.Event().wait()
+                yield b""
+            except asyncio.CancelledError:
+                producer_cancelled.set()
+                await asyncio.sleep(1)  # still cleaning up when the host cancels
+                raise
+
+    async def wait_returns_nothing_done(tasks, return_when=None):  # noqa: ARG001
+        await asyncio.sleep(0)
+        return set(), set(tasks)
+
+    aio = SimpleNamespace(
+        Queue=asyncio.Queue,
+        QueueFull=asyncio.QueueFull,
+        create_task=asyncio.create_task,
+        wait=wait_returns_nothing_done,
+        FIRST_COMPLETED=asyncio.FIRST_COMPLETED,
+    )
+    stream_task = asyncio.create_task(
+        streaming_service._stream_tts_to_websocket(
+            websocket=SimpleNamespace(),
+            speech_req=SimpleNamespace(model="test-model"),
+            tts_service=SlowCancelTTSService(),
+            provider="test-provider",
+            outer_stream=None,
+            reg=SimpleNamespace(increment=lambda *_a, **_k: None),
+            route="audio.stream.tts",
+            component_label="audio_tts_ws",
+            asyncio_module=aio,
+        )
+    )
+    await asyncio.wait_for(producer_cancelled.wait(), timeout=1.0)
+    stream_task.cancel("Cancelled via cancel scope host")
+
+    with pytest.raises(asyncio.CancelledError) as cancelled:
+        await asyncio.wait_for(stream_task, timeout=1.0)
+
+    assert cancelled.value.args == ("Cancelled via cancel scope host",)
+
+
+def _new_cancellations(source: str) -> list[int]:
+    """Lines that raise a newly made CancelledError (``raise asyncio.CancelledError`` or a call of it)."""
+    import ast
+
+    def is_cancelled_error(expr: ast.expr) -> bool:
+        return (isinstance(expr, ast.Attribute) and expr.attr == "CancelledError") or (
+            isinstance(expr, ast.Name) and expr.id == "CancelledError"
+        )
+
+    return [
+        node.lineno
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Raise)
+        and node.exc is not None
+        and is_cancelled_error(node.exc.func if isinstance(node.exc, ast.Call) else node.exc)
+    ]
+
+
+def test_audio_websocket_cleanups_never_raise_a_new_bare_cancellation():
+    """Pins the fix where it cannot be seen from outside too: the voice chat turn's cleanup runs in a child
+    task whose runner swallows the cancellation. A cleanup re-raises the CancelledError it caught."""
+    from pathlib import Path
+
+    from tldw_Server_API.app.api.v1.endpoints.audio import audio_streaming
+
+    seeded = "raise asyncio.CancelledError\nraise CancelledError('x')\nraise caught\nraise\n"
+    assert _new_cancellations(seeded) == [1, 2]
+    for module in (audio_streaming, streaming_service):
+        assert _new_cancellations(Path(module.__file__).read_text(encoding="utf-8")) == [], module.__name__
+
+
+@pytest.mark.asyncio
 async def test_stream_tts_to_websocket_drains_queue_when_producer_finishes():
     class FastTTSService:
         async def generate_speech(self, *_args, **_kwargs):  # noqa: ARG002
