@@ -88,7 +88,7 @@ def test_strict_model_selection_does_not_reject_a_dotted_anthropic_name(
     from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 
     monkeypatch.setenv("CHAT_ENFORCE_STRICT_MODEL_SELECTION", "1")
-    credentials = {"api_key": "sk-dotted", "app_config": {}, "credentials_resolved": True}
+    credentials: dict[str, Any] = {"api_key": "sk-dotted", "app_config": {}, "credentials_resolved": True}
 
     assert chat_endpoint._should_enforce_strict_model_selection() is True
     assert chat_endpoint._validate_explicit_model_availability("anthropic", "claude-sonnet-4.5", **credentials) is None
