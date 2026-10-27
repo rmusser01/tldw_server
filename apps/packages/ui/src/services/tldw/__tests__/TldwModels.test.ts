@@ -981,9 +981,27 @@ describe("TldwModelsService caching", () => {
     expect(mocks.getModels).toHaveBeenCalledTimes(2)
   })
 
+  it.each([false, true])(
+    "keeps the catalog when a read is aborted, since an abort is not a server failure (requireFresh: %s)",
+    async (requireFresh) => {
+      mocks.getModels.mockResolvedValueOnce([
+        { id: "current-model", name: "Current Model", provider: "openai", type: "chat" }
+      ])
+      const { TldwModelsService } = await importService()
+      const service = new TldwModelsService()
+      await service.getModels()
+      mocks.getModels.mockRejectedValue(Object.assign(new Error("The operation was aborted"), { name: "AbortError" }))
+
+      await expect(service.getModels(true, { requireFresh })).resolves.toEqual([])
+      expect((await service.getCachedChatModels()).map((model) => model.id)).toEqual(["current-model"])
+      const reloaded = new TldwModelsService()
+      expect((await reloaded.getCachedChatModels()).map((model) => model.id)).toEqual(["current-model"])
+    }
+  )
+
   it.each([
-    ["Error", false], ["AbortError", false], ["TypeError", false],
-    ["Error", true], ["AbortError", true], ["TypeError", true]
+    ["Error", false], ["TypeError", false],
+    ["Error", true], ["TypeError", true]
   ] as const)(
     "does not resurrect a failed forced catalog after %s through memory or reload (requireFresh: %s)",
     async (name, requireFresh) => {

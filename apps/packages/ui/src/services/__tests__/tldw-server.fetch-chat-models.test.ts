@@ -520,7 +520,9 @@ describe("fetchChatModels", () => {
         if (warmed) expect(await fetchChatModels()).toHaveLength(1)
 
         await expect(fetchChatModels({ forceRefresh: true })).resolves.toEqual([])
-        await expect(fetchChatModels({ allowNetwork: false })).resolves.toEqual([])
+        // An aborted read is not a server failure, so a warmed catalog survives it (review M7).
+        const kept = warmed && name === "AbortError"
+        await expect(fetchChatModels({ allowNetwork: false })).resolves.toHaveLength(kept ? 1 : 0)
         expect(mocks.getModels).toHaveBeenCalledTimes(warmed ? 2 : 1)
       }
     )

@@ -429,9 +429,13 @@ export class TldwModelsService {
       }
       // Failed discovery has no stale fallback. A throwOnError caller gets the
       // failure itself and leaves the last catalog (still inside its TTL) alone;
-      // any other failure drops the catalog it was meant to refresh.
-      if (cookieSession) this.invalidateCacheState()
-      else if (!throwOnError) await this.clearCache()
+      // any other failure drops the catalog it was meant to refresh. An aborted
+      // read (navigation, client timeout) says nothing about the server's models,
+      // so it keeps the catalog too.
+      if (!isAbortLikeModelFetchError(error)) {
+        if (cookieSession) this.invalidateCacheState()
+        else if (!throwOnError) await this.clearCache()
+      }
       if (throwOnError) throw error
       if (requireFresh) return []
       if (isAbortLikeModelFetchError(error)) {
