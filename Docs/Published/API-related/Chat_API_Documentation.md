@@ -272,6 +272,8 @@ When continuation is active, stream metadata payloads include `tldw_continuation
 
 Note: Stream chunks follow OpenAI-style `choices[].delta.content` for maximum client compatibility.
 
+A stream's usage (the provider's token counts for the whole request) arrives on a usage chunk, and the usage record is costed from it whether or not the client receives it. OpenAI sends it only when asked, as a last chunk whose `choices` array is empty. The server asks OpenAI for it on every `/chat/completions` stream to `api.openai.com` and OpenAI's data-residency hosts (such as `eu.api.openai.com`), but forwards it only to a client that asked for it itself with `"stream_options": {"include_usage": true}`, at the top level of the request (as the OpenAI SDKs send it) or in `extra_body`. A client that asks must not assume `choices[0]` exists on that chunk. Every other OpenAI chunk carries `"usage": null`, as in OpenAI's own streams. OpenRouter always sends usage, on a last chunk with one content-free choice, and that chunk is forwarded unchanged. Other providers send usage only if they do so unasked or `extra_body` asks for it.
+
 ### Streaming Event Format
 
 | Event/Line     | Shape/Fields                                                                 | Notes                                         |
@@ -279,6 +281,7 @@ Note: Stream chunks follow OpenAI-style `choices[].delta.content` for maximum cl
 | `event: stream_start` | `data: { conversation_id, model, timestamp }`                                | Emitted once at start                         |
 | Heartbeat      | `: heartbeat <ISO-8601>`                                                      | Comment line; no `data:` payload              |
 | Delta chunk    | `data: {"choices":[{"delta":{"content":"..."}}]}`                           | Repeats for each text delta                   |
+| Usage chunk    | `data: {"choices":[],"usage":{"prompt_tokens":...,"completion_tokens":...}}` | Last provider chunk; sent only to a client that set `stream_options.include_usage` |
 | Error          | `data: {"error": {"message": "..."}}`                                       | Emitted and stream terminates                 |
 | `event: stream_end` | `data: { conversation_id, success, timestamp }`                                 | Emitted on graceful completion                |
 

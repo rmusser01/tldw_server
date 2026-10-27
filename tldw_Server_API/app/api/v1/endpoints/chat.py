@@ -5630,6 +5630,7 @@ async def create_chat_completion(
                                 0.0,
                                 _provider_stream_prime_remaining(error_state),
                             ),
+                            forward_usage_chunk=_client_asked_for_stream_usage(request_data),
                         ), records_itself=True)
 
                     attempted_providers: list[str] = []
@@ -6429,6 +6430,21 @@ async def get_chat_queue_activity(
         return {"enabled": True, "error": "Queue activity unavailable"}
 
 
+def _client_asked_for_stream_usage(request_data: Any) -> bool:
+    """Whether the client asked for a stream's usage chunk (OpenAI's ``stream_options.include_usage``).
+
+    The OpenAI SDKs send ``stream_options`` at the top level of the body; other clients may put it in ``extra_body``.
+    """
+    extra_body = getattr(request_data, "extra_body", None)
+    for options in (
+        (getattr(request_data, "model_extra", None) or {}).get("stream_options"),
+        extra_body.get("stream_options") if isinstance(extra_body, dict) else None,
+    ):
+        if isinstance(options, dict) and options.get("include_usage") is True:
+            return True
+    return False
+
+
 def _build_streaming_commit_cb(
     rg_handle_id: str | None,
     request: Request | None,
@@ -6438,7 +6454,8 @@ def _build_streaming_commit_cb(
     """Build the rg_commit_cb for streaming chat that handles both RG and billing.
 
     The callback is invoked by chat_service when the stream finishes with the
-    total estimated token count.  It must:
+    recorded token count: the provider's usage chunk when it sent one, else the
+    estimate.  It must:
       - Record billing usage via apply_usage_delta (hot cache) AND schedule a
         durable cost-units ledger write so usage survives cache expiry/restart.
       - Return an awaitable that the caller awaits, combining the durable
