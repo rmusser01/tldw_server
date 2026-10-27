@@ -14,10 +14,11 @@ and checks its route list against the ratchet's ``WS`` baseline lines:
   parameter, and, for first-frame routes, in the auth frame.
 - A valid AuthNZ access token must get past authentication on every route (the control
   column), so a refusal above means something.
-- ACP and prompt-studio still take the query ``token``/``api_key`` and the ``x-api-key``
-  subprotocol that shipped clients send, through a deprecated shim that hands them to the
-  resolver's own verification. Their section below proves the shim admits, refuses and
-  warns like the resolver, and that the retired channels are refused.
+- ACP, prompt-studio and watchlists still take the query ``token``/``api_key`` that shipped
+  clients send (ACP and prompt-studio also the ``x-api-key`` subprotocol), through a
+  deprecated shim that hands them to the resolver's own verification. Their section below
+  proves the shim admits, refuses and warns like the resolver, and that the retired
+  channels are refused. Sandbox had no such client, so its query credentials are retired.
 
 The revoked token is a real AuthNZ access token whose jti is on the token blacklist, the
 check HTTP auth runs in verify_jwt_and_fetch_user. Known gaps are strict xfails naming
@@ -28,6 +29,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import hmac
 import json
 import time
 from collections.abc import Iterator, Mapping
@@ -94,19 +97,28 @@ FRAME_TIMEOUT_S = 10.0
 # credential and is waiting for its config frame.
 ADMITTED_AFTER_S = 1.0
 MAX_FRAMES = 8
-# Routes whose deprecated credential shim (agent_client_protocol._authenticate_ws) reads the
-# query and the x-api-key subprotocol; and of those, the ones that accept once authenticated,
-# with the API-key scope each needs.
-SHIM_ROUTES = {path for path in ROUTES if path.startswith(("/api/v1/acp/", "/api/v1/prompt-studio/"))}
-SHIM_ACCEPTING = {"/api/v1/acp/multiplex": "write", "/api/v1/prompt-studio/ws": "read"}
-DEPRECATED_CHANNELS = ("query token", "query api_key", "x-api-key subprotocol")
+SANDBOX = "/api/v1/sandbox/runs/{run_id}/stream"
+WATCHLISTS = "/api/v1/watchlists/runs/{run_id}/stream"
+# Routes whose deprecated credential shim (websocket_principal.resolve_ws_principal_or_deprecated_query)
+# reads the query, and for ACP and prompt-studio (agent_client_protocol._authenticate_ws) the
+# x-api-key subprotocol too; and of those, the ones that accept once authenticated, with the
+# API-key scope each needs. The watchlists URL names run 1, which the fixture seeds.
+SHIM_ROUTES = {path for path in ROUTES if path.startswith(("/api/v1/acp/", "/api/v1/prompt-studio/", WATCHLISTS))}
+SHIM_ACCEPTING = {"/api/v1/acp/multiplex": "write", "/api/v1/prompt-studio/ws": "read", WATCHLISTS: "read"}
+QUERY_CHANNELS = ("query token", "query api_key")
+DEPRECATED_CHANNELS = (*QUERY_CHANNELS, "x-api-key subprotocol")
+SHIM_CASES = [
+    (route, channel)
+    for route in SHIM_ACCEPTING
+    for channel in (QUERY_CHANNELS if route == WATCHLISTS else DEPRECATED_CHANNELS)
+]
 DEPRECATION_MARK = "Deprecated WebSocket credential channel"
 
 def _with_query(url: str, name: str, value: str) -> str:
     return f"{url}{'&' if '?' in url else '?'}{name}={value}"
 
 
-async def _seed_user_and_tokens() -> tuple[int, str, str, str, str]:
+async def _seed_user_and_tokens() -> tuple[int, str, str, str, str, int, str]:
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager, reset_api_key_manager
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
@@ -133,11 +145,37 @@ async def _seed_user_and_tokens() -> tuple[int, str, str, str, str]:
     api_keys = await get_api_key_manager()
     api_key = (await api_keys.create_api_key(user_id=user_id, name="ws-matrix", scope="read"))["key"]
     write_key = (await api_keys.create_api_key(user_id=user_id, name="ws-matrix-write", scope="write"))["key"]
+    # A second real user, for cross-user ownership checks.
+    other_id = await create_authnz_test_user(pool, username="ws-matrix-other", email="ws-matrix-other@example.com")
+    other_valid = jwt_service.create_access_token(user_id=other_id, username="ws-matrix-other", role="user")
     # The TestClient runs the app on its own loop, which opens its own pool.
     await reset_api_key_manager()
     await reset_token_blacklist()
     await reset_db_pool()
-    return user_id, valid, revoked, api_key, write_key
+    return user_id, valid, revoked, api_key, write_key, other_id, other_valid
+
+
+def _seed_watchlists_runs(user_id: int) -> None:
+    """Give the matrix user and the single user a completed run 1, so the watchlists URL in
+    ROUTES names a run each owns."""
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+    from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
+
+    for owner in {user_id, get_settings().SINGLE_USER_FIXED_ID}:
+        db = WatchlistsDatabase.for_user(owner)
+        job = db.create_job(
+            name="ws-auth-matrix",
+            description=None,
+            scope_json="{}",
+            schedule_expr=None,
+            schedule_timezone=None,
+            active=False,
+            max_concurrency=None,
+            per_host_delay_ms=None,
+            retry_policy_json=None,
+            output_prefs_json=None,
+        )
+        assert db.create_run(job_id=job.id, status="completed").id == 1
 
 
 def _reset_auth_singletons() -> None:
@@ -172,9 +210,10 @@ def full_app(tmp_path_factory: pytest.TempPathFactory) -> Iterator[SimpleNamespa
         patch.setenv("MINIMAL_TEST_APP", "0")
         patch.setenv("MINIMAL_TEST_INCLUDE_AUDIO", "1")
         _reset_auth_singletons()
-        user_id, valid, revoked, api_key, write_key = asyncio.run(_seed_user_and_tokens())
+        user_id, valid, revoked, api_key, write_key, other_id, other_valid = asyncio.run(_seed_user_and_tokens())
         config._route_toggle_policy.cache_clear()
         app = reload_app_main().app
+        _seed_watchlists_runs(user_id)
     client = TestClient(app)
     workflows_db = WorkflowsDatabase(str(data_dir / "workflows.db"))
     try:
@@ -187,6 +226,8 @@ def full_app(tmp_path_factory: pytest.TempPathFactory) -> Iterator[SimpleNamespa
             revoked=revoked,
             api_key=api_key,
             write_key=write_key,
+            other_id=other_id,
+            other_valid=other_valid,
             workflows_db=workflows_db,
         )
     finally:
@@ -527,13 +568,12 @@ def _deprecated_request(env: SimpleNamespace, route: str, channel: str, *, valid
     return key, {"url": url, "subprotocols": ["x-api-key", key]}
 
 
-@pytest.mark.parametrize("channel", DEPRECATED_CHANNELS)
-@pytest.mark.parametrize("route", SHIM_ACCEPTING)
-def test_acp_deprecated_channel_admits_a_valid_credential_with_one_warning(
+@pytest.mark.parametrize(("route", "channel"), SHIM_CASES)
+def test_deprecated_channel_admits_a_valid_credential_with_one_warning(
     env: SimpleNamespace, route: str, channel: str
 ) -> None:
     """Shipped clients (useACPSession, ACPWebSocketClient, prompt-studio-stream, the ACP SSH
-    panel) still send these; the shim keeps them working until the clients move."""
+    panel, watchlists-stream) still send these; the shim keeps them working until the clients move."""
     credential, request = _deprecated_request(env, route, channel, valid=True)
     with _warnings() as warned:
         echoed = _accepted_subprotocol(env.client, **request)  # type: ignore[arg-type]
@@ -544,9 +584,8 @@ def test_acp_deprecated_channel_admits_a_valid_credential_with_one_warning(
     assert not [message for message in warned if credential in message]
 
 
-@pytest.mark.parametrize("channel", DEPRECATED_CHANNELS)
-@pytest.mark.parametrize("route", SHIM_ACCEPTING)
-def test_acp_deprecated_channel_refuses_a_revoked_or_unknown_credential(
+@pytest.mark.parametrize(("route", "channel"), SHIM_CASES)
+def test_deprecated_channel_refuses_a_revoked_or_unknown_credential(
     env: SimpleNamespace, route: str, channel: str
 ) -> None:
     credential, request = _deprecated_request(env, route, channel, valid=False)
@@ -557,7 +596,7 @@ def test_acp_deprecated_channel_refuses_a_revoked_or_unknown_credential(
 
 
 @pytest.mark.parametrize("route", SHIM_ACCEPTING)
-def test_acp_retired_channels_are_refused(env: SimpleNamespace, route: str) -> None:
+def test_retired_channels_are_refused(env: SimpleNamespace, route: str) -> None:
     """``Authorization: X-API-KEY <key>`` and the ``api-key, <key>`` subprotocol had no client."""
     url = ROUTES[route][0]
     key = env.write_key if SHIM_ACCEPTING[route] == "write" else env.api_key
@@ -566,14 +605,18 @@ def test_acp_retired_channels_are_refused(env: SimpleNamespace, route: str) -> N
 
 
 @pytest.mark.parametrize("route", SHIM_ACCEPTING)
-def test_acp_header_credentials_need_no_shim(env: SimpleNamespace, route: str) -> None:
-    """The resolver's own channels: no deprecation warning, and the bearer marker is echoed."""
+def test_header_credentials_need_no_shim(env: SimpleNamespace, route: str) -> None:
+    """The resolver's own channels: no deprecation warning, and the bearer marker is echoed. A header
+    credential wins over the query (watchlists used to verify ``?token=`` first), so a revoked
+    query token beside a valid header is never read."""
     key = env.write_key if SHIM_ACCEPTING[route] == "write" else env.api_key
     url = ROUTES[route][0]
     with _warnings() as warned:
         assert _accepted_subprotocol(env.client, url, subprotocols=["bearer", env.valid]) == "bearer"
         assert _accepted_subprotocol(env.client, url, subprotocols=["bearer", key]) == "bearer"  # key as bearer
         assert _accepted_subprotocol(env.client, url, headers={"X-API-KEY": key}) is None
+        revoked_query = _with_query(url, "token", env.revoked)
+        assert _accepted_subprotocol(env.client, revoked_query, headers={"Authorization": f"Bearer {env.valid}"}) is None
     assert _deprecations(warned) == []
 
 
@@ -587,7 +630,7 @@ def _single_user(monkeypatch: pytest.MonkeyPatch, **environ: str) -> None:
 
 
 @pytest.mark.parametrize("route", SHIM_ACCEPTING)
-def test_acp_deprecated_query_admits_the_single_user_key(
+def test_deprecated_query_admits_the_single_user_key(
     env: SimpleNamespace, route: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The single-user WebUI outside cookie quickstart, and the extension, send ``?api_key=``."""
@@ -602,7 +645,7 @@ def test_acp_deprecated_query_admits_the_single_user_key(
 
 
 @pytest.mark.parametrize("route", SHIM_ACCEPTING)
-def test_acp_deprecated_query_keeps_the_single_user_ip_allowlist(
+def test_deprecated_query_keeps_the_single_user_ip_allowlist(
     env: SimpleNamespace, route: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The verifier sees the socket's peer (request.client), so the allowlist still binds."""
@@ -621,7 +664,7 @@ BASIC_PROXY_AUTH = {"Authorization": "Basic cHJveHktdXNlcjpwcm94eS1wYXNz"}
 
 
 @pytest.mark.parametrize("route", SHIM_ACCEPTING)
-def test_acp_a_proxy_basic_authorization_is_not_a_credential(
+def test_a_proxy_basic_authorization_is_not_a_credential(
     env: SimpleNamespace, route: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A Basic-auth reverse proxy makes the browser attach its ``Authorization`` to the upgrade.
@@ -639,7 +682,7 @@ def test_acp_a_proxy_basic_authorization_is_not_a_credential(
 
 
 @pytest.mark.parametrize("route", SHIM_ACCEPTING)
-def test_acp_deprecated_query_pair_resolves_like_both_http_headers(env: SimpleNamespace, route: str) -> None:
+def test_deprecated_query_pair_resolves_like_both_http_headers(env: SimpleNamespace, route: str) -> None:
     """``?token=&api_key=`` goes to the verifier as both headers, as HTTP resolves them: the JWT
     first, and the API key only when the JWT is refused with 401."""
     url = ROUTES[route][0]
@@ -647,3 +690,100 @@ def test_acp_deprecated_query_pair_resolves_like_both_http_headers(env: SimpleNa
     assert _outcome(env.client, f"{url}?token={env.valid}&api_key=tldw_ws-matrix-unknown-key") == "accepted"
     assert _outcome(env.client, f"{url}?token={env.revoked}&api_key={key}") == "accepted"
     assert _outcome(env.client, f"{url}?token={env.revoked}&api_key=tldw_ws-matrix-unknown-key") == "close 4401"
+
+
+def test_sandbox_retired_its_query_credentials(env: SimpleNamespace) -> None:
+    """``?auth_token=`` and, with signed URLs off, ``?token=`` had no client, so they are gone
+    rather than deprecated (TASK-13950.7). A signed URL's ``token`` is its HMAC, not a credential."""
+    url = ROUTES[SANDBOX][0]
+    with _warnings() as warned:
+        assert _outcome(env.client, _with_query(url, "auth_token", env.valid)) == "close 4401"
+        assert _outcome(env.client, _with_query(url, "token", env.valid)) == "close 4401"
+    assert _deprecations(warned) == []
+
+
+@pytest.mark.parametrize("route", [SANDBOX, WATCHLISTS])
+def test_browser_bearer_subprotocol_and_single_user_key(
+    env: SimpleNamespace, route: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Browsers cannot set WebSocket headers. Before the core resolver these routes ignored the
+    bearer subprotocol, so a browser could only reach them through a query credential; the
+    single-user key in ``X-API-KEY`` already worked and still does."""
+    url = ROUTES[route][0]
+    assert _accepted_subprotocol(env.client, url, subprotocols=["bearer", env.valid]) == "bearer"
+    _single_user(monkeypatch)
+    assert _accepted_subprotocol(env.client, url, headers={"X-API-KEY": SINGLE_USER_KEY}) is None
+    assert _accepted_subprotocol(env.client, url, subprotocols=["bearer", SINGLE_USER_KEY]) == "bearer"
+
+
+def _track_sandbox_run(owner_id: int) -> str:
+    """A run the sandbox store records as ``owner_id``'s, as ``POST /sandbox/runs`` leaves it.
+
+    Only a tracked run is owner-checked: in test mode an untracked one is streamed to anyone.
+    """
+    from tldw_Server_API.app.api.v1.endpoints import sandbox as sandbox_ep
+    from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunStatus
+
+    run_id = f"ws-matrix-owned-by-{owner_id}"
+    sandbox_ep._service._orch._store.put_run(owner_id, RunStatus(id=run_id, phase=RunPhase.completed))
+    return run_id
+
+
+def _signed_sandbox_url(run_id: str, monkeypatch: pytest.MonkeyPatch) -> tuple[str, str]:
+    """Turn signed stream URLs on and return a valid one for ``run_id``, and its signature."""
+    secret, exp = "ws-matrix-signing-secret", int(time.time()) + 300
+    monkeypatch.setenv("SANDBOX_WS_SIGNED_URLS", "true")
+    monkeypatch.setenv("SANDBOX_WS_SIGNING_SECRET", secret)
+    signature = hmac.new(secret.encode(), f"{run_id}:{exp}".encode(), hashlib.sha256).hexdigest()
+    return f"/api/v1/sandbox/runs/{run_id}/stream?token={signature}&exp={exp}", signature
+
+
+@pytest.mark.parametrize("signed_url", [False, True], ids=["unsigned", "signed"])
+def test_sandbox_stream_refuses_another_users_run(
+    env: SimpleNamespace, signed_url: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A valid credential is not enough: the run must be the caller's. A signed URL names the run,
+    not the user, so a leaked one plus anyone's credential still meets the owner check (4404)."""
+    run_id = _track_sandbox_run(env.user_id)
+    if signed_url:
+        url, _signature = _signed_sandbox_url(run_id, monkeypatch)
+    else:
+        url = f"/api/v1/sandbox/runs/{run_id}/stream"
+        monkeypatch.setenv("SANDBOX_WS_SIGNED_URLS", "false")
+
+    assert _outcome(env.client, url, headers={"Authorization": f"Bearer {env.other_valid}"}) == "close 4404"
+    assert _outcome(env.client, url, headers={"Authorization": f"Bearer {env.valid}"}) == "accepted"
+
+
+def test_sandbox_signed_url_with_the_browser_bearer_subprotocol(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The documented browser path: the signed ``log_stream_url`` plus ``bearer, <token>``. The
+    signature is checked in addition to the credential, and is not a credential itself."""
+    url, signature = _signed_sandbox_url(_track_sandbox_run(env.user_id), monkeypatch)
+    bad_signature = url.replace(signature, signature[:-1] + ("0" if signature[-1] != "0" else "1"))
+
+    assert _accepted_subprotocol(env.client, url, subprotocols=["bearer", env.valid]) == "bearer"
+    assert _outcome(env.client, bad_signature, subprotocols=["bearer", env.valid]) == "close 1008"
+    assert _outcome(env.client, url) == "close 4401"
+
+
+@pytest.mark.parametrize("channel", ["X-API-KEY", "bearer subprotocol"])
+def test_sandbox_single_user_key_keeps_the_ip_allowlist(
+    env: SimpleNamespace, channel: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The old sandbox resolver checked SINGLE_USER_ALLOWED_IPS itself; the HTTP verifier now does,
+    from the socket's peer."""
+    _single_user(monkeypatch, SINGLE_USER_ALLOWED_IPS="10.1.2.3")
+    if channel == "X-API-KEY":
+        request: dict[str, object] = {"headers": {"X-API-KEY": SINGLE_USER_KEY}}
+    else:
+        request = {"subprotocols": ["bearer", SINGLE_USER_KEY]}
+    url = ROUTES[SANDBOX][0]
+    outside, inside = TestClient(env.app, client=("10.9.9.9", 50000)), TestClient(env.app, client=("10.1.2.3", 50000))
+    try:
+        assert _outcome(outside, url, **request) == "close 4401"  # type: ignore[arg-type]
+        assert _outcome(inside, url, **request) == "accepted"  # type: ignore[arg-type]
+    finally:
+        outside.close()
+        inside.close()

@@ -18,15 +18,18 @@ Credentials, in order:
 - With neither, the single-user session cookie, behind its trusted-Origin check
   (``websocket_session_auth``), since cookies are sent cross-site.
 
-Query-string tokens are not read: they end up in access logs (TASK-12113). A route that must
-keep a deprecated channel for shipped clients reads it itself and hands the credential to
-``verify_ws_credential``, so it is verified exactly as the header it stands for.
+Query-string tokens are not read: they end up in access logs (TASK-12113). Routes whose
+shipped clients still send ``?token=`` / ``?api_key=`` call
+``resolve_ws_principal_or_deprecated_query`` instead, which hands that credential to
+``verify_ws_credential``, so it is verified exactly as the header it stands for; a route with
+another deprecated channel reads it itself and does the same.
 First-message-frame auth arrives with the audio slice of TASK-13950.7, with its consumer.
 """
 
 from __future__ import annotations
 
 from fastapi import HTTPException, WebSocket, WebSocketException, status
+from loguru import logger
 from starlette.requests import Request
 
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import has_scope, normalize_scope
@@ -40,6 +43,9 @@ from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
 WS_UNAUTHENTICATED = 4401
 WS_FORBIDDEN = 4403
 _BEARER_SUBPROTOCOL = "bearer"
+# Logged once per connection that authenticates through a deprecated channel; names the channel
+# and path, never the credential.
+DEPRECATED_WS_CHANNEL = "Deprecated WebSocket credential channel {} on {}; send Authorization or the bearer subprotocol"
 
 
 def _subprotocol_token(websocket: WebSocket) -> str | None:
@@ -68,6 +74,7 @@ async def resolve_ws_principal(
     websocket: WebSocket,
     *,
     required_scope: str | None = None,
+    ignore_signed_url_token: bool = False,
 ) -> AuthPrincipal:
     """Return the authenticated caller of ``websocket``; call it before ``accept()``.
 
@@ -78,6 +85,8 @@ async def resolve_ws_principal(
             ``require_api_key_scope`` without its admin-claim bypass: that helper lives in
             the API layer, which core may not import, so a WebSocket stays on the stricter
             side and an admin's key needs the scope too.
+        ignore_signed_url_token: The route's ``?token=`` is a signed-URL signature, not a
+            credential (sandbox's signed log-stream URL), so it must not stop the cookie.
 
     Raises:
         WebSocketException: 4401 when credentials are missing or rejected, 4403 when they
@@ -88,7 +97,8 @@ async def resolve_ws_principal(
     if token and not _extract_bearer_token(websocket):
         return await verify_ws_credential(websocket, token=token, required_scope=required_scope)
     if not has_ws_credential(websocket):
-        if await resolve_single_user_cookie_websocket(websocket) is not None:
+        cookie = await resolve_single_user_cookie_websocket(websocket, ignore_signed_url_token=ignore_signed_url_token)
+        if cookie is not None:
             cookie_principal: AuthPrincipal = websocket.state.auth_principal
             return cookie_principal
         cookie_code = cookie_websocket_rejection_code(websocket)
@@ -96,6 +106,28 @@ async def resolve_ws_principal(
             raise WebSocketException(code=cookie_code, reason="cookie_auth_rejected")
         raise WebSocketException(code=WS_UNAUTHENTICATED, reason="authentication_required")
     return await _verify(websocket, list(websocket.scope.get("headers") or []), required_scope)
+
+
+async def resolve_ws_principal_or_deprecated_query(
+    websocket: WebSocket,
+    *,
+    required_scope: str | None = None,
+) -> AuthPrincipal:
+    """``resolve_ws_principal``, plus the DEPRECATED ``?token=`` / ``?api_key=`` channels that
+    shipped clients still send (ACP, prompt-studio and watchlists; TASK-13950.7).
+
+    The query is read only when no resolver channel competes (``has_ws_credential``), so a header
+    or bearer-subprotocol credential always wins. It logs ``DEPRECATED_WS_CHANNEL`` once and is
+    verified by ``verify_ws_credential``. Delete it once those clients send the bearer subprotocol.
+    """
+    if not has_ws_credential(websocket):
+        token = websocket.query_params.get("token") or None
+        api_key = websocket.query_params.get("api_key") or None
+        names = [name for name, value in (("token", token), ("api_key", api_key)) if value]
+        if names:
+            logger.warning(DEPRECATED_WS_CHANNEL, f"query {' and '.join(names)}", websocket.url.path)
+            return await verify_ws_credential(websocket, token=token, api_key=api_key, required_scope=required_scope)
+    return await resolve_ws_principal(websocket, required_scope=required_scope)
 
 
 async def verify_ws_credential(

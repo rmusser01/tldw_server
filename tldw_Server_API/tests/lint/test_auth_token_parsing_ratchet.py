@@ -26,6 +26,10 @@ in its PR, that gives the reason and its task or PR -- for example a security fi
 a module that cannot migrate yet. Seed or re-count with:
 
     python tldw_Server_API/tests/lint/test_auth_token_parsing_ratchet.py
+
+Also pinned: the modules that may use ``resolve_ws_principal_or_deprecated_query``, the core shim
+that still reads ``?token=`` / ``?api_key=`` for shipped clients. It is public, so a new route could
+adopt it and bring query credentials back; TASK-13950.61 moves those clients and deletes it.
 """
 
 from __future__ import annotations
@@ -47,9 +51,7 @@ ENDPOINTS_ROOT = APP_ROOT / "api" / "v1" / "endpoints"
 LOOKS_LIKE_JWT_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/api/v1/API_Deps/auth_deps.py": 1,
     "tldw_Server_API/app/api/v1/endpoints/persona.py": 1,
-    "tldw_Server_API/app/api/v1/endpoints/sandbox.py": 1,
     "tldw_Server_API/app/api/v1/endpoints/voice_assistant.py": 1,
-    "tldw_Server_API/app/api/v1/endpoints/watchlists.py": 1,
     "tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py": 1,
     "tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py": 1,
 }
@@ -61,13 +63,11 @@ BEARER_PARSE_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/api/v1/endpoints/persona.py": 3,
     "tldw_Server_API/app/api/v1/endpoints/prompts.py": 3,
     "tldw_Server_API/app/api/v1/endpoints/rpg.py": 1,
-    "tldw_Server_API/app/api/v1/endpoints/sandbox.py": 1,
-    "tldw_Server_API/app/api/v1/endpoints/watchlists.py": 1,
 }
 
 # Each baseline's exact total. A migration lowers its entry and this number together; any
 # other change to a baseline's total is headroom being reused, and fails.
-SEED_TOTALS: dict[str, int] = {"LOOKS_LIKE_JWT_BASELINE": 7, "BEARER_PARSE_BASELINE": 12}
+SEED_TOTALS: dict[str, int] = {"LOOKS_LIKE_JWT_BASELINE": 5, "BEARER_PARSE_BASELINE": 10}
 
 # The only way to raise a count: (baseline name, module) -> (allowed count, reason). The
 # reason must cite a task or PR, e.g. "security fix in persona_stream needs one (TASK-1234)".
@@ -192,6 +192,41 @@ def ratchet_violations(what: str, counts: dict[str, int], baseline: dict[str, in
 
 BASELINES = {"LOOKS_LIKE_JWT_BASELINE": LOOKS_LIKE_JWT_BASELINE, "BEARER_PARSE_BASELINE": BEARER_PARSE_BASELINE}
 
+# The deprecated query-credential shim, and the only modules allowed to use it: their shipped
+# clients still send ?token= / ?api_key=. A new WebSocket route uses resolve_ws_principal.
+QUERY_SHIM = "resolve_ws_principal_or_deprecated_query"
+QUERY_SHIM_CALLERS = frozenset(
+    {
+        "tldw_Server_API/app/api/v1/endpoints/agent_client_protocol.py",
+        "tldw_Server_API/app/api/v1/endpoints/watchlists.py",
+    }
+)
+
+
+def count_query_shim_references(tree: ast.AST) -> int:
+    """Return how many names, attributes and imports in ``tree`` refer to the query shim."""
+    return sum(
+        1
+        for node in ast.walk(tree)
+        if (isinstance(node, ast.Name) and node.id == QUERY_SHIM)
+        or (isinstance(node, ast.Attribute) and node.attr == QUERY_SHIM)
+        or (isinstance(node, ast.alias) and node.name == QUERY_SHIM)
+    )
+
+
+def query_shim_problems(callers: set[str]) -> list[str]:
+    """Describe every module that newly uses the shim, and every allowed one that stopped."""
+    added = [
+        f"{module}: uses {QUERY_SHIM}, the deprecated query-credential shim (TASK-13950.61 deletes it). "
+        "Resolve WebSocket callers with resolve_ws_principal; credentials do not belong in the URL."
+        for module in sorted(callers - QUERY_SHIM_CALLERS)
+    ]
+    gone = [
+        f"{module}: no longer uses {QUERY_SHIM}; drop it from QUERY_SHIM_CALLERS in {_THIS_FILE} (TASK-13950.61)."
+        for module in sorted(QUERY_SHIM_CALLERS - callers)
+    ]
+    return added + gone
+
 
 def test_looks_like_jwt_copies_only_decrease() -> None:
     ceiling = allowed("LOOKS_LIKE_JWT_BASELINE", LOOKS_LIKE_JWT_BASELINE, BUMPS)
@@ -270,6 +305,30 @@ def test_the_ratchet_asks_for_a_lower_seed_after_a_migration() -> None:
     module, seeded = next(iter(BEARER_PARSE_BASELINE.items()))
     problems = ratchet_violations("x", {**BEARER_PARSE_BASELINE, module: seeded - 1}, BEARER_PARSE_BASELINE)
     assert len(problems) == 1 and "Lower its entry" in problems[0], problems
+
+
+def test_only_routes_with_shipped_query_clients_use_the_query_shim() -> None:
+    problems = query_shim_problems(set(_counts(APP_ROOT, QUERY_SHIM, count_query_shim_references)))
+    assert not problems, "\n".join(problems)
+
+
+def test_the_query_shim_pin_rejects_a_new_caller() -> None:
+    """Self-test: an aliased import and an attribute use count, mentions in text do not; a new
+    caller fails pointing at TASK-13950.61, and so does an allowed caller that moved off it."""
+    tree = ast.parse(
+        f'"""{QUERY_SHIM}"""\n'
+        f"# {QUERY_SHIM}\n"
+        f"from tldw_Server_API.app.core.AuthNZ.websocket_principal import {QUERY_SHIM} as resolve\n"
+        "from tldw_Server_API.app.core.AuthNZ import websocket_principal\n"
+        f"principal = websocket_principal.{QUERY_SHIM}\n"
+    )
+    module = "tldw_Server_API/app/api/v1/endpoints/new_feature.py"
+
+    assert count_query_shim_references(tree) == 2
+    added = query_shim_problems(set(QUERY_SHIM_CALLERS) | {module})
+    assert len(added) == 1 and added[0].startswith(module) and "TASK-13950.61" in added[0], added
+    gone = query_shim_problems(set(QUERY_SHIM_CALLERS) - {next(iter(QUERY_SHIM_CALLERS))})
+    assert len(gone) == 1 and "drop it from QUERY_SHIM_CALLERS" in gone[0], gone
 
 
 def test_configuration_comparisons_docstrings_and_comments_are_not_counted() -> None:

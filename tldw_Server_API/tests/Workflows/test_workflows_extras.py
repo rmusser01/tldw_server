@@ -417,7 +417,7 @@ def test_ws_rejections_have_safe_diagnostics(client_with_wf, monkeypatch, scenar
         headers = {}
     if scenario == "cookie_rejected":
 
-        async def reject_cookie(websocket):
+        async def reject_cookie(websocket, **_options):
             websocket.state.single_user_cookie_websocket_close_code = 4403
             return None
 

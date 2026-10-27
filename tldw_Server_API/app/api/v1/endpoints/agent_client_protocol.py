@@ -75,10 +75,11 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import (
 from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPResponseError
 from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidTokenError, TokenExpiredError
 from tldw_Server_API.app.core.AuthNZ.websocket_principal import (
+    DEPRECATED_WS_CHANNEL,
     WS_UNAUTHENTICATED,
     auth_subprotocol,
     has_ws_credential,
-    resolve_ws_principal,
+    resolve_ws_principal_or_deprecated_query,
     verify_ws_credential,
 )
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
@@ -939,12 +940,12 @@ async def _check_prompt_governance(
 # -----------------------------------------------------------------------------
 
 # DEPRECATED channels that shipped clients still send (TASK-13950.7): useACPSession,
-# ACPWebSocketClient and prompt-studio-stream put the credential in ?token= / ?api_key=, and
-# the ACP SSH panel offers "x-api-key, <key>". Remove them once those clients send the bearer
-# subprotocol. Nothing here parses or verifies a credential: it is handed to
-# verify_ws_credential, the verification resolve_ws_principal uses.
+# ACPWebSocketClient and prompt-studio-stream put the credential in ?token= / ?api_key= (read by
+# the shared resolve_ws_principal_or_deprecated_query), and the ACP SSH panel offers
+# "x-api-key, <key>". Remove them once those clients send the bearer subprotocol. Nothing here
+# parses or verifies a credential: it is handed to verify_ws_credential, the verification
+# resolve_ws_principal uses.
 _DEPRECATED_KEY_SUBPROTOCOL = "x-api-key"
-_DEPRECATION = "Deprecated WebSocket credential channel {} on {}; send Authorization or the bearer subprotocol"
 
 
 def _deprecated_subprotocol_key(websocket: WebSocket) -> str | None:
@@ -976,22 +977,12 @@ async def _authenticate_ws(websocket: WebSocket, *, required_scope: str) -> int:
         WebSocketException: as ``resolve_ws_principal``, and 4401 for a principal that is
             not a user (a service token), which owns no ACP session or project.
     """
-    token = api_key = None
-    channel = None
-    if not has_ws_credential(websocket):
-        api_key = _deprecated_subprotocol_key(websocket)
-        if api_key:
-            channel = "x-api-key subprotocol"
-        else:
-            token = websocket.query_params.get("token") or None
-            api_key = websocket.query_params.get("api_key") or None
-            names = [name for name, value in (("token", token), ("api_key", api_key)) if value]
-            channel = f"query {' and '.join(names)}" if names else None
-    if channel:
-        logger.warning(_DEPRECATION, channel, websocket.url.path)
-        principal = await verify_ws_credential(websocket, token=token, api_key=api_key, required_scope=required_scope)
+    api_key = None if has_ws_credential(websocket) else _deprecated_subprotocol_key(websocket)
+    if api_key:
+        logger.warning(DEPRECATED_WS_CHANNEL, "x-api-key subprotocol", websocket.url.path)
+        principal = await verify_ws_credential(websocket, api_key=api_key, required_scope=required_scope)
     else:
-        principal = await resolve_ws_principal(websocket, required_scope=required_scope)
+        principal = await resolve_ws_principal_or_deprecated_query(websocket, required_scope=required_scope)
     if principal.user_id is None:
         raise WebSocketException(code=WS_UNAUTHENTICATED, reason="user_principal_required")
     return int(principal.user_id)
