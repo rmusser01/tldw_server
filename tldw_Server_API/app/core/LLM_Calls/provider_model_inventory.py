@@ -18,6 +18,8 @@ from importlib import import_module
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode, urlsplit
 
+from loguru import logger
+
 from tldw_Server_API.app.core.http_client import RetryPolicy
 from tldw_Server_API.app.core.http_client import fetch as _http_fetch
 from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
@@ -85,7 +87,13 @@ _MAX_PAGES = 10
 _MAX_MODELS = 1000
 _MAX_CACHE_ENTRIES = 128
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024
-_CACHE: OrderedDict[tuple[str, str, str], tuple[float, ModelDiscoveryResult]] = OrderedDict()
+# Short negative cache: a failing /models is not re-fetched on every call. Never auth_failed or not_found.
+_FAILURE_TTL_SECONDS = 20.0
+_BRIEFLY_CACHED_FAILURES = frozenset({"unreachable", "server_error"})
+_CacheKey = tuple[str, str, str]
+# Each entry holds the inventory and the single-model lookups checked against it (model -> result).
+_CACHE: OrderedDict[_CacheKey, tuple[float, ModelDiscoveryResult, dict[str, ModelDiscoveryResult]]] = OrderedDict()
+_FAILED: OrderedDict[_CacheKey, tuple[float, ModelDiscoveryResult]] = OrderedDict()
 _IN_FLIGHT: dict[tuple[str, str, str], Future[ModelDiscoveryResult]] = {}
 _CACHE_LOCK = threading.Lock()
 
@@ -102,7 +110,8 @@ def _safe_base_url(value: Any) -> str | None:
     try:
         parsed = urlsplit(value)
         if (
-            parsed.scheme != "https"
+            # Same schemes the generation adapters accept; egress policy decides per host (review I2).
+            parsed.scheme not in {"http", "https"}
             or not parsed.hostname
             or parsed.username is not None
             or parsed.password is not None
@@ -341,6 +350,20 @@ def _parse_page(provider: str, payload: Any, *, page_number: int = 1) -> tuple[l
     return models, cursor, len(rows)
 
 
+def _cache_key(provider: str, endpoint: str, api_key: str) -> _CacheKey:
+    return provider, endpoint, hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+
+
+def _log_discovery_failure(provider: str, endpoint: str, status: str, *, lookup: bool = False) -> None:
+    """One sanitized line: provider, status and endpoint host; never the key, path, query or body."""
+    try:
+        host = urlsplit(endpoint).hostname or "unknown"
+    except ValueError:
+        host = "unknown"
+    kind = "model lookup" if lookup else "model discovery"
+    logger.warning("Provider {} failed: provider={} status={} host={}", kind, provider, status, host)
+
+
 def resolve_provider_model_selection(
     provider: str,
     api_key: str | None,
@@ -361,7 +384,6 @@ def resolve_provider_model_selection(
     Supplemental lookups use one attempt, no redirects, bounded responses and
     a five-second budget capped by the caller's remaining policy deadline.
     """
-    from urllib.parse import quote
 
     from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
 
@@ -417,6 +439,43 @@ def resolve_provider_model_selection(
             return ModelDiscoveryResult("ready", (model,))
     elif provider != "anthropic":
         return ModelDiscoveryResult("not_found")
+    # A lookup lives exactly as long as the inventory entry it was checked against (review I4).
+    cache_key = _cache_key(provider, endpoint, api_key.strip())
+    with _CACHE_LOCK:
+        entry = _CACHE.get(cache_key)
+        known = entry[2].get(model) if entry is not None and entry[1] is inventory else None
+    if known is not None:
+        return known
+    result = _lookup_model(
+        provider, api_key, model, lookup_model, selected_provider,
+        endpoint=endpoint, inventory=inventory, budget=budget, scope=scope, fetch_fn=fetch_fn,
+    )
+    if result.status in {"ready", "not_found"}:
+        with _CACHE_LOCK:
+            entry = _CACHE.get(cache_key)
+            if entry is not None and entry[1] is inventory:
+                entry[2][model] = result
+    else:
+        _log_discovery_failure(provider, endpoint, result.status, lookup=True)
+    return result
+
+
+def _lookup_model(
+    provider: str,
+    api_key: str,
+    model: str,
+    lookup_model: str,
+    selected_provider: str | None,
+    *,
+    endpoint: str,
+    inventory: ModelDiscoveryResult,
+    budget: float,
+    scope: Any,
+    fetch_fn: Callable[..., Any] | None,
+) -> ModelDiscoveryResult:
+    """One authenticated single-model lookup (Anthropic alias or HF provider selector)."""
+    from urllib.parse import quote
+
     deadline = time.monotonic() + budget
     headers = {"Accept": "application/json"}
     if provider == "anthropic":
@@ -511,17 +570,22 @@ def discover_provider_models(
         return ModelDiscoveryResult("unsupported")
     if scope is not None and not scope.matches(endpoint):
         return ModelDiscoveryResult("unsupported")
-    cache_key = (provider, endpoint, hashlib.sha256(key.encode("utf-8")).hexdigest())
+    cache_key = _cache_key(provider, endpoint, key)
     with _CACHE_LOCK:
         cached = _CACHE.get(cache_key)
         if not force_refresh and cached and time.monotonic() - cached[0] < _TTL_SECONDS:
+            _CACHE.move_to_end(cache_key)
             return cached[1]
+        failed = _FAILED.get(cache_key)
+        if not force_refresh and failed and time.monotonic() - failed[0] < _FAILURE_TTL_SECONDS:
+            return failed[1]
         pending = _IN_FLIGHT.get(cache_key)
         follower: Future[ModelDiscoveryResult] | None = None
         if force_refresh or pending is None:
             if pending is not None and not pending.done():
                 pending.set_result(ModelDiscoveryResult("unreachable"))
             _CACHE.pop(cache_key, None)
+            _FAILED.pop(cache_key, None)
             refresh_token: Future[ModelDiscoveryResult] = Future()
             _IN_FLIGHT[cache_key] = refresh_token
         else:
@@ -540,12 +604,19 @@ def discover_provider_models(
     def finish(result: ModelDiscoveryResult) -> ModelDiscoveryResult:
         """Publish once, without letting superseded work refill the cache."""
         with _CACHE_LOCK:
-            if _IN_FLIGHT.get(cache_key) is refresh_token and result.status == "ready":
-                _CACHE[cache_key] = (time.monotonic(), result)
+            current = _IN_FLIGHT.get(cache_key) is refresh_token
+            if current and result.status == "ready":
+                _CACHE[cache_key] = (time.monotonic(), result, {})
                 while len(_CACHE) > _MAX_CACHE_ENTRIES:
                     _CACHE.popitem(last=False)
+            elif current and result.status in _BRIEFLY_CACHED_FAILURES:
+                _FAILED[cache_key] = (time.monotonic(), result)
+                while len(_FAILED) > _MAX_CACHE_ENTRIES:
+                    _FAILED.popitem(last=False)
             if not refresh_token.done():
                 refresh_token.set_result(result)
+        if result.status != "ready":
+            _log_discovery_failure(provider, endpoint, result.status)
         return result
 
     headers = {"Accept": "application/json"}

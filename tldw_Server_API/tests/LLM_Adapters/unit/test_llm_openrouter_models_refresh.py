@@ -1,5 +1,6 @@
 import asyncio
 import configparser
+from collections import OrderedDict
 
 
 def _fake_config_openrouter():
@@ -46,7 +47,8 @@ def test_llm_models_metadata_refresh_openrouter_includes_live_models(monkeypatch
     monkeypatch.setattr(llm_providers, "get_api_keys", lambda: {"openrouter": "sk-or-test"})
     monkeypatch.setattr(llm_providers, "list_image_models_for_catalog", lambda: [])
     monkeypatch.setattr(openrouter_inventory, "_http_fetch", _fake_fetch)
-    monkeypatch.setattr(openrouter_inventory, "_CACHE", {})
+    monkeypatch.setattr(openrouter_inventory, "_CACHE", OrderedDict())
+    monkeypatch.setattr(openrouter_inventory, "_FAILED", OrderedDict())
 
     refreshed = asyncio.run(
         llm_providers.get_models_metadata(

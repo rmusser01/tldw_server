@@ -75,6 +75,7 @@ def inventory(monkeypatch):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(adapter_utils, "ensure_app_config", lambda config=None: {} if config is None else config)
     module._CACHE.clear()
+    module._FAILED.clear()
 
     def no_network(**kwargs):
         raise AssertionError("Unit discovery must not make a real request")
@@ -82,6 +83,7 @@ def inventory(monkeypatch):
     monkeypatch.setattr(module, "_http_fetch", no_network)
     yield module
     module._CACHE.clear()
+    module._FAILED.clear()
 
 
 @pytest.mark.parametrize(
@@ -387,7 +389,6 @@ def test_missing_or_invalid_credentials_never_request(inventory, key):
         "https://user:secret@example.com/v1",
         "https://example.com/v1?key=secret",
         "https://example.com/v1#secret",
-        "http://example.com/v1",
         "file:///etc/passwd",
         "https:///v1",
         "https://example.com:bad/v1",
@@ -445,7 +446,8 @@ def test_validated_base_url_is_honored_without_scope_widening(inventory, provide
         (307, "unsupported"),
     ],
 )
-def test_failures_never_fall_back_to_a_cached_inventory(inventory, status, expected):
+def test_failures_never_fall_back_to_a_cached_inventory(inventory, monkeypatch, status, expected):
+    monkeypatch.setattr(inventory, "_FAILURE_TTL_SECONDS", 0.0)  # past the brief negative cache
     responses = [Response({"data": [{"id": "current"}]}), Response({"private_error": "synthetic-key"}, status)]
     fetcher = Fetcher(*responses, Response({"data": [{"id": "new"}]}))
     assert inventory.discover_provider_models("deepseek", "synthetic-key", fetch_fn=fetcher).models == ("current",)
@@ -478,7 +480,8 @@ def test_malformed_inventory_is_not_empty_success_or_alias_fallback(inventory, p
     assert response.closed
 
 
-def test_fetch_exception_is_sanitized_and_not_cached(inventory, capsys):
+def test_fetch_exception_is_sanitized_and_not_cached(inventory, monkeypatch, capsys):
+    monkeypatch.setattr(inventory, "_FAILURE_TTL_SECONDS", 0.0)  # past the brief negative cache
     fetcher = Fetcher(TimeoutError("https://user:synthetic-key@example.com"), Response({"data": []}))
     assert inventory.discover_provider_models("deepseek", "synthetic-key", fetch_fn=fetcher) == ModelDiscoveryResult(
         "unreachable"
@@ -486,7 +489,9 @@ def test_fetch_exception_is_sanitized_and_not_cached(inventory, capsys):
     assert inventory.discover_provider_models("deepseek", "synthetic-key", fetch_fn=fetcher) == ModelDiscoveryResult(
         "ready"
     )
-    assert capsys.readouterr() == ("", "")
+    output = "".join(capsys.readouterr())
+    assert "synthetic-key" not in output
+    assert "user:" not in output
 
 
 def test_success_cache_scopes_provider_endpoint_and_credential_digest(inventory):
@@ -513,6 +518,7 @@ def test_ttl_is_300_seconds_and_expired_failure_cannot_reuse_old_cache(inventory
     assert inventory.discover_provider_models("deepseek", "synthetic-key", fetch_fn=fetcher) == ModelDiscoveryResult(
         "server_error"
     )
+    now[0] = 320.0  # past the brief negative cache
     assert inventory.discover_provider_models("deepseek", "synthetic-key", fetch_fn=fetcher).models == ("new",)
 
 
@@ -707,6 +713,7 @@ def test_singleflight_parallel_misses_share_one_fetch_and_fill_cache(inventory, 
     (RuntimeError("synthetic failure"), "unreachable"),
 ])
 def test_singleflight_failure_notifies_waiters_and_allows_fresh_retry(inventory, monkeypatch, response, expected):
+    monkeypatch.setattr(inventory, "_FAILURE_TTL_SECONDS", 0.0)  # past the brief negative cache
     lock = ObservedCacheLock(4)
     monkeypatch.setattr(inventory, "_CACHE_LOCK", lock)
     release = threading.Event()
@@ -1066,3 +1073,119 @@ def test_qwen_unknown_base_path_never_guesses_an_inventory_route(inventory):
         fetch_fn=fetcher,
     ) == ModelDiscoveryResult("unsupported")
     assert fetcher.calls == []
+
+
+# --- Merge-review fixes (PR #3191 fix round 1) ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("config", "env", "endpoint"),
+    [
+        ({"openai_api": {"api_base_url": "http://localhost:4000/v1"}}, {}, "http://localhost:4000/v1/models"),
+        ({"openai_api": {"api_base_url": "http://gateway.example.com/v1"}}, {}, "http://gateway.example.com/v1/models"),
+        ({}, {"MOCK_OPENAI_BASE_URL": "http://127.0.0.1:8080/v1"}, "http://127.0.0.1:8080/v1/models"),
+    ],
+)
+def test_http_base_is_discovered_where_generation_uses_it(inventory, monkeypatch, config, env, endpoint):
+    """An http gateway the adapter would call is listed through the same egress-checked fetch (review I2)."""
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    base = inventory.resolve_provider_models_base_url("openai", config, credentials_resolved=not env)
+    assert base == endpoint.removesuffix("/models")
+    fetcher = Fetcher(Response({"data": [{"id": "gateway-model"}]}))
+    assert inventory.discover_provider_models(
+        "openai", "synthetic-key", base_url=base, fetch_fn=fetcher,
+    ) == ModelDiscoveryResult("ready", ("gateway-model",))
+    assert fetcher.calls[0]["url"] == endpoint
+
+
+def test_unreachable_and_server_error_are_negative_cached_briefly(inventory, monkeypatch):
+    """A failing /models is not re-fetched on every call for ~20 s (review I5)."""
+    now = [100.0]
+    monkeypatch.setattr(inventory.time, "monotonic", lambda: now[0])
+    fetcher = Fetcher(Response({}, 503), Response({"data": [{"id": "back"}]}))
+    assert inventory.discover_provider_models("deepseek", "synthetic-key", fetch_fn=fetcher).status == "server_error"
+    now[0] += 19.0
+    assert inventory.discover_provider_models("deepseek", "synthetic-key", fetch_fn=fetcher).status == "server_error"
+    assert len(fetcher.calls) == 1
+    now[0] += 1.5
+    assert inventory.discover_provider_models("deepseek", "synthetic-key", fetch_fn=fetcher).models == ("back",)
+    assert len(fetcher.calls) == 2
+
+
+@pytest.mark.parametrize("response", [Response({}, 401), Response({}, 404)])
+def test_auth_and_unsupported_failures_are_never_negative_cached(inventory, response):
+    fetcher = Fetcher(response, Response({"data": [{"id": "current"}]}))
+    assert inventory.discover_provider_models("deepseek", "synthetic-key", fetch_fn=fetcher).status != "ready"
+    assert inventory.discover_provider_models("deepseek", "synthetic-key", fetch_fn=fetcher).models == ("current",)
+
+
+def test_forced_refresh_bypasses_the_negative_cache(inventory):
+    fetcher = Fetcher(TimeoutError("down"), Response({"data": [{"id": "current"}]}))
+    assert inventory.discover_provider_models("deepseek", "synthetic-key", fetch_fn=fetcher).status == "unreachable"
+    assert inventory.discover_provider_models(
+        "deepseek", "synthetic-key", force_refresh=True, fetch_fn=fetcher,
+    ).models == ("current",)
+
+
+def test_cache_hit_refreshes_its_eviction_position(inventory):
+    """A hot credential is not evicted just for being old (review M3)."""
+    fetcher = Fetcher(*(Response({"data": []}) for _ in range(130)))
+    for number in range(128):
+        inventory.discover_provider_models("deepseek", f"synthetic-{number}", fetch_fn=fetcher)
+    inventory.discover_provider_models("deepseek", "synthetic-0", fetch_fn=fetcher)  # hit
+    inventory.discover_provider_models("deepseek", "synthetic-new", fetch_fn=fetcher)  # evicts the LRU entry
+    calls = len(fetcher.calls)
+    inventory.discover_provider_models("deepseek", "synthetic-0", fetch_fn=fetcher)
+    assert len(fetcher.calls) == calls
+    inventory.discover_provider_models("deepseek", "synthetic-1", fetch_fn=fetcher)
+    assert len(fetcher.calls) == calls + 1
+
+
+def test_single_model_lookup_lives_exactly_as_long_as_its_inventory(inventory, monkeypatch):
+    """An Anthropic alias is looked up once per inventory, and again only after it is refreshed (review I4)."""
+    now = [0.0]
+    monkeypatch.setattr(inventory.time, "monotonic", lambda: now[0])
+    lookups = []
+
+    def lookup(**kwargs):
+        lookups.append(kwargs["url"])
+        return Response({"id": "claude-current-20990101"})
+
+    monkeypatch.setattr(inventory, "_http_fetch", lookup)
+    lister = Fetcher(*(Response({"data": [{"id": "claude-current-20990101"}], "has_more": False}) for _ in range(2)))
+
+    def select():
+        listed = inventory.discover_provider_models("anthropic", "synthetic-key", fetch_fn=lister)
+        return inventory.resolve_provider_model_selection(
+            "anthropic", "synthetic-key", "claude-current", base_url="https://api.anthropic.com/v1", inventory=listed,
+        )
+
+    assert select() == ModelDiscoveryResult("ready", ("claude-current",))
+    assert select() == ModelDiscoveryResult("ready", ("claude-current",))
+    assert (len(lister.calls), len(lookups)) == (1, 1)
+    now[0] = 301.0  # the inventory expires, and its lookups with it
+    assert select().status == "ready"
+    assert (len(lister.calls), len(lookups)) == (2, 2)
+
+
+def test_discovery_failure_logs_one_sanitized_line(inventory):
+    """Operators see provider, status and host, never the key, path, query or body (review M1)."""
+    from loguru import logger
+
+    lines: list[str] = []
+    sink = logger.add(lambda message: lines.append(str(message)), format="{message}")
+    try:
+        fetcher = Fetcher(Response({"secret_body": "synthetic-key"}, 503))
+        assert inventory.discover_provider_models(
+            "openai", "synthetic-key", base_url="https://gateway.example.com/private/path/v1", fetch_fn=fetcher,
+        ).status == "server_error"
+    finally:
+        logger.remove(sink)
+    failures = [line for line in lines if "model discovery" in line]
+    assert len(failures) == 1
+    assert "provider=openai" in failures[0]
+    assert "status=server_error" in failures[0]
+    assert "host=gateway.example.com" in failures[0]
+    for secret in ("synthetic-key", "/private/path", "secret_body", "?"):
+        assert secret not in failures[0]
