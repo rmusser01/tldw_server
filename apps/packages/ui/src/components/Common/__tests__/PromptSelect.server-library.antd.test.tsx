@@ -172,6 +172,30 @@ describe(
       };
     };
 
+    // The trigger's hover help sits above it, where the upward menu opens; a
+    // pointer moving onto the last menu item must reach the item, not the tooltip.
+    it("hides the trigger tooltip while the prompt menu is open", async () => {
+      const user = userEvent.setup();
+      renderPicker();
+      const trigger = await screen.findByRole("button", { name: "selectAPrompt" });
+      const tooltipShown = () => {
+        const tooltip = screen.queryByRole("tooltip")?.closest(".ant-tooltip");
+        return Boolean(
+          tooltip &&
+            !Array.from(tooltip.classList).some(
+              (name) => name === "ant-tooltip-hidden" || name.endsWith("-leave"),
+            ),
+        );
+      };
+
+      await user.hover(trigger);
+      await waitFor(() => expect(tooltipShown()).toBe(true));
+      await user.click(trigger);
+      await waitFor(() => expect(isMenuOpen()).toBe(true));
+
+      expect(tooltipShown()).toBe(false);
+    });
+
     it("keeps the menu open while a server prompt loads, then closes it once applied", async () => {
       const user = userEvent.setup();
       const props = renderPicker();

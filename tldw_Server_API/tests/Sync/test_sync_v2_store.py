@@ -6195,15 +6195,19 @@ def test_insert_envelope_rejects_direct_core_whole_object_base_metadata_bypass(
             )
         )
 
-    with pytest.raises(SyncStoreError):
-        sync_store.insert_envelope(
-            _envelope(
-                client_envelope_id="env-tombstone-no-base",
-                operation="tombstone",
-                deleted=True,
-                payload_hash="sha256:tombstone",
-            )
+    # Owner decision Q7 (D7 note, 2026-10-19): a notes.note or chat.conversation
+    # tombstone may come without a base. It names an object the dataset never
+    # held; the head check and the materializer decide what it does. Provenance
+    # keeps the rule (test_sync_v2_satisfied_tombstone_objects.py).
+    accepted = sync_store.insert_envelope(
+        _envelope(
+            client_envelope_id="env-tombstone-no-base",
+            operation="tombstone",
+            deleted=True,
+            payload_hash="sha256:tombstone",
         )
+    )
+    assert accepted.operation == "tombstone"
 
 
 def test_insert_envelope_rejects_direct_core_chat_message_identity_and_hash_bypass(

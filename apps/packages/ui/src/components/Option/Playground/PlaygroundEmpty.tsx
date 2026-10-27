@@ -14,9 +14,11 @@ import { useDemoMode } from "@/context/demo-mode";
 import { useHelpModal } from "@/store/tutorials";
 import { buildResearchLaunchPath } from "@/routes/route-paths";
 import { requestQuickIngestOpen } from "@/utils/quick-ingest-open";
-import { useIsConnected } from "@/hooks/useConnectionState";
+import { useConnectionState, useIsConnected } from "@/hooks/useConnectionState";
 import { requestSettingsNavigation } from "@/utils/settings-return";
 import { EmptyState } from "@/components/ui/feedback";
+import { FEATURE_FLAGS, useFeatureFlag } from "@/hooks/useFeatureFlags";
+import { isAwaitingFirstConnectionCheck } from "./composer-connection";
 
 const actionButtonFocusClassName =
   "focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg";
@@ -25,9 +27,14 @@ export const PlaygroundEmpty = () => {
   const { t } = useTranslation(["playground", "common", "option"]);
   const { demoEnabled } = useDemoMode();
   const isConnected = useIsConnected();
+  // While the first server check runs, keep the normal chat card instead of
+  // flashing "Connect to start chatting" and then jumping to it (CC-03).
+  const connectionPending = isAwaitingFirstConnectionCheck(useConnectionState());
   const { open: openHelpModal } = useHelpModal();
   const navigate = useNavigate();
   const [modesExpanded, setModesExpanded] = React.useState(false);
+  // Compare stays hidden until it is verified (owner decision D4).
+  const [compareEnabled] = useFeatureFlag(FEATURE_FLAGS.COMPARE_MODE);
 
   const dispatchStarter = React.useCallback(
     (mode: "general" | "compare" | "character" | "rag", prompt?: string) => {
@@ -130,8 +137,8 @@ export const PlaygroundEmpty = () => {
         ),
         action: handleOpenDeepResearch,
       },
-    ],
-    [dispatchStarter, handleOpenDeepResearch, t],
+    ].filter((starter) => compareEnabled || starter.key !== "compare"),
+    [compareEnabled, dispatchStarter, handleOpenDeepResearch, t],
   );
 
   const description = demoEnabled
@@ -139,11 +146,16 @@ export const PlaygroundEmpty = () => {
         defaultValue:
           "You're in demo mode — try asking a question to see how the assistant responds. You can connect your own tldw server later.",
       })
-    : t("playground:empty.description", {
-        defaultValue: "Choose a model, then write your first message below.",
-      });
+    : connectionPending
+      ? t("playground:empty.connectingDescription", {
+          defaultValue:
+            "Connecting to your tldw server. You can start writing your first message below.",
+        })
+      : t("playground:empty.description", {
+          defaultValue: "Choose a model, then write your first message below.",
+        });
 
-  if (!demoEnabled && !isConnected) {
+  if (!demoEnabled && !isConnected && !connectionPending) {
     return <div className="mx-auto w-full max-w-xl px-4 py-4">
       <EmptyState data-testid="playground-empty-shell" icon={MessageSquarePlus}
         title={t("playground:empty.connectTitle", "Connect to start chatting")}

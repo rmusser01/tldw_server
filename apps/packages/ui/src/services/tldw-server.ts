@@ -129,6 +129,8 @@ const mapTldwModelToUi = (model: any) => ({
       : undefined,
   chat_provider:
     typeof model.chatProvider === "string" ? model.chatProvider : undefined,
+  provider_health:
+    typeof model.providerHealth === "string" ? model.providerHealth : undefined,
   details: {
     provider: model.provider,
     capabilities: model.capabilities,
@@ -323,6 +325,18 @@ export const getAllModels = async ({ returnEmpty = false }: { returnEmpty?: bool
     if (returnEmpty) return []
     throw e
   }
+}
+
+/**
+ * Every chat model the server's catalog lists, including models whose provider
+ * is not set up (they keep their catalog-only flags). Backs the model picker's
+ * "All models" scope (CC-06); sending still uses fetchChatModels.
+ */
+export const fetchChatModelCatalog = async () => {
+  const models = await tldwModels.getModels()
+  return dedupeChatModelsByModel(
+    models.filter((model) => model.type === "chat").map(mapTldwModelToUi)
+  )
 }
 
 export const fetchChatModels = async ({

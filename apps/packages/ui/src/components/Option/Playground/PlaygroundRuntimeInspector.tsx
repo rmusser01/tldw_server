@@ -14,6 +14,11 @@ import {
 } from "lucide-react";
 import type { ChatModelUsabilityStatus } from "@/utils/chat-model-availability";
 import {
+  formatChatModelLabel,
+  formatChatProviderName,
+  getChatModelLabelParts,
+} from "@/utils/chat-model-label";
+import {
   formatCockpitMessageCount,
   useCockpitMessageCount,
 } from "./playground-cockpit-state";
@@ -131,9 +136,22 @@ export const PlaygroundRuntimeInspector = ({
       : displayProvider && displayModel
         ? `${displayProvider}:${displayModel}`
         : selectedModel || null);
+  // Plain names (CC-06): "OpenAI" and "gpt-4.1-mini", never "openai" or
+  // "tldw:gpt-4.1-mini". The raw provider:model route stays in the Model
+  // settings button's title and the screen-reader route text.
+  const providerName = displayProvider
+    ? formatChatProviderName(displayProvider)
+    : "";
+  const modelName = displayModel
+    ? getChatModelLabelParts({ modelId: displayModel }).modelName
+    : "";
   const emptyAssistantRouteLabel =
     typeof emptyAssistantResponseRouteLabel === "string"
-      ? emptyAssistantResponseRouteLabel.trim() || null
+      ? emptyAssistantResponseRouteLabel.trim()
+        ? formatChatModelLabel({
+            modelId: emptyAssistantResponseRouteLabel.trim(),
+          })
+        : null
       : null;
   const emptyAssistantResponseSummary = emptyAssistantRouteLabel
     ? t("cockpit.emptyAssistantResponseSummaryWithRoute", {
@@ -303,12 +321,12 @@ export const PlaygroundRuntimeInspector = ({
         <dl className="mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs text-text-muted">
           <dt>{t("cockpit.provider", "Provider")}</dt>
           <dd className="break-words text-text">
-            {displayProvider ||
+            {providerName ||
               t("cockpit.noProviderSelected", "No provider selected")}
           </dd>
           <dt>{t("cockpit.model", "Model")}</dt>
           <dd className="break-words font-medium text-text">
-            {displayModel || t("cockpit.noModelSelected", "No model selected")}
+            {modelName || t("cockpit.noModelSelected", "No model selected")}
           </dd>
         </dl>
         {routeLabel && (

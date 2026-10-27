@@ -737,7 +737,7 @@ export const Sidebar = ({ onClose, isOpen }: Props) => {
               event.stopPropagation()
               toggleServerChatPinned(chat.id)
             }}
-            className="rounded p-1 text-text-subtle hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-focus)]"
+            className="rounded p-1 text-text-subtle hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             aria-label={isPinned ? t("common:unpin") : t("common:pin")}
             aria-pressed={isPinned}
           >

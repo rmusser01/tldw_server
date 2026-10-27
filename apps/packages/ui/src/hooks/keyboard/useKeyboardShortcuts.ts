@@ -56,21 +56,62 @@ export const modeNavigationTargets: ModeNavigationTarget[] = [
   { key: "modeCharacters", path: "/characters", description: "Go to Characters" }
 ]
 
+const DIGIT_KEY = /^[0-9]$/
+const LETTER_KEY = /^[a-z]$/
+
+/**
+ * Alt or Meta with a digit (the area shortcuts) may fire while the composer
+ * has focus, as long as the chord types no text there (see `typesText`).
+ */
+const firesInsideEditable = (shortcut: KeyboardShortcut) =>
+  Boolean(shortcut.altKey || shortcut.metaKey) && DIGIT_KEY.test(shortcut.key)
+
+/**
+ * True when an Alt/Option chord produced a character other than its own key.
+ * macOS layouts type with Option: US Option+5 is "∞", German and Swiss
+ * Option+5 is "[", Spanish Option+2 is "@", and Option+W is "∑". In a text
+ * field that is typing, so no shortcut may take it; the physical-key fallback
+ * in `matchesShortcutKey` applies only outside text fields.
+ */
+const typesText = (event: KeyboardEvent, key: string) => {
+  if (!event.altKey || event.ctrlKey || event.metaKey) return false
+  const typed = typeof event.key === "string" ? event.key : ""
+  if (typed === "Dead") return true
+  return [...typed].length === 1 && typed.toLowerCase() !== key.toLowerCase()
+}
+
+/**
+ * Match on the typed key first. macOS Option (and AltGr layouts) change
+ * `event.key` (Option+5 reports "∞"), so Alt chords and digits fall back to the
+ * physical key. Ctrl/Meta+letter stays on the typed letter so Dvorak and other
+ * layouts do not get a second binding on a different physical key.
+ */
+const matchesShortcutKey = (event: KeyboardEvent, key: string) => {
+  const expected = key.toLowerCase()
+  if (typeof event.key === "string" && event.key.toLowerCase() === expected) {
+    return !(DIGIT_KEY.test(expected) && event.code?.startsWith("Numpad"))
+  }
+  const code = typeof event.code === "string" ? event.code : ""
+  if (DIGIT_KEY.test(expected)) return code === `Digit${expected}`
+  if (LETTER_KEY.test(expected) && event.altKey) {
+    return code === `Key${expected.toUpperCase()}`
+  }
+  return false
+}
+
 export const executeKeyboardShortcuts = (
   event: KeyboardEvent,
   shortcuts: KeyboardShortcutConfig[]
 ) => {
+  const activeElement =
+    typeof document === "undefined" ? null : document.activeElement
+  const editable =
+    isEditableTarget(event.target) || isEditableTarget(activeElement)
   shortcuts.forEach(({ shortcut, action, enabled = true, ignoreIfEditable = false }) => {
     if (!enabled) return
-    if (ignoreIfEditable) {
-      const activeElement =
-        typeof document === "undefined" ? null : document.activeElement
-      if (
-        isEditableTarget(event.target) ||
-        isEditableTarget(activeElement)
-      ) {
-        return
-      }
+    if (editable) {
+      if (ignoreIfEditable && !firesInsideEditable(shortcut)) return
+      if (typesText(event, shortcut.key)) return
     }
 
     const {
@@ -83,7 +124,7 @@ export const executeKeyboardShortcuts = (
       stopPropagation = true
     } = shortcut
 
-    const keyMatches = event.key.toLowerCase() === key.toLowerCase()
+    const keyMatches = matchesShortcutKey(event, key)
     const ctrlMatches = event.ctrlKey === ctrlKey
     const altMatches = event.altKey === altKey
     const shiftMatches = event.shiftKey === shiftKey
@@ -246,7 +287,9 @@ export const useSidebarShortcuts = (
       shortcut: configuredShortcuts.toggleSidebar,
       action: toggleSidebarAction,
       enabled,
-      description: 'Toggle sidebar'
+      description: 'Toggle sidebar',
+      // Ctrl/Cmd+B means bold while typing (XP-07).
+      ignoreIfEditable: true
     }
   ]
 
@@ -278,7 +321,9 @@ export const useChatModeShortcuts = (
       shortcut: configuredShortcuts.toggleChatMode,
       action: toggleChatModeAction,
       enabled,
-      description: 'Toggle chat with current page'
+      description: 'Toggle chat with current page',
+      // Ctrl+E is "end of line" in macOS text fields; never hijack it (XS-08).
+      ignoreIfEditable: true
     }
   ]
 

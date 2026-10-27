@@ -2301,6 +2301,36 @@ class MessageStore:
         )
         return "deleted"
 
+    def unsynced_message_is_foreign(self, *, stable_message_id: str, sync_client_id: str, object_hash: str) -> bool:
+        """Return whether a row with the id belongs to other Sync history.
+
+        Read-only twin of the ``"foreign"`` outcome of
+        :meth:`tombstone_unsynced_message_from_sync`, so a device's tombstone of
+        such a row is refused at push time instead of blocking the dataset.
+
+        Args:
+            stable_message_id: The message id the tombstone names.
+            sync_client_id: The owner whose chats are searched.
+            object_hash: The tombstone's payload hash; a row this very tombstone
+                already deleted is not foreign.
+
+        Returns:
+            ``True`` when a row carries Sync history of its own.
+        """
+
+        normalized_stable_id = str(stable_message_id).strip()
+        if not normalized_stable_id:
+            return False
+        for version in self.get_messages_by_sync_stable_id(
+            normalized_stable_id, include_deleted=True, owner_client_id=str(sync_client_id)
+        ):
+            sync_meta = ((version.get("metadata") or {}).get("extra") or {}).get("sync_v2") or {}
+            recorded_hash = sync_meta.get("payload_hash")
+            applied_by_this_tombstone = bool(sync_meta.get("tombstoned")) and recorded_hash == object_hash
+            if recorded_hash and not applied_by_this_tombstone:
+                return True
+        return False
+
     def get_messages_by_sync_stable_id(
         self,
         stable_message_id: str,

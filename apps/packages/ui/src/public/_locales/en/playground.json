@@ -4487,6 +4487,9 @@
   "empty_connectAction": {
     "message": "Connect server"
   },
+  "empty_connectingDescription": {
+    "message": "Connecting to your tldw server. You can start writing your first message below."
+  },
   "composer_advancedCustomization": {
     "message": "Advanced customization"
   },
@@ -4592,8 +4595,125 @@
   "characterRail_pageLabel": {
     "message": "Page"
   },
-  "composer_advancedPreferenceUnavailable": {
-    "message": "Display preference unavailable. Advanced controls still work for this visit."
+  "composer_connectingNotice": {
+    "message": "Connecting to your tldw server…"
+  },
+  "composer_providerStatusConnecting": {
+    "message": "Connecting…"
+  },
+  "composer_connectionPendingSend": {
+    "message": "Still connecting to your tldw server. Your draft has not been sent."
+  },
+  "composer_persistence_serverNotLoadedPill": {
+    "message": "Not loaded"
+  },
+  "composer_persistence_serverNotLoaded": {
+    "message": "This conversation couldn't be loaded. Your messages are safe on the server."
+  },
+  "serverChatLoadFailure_title": {
+    "message": "Couldn't load this conversation."
+  },
+  "serverChatLoadFailure_body": {
+    "message": "Your messages are safe on the server."
+  },
+  "serverChatLoadFailure_retry": {
+    "message": "Retry"
+  },
+  "serverChatLoadFailure_openAnother": {
+    "message": "Open another chat"
+  },
+  "serverChatLoadFailure_details": {
+    "message": "Technical details"
+  },
+  "serverChatLoadFailure_toastBody": {
+    "message": "Your messages are safe on the server. Reopen the chat to try again."
+  },
+  "search_open": {
+    "message": "Search this conversation"
+  },
+  "search_openWithShortcut": {
+    "message": "Search this conversation ({{shortcut}})"
+  },
+  "search_placeholder": {
+    "message": "Search messages in this conversation"
+  },
+  "search_matchCount": {
+    "message": "{{current}} / {{total}}"
+  },
+  "search_noMatches": {
+    "message": "No matches"
+  },
+  "errorRecovery_lengthLiveSummary": {
+    "message": "The model reached its output limit, so this reply may be cut off."
+  },
+  "savedReplyActions_loading": {
+    "message": "This saved chat is still loading. Try again in a moment."
+  },
+  "savedReplyActions_regenerateUnavailable": {
+    "message": "This saved reply can't be regenerated here. Use New Branch to try again from this point."
+  },
+  "composer_scrollToLatestReplyInProgress": {
+    "message": "Reply in progress, scroll to latest messages"
+  },
+  "composer_scrollToLatestNewMessages": {
+    "message": "New messages below, scroll to latest messages"
+  },
+  "composer_replyInProgress": {
+    "message": "Reply in progress"
+  },
+  "composer_modelCatalogSearchPlaceholder": {
+    "message": "Search all models"
+  },
+  "composer_modelScopeLabel": {
+    "message": "Models to show"
+  },
+  "composer_modelScopeReady": {
+    "message": "Ready to use"
+  },
+  "composer_modelScopeAll": {
+    "message": "All models"
+  },
+  "composer_modelNotSetUp": {
+    "message": "Not set up"
+  },
+  "composer_modelNotSetUpTitle": {
+    "message": "This model's provider is not set up on your server yet."
+  },
+  "composer_modelReadiness_notChecked": {
+    "message": "Not checked"
+  },
+  "composer_modelReadiness_notCheckedTitle": {
+    "message": "This model has not answered yet. Send a message to check it."
+  },
+  "composer_modelReadiness_working": {
+    "message": "Working"
+  },
+  "composer_modelReadiness_workingTitle": {
+    "message": "This model answered recently."
+  },
+  "composer_modelReadiness_unreachable": {
+    "message": "Unreachable"
+  },
+  "composer_modelReadiness_unreachableTitle": {
+    "message": "The last request to this model failed. Its provider may not be running. Choose another model."
+  },
+  "composer_modelReadiness_switchTo": {
+    "message": "Switch to {{model}}"
+  },
+  "composer_modelReadiness_switchedTo": {
+    "message": "Switched to {{model}}"
+  },
+  "composer_modelReadiness_providerWorkingTitle": {
+    "message": "Its provider answered recently."
+  },
+  "composer_modelReadiness_providerUnreachableTitle": {
+    "message": "Its provider has been failing. Choose another model."
+  },
+  "composer_modelReadiness_tooltip": {
+    "message": "Model status"
+  },
+  "composer_shortcutHintCommands": {
+    "message": "/ commands"
   },
   "messageViews": {
     "label": "Message view",
