@@ -314,18 +314,30 @@ def _offline_provider_model_inventory(request, monkeypatch):
     Cloud generation now confirms the selected model against the provider's
     live model list first. Most tests fake only the generation transport, so
     that check would reach the network and fail closed. Tests of the check
-    itself mark ``provider_inventory`` and stub discovery. Only modules already
-    imported are patched, so this adds no import cost to unrelated tests.
+    itself mark ``provider_inventory`` and stub discovery.
+
+    Each test starts with empty inventory caches. An unmarked test that still
+    reaches discovery (a lazy import, a listing) hits a fetch that raises
+    instead of the network (review M5).
     """
+    from tldw_Server_API.app.core.LLM_Calls import provider_model_inventory
+
+    provider_model_inventory._CACHE.clear()
+    provider_model_inventory._FAILED.clear()
     if request.node.get_closest_marker("provider_inventory"):
         return
+
+    def live_discovery(**_kwargs):
+        raise AssertionError("unmarked test reached live provider discovery")
+
+    monkeypatch.setattr(provider_model_inventory, "_http_fetch", live_discovery)
     for name in (
         "tldw_Server_API.app.core.Chat.chat_service",
         "tldw_Server_API.app.api.v1.endpoints.messages",
     ):
         module = sys.modules.get(name)
         if module is not None and hasattr(module, "_validate_provider_model_selection"):
-            monkeypatch.setattr(module, "_validate_provider_model_selection", lambda _provider, _request: None)
+            monkeypatch.setattr(module, "_validate_provider_model_selection", lambda _provider, _request, **_kw: None)
 
 
 @pytest.fixture()
