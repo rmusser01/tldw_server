@@ -250,7 +250,10 @@ async def verify_ws_credential(
 async def _verify(
     websocket: WebSocket, headers: list[tuple[bytes, bytes]], required_scope: str | None
 ) -> AuthPrincipal:
-    request = Request({**websocket.scope, "type": "http", "method": "GET", "headers": headers, "state": {}})
+    # A route that enforces a scoped token's own limits itself (audio) says so, as an HTTP route that
+    # depends on require_token_scope does; otherwise HTTP refuses a scoped token here (403 -> 4403).
+    state = {"_token_scope_enforced": True} if getattr(websocket.state, "ws_token_scope_enforced", False) else {}
+    request = Request({**websocket.scope, "type": "http", "method": "GET", "headers": headers, "state": state})
     try:
         principal = await get_auth_principal(request)
     except HTTPException as exc:

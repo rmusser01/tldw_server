@@ -72,10 +72,6 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCredentialRuntime,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import is_multi_user_mode
-from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
-    cookie_websocket_rejection_code,
-    resolve_single_user_cookie_websocket,
-)
 from tldw_Server_API.app.core.Billing.enforcement import (
     LimitCategory,
     billing_checks_active,
@@ -1248,15 +1244,6 @@ async def audio_chat_turn(
 ws_router = APIRouter()
 
 
-async def _preflight_audio_cookie_websocket(websocket: WebSocket) -> bool:
-    await resolve_single_user_cookie_websocket(websocket)
-    close_code = cookie_websocket_rejection_code(websocket)
-    if close_code is None:
-        return True
-    await websocket.close(code=close_code)
-    return False
-
-
 @ws_router.websocket("/stream/transcribe")
 async def websocket_transcribe(
     websocket: WebSocket, token: Optional[str] = Query(None)  # Legacy query-token auth; disabled by default.
@@ -1275,7 +1262,13 @@ async def websocket_transcribe(
         websocket (WebSocket): The active WebSocket connection.
         token (Optional[str]): Legacy API key or JWT query-string token, ignored unless AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     """
-    if not await _preflight_audio_cookie_websocket(websocket):
+    # Authenticated before anything else runs: the socket is accepted only to read an auth frame.
+    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
+        websocket,
+        endpoint_id="audio.stream.transcribe",
+        ws_path="/api/v1/audio/stream/transcribe",
+    )
+    if not auth_ok:
         return
     # Create a lightweight WebSocketStream for uniform metrics on outer error paths
     _outer_stream = None
@@ -1355,15 +1348,6 @@ async def websocket_transcribe(
         flag = str(_os.getenv("AUDIO_WS_QUOTA_CLOSE_1008", "0")).strip().lower()
         return 1008 if is_truthy(flag) else 4003
 
-    # Authenticate (shared helper; parity with other audio WS endpoints)
-    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
-        websocket,
-        _outer_stream,
-        endpoint_id="audio.stream.transcribe",
-        ws_path="/api/v1/audio/stream/transcribe",
-    )
-    if not auth_ok:
-        return
     if not await _guard_audio_ws_work_start(
         websocket,
         kind="audio.stream.transcribe",
@@ -1961,9 +1945,14 @@ async def websocket_audio_chat_stream(
       - Single-user: API key via header or an initial auth message; optional IP allowlist.
       - Legacy `token` query-string auth is accepted only when AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     """
-    if not await _preflight_audio_cookie_websocket(websocket):
+    # Authenticated before anything else runs: the socket is accepted only to read an auth frame.
+    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
+        websocket,
+        endpoint_id="audio.chat.stream",
+        ws_path="/api/v1/audio/chat/stream",
+    )
+    if not auth_ok:
         return
-    await websocket.accept()
 
     try:
         _raw_idle = os.getenv("AUDIO_WS_IDLE_TIMEOUT_S") or os.getenv("STREAM_IDLE_TIMEOUT_S")
@@ -2019,15 +2008,6 @@ async def websocket_audio_chat_stream(
         flag = str(os.getenv("AUDIO_WS_QUOTA_CLOSE_1008", "0")).strip().lower()
         return 1008 if is_truthy(flag) else 4003
 
-    # Authenticate (parity with STT/WS TTS)
-    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
-        websocket,
-        _outer_stream,
-        endpoint_id="audio.chat.stream",
-        ws_path="/api/v1/audio/chat/stream",
-    )
-    if not auth_ok:
-        return
     if not await _guard_audio_ws_work_start(
         websocket,
         kind="audio.chat.stream",
@@ -3724,9 +3704,14 @@ async def websocket_tts(
     - Single-user: fixed API key via header or initial auth message; optional IP allowlist.
     - Legacy `token` query-string auth is accepted only when AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     """
-    if not await _preflight_audio_cookie_websocket(websocket):
+    # Authenticated before anything else runs: the socket is accepted only to read an auth frame.
+    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
+        websocket,
+        endpoint_id="audio.stream.tts",
+        ws_path="/api/v1/audio/stream/tts",
+    )
+    if not auth_ok:
         return
-    await websocket.accept()
 
     try:
         _raw_idle = os.getenv("AUDIO_WS_IDLE_TIMEOUT_S") or os.getenv("STREAM_IDLE_TIMEOUT_S")
@@ -3774,15 +3759,6 @@ async def websocket_tts(
         flag = str(os.getenv("AUDIO_WS_QUOTA_CLOSE_1008", "0")).strip().lower()
         return 1008 if is_truthy(flag) else 4003
 
-    # Authenticate (parity with STT WS)
-    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
-        websocket,
-        _outer_stream,
-        endpoint_id="audio.stream.tts",
-        ws_path="/api/v1/audio/stream/tts",
-    )
-    if not auth_ok:
-        return
     if not await _guard_audio_ws_work_start(
         websocket,
         kind="audio.stream.tts",
@@ -3986,9 +3962,14 @@ async def websocket_tts_realtime(
       - JSON status/warning/error frames
       - Binary audio frames for synthesized audio
     """
-    if not await _preflight_audio_cookie_websocket(websocket):
+    # Authenticated before anything else runs: the socket is accepted only to read an auth frame.
+    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
+        websocket,
+        endpoint_id="audio.stream.tts.realtime",
+        ws_path="/api/v1/audio/stream/tts/realtime",
+    )
+    if not auth_ok:
         return
-    await websocket.accept()
 
     try:
         _raw_idle = os.getenv("AUDIO_WS_IDLE_TIMEOUT_S") or os.getenv("STREAM_IDLE_TIMEOUT_S")
@@ -4079,14 +4060,6 @@ async def websocket_tts_realtime(
         with contextlib.suppress(_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS):
             await websocket.close(code=close_code)
 
-    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
-        websocket,
-        _outer_stream,
-        endpoint_id="audio.stream.tts.realtime",
-        ws_path="/api/v1/audio/stream/tts/realtime",
-    )
-    if not auth_ok:
-        return
     if not await _guard_audio_ws_work_start(
         websocket,
         kind="audio.stream.tts.realtime",

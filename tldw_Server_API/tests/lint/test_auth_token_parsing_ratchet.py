@@ -28,8 +28,10 @@ a module that cannot migrate yet. Seed or re-count with:
     python tldw_Server_API/tests/lint/test_auth_token_parsing_ratchet.py
 
 Also pinned: the modules that may use ``resolve_ws_principal_or_deprecated_query``, the core shim
-that still reads ``?token=`` / ``?api_key=`` for shipped clients. It is public, so a new route could
-adopt it and bring query credentials back; TASK-13950.61 moves those clients and deletes it.
+that still reads ``?token=`` / ``?api_key=`` for shipped clients (a first-frame route passes it to
+``resolve_ws_principal_first_frame`` as its ``tokenless_frame`` fallback, which counts). It is public,
+so a new route could adopt it and bring query credentials back; TASK-13950.61 moves those clients
+and deletes it.
 """
 
 from __future__ import annotations
@@ -197,7 +199,13 @@ QUERY_SHIM_CALLERS = frozenset(
         # persona-stream.ts falls back to ?token= / ?api_key= for a credential that is not
         # subprotocol-safe (TASK-13950.61 moves it).
         "tldw_Server_API/app/api/v1/endpoints/persona.py",
+        # The voice SDKs (sdks/python, sdks/typescript) send ?token= beside the auth frame; it is read
+        # only for a frame without a token (TASK-13950.61 moves them).
+        "tldw_Server_API/app/api/v1/endpoints/voice_assistant.py",
         "tldw_Server_API/app/api/v1/endpoints/watchlists.py",
+        # The audio streams read ?token= only with AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH set, the opt-in that
+        # Helper_Scripts/streaming_unified_smoke.py needs (TASK-13950.61 moves it to the auth frame).
+        "tldw_Server_API/app/core/Audio/streaming_service.py",
     }
 )
 
