@@ -1025,6 +1025,19 @@ describe("standalone presentation client contracts", () => {
     }
   })
 
+  it("forwards the structured export cancellation signal", async () => {
+    const client = createCore(async () => responseEnvelope(new Uint8Array([1, 2, 3])))
+    const controller = new AbortController()
+    await presentationsMethods.exportPresentation.call(client, "structured-1", "json", {
+      abortSignal: controller.signal
+    })
+    expect(client.request).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/slides/presentations/structured-1/export?format=json",
+      method: "GET",
+      abortSignal: controller.signal
+    }))
+  })
+
   it("saves validated standalone source as an exact raw string and adopts only the response ETag", async () => {
     const source = "<!doctype html>\n<title>Café 😀</title>"
     const client = createCore(async () =>

@@ -1139,13 +1139,15 @@ export const presentationsMethods = {
   async exportPresentation(
     this: TldwApiClientCore,
     presentationId: string,
-    format: "revealjs" | "markdown" | "json" | "pdf"
+    format: "revealjs" | "markdown" | "json" | "pdf",
+    options?: { abortSignal?: AbortSignal }
   ): Promise<Blob> {
     await this.ensureConfigForRequest(true)
 
     const response = await this.request<any>({
       path: `/api/v1/slides/presentations/${encodeURIComponent(presentationId)}/export?format=${encodeURIComponent(format)}`,
       method: "GET",
+      abortSignal: options?.abortSignal,
       headers: presentationNegotiationHeaders(),
       responseType: "arrayBuffer",
       returnResponse: true

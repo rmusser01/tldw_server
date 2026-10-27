@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { PresentationStudioPage } from "../PresentationStudioPage"
@@ -18,6 +18,7 @@ const routerMocks = vi.hoisted(() => ({
 }))
 
 const clientMocks = vi.hoisted(() => ({
+  exportPresentation: vi.fn(),
   createPresentation: vi.fn(),
   patchPresentation: vi.fn(),
   getPresentationMetadata: vi.fn(),
@@ -28,6 +29,9 @@ const clientMocks = vi.hoisted(() => ({
   patchVisualStyle: vi.fn(),
   deleteVisualStyle: vi.fn()
 }))
+
+const downloadMock = vi.hoisted(() => vi.fn())
+vi.mock("@/utils/download-blob", () => ({ downloadBlob: downloadMock }))
 
 const standaloneWorkspaceMocks = vi.hoisted(() => ({
   rendered: vi.fn(),
@@ -58,6 +62,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   clonePresentationVisualStyleSnapshot: (style: Record<string, unknown> | null | undefined) =>
     style ? { ...style } : null,
   tldwClient: {
+    exportPresentation: (...args: unknown[]) => clientMocks.exportPresentation(...args),
     createPresentation: (...args: unknown[]) => clientMocks.createPresentation(...args),
     patchPresentation: (...args: unknown[]) => clientMocks.patchPresentation(...args),
     getPresentationMetadata: (...args: unknown[]) => clientMocks.getPresentationMetadata(...args),
@@ -174,6 +179,8 @@ describe("PresentationStudioPage", () => {
   beforeEach(() => {
     usePresentationStudioStore.getState().reset()
     routerMocks.navigate.mockReset()
+    clientMocks.exportPresentation.mockReset()
+    downloadMock.mockReset()
     clientMocks.createPresentation.mockReset()
     clientMocks.patchPresentation.mockReset()
     clientMocks.getPresentationMetadata.mockReset()
@@ -233,6 +240,33 @@ describe("PresentationStudioPage", () => {
       content_kinds: { standalone_html: { read: true } },
       generation_modes: { standalone_html: { enabled: true } }
     })
+  })
+
+  it("exports a reopened saved deck without a workspace output card", async () => {
+    const record = structuredRecord("presentation-export", "Saved deck")
+    clientMocks.getPresentation.mockResolvedValue({ record, etag: 'W/"v1"' })
+    render(<PresentationStudioPage mode="detail" projectId={record.id} />)
+    await screen.findByLabelText("Slide title")
+
+    expect(screen.getByRole("button", { name: "Export saved presentation" })).toBeEnabled()
+  })
+
+  it("releases a pending export when account authority changes", async () => {
+    const record = structuredRecord("presentation-export-authority", "Saved deck")
+    clientMocks.getPresentation.mockResolvedValue({ record, etag: 'W/"v1"' })
+    let resolve!: (blob: Blob) => void
+    clientMocks.exportPresentation.mockReturnValueOnce(new Promise(done => { resolve = done }))
+    render(<PresentationStudioPage mode="detail" projectId={record.id} />)
+    await screen.findByLabelText("Slide title")
+    fireEvent.click(screen.getByRole("button", { name: "Export saved presentation" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "JSON" }))
+    const signal = clientMocks.exportPresentation.mock.calls[0][2].abortSignal
+    clientMocks.getPresentationMetadata.mockReturnValue(new Promise(() => {}))
+
+    act(() => window.dispatchEvent(new Event("tldw:auth-principal-changed")))
+    expect(signal.aborted).toBe(true)
+    await act(async () => resolve(new Blob(["previous account export"])))
+    expect(downloadMock).not.toHaveBeenCalled()
   })
 
   it("keeps input focus inside the editor and autosaves the real draft", async () => {
