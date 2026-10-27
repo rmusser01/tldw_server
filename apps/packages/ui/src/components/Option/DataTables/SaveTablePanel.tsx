@@ -43,8 +43,7 @@ export const SaveTablePanel: React.FC = () => {
 
     const name = tableName.trim() || "Untitled Table"
     const description = tableDescription.trim() || undefined
-    const fallbackId = `local-${Date.now()}`
-    const tableId = generatedTable.id ? String(generatedTable.id) : fallbackId
+    const tableId = generatedTable.id
     const serverId =
       typeof generatedTable.id === "string" &&
       generatedTable.id &&
@@ -56,24 +55,30 @@ export const SaveTablePanel: React.FC = () => {
     setIsSaving(true)
 
     try {
-      // If table has an ID, update it; otherwise the server should have assigned one
-      if (serverId) {
-        await tldwClient.updateDataTable(serverId, {
-          name,
-          description
-        })
+      if (!serverId) {
+        throw new Error(
+          t(
+            "dataTables:saveRequiresGeneratedTable",
+            "Generate a table before saving to the library. You can still export this preview."
+          )
+        )
       }
+      const savedTable = await tldwClient.saveDataTableContent(serverId, {
+        columns: generatedTable.columns,
+        rows: generatedTable.rows
+      })
+      await tldwClient.updateDataTable(serverId, { name, description })
 
-      // Add to local store
+      // Publish the library entry only after both server writes succeed.
       addTable({
         id: tableId,
         name,
         description,
-        row_count: generatedTable.row_count || generatedTable.rows?.length || 0,
-        column_count: generatedTable.columns?.length || 0,
-        created_at: generatedTable.created_at || new Date().toISOString(),
+        row_count: savedTable.row_count,
+        column_count: savedTable.columns.length,
+        created_at: savedTable.created_at,
         updated_at: new Date().toISOString(),
-        source_count: generatedTable.sources?.length || 0
+        source_count: savedTable.sources.length
       })
 
       await queryClient.invalidateQueries({ queryKey: ["dataTables"] })
