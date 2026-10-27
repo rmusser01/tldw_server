@@ -22,6 +22,7 @@ Filed from the TASK-13878/13879/13880/13885 PR (plan Docs/superpowers/plans/2026
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 From TASK-13936 (2026-10-26): fixing the adapter's stream usage does not change /chat/completions, whose streamed replies chat_service records from an estimate; that is TASK-13951.
+From TASK-13951 (2026-10-26): /chat/completions now reads a streamed reply's usage with the provider-level recorder's own parser (usage_accounting._StreamUsage.feed_event, which StreamingResponseHandler calls for each parsed payload) and counts its tokens with _usage_tokens. So fixing the Anthropic adapter's stream usage reaches both recorders at once, whether the adapter puts a top-level usage on its OpenAI-shaped chunks or feed_event learns to read provider_response. Mind the merge: feed_event merges a later usage block over an earlier one only when type == 'message_delta'; an OpenAI-shaped chunk has no type, so emit one block per stream (message_start's usage with message_delta's merged over it) or keep the type. Emit it as choices: [] so the /chat/completions forwarding guard applies. The selected provider 'anthropic' sends an Anthropic-shaped block through the normalizer's Anthropic branch, and _usage_tokens adds its cache tokens to the prompt (ADR-075). Add an Anthropic case to test_a_streamed_reply_is_recorded_from_the_usage_chunk_its_provider_sends (tests/Chat/unit/test_chat_service_streaming_tool_autoexec.py, fixture stream_usage_rows).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

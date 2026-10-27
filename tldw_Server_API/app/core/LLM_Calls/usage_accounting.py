@@ -136,31 +136,38 @@ class _StreamUsage:
                     data = json.loads(payload)
                 except ValueError:
                     continue
-                if not isinstance(data, dict):
-                    continue
-                usage = usage_with_service_tier(data)  # an OpenAI chunk names its service tier beside the usage
-                event = data.get("type")
-                if event == "message_start":  # Anthropic Messages: input tokens arrive here, output in message_delta
-                    message = data.get("message")
-                    usage = message.get("usage") if isinstance(message, dict) else None
-                if isinstance(usage, dict):
-                    usage = {key: value for key, value in usage.items() if value is not None}  # null never erases a count
-                    if usage:
-                        self.usage = {**(self.usage or {}), **usage} if event == "message_delta" else usage
-                for choice in data.get("choices") or []:
-                    delta = choice.get("delta") if isinstance(choice, dict) else None
-                    if not isinstance(delta, dict):
-                        continue
-                    for text_field in (delta.get("content"), delta.get("reasoning_content")):
-                        if isinstance(text_field, str):
-                            self.chars += len(text_field)
-                    tool_calls = delta.get("tool_calls")
-                    for tool_call in tool_calls if isinstance(tool_calls, list) else []:
-                        function = tool_call.get("function") if isinstance(tool_call, dict) else None
-                        arguments = function.get("arguments") if isinstance(function, dict) else None
-                        if isinstance(arguments, str):
-                            self.chars += len(arguments)
+                self.feed_event(data)
         except Exception:  # noqa: BLE001 - a malformed chunk must never fail a stream
+            return
+
+    def feed_event(self, data: Any) -> None:
+        """Read one parsed SSE payload; never raises. The chat stream handler calls it with the payloads it parses."""
+        try:
+            if not isinstance(data, dict):
+                return
+            usage = usage_with_service_tier(data)  # an OpenAI chunk names its service tier beside the usage
+            event = data.get("type")
+            if event == "message_start":  # Anthropic Messages: input tokens arrive here, output in message_delta
+                message = data.get("message")
+                usage = message.get("usage") if isinstance(message, dict) else None
+            if isinstance(usage, dict):
+                usage = {key: value for key, value in usage.items() if value is not None}  # null never erases a count
+                if usage:
+                    self.usage = {**(self.usage or {}), **usage} if event == "message_delta" else usage
+            for choice in data.get("choices") or []:
+                delta = choice.get("delta") if isinstance(choice, dict) else None
+                if not isinstance(delta, dict):
+                    continue
+                for text_field in (delta.get("content"), delta.get("reasoning_content")):
+                    if isinstance(text_field, str):
+                        self.chars += len(text_field)
+                tool_calls = delta.get("tool_calls")
+                for tool_call in tool_calls if isinstance(tool_calls, list) else []:
+                    function = tool_call.get("function") if isinstance(tool_call, dict) else None
+                    arguments = function.get("arguments") if isinstance(function, dict) else None
+                    if isinstance(arguments, str):
+                        self.chars += len(arguments)
+        except Exception:  # noqa: BLE001 - a malformed payload must never fail a stream
             return
 
 
