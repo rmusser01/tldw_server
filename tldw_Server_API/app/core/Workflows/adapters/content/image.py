@@ -21,7 +21,7 @@ except ImportError:
     async def perform_chat_api_call_async(*args: Any, **kwargs: Any) -> dict[str, Any]:
         raise ImportError("chat_service_unavailable")
 
-from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
+from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Workflows.adapters._common import (

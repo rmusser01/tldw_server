@@ -71,7 +71,7 @@ async def run_notify_adapter(config: dict[str, Any], context: dict[str, Any]) ->
 
     Output: { dispatched: bool, status_code?, provider?: 'slack'|'webhook' }
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     msg_t = str(config.get("message") or "").strip()
     message = _tmpl(msg_t, context) or msg_t
@@ -151,7 +151,7 @@ async def run_webhook_adapter(config: dict[str, Any], context: dict[str, Any]) -
     """
     def _render_value(v: Any) -> Any:
         """Render strings via prompt templating; recurse into lists/dicts."""
-        from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+        from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
         if isinstance(v, str):
             try:
                 return _tmpl(v, context)
