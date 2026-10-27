@@ -1391,6 +1391,36 @@ def test_backend_required_enforces_isolation_ratchets():
         assert suite in gate["run"]  # nosec B101 - regression assertion
 
 
+# TASK-13950.10: packages/ui has no lint of its own, so these frontend-required steps are
+# the only thing enforcing its lint, boundary, size and import-cycle ratchets.
+SHARED_UI_RATCHETS = {
+    "Run shared UI lint and hook enforcement": "node scripts/check-shared-hooks.mjs",
+    "Run shared UI import-cycle ratchet": "bun scripts/check-ui-import-cycles.mjs",
+}
+
+
+def _step_commands(run: str) -> list[str]:
+    """The lines a step's shell runs: blank lines and comments do not count."""
+    lines = (line.strip() for line in run.splitlines())
+    return [line for line in lines if line and not line.startswith("#")]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("name", "command"), SHARED_UI_RATCHETS.items())
+def test_frontend_required_runs_the_shared_ui_ratchets(name: str, command: str) -> None:
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/frontend-required.yml").read_text())
+    steps = workflow["jobs"]["frontend-required"]["steps"]
+    names = [step.get("name") for step in steps]
+    assert names.count(name) == 1, f"frontend-required must run {name!r}"  # nosec B101 - regression assertion
+    step = steps[names.index(name)]
+    lint = steps[names.index("Run frontend lint")]
+    assert _step_commands(step["run"]) == [command]  # nosec B101 - regression assertion
+    assert step["working-directory"] == "apps/tldw-frontend"  # nosec B101 - regression assertion
+    assert step["if"] == lint["if"], "runs whenever the WebUI lint does"  # nosec B101 - regression assertion
+    assert not step.get("continue-on-error", False)  # nosec B101 - regression assertion
+    assert names.index("Install frontend dependencies") < names.index(name)  # nosec B101 - regression assertion
+
+
 def _without_await_license(
     workflows: dict[str, tuple[dict[str, Any], str]], *, drop_job: bool
 ) -> dict[str, tuple[dict[str, Any], str]]:

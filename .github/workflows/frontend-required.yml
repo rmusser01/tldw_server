@@ -808,10 +808,21 @@ jobs:
         working-directory: apps/tldw-frontend
         run: bun run typecheck --incremental false
 
-      - name: Run shared UI hook enforcement
+      # Full ESLint rule set on packages/ui (which has no eslint of its own) plus the three
+      # hook rules; pre-existing errors are frozen in eslint-suppressions.packages-ui.json.
+      # This step and the import-cycle ratchet below are TASK-13950.10's; backend-required's
+      # test_license_first_workflow_contracts.py fails if either stops running.
+      # node, not bun: ESLint's parallel lint workers need worker_threads SHARE_ENV (about
+      # 4x faster here), which Bun lacks.
+      - name: Run shared UI lint and hook enforcement
         if: needs.changes.outputs.tldw_frontend_changed == 'true'
         working-directory: apps/tldw-frontend
-        run: bun scripts/check-shared-hooks.mjs
+        run: node scripts/check-shared-hooks.mjs
+
+      - name: Run shared UI import-cycle ratchet
+        if: needs.changes.outputs.tldw_frontend_changed == 'true'
+        working-directory: apps/tldw-frontend
+        run: bun scripts/check-ui-import-cycles.mjs
 
       - name: Run strict shared-boundary typecheck
         if: needs.changes.outputs.tldw_frontend_changed == 'true'
