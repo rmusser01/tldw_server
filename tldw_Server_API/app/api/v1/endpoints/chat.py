@@ -71,6 +71,7 @@ from tldw_Server_API.app.core.Utils.image_validation import (
     get_max_base64_bytes,
     validate_image_url,
 )
+from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 
 # Import new modules for integration
 
@@ -6745,9 +6746,11 @@ def _replace_conversation_keywords(
         )
         return
     existing = db.get_keywords_for_conversation(conversation_id)
-    existing_map = {str(k.get("keyword") or "").strip().lower(): int(k.get("id")) for k in existing if k.get("id")}
-    target = {str(k).strip() for k in keywords if k is not None and str(k).strip()}
-    target_map = {t.lower(): t for t in target}
+    existing_map = {normalize_keyword_identity(str(k.get("keyword") or "")): int(k["id"]) for k in existing if k.get("id")}
+    target_map: dict[str, str] = {}
+    for keyword in keywords:
+        if keyword is not None and str(keyword).strip():
+            target_map.setdefault(normalize_keyword_identity(str(keyword)), str(keyword).strip())
 
     for key, kw_id in existing_map.items():
         if key not in target_map:

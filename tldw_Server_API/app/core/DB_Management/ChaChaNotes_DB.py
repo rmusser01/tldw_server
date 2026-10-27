@@ -35181,6 +35181,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             version_value = 1
             deleted_value = 0
 
+        unique_match_sql = self._unique_text_match_sql(table_name, unique_col_name)
         table_name = self._map_table_for_backend(table_name)
         insert_cols_sql = ', '.join(cols_str_list_insert)
         insert_placeholders_sql = ', '.join(placeholders_str_list_insert)
@@ -35199,7 +35200,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             with self.transaction() as conn:
                 # Check if a soft-deleted item exists and undelete it
                 undelete_cursor = conn.execute(
-                    f"SELECT id, version FROM {table_name} WHERE {unique_col_name} = ? AND deleted = 1{owner_clause}",  # nosec B608
+                    f"SELECT id, version FROM {table_name} WHERE {unique_match_sql} AND deleted = 1{owner_clause}",  # nosec B608
                     (main_col_value,) + owner_params)
                 existing_deleted = undelete_cursor.fetchone()
                 if existing_deleted:
@@ -35235,7 +35236,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 item_id_insert = cursor_insert.lastrowid if hasattr(cursor_insert, 'lastrowid') else None
                 if item_id_insert is None and self.backend_type == BackendType.POSTGRESQL:
                     sel = conn.execute(
-                        f"SELECT id FROM {table_name} WHERE {unique_col_name} = ?{owner_clause}",  # nosec B608
+                        f"SELECT id FROM {table_name} WHERE {unique_match_sql}{owner_clause}",  # nosec B608
                         (main_col_value,) + owner_params
                     )
                     row = sel.fetchone()
@@ -35297,9 +35298,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         Raises:
             CharactersRAGDBError: For database errors.
         """
+        unique_match_sql = self._unique_text_match_sql(table_name, unique_col_name)
         table_name = self._map_table_for_backend(table_name)
         owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
-        query = f"SELECT * FROM {table_name} WHERE {unique_col_name} = ? AND deleted = 0{owner_clause}"  # nosec B608
+        query = f"SELECT * FROM {table_name} WHERE {unique_match_sql} AND deleted = 0{owner_clause}"  # nosec B608
         try:
             cursor = self.execute_query(query, (value,) + owner_params)
             row = cursor.fetchone()
@@ -35307,6 +35309,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except CharactersRAGDBError as e:
             logger.error(f"Database error fetching {table_name} by {unique_col_name} '{value}': {e}")
             raise
+
+    def _unique_text_match_sql(self, table_name: str, column: str) -> str:
+        """Return the equality predicate for a unique text column.
+
+        Keywords and keyword collections are case-insensitive (TASK-13950.5). SQLite
+        gets that from the columns' ``COLLATE NOCASE``; PostgreSQL strips NOCASE and
+        indexes ``LOWER(keyword)``/``LOWER(name)`` instead, so it compares ``LOWER`` too.
+        """
+        if table_name in {"keywords", "keyword_collections"} and self.backend_type == BackendType.POSTGRESQL:
+            return f"LOWER({column}) = LOWER(?)"
+        return f"{column} = ?"
 
     def _case_insensitive_order_expression(self, column: str, direction: str | None = None) -> str:
         column_clean = (column or '').strip()
@@ -38842,7 +38855,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             join_tag = f"JOIN flashcard_keywords fk ON fk.card_id = f.id JOIN {keyword_table} kw ON kw.id = fk.keyword_id"
             if self.backend_type == BackendType.POSTGRESQL:
                 join_tag += " AND kw.client_id = f.client_id"
-            where_clauses.append("kw.keyword = ?")
+            where_clauses.append(self._unique_text_match_sql("keywords", "kw.keyword"))
             params.append(tag)
 
         # FTS filter
@@ -38935,7 +38948,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             join_tag = f"JOIN flashcard_keywords fk ON fk.card_id = f.id JOIN {keyword_table} kw ON kw.id = fk.keyword_id"
             if self.backend_type == BackendType.POSTGRESQL:
                 join_tag += " AND kw.client_id = f.client_id"
-            where_clauses.append("kw.keyword = ?")
+            where_clauses.append(self._unique_text_match_sql("keywords", "kw.keyword"))
             params.append(tag)
 
         fts_filter = ""
@@ -39777,11 +39790,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if scope_tag:
                     tag_owner_filter, tag_owner_params = self._flashcard_owner_filter("kw")
                     keyword_table = self._map_table_for_backend("keywords")
+                    tag_match_sql = self._unique_text_match_sql("keywords", "kw.keyword")
                     matching_tag = conn.execute(
                         f"""
                         SELECT 1 FROM flashcard_keywords fk
                         JOIN {keyword_table} kw ON kw.id = fk.keyword_id
-                        WHERE fk.card_id = ? AND kw.keyword = ?{tag_owner_filter}
+                        WHERE fk.card_id = ? AND {tag_match_sql}{tag_owner_filter}
                         """,  # nosec B608 -- keyword table comes from the backend mapping
                         (card_id, scope_tag, *tag_owner_params),
                     ).fetchone()

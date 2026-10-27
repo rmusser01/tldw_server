@@ -261,7 +261,7 @@ async def test_flashcards_crud_and_export(monkeypatch, tmp_path):
     assert reviewed["review_result"]["rating"] == 3  # nosec B101
 
     tags = await mod.execute_tool("flashcards.tags.set", {"card_uuid": card_uuid, "tags": ["Tag1"]}, context=ctx)
-    assert tags["tags"] == ["tag1"]  # nosec B101
+    assert tags["tags"] == ["Tag1"]  # nosec B101 - display casing is kept (TASK-13950.5).
 
     listed = await mod.execute_tool("flashcards.list", {}, context=ctx)
     assert listed["total"] == 1  # nosec B101

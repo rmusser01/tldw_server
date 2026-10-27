@@ -1489,6 +1489,16 @@ def test_frontend_required_runs_the_shared_ui_ratchets(name: str, command: str) 
     assert names.index("Install frontend dependencies") < names.index(name)  # nosec B101 - regression assertion
 
 
+def test_backend_required_enforces_code_ratchets():
+    """This file runs in the same step, so dropping a ratchet from it fails the gate itself."""
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    steps = workflow["jobs"]["backend-required"]["steps"]
+    gate = next(step for step in steps if step.get("name") == "Enforce CI contracts and code ratchets")
+    assert not gate.get("continue-on-error", False)  # nosec B101 - regression assertion
+    assert "tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py" in gate["run"]  # nosec B101
+    assert "tldw_Server_API/tests/lint/test_keyword_identity_ratchet.py" in gate["run"]  # nosec B101
+
+
 def _without_await_license(
     workflows: dict[str, tuple[dict[str, Any], str]], *, drop_job: bool
 ) -> dict[str, tuple[dict[str, Any], str]]:

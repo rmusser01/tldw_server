@@ -296,6 +296,7 @@ jobs:
             tldw_Server_API/tests/lint/test_first_party_source_pinning.py \
             tldw_Server_API/tests/lint/test_production_detector_single_source.py \
             tldw_Server_API/tests/lint/test_test_seam_env_reads_guarded.py \
+            tldw_Server_API/tests/lint/test_keyword_identity_ratchet.py \
             tldw_Server_API/tests/CI/test_backlog_task_format_ratchet.py \
             tools/backlog-py/tests \
             tldw_Server_API/tests/Services/test_startup_test_runtime_guard.py \

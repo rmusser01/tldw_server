@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.Sync.v2.notes_organization import (
     new_organization_sync_id,
     validate_resource_sync_id,
 )
+from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -47,8 +48,8 @@ class KeywordStore:
         """
         Adds a new keyword or undeletes an existing soft-deleted one.
 
-        Keyword text is stripped of leading/trailing whitespace.
-        Uniqueness is case-insensitive due to `COLLATE NOCASE` on the `keyword` column (schema).
+        Keyword text is stripped of leading/trailing whitespace and stored with its display casing.
+        Uniqueness follows ``normalize_keyword_identity`` (NFC plus casefold) on every backend.
         FTS and sync_log entries are handled by SQL triggers.
 
         Args:
@@ -64,6 +65,12 @@ class KeywordStore:
         """
         if not keyword_text or not keyword_text.strip():
             raise InputError("Keyword text cannot be empty.")  # noqa: TRY003
+        if self.get_keyword_by_text(keyword_text) is not None:
+            raise ConflictError(  # noqa: TRY003
+                f"keywords '{keyword_text.strip()}' already exists and is active.",
+                entity="keywords",
+                entity_id=keyword_text.strip(),
+            )
         return self._db._add_generic_item(
             "keywords",
             "keyword",
@@ -137,8 +144,7 @@ class KeywordStore:
 
     def get_keyword_by_text(self, keyword_text: str) -> dict[str, Any] | None:
         """
-        Retrieves a keyword by its text (case-insensitive due to schema).
-        Returns active (non-deleted) keywords only.
+        Retrieves an active keyword whose ``normalize_keyword_identity`` matches ``keyword_text``.
 
         Args:
             keyword_text: The text of the keyword (stripped before query).
@@ -146,7 +152,24 @@ class KeywordStore:
         Returns:
             Keyword data as a dictionary, or None if not found/deleted.
         """
-        return self._db._get_generic_item_by_unique_text("keywords", "keyword", keyword_text.strip(), owner_client_id=self._db.client_id)
+        text = keyword_text.strip()
+        row = self._db._get_generic_item_by_unique_text("keywords", "keyword", text, owner_client_id=self._db.client_id)
+        if row is not None:
+            return row
+        # SQLite NOCASE folds ASCII only and Postgres LOWER() misses folds such as ß/SS and
+        # NFC forms, so a SQL miss compares helper identities over the owner's keywords.
+        # ponytail: O(keywords) scan per miss; add a stored identity column if that gets slow.
+        table = self._db._map_table_for_backend("keywords")
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
+        identity = normalize_keyword_identity(text)
+        cursor = self._db.execute_query(
+            f"SELECT * FROM {table} WHERE deleted = {self._deleted_literal(False)}{owner_clause} ORDER BY id",  # nosec B608
+            owner_params,
+        )
+        return next(
+            (dict(row) for row in cursor.fetchall() if normalize_keyword_identity(row["keyword"]) == identity),
+            None,
+        )
 
     def list_keywords(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
         """
@@ -235,7 +258,7 @@ class KeywordStore:
                     )
 
                 duplicate = conn.execute(
-                    f"SELECT id FROM {keyword_table} WHERE deleted = {self._deleted_literal(False)} AND keyword = ? AND id <> ?{owner_clause} LIMIT 1",  # nosec B608
+                    f"SELECT id FROM {keyword_table} WHERE deleted = {self._deleted_literal(False)} AND {self._db._unique_text_match_sql('keywords', 'keyword')} AND id <> ?{owner_clause} LIMIT 1",  # nosec B608
                     (normalized_text, keyword_id) + owner_params,
                 ).fetchone()
                 if duplicate:
@@ -766,6 +789,12 @@ class KeywordStore:
         """
         if not name or not name.strip():
             raise InputError("Collection name cannot be empty.")  # noqa: TRY003
+        if self.get_keyword_collection_by_name(name) is not None:
+            raise ConflictError(  # noqa: TRY003
+                f"keyword_collections '{name.strip()}' already exists and is active.",
+                entity="keyword_collections",
+                entity_id=name.strip(),
+            )
         with self._db.transaction() as conn:
             self._db._require_selected_owner_row(conn, "keyword_collections", parent_id, self._db.client_id)
             return self._db._add_generic_item(
