@@ -83,3 +83,12 @@ def test_prompt_loader_lives_in_context_integrity_with_no_utils_shim() -> None:
     assert callable(prompt_loader.load_prompt)
     with pytest.raises(ModuleNotFoundError):
         importlib.import_module("tldw_Server_API.app.core.Utils.prompt_loader")
+
+
+def test_utils_no_longer_owns_db_code() -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.runtime import safe_metadata_write_ops
+    from tldw_Server_API.app.core.Utils import Utils, metadata_utils
+
+    assert callable(safe_metadata_write_ops.update_version_safe_metadata_in_transaction)
+    assert not hasattr(metadata_utils, "update_version_safe_metadata_in_transaction")
+    assert not hasattr(Utils, "get_db_config")
