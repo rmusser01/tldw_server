@@ -19,7 +19,7 @@ def test_websocket_disconnects_decrement_connection_count(
 
     # Open a base WebSocket connection and ensure the count increases
     headers = {"X-API-KEY": os.environ["SINGLE_USER_TEST_API_KEY"]}
-    with client.websocket_connect("/api/v1/prompt-studio/ws", headers=headers) as websocket:
+    with client.websocket_connect("/api/v1/prompt-studio/ws", headers=headers):
         during = mgr.get_connection_count()
         assert during >= before + 1
 

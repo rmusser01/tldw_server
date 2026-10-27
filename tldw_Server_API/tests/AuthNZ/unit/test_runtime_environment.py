@@ -183,7 +183,7 @@ def _answers(env: pytest.MonkeyPatch) -> dict[str, bool]:
 
 
 def _all(value: bool) -> dict[str, bool]:
-    return {name: value for name in (*CALLERS, *OUTSIDE_TEST_CALLERS)}
+    return dict.fromkeys((*CALLERS, *OUTSIDE_TEST_CALLERS), value)
 
 
 def test_key_set_is_the_documented_one() -> None:
