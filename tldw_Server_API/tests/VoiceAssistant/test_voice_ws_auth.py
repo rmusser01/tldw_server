@@ -109,3 +109,14 @@ async def test_a_tokenless_frame_falls_back_to_the_deprecated_query_token(monkey
 
     assert await voice_assistant._authenticate_websocket(_socket({"type": "auth"}, query=b"token=q.r.s")) == 7
     assert seen == ["Bearer q.r.s"]
+
+
+@pytest.mark.asyncio
+async def test_a_tokenless_frame_never_reads_a_query_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Voice never read ``?api_key=``; the shared shim reads it for other routes, not here."""
+    seen = _verifier(monkeypatch, AuthPrincipal(kind="user", user_id=7, token_type="access"))
+
+    with pytest.raises(WebSocketException) as refused:
+        await voice_assistant._authenticate_websocket(_socket({"type": "auth"}, query=b"api_key=tldw_key"))
+
+    assert (refused.value.code, seen) == (4401, [])

@@ -519,7 +519,8 @@ async def _audio_ws_authenticate_impl(
     websocket.state.ws_token_scope_enforced = True
     try:
         if not has_ws_credential(websocket) and _allow_query_token_auth() and websocket.query_params.get("token"):
-            principal = await resolve_ws_principal_or_deprecated_query(websocket)
+            # ``?token=`` only, as before; the shim's ``?api_key=`` was never an audio channel.
+            principal = await resolve_ws_principal_or_deprecated_query(websocket, query_params=("token",))
         elif has_ws_credential(websocket) or not allow_initial_auth_message:
             principal = await resolve_ws_principal(websocket)
         else:

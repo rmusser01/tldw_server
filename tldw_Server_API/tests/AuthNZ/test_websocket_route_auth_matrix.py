@@ -812,6 +812,30 @@ def test_a_data_frame_before_the_auth_frame_is_never_processed(
     assert started == [route]
 
 
+@pytest.mark.parametrize("opt_in", [False, True], ids=["query-auth-off", "AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH"])
+@pytest.mark.parametrize("route", FIRST_FRAME_ROUTES)
+def test_first_frame_routes_never_read_a_query_api_key(
+    env: SimpleNamespace, route: str, opt_in: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Voice read only ``?token=`` before TASK-13950.7, and the audio streams only ``?token=``, behind
+    their opt-in. The shared query shim also reads ``?api_key=``; these routes must not gain it, alone
+    or as HTTP's fall-back beside a refused ``?token=``."""
+    if opt_in:
+        monkeypatch.setenv("AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH", "1")
+    else:
+        monkeypatch.delenv("AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH", raising=False)
+    url = _with_query(ROUTES[route][0], "api_key", env.api_key)
+    beside_revoked = _with_query(url, "token", env.revoked)
+    # Behind the opt-in the audio streams verify ?token= before accept; voice reads it after its frame.
+    revoked_query = "close 4401" if opt_in and route != VOICE else "closed 4401"
+
+    with _warnings() as warned:
+        assert _outcome(env.client, url, frame={"type": "auth"}) == "closed 4401"
+        assert _outcome(env.client, beside_revoked, frame={"type": "auth"}) == revoked_query
+
+    assert not [message for message in _deprecations(warned) if "api_key" in message], warned
+
+
 def _voice_auth(client: TestClient, url: str = ROUTES[VOICE][0], **frame: object) -> str:
     return _outcome(client, url, frame={"type": "auth", **frame}, timeout=ADMITTED_AFTER_S)
 

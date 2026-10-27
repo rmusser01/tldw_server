@@ -12,6 +12,7 @@ import contextlib
 import json
 import time
 import uuid
+from functools import partial
 from typing import Any, Optional
 
 import numpy as np
@@ -158,7 +159,6 @@ def _voice_command_to_info(command: VoiceCommand) -> VoiceCommandInfo:
     )
 
 
-_AUTH_FRAME_TIMEOUT_S = 10.0
 # The AUTH_ERROR text the voice SDKs show, by refusal reason; anything else is "Invalid credentials".
 _AUTH_ERRORS = {"authentication_timeout": "Authentication timeout", "expected_auth_frame": "Expected AUTH message"}
 
@@ -168,16 +168,17 @@ async def _authenticate_websocket(websocket: WebSocket) -> int:
 
     The core first-frame resolver accepts the socket, reads only that frame and verifies its token
     on HTTP's path, so revocation, the API key's ``read`` scope and the single-user key and IP
-    allowlist follow HTTP (TASK-13950.7). A frame without a token falls back to the cookie, then to
-    a handshake credential, then to the DEPRECATED ``?token=`` the voice SDKs also send
-    (TASK-13950.61 moves them). Raises ``WebSocketException`` as the resolver does, and 4401 for a
-    service token, which owns no voice session.
+    allowlist follow HTTP (TASK-13950.7). It waits ``FIRST_FRAME_TIMEOUT_S`` (10 s) for the frame. A
+    frame without a token falls back to the cookie, then to a handshake credential, then to the
+    DEPRECATED ``?token=`` the voice SDKs also send (TASK-13950.61 moves them); ``?api_key=`` is not
+    read. Raises ``WebSocketException`` as the resolver does, and 4401 for a service token, which owns
+    no voice session.
     """
     principal = await resolve_ws_principal_first_frame(
         websocket,
         required_scope="read",
-        timeout=_AUTH_FRAME_TIMEOUT_S,
-        tokenless_frame=resolve_ws_principal_or_deprecated_query,
+        # ``?token=`` only, the one query channel voice ever read; never the shim's ``?api_key=``.
+        tokenless_frame=partial(resolve_ws_principal_or_deprecated_query, query_params=("token",)),
     )
     if principal.user_id is None:
         raise WebSocketException(code=4401, reason="user_principal_required")

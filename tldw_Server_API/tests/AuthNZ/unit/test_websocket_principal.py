@@ -302,6 +302,36 @@ async def test_the_query_shim_warns_once_per_connection(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
+async def test_the_query_shim_reads_only_the_channels_its_caller_keeps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Voice and the audio streams keep ``?token=`` only; ACP, persona and watchlists keep both."""
+    from loguru import logger
+
+    seen: list[tuple[str | None, str | None]] = []
+
+    async def verifier(request):
+        seen.append((request.headers.get("authorization"), request.headers.get("x-api-key")))
+        return _ACCESS
+
+    monkeypatch.setattr(websocket_principal, "get_auth_principal", verifier)
+    token_only, both = _websocket([]), _websocket([])
+    for websocket in (token_only, both):
+        websocket.scope["query_string"] = b"token=a.b.c&api_key=k"
+    warned: list[str] = []
+    sink = logger.add(lambda message: warned.append(message.record["message"]), level="WARNING")
+    try:
+        await websocket_principal.resolve_ws_principal_or_deprecated_query(token_only, query_params=("token",))
+        await websocket_principal.resolve_ws_principal_or_deprecated_query(both)
+    finally:
+        logger.remove(sink)
+
+    assert seen == [("Bearer a.b.c", None), ("Bearer a.b.c", "k")]
+    assert [m.split(" on ")[0] for m in warned if "Deprecated" in m] == [
+        "Deprecated WebSocket credential channel query token",
+        "Deprecated WebSocket credential channel query token and api_key",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_verify_ws_credential_verifies_only_the_credential_it_is_given(monkeypatch: pytest.MonkeyPatch) -> None:
     """A first-frame route's token stands alone: the handshake's own X-API-KEY must not rescue it when
     HTTP refuses the token with 401. The bearer subprotocol still rides with X-API-KEY, as the two

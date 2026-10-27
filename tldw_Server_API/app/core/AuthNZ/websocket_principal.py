@@ -132,6 +132,7 @@ async def resolve_ws_principal_or_deprecated_query(
     websocket: WebSocket,
     *,
     required_scope: str | None = None,
+    query_params: tuple[str, ...] = ("token", "api_key"),
 ) -> AuthPrincipal:
     """``resolve_ws_principal``, plus the DEPRECATED ``?token=`` / ``?api_key=`` channels that
     shipped clients still send (ACP, prompt-studio, watchlists and persona; TASK-13950.7).
@@ -139,10 +140,14 @@ async def resolve_ws_principal_or_deprecated_query(
     The query is read only when no resolver channel competes (``has_ws_credential``), so a header
     or bearer-subprotocol credential always wins. It logs ``DEPRECATED_WS_CHANNEL`` once per connection
     and is verified by ``verify_ws_credential``. Delete it once those clients send the bearer subprotocol.
+
+    ``query_params`` names the channels a route keeps; voice and the audio streams read only ``token``,
+    as they did before, so the shim never opens ``?api_key=`` on them.
     """
     if not has_ws_credential(websocket):
-        token = websocket.query_params.get("token") or None
-        api_key = websocket.query_params.get("api_key") or None
+        token = websocket.query_params.get("token") if "token" in query_params else None
+        api_key = websocket.query_params.get("api_key") if "api_key" in query_params else None
+        token, api_key = token or None, api_key or None
         names = [name for name, value in (("token", token), ("api_key", api_key)) if value]
         if names:
             if not getattr(websocket.state, "ws_deprecation_logged", False):  # persona re-verifies its caller

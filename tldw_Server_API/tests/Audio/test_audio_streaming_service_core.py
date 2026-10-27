@@ -94,13 +94,13 @@ async def test_audio_ws_query_token_auth_rejected_by_default(monkeypatch: pytest
 @pytest.mark.asyncio
 async def test_audio_ws_query_token_auth_can_be_enabled_explicitly(monkeypatch: pytest.MonkeyPatch):
     """AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH keeps the deprecated channel for its opt-in users, through the
-    shared query shim, which warns."""
+    shared query shim, which warns. Only ``?token=``, as before: the shim's ``?api_key=`` is not read."""
     from loguru import logger
 
     _cookie(monkeypatch, None)
     seen = _verifier(monkeypatch)
     monkeypatch.setenv("AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH", "1")
-    ws, sent = scripted_websocket(query=b"token=single-user-secret")
+    ws, sent = scripted_websocket(query=b"token=single-user-secret&api_key=another-key")
     warned: list[str] = []
     sink = logger.add(lambda message: warned.append(message.record["message"]), level="WARNING")
     try:
@@ -110,7 +110,9 @@ async def test_audio_ws_query_token_auth_can_be_enabled_explicitly(monkeypatch: 
 
     assert result == (True, 1)
     assert seen == [("Bearer single-user-secret", None)]
-    assert [m for m in warned if "Deprecated WebSocket credential channel" in m and "single-user-secret" not in m]
+    assert [m for m in warned if "Deprecated WebSocket credential channel" in m] == [
+        "Deprecated WebSocket credential channel query token on /api/v1/audio/stream/transcribe; send Authorization or the bearer subprotocol"
+    ]
     assert sent[0]["type"] == "websocket.accept"  # left accepted for the route
 
 
