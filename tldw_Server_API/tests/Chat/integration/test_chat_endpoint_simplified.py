@@ -3617,6 +3617,8 @@ def test_real_openai_adapter_nonstream_failure_is_bounded_across_endpoint_logs_a
             patch.object(chat_endpoint, "get_request_queue", return_value=None),
             patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
             patch.object(chat_endpoint, "_shared_is_test_mode", return_value=False),
+            # Production mode turns on strict selection, which asks the live model list (TASK-13460).
+            patch.object(chat_endpoint, "_validate_explicit_model_availability", return_value=None),
             patch.object(adapter_module, "http_client_factory", fail_before_dispatch),
             patch.dict(
                 app.dependency_overrides,
@@ -3671,6 +3673,8 @@ def test_nonstream_output_limit_guidance_reaches_http_boundary(
         patch.object(chat_service, "get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
         patch.object(chat_endpoint, "_shared_is_test_mode", return_value=False),
+        # Production mode turns on strict selection, which asks the live model list (TASK-13460).
+        patch.object(chat_endpoint, "_validate_explicit_model_availability", return_value=None),
         patch.object(chat_endpoint, "perform_chat_api_call", return_value=provider_result) as provider_call,
     ):
         response = authenticated_client.post(
