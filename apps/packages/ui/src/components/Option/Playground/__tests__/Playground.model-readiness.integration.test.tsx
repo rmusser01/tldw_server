@@ -17,6 +17,7 @@ import {
   sendFromComposer,
   waitFor,
   waitForChatIdle,
+  within,
   type PlaygroundView
 } from "./harness/playground-harness"
 import { beforeEach, describe, expect, it } from "vitest"
@@ -138,6 +139,28 @@ describe("Playground model readiness chip (CC-01, #3111)", { timeout: 90_000 }, 
     const named = new RegExp(`Couldn't reach ${OLLAMA_MODEL.replace(/[.]/g, "\\.")} \\(Ollama\\)\\.`)
     expect((await screen.findAllByText(named, {}, HARNESS_WAIT)).length).toBeGreaterThan(0)
     expect(screen.queryByText(/Something went wrong while talking to your tldw server/)).toBeNull()
+  })
+
+  it("CC-02: a saved chat's failed send offers Switch model, which opens the model picker", async () => {
+    const server = twoProviderServer()
+    const view = await renderPlayground({ server, persistedModel: `ollama:${OLLAMA_MODEL}` })
+    server.planCompletion({
+      status: 502,
+      errorBody: {
+        detail: {
+          error_code: "provider_unavailable",
+          message: "The chat service provider is currently unavailable."
+        }
+      }
+    })
+
+    await sendFailingTurn(view, "Is anyone there?")
+
+    const title = await screen.findByText("No reply to this message", {}, HARNESS_WAIT)
+    const card = title.closest("[role='status']") as HTMLElement
+    expect(within(card).getByRole("alert")).toHaveTextContent(`Couldn't reach ${OLLAMA_MODEL} (Ollama).`)
+    await view.user.click(within(card).getByRole("button", { name: "Switch model" }))
+    expect(await screen.findByRole("textbox", { name: "Search models" }, HARNESS_WAIT)).toBeInTheDocument()
   })
 
   it("CC-01: shows a provider the server reports as failing as Unreachable before any send", async () => {

@@ -61,9 +61,12 @@ export function HistorySelectionReview({
   getRetryContext,
   onRetryRecovery,
   getSavedQuestionReview,
-  onRetrySavedQuestion
+  onRetrySavedQuestion,
+  onSwitchModel
 }: {
   selection: HistorySelectionController
+  /** Open this surface's model picker, offered when a send failed because of its model (CC-02). */
+  onSwitchModel?: () => void
   onExpand?: () => void
   onBind?: () => void
   /** Leave out retained turns the transcript already shows or still handles (CS-04). */
@@ -697,32 +700,46 @@ export function HistorySelectionReview({
         </>
       ) : (
         <>
+          {/* The problem, then its cause, then what is kept (CC-02). */}
           <p className="font-medium">
-            {text("recoveryTitle", "Turn needs review")}
+            {entry.turn.state === "generated_unsaved"
+              ? text("recoveryUnsavedReplyTitle", "Reply not saved")
+              : text("recoveryTitle", "No reply to this message")}
+          </p>
+          {entry.turn.failure_reason && <p role="alert">{entry.turn.failure_reason}</p>}
+          <p>
+            {entry.turn.persistence === "server" && entry.turn.admission
+              ? text(
+                  "recoveryState.accepted_response_unknown",
+                  "Your message was saved. Not known whether a reply was saved"
+                )
+              : text(`recoveryState.${entry.turn.state}`, entry.turn.state)}
           </p>
           <p>
             {text(
               entry.turn.persistence === 'server' ? 'nativeRecoveryMessage' : 'recoveryMessage',
               entry.turn.persistence === 'server'
-                ? 'The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Review conversation history. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically.'
-                : 'The original send outcome is retained separately from history. It will not be sent again automatically.'
+                ? 'The server may have saved a reply. Any text that arrived is kept here. Reload this chat to check, and choose where to continue in Review conversation history before trying again. Nothing is sent again automatically.'
+                : 'Your message is kept. Nothing is sent again unless you choose to retry.'
             )}
           </p>
-          <p>
-            {entry.turn.persistence === "server" && entry.turn.admission
-              ? text(
-                  "recoveryState.accepted_response_unknown",
-                  "User input accepted; response outcome unknown"
-                )
-              : text(`recoveryState.${entry.turn.state}`, entry.turn.state)}
-          </p>
+          {entry.turn.failure_action === "open-model-selector" && onSwitchModel && (
+            <Button
+              variant="text"
+              disabled={sendInProgress}
+              onClick={() => {
+                if (mounted.current && renderedSource.isCurrent() && renderedSelectionIsCurrent())
+                  onSwitchModel()
+              }}>
+              {text("switchModel", "Switch model")}
+            </Button>
+          )}
         </>
       )}
       {entry.turn.recovery_storage === "memory" && <p role="alert">{text("recoveryStorageFull", "Local storage could not keep all recovered text. Some text is retained in this window only; copy it before closing or reloading.")}</p>}
-      {entry.turn.failure_reason && <p role="alert">{entry.turn.failure_reason}</p>}
       <details>
         <summary>
-          {text("inspectRecovery", "Inspect original input and result")}
+          {text("inspectRecovery", "Show what was sent and received")}
         </summary>
         <pre className="whitespace-pre-wrap break-words">
           {entry.turn.input_text}
@@ -1127,7 +1144,7 @@ export function HistorySelectionReview({
               })
           }}>
           <summary className="cursor-pointer py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
-            {`${text("retainedOutcomes", "Retained outcomes")} (${olderRecoveries.length})`}
+            {`${text("retainedOutcomes", "Earlier messages without a reply")} (${olderRecoveries.length})`}
           </summary>
           {olderRecoveries.map(renderRecovery)}
         </details>

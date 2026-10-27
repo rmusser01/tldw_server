@@ -1473,7 +1473,10 @@ const captureNormalHistoryTurn = async (
                 ? { interruption_reason: data.interruptionReason }
                 : {})
             } : {}),
-            ...(failure ? { failure_reason: `${failure.summary} ${failure.hint}` } : {})
+            ...(failure ? { failure_reason: `${failure.summary} ${failure.hint}` } : {}),
+            ...(failure?.recoveryAction === "open-model-selector"
+              ? { failure_action: failure.recoveryAction }
+              : {})
           }
         )
       )

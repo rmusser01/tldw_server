@@ -1,3 +1,4 @@
+import { useModelPickerOpenRequests } from "./useModelPickerOpenRequests"
 import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import { captureChatDispatchSource } from "@/hooks/chat/chat-dispatch-source"
 import { resolveModelSelectorSelection, type ModelSelectorDescriptor } from "@/hooks/playground/modelSelectorUtils"
@@ -303,6 +304,8 @@ export const SidepanelForm = ({
   useSidepanelStartupModel({ enabled: isConnectionReady, models: chatModels })
   // Opens the model picker (Casual chip or Pro control row) when a send is blocked by the model (XS-02).
   const modelPickerRef = React.useRef<ModelSelectHandle>(null)
+  // The history review's "Switch model" after a failed send asks for it too (CC-02).
+  useModelPickerOpenRequests(modelPickerRef)
   const voiceChatModelOptions = React.useMemo(() => {
     const options = [
       {

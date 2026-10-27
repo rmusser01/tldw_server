@@ -4102,7 +4102,7 @@ const PlaygroundContent = () => {
             >
               <div className={`mx-auto w-full ${chatContentWidthClassName} pb-6`}>
                 <ChatErrorBoundary>
-                  <HistorySelectionReview selection={historySelection} hideRecovery={hideKeptHistoryTurn} getRetryContext={getRecoveryRetryContext} onRetryRecovery={retryRecoveredHistoryTurn} getSavedQuestionReview={!compareActive && serverChatCharacterId ? getSavedQuestionReview : undefined} onRetrySavedQuestion={!compareActive && serverChatCharacterId ? retrySavedQuestion : undefined} onBind={() => void historySelection.bindUnavailableConversation()} />
+                  <HistorySelectionReview selection={historySelection} hideRecovery={hideKeptHistoryTurn} getRetryContext={getRecoveryRetryContext} onRetryRecovery={retryRecoveredHistoryTurn} getSavedQuestionReview={!compareActive && serverChatCharacterId ? getSavedQuestionReview : undefined} onRetrySavedQuestion={!compareActive && serverChatCharacterId ? retrySavedQuestion : undefined} onSwitchModel={openModelSelector} onBind={() => void historySelection.bindUnavailableConversation()} />
                   <PlaygroundChat
                     messageView={messageView}
                     scrollParentRef={containerRef}

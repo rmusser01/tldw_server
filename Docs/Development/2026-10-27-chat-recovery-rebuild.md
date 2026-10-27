@@ -46,18 +46,32 @@ is fine, and "Switch model" as the recovery action.
 **Tests:** `chat-error-message` unit tests; a temporary-chat integration case.
 **Status:** Complete
 
-### Stage 2: failed and stopped turns in saved chats (CC-02, CM-02)
+### Stage 2: failed turns in saved chats (CC-02, CM-02)
 **Goal:** a saved-chat send that gets no reply explains why, in plain words,
-and offers Retry and Switch model. A Stop before the first token says so and
-doesn't duplicate the question.
-**Success criteria:** the recovery card names the cause from the error
-(provider, model, status), has `role=alert`, and keeps dev's retry rules.
-Stop before the first token shows "Stopped before reply" under the kept
-question, without also restoring it to the composer. Busy Send reads
-"Send after this reply".
-**Tests:** harness integration cases for fresh and saved chats (502, Stop
-before token); recovery-card unit tests; label tests.
-**Status:** Not Started
+and offers Switch model next to dev's Retry.
+**Success criteria:** the recovery card says "No reply to this message"
+("Reply not saved" when a reply arrived but wasn't saved), then the cause
+(`role=alert`), then what is kept. A failure about the model (CC-N2) adds
+"Switch model", which opens the picker on the full page and in the side
+panel. The other states, "Show what was sent and received" and "Earlier
+messages without a reply" use plain words. Busy Send keeps its "Send" label
+and is named "Send after this reply", as in the side panel (XS-10).
+**Tests:** `HistorySelectionReview` unit tests; a saved-chat 502 integration
+case that opens the picker from the card; `useModelPickerOpenRequests`;
+`PlaygroundSendControl` label test. Existing copy assertions updated, with
+negative checks pointed at the new titles.
+**Status:** Complete
+
+**Not done: Stop before the first token (CM-02).** The question stays in the
+transcript and the draft also returns to the composer, so sending again
+saves the question twice. Keeping an empty "Stopped" reply with Retry was
+tried and backed out: dev rebuilds the transcript from the selected history
+plus kept turns, and a kept turn without reply text is not shown
+(`isRetainedPartialReply` needs `result_text`). Without a Retry there, the
+restored draft is the only quick way to ask again, so it stays. A proper fix
+belongs with dev's retry design: let a stopped turn with no text use the
+saved-question retry, then stop restoring the draft (a `questionKept` flag on
+the skipped result is enough for the second part).
 
 ### Stage 3: long waits (CM-06) and one error surface (CC-N2)
 **Goal:** waits show elapsed time and announce plainly; an error shows once.

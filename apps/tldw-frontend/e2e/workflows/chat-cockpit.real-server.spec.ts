@@ -3372,7 +3372,7 @@ test.describe('/chat cockpit real-server parity', () => {
         .filter(row => row.conversation_id === originalChatId).flatMap(row => Object.values(row.pending_turns ?? {}));
       const stoppedInput = originalRecoveries.find(turn => turn.input_text === prompt);
       expect(stoppedInput).toBeDefined();
-      if (emptyResponse) await expect(page.getByText('The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Review conversation history. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically.', { exact: true })).toBeVisible();
+      if (emptyResponse) await expect(page.getByText('The server may have saved a reply. Any text that arrived is kept here. Reload this chat to check, and choose where to continue in Review conversation history before trying again. Nothing is sent again automatically.', { exact: true })).toBeVisible();
       else expect(stoppedInput!.result_text.trim()).not.toBe('');
       const automaticTurnAttempts: string[] = [];
       const observeAutomaticTurn = (hit: Request) => {

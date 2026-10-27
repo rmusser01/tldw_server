@@ -129,7 +129,7 @@ test.describe("Sidepanel chat smoke", () => {
       await ensureChatInput(sidepanel)
       await expect(sidepanel.getByTestId("chat-main")).toBeVisible()
       await expect(
-        sidepanel.getByRole("button", { name: /Send message|Queue request/i })
+        sidepanel.getByRole("button", { name: /Send message|Send after this reply/i })
       ).toBeVisible()
 
       const metrics = await sidepanel.evaluate(() => {
@@ -153,7 +153,7 @@ test.describe("Sidepanel chat smoke", () => {
           messages: rectFor('[data-testid="chat-messages"]'),
           input: rectFor('[data-testid="chat-input"]'),
           send: rectFor(
-            '[data-testid="chat-send"], [aria-label="Send message"], [aria-label="Queue request"]'
+            '[data-testid="chat-send"], [aria-label="Send message"], [aria-label="Send after this reply"]'
           )
         }
       })

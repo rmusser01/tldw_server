@@ -250,13 +250,13 @@ it("shows confirmed native refusal with exact input, Copy and Dismiss without un
     dismissRecovery: vi.fn(async () => true)
   } as unknown as HistorySelectionController
   render(<HistorySelectionReview selection={selection} />)
-  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
+  fireEvent.click(screen.getByText(/Earlier messages without a reply \(1\)/))
   expect(screen.getByText("Message not added")).toBeVisible()
   expect(
     screen.getByText(/Your original input is kept here/)
   ).toBeVisible()
-  expect(screen.queryByText(/unknown|Turn needs review/i)).toBeNull()
-  fireEvent.click(screen.getByText("Inspect original input and result"))
+  expect(screen.queryByText(/unknown|not (yet )?known|No reply to this message|Reply not saved/i)).toBeNull()
+  fireEvent.click(screen.getByText("Show what was sent and received"))
   expect(screen.getByText("original refused question")).toBeVisible()
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Copy recovered text" })) })
   expect(copy).toHaveBeenCalledWith("  original refused question  ")
@@ -272,7 +272,8 @@ it("shows confirmed native refusal with exact input, Copy and Dismiss without un
 const recoveryController = (
   persistence: "server" | "client" | undefined,
   state: "accepted_unsent" | "generated_unsaved",
-  resultText = ""
+  resultText = "",
+  turnExtras: Record<string, unknown> = {}
 ) => {
   const origin = {
     owner_key: "original-owner",
@@ -308,6 +309,7 @@ const recoveryController = (
           input_text: "original accepted question",
           input_images: [],
           result_text: resultText,
+          ...turnExtras,
           admission: {
             version: 1,
             owner_key: origin.owner_key,
@@ -322,6 +324,63 @@ const recoveryController = (
     dismissRecovery: vi.fn(async () => true)
   } as unknown as HistorySelectionController
 }
+
+describe("CC-02: a send that got no reply explains itself", () => {
+  const providerFailure =
+    "Couldn't reach gemma3:1b (Ollama). Your tldw server is fine, but this model's provider didn't respond. Start the provider or switch models."
+
+  it("names the problem, then the cause, and offers Switch model", async () => {
+    const selection = recoveryController("client", "accepted_unsent", "", {
+      failure_reason: providerFailure,
+      failure_action: "open-model-selector"
+    })
+    const onSwitchModel = vi.fn()
+    render(<HistorySelectionReview selection={selection} onSwitchModel={onSwitchModel} />)
+    fireEvent.click(screen.getByText("Earlier messages without a reply (1)"))
+
+    expect(screen.getByText("No reply to this message")).toBeVisible()
+    expect(screen.getByRole("alert")).toHaveTextContent(providerFailure)
+    expect(screen.getByText("Your message was saved, but no reply was")).toBeVisible()
+    expect(
+      screen.getByText("Your message is kept. Nothing is sent again unless you choose to retry.")
+    ).toBeVisible()
+    expect(screen.queryByText(/Turn needs review|User input accepted/)).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "Switch model" }))
+    expect(onSwitchModel).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers Switch model only when the failure is about the model and the surface can open a picker", () => {
+    const withoutAction = recoveryController("client", "accepted_unsent", "", {
+      failure_reason: "Your message is too large. Use a smaller image or shorten your message, then try again."
+    })
+    const { unmount } = render(<HistorySelectionReview selection={withoutAction} onSwitchModel={vi.fn()} />)
+    fireEvent.click(screen.getByText("Earlier messages without a reply (1)"))
+    expect(screen.getByText("No reply to this message")).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Switch model" })).toBeNull()
+    unmount()
+
+    const withAction = recoveryController("client", "accepted_unsent", "", {
+      failure_reason: providerFailure,
+      failure_action: "open-model-selector"
+    })
+    render(<HistorySelectionReview selection={withAction} />)
+    fireEvent.click(screen.getByText("Earlier messages without a reply (1)"))
+    expect(screen.getByText("No reply to this message")).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Switch model" })).toBeNull()
+  })
+
+  it("calls a reply that arrived but was not saved what it is", () => {
+    render(
+      <HistorySelectionReview
+        selection={recoveryController("client", "generated_unsaved", "partial text")}
+      />
+    )
+    fireEvent.click(screen.getByText("Earlier messages without a reply (1)"))
+    expect(screen.getByText("Reply not saved")).toBeVisible()
+    expect(screen.getByText("A reply arrived but wasn't saved")).toBeVisible()
+  })
+})
 
 it("accepted unanswered user recovery reviews reapplied prompt before retrying its saved question", async () => {
   const selection = recoveryController("client", "accepted_unsent")
@@ -345,7 +404,7 @@ it("accepted unanswered user recovery reviews reapplied prompt before retrying i
     getRetryContext: async () => context
   }} />)
   expect(screen.queryByRole("button", { name: "Retry saved question" })).toBeNull()
-  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
+  fireEvent.click(screen.getByText(/Earlier messages without a reply \(1\)/))
   fireEvent.click(screen.getByRole("button", { name: "Review retry" }))
   expect(await screen.findByText(/Review or reapply the original System\/Prompt settings/)).toBeVisible()
   expect(screen.getByText("qwen")).toBeVisible()
@@ -362,7 +421,7 @@ it("an old no-prompt recovery requires explicit current-context confirmation and
   const context = { model: "qwen", systemPrompts: [], isCurrent: () => true }
   const retry = vi.fn(async () => ({ status: "failed" as const, errorMessage: "retry_context_changed" }))
   render(<HistorySelectionReview selection={selection} getRetryContext={async () => context} onRetryRecovery={retry} />)
-  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
+  fireEvent.click(screen.getByText(/Earlier messages without a reply \(1\)/))
   fireEvent.click(screen.getByRole("button", { name: "Review retry" }))
   expect(await screen.findByText("No System/Prompt instruction is currently applied.")).toBeVisible()
   expect(retry).not.toHaveBeenCalled()
@@ -378,7 +437,7 @@ it.each(["server", "partial", "missing-admission"])("does not offer manual Retry
   else if (refusal === "partial") selection.recoveries[0].turn.result_text = "retained output"
   else selection.recoveries[0].turn.admission = undefined
   render(<HistorySelectionReview selection={selection} getRetryContext={async () => ({ model: "qwen", systemPrompts: [], isCurrent: () => true })} onRetryRecovery={vi.fn()} />)
-  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
+  fireEvent.click(screen.getByText(/Earlier messages without a reply \(1\)/))
   expect(screen.queryByRole("button", { name: "Review retry" })).toBeNull()
   expect(screen.getByRole("button", { name: "Copy recovered text" })).toBeVisible()
 })
@@ -392,15 +451,15 @@ it.each(["accepted_unsent", "generated_unsaved"] as const)(
       state === "generated_unsaved" ? "unacknowledged generated text" : ""
     )
     render(<HistorySelectionReview selection={selection} />)
-    fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
+    fireEvent.click(screen.getByText(/Earlier messages without a reply \(1\)/))
     expect(
-      screen.getByText("User input accepted; response outcome unknown")
+      screen.getByText("Your message was saved. Not known whether a reply was saved")
     ).toBeVisible()
     expect(
-      screen.queryByText("User input accepted; response not saved")
+      screen.queryByText("Your message was saved, but no reply was")
     ).toBeNull()
-    expect(screen.queryByText("User admission outcome unknown")).toBeNull()
-    fireEvent.click(screen.getByText("Inspect original input and result"))
+    expect(screen.queryByText("Not known whether your message was saved")).toBeNull()
+    fireEvent.click(screen.getByText("Show what was sent and received"))
     expect(screen.getByText("original accepted question")).toBeVisible()
     if (state === "generated_unsaved")
       expect(screen.getByText("unacknowledged generated text")).toBeVisible()
@@ -423,12 +482,12 @@ it.each([undefined, "client"] as const)(
         selection={recoveryController(persistence, "accepted_unsent")}
       />
     )
-    fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
+    fireEvent.click(screen.getByText(/Earlier messages without a reply \(1\)/))
     expect(
-      screen.getByText("User input accepted; response not saved")
+      screen.getByText("Your message was saved, but no reply was")
     ).toBeVisible()
     expect(
-      screen.queryByText("User input accepted; response outcome unknown")
+      screen.queryByText("Your message was saved. Not known whether a reply was saved")
     ).toBeNull()
   }
 )
@@ -443,10 +502,10 @@ it("client-managed generated text retains its existing review label", () => {
       )}
     />
   )
-  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
-  expect(screen.getByText("Generated response needs review")).toBeVisible()
+  fireEvent.click(screen.getByText(/Earlier messages without a reply \(1\)/))
+  expect(screen.getByText("A reply arrived but wasn't saved")).toBeVisible()
   expect(
-    screen.queryByText("User input accepted; response outcome unknown")
+    screen.queryByText("Your message was saved. Not known whether a reply was saved")
   ).toBeNull()
 })
 it("retains unresolved fork separately from sends with candidate inspection and deliberate-new-action control", () => {
@@ -1000,7 +1059,7 @@ describe("bounded retained outcomes", () => {
     ]
     const selection = selectionWith(original)
     render(<HistorySelectionReview selection={selection} />)
-    const summary = screen.getByText(/Retained outcomes.*5/)
+    const summary = screen.getByText(/Earlier messages without a reply.*5/)
     const copies = screen.getAllByRole("button", {
       name: "Copy recovered text"
     })
@@ -1027,10 +1086,10 @@ describe("bounded retained outcomes", () => {
   it("preserves an explicit expansion during same-owner refresh, but closes after leaving and returning", async () => {
     const selection = selectionWith([receipt("r1")])
     const mounted = render(<HistorySelectionReview selection={selection} />)
-    fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
+    fireEvent.click(screen.getByText(/Earlier messages without a reply \(1\)/))
     await waitFor(() =>
       expect(
-        screen.getByText(/Retained outcomes \(1\)/).closest("details")
+        screen.getByText(/Earlier messages without a reply \(1\)/).closest("details")
       ).toHaveAttribute("open")
     )
     mounted.rerender(
@@ -1042,7 +1101,7 @@ describe("bounded retained outcomes", () => {
       />
     )
     expect(
-      screen.getByText(/Retained outcomes \(2\)/).closest("details")
+      screen.getByText(/Earlier messages without a reply \(2\)/).closest("details")
     ).toHaveAttribute("open")
     mounted.rerender(
       <HistorySelectionReview
@@ -1057,10 +1116,10 @@ describe("bounded retained outcomes", () => {
         }}
       />
     )
-    expect(screen.queryByText(/Retained outcomes/)).toBeNull()
+    expect(screen.queryByText(/Earlier messages without a reply/)).toBeNull()
     mounted.rerender(<HistorySelectionReview selection={selection} />)
     expect(
-      screen.getByText(/Retained outcomes \(1\)/).closest("details")
+      screen.getByText(/Earlier messages without a reply \(1\)/).closest("details")
     ).not.toHaveAttribute("open")
   })
   it("keeps distinct operations with identical text and sorts their actions by recency without changing the journal", async () => {
@@ -1071,7 +1130,7 @@ describe("bounded retained outcomes", () => {
     const entries = [first, second],
       selection = selectionWith(entries)
     render(<HistorySelectionReview selection={selection} />)
-    const summary = screen.getByText(/Retained outcomes \(2\)/)
+    const summary = screen.getByText(/Earlier messages without a reply \(2\)/)
     fireEvent.click(summary)
     const cards = [
       ...summary
@@ -1115,7 +1174,7 @@ describe("bounded retained outcomes", () => {
       openRecoveryResult: vi.fn(async () => true)
     }
     render(<HistorySelectionReview selection={selection} />)
-    const summary = screen.getByText(/Retained outcomes \(2\)/)
+    const summary = screen.getByText(/Earlier messages without a reply \(2\)/)
     expect(
       screen.getByRole("button", { name: "Open saved reply" })
     ).not.toBeVisible()
@@ -1126,7 +1185,7 @@ describe("bounded retained outcomes", () => {
       .closest('[role="status"]')!
     fireEvent.click(
       within(partialCard as HTMLElement).getByText(
-        "Inspect original input and result"
+        "Show what was sent and received"
       )
     )
     expect(screen.getByText("Retained partial reply")).toBeVisible()
@@ -1150,7 +1209,7 @@ describe("bounded retained outcomes", () => {
         hideRecovery={(entry) => entry.turn.operation_id === "r2"}
       />
     )
-    const summary = screen.getByText(/Retained outcomes.*4/)
+    const summary = screen.getByText(/Earlier messages without a reply.*4/)
     screen
       .getAllByRole("button", { name: "Copy recovered text" })
       .forEach((button) => expect(button).not.toBeVisible())
@@ -1839,8 +1898,8 @@ it("explains explicit saved-history review before continuing an uncertain native
   const selection = recoveryController("server", "accepted_unsent")
   const originalView = selection.view
   render(<HistorySelectionReview selection={selection} />)
-  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
-  expect(screen.getByText("The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Review conversation history. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically.")).toBeVisible()
+  fireEvent.click(screen.getByText(/Earlier messages without a reply \(1\)/))
+  expect(screen.getByText("The server may have saved a reply. Any text that arrived is kept here. Reload this chat to check, and choose where to continue in Review conversation history before trying again. Nothing is sent again automatically.")).toBeVisible()
   expect(screen.getByRole("button", { name: "Review conversation history", exact: true })).toBeVisible()
   expect(selection.view).toBe(originalView)
   expect(selection.choose).not.toHaveBeenCalled()
@@ -1925,7 +1984,7 @@ it("warns about latest unknown retry while retaining an earlier unsaved reply", 
   const selection = roleplaySelection(false)
   selection.recoveries[0].turn.state = "unknown"
   render(<HistorySelectionReview selection={selection} />)
-  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
+  fireEvent.click(screen.getByText(/Earlier messages without a reply \(1\)/))
   expect(screen.getByText("Reply save unconfirmed")).toBeVisible()
   expect(screen.getByText(/including while an earlier request is still running/)).toBeVisible()
   expect(screen.getByRole('button', { name: 'Copy recovered text' })).toBeEnabled()
@@ -1936,7 +1995,7 @@ it.each(["history_retry_input_changed", "request_config_scope_changed", "provide
   const context = { model: "qwen", systemPrompts: [], isCurrent: () => true }
   const retry = vi.fn(async () => ({ status: "failed" as const, errorMessage: reason }))
   render(<HistorySelectionReview selection={selection} getRetryContext={async () => context} onRetryRecovery={retry} />)
-  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
+  fireEvent.click(screen.getByText(/Earlier messages without a reply \(1\)/))
   fireEvent.click(screen.getByRole("button", { name: "Review retry" }))
   await screen.findByText("No System/Prompt instruction is currently applied.")
   fireEvent.click(screen.getByRole("button", { name: "Retry saved question" }))
