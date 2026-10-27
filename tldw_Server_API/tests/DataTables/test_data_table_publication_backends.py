@@ -240,3 +240,48 @@ def test_modern_reserved_generation_recovers_the_exact_active_or_archived_attemp
         assert recovered["status"] == "ready"  # nosec B101 # exact completion-token replay works.
         columns, rows = _contents(db, table["id"])
         assert json.loads(rows[0]["row_json"]) == {columns[0]["column_id"]: "Replacement"}  # nosec B101 # canonical generated cell.
+
+
+@pytest.mark.parametrize("response_kind", ["table", "job"])
+def test_real_backend_timestamp_responses_keep_the_public_string_contract(publication_store, tmp_path, response_kind):
+    """Native PostgreSQL values pass through the same response builders as real requests."""
+    from datetime import datetime
+
+    from tldw_Server_API.app.api.v1.endpoints import data_tables as endpoint
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    db, backend, _path = publication_store
+    with scoped_context(user_id=401, is_admin=False):
+        if response_kind == "table":
+            row = db.create_data_table(name="Rowan native timestamps", prompt="Keep saved facts", status="ready")
+            response = endpoint._table_summary_from_row(row)
+            fields = ("created_at", "updated_at", "last_modified")
+        else:
+            if backend is None:
+                jm = JobManager(tmp_path / "timestamp-jobs.db")
+            else:
+                cfg = backend.config
+                dsn = f"postgresql://{quote(cfg.pg_user, safe='')}:{quote(cfg.pg_password, safe='')}@{cfg.pg_host}:{cfg.pg_port}/{quote(cfg.pg_database, safe='')}"
+                jm = JobManager(backend="postgres", db_url=dsn)
+            row = jm.create_job(
+                domain="data_tables", queue="default", job_type="data_table_generate", owner_user_id="401", payload={}
+            )
+            response = asyncio.run(
+                endpoint.get_data_table_job(
+                    row["id"],
+                    current_user=User(id=401, username="timestamp-owner", is_active=True, is_admin=False),
+                    principal=AuthPrincipal(
+                        kind="user", user_id=401, subject="timestamp-owner", roles=["user"], permissions=["media.read"]
+                    ),
+                    jm=jm,
+                )
+            )
+            fields = ("created_at", "started_at", "completed_at", "cancelled_at")
+        expected = {
+            name: row.get(name).isoformat() if isinstance(row.get(name), datetime) else row.get(name) for name in fields
+        }
+        actual = {name: response.model_dump(mode="json")[name] for name in fields}
+        assert (
+            actual == expected
+        )  # nosec B101 -- actual database timestamp values retain the public string/null contract.
