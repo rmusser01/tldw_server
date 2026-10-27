@@ -90,7 +90,7 @@ See `app/main.py` for router includes and full route namespaces.
 - `CHATBOOKS_CORE_WORKER_ENABLED`: Enable/disable the shared core worker when using the `core` backend (default `true`). Set to `false` to skip starting the background worker even if `core` is selected.
 
 - `JOBS_DB_URL`: Optional. If set to a PostgreSQL DSN (e.g., `postgresql://user:pass@host:5432/dbname`), the core Jobs backend uses PostgreSQL instead of SQLite.
-  - Requirements: install extras `db_postgres` to pull `psycopg` and `psycopg-pool`.
+  - Requirements: none beyond the core install; `psycopg` and `psycopg-pool` are core dependencies.
   - Schema: created automatically via `app/core/Jobs/pg_migrations.py` on first use.
   - Notes: JSON fields (`payload`, `result`) are stored as JSONB in Postgres and as TEXT in SQLite.
 

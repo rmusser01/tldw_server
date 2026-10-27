@@ -2577,12 +2577,17 @@ def test_postgres_media_clone_snapshot_returns_idle_dedicated_connection_on_ever
                         [999_999 if outcome == "missing" else media_id]
                     )
 
-        assert len(acquired_connections) == 1
-        snapshot_connection = acquired_connections[0]
-        assert snapshot_connection is not caller_connection
-        assert returned_connections == [(snapshot_connection, "IDLE")]
         if outcome == "scope_apply_failure":
+            # The pool discards a checkout it cannot scope (TASK-13950.3), so
+            # nothing is handed out, returned for reuse, or queried.
+            assert acquired_connections == []
+            assert returned_connections == []
             assert table_queries == []
+        else:
+            assert len(acquired_connections) == 1
+            snapshot_connection = acquired_connections[0]
+            assert snapshot_connection is not caller_connection
+            assert returned_connections == [(snapshot_connection, "IDLE")]
     finally:
         db.close_connection()
         pool.close_all()
@@ -2710,7 +2715,9 @@ def test_postgres_pool_scope_failure_log_does_not_emit_driver_text(
                 raise RuntimeError("sensitive scope driver detail")
 
             monkeypatch.setattr(pool, "_apply_scope_settings", fail_pool_scope)
-            db.read_media_clone_snapshots([media_id])
+            # An unscoped checkout is discarded, never handed out (TASK-13950.3).
+            with pytest.raises(CloneSnapshotUnavailable):
+                db.read_media_clone_snapshots([media_id])
     finally:
         logger.remove(sink_id)
         db.close_connection()
