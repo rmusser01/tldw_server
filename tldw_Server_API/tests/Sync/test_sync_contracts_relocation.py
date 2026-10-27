@@ -24,3 +24,13 @@ def test_the_sync_v2_package_reexports_the_moved_classes() -> None:
     from tldw_Server_API.app.core.Sync_Contracts.errors import SyncV2Error as MovedError
     from tldw_Server_API.app.core.Sync_Contracts.models import SyncEnvelope as MovedEnvelope
     assert (SyncEnvelope, SyncV2Error) == (MovedEnvelope, MovedError)
+
+
+def test_blob_store_raises_the_contract_error_class() -> None:
+    from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore, SyncBlobStoreError
+    from tldw_Server_API.app.core.Sync_Contracts import blob_keys
+    namespace, digest = "0" * 32, "a" * 64
+    assert SyncBlobStoreError is blob_keys.SyncBlobStoreError
+    assert LocalSyncBlobStore.namespace_storage_key(namespace, f"sha256:{digest}") == f"blobs/v2/{namespace}/{digest}.blob"
+    with pytest.raises(blob_keys.SyncBlobStoreError, match="lowercase hex"):
+        blob_keys.namespace_storage_key(namespace, "sha256:" + "A" * 64)

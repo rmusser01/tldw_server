@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.Sync_Contracts.blob_keys import namespace_storage_key
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.Chat.native_fork_schemas import (
@@ -515,8 +516,6 @@ class NativeChatAssetStore:
         Graph/reference/receipt failures must roll back this same transaction.
         This private transition performs no byte or external quota work and grants no readiness.
         """
-        from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
-
         self._db.native_forks._require_active_transaction(conn)
         if not isinstance(conversation_id, str) or not 1 <= len(conversation_id) <= 256:
             raise ValueError("invalid_native_child_identity")
@@ -549,7 +548,7 @@ class NativeChatAssetStore:
             "embedded_image_v1", "generated_image_revision_v1", "document_original_v1", "document_text_v1",
         } or row["expected_size_bytes"] < 1:
             raise ValueError("native_asset_representation_unsupported")
-        canonical_key = LocalSyncBlobStore.namespace_storage_key(row["storage_namespace_id"], "sha256:" + row["expected_hash"])
+        canonical_key = namespace_storage_key(row["storage_namespace_id"], "sha256:" + row["expected_hash"])
         if row["storage_key"] != canonical_key:
             raise ValueError("candidate_storage_identity_conflict")
         self._require_exclusive_paths(owner.client_id, candidate_id, row["storage_namespace_id"], row["upload_id"], conn=conn)
@@ -667,8 +666,6 @@ class NativeChatAssetStore:
         conn: Any,
     ) -> dict[str, Any]:
         """Validate already-read provenance without acquiring an operation lock."""
-        from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
-
         if (
             candidate is None
             or claim is None
@@ -705,7 +702,7 @@ class NativeChatAssetStore:
         self._require_exclusive_paths(
             owner.client_id, candidate["candidate_id"], candidate["storage_namespace_id"], candidate["upload_id"], conn=conn
         )
-        key = LocalSyncBlobStore.namespace_storage_key(
+        key = namespace_storage_key(
             candidate["storage_namespace_id"], "sha256:" + candidate["expected_hash"]
         )
         if candidate["storage_key"] != key:

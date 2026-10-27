@@ -178,7 +178,8 @@ core.DB_Management -> core.Prompt_Management: 7
 core.DB_Management -> core.RAG: 6
 core.DB_Management -> core.RPG: 6
 core.DB_Management -> core.Sharing: 5
-core.DB_Management -> core.Sync: 30
+core.DB_Management -> core.Sync: 28
+core.DB_Management -> core.Sync_Contracts: 1  # bump: Sync contracts moved out of core.Sync so DB_Management no longer imports the Sync package; not DB-loading, pinned by test_db_management_logic_imports (TASK-13950.16)
 core.DB_Management -> core.VN_Assets: 1
 core.DB_Management -> core.Visual_Identities: 1
 core.DB_Management -> core.Watchlists: 2
