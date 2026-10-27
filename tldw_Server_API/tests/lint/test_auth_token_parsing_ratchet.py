@@ -54,16 +54,15 @@ LOOKS_LIKE_JWT_BASELINE: dict[str, int] = {
 }
 
 BEARER_PARSE_BASELINE: dict[str, int] = {
-    "tldw_Server_API/app/api/v1/endpoints/auth.py": 1,
-    "tldw_Server_API/app/api/v1/endpoints/authnz_debug.py": 1,
+    # Strips a case-sensitive "Bearer " from an X-API-KEY value; core bearer_credential matches any
+    # case and trims, so it would admit X-API-KEY "bearer <key>", which fails today. It goes when the
+    # evaluations auth moves onto the AuthNZ dependencies.
     "tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_auth.py": 1,
-    "tldw_Server_API/app/api/v1/endpoints/prompts.py": 3,
-    "tldw_Server_API/app/api/v1/endpoints/rpg.py": 1,
 }
 
 # Each baseline's exact total. A migration lowers its entry and this number together; any
 # other change to a baseline's total is headroom being reused, and fails.
-SEED_TOTALS: dict[str, int] = {"LOOKS_LIKE_JWT_BASELINE": 1, "BEARER_PARSE_BASELINE": 7}
+SEED_TOTALS: dict[str, int] = {"LOOKS_LIKE_JWT_BASELINE": 1, "BEARER_PARSE_BASELINE": 1}
 
 # The only way to raise a count: (baseline name, module) -> (allowed count, reason). The
 # reason must cite a task or PR, e.g. "security fix in persona_stream needs one (TASK-1234)".
@@ -72,7 +71,8 @@ BUMPS: dict[tuple[str, str], tuple[int, str]] = {}
 _THIS_FILE = "tldw_Server_API/tests/lint/test_auth_token_parsing_ratchet.py"
 _FIX = (
     "Resolve WebSocket callers with core/AuthNZ/websocket_principal.resolve_ws_principal "
-    "and HTTP callers with the AuthNZ dependencies instead of parsing tokens by hand. If a "
+    "and HTTP callers with the AuthNZ dependencies instead of parsing tokens by hand; to read a "
+    "bearer from a header, call core/AuthNZ/auth_principal_resolver.bearer_credential. If a "
     f"copy is unavoidable, add a BUMPS entry with the reason and its task or PR in {_THIS_FILE}. "
     "If you are building an outbound Authorization header rather than parsing an inbound one, "
     "add a BUMPS entry citing the PR."

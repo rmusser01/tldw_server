@@ -74,16 +74,24 @@ _PLATFORM_ADMIN_ROLES = PLATFORM_ADMIN_ROLES
 _ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 
+def bearer_credential(value: Optional[str]) -> Optional[str]:
+    """Return ``<credential>`` from ``Bearer <credential>`` (the scheme in any case), else None.
+
+    The one bearer-scheme parser (TASK-13950.7): endpoints that read a bearer from a header call
+    it rather than splitting the header themselves.
+    """
+    if not isinstance(value, str):
+        return None
+    scheme, _, credential = value.partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+    return credential.strip() or None
+
+
 def _extract_bearer_token(request: HTTPConnection) -> Optional[str]:
     """Extract Bearer token from Authorization header (of a request or a WebSocket handshake)."""
     try:
-        auth_header = request.headers.get("Authorization")
-        if not auth_header:
-            return None
-        scheme, _, credential = auth_header.partition(" ")
-        if scheme.lower() != "bearer" or not credential:
-            return None
-        return credential.strip()
+        return bearer_credential(request.headers.get("Authorization"))
     except (AttributeError, TypeError):
         return None
 
