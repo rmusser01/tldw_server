@@ -80,3 +80,26 @@ it("a raw branch-conflict name cannot certify that input was not added", () => {
     nativeCharacterPreflightMessage(new Error("history_branch_changed"), t)
   ).toBeNull()
 })
+
+describe("saved-reply Continue guidance (CM-01)", () => {
+  it.each([
+    ["unsupported_history_continuation", "This reply can't be continued here."],
+    ["unsupported_history_action_context", "This reply can't be continued here."],
+    ["stale_selection", "Reload the chat before continuing the reply."],
+    ["native_history_stream_interrupted", "We could not confirm the continued reply."]
+  ])("explains %s in plain words about continuing", (code, expected) => {
+    const text = nativeRegenerationFeedback(new Error(code), t, "continue")
+    expect(text).toContain(expected)
+    expect(text).toContain("original exchange and draft are kept")
+    expect(text).not.toMatch(/regenerat/i)
+  })
+  it("reads a structured server refusal code without showing it", () => {
+    const text = nativeRegenerationFeedback(
+      { status: 409, details: { detail: { status: "unsupported_history_capability", code: "unsupported_history_continuation" } } },
+      t,
+      "continue"
+    )
+    expect(text).toContain("This reply can't be continued here.")
+    expect(text).not.toContain("unsupported_history")
+  })
+})

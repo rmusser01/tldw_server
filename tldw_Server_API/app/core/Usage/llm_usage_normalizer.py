@@ -1,14 +1,16 @@
 """
 Provider-agnostic LLM usage normalization helpers.
 
-This module is deliberately measurement-only. It normalizes provider usage
+This module normalizes provider usage
 payloads into stable fields without changing billing rates, persistence schema,
-or provider request behavior.
+or provider request behavior. It reads the billing facts a provider reports
+(cache tokens, service tier, OpenRouter's own cost); compute_costs prices them.
 """
 
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
@@ -72,6 +74,10 @@ class NormalizedLLMUsage:
     # Anthropic request options billed above list price (lowercased; empty when not reported).
     speed: str = ""
     inference_geo: str = ""
+    # The service tier the provider reports the call ran on (lowercased; empty when not reported).
+    service_tier: str = ""
+    # OpenRouter's own bill for the call in USD (its usage.cost), or None.
+    reported_cost_usd: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -140,6 +146,9 @@ def normalize_llm_usage(
     cache_write_1h_input_tokens = 0
     speed = ""
     inference_geo = ""
+    # Anthropic reports it in the usage block; OpenAI beside it (usage_with_service_tier folds it in).
+    service_tier = _usage_str(usage_mapping, "service_tier")
+    reported_cost_usd = _openrouter_reported_cost(usage_mapping) if "openrouter" in provider_key else None
 
     if "anthropic" in provider_key:
         speed = _usage_str(usage_mapping, "speed")
@@ -208,7 +217,47 @@ def normalize_llm_usage(
         cache_write_1h_input_tokens=cache_write_1h_input_tokens,
         speed=speed,
         inference_geo=inference_geo,
+        service_tier=service_tier,
+        reported_cost_usd=reported_cost_usd,
     )
+
+
+def usage_with_service_tier(response: Any) -> Any:
+    """``response["usage"]``, with the response's top-level ``service_tier`` added when the block lacks one.
+
+    OpenAI reports the tier a call ran on beside the usage block; Anthropic reports it inside. The result is a copy,
+    so the response a caller passes on is unchanged; without a tier to add it is the usage block itself.
+    """
+    if not isinstance(response, Mapping):
+        return None
+    usage = response.get("usage")
+    tier = response.get("service_tier")
+    if isinstance(usage, Mapping) and isinstance(tier, str) and tier.strip() and "service_tier" not in usage:
+        return {**usage, "service_tier": tier}
+    return usage
+
+
+def _openrouter_reported_cost(usage: Mapping[str, Any] | None) -> float | None:
+    """OpenRouter's ``usage.cost`` in USD (its credits are dollars), or None when absent or not a number.
+
+    With BYOK, ``cost`` is only OpenRouter's fee; ``cost_details.upstream_inference_cost`` is what the upstream
+    provider charged the operator's own key, so it is added.
+    """
+    cost = _usage_float(usage, "cost")
+    if cost is None or not usage:
+        return None
+    if usage.get("is_byok") is True:
+        details = usage.get("cost_details")
+        cost += _usage_float(details if isinstance(details, Mapping) else None, "upstream_inference_cost") or 0.0
+    return cost
+
+
+def _usage_float(usage: Mapping[str, Any] | None, key: str) -> float | None:
+    """A finite non-negative number at ``key``, or None."""
+    value = usage.get(key) if usage else None
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value) or value < 0:
+        return None
+    return float(value)
 
 
 def _first_int(*values: Any) -> int:
@@ -399,4 +448,4 @@ def _bound_raw_usage_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     return bounded
 
 
-__all__ = ["NormalizedLLMUsage", "normalize_llm_usage"]
+__all__ = ["NormalizedLLMUsage", "normalize_llm_usage", "usage_with_service_tier"]

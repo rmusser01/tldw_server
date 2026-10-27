@@ -3,9 +3,17 @@ import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 const SETTINGS_RETURN_TO_KEY = "tldw:settingsReturnTo"
 export const SETTINGS_NAVIGATION_REQUEST_EVENT =
   "tldw:settings-navigation-request"
-export const SETTINGS_HISTORY_ID_PARAM = "settingsHistoryId"
-export const SETTINGS_SERVER_CHAT_ID_PARAM = "settingsServerChatId"
-export const RESEARCH_RETURN_RUN_ID_PARAM = "researchReturnRunId"
+import {
+  RESEARCH_RETURN_RUN_ID_PARAM,
+  SETTINGS_HISTORY_ID_PARAM,
+  SETTINGS_SERVER_CHAT_ID_PARAM
+} from "@/utils/settings-return-params"
+
+export {
+  RESEARCH_RETURN_RUN_ID_PARAM,
+  SETTINGS_HISTORY_ID_PARAM,
+  SETTINGS_SERVER_CHAT_ID_PARAM
+}
 
 const isSettingsPath = (path: string) => path.startsWith("/settings")
 const SETTINGS_RETURN_URL_BASE = "https://tldw.local"

@@ -33,7 +33,10 @@ describe("Playground responsive parity guard", () => {
     expect(helpHost).toContain("tldw:open-playground-shortcuts")
     expect(helpHost).toContain("shouldOpenShortcutsHelp(event)")
     expect(source).toContain("event.key.toLowerCase() === \"f\"")
-    expect(source).toContain("searchQuery={threadSearchQuery.trim()}")
+    // Highlights follow the open search bar only (CS-11).
+    expect(source).toContain(
+      "searchQuery={threadSearchHighlightQuery(threadSearchOpen, threadSearchQuery)}"
+    )
     expect(source).toContain("compositionPreviewSummary")
     expect(source).toContain("buildPlaygroundCompositionPreviewSummary")
   })

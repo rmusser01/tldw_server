@@ -202,6 +202,18 @@ def test_invalid_regeneration_never_reaches_provider_or_message_writes(history_a
     ) == before
 
 
+def test_regeneration_refuses_an_invalid_reply_id_as_a_bad_request(history_api):
+    # The endpoint passes only allow-listed statuses through; an invalid id is a
+    # client error, not an unexpected 500.
+    client, db, cid, headers = history_api
+    answered(client, cid, headers)
+    before = db.get_messages_for_conversation(cid)
+    response = regenerate(client, cid, headers, select(client, cid, headers, after="a1"), target="not a valid id!")
+    assert response.status_code == 400, response.text
+    assert "valid saved reply ID" in response.json()["detail"]
+    assert db.get_messages_for_conversation(cid) == before
+
+
 @pytest.mark.parametrize("stream", [False, True])
 def test_fresh_assistant_edit_can_regenerate_with_its_current_opaque_revision(history_api, monkeypatch, stream):
     from tldw_Server_API.app.core.Chat import streaming_utils

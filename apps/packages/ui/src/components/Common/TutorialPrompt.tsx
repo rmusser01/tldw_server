@@ -117,9 +117,9 @@ export const TutorialPrompt: React.FC = () => {
       return
     }
 
-    // Mark as shown for this session immediately
-    shownRef.current.add(pageKey)
-
+    // The page counts as prompted once the prompt appears. A same-page address
+    // change before then (opening a note writes /notes?note=<id>, XP-05)
+    // cancels the pending prompt, and this lets it be scheduled again.
     const now = Date.now()
     const elapsedSinceLastPrompt = now - lastPromptShownAtRef.current
     const cooldownRemaining = Math.max(
@@ -131,6 +131,7 @@ export const TutorialPrompt: React.FC = () => {
     // Show notification after a delay
     timeoutRef.current = globalThis.setTimeout(() => {
       if (!active) return
+      shownRef.current.add(pageKey)
       lastPromptShownAtRef.current = Date.now()
       activePromptPageRef.current = pageKey
 

@@ -100,6 +100,7 @@ export interface ModelInfo {
   readinessReasonCode?: string
   readinessMessage?: string
   chatProvider?: string
+  providerHealth?: string
   catalogOnly?: boolean
   modalities?: {
     input?: string[]
@@ -742,6 +743,9 @@ export class TldwModelsService {
       ),
       chatProvider: toOptionalString(
         rawModel.chat_provider ?? rawModel.chatProvider
+      ),
+      providerHealth: toOptionalString(
+        rawModel.provider_health ?? rawModel.providerHealth
       )
     }
   }

@@ -883,11 +883,13 @@ def test_search_notes_with_keyword_tokens(client: TestClient):
         search_term=query_term,
         keyword_tokens=["mindmap", "project"],
         limit=5,
-        offset=0
+        offset=0,
+        match="all",
     )
     mock_chacha_db_instance.count_notes_matching_keywords.assert_called_once_with(
         search_term=query_term,
         keyword_tokens=["mindmap", "project"],
+        match="all",
     )
 
 

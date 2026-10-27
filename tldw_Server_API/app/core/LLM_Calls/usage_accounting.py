@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.Usage.llm_call_context import (
     in_accounted_call,
 )
 from tldw_Server_API.app.core.Usage.llm_quota_gate import check_user_async, check_user_sync, user_to_check
+from tldw_Server_API.app.core.Usage.llm_usage_normalizer import usage_with_service_tier
 
 _ACCOUNTED_METHODS = ("chat", "achat", "stream", "astream")
 _MARK = "__llm_accounted__"
@@ -135,31 +136,38 @@ class _StreamUsage:
                     data = json.loads(payload)
                 except ValueError:
                     continue
-                if not isinstance(data, dict):
-                    continue
-                usage = data.get("usage")
-                event = data.get("type")
-                if event == "message_start":  # Anthropic Messages: input tokens arrive here, output in message_delta
-                    message = data.get("message")
-                    usage = message.get("usage") if isinstance(message, dict) else None
-                if isinstance(usage, dict):
-                    usage = {key: value for key, value in usage.items() if value is not None}  # null never erases a count
-                    if usage:
-                        self.usage = {**(self.usage or {}), **usage} if event == "message_delta" else usage
-                for choice in data.get("choices") or []:
-                    delta = choice.get("delta") if isinstance(choice, dict) else None
-                    if not isinstance(delta, dict):
-                        continue
-                    for text_field in (delta.get("content"), delta.get("reasoning_content")):
-                        if isinstance(text_field, str):
-                            self.chars += len(text_field)
-                    tool_calls = delta.get("tool_calls")
-                    for tool_call in tool_calls if isinstance(tool_calls, list) else []:
-                        function = tool_call.get("function") if isinstance(tool_call, dict) else None
-                        arguments = function.get("arguments") if isinstance(function, dict) else None
-                        if isinstance(arguments, str):
-                            self.chars += len(arguments)
+                self.feed_event(data)
         except Exception:  # noqa: BLE001 - a malformed chunk must never fail a stream
+            return
+
+    def feed_event(self, data: Any) -> None:
+        """Read one parsed SSE payload; never raises. The chat stream handler calls it with the payloads it parses."""
+        try:
+            if not isinstance(data, dict):
+                return
+            usage = usage_with_service_tier(data)  # an OpenAI chunk names its service tier beside the usage
+            event = data.get("type")
+            if event == "message_start":  # Anthropic Messages: input tokens arrive here, output in message_delta
+                message = data.get("message")
+                usage = message.get("usage") if isinstance(message, dict) else None
+            if isinstance(usage, dict):
+                usage = {key: value for key, value in usage.items() if value is not None}  # null never erases a count
+                if usage:
+                    self.usage = {**(self.usage or {}), **usage} if event == "message_delta" else usage
+            for choice in data.get("choices") or []:
+                delta = choice.get("delta") if isinstance(choice, dict) else None
+                if not isinstance(delta, dict):
+                    continue
+                for text_field in (delta.get("content"), delta.get("reasoning_content")):
+                    if isinstance(text_field, str):
+                        self.chars += len(text_field)
+                tool_calls = delta.get("tool_calls")
+                for tool_call in tool_calls if isinstance(tool_calls, list) else []:
+                    function = tool_call.get("function") if isinstance(tool_call, dict) else None
+                    arguments = function.get("arguments") if isinstance(function, dict) else None
+                    if isinstance(arguments, str):
+                        self.chars += len(arguments)
+        except Exception:  # noqa: BLE001 - a malformed payload must never fail a stream
             return
 
 
@@ -208,7 +216,7 @@ def _submit_record(
 def _record_response(provider: Any, plan: _CallPlan, request: Any, response: Any, started: float) -> None:
     """Record a non-streaming call from its usage block, or an estimate; never raises."""
     try:
-        usage = response.get("usage") if isinstance(response, dict) else None
+        usage = usage_with_service_tier(response)
         if isinstance(usage, dict) and usage:
             prompt_tokens, completion_tokens = _usage_tokens(usage)
             if (prompt_tokens, completion_tokens) != (0, 0):
