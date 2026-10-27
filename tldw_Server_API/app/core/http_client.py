@@ -128,6 +128,12 @@ from tldw_Server_API.app.core.exceptions import (  # noqa: E402
     StreamingProtocolError,
     raise_detached_error,
 )
+from tldw_Server_API.app.core.Logging.stt_observability_context import (
+    OPAQUE_STT_ENDPOINT_ID as _OPAQUE_STT_ENDPOINT_ID,
+)
+from tldw_Server_API.app.core.Logging.stt_observability_context import (
+    get_opaque_stt_endpoint_id,
+)
 from tldw_Server_API.app.core.Metrics import (  # noqa: E402
     MetricDefinition,
     MetricType,
@@ -135,12 +141,6 @@ from tldw_Server_API.app.core.Metrics import (  # noqa: E402
 )
 from tldw_Server_API.app.core.Metrics.traces import get_tracing_manager  # noqa: E402
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope  # noqa: E402
-from tldw_Server_API.app.core.stt_observability_context import (
-    OPAQUE_STT_ENDPOINT_ID as _OPAQUE_STT_ENDPOINT_ID,
-)
-from tldw_Server_API.app.core.stt_observability_context import (
-    get_opaque_stt_endpoint_id,
-)
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled,
     is_explicit_pytest_runtime,

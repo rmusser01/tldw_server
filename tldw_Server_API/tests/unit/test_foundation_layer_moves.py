@@ -51,3 +51,25 @@ def test_llamacpp_handler_settings_are_none_when_disabled(monkeypatch: pytest.Mo
 
     monkeypatch.setenv("LLAMACPP_ENABLED", "0")
     assert config.get_llamacpp_handler_settings() is None
+
+
+def test_request_id_helpers_live_in_logging() -> None:
+    from tldw_Server_API.app.core.Logging import log_context
+    from tldw_Server_API.app.core.Security import request_id_middleware
+
+    assert log_context._clean_request_id.__module__ == "tldw_Server_API.app.core.Logging.log_context"
+    assert request_id_middleware._clean_request_id is log_context._clean_request_id
+    assert log_context._clean_request_id("req-1") == "req-1"
+    assert log_context._clean_request_id("bad id!") != "bad id!"
+
+
+def test_stt_observability_context_is_one_contextvar() -> None:
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core import stt_observability_context as old
+    from tldw_Server_API.app.core.Logging import stt_observability_context as new
+
+    assert old.OPAQUE_STT_ENDPOINT_ID is new.OPAQUE_STT_ENDPOINT_ID
+    endpoint_id = "sha256:" + "a" * 64
+    with http_client.opaque_stt_http_observability(endpoint_id):
+        assert old.get_opaque_stt_endpoint_id() == endpoint_id
+    assert new.get_opaque_stt_endpoint_id() is None

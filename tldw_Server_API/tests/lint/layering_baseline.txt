@@ -206,7 +206,6 @@ core.Ingestion_Sources -> services: 1
 core.LLM_Calls -> core.AuthNZ: 7
 core.LLM_Calls -> core.Chat: 48
 core.Local_LLM -> api.v1.schemas: 4
-core.Logging -> core.Security: 1
 core.MCP_unified -> api.v1.schemas: 1
 core.MCP_unified -> services: 11
 core.Metrics -> core.Ingestion_Media_Processing: 1
@@ -221,7 +220,6 @@ core.Research -> api.v1.schemas: 2
 core.Research_Workspace -> api.v1.API_Deps: 2
 core.Research_Workspace -> api.v1.schemas: 5
 core.Scheduled_Tasks -> api.v1.schemas: 1
-core.Security -> core.stt_observability_context: 1
 core.Security -> services: 1
 core.Setup -> api.v1.endpoints.audio: 1
 core.Setup -> api.v1.schemas: 2
@@ -248,7 +246,6 @@ core.Workspaces -> api.v1.schemas: 2
 core.Workspaces -> services: 1
 core.http_client -> core.Metrics: 2
 core.http_client -> core.Security: 6
-core.http_client -> core.stt_observability_context: 2
 services -> api.v1.API_Deps: 33
 services -> api.v1.endpoints.admin: 1
 services -> api.v1.endpoints.llamacpp: 1
