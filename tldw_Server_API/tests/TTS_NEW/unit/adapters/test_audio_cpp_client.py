@@ -249,3 +249,196 @@ async def test_transport_timeout_maps_to_tts_timeout_error(egress_policy):
         client = AudioCppClient(base_url="http://127.0.0.1:8080", http_client=http_client)
         with pytest.raises(TTSTimeoutError):
             await client.health()
+
+
+# --- Private-network opt-in: allow_private_network scopes a remote base_url to its origin ----
+
+
+@pytest.fixture
+def lan_egress(monkeypatch):
+    """Production egress policy (default ports too) with DNS stubbed.
+
+    Returns ``(seen, dns)``: requests that reached the MockTransport, and the DNS answers
+    (host -> list of addresses) tests may fill in. http_client's test-mode carve-out, which
+    skips the private-address check for an unscoped hostname under pytest, is switched off so
+    unscoped hostnames are vetted as in production. The MockTransport is the socket layer, so
+    an empty ``seen`` proves nothing was sent.
+    """
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Security import egress
+
+    seen: list[httpx.Request] = []
+    dns: dict[str, list[str]] = {}
+
+    real_env_flag_enabled = http_client.env_flag_enabled
+    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
+    monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
+    monkeypatch.setattr(
+        http_client, "env_flag_enabled", lambda name: name != "TESTING" and real_env_flag_enabled(name)
+    )
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda host, **_kwargs: list(dns.get(host, [])))
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWED_PORTS", "80,443,8080")
+    return seen, dns
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("base_url", "answers", "wire_url"),
+    [
+        ("http://192.168.1.50:8080", {}, "http://192.168.1.50:8080/health"),
+        ("http://gpu-box.lan:9000", {"gpu-box.lan": ["192.168.1.50"]}, "http://192.168.1.50:9000/health"),
+    ],
+)
+async def test_private_network_opt_in_reaches_the_configured_lan_server(lan_egress, base_url, answers, wire_url):
+    seen, dns = lan_egress
+    dns.update(answers)
+    wire: list[tuple[str, str]] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        # Captured here: http_client later rewrites the stored Request back to the logical URL.
+        wire.append((str(request.url), request.headers["host"]))
+        return _healthy(request)
+
+    async with _recording_client(seen, respond) as http_client:
+        client = AudioCppClient(
+            base_url=base_url,
+            http_client=http_client,
+            allow_remote_base_url=True,
+            allow_private_network=True,
+        )
+        assert await client.health() == {"status": "ok"}
+
+    assert wire == [(wire_url, base_url.removeprefix("http://"))]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("base_url", "answers"),
+    [
+        ("http://192.168.1.50:8080", {}),
+        ("http://192.168.1.50:9000", {}),
+        ("http://gpu-box.lan:8080", {"gpu-box.lan": ["192.168.1.50"]}),
+    ],
+)
+async def test_lan_base_url_without_the_opt_in_is_still_refused(lan_egress, base_url, answers):
+    seen, dns = lan_egress
+    dns.update(answers)
+    async with _recording_client(seen, _healthy) as http_client:
+        client = AudioCppClient(base_url=base_url, http_client=http_client, allow_remote_base_url=True)
+        with pytest.raises(TTSConfigurationError) as error:
+            await client.health()
+
+    assert error.value.error_code == "EGRESS_DENIED"
+    assert seen == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "location",
+    ["http://192.168.1.51:8080/health", "http://192.168.1.50:9090/health", "http://169.254.169.254/latest"],
+)
+async def test_private_network_opt_in_does_not_follow_a_redirect_to_another_origin(lan_egress, location):
+    seen, _dns = lan_egress
+
+    def redirect(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(302, headers={"location": location})
+
+    async with _recording_client(seen, redirect) as http_client:
+        client = AudioCppClient(
+            base_url="http://192.168.1.50:8080",
+            http_client=http_client,
+            allow_remote_base_url=True,
+            allow_private_network=True,
+        )
+        with pytest.raises(TTSProviderError) as error:
+            await client.health()
+
+    assert error.value.error_code == "HTTP_302"
+    assert [str(request.url) for request in seen] == ["http://192.168.1.50:8080/health"]
+
+
+@pytest.mark.unit
+async def test_private_network_scope_admits_only_the_configured_origin(lan_egress):
+    from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
+
+    async with _recording_client([], _healthy) as http_client:
+        client = AudioCppClient(
+            base_url="http://192.168.1.50:8080",
+            http_client=http_client,
+            allow_remote_base_url=True,
+            allow_private_network=True,
+        )
+        scope = client._endpoint_scope
+
+    assert evaluate_url_policy("http://192.168.1.50:8080/health", configured_endpoint=scope).allowed
+    for other in ("http://192.168.1.51:8080/health", "http://192.168.1.50:9090/health"):
+        result = evaluate_url_policy(other, configured_endpoint=scope)
+        assert (result.allowed, result.reason_code) == (False, "origin_mismatch")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("base_url", "answers"),
+    [
+        ("http://169.254.169.254", {}),  # cloud metadata
+        ("http://100.100.100.200", {}),  # metadata inside the admitted 100.64.0.0/10
+        ("http://[fd00:ec2::254]:8080", {}),  # metadata inside the admitted fc00::/7
+        ("http://169.254.10.20:8080", {}),  # IPv4 link-local
+        ("http://[fe80::1]:8080", {}),  # IPv6 link-local
+        ("http://gpu-box.lan:8080", {"gpu-box.lan": ["169.254.169.254"]}),
+        ("http://gpu-box.lan:8080", {"gpu-box.lan": ["192.168.1.50", "169.254.169.254"]}),
+    ],
+)
+async def test_private_network_opt_in_still_refuses_metadata_and_link_local(lan_egress, base_url, answers):
+    seen, dns = lan_egress
+    dns.update(answers)
+    async with _recording_client(seen, _healthy) as http_client:
+        client = AudioCppClient(
+            base_url=base_url,
+            http_client=http_client,
+            allow_remote_base_url=True,
+            allow_private_network=True,
+        )
+        with pytest.raises(TTSConfigurationError) as error:
+            await client.health()
+
+    assert error.value.error_code == "EGRESS_DENIED"
+    assert seen == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("base_url", "allow_remote", "opt_in"),
+    [
+        ("http://u:p@127.0.0.1:8080", False, False),
+        ("http://user@localhost:8080", False, False),
+        ("http://u:p@192.168.1.50:8080", True, True),
+    ],
+)
+def test_userinfo_in_a_scoped_base_url_is_a_validation_error(base_url, allow_remote, opt_in):
+    """The scoped egress path refuses userinfo; say so at construction, not as a raw ValueError."""
+    from tldw_Server_API.app.core.TTS.tts_exceptions import TTSValidationError
+
+    with pytest.raises(TTSValidationError, match="credentials in base_url") as error:
+        AudioCppClient(base_url=base_url, allow_remote_base_url=allow_remote, allow_private_network=opt_in)
+    assert error.value.error_code == "invalid_base_url"
+    assert "u:p" not in str(error.value)
+
+
+@pytest.mark.unit
+async def test_remote_userinfo_base_url_without_the_opt_in_still_sends_basic_auth(lan_egress):
+    """Unchanged from before the opt-in: how a basic-auth reverse proxy in front of audio.cpp is reached."""
+    seen, dns = lan_egress
+    dns["tts.example.com"] = ["93.184.216.34"]
+    authorization: list[str | None] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        authorization.append(request.headers.get("authorization"))
+        return _healthy(request)
+
+    async with _recording_client(seen, respond) as http_client:
+        client = AudioCppClient(base_url="http://u:p@tts.example.com", http_client=http_client, allow_remote_base_url=True)
+        assert await client.health() == {"status": "ok"}
+
+    assert authorization == ["Basic " + base64.b64encode(b"u:p").decode("ascii")]

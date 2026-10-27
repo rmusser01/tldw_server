@@ -4,7 +4,9 @@ Every request goes through ``core.http_client.afetch``: one attempt, no redirect
 egress policy checked on the address the connection uses. A loopback ``base_url`` (the
 default, and the managed sidecar) is admitted by a ``ConfiguredEndpointScope`` for its exact
 origin. A remote one (``allow_remote_base_url``) gets the default egress policy, so a private
-address is refused unless the operator's egress settings allow it.
+address is refused unless the operator's egress settings allow it, or unless the operator sets
+``allow_private_network``: then the remote origin gets the same exact-origin scope, which admits
+private and LAN addresses there but never cloud metadata or link-local ones.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from ..tts_exceptions import (
     TTSNetworkError,
     TTSProviderError,
     TTSTimeoutError,
+    TTSValidationError,
 )
 from .audio_cpp_config import PROVIDER_KEY, _is_loopback_host, validate_base_url
 
@@ -57,6 +60,7 @@ class AudioCppClient:
         http_client: httpx.AsyncClient | None = None,
         timeout: float = 300.0,
         allow_remote_base_url: bool = False,
+        allow_private_network: bool = False,
     ) -> None:
         """Use an injected client or own a proxy-independent HTTP client."""
         self.base_url = validate_base_url(
@@ -64,11 +68,19 @@ class AudioCppClient:
             allow_remote_base_url=allow_remote_base_url,
         )
         self.timeout = timeout
-        self._endpoint_scope = (
-            ConfiguredEndpointScope.from_url(self.base_url)
-            if _is_loopback_host(urlparse(self.base_url).hostname)
-            else None
-        )
+        # allow_private_network is operator provider config only, never request input.
+        parsed = urlparse(self.base_url)
+        self._endpoint_scope: ConfiguredEndpointScope | None = None
+        if allow_private_network or _is_loopback_host(parsed.hostname):
+            # The scoped egress path refuses userinfo. An unscoped remote base_url keeps it
+            # (sent as Basic auth, e.g. to a reverse proxy).
+            if parsed.username is not None or parsed.password is not None:
+                raise TTSValidationError(
+                    "audio.cpp credentials in base_url are not supported for loopback or private-network endpoints",
+                    provider=PROVIDER_KEY,
+                    error_code="invalid_base_url",
+                )
+            self._endpoint_scope = ConfiguredEndpointScope.from_url(self.base_url)
         self._http_client = http_client or create_async_client(timeout=timeout, trust_env=False)
         self._owns_client = http_client is None
 

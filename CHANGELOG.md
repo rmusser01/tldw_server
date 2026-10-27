@@ -9,6 +9,7 @@ and this project adheres to Some kind of Versioning
 
 ### Added
 
+- **audio.cpp TTS private-network opt-in:** `providers.audio_cpp.extra_params.allow_private_network` (default `false`, operator config only) lets a remote `base_url` (`allow_remote_base_url`) on a private or LAN address work without relaxing the global egress settings. It scopes requests to exactly the configured origin, public hosts included (any port; no `EGRESS_ALLOWLIST` entry needed under the strict profile); cloud metadata and link-local addresses stay refused (TASK-13950.11).
 
 ### Changed
 
@@ -18,6 +19,7 @@ and this project adheres to Some kind of Versioning
 - **Media and Prompts keywords are case-insensitive and keep their display casing.** "Foo" and "foo" are one keyword, stored with the first-seen casing (Media no longer lowercases keywords on write), and lookups also fold ß/SS, accented capitals and NFC forms. On PostgreSQL, Media DB startup merges existing case-variant keyword rows into the earliest one (links move to it; the others are soft-deleted with `merge_parent_uuid` set) and then enforces a unique `LOWER(keyword)` index. The PostgreSQL Media keyword vocabulary is shared, so the first user's casing becomes every user's display casing. Ingestion keeps processor-extracted keyword casing, and the Prompts keyword endpoints return stored casing instead of lowercase (TASK-13950.5).
 - **Collections (reading items) and Watchlists source tags are case-insensitive per user and keep their display casing.** Tags are no longer lowercased on write: "Foo" and "foo" are one tag, stored with the first-seen casing, and tag lookups, filters, OPML export and content-alert source constraints also fold ß/SS, accented capitals and NFC forms. On first open after upgrade (SQLite and PostgreSQL), each user's case-variant duplicate tags are merged into their earliest row (tagged items and sources move to it, the duplicates are deleted), and a unique case-insensitive index per user is enforced. Tags are never merged across users. Existing tags keep their stored lowercase names (TASK-13950.5).
 - **Admin webhooks, `github_create_issue` and GitHub repository sync follow the general egress policy:** ports other than 80, 443 and 8080 are refused unless `WORKFLOWS_EGRESS_ALLOWED_PORTS` lists them, so an admin-webhook receiver on a port such as :8443 or :5678 needs it set. When `ENVIRONMENT`, `APP_ENV` or `ENV` is `prod` or `production`, the strict profile denies every host not in `EGRESS_ALLOWLIST` or `WORKFLOWS_EGRESS_ALLOWLIST`, so production deployments without an allowlist must add the receiver hosts and `api.github.com` (TASK-13950.11).
+- **audio.cpp TTS `base_url` credentials:** a loopback `base_url` with userinfo (`user:pass@`) has been refused since the audio.cpp client moved to `core.http_client`, as a raw `ValueError`. It, and one with `allow_private_network` on, now fails with a clear `TTSValidationError`. A remote `base_url` without the opt-in still sends its userinfo as Basic auth, as before. A `base_url` with an invalid port is now a `TTSValidationError` too (TASK-13950.11).
 
 ### Fixed
 

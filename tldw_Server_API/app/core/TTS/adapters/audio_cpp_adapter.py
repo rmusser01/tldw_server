@@ -127,6 +127,7 @@ class AudioCppTTSAdapter(TTSAdapter):
                 base_url=base_url,
                 timeout=float(self._audio_cpp_config.timeout),
                 allow_remote_base_url=self._audio_cpp_config.allow_remote_base_url,
+                allow_private_network=self._audio_cpp_config.allow_private_network,
             )
             self._owns_client = True
 
