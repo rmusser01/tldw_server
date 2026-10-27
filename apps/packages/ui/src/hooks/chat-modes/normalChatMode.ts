@@ -1453,7 +1453,9 @@ const captureNormalHistoryTurn = async (
       // A reply the server never received leaves the server copy incomplete.
       endReplyWrite?.(turn.persistence === "server" ? "unknown" : data.content.trim() ? "failed" : "unknown")
       const failure = !data.outcome && error != null
-        ? decodeChatErrorPayload(buildFriendlyErrorMessage(error))
+        ? decodeChatErrorPayload(
+            buildFriendlyErrorMessage(error, { modelLabel: turn.replyModel?.label })
+          )
         : null
       await saveRecord(
         record(

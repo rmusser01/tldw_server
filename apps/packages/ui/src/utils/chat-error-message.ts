@@ -3,6 +3,7 @@ import { formatErrorMessage } from "@/utils/format-error-message"
 import { parseBillingLimitError } from "@/utils/billing-error"
 import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import { ChatStreamTimeoutError } from "@/services/tldw/chat-timeouts"
+import { isChatProviderFailureError } from "@/utils/chat-model-readiness"
 
 export const TLDW_ERROR_BUBBLE_PREFIX = "__tldw_error__:"
 
@@ -62,11 +63,18 @@ export const decodeChatErrorPayload = (
   }
 }
 
-const translateErrorText = (key: string, fallback: string): string => {
-  const translated = i18n.t(key, fallback)
+const interpolate = (text: string, values: Record<string, string>): string =>
+  text.replace(/\{\{(\w+)\}\}/g, (match, name: string) => values[name] ?? match)
+
+const translateErrorText = (
+  key: string,
+  fallback: string,
+  values: Record<string, string> = {}
+): string => {
+  const translated = i18n.t(key, fallback, values)
   return typeof translated === "string" && translated.trim().length > 0
     ? translated
-    : fallback
+    : interpolate(fallback, values)
 }
 
 const findRecoveryServerError = (error: unknown): unknown => {
@@ -89,7 +97,16 @@ const findRecoveryServerError = (error: unknown): unknown => {
   return undefined
 }
 
-export const buildFriendlyErrorMessage = (rawError: unknown): string => {
+/** What the failing request was for, when the caller knows it. */
+export type ChatErrorContext = {
+  /** The model's one-line label, e.g. "gemma3:1b (Ollama)" (formatChatModelLabel). */
+  modelLabel?: string
+}
+
+export const buildFriendlyErrorMessage = (
+  rawError: unknown,
+  context: ChatErrorContext = {}
+): string => {
   let detail = formatErrorMessage(rawError, "Request failed")
   const lower = detail.toLowerCase()
   // Ordinary chat wraps the direct transport error in Error.cause. Preserve
@@ -140,6 +157,30 @@ export const buildFriendlyErrorMessage = (rawError: unknown): string => {
         "Choose another model"
       ),
       serverRetryRequired: rawError.serverRetryRequired
+    })
+  }
+
+  // The provider behind the model didn't answer; the tldw server did (CC-N2).
+  if (isChatProviderFailureError(rawError)) {
+    const modelLabel = context.modelLabel?.trim()
+    return encodeChatErrorPayload({
+      summary: modelLabel
+        ? translateErrorText(
+            "common:error.providerUnavailableSummary",
+            "Couldn't reach {{model}}.",
+            { model: modelLabel }
+          )
+        : translateErrorText(
+            "common:error.providerUnavailableSummaryGeneric",
+            "Couldn't reach this model's provider."
+          ),
+      hint: translateErrorText(
+        "common:error.providerUnavailableHint",
+        "Your tldw server is fine, but this model's provider didn't respond. Start the provider or switch models."
+      ),
+      detail: sanitizeServerErrorMessage(rawError, detail),
+      recoveryAction: "open-model-selector",
+      recoveryLabel: translateErrorText("common:error.switchModel", "Switch model")
     })
   }
 
@@ -340,10 +381,11 @@ export const buildFriendlyErrorMessage = (rawError: unknown): string => {
 
 export const buildAssistantErrorContent = (
   botMessage: string | undefined,
-  rawError: unknown
+  rawError: unknown,
+  context?: ChatErrorContext
 ): string => {
   if (botMessage && String(botMessage).trim().length > 0) {
     return String(botMessage)
   }
-  return buildFriendlyErrorMessage(rawError)
+  return buildFriendlyErrorMessage(rawError, context)
 }

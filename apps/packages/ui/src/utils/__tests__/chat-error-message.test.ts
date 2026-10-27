@@ -5,6 +5,7 @@ import {
   buildFriendlyErrorMessage,
   decodeChatErrorPayload,
   encodeChatErrorPayload,
+  buildAssistantErrorContent,
   ImageSupportUnconfirmedError
 } from "../chat-error-message"
 
@@ -134,3 +135,55 @@ describe("chat error message recovery actions", () => {
   })
 
 })
+
+describe("provider failures name the model (CC-N2)", () => {
+  beforeAll(async () => { await i18n.init({ lng: "en", resources: {} }) })
+
+  const providerDown = () =>
+    new Error("Stream completion failed", {
+      cause: {
+        status: 502,
+        details: {
+          detail: {
+            error_code: "provider_unavailable",
+            message: "The chat service provider is currently unavailable."
+          }
+        }
+      }
+    })
+
+  it("says which model didn't answer and offers Switch model", () => {
+    expect(
+      decodeChatErrorPayload(
+        buildFriendlyErrorMessage(providerDown(), { modelLabel: "gemma3:1b (Ollama)" })
+      )
+    ).toMatchObject({
+      summary: "Couldn't reach gemma3:1b (Ollama).",
+      hint: "Your tldw server is fine, but this model's provider didn't respond. Start the provider or switch models.",
+      recoveryAction: "open-model-selector",
+      recoveryLabel: "Switch model"
+    })
+  })
+
+  it("names the provider generically when the model is unknown", () => {
+    expect(decodeChatErrorPayload(buildFriendlyErrorMessage(providerDown()))?.summary).toBe(
+      "Couldn't reach this model's provider."
+    )
+  })
+
+  it("passes the model label through buildAssistantErrorContent", () => {
+    expect(
+      decodeChatErrorPayload(
+        buildAssistantErrorContent("", providerDown(), { modelLabel: "mock-gpt-4o (Custom OpenAI API)" })
+      )?.summary
+    ).toBe("Couldn't reach mock-gpt-4o (Custom OpenAI API).")
+  })
+
+  it("keeps a server 503 for missing credentials out of the provider wording", () => {
+    const error = new Error("Stream completion failed", {
+      cause: { status: 503, detail: { error_code: "missing_provider_credentials" } }
+    })
+    expect(decodeChatErrorPayload(buildFriendlyErrorMessage(error))?.summary).not.toMatch(/Couldn't reach/)
+  })
+})
+

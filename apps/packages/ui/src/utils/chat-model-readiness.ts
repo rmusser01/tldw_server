@@ -123,24 +123,60 @@ const collectErrorCodes = (value: unknown, codes: string[], depth = 0) => {
 }
 
 /**
- * True when a failed chat request shows the model's provider could not answer:
- * a 5xx from the server or a provider-unavailable error code. Client-side
- * aborts, timeouts and validation errors are not evidence either way.
+ * True when `test` holds for the error or one of its causes, given that
+ * level's HTTP status and error codes.
  */
-export const isChatModelUnreachableError = (error: unknown): boolean => {
+const someErrorLevel = (
+  error: unknown,
+  test: (status: number | null, codes: string[]) => boolean
+): boolean => {
   let current: unknown = error
   for (let depth = 0; depth < 5 && current; depth += 1) {
     if (typeof current !== "object") return false
     const record = current as Record<string, unknown>
-    const status = readStatus(record)
-    if (status !== null && status >= 500 && status <= 599) return true
     const codes: string[] = []
     collectErrorCodes(record, codes)
-    if (codes.some((code) => UNREACHABLE_ERROR_CODES.has(code))) return true
+    if (test(readStatus(record), codes)) return true
     current = record.cause
   }
   return false
 }
+
+/**
+ * True when a failed chat request shows the model's provider could not answer:
+ * a 5xx from the server or a provider-unavailable error code. Client-side
+ * aborts, timeouts and validation errors are not evidence either way.
+ */
+export const isChatModelUnreachableError = (error: unknown): boolean =>
+  someErrorLevel(
+    error,
+    (status, codes) =>
+      (status !== null && status >= 500 && status <= 599) ||
+      codes.some((code) => UNREACHABLE_ERROR_CODES.has(code))
+  )
+
+const PROVIDER_FAILURE_CODES = new Set([
+  "provider_unavailable",
+  "provider_error",
+  "upstream_error",
+  "upstream_unavailable",
+  "bad_gateway",
+  "gateway_timeout"
+])
+
+/**
+ * True when a failed chat request says the model's provider, not the tldw
+ * server, failed (CC-N2): a provider error code, or a 502/504 without one. A
+ * 503 alone is not enough, because the server also answers 503 for missing
+ * provider credentials, routing failures and while it is busy.
+ */
+export const isChatProviderFailureError = (error: unknown): boolean =>
+  someErrorLevel(
+    error,
+    (status, codes) =>
+      codes.some((code) => PROVIDER_FAILURE_CODES.has(code)) ||
+      (codes.length === 0 && (status === 502 || status === 504))
+  )
 
 type ReadinessModelDescriptor = Record<string, unknown> | null | undefined
 
