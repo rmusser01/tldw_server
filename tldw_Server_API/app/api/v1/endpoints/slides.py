@@ -65,6 +65,7 @@ from tldw_Server_API.app.api.v1.schemas.slides_schemas import (
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE, MEDIA_DELETE, MEDIA_READ, MEDIA_UPDATE
+from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
     ArtifactVerificationResult,
     ArtifactVerificationUnit,
@@ -1269,11 +1270,14 @@ async def _generate_presentation(
     response: Response,
     db: SlidesDatabase,
     request: Any,
+    http_request: Request,
     source_text: str,
     source_type: str,
     source_ref: Any | None,
     source_query: str | None,
 ) -> PresentationResponse:
+    if await http_request.is_disconnected():
+        raise HTTPException(status_code=499, detail="generation_cancelled")
     visual_style_application = _resolve_presentation_visual_style_application(
         visual_style_id=getattr(request, "visual_style_id", None),
         visual_style_scope=getattr(request, "visual_style_scope", None),
@@ -1310,20 +1314,23 @@ async def _generate_presentation(
             logger.debug("Failed to record slides generation error metric")
 
     try:
-        generated = generator.generate_from_text(
-            source_text=source_text,
-            title_hint=request.title_hint,
-            provider=provider,
-            model=request.model,
-            api_key=None,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-            max_source_tokens=request.max_source_tokens,
-            max_source_chars=request.max_source_chars,
-            enable_chunking=request.enable_chunking,
-            chunk_size_tokens=request.chunk_size_tokens,
-            summary_tokens=request.summary_tokens,
-            visual_style_snapshot=visual_style_snapshot_dict,
+        generated = await await_owned_worker(
+            asyncio.to_thread(
+                generator.generate_from_text,
+                source_text=source_text,
+                title_hint=request.title_hint,
+                provider=provider,
+                model=request.model,
+                api_key=None,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                max_source_tokens=request.max_source_tokens,
+                max_source_chars=request.max_source_chars,
+                enable_chunking=request.enable_chunking,
+                chunk_size_tokens=request.chunk_size_tokens,
+                summary_tokens=request.summary_tokens,
+                visual_style_snapshot=visual_style_snapshot_dict,
+            )
         )
     except SlidesSourceTooLargeError as exc:
         _record_generation_error("input_too_large")
@@ -1345,6 +1352,9 @@ async def _generate_presentation(
     except SlidesGenerationError as exc:
         _record_generation_error("generation_error")
         raise HTTPException(status_code=500, detail="Failed to generate presentation") from exc
+
+    if await http_request.is_disconnected():
+        raise HTTPException(status_code=499, detail="generation_cancelled")
 
     try:
         slides = _normalize_slides([_slide_from_obj(s) for s in generated["slides"]])
@@ -1373,6 +1383,8 @@ async def _generate_presentation(
             },
         )
     studio_data = {"claimVerification": claim_verification_payload}
+    if await http_request.is_disconnected():
+        raise HTTPException(status_code=499, detail="generation_cancelled")
     row = db.create_presentation(
         presentation_id=None,
         title=generated["title"],
@@ -2588,6 +2600,7 @@ async def list_presentation_render_artifacts(
 async def generate_from_prompt(
     request: GenerateFromPromptRequest,
     response: Response,
+    http_request: Request,
     db: SlidesDatabase = Depends(get_slides_db_for_user),
 ) -> PresentationResponse:
     prompt = request.prompt.strip()
@@ -2597,6 +2610,7 @@ async def generate_from_prompt(
         response=response,
         db=db,
         request=request,
+        http_request=http_request,
         source_text=prompt,
         source_type="prompt",
         source_ref=None,
@@ -2632,6 +2646,7 @@ async def generate_from_chat(
         response=response,
         db=db,
         request=request,
+        http_request=http_request,
         source_text=source_text,
         source_type="chat",
         source_ref=conversation_id,
@@ -2648,6 +2663,7 @@ async def generate_from_chat(
 async def generate_from_media(
     request: GenerateFromMediaRequest,
     response: Response,
+    http_request: Request,
     db: SlidesDatabase = Depends(get_slides_db_for_user),
     media_db: MediaDbSession = Depends(get_media_db_for_user),
 ) -> PresentationResponse:
@@ -2671,6 +2687,7 @@ async def generate_from_media(
         response=response,
         db=db,
         request=request,
+        http_request=http_request,
         source_text=source_text,
         source_type="media",
         source_ref=str(media_id),
@@ -2711,6 +2728,7 @@ async def generate_from_notes(
         response=response,
         db=db,
         request=request,
+        http_request=http_request,
         source_text=source_text,
         source_type="notes",
         source_ref=request.note_ids,
@@ -2727,6 +2745,7 @@ async def generate_from_notes(
 async def generate_from_rag(
     request: GenerateFromRagRequest,
     response: Response,
+    http_request: Request,
     db: SlidesDatabase = Depends(get_slides_db_for_user),
 ) -> PresentationResponse:
     query = request.query.strip()
@@ -2754,6 +2773,7 @@ async def generate_from_rag(
         response=response,
         db=db,
         request=request,
+        http_request=http_request,
         source_text=source_text,
         source_type="rag",
         source_ref=None,

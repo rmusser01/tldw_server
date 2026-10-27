@@ -2747,6 +2747,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
   } = deps
 
   const generationAbortRef = useRef<AbortController | null>(null)
+  const generationRollbackRef = useRef<(() => void) | null>(null)
   const [generationPhase, setGenerationPhase] = useState<
     "preparing" | "retrieving" | "generating" | "finalizing" | null
   >(null)
@@ -2915,9 +2916,12 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
   useEffect(() => {
     return () => {
       generationAbortRef.current?.abort()
+      generationRollbackRef.current?.()
+      if (generationAbortRef.current) setIsGeneratingOutput(false)
       generationAbortRef.current = null
+      generationRollbackRef.current = null
     }
-  }, [])
+  }, [setIsGeneratingOutput])
 
   // Resolve chat runtime
   const resolveStudioChatRuntime = React.useCallback(async () => {
@@ -3109,6 +3113,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
       type: ArtifactType,
       options: ArtifactGenerationOptions = {}
     ) => {
+      if (generationAbortRef.current) return
       setRecentOutputTypes(recordRecentOutputType(type))
       if (!hasSelectedSources) return
 
@@ -3134,6 +3139,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
       const estimatedCostUsd = estimateGenerationCostUsd(estimatedTokens)
 
       let artifact: GeneratedArtifact | null = null
+      let previousArtifact: GeneratedArtifact | null = null
 
       try {
         const workProductTemplate = options.templateId
@@ -3164,27 +3170,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
             (entry) => entry.id === options.targetArtifactId
           )
           if (existingArtifact) {
+            previousArtifact = existingArtifact
             updateArtifactStatus(existingArtifact.id, "generating", {
-              createdAt: new Date(),
-              completedAt: undefined,
-              estimatedTokens,
-              estimatedCostUsd,
-              totalTokens: undefined,
-              totalCostUsd: undefined,
-              serverId: undefined,
-              content: undefined,
-              contentType: undefined,
-              previewText: undefined,
-              summary: undefined,
-              audioUrl: undefined,
-              audioFormat: undefined,
-              presentationId: undefined,
-              presentationVersion: undefined,
-              producerMetadata: undefined,
-              exportRefs: undefined,
-              version: undefined,
-              data: undefined,
-              sourceCoverage: undefined,
               errorMessage: undefined,
               ...templateMetadata
             })
@@ -3212,6 +3199,14 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
           })
         }
 
+        generationRollbackRef.current = () => {
+          if (generationAbortRef.current !== activeAbort || !artifact) return
+          updateArtifactStatus(artifact.id, previousArtifact?.status ?? "failed", {
+            ...(previousArtifact ?? {}),
+            errorMessage: t("playground:studio.generateCancelled", "Generation canceled before completion.")
+          })
+        }
+
         let result: GenerationResult = {}
 
         // Phase: retrieving relevant content
@@ -3219,6 +3214,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
 
         // Small delay to ensure UI updates before heavy work
         await new Promise((resolve) => setTimeout(resolve, 50))
+        throwIfAborted(activeAbort.signal)
 
         // Phase: generating output
         setGenerationPhase("generating")
@@ -3490,6 +3486,9 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
             throw new Error(`Unsupported output type: ${type}`)
         }
 
+        throwIfAborted(activeAbort.signal)
+        if (generationAbortRef.current !== activeAbort) return
+
         // Phase: finalizing
         setGenerationPhase("finalizing")
 
@@ -3551,13 +3550,14 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
           })
         )
       } catch (error) {
-        const generationWasAborted = isAbortLikeError(error)
+        if (generationAbortRef.current !== activeAbort) return
+        const generationWasAborted = activeAbort.signal.aborted || isAbortLikeError(error)
         const sourceCoverage = isLiteratureSourceCoverageError(error)
           ? error.sourceCoverage
           : undefined
         if (artifact) {
-          updateArtifactStatus(artifact.id, "failed", {
-            sourceCoverage,
+          updateArtifactStatus(artifact.id, previousArtifact?.status ?? "failed", {
+            ...(previousArtifact ?? { sourceCoverage }),
             errorMessage: generationWasAborted
               ? t(
                   "playground:studio.generateCancelled",
@@ -3583,9 +3583,10 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
       } finally {
         if (generationAbortRef.current === activeAbort) {
           generationAbortRef.current = null
+          generationRollbackRef.current = null
+          setIsGeneratingOutput(false)
+          setGenerationPhase(null)
         }
-        setIsGeneratingOutput(false)
-        setGenerationPhase(null)
       }
     },
     [
