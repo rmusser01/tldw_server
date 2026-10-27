@@ -172,7 +172,7 @@ describe("ReviewTab cram mode", () => {
     vi.mocked(listFlashcards).mockReset()
     reviewMutateAsync.mockResolvedValue({ review_session_id: 77, interval_days: 1 })
     endMutateAsync.mockResolvedValue({ id: 77 })
-    vi.mocked(useEndFlashcardReviewSessionMutation).mockReturnValue({ mutateAsync: endMutateAsync } as ReturnType<typeof useEndFlashcardReviewSessionMutation>)
+    vi.mocked(useEndFlashcardReviewSessionMutation, { partial: true }).mockReturnValue({ mutateAsync: endMutateAsync })
     await clearSetting(FLASHCARDS_SHORTCUT_HINT_DENSITY_SETTING)
     await clearSetting(FLASHCARDS_REVIEW_ONBOARDING_DISMISSED_SETTING)
     vi.mocked(useDecksQuery).mockReturnValue({
@@ -359,7 +359,7 @@ describe("ReviewTab cram mode", () => {
   })
 
   const mountQueue = () => {
-    const template = vi.mocked(useCramQueueQuery)().data![0]
+    const template = vi.mocked(useCramQueueQuery)(undefined).data![0]
     const cards = ["Alpha", "Bravo", "Charlie"].map((front, index) => ({
       ...template, uuid: `card-${index}`, front,
     })) as Flashcard[]
@@ -393,7 +393,7 @@ describe("ReviewTab cram mode", () => {
     return { promise, resolve }
   }
   const mountRealQueue = () => {
-    const template = vi.mocked(useCramQueueQuery)().data![0]
+    const template = vi.mocked(useCramQueueQuery)(undefined).data![0]
     vi.mocked(useCramQueueQuery).mockImplementation(useRealCramQueueQuery)
     const client = new QueryClient({ defaultOptions: { queries: {
       retry: false, refetchOnWindowFocus: false, refetchOnReconnect: false
@@ -463,7 +463,7 @@ describe("ReviewTab cram mode", () => {
   })
 
   it("keeps an error visible with cached cards and preserves practiced identities through retry", async () => {
-    const template = vi.mocked(useCramQueueQuery)().data![0]
+    const template = vi.mocked(useCramQueueQuery)(undefined).data![0]
     const cards = [template, { ...template, uuid: "second-card", front: "Second card" }]
     vi.mocked(listFlashcards).mockResolvedValue(queueResponse(cards))
     const { client } = mountRealQueue()
@@ -485,7 +485,7 @@ describe("ReviewTab cram mode", () => {
   })
 
   it("does not claim completion for a failed refresh after the cached queue is practiced", async () => {
-    const template = vi.mocked(useCramQueueQuery)().data![0]
+    const template = vi.mocked(useCramQueueQuery)(undefined).data![0]
     vi.mocked(listFlashcards).mockResolvedValue(queueResponse([template]))
     const { client } = mountRealQueue()
     fireEvent.click(screen.getByTestId("flashcards-review-cram-update-schedule"))
@@ -607,7 +607,7 @@ describe("ReviewTab cram mode", () => {
     mountQueue()
     fireEvent.click(screen.getByTestId("flashcards-review-cram-update-schedule"))
     await rate("Alpha")
-    fireEvent.click(screen.getByRole("button", { name: "End Session", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "End Session" }))
     await waitFor(() => expect(endMutateAsync).toHaveBeenCalledTimes(1))
     expect(screen.getByText("Bravo")).toBeInTheDocument()
     await rate("Bravo")

@@ -86,6 +86,7 @@ async def save_uploaded_files(
     allowed_extensions: list[str] | None = None,
     *,
     skip_archive_scanning: bool = False,
+    max_upload_bytes: int | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """
     Save uploaded files to a temporary directory, validating them via FileValidator.
@@ -101,6 +102,7 @@ async def save_uploaded_files(
         expected_media_type_key: Optional media-type key hint used for validation.
         allowed_extensions: Optional list of allowed file extensions.
         skip_archive_scanning: When True, relaxes deep archive scanning for some types.
+        max_upload_bytes: Optional server-derived bound in addition to media policy.
 
     Returns:
         processed_files: List of dicts for successfully saved files:
@@ -108,6 +110,8 @@ async def save_uploaded_files(
         file_handling_errors: List of dicts for failures:
             `{"original_filename": str, "input_ref": str, "status": "Error", "error": str}`.
     """
+    if max_upload_bytes is not None and (type(max_upload_bytes) is not int or max_upload_bytes < 1):
+        raise ValueError("max_upload_bytes must be a positive integer")
     processed_files: list[dict[str, Any]] = []
     file_handling_errors: list[dict[str, Any]] = []
     used_secure_names: set[str] = set()
@@ -370,11 +374,16 @@ async def save_uploaded_files(
                 except Exception:
                     max_cfg_bytes = None
 
+            if max_upload_bytes is not None:
+                max_cfg_bytes = min(max_cfg_bytes, max_upload_bytes) if max_cfg_bytes is not None else max_upload_bytes
             written = 0
             try:
                 async with aiofiles.open(local_file_path, "wb") as buffer:
                     while True:
-                        chunk = await file.read(1024 * 1024)
+                        read_size = 1024 * 1024
+                        if max_upload_bytes is not None:
+                            read_size = min(read_size, max_cfg_bytes - written + 1)
+                        chunk = await file.read(read_size)
                         if not chunk:
                             break
                         written += len(chunk)

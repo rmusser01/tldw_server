@@ -696,11 +696,13 @@ describe("ExternalServersTab", () => {
       name: "Docs Local",
       transport: "stdio",
       config: {
-        command: "uvx",
-        args: ["mcp-server-docs", "--stdio"],
-        cwd: "/tmp/docs",
-        env: {
-          DOCS_MODE: "readonly"
+        stdio: {
+          command: "uvx",
+          args: ["mcp-server-docs", "--stdio"],
+          cwd: "/tmp/docs",
+          env: {
+            DOCS_MODE: "readonly"
+          }
         }
       },
       owner_scope_type: "global",
@@ -713,54 +715,19 @@ describe("ExternalServersTab", () => {
     expect(onOpenToolCatalog).toHaveBeenCalledTimes(1)
   }, 15000)
 
-  it("saves a guided HTTP/SSE server with URL and headers", async () => {
+  it("keeps unsupported HTTP/SSE unavailable without creating or discovering a server", async () => {
     const user = userEvent.setup()
-    mocks.createExternalServer.mockResolvedValueOnce({
-      id: "docs-http",
-      name: "Docs HTTP",
-      enabled: true,
-      owner_scope_type: "global",
-      transport: "sse",
-      config: {},
-      secret_configured: false,
-      server_source: "managed",
-      binding_count: 0,
-      runtime_executable: true,
-      auth_template_present: false,
-      auth_template_valid: false,
-      auth_template_blocked_reason: "no_auth_template",
-      credential_slots: []
-    })
     render(<ExternalServersTab />)
 
     await screen.findByText("Docs Legacy")
     await user.click(screen.getByRole("button", { name: /new managed server/i }))
-    await user.click(screen.getByRole("button", { name: /http\/sse/i }))
-    await user.type(screen.getByLabelText(/server id/i), "docs-http")
-    await user.type(screen.getByLabelText(/^name$/i), "Docs HTTP")
-    await user.type(screen.getByLabelText(/^url$/i), "https://example.test/mcp")
-    fireEvent.change(screen.getByLabelText(/headers json/i), {
-      target: {
-        value: JSON.stringify({
-          Authorization: "Bearer test"
-        })
-      }
-    })
-    await user.click(screen.getByRole("button", { name: /save without discovery/i }))
+    const choice = screen.getByRole("button", { name: /http\/sse/i })
+    expect(choice).toBeDisabled()
+    await user.click(choice)
 
-    expect(mocks.createExternalServer).toHaveBeenCalledWith({
-      server_id: "docs-http",
-      name: "Docs HTTP",
-      transport: "sse",
-      config: {
-        url: "https://example.test/mcp",
-        headers: {
-          Authorization: "Bearer test"
-        }
-      },
-      owner_scope_type: "global",
-      enabled: true
-    })
+    expect(screen.getByText(/HTTP\/SSE is unavailable.*stdio.*WebSocket/i)).toBeVisible()
+    expect(screen.queryByLabelText(/^url$/i)).toBeNull()
+    expect(mocks.createExternalServer).not.toHaveBeenCalled()
     expect(mocks.refreshExternalServerDiscovery).not.toHaveBeenCalled()
   }, 15000)
 
@@ -779,8 +746,8 @@ describe("ExternalServersTab", () => {
       />
     )
 
-    expect(await screen.findByDisplayValue("Docs Managed")).toBeTruthy()
-    expect(screen.getByDisplayValue("stdio")).toBeTruthy()
+    expect(await screen.findByRole("textbox", { name: "Name" })).toHaveValue("Docs Managed")
+    expect(screen.getByRole("combobox", { name: "Transport" })).toHaveValue("stdio")
     expect(onDrillHandled).toHaveBeenCalledWith(12)
   })
 

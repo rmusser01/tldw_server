@@ -155,7 +155,10 @@ class CustomOpenAIAdapter(ChatProvider):
             if self.default_base_url:
                 base = self.default_base_url
             else:
-                raise RuntimeError(f"{self.name} requires an explicit base URL")
+                raise ChatConfigurationError(
+                    provider=self.name,
+                    message=f"{self.name} requires an explicit base URL",
+                )
         return str(base).rstrip("/")
 
     def _is_configured_custom(self) -> bool:
@@ -208,7 +211,10 @@ class CustomOpenAIAdapter(ChatProvider):
 
         endpoint = resolve_trusted_provider_endpoint(self.name)
         if endpoint is None:
-            raise RuntimeError(f"{self.name} requires an explicit configured base URL")
+            raise ChatConfigurationError(
+                provider=self.name,
+                message=f"{self.name} requires an explicit configured base URL",
+            )
         return endpoint.base_url, endpoint
 
     def _consume_runtime_credentials(

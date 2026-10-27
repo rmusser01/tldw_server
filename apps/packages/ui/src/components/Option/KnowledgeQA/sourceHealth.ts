@@ -65,7 +65,8 @@ export function normalizeEmbeddingStatus(
 }
 
 export function normalizeKnowledgeSourceHealth(
-  payload: unknown
+  payload: unknown,
+  personalLists?: Partial<Record<"media_db" | "notes", unknown>>
 ): KnowledgeSourceHealthState {
   const record = toRecord(payload) ?? {}
   const rawSources = Array.isArray(record.sources) ? record.sources : []
@@ -78,12 +79,20 @@ export function normalizeKnowledgeSourceHealth(
       continue
     }
 
+    const list = toRecord(personalLists?.[sourceId as "media_db" | "notes"])
+    const pagination = toRecord(list?.pagination)
+    const total = toOptionalNumber(
+      pagination?.total ?? pagination?.total_items ?? list?.total
+    )
     sources.push({
       sourceId,
       label: toOptionalString(entry?.label) ?? getRagSourceLabel(sourceId),
       available: entry?.available === true,
       searchable: entry?.searchable === true,
-      itemCount: toOptionalNumber(entry?.item_count),
+      itemCount:
+        total != null && Number.isSafeInteger(total) && total >= 0
+          ? total
+          : toOptionalNumber(entry?.item_count),
       indexedCount: toOptionalNumber(entry?.indexed_count),
       lastUpdated: toOptionalString(entry?.last_updated),
       lastIndexed: toOptionalString(entry?.last_indexed),
@@ -178,8 +187,48 @@ export function buildSourceHealthSummary(
     return "Source health unavailable"
   }
 
-  const readyCount = state.sources.filter(
-    (source) => source.searchable && source.indexStatus === "ready"
+  const availableCount = state.sources.filter(
+    (source) => source.available
   ).length
-  return `Sources ready: ${readyCount} of ${state.sources.length}`
+  const personalCount = getPersonalItemCount(state)
+  const personalSources = [state.bySource.media_db, state.bySource.notes]
+  const searchableCount =
+    personalCount === 0
+      ? 0
+      : personalSources.every(
+            (source) =>
+              source &&
+              source.indexedCount != null &&
+              Number.isSafeInteger(source.indexedCount) &&
+              source.indexedCount >= 0
+          )
+        ? personalSources.reduce(
+            (total, source) =>
+              total + (source?.searchable ? (source.indexedCount ?? 0) : 0),
+            0
+          )
+        : "unknown"
+  const content = state.personalContentError
+    ? "Personal items: unavailable"
+    : personalCount == null
+      ? "Personal items: unknown"
+      : `Stored personal items: ${personalCount} · Searchable personal items: ${searchableCount}`
+  return `Available services: ${availableCount} of ${state.sources.length} · ${content}`
+}
+
+/** Storage totals never imply embeddings exist. Unknown/loading counts stay unknown. */
+export function getPersonalItemCount(
+  state: KnowledgeSourceHealthState | null | undefined
+): number | null {
+  if (!state || state.loading || state.error || state.personalContentError)
+    return null
+  const counts = [
+    state.bySource.media_db?.itemCount,
+    state.bySource.notes?.itemCount
+  ]
+  return counts.every(
+    (count) => count != null && Number.isSafeInteger(count) && count >= 0
+  )
+    ? counts.reduce<number>((total, count) => total + (count ?? 0), 0)
+    : null
 }

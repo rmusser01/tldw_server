@@ -394,7 +394,7 @@
     "storageServerDescription": "Lagret på tldw-serveren din (anbefales for RAG og delte arbeidsområder).",
     "storageLocalDescription": "Beholdes kun i denne nettleseren; ingen data skrives til serveren.",
     "storeAfterReview": "Lagre etter gjennomgang",
-    "reviewBeforeStorage": "Gjennomgå før lagring",
+    "reviewBeforeStorage": "Se gjennom uthentet innhold før lagring",
     "reviewBeforeStorageHint": "Behandle nå, og rediger deretter kladder lokalt før du lagrer på serveren.",
     "reviewEnabled": "Gjennomgangsmodus",
     "reviewStorageCap": "Lokale kladder er begrenset til {{cap}}.",

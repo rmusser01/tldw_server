@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat import chat_target_resolution as targets
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.exceptions import (
     ChatAuthenticationError,
@@ -218,9 +219,12 @@ def study_route(request, study_database, provider_boundary):
         db.submit_attempt(int(attempt["id"]), answers=[{"question_id": question, "user_answer": 1}])
         path = f"/api/v1/quizzes/attempts/{attempt['id']}/questions/{question}/assistant"
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(flashcards.router, prefix="/api/v1")
     app.include_router(quizzes.router, prefix="/api/v1")
     app.dependency_overrides[flashcards.get_chacha_db_for_user] = lambda: db
+    # The study-assistant routes depend on require_llm_quota, which resolves the user itself.
+    app.dependency_overrides[flashcards.get_request_user] = lambda: SimpleNamespace(id=1)
     app.dependency_overrides[get_study_assistant_guidance] = lambda: "Stay with the study context."
     with TestClient(app, raise_server_exceptions=False) as client:
         initial = client.get(path)

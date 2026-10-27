@@ -98,4 +98,12 @@ describe("Content Review account storage (UAT400)", () => {
     await expect(drafts.upsertContentDraft({ id: "late" } as ContentDraft, owner)).rejects.toThrow("Account changed")
     expect(memory.drafts.rows.has("late")).toBe(false)
   })
+  it("B09 rejects a stale local edit and preserves the acknowledged newer draft", async () => {
+    const owner = alice();
+    await drafts.upsertContentDraft({ id: "alice", content: "original", updatedAt: 1 } as ContentDraft, owner);
+    await drafts.upsertContentDraft({ id: "alice", content: "newer", updatedAt: 2 } as ContentDraft, owner, 1);
+    await expect(drafts.upsertContentDraft({ id: "alice", content: "stale", updatedAt: 3 } as ContentDraft, owner, 1)).rejects.toThrow(/changed elsewhere/i);
+    expect((await drafts.getDraftById("alice", owner))?.content).toBe("newer");
+  })
+
 })

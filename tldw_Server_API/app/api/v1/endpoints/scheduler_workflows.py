@@ -10,9 +10,10 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, ge
 
 from tldw_Server_API.app.core.AuthNZ.permissions import WORKFLOWS_ADMIN
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.Scheduler import get_global_scheduler
+from tldw_Server_API.app.core.Scheduler import SchedulerError, get_global_scheduler
 from tldw_Server_API.app.services.workflows_scheduler import (
     build_schedule_payload,
+    ensure_schedule_queue_worker,
     get_workflows_scheduler,
     resolve_schedule_submission_target,
 )
@@ -89,6 +90,14 @@ class ScheduleResponse(BaseModel):
     last_status: str | None
 
 
+def _tenant_id_for_user(current_user: User) -> str:
+    """Match Workflows routing for absent or blank tenant claims."""
+    tenant_id = getattr(current_user, "tenant_id", None)
+    if tenant_id is None:
+        return "default"
+    return str(tenant_id).strip() or "default"
+
+
 def _normalize_claim_values(raw: Any) -> list[str]:
     values = raw if isinstance(raw, (list, tuple, set)) else ([raw] if raw is not None else [])
     out: list[str] = []
@@ -133,7 +142,7 @@ async def create_schedule(
 ):
     _validate_cron_or_422(body.cron, body.timezone)
     svc = get_workflows_scheduler()
-    tenant_id = str(getattr(current_user, "tenant_id", "default"))
+    tenant_id = _tenant_id_for_user(current_user)
     sid = svc.create(
         tenant_id=tenant_id,
         user_id=str(current_user.id),
@@ -198,7 +207,7 @@ async def list_schedules(
     current_user: User = Depends(get_request_user),
 ):
     svc = get_workflows_scheduler()
-    tenant_id = str(getattr(current_user, "tenant_id", "default"))
+    tenant_id = _tenant_id_for_user(current_user)
     is_admin = _is_scheduler_admin_user(current_user)
     user_filter: str | None = None
     if owner:
@@ -387,6 +396,10 @@ async def run_now(
     handler_name, queue_name = resolve_schedule_submission_target(payload)
     # Use the global scheduler instance to avoid duplicate worker pools
     core = await get_global_scheduler()
+    try:
+        await ensure_schedule_queue_worker(core, queue_name)
+    except SchedulerError as exc:
+        raise HTTPException(status_code=503, detail="Workflow queue is unavailable") from exc
     task_id = await core.submit(handler_name, payload=payload, queue_name=queue_name, metadata={"user_id": s.user_id})
     return {"task_id": task_id}
 

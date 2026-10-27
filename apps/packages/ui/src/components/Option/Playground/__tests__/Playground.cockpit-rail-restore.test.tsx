@@ -41,6 +41,35 @@ const renderShell = ({
 };
 
 describe("Playground cockpit rail restore tabs", () => {
+  it("closes the active mobile panel without changing saved rail visibility and restores tab focus", () => {
+    const onLeftRailVisibleChange = vi.fn();
+    const onRightRailVisibleChange = vi.fn();
+    renderShell({
+      leftRailVisible: true,
+      rightRailVisible: true,
+      onLeftRailVisibleChange,
+      onRightRailVisibleChange,
+    });
+    const contextButton = screen.getByRole("button", { name: "Context",
+      exact: true,
+    });
+    const runtimeButton = screen.getByRole("button", { name: "Runtime",
+      exact: true,
+    });
+    fireEvent.click(runtimeButton);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close Runtime panel" }),
+    );
+    expect(
+      screen.getByTestId("playground-cockpit-mobile-rails"),
+    ).toHaveAttribute("data-mobile-panel", "none");
+    expect(runtimeButton).toHaveFocus();
+    expect(onLeftRailVisibleChange).not.toHaveBeenCalled();
+    expect(onRightRailVisibleChange).not.toHaveBeenCalled();
+    fireEvent.click(contextButton);
+    expect(screen.getByRole("region", { name: "Context" })).toBeVisible();
+  });
+
   it("keeps restore controls mounted across rail visibility changes", () => {
     const { rerender } = render(
       <PlaygroundCockpitShell
@@ -112,7 +141,7 @@ describe("Playground cockpit rail restore tabs", () => {
     const contextRestore = screen.getByTestId(
       "playground-cockpit-left-rail-restore",
     );
-    expect(contextRestore).toHaveTextContent("Context rail");
+    expect(contextRestore).toHaveTextContent("Context");
     expect(contextRestore.parentElement).toHaveClass(
       ...COCKPIT_LEFT_RESTORE_WRAPPER_CLASS.split(" "),
     );
@@ -149,7 +178,7 @@ describe("Playground cockpit rail restore tabs", () => {
     const runtimeRestore = screen.getByTestId(
       "playground-cockpit-right-rail-restore",
     );
-    expect(runtimeRestore).toHaveTextContent("Runtime rail");
+    expect(runtimeRestore).toHaveTextContent("Runtime");
     expect(runtimeRestore.parentElement).toHaveClass(
       "absolute",
       "right-0",
@@ -180,8 +209,8 @@ describe("Playground cockpit rail restore tabs", () => {
       "playground-cockpit-right-rail-restore",
     );
 
-    expect(contextRestore).toHaveTextContent("Context rail");
-    expect(runtimeRestore).toHaveTextContent("Runtime rail");
+    expect(contextRestore).toHaveTextContent("Context");
+    expect(runtimeRestore).toHaveTextContent("Runtime");
     expect(
       screen.queryByTestId("playground-collapsed-composition-summary"),
     ).not.toBeInTheDocument();
@@ -201,7 +230,7 @@ describe("Playground cockpit rail restore tabs", () => {
     expect(onRightRailVisibleChange).toHaveBeenCalledWith(true);
   });
 
-  it("keeps mobile restore tabs available when cockpit rails are hidden", () => {
+  it("keeps mobile disclosures available when cockpit rails are hidden", () => {
     const { onLeftRailVisibleChange, onRightRailVisibleChange } = renderShell({
       leftRailVisible: false,
       rightRailVisible: false,
@@ -210,26 +239,24 @@ describe("Playground cockpit rail restore tabs", () => {
     const mobileRails = screen.getByTestId("playground-cockpit-mobile-rails");
     expect(mobileRails).toHaveAttribute("data-mobile-panel", "none");
 
-    const contextTab = screen.getByRole("tab", {
-      name: /restore context sidechannel/i,
+    const contextButton = screen.getByRole("button", { name: "Context",
     });
-    const runtimeTab = screen.getByRole("tab", {
-      name: /restore runtime sidechannel/i,
+    const runtimeButton = screen.getByRole("button", { name: "Runtime",
     });
     const contextPanel = document.getElementById(
-      contextTab.getAttribute("aria-controls") ?? "",
+      contextButton.getAttribute("aria-controls") ?? "",
     );
     const runtimePanel = document.getElementById(
-      runtimeTab.getAttribute("aria-controls") ?? "",
+      runtimeButton.getAttribute("aria-controls") ?? "",
     );
 
-    expect(contextPanel).toHaveAttribute("role", "tabpanel");
+    expect(contextPanel).toHaveAttribute("aria-labelledby", contextButton.id);
     expect(contextPanel).not.toBeVisible();
-    expect(runtimePanel).toHaveAttribute("role", "tabpanel");
+    expect(runtimePanel).toHaveAttribute("aria-labelledby", runtimeButton.id);
     expect(runtimePanel).not.toBeVisible();
 
-    fireEvent.click(contextTab);
-    fireEvent.click(runtimeTab);
+    fireEvent.click(contextButton);
+    fireEvent.click(runtimeButton);
 
     expect(onLeftRailVisibleChange).toHaveBeenCalledWith(true);
     expect(onRightRailVisibleChange).toHaveBeenCalledWith(true);

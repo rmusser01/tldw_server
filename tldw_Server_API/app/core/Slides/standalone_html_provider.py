@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.LLM_Calls import provider_model_inventory
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.Slides.standalone_html_config import (
     CLOSED_ADAPTER_CATALOG,
     MAX_DOCUMENT_BYTES,
@@ -396,7 +397,7 @@ def _build_request(
         headers["x-api-key"] = provider_api_key
         headers["anthropic-version"] = _ANTHROPIC_VERSION
         return headers, {
-            "model": target.model,
+            "model": canonical_anthropic_model_id(target.model),
             "system": system_prompt,
             "messages": [{"role": "user", "content": user_content}],
             "max_tokens": max_output_tokens,

@@ -28,7 +28,7 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call_async,
     resolve_provider_api_key,
 )
-from tldw_Server_API.app.core.exceptions import PromptImprovementDispatchError
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, PromptImprovementDispatchError
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
     list_registered_providers,
@@ -212,6 +212,8 @@ async def dispatch_prompt_improvement(
                 app_config=getattr(byok, "app_config", None),
                 call_policy=PROMPT_IMPROVEMENT_CALL_POLICY,
             )
+        except LLMQuotaExceededError:
+            raise  # the user's limit, not a provider outage: the route answers the 402
         except Exception as exc:  # noqa: BLE001 - translate all provider SDK failures
             raise _map_provider_exception(exc) from exc
     finally:

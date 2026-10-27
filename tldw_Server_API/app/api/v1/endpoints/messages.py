@@ -7,6 +7,7 @@ import codecs
 import contextlib
 import json
 import os
+import time
 from collections.abc import AsyncIterator
 from functools import partial
 from typing import Any
@@ -16,6 +17,7 @@ from loguru import logger
 from starlette.responses import JSONResponse, StreamingResponse
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, check_rate_limit, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import require_llm_quota
 from tldw_Server_API.app.api.v1.schemas.anthropic_messages import (
     AnthropicCountTokensRequest,
     AnthropicMessagesRequest,
@@ -62,7 +64,9 @@ from tldw_Server_API.app.core.LLM_Calls.anthropic_messages import (
     openai_response_to_anthropic,
     openai_stream_to_anthropic,
 )
+from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+from tldw_Server_API.app.core.LLM_Calls.usage_accounting import accounted_direct_stream, record_direct_response
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
 
 router = APIRouter()
@@ -1181,11 +1185,12 @@ def _build_openai_call_params(
     return call_params
 
 
-def _prepare_native_payload(request_data: Any, *, model: str) -> dict[str, Any]:
+def _prepare_native_payload(request_data: Any, *, model: str, provider: str = "") -> dict[str, Any]:
     """Prepare payload for native Messages providers."""
     payload = request_data.model_dump(exclude_none=True)
     payload.pop("api_provider", None)
-    payload["model"] = model
+    # Anthropic accepts only its documented IDs; a saved dotted name (claude-sonnet-4.5) is sent dashed.
+    payload["model"] = canonical_anthropic_model_id(model) if provider == "anthropic" else model
     return payload
 
 
@@ -2070,7 +2075,7 @@ async def _handle_messages(
         if provider in MESSAGES_NATIVE_PROVIDERS:
             base_url = _resolve_messages_base_url(provider, app_config_override)
             url = _join_messages_endpoint(base_url, "/messages")
-            payload = _prepare_native_payload(request_data, model=model)
+            payload = _prepare_native_payload(request_data, model=model, provider=provider)
             timeout = _resolve_native_timeout(provider, app_config_override)
             headers = _build_native_headers(
                 provider=provider,
@@ -2079,6 +2084,7 @@ async def _handle_messages(
                 anthropic_beta=anthropic_beta,
             )
             stream = _extract_stream_flag(request_data.stream)
+            started = time.monotonic()
             if stream:
                 stream_iter = await _prepare_native_stream_iterator(
                     url,
@@ -2088,11 +2094,17 @@ async def _handle_messages(
                     provider=provider,
                     operation="messages.stream",
                 )
+                # This path never reaches a ChatProvider, so it records through the provider recorder (ADR-075).
                 response = StreamingResponse(
-                    _touch_on_first_stream_output(
-                        _sanitize_native_messages_stream(stream_iter),
-                        credential_runtime,
-                        credentials,
+                    accounted_direct_stream(
+                        provider,
+                        payload,
+                        _touch_on_first_stream_output(
+                            _sanitize_native_messages_stream(stream_iter),
+                            credential_runtime,
+                            credentials,
+                        ),
+                        started,
                     ),
                     media_type="text/event-stream",
                 )
@@ -2108,6 +2120,7 @@ async def _handle_messages(
             )
             if not _native_message_payload_is_semantic(data):
                 raise_detached_error(_messages_upstream_http_exception())
+            record_direct_response(provider, payload, data, started)
             response = JSONResponse(data)
             await await_owned_worker(
                 _mark_messages_credential_used(
@@ -2214,7 +2227,7 @@ async def _handle_count_tokens(
 
         base_url = _resolve_messages_base_url(provider, app_config_override)
         url = _join_messages_endpoint(base_url, "/messages/count_tokens")
-        payload = _prepare_native_payload(request_data, model=model)
+        payload = _prepare_native_payload(request_data, model=model, provider=provider)
         timeout = _resolve_native_timeout(provider, app_config_override)
         headers = _build_native_headers(
             provider,
@@ -2247,7 +2260,7 @@ async def _handle_count_tokens(
 @router.post(
     "/messages",
     summary="Anthropic-compatible Messages API",
-    dependencies=[Depends(check_rate_limit)],
+    dependencies=[Depends(check_rate_limit), Depends(require_llm_quota)],
     responses={
         status.HTTP_200_OK: {
             "description": "Anthropic-compatible messages JSON response or SSE stream.",
@@ -2278,7 +2291,7 @@ async def create_messages(
 @public_router.post(
     "/v1/messages",
     summary="Anthropic-compatible Messages API",
-    dependencies=[Depends(check_rate_limit)],
+    dependencies=[Depends(check_rate_limit), Depends(require_llm_quota)],
     responses={
         status.HTTP_200_OK: {
             "description": "Anthropic-compatible messages JSON response or SSE stream.",

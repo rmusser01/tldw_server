@@ -28,6 +28,7 @@ Features:
 import json
 import re
 import sqlite3
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from typing import Any, Optional, Union
 
@@ -302,13 +303,15 @@ class WorldBookEntry:
 
         return patterns
 
-    def _search_pattern(self, pattern: Any, text: str):
+    def _search_pattern(self, pattern: Any, text: str, *, strict: bool = False):
         """Search *text* with runtime timeout for user-provided regex entries."""
         try:
             if self.regex_match:
                 return pattern.search(text, timeout=MAX_REGEX_MATCH_TIME_MS / 1000.0)
             return pattern.search(text)
         except (TimeoutError, _REGEX_TIMEOUT_ERROR):
+            if strict:
+                raise
             logger.warning(
                 "World book regex pattern timed out after {}ms for entry {}",
                 MAX_REGEX_MATCH_TIME_MS,
@@ -331,13 +334,13 @@ class WorldBookEntry:
 
         return any(self._search_pattern(pattern, text) for pattern, _keyword in self._patterns)
 
-    def get_first_match_info(self, text: str) -> Optional[dict[str, Any]]:
+    def get_first_match_info(self, text: str, *, strict: bool = False) -> Optional[dict[str, Any]]:
         """Return the first matching keyword and reason, if any."""
         if not self.enabled or not self._patterns:
             return None
 
         for pattern, keyword in self._patterns:
-            if self._search_pattern(pattern, text):
+            if self._search_pattern(pattern, text, strict=True) if strict else self._search_pattern(pattern, text):
                 return {
                     "reason": "regex_match" if self.regex_match else "keyword_match",
                     "keyword": keyword,
@@ -404,7 +407,6 @@ class WorldBookEntry:
             'last_modified': self.last_modified,
         }
 
-
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> 'WorldBookEntry':
         """Create WorldBookEntry instance from database dictionary."""
@@ -425,6 +427,7 @@ class WorldBookEntry:
             created_at=data.get('created_at'),
             last_modified=data.get('last_modified'),
         )
+
 
 class WorldBookEntryView:
     """A hybrid view that behaves like both an object and a dict for tests."""
@@ -465,7 +468,301 @@ class OpResult:
     def __repr__(self):
         return f"OpResult(success={self.success})"
 
+
 ## removed stray helper; functionality provided by WorldBookEntry.from_dict
+
+
+def process_loaded_world_book_context(
+    text: str,
+    books: Sequence[Mapping[str, Any]],
+    entries_by_book: Mapping[int, Sequence[WorldBookEntry]],
+    *,
+    count_tokens: Callable[[str], int],
+    scan_depth: int = 3,
+    token_budget: int = 500,
+    recursive_scanning: bool | None = None,
+    recursive_depth: int = 0,
+    include_diagnostics: bool = False,
+    strict_matching: bool = False,
+) -> tuple[dict[str, Any], tuple[WorldBookEntry, ...]]:
+    """Match already loaded lore without database, cache or statistics mutations."""
+    books_to_use = list(books)
+    recursive_depth = min(MAX_RECURSIVE_DEPTH, recursive_depth)
+    if recursive_depth > 0:
+        recursive_scanning = True
+    if recursive_scanning is None:
+        recursive_scanning = any(_coerce_metadata_bool(book.get("recursive_scanning", False)) for book in books_to_use)
+
+    if not books_to_use:
+        empty = {
+            "processed_context": "",
+            "entries_matched": 0,
+            "tokens_used": 0,
+            "books_used": 0,
+            "token_budget": int(token_budget),
+            "budget_exhausted": False,
+            "skipped_entries_due_to_budget": 0,
+        }
+        if include_diagnostics:
+            empty["diagnostics"] = []
+        return empty, ()
+
+    def _normalize_depth(value: Any) -> Optional[int]:
+        try:
+            depth_val = int(value)
+        except (TypeError, ValueError):
+            return None
+        return depth_val if depth_val > 0 else None
+
+    request_depth = _normalize_depth(scan_depth)
+
+    # Gather all entries from applicable books
+    all_entries: list[WorldBookEntry] = []
+    book_entry_limits: dict[int, Optional[int]] = {}
+    for book in books_to_use:
+        book_entries = [entry for entry in entries_by_book.get(book["id"], ()) if entry.enabled]
+        all_entries.extend(book_entries)
+        # scan_depth is currently treated as a per-book match cap.
+        book_depth = _normalize_depth(book.get("scan_depth"))
+        book_id = book.get("id")
+        if book_id is None:
+            continue
+        if request_depth is not None:
+            limit = request_depth if book_depth is None else min(request_depth, book_depth)
+        else:
+            limit = book_depth
+        book_entry_limits[book_id] = limit
+
+    # Sort by priority (highest first)
+    all_entries.sort(key=lambda e: e.priority, reverse=True)
+    has_recursive_sources = any(
+        _coerce_metadata_bool((entry.metadata or {}).get("recursive_scanning", False)) for entry in all_entries
+    )
+
+    def _is_recursive_source(entry: WorldBookEntry) -> bool:
+        # Backward compatibility: if no entry explicitly opts into recursive
+        # source scanning, preserve legacy behavior (all matched entries can chain).
+        if not has_recursive_sources:
+            return True
+        return _coerce_metadata_bool((entry.metadata or {}).get("recursive_scanning", False))
+
+    # Build a lightweight normalized keyword index for common literal lookups.
+    # Regex/case-sensitive/partial-match entries fall back to full scan.
+    quick_keyword_index: dict[str, list[WorldBookEntry]] = {}
+    entries_requiring_scan: list[WorldBookEntry] = []
+
+    def _entry_quick_lookup_keywords(entry: WorldBookEntry) -> Optional[list[str]]:
+        if entry.regex_match or entry.case_sensitive or not entry.whole_word_match:
+            return None
+
+        normalized_keywords: list[str] = []
+        for keyword in entry.keywords:
+            normalized_keyword = str(keyword or "").strip().lower()
+            if not normalized_keyword:
+                continue
+            # Keep quick lookup conservative to preserve exact matching behavior.
+            if re.fullmatch(r"\w+", normalized_keyword) is None:
+                return None
+            normalized_keywords.append(normalized_keyword)
+
+        return normalized_keywords or None
+
+    for entry in all_entries:
+        quick_keywords = _entry_quick_lookup_keywords(entry)
+        if not quick_keywords:
+            entries_requiring_scan.append(entry)
+            continue
+        for normalized_keyword in quick_keywords:
+            quick_keyword_index.setdefault(normalized_keyword, []).append(entry)
+
+    def _candidate_entries_for_text(source_text: str) -> list[WorldBookEntry]:
+        if not quick_keyword_index:
+            return all_entries
+
+        tokens = set(re.findall(r"\b\w+\b", (source_text or "").lower()))
+        quick_candidates: set[WorldBookEntry] = set()
+        for token in tokens:
+            for candidate in quick_keyword_index.get(token, []):
+                quick_candidates.add(candidate)
+
+        if not quick_candidates:
+            return entries_requiring_scan
+
+        # Filtering must retain priority before budget and per-book admission.
+        scan_candidates = set(entries_requiring_scan)
+        return [entry for entry in all_entries if entry in quick_candidates or entry in scan_candidates]
+
+    # Find matching entries
+    matched_entries = []
+    tokens_used = 0
+    per_book_match_count: dict[int, int] = {}
+    diagnostics_by_key: dict[int, dict[str, Any]] = {}
+    skipped_entries_due_to_budget = 0
+
+    def _record_diagnostic(
+        *,
+        entry: WorldBookEntry,
+        entry_tokens: int,
+        activation_reason: str,
+        match_info: Optional[dict[str, Any]] = None,
+        depth_level: Optional[int] = None,
+    ) -> None:
+        if not include_diagnostics:
+            return
+
+        entry_key = int(entry.entry_id) if entry.entry_id is not None else id(entry)
+        keyword_raw = (match_info or {}).get("keyword")
+        keyword = str(keyword_raw).strip() if keyword_raw is not None else None
+        if keyword == "":
+            keyword = None
+
+        entry_metadata = entry.metadata or {}
+        static_or_pinned = any(
+            _coerce_metadata_bool(entry_metadata.get(key), default=False)
+            for key in (
+                "static",
+                "pinned",
+                "always_on",
+                "constant",
+                "cache_static",
+                "cache_pinned",
+            )
+        )
+        diagnostics_by_key[entry_key] = {
+            "entry_id": int(entry.entry_id) if entry.entry_id is not None else None,
+            "world_book_id": (int(entry.world_book_id) if entry.world_book_id is not None else None),
+            "activation_reason": activation_reason,
+            "keyword": keyword,
+            "token_cost": int(entry_tokens),
+            "priority": int(entry.priority),
+            "regex_match": bool(entry.regex_match),
+            "appendable": (_coerce_metadata_bool(entry.metadata.get("appendable", False)) if entry.metadata else False),
+            "static_or_pinned": static_or_pinned,
+            "content_preview": (entry.content or "")[:240],
+            "depth_level": depth_level,
+        }
+
+    for entry in _candidate_entries_for_text(text):
+        match_info = (
+            entry.get_first_match_info(text, strict=True) if strict_matching else entry.get_first_match_info(text)
+        )
+        if match_info is None:
+            continue
+        book_id = getattr(entry, "world_book_id", None)
+        limit = book_entry_limits.get(book_id)
+        if limit is not None and per_book_match_count.get(book_id, 0) >= limit:
+            continue
+        # Estimate tokens (simple approximation)
+        entry_tokens = count_tokens(entry.content)
+        if tokens_used + entry_tokens <= token_budget:
+            matched_entries.append(entry)
+            tokens_used += entry_tokens
+            _record_diagnostic(
+                entry=entry,
+                entry_tokens=entry_tokens,
+                activation_reason=str(match_info.get("reason") or "keyword_match"),
+                match_info=match_info,
+                depth_level=0,
+            )
+            if limit is not None:
+                per_book_match_count[book_id] = per_book_match_count.get(book_id, 0) + 1
+        else:
+            skipped_entries_due_to_budget += 1
+            continue  # Skip oversized entry but continue scanning
+
+    # Handle recursive scanning
+    if recursive_scanning and matched_entries:
+        current_depth = max(1, recursive_depth)
+        seen = set(matched_entries)
+        recursive_seed_entries = [entry for entry in matched_entries if _is_recursive_source(entry)]
+        combined_content = " ".join(entry.content for entry in recursive_seed_entries)
+        while current_depth > 0 and combined_content:
+            depth_level = current_depth
+            additional_entries = []
+            for entry in _candidate_entries_for_text(combined_content):
+                if entry in seen:
+                    continue
+                book_id = getattr(entry, "world_book_id", None)
+                limit = book_entry_limits.get(book_id)
+                if limit is not None and per_book_match_count.get(book_id, 0) >= limit:
+                    continue
+                match_info = (
+                    entry.get_first_match_info(combined_content, strict=True)
+                    if strict_matching
+                    else entry.get_first_match_info(combined_content)
+                )
+                if match_info is None:
+                    continue
+                entry_tokens = count_tokens(entry.content)
+                if tokens_used + entry_tokens <= token_budget:
+                    additional_entries.append(entry)
+                    tokens_used += entry_tokens
+                    _record_diagnostic(
+                        entry=entry,
+                        entry_tokens=entry_tokens,
+                        activation_reason="depth",
+                        match_info=match_info,
+                        depth_level=depth_level,
+                    )
+                    if limit is not None:
+                        per_book_match_count[book_id] = per_book_match_count.get(book_id, 0) + 1
+                else:
+                    skipped_entries_due_to_budget += 1
+            if not additional_entries:
+                break
+            for e in additional_entries:
+                seen.add(e)
+            matched_entries.extend(additional_entries)
+            recursive_seed_entries = [entry for entry in additional_entries if _is_recursive_source(entry)]
+            if not recursive_seed_entries:
+                break
+            combined_content = " ".join(entry.content for entry in recursive_seed_entries)
+            current_depth -= 1
+
+    # Build injected content (appendable-aware grouping)
+    if matched_entries:
+        # Sort by priority for final output
+        matched_entries.sort(key=lambda e: e.priority, reverse=True)
+        # Consecutive appendable entries are concatenated directly (no separator).
+        # Non-appendable entries are separated by "\n\n".
+        blocks: list[str] = []
+        current_block: list[str] = []
+        for entry in matched_entries:
+            is_appendable = _coerce_metadata_bool(entry.metadata.get("appendable", False)) if entry.metadata else False
+            if is_appendable:
+                current_block.append(entry.content)
+            else:
+                if current_block:
+                    blocks.append("".join(current_block))
+                    current_block = []
+                blocks.append(entry.content)
+        if current_block:
+            blocks.append("".join(current_block))
+        injected_content = "\n\n".join(blocks)
+    else:
+        injected_content = ""
+
+    diagnostics: list[dict[str, Any]] = []
+    if include_diagnostics and matched_entries:
+        for entry in matched_entries:
+            entry_key = int(entry.entry_id) if entry.entry_id is not None else id(entry)
+            diagnostic = diagnostics_by_key.get(entry_key)
+            if diagnostic is not None:
+                diagnostics.append(diagnostic)
+
+    response = {
+        "processed_context": injected_content,
+        "entries_matched": len(matched_entries),
+        "tokens_used": tokens_used,
+        "books_used": (len({e.world_book_id for e in matched_entries}) if matched_entries else 0),
+        "entry_ids": [e.entry_id for e in matched_entries],
+        "token_budget": int(token_budget),
+        "budget_exhausted": bool(int(token_budget) > 0 and tokens_used >= int(token_budget)),
+        "skipped_entries_due_to_budget": int(skipped_entries_due_to_budget),
+    }
+    if include_diagnostics:
+        response["diagnostics"] = diagnostics
+    return response, tuple(matched_entries)
 
 
 class WorldBookService:
@@ -1798,7 +2095,7 @@ class WorldBookService:
         scan_depth: int = 3,
         token_budget: int = 500,
         recursive_scanning: Optional[bool] = None,
-        **kwargs
+        **kwargs,
     ) -> Union[dict[str, Any], list[dict[str, Any]]]:
         """
         Process text to find and inject relevant world info.
@@ -1853,265 +2150,22 @@ class WorldBookService:
                 unique_books[book_id] = book
             books_to_use = list(unique_books.values())
 
-        if recursive_scanning is None:
-            recursive_scanning = any(
-                _coerce_metadata_bool(book.get("recursive_scanning", False))
-                for book in books_to_use
-            )
-
-        if not books_to_use:
-            empty = {
-                "processed_context": "",
-                "entries_matched": 0,
-                "tokens_used": 0,
-                "books_used": 0,
-                "token_budget": int(token_budget),
-                "budget_exhausted": False,
-                "skipped_entries_due_to_budget": 0,
-            }
-            if include_diagnostics:
-                empty["diagnostics"] = []
-            return [] if compact_return else empty
-
-        def _normalize_depth(value: Any) -> Optional[int]:
-            try:
-                depth_val = int(value)
-            except (TypeError, ValueError):
-                return None
-            return depth_val if depth_val > 0 else None
-
-        request_depth = _normalize_depth(scan_depth)
-
-        # Gather all entries from applicable books
-        all_entries: list[WorldBookEntry] = []
-        book_entry_limits: dict[int, Optional[int]] = {}
+        entries_by_book: dict[int, list[WorldBookEntry]] = {}
         for book in books_to_use:
-            # Ensure we have object entries for matching
-            if book['id'] in self._entry_cache:
-                book_entries = [e for e in self._entry_cache[book['id']] if e.enabled]
-            else:
-                # Populate full per-book cache via DB. `enabled_only=True` reads are
-                # intentionally not cached to avoid partial-cache poisoning.
-                _ = self.get_entries(book['id'], enabled_only=False)
-                book_entries = [e for e in self._entry_cache.get(book['id'], []) if e.enabled]
-            all_entries.extend(book_entries)
-            # scan_depth is currently treated as a per-book match cap.
-            book_depth = _normalize_depth(book.get('scan_depth'))
-            book_id = book.get('id')
-            if book_id is None:
-                continue
-            if request_depth is not None:
-                limit = request_depth if book_depth is None else min(request_depth, book_depth)
-            else:
-                limit = book_depth
-            book_entry_limits[book_id] = limit
-
-        # Sort by priority (highest first)
-        all_entries.sort(key=lambda e: e.priority, reverse=True)
-        has_recursive_sources = any(
-            _coerce_metadata_bool((entry.metadata or {}).get("recursive_scanning", False))
-            for entry in all_entries
+            if book["id"] not in self._entry_cache:
+                self.get_entries(book["id"], enabled_only=False)
+            entries_by_book[book["id"]] = list(self._entry_cache.get(book["id"], ()))
+        response, matched_entries = process_loaded_world_book_context(
+            text,
+            books_to_use,
+            entries_by_book,
+            count_tokens=self.count_tokens,
+            scan_depth=scan_depth,
+            token_budget=token_budget,
+            recursive_scanning=recursive_scanning,
+            recursive_depth=recursive_depth,
+            include_diagnostics=include_diagnostics,
         )
-
-        def _is_recursive_source(entry: WorldBookEntry) -> bool:
-            # Backward compatibility: if no entry explicitly opts into recursive
-            # source scanning, preserve legacy behavior (all matched entries can chain).
-            if not has_recursive_sources:
-                return True
-            return _coerce_metadata_bool((entry.metadata or {}).get("recursive_scanning", False))
-
-        # Build a lightweight normalized keyword index for common literal lookups.
-        # Regex/case-sensitive/partial-match entries fall back to full scan.
-        quick_keyword_index: dict[str, list[WorldBookEntry]] = {}
-        entries_requiring_scan: list[WorldBookEntry] = []
-
-        def _entry_quick_lookup_keywords(entry: WorldBookEntry) -> Optional[list[str]]:
-            if entry.regex_match or entry.case_sensitive or not entry.whole_word_match:
-                return None
-
-            normalized_keywords: list[str] = []
-            for keyword in entry.keywords:
-                normalized_keyword = str(keyword or "").strip().lower()
-                if not normalized_keyword:
-                    continue
-                # Keep quick lookup conservative to preserve exact matching behavior.
-                if re.fullmatch(r"\w+", normalized_keyword) is None:
-                    return None
-                normalized_keywords.append(normalized_keyword)
-
-            return normalized_keywords or None
-
-        for entry in all_entries:
-            quick_keywords = _entry_quick_lookup_keywords(entry)
-            if not quick_keywords:
-                entries_requiring_scan.append(entry)
-                continue
-            for normalized_keyword in quick_keywords:
-                quick_keyword_index.setdefault(normalized_keyword, []).append(entry)
-
-        def _candidate_entries_for_text(source_text: str) -> list[WorldBookEntry]:
-            if not quick_keyword_index:
-                return all_entries
-
-            tokens = set(re.findall(r"\b\w+\b", (source_text or "").lower()))
-            quick_candidates: set[WorldBookEntry] = set()
-            for token in tokens:
-                for candidate in quick_keyword_index.get(token, []):
-                    quick_candidates.add(candidate)
-
-            if not quick_candidates:
-                return entries_requiring_scan
-
-            ordered_quick_candidates = [entry for entry in all_entries if entry in quick_candidates]
-            return ordered_quick_candidates + entries_requiring_scan
-
-        # Find matching entries
-        matched_entries = []
-        tokens_used = 0
-        per_book_match_count: dict[int, int] = {}
-        diagnostics_by_key: dict[int, dict[str, Any]] = {}
-        skipped_entries_due_to_budget = 0
-
-        def _record_diagnostic(
-            *,
-            entry: WorldBookEntry,
-            entry_tokens: int,
-            activation_reason: str,
-            match_info: Optional[dict[str, Any]] = None,
-            depth_level: Optional[int] = None,
-        ) -> None:
-            if not include_diagnostics:
-                return
-
-            entry_key = int(entry.entry_id) if entry.entry_id is not None else id(entry)
-            keyword_raw = (match_info or {}).get("keyword")
-            keyword = str(keyword_raw).strip() if keyword_raw is not None else None
-            if keyword == "":
-                keyword = None
-
-            entry_metadata = entry.metadata or {}
-            static_or_pinned = any(
-                _coerce_metadata_bool(entry_metadata.get(key), default=False)
-                for key in (
-                    "static",
-                    "pinned",
-                    "always_on",
-                    "constant",
-                    "cache_static",
-                    "cache_pinned",
-                )
-            )
-            diagnostics_by_key[entry_key] = {
-                "entry_id": int(entry.entry_id) if entry.entry_id is not None else None,
-                "world_book_id": int(entry.world_book_id) if entry.world_book_id is not None else None,
-                "activation_reason": activation_reason,
-                "keyword": keyword,
-                "token_cost": int(entry_tokens),
-                "priority": int(entry.priority),
-                "regex_match": bool(entry.regex_match),
-                "appendable": _coerce_metadata_bool(entry.metadata.get("appendable", False)) if entry.metadata else False,
-                "static_or_pinned": static_or_pinned,
-                "content_preview": (entry.content or "")[:240],
-                "depth_level": depth_level,
-            }
-
-        for entry in _candidate_entries_for_text(text):
-            match_info = entry.get_first_match_info(text)
-            if match_info is None:
-                continue
-            book_id = getattr(entry, 'world_book_id', None)
-            limit = book_entry_limits.get(book_id)
-            if limit is not None and per_book_match_count.get(book_id, 0) >= limit:
-                continue
-            # Estimate tokens (simple approximation)
-            entry_tokens = self.count_tokens(entry.content)
-            if tokens_used + entry_tokens <= token_budget:
-                matched_entries.append(entry)
-                tokens_used += entry_tokens
-                _record_diagnostic(
-                    entry=entry,
-                    entry_tokens=entry_tokens,
-                    activation_reason=str(match_info.get("reason") or "keyword_match"),
-                    match_info=match_info,
-                    depth_level=0,
-                )
-                if limit is not None:
-                    per_book_match_count[book_id] = per_book_match_count.get(book_id, 0) + 1
-            else:
-                skipped_entries_due_to_budget += 1
-                continue  # Skip oversized entry but continue scanning
-
-        # Handle recursive scanning
-        if recursive_scanning and matched_entries:
-            current_depth = max(1, recursive_depth)
-            seen = set(matched_entries)
-            recursive_seed_entries = [entry for entry in matched_entries if _is_recursive_source(entry)]
-            combined_content = " ".join(entry.content for entry in recursive_seed_entries)
-            while current_depth > 0 and combined_content:
-                depth_level = current_depth
-                additional_entries = []
-                for entry in _candidate_entries_for_text(combined_content):
-                    if entry in seen:
-                        continue
-                    book_id = getattr(entry, 'world_book_id', None)
-                    limit = book_entry_limits.get(book_id)
-                    if limit is not None and per_book_match_count.get(book_id, 0) >= limit:
-                        continue
-                    match_info = entry.get_first_match_info(combined_content)
-                    if match_info is None:
-                        continue
-                    entry_tokens = self.count_tokens(entry.content)
-                    if tokens_used + entry_tokens <= token_budget:
-                        additional_entries.append(entry)
-                        tokens_used += entry_tokens
-                        _record_diagnostic(
-                            entry=entry,
-                            entry_tokens=entry_tokens,
-                            activation_reason="depth",
-                            match_info=match_info,
-                            depth_level=depth_level,
-                        )
-                        if limit is not None:
-                            per_book_match_count[book_id] = per_book_match_count.get(book_id, 0) + 1
-                    else:
-                        skipped_entries_due_to_budget += 1
-                if not additional_entries:
-                    break
-                for e in additional_entries:
-                    seen.add(e)
-                matched_entries.extend(additional_entries)
-                recursive_seed_entries = [entry for entry in additional_entries if _is_recursive_source(entry)]
-                if not recursive_seed_entries:
-                    break
-                combined_content = " ".join(entry.content for entry in recursive_seed_entries)
-                current_depth -= 1
-
-        # Build injected content (appendable-aware grouping)
-        if matched_entries:
-            # Sort by priority for final output
-            matched_entries.sort(key=lambda e: e.priority, reverse=True)
-            # Consecutive appendable entries are concatenated directly (no separator).
-            # Non-appendable entries are separated by "\n\n".
-            blocks: list[str] = []
-            current_block: list[str] = []
-            for entry in matched_entries:
-                is_appendable = (
-                    _coerce_metadata_bool(entry.metadata.get("appendable", False))
-                    if entry.metadata else False
-                )
-                if is_appendable:
-                    current_block.append(entry.content)
-                else:
-                    if current_block:
-                        blocks.append("".join(current_block))
-                        current_block = []
-                    blocks.append(entry.content)
-            if current_block:
-                blocks.append("".join(current_block))
-            injected_content = "\n\n".join(blocks)
-        else:
-            injected_content = ""
-
         # Track activation counts
         try:
             if matched_entries:
@@ -2130,28 +2184,6 @@ class WorldBookService:
         if compact_return:
             return [e.to_api_dict() for e in matched_entries]
 
-        diagnostics: list[dict[str, Any]] = []
-        if include_diagnostics and matched_entries:
-            for entry in matched_entries:
-                entry_key = int(entry.entry_id) if entry.entry_id is not None else id(entry)
-                diagnostic = diagnostics_by_key.get(entry_key)
-                if diagnostic is not None:
-                    diagnostics.append(diagnostic)
-
-        response = {
-            "processed_context": injected_content,
-            "entries_matched": len(matched_entries),
-            "tokens_used": tokens_used,
-            "books_used": len({e.world_book_id for e in matched_entries}) if matched_entries else 0,
-            "entry_ids": [e.entry_id for e in matched_entries],
-            "token_budget": int(token_budget),
-            "budget_exhausted": bool(
-                int(token_budget) > 0 and tokens_used >= int(token_budget)
-            ),
-            "skipped_entries_due_to_budget": int(skipped_entries_due_to_budget),
-        }
-        if include_diagnostics:
-            response["diagnostics"] = diagnostics
         return response
 
     # --- Import/Export ---

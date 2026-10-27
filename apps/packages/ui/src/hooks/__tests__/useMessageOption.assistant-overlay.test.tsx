@@ -2,6 +2,15 @@ import React from "react"
 import { renderHook } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+const mirrorProbe=vi.hoisted(()=>({
+  ensure:vi.fn(async()=>null),
+  controller:null as null | {getCurrent:()=>{settingsQualified:boolean;owner:{kind:"native";conversation_id:string;scope:{type:"workspace";workspaceId:string};request_scope:{config:{serverUrl:string;authMode:string};userId:string};validate_lease:()=>boolean}}}
+}))
+vi.mock("@/hooks/chat/useHistorySelection", async original => ({
+  ...await original<typeof import("@/hooks/chat/useHistorySelection")>(),
+  useHistorySelectionContext:()=>mirrorProbe.controller
+}))
+
 const ownerMeta = vi.hoisted(() => ({ current: undefined as { assistantKey: string; isLoading: boolean; isCurrent: () => boolean } | undefined }))
 
 const {
@@ -172,9 +181,10 @@ const {
 
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({
-    invalidateQueries: vi.fn()
-  })
-}))
+    cancelQueries: vi.fn(),
+    invalidateQueries: vi.fn(),
+  }),
+}));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -214,7 +224,7 @@ vi.mock("@/hooks/chat/useSelectServerChat", () => ({
 
 vi.mock("@/hooks/chat/useServerChatHistoryId", () => ({
   useServerChatHistoryId: () => ({
-    ensureServerChatHistoryId: vi.fn()
+    ensureServerChatHistoryId: mirrorProbe.ensure
   })
 }))
 
@@ -301,7 +311,12 @@ vi.mock("@/store/model", () => ({
 
 vi.mock("@/store/option", () => ({
   useStoreMessageOption: Object.assign((selector?: (state: Record<string, unknown>) => unknown) =>
-    selector ? selector(storeState) : storeState, { getState: () => storeState })
+    selector ? selector(storeState) : storeState, {
+      getState: () => storeState,
+      setState: (update: Record<string, unknown> | ((state: typeof storeState) => Record<string, unknown>)) => {
+        Object.assign(storeState, typeof update === "function" ? update(storeState) : update)
+      }
+    })
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({
@@ -641,4 +656,16 @@ it("keeps passive consumers from acquiring server hydration ownership", () => {
   expect(vi.mocked(useServerChatLoader)).toHaveBeenLastCalledWith(
     expect.objectContaining({ enabled: true, scope: { type: "global" } })
   )
+})
+
+
+it("passes the qualified native workspace namespace to the existing mirror binder", () => {
+  mirrorProbe.ensure.mockClear()
+  mirrorProbe.controller={getCurrent:()=>({settingsQualified:true,owner:{kind:"native",conversation_id:"chat-1",scope:{type:"workspace",workspaceId:"W"},
+    request_scope:{config:{serverUrl:"http://chat.test",authMode:"multi-user"},userId:"A"},validate_lease:()=>true}})}
+  storeState.serverChatId="chat-1";storeState.temporaryChat=false
+  const view=renderHook(()=>useMessageOption({scope:{type:"workspace",workspaceId:"W"}}))
+  try {
+    expect(mirrorProbe.ensure).toHaveBeenCalledWith("chat-1",expect.anything(),expect.any(AbortSignal),expect.objectContaining({scope:{type:"workspace",workspaceId:"W"}}))
+  } finally {view.unmount();mirrorProbe.controller=null}
 })

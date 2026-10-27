@@ -51,7 +51,7 @@ describe("sidepanel history owner through the real transport", () => {
     vi.unstubAllGlobals()
     vi.unstubAllEnvs()
   })
-  it.each(["search", "list"])(
+  it.each(["search", "list", "get", "create"])(
     "carries the captured account through %s",
     async (method) => {
       const client = new TldwApiClient()
@@ -60,12 +60,28 @@ describe("sidepanel history owner through the real transport", () => {
           { query: "private" },
           { requestScope }
         )
-      else await client.listChatsWithMeta({}, { requestScope })
-      const [, init] = boundary.fetch.mock.calls[0]
+      else if (method === "list") await client.listChatsWithMeta({}, { requestScope })
+      else if (method === "get") await client.getChat("folder-chat", { requestScope, scope: { type: "global" }, signal: new AbortController().signal })
+      else await client.createChat({character_id: 42, provider: "openai", model: "configured-model"}, {
+        requestScope, signal: new AbortController().signal, seedFirstMessage: true, greetingStrategy: "alternate_index", alternateIndex: 0
+      })
+      const [url, init] = boundary.fetch.mock.calls[0]
+      if (method === "get") {
+        expect(new URL(url).pathname).toBe("/api/v1/chats/folder-chat")
+        expect(new URL(url).searchParams.get("scope_type")).toBe("global")
+        expect(init.signal).toBeInstanceOf(AbortSignal)
+      }
+      if (method === "create") {
+        expect(new URL(url).pathname).toBe("/api/v1/chats/")
+        expect(new URL(url).searchParams.get("seed_first_message")).toBe("true")
+        expect(new URL(url).searchParams.get("alternate_index")).toBe("0")
+        expect(JSON.parse(init.body)).toEqual({character_id: 42, provider: "openai", model: "configured-model", scope_type: "global"})
+        expect(init.signal).toBeInstanceOf(AbortSignal)
+      }
       expect(new Headers(init.headers).get("X-TLDW-Expected-User-ID")).toBe("7")
     }
   )
-  it.each(["search", "list"])(
+  it.each(["search", "list", "get", "create"])(
     "rejects an account replacement before %s dispatch",
     async (method) => {
       boundary.get.mockImplementation(async (key: string) =>
@@ -78,7 +94,11 @@ describe("sidepanel history owner through the real transport", () => {
               { query: "private" },
               { requestScope }
             )
-          : client.listChatsWithMeta({}, { requestScope })
+          : method === "list"
+            ? client.listChatsWithMeta({}, { requestScope })
+            : method === "get"
+              ? client.getChat("folder-chat", { requestScope, scope: { type: "global" } })
+              : client.createChat({character_id: 42}, {requestScope, seedFirstMessage: true})
       await expect(read).rejects.toMatchObject({ status: 412 })
       expect(boundary.fetch).not.toHaveBeenCalled()
     }

@@ -1,0 +1,195 @@
+import React from "react"
+
+import { PageAssistDatabase, watchOnDeviceHistoryChanges, isOnDeviceHistory, isOwnedCachedServerHistory } from "@/db/dexie/chat"
+import { db } from "@/db/dexie/schema"
+import type { OnDeviceHistoryScope } from "@/db/dexie/chat"
+import type { HistoryInfo } from "@/db/dexie/types"
+import type { SidepanelChatOwner } from "@/hooks/useSidepanelChatOwner"
+import {
+  useServerChatHistory,
+  type ServerChatHistoryItem
+} from "@/hooks/useServerChatHistory"
+
+/** How many recent chats the side panel lists without a search (XS-06). */
+export const SIDEPANEL_RECENT_CHAT_LIMIT = 8
+/** Read a few extra of each, since open tabs and local copies are left out. */
+const RECENT_SERVER_FETCH = 10
+const RECENT_LOCAL_FETCH = 20
+
+export type SidepanelRecentChat =
+  | { kind: "server"; key: string; title: string; at: number; chat: ServerChatHistoryItem }
+  | { kind: "local"; key: string; title: string; at: number; history: HistoryInfo; origin: "local" | "server-copy" }
+
+const finiteOrZero = (value: number | null | undefined) =>
+  typeof value === "number" && Number.isFinite(value) ? value : 0
+
+const isRecentHistory = (history: HistoryInfo, scope: OnDeviceHistoryScope) =>
+  scope.isCurrent() && (isOnDeviceHistory(history, scope) ||
+    (isOwnedCachedServerHistory(history, scope) &&
+      (!history.server_scope_type || history.server_scope_type === "global") &&
+      !history.server_workspace_id))
+
+/**
+ * Merge recent server chats and this device's chat histories, newest first.
+ *
+ * Chats that already have a tab are left out, and so is a local copy of a
+ * server chat the list already shows (or that has a tab).
+ */
+export const mergeRecentChats = ({
+  server,
+  local,
+  historyScope,
+  openHistoryIds,
+  openServerChatIds,
+  limit = SIDEPANEL_RECENT_CHAT_LIMIT
+}: {
+  server: readonly ServerChatHistoryItem[]
+  local: readonly HistoryInfo[]
+  historyScope: OnDeviceHistoryScope | null
+  openHistoryIds: ReadonlySet<string>
+  openServerChatIds: ReadonlySet<string>
+  limit?: number
+}): SidepanelRecentChat[] => {
+  const listedServerIds = new Set(server.map((chat) => String(chat.id)))
+  const serverItems: SidepanelRecentChat[] = server
+    .filter((chat) => !openServerChatIds.has(String(chat.id)))
+    .map((chat) => ({
+      kind: "server",
+      key: `server-${chat.id}`,
+      title: chat.title,
+      at: finiteOrZero(chat.updatedAtMs) || finiteOrZero(chat.createdAtMs),
+      chat
+    }))
+  const localItems: SidepanelRecentChat[] = local
+    .filter(history => historyScope && isRecentHistory(history, historyScope))
+    .filter(
+      (history) =>
+        !openHistoryIds.has(history.id) &&
+        !(
+          history.server_chat_id &&
+          (openServerChatIds.has(history.server_chat_id) ||
+            listedServerIds.has(history.server_chat_id))
+        )
+    )
+    .map((history) => ({
+      kind: "local",
+      origin: historyScope && isOwnedCachedServerHistory(history, historyScope) ? "server-copy" : "local",
+      key: `local-${history.id}`,
+      title: history.title,
+      at: finiteOrZero(history.createdAt),
+      history
+    }))
+  return [...serverItems, ...localItems]
+    .sort((a, b) => b.at - a.at)
+    .slice(0, limit)
+}
+
+type RecentChatsOwner = Pick<SidepanelChatOwner, "ownerKey" | "isCurrent"> & {
+  snapshot: Pick<SidepanelChatOwner["snapshot"], "requestScope">
+}
+
+/**
+ * The side panel's recent chats: the full page's server history query (first
+ * page, most recently updated) plus this account's histories on this device.
+ */
+export const useSidepanelRecentChats = ({
+  owner,
+  enabled,
+  openHistoryIds,
+  openServerChatIds
+}: {
+  owner?: RecentChatsOwner
+  enabled: boolean
+  openHistoryIds: ReadonlySet<string>
+  openServerChatIds: ReadonlySet<string>
+}): SidepanelRecentChat[] => {
+  const active = enabled && Boolean(owner?.isCurrent())
+  const server = useServerChatHistory("", {
+    enabled: active,
+    owner: owner
+      ? { key: owner.ownerKey, requestScope: owner.snapshot.requestScope, isCurrent: owner.isCurrent }
+      : undefined,
+    mode: "overview",
+    page: 1,
+    limit: RECENT_SERVER_FETCH
+  })
+  const [revision, setRevision] = React.useState(0)
+  const readRevision = React.useRef(0)
+  React.useEffect(
+    () =>
+      watchOnDeviceHistoryChanges(() => {
+        const next = ++readRevision.current
+        setRevision(next)
+      }),
+    []
+  )
+  const [local, setLocal] = React.useState<{
+    owner?: RecentChatsOwner
+    revision: number
+    scope?: OnDeviceHistoryScope
+    items: HistoryInfo[]
+  }>({ revision: 0, items: [] })
+
+  // Re-read when tabs open or close: a closed tab's chat becomes recent.
+  const openKey = React.useMemo(
+    () => [...openHistoryIds].sort().join("\n"),
+    [openHistoryIds]
+  )
+
+  React.useEffect(() => {
+    if (!active || !owner) return
+    let live = true
+    const isCurrent = () => live && revision === readRevision.current && owner.isCurrent()
+    void (async () => {
+      try {
+        const settings = await db.userSettings.get("main")
+        if (!isCurrent()) return
+        const scope: OnDeviceHistoryScope = {
+          profileId: settings?.history_profile_id ?? null,
+          serverScopeKey: owner.ownerKey,
+          isCurrent
+        }
+        const qualifies = (history: HistoryInfo) => isRecentHistory(history, scope)
+        const items = await new PageAssistDatabase().getRecentChatHistories(
+          RECENT_LOCAL_FETCH,
+          qualifies
+        )
+        if (isCurrent()) {
+          setLocal({ owner, revision, scope, items: items.filter(qualifies) })
+        }
+      } catch (error) {
+        console.warn(
+          "[sidepanel] Could not read recent chats on this device",
+          error
+        )
+        if (isCurrent()) setLocal({ owner, revision, items: [] })
+      }
+    })()
+    return () => {
+      live = false
+    }
+  }, [active, owner, openKey, revision])
+
+  const serverChats = server.data
+  const localChats =
+    local.owner === owner &&
+    local.revision === revision &&
+    local.revision === readRevision.current &&
+    local.scope?.isCurrent()
+      ? local.items
+      : null
+
+  return React.useMemo(
+    () =>
+      active
+        ? mergeRecentChats({
+            server: serverChats ?? [],
+            local: localChats ?? [],
+            historyScope: local.scope ?? null,
+            openHistoryIds,
+            openServerChatIds
+          })
+        : [],
+    [active, localChats, local.scope, openHistoryIds, openServerChatIds, serverChats]
+  )
+}

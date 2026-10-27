@@ -1,3 +1,5 @@
+import { requestScopeFields } from "./service-prompts"
+import type { ScopedRequestOptions } from "../TldwApiClient"
 import { bgRequest } from "@/services/background-proxy"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
 import type {
@@ -18,16 +20,20 @@ const WEB_CLIPPER_SAVE_TIMEOUT_MS = 5_000
 export const webClipperMethods = {
   async saveWebClip(
     this: TldwWebClipperApiClientCore,
-    payload: WebClipperSaveRequest
+    payload: WebClipperSaveRequest,
+    options?: ScopedRequestOptions
   ): Promise<WebClipperSaveResponse> {
     const path = await this.resolveApiPath("webClipper.save", [
       "/api/v1/web-clipper/save",
       "/api/v1/web-clipper/save/"
     ])
+    const scopeFields = requestScopeFields(options?.requestScope)
     return await bgRequest<WebClipperSaveResponse>({
+      ...scopeFields,
+      abortSignal: options?.signal,
       path,
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...scopeFields.headers },
       body: payload,
       timeoutMs: WEB_CLIPPER_SAVE_TIMEOUT_MS
     })
@@ -35,7 +41,8 @@ export const webClipperMethods = {
 
   async getWebClipStatus(
     this: TldwWebClipperApiClientCore,
-    clipId: string
+    clipId: string,
+    options?: ScopedRequestOptions
   ): Promise<WebClipperStatusResponse> {
     const template = await this.resolveApiPath("webClipper.status", [
       "/api/v1/web-clipper/{clip_id}",
@@ -44,7 +51,9 @@ export const webClipperMethods = {
     const path = this.fillPathParams(template, clipId)
     return await bgRequest<WebClipperStatusResponse>({
       path,
-      method: "GET"
+      method: "GET",
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal
     })
   },
 

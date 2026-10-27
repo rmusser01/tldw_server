@@ -1,3 +1,4 @@
+import type { MessageHistory } from "@/db/dexie/types"
 import React from "react"
 import i18n from "i18next"
 import { ConfigProvider, notification } from "antd"
@@ -8,17 +9,27 @@ import {
   screen,
   waitFor
 } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ChatTldw } from "@/models/ChatTldw"
 import { chatRagMethods } from "@/services/tldw/domains/chat-rag"
-import { useChatActions } from "../useChatActions"
+import { useChatActions as useRawChatActions } from "../useChatActions"
+import { captureActorSceneSendForTarget } from "../actor-scene-source"
+import { captureChatDraftSource } from "../chat-draft-transition"
+import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
+import { createDefaultActorSettings } from "@/types/actor"
 import { useServerChatLoader } from "../useServerChatLoader"
+import { useServerChatHistoryId } from "../useServerChatHistoryId"
+import { useActorStore } from "@/store/actor"
+import type { ChatScope } from "@/types/chat-scope"
 import { usePlaygroundPersistence } from "@/components/Option/Playground/hooks/usePlaygroundPersistence"
+import type { Message } from "@/store/option"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { reconcileServerChatMessages, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { useComposerQueue } from "@/components/Chat/composer/hooks/useComposerQueue"
 import { decodeChatErrorPayload } from "@/utils/chat-error-message"
+import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
+import { resolveServicePromptScope } from "@/services/service-prompts"
 
 const mocks = vi.hoisted(() => ({
   capability: true as boolean | "error",
@@ -42,7 +53,9 @@ const mocks = vi.hoisted(() => ({
   saveHistory: vi.fn(),
   saveMessage: vi.fn(),
   ensureHistory: vi.fn(),
-  getActorSettings: vi.fn(),
+  getActorScene: vi.fn<typeof import("@/services/actor-settings").getActorSceneForChat>(),
+  linkMirror: vi.fn<typeof import("@/db/dexie/server-chat-mirror").linkServerChatMirror>(),
+  injectActor: vi.fn<typeof import("@/utils/actor").maybeInjectActorMessage>(),
   notifyError: vi.fn(),
   rows: [] as Array<Record<string, unknown>>,
   mirrorHistories: new Map<string, Record<string, unknown>>(),
@@ -82,6 +95,7 @@ vi.mock("@/services/tldw/TldwAuth", () => ({
 }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
+    getMessage: vi.fn(),
     deleteMessage: mocks.deleteMessage,
     initialize: mocks.initialize,
     getConfig: async () => mocks.config,
@@ -139,11 +153,17 @@ vi.mock("@/utils/human-message", async () => {
       : { role: "user", content: Array.isArray(options.content) ? options.content[0]?.type === "text" ? options.content[0].text : "" : options.content }
   }
 })
-vi.mock("@/utils/actor", () => ({
-  maybeInjectActorMessage: async (history: unknown[]) => history
+vi.mock("@/utils/actor", async original => ({
+  ...await original<typeof import("@/utils/actor")>(),
+  maybeInjectActorMessage: mocks.injectActor
 }))
-vi.mock("@/services/actor-settings", () => ({
-  getActorSettingsForChat: mocks.getActorSettings
+vi.mock("@/db/dexie/server-chat-mirror", async original => ({
+  ...await original<typeof import("@/db/dexie/server-chat-mirror")>(),
+  linkServerChatMirror: mocks.linkMirror
+}))
+vi.mock("@/services/actor-settings", async original => ({
+  ...await original<typeof import("@/services/actor-settings")>(),
+  getActorSceneForChat: mocks.getActorScene
 }))
 vi.mock("@/db/dexie/schema", () => ({ db: {
   chatHistories: {
@@ -234,7 +254,12 @@ vi.mock("@/services/tldw/server-capabilities", () => ({
   }
 }))
 vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
-  useChatSettingsRecord: () => ({ settings: {}, updateSettings: vi.fn() })
+  useChatSettingsRecord: () => {
+    // Keep the real hook's draft subscriptions while isolating settings storage.
+    useStoreMessageOption((state) => state.chatDraftAddress)
+    useStoreMessageOption((state) => state.chatDraftRevision)
+    return { settings: {}, updateSettings: vi.fn() }
+  }
 }))
 vi.mock("@/hooks/playground", () => ({
   usePersistenceMode: () => ({
@@ -258,12 +283,14 @@ const deferred = <T,>() => {
 }
 
 const createHookOptions = () => ({
-  t: (_key: string, fallback?: string) => fallback || _key,
+  t: ((_key: string, fallback?: string) => fallback || _key) as Parameters<typeof useChatActions>[0]["t"],
   notification: {
     error: mocks.notifyError,
     warning: vi.fn(),
     info: vi.fn(),
-    success: vi.fn()
+    success: vi.fn(),
+    open: vi.fn(),
+    destroy: vi.fn()
   },
   abortController: null,
   setAbortController: vi.fn(),
@@ -367,6 +394,42 @@ const ServerLoaderHost = ({ children }: React.PropsWithChildren) => {
   return <>{children}</>
 }
 
+// These legacy SDK transport cases receive an original private scene, without H1 capability.
+const useChatActions = (options: Parameters<typeof useRawChatActions>[0]) => {
+  const actions = useRawChatActions(options)
+  const captureOriginalScene = () => {
+    const original = useStoreMessageOption.getState()
+    const originalConfig = mocks.config
+    // The declared single-user fixture uses the same credential-free scope
+    // projection as the real resolver, without adding an initialization await
+    // before legacy tests' original dispatch boundary.
+    const requestScope = { config: { serverUrl: originalConfig.serverUrl, authMode: "single-user" as const,
+      expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope(originalConfig.authMode, originalConfig.apiKey)! }, userId: null }
+    const account = { requestScope, isCurrent: () => mocks.config === originalConfig }
+    const captured = captureChatDraftSource(account.isCurrent)
+    const address = original.chatDraftAddress
+    // Issued server/mirror IDs do not replace the original private Scene or
+    // manufacture an H1 owner/view receipt for this SDK fixture.
+    const target = captureActorSettingsTarget({ address,
+      requestScope, accountIsCurrent: account.isCurrent, isCurrent: captured.isCurrent })
+    return captureActorSceneSendForTarget(target, account, captured.isCurrent, account.isCurrent)
+  }
+  return {
+    ...actions,
+    onSubmit: async (input: Parameters<typeof actions.onSubmit>[0]) => {
+      const originalCapture = input.actorSceneSend ? null : captureOriginalScene()
+      return actions.onSubmit({ ...input,
+        actorSceneSend: input.actorSceneSend ?? await originalCapture?.read() })
+    },
+    regenerateLastMessage: async (dispatch?: Parameters<typeof actions.regenerateLastMessage>[0]) => {
+      const originalCapture = dispatch?.actorSceneSend ? null : captureOriginalScene()
+      const scopedDispatch = { ...dispatch,
+        actorSceneSend: dispatch?.actorSceneSend ?? await originalCapture?.read() }
+      return actions.regenerateLastMessage(scopedDispatch)
+    }
+  }
+}
+
 const renderWorkspace = (realNotifications = false, withLoader = false, options: Partial<ReturnType<typeof createHookOptions>> = {}) =>
   renderHook(
     ({ ready }) => {
@@ -382,7 +445,7 @@ const renderWorkspace = (realNotifications = false, withLoader = false, options:
         ensureServerChatHistoryId: mocks.ensureHistory,
         selectedCharacter: null,
         selectedAssistant: null
-      } as Parameters<typeof useChatActions>[0])
+      })
       const persistence = usePlaygroundPersistence({
         ...state,
         isConnectionReady: ready,
@@ -510,33 +573,86 @@ describe("saved normal Chat pipeline with autosave", () => {
     expect([...mocks.serverRows.values()].flat().map(row => row.role).sort()).toEqual(["assistant", "user"])
   })
 
-  it.each(["local", "server"])("deletes a qualified mirror row and clears its %s reply target using the canonical request ID", async replyKind => {
-    const localId = "history-A:server:answer"
-    const serverId = "canonical-answer"
-    mocks.mirrorHistories.set("mirror", {
-      id: "mirror", server_chat_id: "cedar",
-      server_scope_key: serverChatMirrorOwnerKey({ requestScope: {
-        config: { serverUrl: mocks.config.serverUrl, authMode: "single-user" }, userId: null
-      } })
-    })
-    const stored = { id: localId, history_id: "mirror", serverMessageId: serverId,
-      serverMessageVersion: 2, role: "assistant", content: "Cedar reply", createdAt: 1 }
-    const draft = { ...stored, id: "same-text-draft", serverMessageId: undefined }
-    const otherHistory = { ...stored, id: "other-history:server:answer", history_id: "other-history" }
-    mocks.rows.push(stored, draft, otherHistory)
-    useStoreMessageOption.setState({ historyId: "mirror", serverChatId: "cedar", temporaryChat: false,
-      messages: [{ id: localId, serverMessageId: serverId, serverMessageVersion: 2, role: "assistant", isBot: true, name: "Cedar", message: "Cedar reply" }],
-      history: [{ role: "assistant", content: "Cedar reply" }],
-      replyTarget: { id: replyKind === "local" ? localId : serverId, role: "assistant", text: "Cedar reply" }
-    })
-    const { result } = renderWorkspace()
-    await act(async () => { await result.current.actions.deleteMessage(0) })
-    expect(mocks.deleteMessage).toHaveBeenCalledWith(serverId, 2, "cedar")
-    expect(mocks.rows.find(row => row.id === localId)).toBeUndefined()
-    expect(mocks.rows).toEqual([draft, otherHistory])
-    expect(useStoreMessageOption.getState().messages).toEqual([])
-    expect(useStoreMessageOption.getState().replyTarget).toBeNull()
-  })
+  it.each(["local", "server"])(
+    "refuses server mirror deletion without canonical ownership for its %s Reply target",
+    async (replyKind) => {
+      const localId = "history-A:server:answer"
+      const serverId = "canonical-answer"
+      mocks.mirrorHistories.set("mirror", {
+        id: "mirror",
+        server_chat_id: "cedar",
+        server_scope_key: serverChatMirrorOwnerKey({
+          requestScope: {
+            config: {
+              serverUrl: mocks.config.serverUrl,
+              authMode: "single-user"
+            },
+            userId: null
+          }
+        })
+      })
+      const stored = {
+        id: localId,
+        history_id: "mirror",
+        serverMessageId: serverId,
+        serverMessageVersion: 2,
+        role: "assistant",
+        content: "Cedar reply",
+        createdAt: 1
+      }
+      const draft = {
+        ...stored,
+        id: "same-text-draft",
+        serverMessageId: undefined
+      }
+      const otherHistory = {
+        ...stored,
+        id: "other-history:server:answer",
+        history_id: "other-history"
+      }
+      mocks.rows.push(stored, draft, otherHistory)
+      useStoreMessageOption.setState({
+        historyId: "mirror",
+        serverChatId: "cedar",
+        temporaryChat: false,
+        messages: [
+          {
+            id: localId,
+            serverMessageId: serverId,
+            serverMessageVersion: 2,
+            role: "assistant",
+            isBot: true,
+            name: "Cedar",
+            message: "Cedar reply"
+          }
+        ],
+        history: [{ role: "assistant", content: "Cedar reply" }],
+        replyTarget: {
+          id: replyKind === "local" ? localId : serverId,
+          role: "assistant",
+          text: "Cedar reply"
+        }
+      })
+      const { result } = renderWorkspace()
+      const original = useStoreMessageOption.getState()
+      await act(async () => {
+        await expect(result.current.actions.deleteMessage(0)).rejects.toThrow(
+          "native_history_mutation_unavailable"
+        )
+      })
+      expect(mocks.deleteMessage).not.toHaveBeenCalled()
+      expect(
+        (await import("@/services/tldw/TldwApiClient")).tldwClient.getMessage
+      ).not.toHaveBeenCalled()
+      expect(mocks.removeMessageById).not.toHaveBeenCalled()
+      expect(mocks.rows).toEqual([stored, draft, otherHistory])
+      expect(useStoreMessageOption.getState().messages).toEqual(original.messages)
+      expect(useStoreMessageOption.getState().history).toEqual(original.history)
+      expect(useStoreMessageOption.getState().replyTarget).toEqual(
+        original.replyTarget
+      )
+    }
+  )
 
   it.each(["immediate", "delayed ACK", "ambiguous ACK"])("UAT131 promotes exact greeting identity through loader, send and reload: %s", async boundary => {
     mocks.withLoader = true
@@ -827,6 +943,7 @@ describe("saved normal Chat pipeline with autosave", () => {
     mocks.realFormatter = false
     mocks.realPersistence = false
     mocks.realProviderResolution = false
+    mocks.injectActor.mockImplementation(async history => history)
     mocks.getModels.mockResolvedValue([])
     mocks.ragSearch.mockReset()
     mocks.getModel.mockResolvedValue({ id: "test-model", name: "Test model", capabilities: [] })
@@ -848,7 +965,8 @@ describe("saved normal Chat pipeline with autosave", () => {
       true
     )
     mocks.initialize.mockResolvedValue(undefined)
-    mocks.getActorSettings.mockResolvedValue(null)
+    useStoreMessageOption.getState().startNewChatDraft(false)
+    mocks.getActorScene.mockImplementation(async ({ target }) => ({ target: target!, settings: createDefaultActorSettings(), originalRecord: null, origin: "default", profileUnavailable: false }))
     mocks.createChat.mockImplementation(async (payload) => {
       const id = `chat-${mocks.serverRows.size + 1}`
       mocks.serverRows.set(id, [])
@@ -872,12 +990,14 @@ describe("saved normal Chat pipeline with autosave", () => {
     mocks.saveMessage.mockImplementation(async (row) => {
       mocks.rows.push(row)
     })
-    mocks.ensureHistory.mockImplementation(async (chatId, title, _signal, snapshot) => {
+    mocks.ensureHistory.mockImplementation(async (chatId, title, _signal, snapshot, sceneSend) => {
       const localId = useStoreMessageOption.getState().historyId || "local-1"
+      if (snapshot) mocks.mirrorHistories.set(localId, { id: localId, title, server_chat_id: chatId, server_scope_key: serverChatMirrorOwnerKey(snapshot) })
+      if (sceneSend && sceneSend.acceptHistoryMirror?.(localId) !== true) throw new Error("actor_settings_scope_changed")
       useStoreMessageOption
         .getState()
         .setHistoryId(localId, { preserveServerChatId: true })
-      if (snapshot) mocks.mirrorHistories.set(localId, { id: localId, title, server_chat_id: chatId, server_scope_key: serverChatMirrorOwnerKey(snapshot) })
+      if (sceneSend && !sceneSend.isCurrent()) throw new Error("actor_settings_scope_changed")
       return localId
     })
     mocks.pageAssistModel.mockImplementation(async ({ conversationId }) => {
@@ -906,8 +1026,43 @@ describe("saved normal Chat pipeline with autosave", () => {
     })
   })
 
+  it("publishes a current Temporary full-chat reply after an address-only draft change", async () => {
+    useStoreMessageOption.setState({ temporaryChat: true })
+    useStoreMessageOption.getState().startNewChatDraft()
+    const source = useStoreMessageOption.getState()
+    const fixedOptions = { ...createHookOptions(), ...source }
+    const hook = renderHook(() => {
+      const [abortController, setAbortController] =
+        React.useState<AbortController | null>(null)
+      return useChatActions({
+        ...fixedOptions,
+        abortController,
+        setAbortController
+      } as Parameters<typeof useChatActions>[0])
+    })
+    try {
+      act(() => useStoreMessageOption.getState().startNewChatDraft())
+      hook.rerender()
+      expect(useStoreMessageOption.getState().messages).toBe(source.messages)
+      expect(useStoreMessageOption.getState().historyId).toBe(source.historyId)
+      await act(async () => {
+        await hook.result.current.onSubmit({
+          message: "Fresh Temporary request",
+          image: ""
+        })
+      })
+      expect(useStoreMessageOption.getState().historyId).toBe("temp")
+      expect(useStoreMessageOption.getState().messages.at(-1)?.message).toBe(
+        "Answer: Fresh Temporary request"
+      )
+      expect(mocks.createChat).not.toHaveBeenCalled()
+    } finally {
+      hook.unmount()
+    }
+  })
+
   it("UAT103 deleting a local diagnostic does not remove equal genuine prompt text", async () => {
-    const generationInfo = { mode: "rag", grounded: false, reason: "selected_source_retrieval_failed" }
+    const generationInfo = { mode: "rag" as const, grounded: false, reason: "selected_source_retrieval_failed" }
     const messages = [
       { id: "diagnostic-user", isBot: false, name: "You", message: "Repeated question", sources: [], generationInfo },
       { id: "diagnostic-answer", isBot: true, name: "Assistant", message: "Repeated answer", sources: [], generationInfo, parentMessageId: "diagnostic-user" },
@@ -942,11 +1097,11 @@ describe("saved normal Chat pipeline with autosave", () => {
     mocks.realPersistence = true
     const { formatToMessage, formatToChatHistory } = await import("@/db/dexie/helpers")
     const generationInfo = { mode: "rag", grounded: false, reason: "selected_source_retrieval_failed" }
-    const rows = [
-      { id: "diagnostic-user", role: "user", content: "Repeated question", history_id: "local", images: [], generationInfo, createdAt: 1 },
-      { id: "diagnostic-answer", role: "assistant", content: "Repeated answer", history_id: "local", images: [], generationInfo, parent_message_id: "diagnostic-user", createdAt: 2 },
-      { id: "real-user", role: "user", content: "Repeated question", history_id: "local", images: [], createdAt: 3 },
-      { id: "real-answer", role: "assistant", content: "Repeated answer", history_id: "local", images: [], parent_message_id: "real-user", createdAt: 4 }
+    const rows: MessageHistory = [
+      { name: undefined, id: "diagnostic-user", role: "user", content: "Repeated question", history_id: "local", images: [], generationInfo, createdAt: 1 },
+      { name: undefined, id: "diagnostic-answer", role: "assistant", content: "Repeated answer", history_id: "local", images: [], generationInfo, parent_message_id: "diagnostic-user", createdAt: 2 },
+      { name: undefined, id: "real-user", role: "user", content: "Repeated question", history_id: "local", images: [], createdAt: 3 },
+      { name: undefined, id: "real-answer", role: "assistant", content: "Repeated answer", history_id: "local", images: [], parent_message_id: "real-user", createdAt: 4 }
     ]
     mocks.rows.push(...rows)
     mocks.removeMessageById.mockImplementationOnce(async (historyId, id) => {
@@ -957,7 +1112,10 @@ describe("saved normal Chat pipeline with autosave", () => {
     await act(async () => { await view.result.current.actions.deleteMessage(1) })
     const reloadMessages = formatToMessage(mocks.rows)
     const reloadHistory = formatToChatHistory(mocks.rows)
-    expect(mocks.removeMessageById).toHaveBeenCalledWith("local", "diagnostic-answer")
+    expect(mocks.removeMessageById).toHaveBeenCalledWith(
+      "local", "diagnostic-answer", undefined,
+      { validate_lease: expect.any(Function) }
+    )
     expect(view.result.current.state.messages.map(row => row.id)).toEqual(["diagnostic-user", "real-user", "real-answer"])
     expect(reloadMessages.map(row => row.id)).toEqual(["diagnostic-user", "real-user", "real-answer"])
     const promptRows = (history: typeof reloadHistory) => history.map(({ role, content }) => ({ role, content }))
@@ -1173,15 +1331,105 @@ describe("saved normal Chat pipeline with autosave", () => {
     view.unmount()
   })
 
-  it("preserves the selected provider in source-grounded generation options", async () => {
+  it("uses the selected provider once for source-grounded completion and retrieves evidence only", async () => {
     mocks.realProviderResolution = true
-    mocks.ragSearch.mockResolvedValue({ documents: [{ content: "Evidence", metadata: {} }] })
-    const view = renderWorkspace(false, false, { ragMediaIds: [42], fileRetrievalEnabled: true, ragEnableGeneration: true })
-    act(() => useStoreMessageOption.setState({ selectedModel: "custom-openai-api:shared-model" }))
-    await act(async () => { await view.result.current.actions.onSubmit({ message: "Use this source", image: "" }) })
-    expect(mocks.ragSearch).toHaveBeenCalledWith("Use this source", expect.objectContaining({
-      generation_model: "shared-model", generation_provider: "custom-openai-api"
-    }))
+    const actualModels =
+      await vi.importActual<typeof import("@/models")>("@/models")
+    mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
+    mocks.getModels.mockResolvedValue([
+      { id: "shared-model", provider: "openai", capabilities: [] },
+      { id: "shared-model", provider: "custom_openai_api", capabilities: [] }
+    ])
+    mocks.ragSearch.mockResolvedValue({
+      documents: [
+        {
+          content: "Evidence",
+          metadata: {
+            media_id: 42,
+            source: "media_db",
+            title: "Distinctive media 42 evidence",
+            type: "text",
+            url: "https://sources.test/media-42-evidence"
+          }
+        }
+      ]
+    })
+    mocks.streamMessage.mockImplementation(
+      async function* (_messages, options, onChunk) {
+        const id = options.conversationId || "source-chat"
+        if (!mocks.serverRows.has(id)) mocks.serverRows.set(id, [])
+        const rows = mocks.serverRows.get(id)!
+        rows.push(
+          { id: "source-user", role: "user", content: "Use this source" },
+          { id: "source-answer", role: "assistant", content: "Grounded answer" }
+        )
+        onChunk({
+          tldw_conversation_id: id,
+          tldw_user_message_id: "source-user",
+          tldw_message_id: "source-answer"
+        })
+        yield "Grounded answer"
+      }
+    )
+    const view = renderWorkspace(false, false, {
+      ragMediaIds: [42],
+      fileRetrievalEnabled: true,
+      ragEnableGeneration: true
+    })
+    act(() =>
+      useStoreMessageOption
+        .getState()
+        .setSelectedModel("custom-openai-api:shared-model")
+    )
+    await act(async () => {
+      await view.result.current.actions.onSubmit({
+        message: "Use this source",
+        image: ""
+      })
+    })
+    // Retrieval supplies evidence; the selected provider generates the one streamed answer.
+    expect(mocks.ragSearch).toHaveBeenCalledWith(
+      "Use this source",
+      expect.objectContaining({
+        enable_generation: false,
+        include_media_ids: [42],
+        sources: ["media_db"]
+      })
+    )
+    expect(mocks.ragSearch.mock.calls[0][1]).not.toHaveProperty(
+      "generation_model"
+    )
+    expect(mocks.ragSearch.mock.calls[0][1]).not.toHaveProperty(
+      "generation_provider"
+    )
+    expect(mocks.ragSearch.mock.calls[0][1]).not.toHaveProperty("generation_prompt")
+    expect(mocks.streamMessage).toHaveBeenCalledTimes(1)
+    expect(mocks.streamMessage.mock.calls[0][1]).toMatchObject({
+      apiProvider: "custom-openai-api",
+      model: "shared-model"
+    })
+    expect(mocks.streamMessage.mock.calls[0][0].at(-1).content).toContain(
+      "Evidence"
+    )
+    expect(view.result.current.state.messages.at(-1)?.message).toBe(
+      "Grounded answer"
+    )
+    expect(view.result.current.state.messages.at(-1)?.sources).toEqual([
+      {
+        name: "Distinctive media 42 evidence",
+        type: "text",
+        mode: "rag",
+        url: "https://sources.test/media-42-evidence",
+        pageContent: "Evidence",
+        metadata: {
+          media_id: 42,
+          source: "media_db",
+          title: "Distinctive media 42 evidence",
+          type: "text",
+          url: "https://sources.test/media-42-evidence"
+        }
+      }
+    ])
     view.unmount()
   })
 
@@ -1745,7 +1993,7 @@ describe("saved normal Chat pipeline with autosave", () => {
     expect(local.map(row => row.serverMessageId)).toEqual(["user-1", "assistant-1", "user-3", "assistant-3"])
     const remote = mocks.serverRows.get("chat-1")!.map(row => ({
       id: row.id!, serverMessageId: row.id!, message: row.content,
-      isBot: row.role !== "user", role: row.role, name: "", sources: []
+      isBot: row.role !== "user", role: row.role as Message["role"], name: "", sources: []
     }))
     expect(reconcileServerChatMessages(local, remote)).toHaveLength(5)
     const draft = { id: "unsent", message: "Same question", isBot: false, name: "You", sources: [] }
@@ -1767,7 +2015,7 @@ describe("saved normal Chat pipeline with autosave", () => {
     let pending!: Promise<unknown>
     act(() => { pending = result.current.actions.onSubmit({ message: "Old question", image: "" }) })
     await waitFor(() => expect(mocks.streamMessage).toHaveBeenCalled())
-    const draft = { id: "new-draft", isBot: false, name: "You", message: "New draft" }
+    const draft = { id: "new-draft", isBot: false, name: "You", message: "New draft", sources: [] }
     await act(async () => {
       replaceAuthority("synthetic-b")
       if (destination === "A") replaceAuthority("synthetic-a")
@@ -1782,11 +2030,16 @@ describe("saved normal Chat pipeline with autosave", () => {
 
   it("establishes one neutral conversation and local history before inference, including a queued second turn", async () => {
     const linking = deferred<string>()
-    mocks.ensureHistory.mockImplementationOnce(async () => {
+    mocks.ensureHistory.mockImplementationOnce(async (chatId, title, _signal, snapshot, sceneSend) => {
       const id = await linking.promise
+      if (snapshot) mocks.mirrorHistories.set(id, { id, title, server_chat_id: chatId,
+        server_scope_key: serverChatMirrorOwnerKey(snapshot) })
+      if (sceneSend && sceneSend.acceptHistoryMirror?.(id) !== true)
+        throw new Error("actor_settings_scope_changed")
       useStoreMessageOption
         .getState()
         .setHistoryId(id, { preserveServerChatId: true })
+      if (sceneSend && !sceneSend.isCurrent()) throw new Error("actor_settings_scope_changed")
       return id
     })
     const { result } = renderWorkspace()
@@ -1917,111 +2170,6 @@ describe("saved normal Chat pipeline with autosave", () => {
     })
     expect(mocks.serverRows.get("chat-1")).toHaveLength(2)
     expect(mocks.serverRows.size).toBe(1)
-  })
-
-  it.each(["create", "message"])(
-    "waits for the entire local promotion during %s before a follow-up and queued turn",
-    async (boundary) => {
-      const blocked = deferred<void>()
-      if (boundary === "create") {
-        mocks.createChat.mockImplementationOnce(async () => {
-          mocks.serverRows.set("promoted-chat", [])
-          await blocked.promise
-          return { id: "promoted-chat" }
-        })
-      } else {
-        mocks.addChatMessage.mockImplementationOnce(async (id, row) => {
-          await blocked.promise
-          mocks.serverRows.get(id)!.push(row)
-          return { id: crypto.randomUUID(), version: 1 }
-        })
-      }
-      seedLocalDraft()
-      const { result } = renderWorkspace()
-      await waitFor(() =>
-        expect(
-          boundary === "create" ? mocks.createChat : mocks.addChatMessage
-        ).toHaveBeenCalledTimes(1)
-      )
-      let followUp!: Promise<unknown>
-      act(() => {
-        followUp = result.current.actions.onSubmit({
-          message: "Follow-up question",
-          image: ""
-        })
-      })
-      await waitFor(() => expect(mocks.initialize).toHaveBeenCalledTimes(2))
-      act(() => {
-        result.current.queue.enqueue({
-          promptText: "Queued question",
-          image: ""
-        })
-      })
-      await act(async () => {
-        await Promise.resolve()
-      })
-      const inferredBeforePromotion = mocks.pageAssistModel.mock.calls.length
-      await act(async () => {
-        blocked.resolve()
-        await followUp
-      })
-      await waitFor(() =>
-        expect(result.current.state.queuedMessages).toHaveLength(0)
-      )
-      expect(inferredBeforePromotion).toBe(0)
-      expect(mocks.createChat).toHaveBeenCalledTimes(1)
-      expect(mocks.serverRows.size).toBe(1)
-      expect(
-        mocks.serverRows
-          .get(result.current.state.serverChatId!)
-          ?.map((row) => row.content)
-      ).toEqual([
-        "Own draft",
-        "Own answer",
-        "Follow-up question",
-        "Answer: Follow-up question",
-        "Queued question",
-        "Answer: Queued question"
-      ])
-      expect(result.current.state.historyId).toBe("local-draft")
-    }
-  )
-
-  it("rechecks the current conversation after promotion finishes during send initialization", async () => {
-    const promotion = deferred<void>()
-    const sending = deferred<void>()
-    mocks.addChatMessage.mockImplementationOnce(async (id, row) => {
-      await promotion.promise
-      mocks.serverRows.get(id)!.push(row)
-      return { id: crypto.randomUUID(), version: 1 }
-    })
-    seedLocalDraft()
-    const { result } = renderWorkspace()
-    // The send captures the initial null ID before the autosave creates its chat.
-    mocks.initialize.mockReturnValueOnce(sending.promise)
-    let followUp!: Promise<unknown>
-    act(() => {
-      followUp = result.current.actions.onSubmit({
-        message: "Follow-up question",
-        image: ""
-      })
-    })
-    await waitFor(() => expect(mocks.addChatMessage).toHaveBeenCalledTimes(1))
-    await act(async () => {
-      promotion.resolve()
-    })
-    await waitFor(() => expect(mocks.addChatMessage).toHaveBeenCalledTimes(2))
-    await act(async () => {
-      sending.resolve()
-      await followUp
-    })
-    expect(mocks.createChat).toHaveBeenCalledTimes(1)
-    expect(mocks.serverRows.get("chat-1")?.map((row) => row.content)).toEqual([
-      "Own draft",
-      "Own answer",
-      "Follow-up question",
-      "Answer: Follow-up question"
-    ])
   })
 
   it("cancels a waiting follow-up without cancelling the owning promotion", async () => {
@@ -2333,6 +2481,7 @@ describe("saved normal Chat pipeline with autosave", () => {
         if (boundary === "A to B to A") {
           replaceAuthority("synthetic-b")
           replaceAuthority("synthetic-a")
+          useStoreMessageOption.getState().startNewChatDraft(false)
         }
         useStoreMessageOption.setState({
           historyId: boundary === "new history" ? "new-local" : "local-draft",
@@ -2563,4 +2712,689 @@ describe("saved normal Chat pipeline with autosave", () => {
       expect(result.current.state.serverChatId).toBeNull()
     }
   )
+
+  describe("qualified SDK promotion ACK", () => {
+    let copyScene: ReturnType<typeof vi.spyOn>
+    let promotionWait: ReturnType<typeof vi.spyOn>
+
+    beforeEach(async () => {
+      useActorStore.getState().reset()
+      const actor = await vi.importActual<typeof import("@/utils/actor")>("@/utils/actor")
+      mocks.injectActor.mockImplementation(actor.maybeInjectActorMessage)
+      copyScene = vi.spyOn(await import("@/services/actor-settings"), "copyActorSceneToBoundChat")
+      promotionWait = vi.spyOn(await import("@/services/pending-chat-promotion"), "waitForChatPromotion")
+    })
+    afterEach(() => { copyScene.mockRestore(); promotionWait.mockRestore() })
+
+    // Legacy transcript IDs are metadata only. This fixture owns one private
+    // fresh Scene; no H1 capability or ID-derived native/local target exists.
+    const mountPromotion = async () => {
+      seedLocalDraft()
+      const originalAddress = useStoreMessageOption.getState().chatDraftAddress!
+      if (originalAddress.kind !== "fresh") throw new Error("Expected original private Scene")
+      const originalConfig = mocks.config
+      const verifiedScope = await resolveServicePromptScope()
+      const requestScope = { config: verifiedScope.config, userId: verifiedScope.userId }
+      const account = { requestScope, isCurrent: () => mocks.config === originalConfig }
+      const settings = { ...createDefaultActorSettings(), isEnabled: true,
+        notes: "Frozen original promotion Scene" }
+      const record = { value: settings, updatedAt: 1700000000000 }
+      mocks.getActorScene.mockImplementation(async ({ target }) => ({
+        target: target!, settings: structuredClone(settings), originalRecord: record,
+        origin: "scene", profileUnavailable: false
+      }))
+      const captureScene = async () => {
+        const source = captureChatDraftSource(() => account.isCurrent() &&
+          useStoreMessageOption.getState().chatDraftAddress === originalAddress)
+        const target = captureActorSettingsTarget({ address: originalAddress,
+          requestScope, accountIsCurrent: account.isCurrent, isCurrent: source.isCurrent })
+        if (!target) throw new Error("Original private Scene retired")
+        return captureActorSceneSendForTarget(target, account, source.isCurrent, account.isCurrent)!.read()
+      }
+      const originalScene = await captureScene()
+      mocks.linkMirror.mockImplementation(async ({ chatId, title, ownerKey }) => {
+        expect(ownerKey).toBe(serverChatMirrorOwnerKey({ requestScope }))
+        expect(mocks.serverRows.has(chatId)).toBe(true)
+        mocks.mirrorHistories.set("local-draft", { id: "local-draft", title,
+          server_chat_id: chatId, server_scope_key: ownerKey })
+        return "local-draft"
+      })
+      const hook = renderHook(({ ready }) => {
+        const state = useStoreMessageOption()
+        const [controller, updateController] = React.useState<AbortController | null>(null)
+        const controllerRef = React.useRef<AbortController | null>(null)
+        const setController = React.useCallback((next: AbortController | null) => {
+          controllerRef.current = next
+          updateController(next)
+        }, [])
+        const getController = React.useCallback(() => controllerRef.current, [])
+        const mirror = useServerChatHistoryId({ serverChatId: state.serverChatId,
+          historyId: state.historyId, setHistoryId: state.setHistoryId,
+          temporaryChat: false, t: loaderTranslate })
+        const actions = useRawChatActions({ ...createHookOptions(), ...state,
+          abortController: controller, setAbortController: setController,
+          getAbortController: getController,
+          ensureServerChatHistoryId: mirror.ensureServerChatHistoryId
+        } as Parameters<typeof useRawChatActions>[0])
+        const persistence = usePlaygroundPersistence({ ...state,
+          isConnectionReady: ready, isFireFoxPrivateMode: false,
+          setTemporaryChat: (temporaryChat) => useStoreMessageOption.setState({ temporaryChat }),
+          clearChat: vi.fn(), selectedCharacter: null, selectedAssistantMode: null,
+          assistantOverlayActive: false, serverPersistenceHintSeen: true,
+          setServerPersistenceHintSeen: vi.fn(), invalidateServerChatHistory: vi.fn(),
+          navigate: vi.fn(), notificationApi: createHookOptions().notification,
+          t: createHookOptions().t
+        } as Parameters<typeof usePlaygroundPersistence>[0])
+        const queue = useComposerQueue({ isConnectionReady: ready,
+          isStreaming: state.streaming, queuedMessages: state.queuedMessages,
+          setQueuedMessages: state.setQueuedMessages,
+          sendQueuedRequest: async (item, assertDispatchReady) => {
+            const scene = await captureScene()
+            assertDispatchReady()
+            const outcome = await actions.onSubmit({ message: item.promptText,
+              image: item.image, actorSceneSend: scene })
+            if (outcome.status !== "submitted") throw new Error("Queued SDK send did not submit")
+          },
+          stopStreamingRequest: vi.fn(), resolveConversationId: () => state.historyId,
+          buildQueuedDocuments: () => [],
+          buildQueuedRequestSnapshot: () => ({ selectedModel: state.selectedModel }),
+          isQueuedDispatchBlocked: false, cancelCurrentAndRunDisabledReasonText: null })
+        return { actions, persistence, queue, state }
+      }, { initialProps: { ready: true } })
+      const send = (scene = originalScene, controller?: AbortController) =>
+        hook.result.current.actions.onSubmit({ message: "Follow-up question", image: "",
+          actorSceneSend: scene, ...(controller ? { controller } : {}) })
+      return { ...hook, send, captureScene, originalScene, originalAddress, record, requestScope }
+    }
+
+    it.each(["create", "message"] as const)(
+      "waits for the entire local promotion during %s before a follow-up and queued turn",
+      async boundary => {
+        const blocked = deferred<void>()
+        if (boundary === "create") {
+          mocks.createChat.mockImplementationOnce(async () => {
+            mocks.serverRows.set("promoted-chat", [])
+            await blocked.promise
+            return { id: "promoted-chat" }
+          })
+        } else {
+          mocks.addChatMessage.mockImplementationOnce(async (id, row) => {
+            await blocked.promise
+            mocks.serverRows.get(id)!.push({ ...row, id: "promoted-user", version: 1 })
+            return { id: "promoted-user", version: 1 }
+          })
+        }
+        const view = await mountPromotion()
+        let followUp: ReturnType<typeof view.send> | undefined
+        try {
+          await waitFor(() => expect(boundary === "create" ? mocks.createChat : mocks.addChatMessage).toHaveBeenCalledOnce())
+          const scene = boundary === "create" ? view.originalScene : await view.captureScene()
+          act(() => { followUp = view.send(scene) })
+          await waitFor(() => expect(promotionWait).toHaveBeenCalledOnce())
+          expect(promotionWait.mock.calls[0][0]).toBe(useStoreMessageOption.getState().setServerChatId)
+          expect(promotionWait.mock.calls[0][1]).toBe("local-draft")
+          expect(promotionWait.mock.calls[0][2].requestScope).toEqual(view.requestScope)
+          act(() => { view.result.current.queue.enqueue({ promptText: "Queued question", image: "" }) })
+          expect(view.result.current.state.queuedMessages).toHaveLength(1)
+          expect(mocks.pageAssistModel).not.toHaveBeenCalled()
+          let outcome: unknown
+          await act(async () => { blocked.resolve(); outcome = await followUp })
+          expect(outcome, JSON.stringify(outcome)).toMatchObject({ status: "submitted" })
+          await waitFor(() => expect(view.result.current.state.queuedMessages).toHaveLength(0))
+          expect(mocks.createChat).toHaveBeenCalledOnce()
+          expect(mocks.serverRows.size).toBe(1)
+          const chatId = view.result.current.state.serverChatId!
+          expect(mocks.serverRows.get(chatId)?.map(row => row.content)).toEqual([
+            "Own draft", "Own answer", "Follow-up question", "Answer: Follow-up question",
+            "Queued question", "Answer: Queued question" ])
+          expect(mocks.pageAssistModel.mock.calls.map(([request]) => request.conversationId)).toEqual([chatId, chatId])
+          expect(mocks.createChat.mock.calls[0][1].requestScope).toEqual(view.requestScope)
+          expect(view.result.current.state.historyId).toBe("local-draft")
+          expect(view.result.current.state.chatDraftAddress).toBe(view.originalAddress)
+          expect(view.originalScene.scene.originalRecord).toBe(view.record)
+          expect(mocks.injectActor.mock.calls.map(([, sceneSettings]) => sceneSettings.notes)).toEqual([
+            "Frozen original promotion Scene", "Frozen original promotion Scene" ])
+          expect(copyScene).not.toHaveBeenCalled()
+          expect(useActorStore.getState().applied).toBeNull()
+        } finally {
+          blocked.resolve()
+          await followUp
+          view.unmount()
+        }
+      }
+    )
+
+    it("rechecks the current conversation after promotion finishes during send initialization", async () => {
+      const creating = deferred<void>(), sending = deferred<void>()
+      mocks.createChat.mockImplementationOnce(async () => {
+        mocks.serverRows.set("promoted-before-ensure", [])
+        await creating.promise
+        return { id: "promoted-before-ensure" }
+      })
+      const view = await mountPromotion()
+      let followUp: ReturnType<typeof view.send> | undefined
+      try {
+        await waitFor(() => expect(mocks.createChat).toHaveBeenCalledOnce())
+        mocks.initialize.mockReturnValueOnce(sending.promise)
+        const initializeCalls = mocks.initialize.mock.calls.length
+        act(() => { followUp = view.send() })
+        await waitFor(() => expect(mocks.initialize).toHaveBeenCalledTimes(initializeCalls + 1))
+        expect(view.result.current.state.serverChatId).toBeNull()
+        await act(async () => { creating.resolve() })
+        await waitFor(() => expect(mocks.addChatMessage).toHaveBeenCalledTimes(2))
+        expect(mocks.pageAssistModel).not.toHaveBeenCalled()
+        expect(promotionWait).not.toHaveBeenCalled()
+        let outcome: unknown
+        await act(async () => { sending.resolve(); outcome = await followUp })
+        expect(outcome, JSON.stringify(outcome)).toMatchObject({ status: "submitted" })
+        expect(mocks.createChat).toHaveBeenCalledOnce()
+        expect(mocks.serverRows.get("promoted-before-ensure")?.map(row => row.content)).toEqual([
+          "Own draft", "Own answer", "Follow-up question", "Answer: Follow-up question" ])
+        expect(mocks.pageAssistModel.mock.calls[0][0].conversationId).toBe("promoted-before-ensure")
+        expect(view.result.current.state.chatDraftAddress).toBe(view.originalAddress)
+        expect(view.originalScene.scene.originalRecord).toBe(view.record)
+        expect(copyScene).not.toHaveBeenCalled()
+        expect(useActorStore.getState().applied).toBeNull()
+      } finally {
+        creating.resolve(); sending.resolve()
+        await followUp
+        view.unmount()
+      }
+    })
+
+    it.each(["New with same history ID", "source selection", "account ABA", "foreign server ID"] as const)(
+      "refuses SDK promotion ACK after original %s retirement and preserves replacement work",
+      async boundary => {
+        const creating = deferred<void>()
+        mocks.createChat.mockImplementationOnce(async () => {
+          mocks.serverRows.set("retired-promotion-chat", [])
+          await creating.promise
+          return { id: "retired-promotion-chat", source: "old-source", version: 1 }
+        })
+        const view = await mountPromotion()
+        let followUp: ReturnType<typeof view.send> | undefined
+        try {
+          await waitFor(() => expect(mocks.createChat).toHaveBeenCalledOnce())
+          act(() => { followUp = view.send() })
+          await waitFor(() => expect(promotionWait).toHaveBeenCalledOnce())
+          expect(promotionWait.mock.calls[0][0]).toBe(useStoreMessageOption.getState().setServerChatId)
+          expect(promotionWait.mock.calls[0][1]).toBe("local-draft")
+          expect(promotionWait.mock.calls[0][2].requestScope).toEqual(view.requestScope)
+          let replacementAddress: unknown
+          act(() => {
+            if (boundary === "New with same history ID") {
+              useStoreMessageOption.getState().startNewChatDraft(false)
+              useStoreMessageOption.setState({ historyId: "local-draft" })
+            }
+            if (boundary === "source selection") usePlaygroundSessionStore.setState(state => ({ sourceSelectionRevision: state.sourceSelectionRevision + 1 }))
+            if (boundary === "account ABA") { replaceAuthority("synthetic-b"); replaceAuthority("synthetic-a") }
+            if (boundary === "foreign server ID") useStoreMessageOption.getState().setServerChatId("foreign-chat")
+            replacementAddress = useStoreMessageOption.getState().chatDraftAddress
+            useStoreMessageOption.setState({ serverChatSource: "Keep replacement source", serverChatVersion: 77 })
+          })
+          const replacement = useStoreMessageOption.getState()
+          const expectedReplacement = { historyId: replacement.historyId,
+            serverChatId: replacement.serverChatId,
+            serverChatSource: replacement.serverChatSource,
+            serverChatVersion: replacement.serverChatVersion }
+          let outcome: unknown
+          await act(async () => { creating.resolve(); outcome = await followUp })
+          expect(outcome).not.toMatchObject({ status: "submitted" })
+          expect(mocks.pageAssistModel).not.toHaveBeenCalled()
+          expect(view.result.current.state.chatDraftAddress).toBe(replacementAddress)
+          expect(view.result.current.state).toMatchObject(expectedReplacement)
+          expect(mocks.addChatMessage).not.toHaveBeenCalled()
+          expect(copyScene).not.toHaveBeenCalled()
+          expect(useActorStore.getState().applied).toBeNull()
+        } finally {
+          creating.resolve()
+          await followUp
+          view.unmount()
+        }
+      }
+    )
+
+    it.each(["New", "source ABA"] as const)(
+      "does not acknowledge the promotion's issued ID after synchronous subscriber %s",
+      async boundary => {
+        const creating = deferred<void>()
+        mocks.createChat.mockImplementationOnce(async () => {
+          mocks.serverRows.set("subscriber-promotion-chat", [])
+          await creating.promise
+          return { id: "subscriber-promotion-chat", source: "old-source", version: 1 }
+        })
+        const view = await mountPromotion()
+        let followUp: ReturnType<typeof view.send> | undefined
+        let replacementAddress: unknown
+        const unsubscribe = useStoreMessageOption.subscribe(state => {
+          if (state.serverChatId !== "subscriber-promotion-chat") return
+          unsubscribe()
+          state.startNewChatDraft(false)
+          if (boundary === "source ABA") useStoreMessageOption.getState().setChatDraftAddress(view.originalAddress)
+          replacementAddress = useStoreMessageOption.getState().chatDraftAddress
+          useStoreMessageOption.setState({ historyId: "local-draft", serverChatId: "replacement-chat",
+            serverChatSource: "Keep subscriber source", serverChatVersion: 77 })
+        })
+        try {
+          await waitFor(() => expect(mocks.createChat).toHaveBeenCalledOnce())
+          act(() => { followUp = view.send() })
+          await waitFor(() => expect(promotionWait).toHaveBeenCalledOnce())
+          expect(promotionWait.mock.calls[0][0]).toBe(useStoreMessageOption.getState().setServerChatId)
+          expect(promotionWait.mock.calls[0][1]).toBe("local-draft")
+          expect(promotionWait.mock.calls[0][2].requestScope).toEqual(view.requestScope)
+          await act(async () => { creating.resolve(); await followUp })
+          expect(mocks.pageAssistModel).not.toHaveBeenCalled()
+          expect(view.result.current.state.chatDraftAddress).toBe(replacementAddress)
+          expect(view.result.current.state).toMatchObject({ historyId: "local-draft", serverChatId: "replacement-chat",
+            serverChatSource: "Keep subscriber source", serverChatVersion: 77 })
+          expect(mocks.addChatMessage).not.toHaveBeenCalled()
+          expect(copyScene).not.toHaveBeenCalled()
+          expect(useActorStore.getState().applied).toBeNull()
+        } finally {
+          unsubscribe(); creating.resolve()
+          await followUp
+          view.unmount()
+        }
+      }
+    )
+
+    it("cancels the original SDK promotion waiter without cancelling its owning save", async () => {
+      const creating = deferred<void>()
+      mocks.createChat.mockImplementationOnce(async () => {
+        mocks.serverRows.set("uncancelled-promotion", [])
+        await creating.promise
+        return { id: "uncancelled-promotion" }
+      })
+      const view = await mountPromotion()
+      const controller = new AbortController()
+      let followUp: ReturnType<typeof view.send> | undefined
+      try {
+        await waitFor(() => expect(mocks.createChat).toHaveBeenCalledOnce())
+        act(() => { followUp = view.send(view.originalScene, controller) })
+        await waitFor(() => expect(promotionWait).toHaveBeenCalledOnce())
+        await act(async () => { controller.abort(); await followUp })
+        expect(mocks.createChat.mock.calls[0][1].signal.aborted).toBe(false)
+        expect(mocks.pageAssistModel).not.toHaveBeenCalled()
+        await act(async () => { creating.resolve() })
+        await waitFor(() => expect(mocks.serverRows.get("uncancelled-promotion")).toHaveLength(2))
+        const retryScene = await view.captureScene()
+        let outcome: unknown
+        await act(async () => { outcome = await view.send(retryScene) })
+        expect(outcome, JSON.stringify(outcome)).toMatchObject({ status: "submitted" })
+        expect(mocks.createChat).toHaveBeenCalledOnce()
+        expect(mocks.serverRows.get("uncancelled-promotion")?.map(row => row.content)).toEqual([
+          "Own draft", "Own answer", "Follow-up question", "Answer: Follow-up question" ])
+      } finally {
+        creating.resolve()
+        await followUp
+        view.unmount()
+      }
+    })
+  })
+
+  describe("legacy SDK scene dispatch continuation", () => {
+    let copyScene: ReturnType<typeof vi.spyOn>
+
+    beforeEach(async () => {
+      useActorStore.getState().reset()
+      const actor = await vi.importActual<typeof import("@/utils/actor")>("@/utils/actor")
+      mocks.injectActor.mockImplementation(actor.maybeInjectActorMessage)
+      copyScene = vi.spyOn(await import("@/services/actor-settings"), "copyActorSceneToBoundChat")
+      mocks.linkMirror.mockImplementation(async ({ chatId, title, ownerKey }) => {
+        const id = "sdk-certified-mirror"
+        mocks.mirrorHistories.set(id, {
+          id, title, server_chat_id: chatId, server_scope_key: ownerKey
+        })
+        return id
+      })
+    })
+    afterEach(() => copyScene.mockRestore())
+
+    // No H1 provider is installed: these are legacy save_to_db/stream ACK cases.
+    // Only SDK create/link and scene-read I/O are declared doubles. The real
+    // mirror hook publishes the local alias into the actual option store.
+    const mountSdkScene = async (scope: ChatScope = { type: "global" }) => {
+      const state = useStoreMessageOption.getState()
+      const address = state.chatDraftAddress!
+      if (address.kind !== "fresh") throw new Error("Expected a fresh SDK source")
+      state.setChatDraftAddress({ ...address, scope })
+      const originalAddress = useStoreMessageOption.getState().chatDraftAddress!
+      const originalConfig = mocks.config
+      const verifiedScope = await resolveServicePromptScope()
+      const requestScope = { config: verifiedScope.config, userId: verifiedScope.userId }
+      const account = { requestScope, isCurrent: () => mocks.config === originalConfig }
+      const source = captureChatDraftSource(account.isCurrent)
+      const target = captureActorSettingsTarget({
+        address: originalAddress, requestScope, accountIsCurrent: account.isCurrent,
+        isCurrent: source.isCurrent
+      })!
+      const settings = { ...createDefaultActorSettings(), isEnabled: true,
+        notes: "Frozen original SDK scene" }
+      const record = { value: settings, updatedAt: 1700000000000 }
+      mocks.getActorScene.mockImplementation(async ({ target: readTarget }) => ({
+        target: readTarget!, settings: structuredClone(settings), originalRecord: record,
+        origin: "scene", profileUnavailable: false
+      }))
+      const scene = await captureActorSceneSendForTarget(target, account, source.isCurrent, account.isCurrent)!.read()
+      const captureSdkScene = async () => {
+        const currentSource = captureChatDraftSource(() => account.isCurrent() &&
+          useStoreMessageOption.getState().chatDraftAddress === originalAddress)
+        const currentTarget = captureActorSettingsTarget({
+          address: originalAddress, requestScope, accountIsCurrent: account.isCurrent,
+          isCurrent: currentSource.isCurrent
+        })
+        if (!currentTarget) throw new Error("Original SDK Scene retired")
+        return captureActorSceneSendForTarget(currentTarget, account,
+          currentSource.isCurrent, account.isCurrent)!.read()
+      }
+      const hook = renderHook(() => {
+        const current = useStoreMessageOption()
+        const [controller, updateController] = React.useState<AbortController | null>(null)
+        const controllerRef = React.useRef<AbortController | null>(null)
+        const setController = React.useCallback((next: AbortController | null) => {
+          controllerRef.current = next
+          updateController(next)
+        }, [])
+        const getController = React.useCallback(() => controllerRef.current, [])
+        const mirror = useServerChatHistoryId({
+          serverChatId: current.serverChatId, historyId: current.historyId,
+          setHistoryId: current.setHistoryId, temporaryChat: false, t: loaderTranslate
+        })
+        const actions = useRawChatActions({
+          ...createHookOptions(), ...current, scope,
+          abortController: controller, setAbortController: setController,
+          getAbortController: getController,
+          ensureServerChatHistoryId: mirror.ensureServerChatHistoryId
+        } as Parameters<typeof useRawChatActions>[0])
+        return { actions, state: current }
+      })
+      const send = () => hook.result.current.actions.onSubmit({
+        message: "SDK original question", image: "", actorSceneSend: scene
+      })
+      return { ...hook, send, captureSdkScene, scene, target, record, originalAddress, requestScope }
+    }
+
+    it.each([
+      { type: "global" } as const,
+      { type: "workspace", workspaceId: "sdk-original-workspace" } as const
+    ])("keeps original scene through exact $type SDK create and actual mirror publication without granting H1 bind", async scope => {
+      const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
+      mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
+      mocks.realFormatter = true
+      // The actual model factory and ChatTldw reach the service stream boundary.
+      // This declared wire double supplies server receipts; initialization and
+      // physical transport dispatch are outside this fixture's boundary.
+      mocks.streamMessage.mockImplementation(async function* (messages, options, onChunk) {
+        const rows = mocks.serverRows.get(options.conversationId)!
+        const question = messages.at(-1)!.content
+        rows.push({ id: "sdk-wire-user", role: "user", content: question },
+          { id: "sdk-wire-answer", role: "assistant", content: "SDK wire answer" })
+        onChunk({ tldw_conversation_id: options.conversationId,
+          tldw_user_message_id: "sdk-wire-user", tldw_message_id: "sdk-wire-answer" })
+        yield "SDK wire answer"
+      })
+      const view = await mountSdkScene(scope)
+      let result: unknown
+      await act(async () => { result = await view.send() })
+      expect(result, JSON.stringify(result)).toMatchObject({ status: "submitted" })
+      expect(mocks.createChat).toHaveBeenCalledOnce()
+      expect(mocks.createChat.mock.calls[0][1]).toMatchObject({ scope, requestScope: view.requestScope })
+      expect(mocks.linkMirror).toHaveBeenCalledWith(expect.objectContaining({
+        chatId: "chat-1", ownerKey: serverChatMirrorOwnerKey({ requestScope: view.requestScope })
+      }))
+      expect(mocks.pageAssistModel).toHaveBeenCalledOnce()
+      expect(mocks.pageAssistModel.mock.calls[0][0]).toMatchObject({ conversationId: "chat-1" })
+      expect(mocks.streamMessage).toHaveBeenCalledOnce()
+      expect(mocks.streamMessage.mock.calls[0][1]).toMatchObject({ conversationId: "chat-1", saveToDb: true,
+        requestScope: view.requestScope })
+      expect(mocks.injectActor.mock.calls[0][1]).toMatchObject({ notes: "Frozen original SDK scene" })
+      expect(mocks.serverRows.get("chat-1")?.[0].content).toContain("SDK original question")
+      expect(mocks.getActorScene).toHaveBeenCalledOnce()
+      expect(view.result.current.state.historyId).toBe("sdk-certified-mirror")
+      expect(view.result.current.state.serverChatId).toBe("chat-1")
+      expect(view.result.current.state.chatDraftAddress).toBe(view.originalAddress)
+      expect(view.scene.scene.originalRecord).toBe(view.record)
+      expect(copyScene).not.toHaveBeenCalled()
+      expect(useActorStore.getState().applied).toBeNull()
+    })
+
+    it.each(["unchanged original", "same-ID reselection", "New then original reopen"] as const)(
+      "consumes only the original SDK Reply intent after held completion: %s",
+      async boundary => {
+        const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
+        mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
+        mocks.realFormatter = true
+        mocks.withLoader = true
+        const held = deferred<void>()
+        let dispatched = 0
+        mocks.streamMessage.mockImplementation(async function* (messages, options, onChunk) {
+          const index = ++dispatched
+          // Actual factory/ChatTldw dispatch reaches this declared service I/O
+          // boundary; the proxy and physical provider are outside this fixture.
+          options.onDispatch?.()
+          const wire = options.preparedRequest?.messages ?? messages
+          const question = wire.at(-1)!.content
+          if (index === 2) await held.promise
+          const rows = mocks.serverRows.get(options.conversationId)!
+          rows.push({ id: `reply-wire-user-${index}`, role: "user", content: question },
+            { id: `reply-wire-answer-${index}`, role: "assistant", content: `Reply answer ${index}` })
+          onChunk({ tldw_conversation_id: options.conversationId,
+            tldw_user_message_id: `reply-wire-user-${index}`,
+            tldw_message_id: `reply-wire-answer-${index}` })
+          yield `Reply answer ${index}`
+        })
+        const view = await mountSdkScene()
+        let unmountLoader: (() => void) | undefined
+        let pending: ReturnType<typeof view.send> | undefined
+        try {
+          await act(async () => { expect(await view.send()).toMatchObject({ status: "submitted" }) })
+          const seeded = useStoreMessageOption.getState()
+          expect(seeded).toMatchObject({ historyId: "sdk-certified-mirror", serverChatId: "chat-1" })
+          expect(seeded.chatDraftAddress).toBe(view.originalAddress)
+          const targetMessage = seeded.messages.find(row => row.serverMessageId === "reply-wire-answer-1")!
+          expect(targetMessage?.message).toBe("Reply answer 1")
+          const originalTarget = { id: targetMessage.id!, preview: targetMessage.message,
+            name: targetMessage.name, isBot: true }
+          act(() => useStoreMessageOption.getState().setReplyTarget(originalTarget))
+          const originalReplySource = useStoreMessageOption.getState()
+          const replyScene = await view.captureSdkScene()
+          expect(replyScene.isCurrent()).toBe(true)
+          expect(replyScene.scene.originalRecord).toBe(view.record)
+          act(() => {
+            pending = view.result.current.actions.onSubmit({
+              message: "Held SDK reply question", image: "", actorSceneSend: replyScene
+            })
+          })
+          await waitFor(() => expect(dispatched).toBe(2))
+          const replyWire = mocks.streamMessage.mock.calls[1]
+          expect(replyWire[1]).toMatchObject({ conversationId: "chat-1", saveToDb: true,
+            requestScope: view.requestScope })
+          expect(JSON.stringify(replyWire[1].preparedRequest?.messages ?? replyWire[0])).toContain("Held SDK reply question")
+          expect(useStoreMessageOption.getState().replyTarget).toBe(originalTarget)
+          expect(useStoreMessageOption.getState().messages.find(row => row.message === "Held SDK reply question")?.parentMessageId).toBe(originalTarget.id)
+          let expectedTarget = originalTarget
+          if (boundary === "same-ID reselection") {
+            expectedTarget = { ...originalTarget }
+            act(() => useStoreMessageOption.getState().setReplyTarget(expectedTarget))
+            expect(expectedTarget).not.toBe(originalTarget)
+            expect(expectedTarget).toEqual(originalTarget)
+          }
+          if (boundary === "New then original reopen") {
+            act(() => {
+              const current = useStoreMessageOption.getState()
+              current.startNewChatDraft(false)
+              current.clearReplyTarget()
+              current.setHistoryId(null)
+              current.setServerChatId(null)
+              current.setMessages([])
+              current.setHistory([])
+              current.setStreaming(false)
+              current.setIsProcessing(false)
+              current.setServerChatMetaLoaded(false)
+              current.setServerChatLoadState("idle")
+            })
+            expect(replyScene.isCurrent()).toBe(false)
+            act(() => {
+              const current = useStoreMessageOption.getState()
+              // Reopen the original typed private source and its SDK-certified
+              // cached metadata. IDs alone issue no H1 owner or bind receipt.
+              expect(current.setChatDraftAddress(view.originalAddress)).toBe(true)
+              current.setHistoryId(seeded.historyId, { preserveServerChatId: true })
+              current.setServerChatId(seeded.serverChatId)
+              current.setMessages(seeded.messages)
+              current.setHistory(seeded.history)
+            })
+            const loader = renderHook(() => {
+              const state = useStoreMessageOption()
+              const mirror = useServerChatHistoryId({ serverChatId: state.serverChatId,
+                historyId: state.historyId, setHistoryId: state.setHistoryId,
+                temporaryChat: false, t: loaderTranslate })
+              useServerChatLoader({ ensureServerChatHistoryId: mirror.ensureServerChatHistoryId,
+                notification: loaderNotification, t: loaderTranslate })
+            })
+            unmountLoader = loader.unmount
+            await waitFor(() => expect(useStoreMessageOption.getState().serverChatLoadState).toBe("loaded"))
+            expect(mocks.listChatMessages).toHaveBeenCalledWith("chat-1", expect.any(Object),
+              expect.objectContaining({ requestScope: view.requestScope }))
+            const reopened = useStoreMessageOption.getState()
+            expect(reopened.messages.find(row => row.serverMessageId === "reply-wire-answer-1")).toMatchObject({ id: originalTarget.id })
+            expect(reopened.chatDraftAddress).toBe(view.originalAddress)
+            expect(reopened.chatDraftRevision).toBeGreaterThan(originalReplySource.chatDraftRevision)
+            expect(replyScene.isCurrent()).toBe(false)
+            // Restoring a cached target can retain object identity; original
+            // view ownership must still retire across New and source ABA.
+            act(() => useStoreMessageOption.getState().setReplyTarget(originalTarget))
+          }
+          expect(useStoreMessageOption.getState().replyTarget).toBe(expectedTarget)
+          await act(async () => { held.resolve(); expect(await pending).toMatchObject({ status: "submitted" }) })
+          expect(mocks.streamMessage).toHaveBeenCalledTimes(2)
+          expect(mocks.serverRows.get("chat-1")?.map(row => row.content)).toEqual([
+            "SDK original question", "Reply answer 1", "Held SDK reply question", "Reply answer 2"
+          ])
+          if (boundary === "unchanged original") expect(useStoreMessageOption.getState().replyTarget).toBeNull()
+          else expect(useStoreMessageOption.getState().replyTarget).toBe(expectedTarget)
+          expect(copyScene).not.toHaveBeenCalled()
+          expect(useActorStore.getState().applied).toBeNull()
+        } finally {
+          held.resolve()
+          await pending
+          unmountLoader?.()
+          view.unmount()
+        }
+      }
+    )
+
+    it.each(["create", "mirror"] as const)("refuses the held SDK %s after actual New and preserves replacement work", async boundary => {
+      const held = boundary === "create"
+        ? { kind: "create" as const, ...deferred<{ id: string; title: string }>() }
+        : { kind: "mirror" as const, ...deferred<string>() }
+      if (held.kind === "create") mocks.createChat.mockReturnValueOnce(held.promise)
+      else mocks.linkMirror.mockReturnValueOnce(held.promise)
+      const view = await mountSdkScene()
+      let pending!: ReturnType<typeof view.send>
+      act(() => { pending = view.send() })
+      await waitFor(() => expect(boundary === "create" ? mocks.createChat : mocks.linkMirror).toHaveBeenCalledOnce())
+      let replacement: unknown
+      await act(async () => {
+        useStoreMessageOption.getState().startNewChatDraft(false)
+        replacement = useStoreMessageOption.getState().chatDraftAddress
+        useStoreMessageOption.setState({ historyId: null, serverChatId: null,
+          messages: [{ id: "replacement-user", isBot: false, name: "You", message: "Keep replacement draft", sources: [] }],
+          history: [{ role: "user", content: "Keep replacement draft" }] })
+        if (held.kind === "create") held.resolve({ id: "late-sdk-chat", title: "Late title" })
+        else held.resolve("late-sdk-mirror")
+        expect(await pending).not.toMatchObject({ status: "submitted" })
+      })
+      expect(view.result.current.state.chatDraftAddress).toBe(replacement)
+      expect(view.result.current.state.historyId).toBeNull()
+      expect(view.result.current.state.serverChatId).toBeNull()
+      expect(view.result.current.state.messages[0].message).toBe("Keep replacement draft")
+      expect(mocks.pageAssistModel).not.toHaveBeenCalled()
+      if (boundary === "create") expect(mocks.linkMirror).not.toHaveBeenCalled()
+    })
+
+    it.each(["same-ID restore", "account ABA", "foreign IDs", "model", "tools"] as const)(
+      "does not adopt the held SDK mirror after %s retires the original command", async boundary => {
+        const held = deferred<string>()
+        mocks.linkMirror.mockReturnValueOnce(held.promise)
+        const view = await mountSdkScene()
+        let pending!: ReturnType<typeof view.send>
+        act(() => { pending = view.send() })
+        await waitFor(() => expect(mocks.linkMirror).toHaveBeenCalledOnce())
+        await act(async () => {
+          if (boundary === "same-ID restore") usePlaygroundSessionStore.setState(state => ({ restoreRevision: state.restoreRevision + 1 }))
+          if (boundary === "account ABA") { replaceAuthority("synthetic-b"); replaceAuthority("synthetic-a") }
+          if (boundary === "foreign IDs") useStoreMessageOption.setState({ serverChatId: "replacement-chat", historyId: "replacement-history" })
+          if (boundary === "model") useStoreMessageOption.getState().setSelectedModel("replacement-model")
+          if (boundary === "tools") useStoreMessageOption.getState().setToolChoice("required")
+          held.resolve("late-sdk-mirror")
+          expect(await pending).not.toMatchObject({ status: "submitted" })
+        })
+        expect(mocks.pageAssistModel).not.toHaveBeenCalled()
+        expect(view.result.current.state.historyId).not.toBe("late-sdk-mirror")
+        if (boundary === "foreign IDs") expect(view.result.current.state).toMatchObject({ serverChatId: "replacement-chat", historyId: "replacement-history" })
+        expect(copyScene).not.toHaveBeenCalled()
+      }
+    )
+
+    it.each(["historyId", "serverChatId"] as const)("retires its SDK publication tail after synchronous New during %s", async field => {
+      const view = await mountSdkScene()
+      let replacement: unknown
+      const unsubscribe = useStoreMessageOption.subscribe(state => {
+        if (state[field] !== (field === "historyId" ? "sdk-certified-mirror" : "chat-1")) return
+        unsubscribe()
+        state.startNewChatDraft(false)
+        replacement = useStoreMessageOption.getState().chatDraftAddress
+        useStoreMessageOption.setState({ serverChatId: "replacement-chat", historyId: "replacement-history",
+          serverChatTitle: "Keep replacement title", serverChatMetaLoaded: true,
+          messages: [{ id: "replacement-user", isBot: false, name: "You", message: "Keep replacement draft", sources: [] }] })
+      })
+      try {
+        await act(async () => { expect(await view.send()).not.toMatchObject({ status: "submitted" }) })
+        expect(view.result.current.state.chatDraftAddress).toBe(replacement)
+        expect(view.result.current.state).toMatchObject({ serverChatId: "replacement-chat", historyId: "replacement-history",
+          serverChatTitle: "Keep replacement title", serverChatMetaLoaded: true })
+        expect(view.result.current.state.messages[0].message).toBe("Keep replacement draft")
+        expect(mocks.pageAssistModel).not.toHaveBeenCalled()
+      } finally { unsubscribe() }
+    })
+
+    it("refuses an expired original scene proof before any SDK create, mirror, or provider call", async () => {
+      const view = await mountSdkScene()
+      act(() => useStoreMessageOption.getState().startNewChatDraft(false))
+      await act(async () => { expect(await view.send()).not.toMatchObject({ status: "submitted" }) })
+      expect(mocks.createChat).not.toHaveBeenCalled()
+      expect(mocks.linkMirror).not.toHaveBeenCalled()
+      expect(mocks.pageAssistModel).not.toHaveBeenCalled()
+      expect(copyScene).not.toHaveBeenCalled()
+    })
+  })
+  it.each(["pending", "failed"] as const)("B03 saved identity %s cannot dispatch as ordinary Chat", async boundary => {
+    mocks.withLoader = true
+    const metadata = deferred<ReturnType<typeof chatRagMethods.normalizeChatSummary>>()
+    const greeting = { id: "b03-greeting", role: "assistant", content: "What would you like to ask?" }
+    mocks.serverRows.set("b03-character", [greeting])
+    mocks.getChat.mockImplementation(() => boundary === "failed" ? Promise.reject(new Error("Metadata temporarily unavailable")) : metadata.promise)
+    useStoreMessageOption.setState({
+      historyId: null, serverChatId: "b03-character", serverChatMetaLoaded: false,
+      serverChatAssistantKind: null, serverChatAssistantId: null, serverChatCharacterId: null,
+      messages: [{ id: greeting.id, serverMessageId: greeting.id, role: "assistant", isBot: true,
+        name: "Archivist", message: greeting.content, sources: [] }],
+      history: [{ role: "assistant", content: greeting.content }]
+    })
+    const view = renderWorkspace(false, true)
+    try {
+      await waitFor(() => expect(mocks.getChat).toHaveBeenCalledWith("b03-character", expect.anything()))
+      await act(async () => { await view.result.current.actions.onSubmit({ message: "B03-RAW-742", image: "" }) })
+      expect(mocks.pageAssistModel).not.toHaveBeenCalled()
+      expect(mocks.streamMessage).not.toHaveBeenCalled()
+      expect(mocks.addChatMessage).not.toHaveBeenCalled()
+      expect(mocks.createChat).not.toHaveBeenCalled()
+      expect(useStoreMessageOption.getState().serverChatId).toBe("b03-character")
+    } finally {
+      metadata.resolve(chatRagMethods.normalizeChatSummary({ id: "b03-character", character_id: 3, scope_type: "global" }))
+      view.unmount()
+    }
+  })
+
 })

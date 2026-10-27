@@ -16,6 +16,8 @@ interface ResizablePanelsProps {
   defaultLeft?: number
   defaultCenter?: number
   /** Labels for mobile panel switcher tabs */
+  mobileTab?: 0 | 1 | 2
+  onMobileTabChange?: (tab: 0 | 1 | 2) => void
   tabLabels?: [string, string, string]
 }
 
@@ -32,11 +34,14 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = ({
   minCenter = 280,
   defaultLeft = 220,
   defaultCenter = 320,
+  mobileTab: controlledMobileTab,
+  onMobileTabChange,
   tabLabels = ["Filters", "Results", "Content"]
 }) => {
   const [leftWidth, setLeftWidth] = React.useState(defaultLeft)
   const [centerWidth, setCenterWidth] = React.useState(defaultCenter)
-  const [mobileTab, setMobileTab] = React.useState<0 | 1 | 2>(1)
+  const [localMobileTab, setMobileTab] = React.useState<0 | 1 | 2>(1)
+  const mobileTab = controlledMobileTab ?? localMobileTab
   const draggingRef = React.useRef<"left" | "center" | null>(null)
   const startXRef = React.useRef(0)
   const startWidthRef = React.useRef(0)
@@ -87,7 +92,8 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = ({
                   ? "text-primary border-b-2 border-primary bg-primary/5"
                   : "text-text-muted hover:text-text"
               }`}
-              onClick={() => setMobileTab(idx as 0 | 1 | 2)}
+              onClick={() => { setMobileTab(idx as 0 | 1 | 2); onMobileTabChange?.(idx as 0 | 1 | 2) }}
+              aria-pressed={mobileTab === idx}
               data-testid={`mobile-tab-${idx}`}
             >
               {label}

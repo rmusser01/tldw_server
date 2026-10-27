@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   login: vi.fn(),
   requestMagicLink: vi.fn(),
   verifyMagicLink: vi.fn(),
+  testApiKey: vi.fn(),
 }))
 vi.mock("@/services/background-proxy", () => ({ bgRequest: mocks.bgRequest }))
 vi.mock("@/services/tldw/TldwApiClient", async (importOriginal) => ({
@@ -45,6 +46,7 @@ vi.mock("@/services/tldw/TldwAuth", () => ({
     login: mocks.login,
     requestMagicLink: mocks.requestMagicLink,
     verifyMagicLink: mocks.verifyMagicLink,
+    testApiKey: mocks.testApiKey,
   },
 }))
 vi.mock("@/services/tldw-server", () => ({
@@ -99,6 +101,7 @@ beforeEach(async () => {
   mocks.login.mockResolvedValue({})
   mocks.requestMagicLink.mockResolvedValue(undefined)
   mocks.verifyMagicLink.mockResolvedValue({})
+  mocks.testApiKey.mockResolvedValue(true)
   vi.spyOn(console, "error").mockImplementation(() => {})
 })
 afterEach(() => {
@@ -347,7 +350,7 @@ it("UAT378 saves a multi-user target before credentials are entered and still va
   const serverUrl = "https://new.example.test/base"
   fireEvent.change(await screen.findByLabelText("Server URL"), { target: { value: serverUrl } })
   fireEvent.click(screen.getByRole("button", { name: "common:save" }))
-  await waitFor(() => expect(mocks.updateConfig).toHaveBeenCalledWith(expect.objectContaining({serverUrl, authMode: "multi-user"})))
+  await waitFor(() => expect(mocks.updateConfig).toHaveBeenCalledWith(expect.objectContaining({serverUrl, authMode: "multi-user"}), expect.any(Function), expect.any(Function)))
   await waitFor(() => expect(login()).toBeEnabled())
   expect(screen.queryByText("Please enter your username")).toBeNull()
   expect(screen.queryByText("Please enter your password")).toBeNull()
@@ -372,7 +375,7 @@ it("UAT378 submits the connection form with empty login credentials", async () =
   const input = await screen.findByLabelText("Server URL")
   fireEvent.change(input, { target: { value: serverUrl } })
   fireEvent.submit(input.closest("form")!)
-  await waitFor(() => expect(mocks.updateConfig).toHaveBeenCalledWith(expect.objectContaining({serverUrl})))
+  await waitFor(() => expect(mocks.updateConfig).toHaveBeenCalledWith(expect.objectContaining({serverUrl}), expect.any(Function), expect.any(Function)))
   await waitFor(() => expect(login()).toBeEnabled())
   expect(mocks.login).not.toHaveBeenCalled()
 })
@@ -387,4 +390,24 @@ it("UAT379 leaves health unchecked until first login after saving a connection",
   expect(screen.getByText("Login Required")).toBeInTheDocument()
   expect(screen.getByText("Core: not checked yet")).toBeInTheDocument()
   expect(mocks.apiSend).not.toHaveBeenCalled()
+})
+
+
+it("A02 explains a rejected API key while preserving the draft and prior credential", async () => {
+  const prior = { serverUrl: target.serverUrl, authMode: "single-user" as const, apiKey: "prior-valid-key" }
+  saved = prior
+  await storage.set("tldwConfig", prior)
+  mocks.testApiKey.mockResolvedValueOnce(false)
+  mount()
+  const apiKey = await screen.findByLabelText("API Key", { exact: true })
+  fireEvent.change(apiKey, { target: { value: "invalid-key" } })
+  fireEvent.click(screen.getByRole("button", { name: "common:save" }))
+
+  await waitFor(() => expect(mocks.testApiKey).toHaveBeenCalledWith(target.serverUrl, "invalid-key"))
+  await screen.findByText("Invalid API key. Please check your key and try again.")
+  expect(apiKey).toHaveValue("invalid-key")
+  expect(screen.getByText(/unsaved connection settings/i)).toBeInTheDocument()
+  expect(await storage.get("tldwConfig")).toEqual(prior)
+  expect(mocks.updateConfig).not.toHaveBeenCalled()
+  expect(mocks.login).not.toHaveBeenCalled()
 })

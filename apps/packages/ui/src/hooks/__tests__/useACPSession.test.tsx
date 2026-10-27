@@ -226,4 +226,113 @@ describe("useACPSession", () => {
     expect(MockWebSocket.instances).toHaveLength(2)
     expect(result.current.state).toBe("connecting")
   })
+  it("shows a running externally started task after the socket connects", async () => {
+    const onPromptComplete = vi.fn()
+    const { result } = renderHook(() => useACPSession({ sessionId: "session-1", onPromptComplete }))
+    await act(async () => { await Promise.resolve() })
+    const socket = MockWebSocket.instances[0]
+    act(() => { socket.open(); socket.emitMessage({ type: "connected", session_id: "session-1" }) })
+    expect(result.current.state).toBe("connected")
+    act(() => socket.emitMessage({ type: "update", session_id: "session-1", update_type: "agent_message_chunk", data: { text: "Reading the public README" } }))
+    expect(result.current.state).toBe("running")
+    expect(MockWebSocket.instances).toHaveLength(1)
+    expect(socket.sent).toEqual([])
+    act(() => result.current.cancel())
+    expect(socket.sent.map((message) => JSON.parse(message))).toEqual([{ type: "cancel", session_id: "session-1" }])
+    act(() => socket.emitMessage({ type: "update", session_id: "session-1", update_type: "cancelled", data: { message: "Operation cancelled" } }))
+    expect(result.current.state).toBe("running")
+    act(() => socket.emitMessage({ type: "prompt_settled", session_id: "foreign-session" }))
+    expect(result.current.state).toBe("running")
+    act(() => socket.emitMessage({ type: "prompt_settled", session_id: "session-1" }))
+    expect(result.current.state).toBe("connected")
+    expect(onPromptComplete).not.toHaveBeenCalled()
+    expect(MockWebSocket.instances).toHaveLength(1)
+  })
+
+  it.each([
+    ["session_info_update", undefined],
+    ["available_commands_update", undefined],
+    ["current_mode_update", undefined],
+    ["config_option_update", undefined],
+    ["tool_call_update", "completed"],
+    ["tool_call_update", "failed"],
+    ["tool_call_update", "cancelled"],
+  ])("does not infer active work from idle/retired %s %s", async (kind, status) => {
+    const { result } = renderHook(() => useACPSession({ sessionId: "session-1" }))
+    await act(async () => { await Promise.resolve() })
+    const socket = MockWebSocket.instances[0]
+    act(() => { socket.open(); socket.emitMessage({ type: "connected", session_id: "session-1" }) })
+    const update = { type: "update", session_id: "session-1", update_type: kind, data: { update: { status } } }
+    act(() => socket.emitMessage(update))
+    expect(result.current.state).toBe("connected")
+    act(() => socket.emitMessage({ ...update, prompt_active: true }))
+    expect(result.current.state).toBe("running")
+    act(() => socket.emitMessage({ ...update, prompt_active: false }))
+    expect(result.current.state).toBe("running")
+    act(() => socket.emitMessage({ type: "prompt_settled", session_id: "session-1" }))
+    expect(result.current.state).toBe("connected")
+    act(() => socket.emitMessage({ ...update, prompt_active: false }))
+    expect(result.current.state).toBe("connected")
+    act(() => socket.emitMessage({ ...update, prompt_active: true, session_id: "foreign" }))
+    expect(result.current.state).toBe("connected")
+  })
+
+  it("does not infer work from an explicitly inactive native tool update", async () => {
+    const { result } = renderHook(() => useACPSession({ sessionId: "session-1" }))
+    await act(async () => { await Promise.resolve() })
+    const socket = MockWebSocket.instances[0]
+    act(() => { socket.open(); socket.emitMessage({ type: "connected", session_id: "session-1" }) })
+    act(() => socket.emitMessage({ type: "update", session_id: "session-1", update_type: "tool_call_update", prompt_active: false, data: { update: { status: "in_progress" } } }))
+    expect(result.current.state).toBe("connected")
+    act(() => socket.emitMessage({ type: "update", session_id: "session-1", update_type: "tool_call_update", data: { update: { status: "in_progress" } } }))
+    expect(result.current.state).toBe("running")
+  })
+
+  it("semantic ACP connection keeps a running prompt on equal config rehydration", async () => {
+    let stored = { serverUrl: "http://localhost:8000", authMode: "single-user", apiKey: "test-key" }
+    useStorageMock.mockImplementation((key: string, fallback: unknown) => [key === "tldwConfig" ? stored : fallback, vi.fn()])
+    getConfigMock.mockImplementation(async () => ({ ...stored }))
+    const { result, rerender } = renderHook(() => useACPSession({ sessionId: "session-1" }))
+    await act(async () => { await Promise.resolve() })
+    const socket = MockWebSocket.instances[0]
+    act(() => { socket.open(); socket.emitMessage({ type: "connected", session_id: "session-1" }) })
+    act(() => result.current.sendPrompt([{ role: "user", content: "Controlled pending prompt" }]))
+    stored = { ...stored }
+    await act(async () => { rerender(); await Promise.resolve() })
+    expect(MockWebSocket.instances).toHaveLength(1)
+    expect(socket.readyState).toBe(MockWebSocket.OPEN)
+    expect(result.current.state).toBe("running")
+    expect(socket.sent.map((entry) => JSON.parse(entry).type)).toEqual(["prompt"])
+  })
+
+  it.each([
+    ["serverUrl", "http://localhost:9000"], ["authMode", "multi-user"],
+    ["apiKey", "replacement-key"], ["accessToken", "replacement-access"],
+    ["refreshToken", "replacement-refresh"], ["orgId", 9], ["authSource", "cookie-session"]
+  ])("semantic ACP connection retires changed %s", async (field, value) => {
+    let stored: Record<string, unknown> = { serverUrl: "http://localhost:8000", authMode: "single-user", apiKey: "test-key" }
+    useStorageMock.mockImplementation((key: string, fallback: unknown) => [key === "tldwConfig" ? stored : fallback, vi.fn()])
+    getConfigMock.mockImplementation(async () => ({ ...stored }))
+    const { rerender } = renderHook(() => useACPSession({ sessionId: "session-1" }))
+    await act(async () => { await Promise.resolve() })
+    const socket = MockWebSocket.instances[0]
+    act(() => socket.open())
+    stored = { ...stored, [field]: value }
+    await act(async () => { rerender(); await Promise.resolve() })
+    expect(socket.readyState).toBe(MockWebSocket.CLOSED)
+    expect(MockWebSocket.instances).toHaveLength(2)
+  })
+
+  it("semantic ACP connection retires a changed session and closes on unmount", async () => {
+    const { rerender, unmount } = renderHook(({ sessionId }) => useACPSession({ sessionId }), { initialProps: { sessionId: "session-1" } })
+    await act(async () => { await Promise.resolve() })
+    const original = MockWebSocket.instances[0]
+    act(() => original.open())
+    await act(async () => { rerender({ sessionId: "session-2" }); await Promise.resolve() })
+    expect(original.readyState).toBe(MockWebSocket.CLOSED)
+    expect(MockWebSocket.instances).toHaveLength(2)
+    unmount()
+    expect(MockWebSocket.instances[1].readyState).toBe(MockWebSocket.CLOSED)
+  })
+
 })

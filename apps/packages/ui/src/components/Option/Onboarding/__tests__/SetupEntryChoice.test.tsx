@@ -216,3 +216,21 @@ describe("SetupEntryChoice", () => {
     ).toBeInTheDocument()
   })
 })
+
+describe("setup entry before a configured connection", () => {
+  it("opens connection settings without starting or refreshing backend setup", () => {
+    const onOpenConnectionSettings = vi.fn()
+    const { onStartWebUiSetup, onRefreshSetupState } = renderChoice({
+      state: null, metadata: null, configuredServerUrl: null,
+      currentOrigin: "chrome-extension://declared", connectionRequired: true,
+      onOpenConnectionSettings
+    })
+    expect(screen.getByRole("heading", { level: 1, name: "Connect your tldw server" })).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Open connection settings" }))
+    expect(onOpenConnectionSettings).toHaveBeenCalledOnce()
+    expect(onStartWebUiSetup).not.toHaveBeenCalled()
+    expect(onRefreshSetupState).not.toHaveBeenCalled()
+    expect(screen.queryByRole("button", { name: "I finished API server setup" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  })
+})

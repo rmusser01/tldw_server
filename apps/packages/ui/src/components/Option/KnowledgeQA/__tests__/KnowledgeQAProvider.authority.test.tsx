@@ -1,4 +1,5 @@
 import React from "react"
+import { MemoryRouter } from "react-router-dom"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { KnowledgeQAProvider, useKnowledgeQA } from "../KnowledgeQAProvider"
@@ -25,6 +26,7 @@ const harness = vi.hoisted(() => ({
   create: vi.fn(),
   add: vi.fn(),
   remove: vi.fn(),
+  removeMirror: vi.fn(),
   message: vi.fn(),
   share: vi.fn(),
   createShare: vi.fn(), exportChatbook: vi.fn(), download: vi.fn(), clipboard: vi.fn(),
@@ -67,6 +69,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: {
   downloadChatbookExport: (...args: unknown[]) => harness.download(...args),
 } }))
 
+vi.mock("@/db/dexie/server-chat-mirror", async original => ({ ...await original<typeof import("@/db/dexie/server-chat-mirror")>(), removeServerChatMirror: (...args: unknown[]) => harness.removeMirror(...args) }))
 let current: ReturnType<typeof useKnowledgeQA>
 function Recent({ sourceFeedback = false }: { sourceFeedback?: boolean }) {
   const context = useKnowledgeQA()
@@ -125,11 +128,262 @@ describe("Knowledge QA verified account boundary", () => {
     harness.create.mockResolvedValue({ id: "alice-thread", version: 1 })
     harness.add.mockResolvedValue({ id: "saved-message" })
     harness.remove.mockResolvedValue(undefined)
+    harness.removeMirror.mockReset().mockResolvedValue(["qa-mirror"])
     harness.search.mockResolvedValue({ results: [], generated_answer: null, metadata: {} })
     harness.stream.mockImplementation(async function* () {
       yield { schema_version: 1, type: "complete", code: "complete", upstream_dispatched: true, output_emitted: false, allow_non_stream_fallback: false, message: "Search completed." }
     })
   })
+
+  it.each(["ack", "device failure", "server failure"])(
+    "keeps QA user deletion and any owned Chat copy consistent: %s",
+    async (result) => {
+      localStorage.setItem(
+        getKnowledgeQaHistoryStorageKey(harness.snapshot.requestScope),
+        JSON.stringify([aliceHistory])
+      )
+      if (result === "device failure")
+        harness.removeMirror.mockRejectedValue(new Error("Device unavailable"))
+      if (result === "server failure")
+        harness.remove.mockRejectedValue(new Error("HTTP 500"))
+      render(view())
+      await waitFor(() => expect(current.historyHydrated).toBe(true))
+      await act(async () => {
+        await current.deleteHistoryItem("alice-history")
+      })
+      if (result === "server failure")
+        expect(harness.removeMirror).not.toHaveBeenCalled()
+      else {
+        expect(harness.removeMirror).toHaveBeenCalledWith(
+          expect.objectContaining({
+            chatId: "alice-thread",
+            ownerKey: expect.stringContaining("alice-server"),
+            scope: { type: "global" },
+            validate_lease: expect.any(Function)
+          })
+        )
+        expect(harness.message).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: result === "device failure" ? "warning" : "success"
+          })
+        )
+        expect(harness.remove).toHaveBeenCalledTimes(1)
+      }
+    }
+  )
+
+  it("preserves a newer same-account thread and exact draft while acknowledged old cleanup completes", async () => {
+    localStorage.setItem(
+      getKnowledgeQaHistoryStorageKey(harness.snapshot.requestScope),
+      JSON.stringify([aliceHistory])
+    )
+    render(view())
+    await waitFor(() => expect(current.historyHydrated).toBe(true))
+    await act(async () => {
+      await current.createNewThread("A")
+    })
+    expect(current.currentThreadId).toBe("alice-thread")
+    const held = deferred<string[]>()
+    harness.removeMirror.mockReturnValueOnce(held.promise)
+    let deletion!: Promise<void>
+    act(() => {
+      deletion = current.deleteHistoryItem("alice-history")
+    })
+    await waitFor(() => expect(harness.removeMirror).toHaveBeenCalled())
+    harness.create.mockResolvedValueOnce({ id: "new-thread-B", version: 1 })
+    await act(async () => {
+      await current.startNewTopic()
+    })
+    act(() => current.setQuery("B next unsent question  "))
+    await act(async () => {
+      held.resolve(["old-copy"])
+      await deletion
+    })
+    expect(current.currentThreadId).toBe("new-thread-B")
+    expect(current.query).toBe("B next unsent question  ")
+    expect(
+      current.searchHistory.some((item) => item.id === "alice-history")
+    ).toBe(false)
+  })
+
+  it("runs the same acknowledged history completion when QA Delete is retried", async () => {
+    localStorage.setItem(
+      getKnowledgeQaHistoryStorageKey(harness.snapshot.requestScope),
+      JSON.stringify([aliceHistory])
+    )
+    render(view())
+    await waitFor(() => expect(current.historyHydrated).toBe(true))
+    harness.remove.mockRejectedValueOnce(new Error("First delete failed"))
+    await act(async () => {
+      await current.deleteHistoryItem("alice-history")
+    })
+    expect(
+      current.searchHistory.some((item) => item.id === "alice-history")
+    ).toBe(true)
+    const toast = harness.message.mock.calls.find(
+      ([options]) =>
+        options.key === "knowledge-qa-delete-alice-history" &&
+        options.type === "error"
+    )?.[0]
+    expect(toast).toBeDefined()
+    render(toast.content as React.ReactElement)
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    await waitFor(() =>
+      expect(
+        current.searchHistory.some((item) => item.id === "alice-history")
+      ).toBe(false)
+    )
+    expect(harness.remove).toHaveBeenCalledTimes(2)
+    expect(harness.removeMirror).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ["server", "edit"],
+    ["server", "edit/Undo"],
+    ["device", "edit"],
+    ["device", "edit/Undo"],
+    ["Retry", "edit"],
+    ["Retry", "edit/Undo"]
+  ] as const)(
+    "preserves newer same-thread query intent during held %s deletion: %s",
+    async (stage, edit) => {
+      localStorage.setItem(
+        getKnowledgeQaHistoryStorageKey(harness.snapshot.requestScope),
+        JSON.stringify([aliceHistory])
+      )
+      render(view())
+      await waitFor(() => expect(current.historyHydrated).toBe(true))
+      await act(async () => {
+        await current.createNewThread("A")
+      })
+      const original = "Original question  "
+      act(() => current.setQuery(original))
+      const held = deferred<undefined | string[]>()
+      if (stage === "device")
+        harness.removeMirror.mockReturnValueOnce(held.promise)
+      else {
+        if (stage === "Retry")
+          harness.remove.mockRejectedValueOnce(new Error("First delete failed"))
+        harness.remove.mockReturnValueOnce(held.promise)
+      }
+      let deletion!: Promise<void>
+      act(() => {
+        deletion = current.deleteHistoryItem("alice-history")
+      })
+      if (stage === "Retry") {
+        await act(async () => {
+          await deletion
+        })
+        const toast = harness.message.mock.calls.find(
+          ([options]) => options.type === "error"
+        )?.[0]
+        expect(toast).toBeDefined()
+        render(toast.content as React.ReactElement)
+        fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+      }
+      await waitFor(() =>
+        expect(
+          stage === "device" ? harness.removeMirror : harness.remove
+        ).toHaveBeenCalledTimes(stage === "Retry" ? 2 : 1)
+      )
+      const next = edit === "edit/Undo" ? original : "Next unsent question  "
+      act(() => {
+        current.setQuery("Next unsent question  ")
+        if (edit === "edit/Undo") current.setQuery(original)
+      })
+      await act(async () => {
+        held.resolve(stage === "device" ? ["old-copy"] : undefined)
+        await deletion
+      })
+      await waitFor(() =>
+        expect(
+          current.searchHistory.some((item) => item.id === "alice-history")
+        ).toBe(false)
+      )
+      expect(current.currentThreadId).toBeNull()
+      expect(current.query).toBe(next)
+      expect(harness.remove).toHaveBeenCalledTimes(stage === "Retry" ? 2 : 1)
+      expect(harness.removeMirror).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it("does not let a retained old Delete callback adopt a newer same-account topic", async () => {
+    localStorage.setItem(
+      getKnowledgeQaHistoryStorageKey(harness.snapshot.requestScope),
+      JSON.stringify([aliceHistory])
+    )
+    render(view())
+    await waitFor(() => expect(current.historyHydrated).toBe(true))
+    await act(async () => {
+      await current.createNewThread("A")
+    })
+    const oldDelete = current.deleteHistoryItem
+    harness.create.mockResolvedValueOnce({ id: "new-thread-B", version: 1 })
+    await act(async () => {
+      await current.startNewTopic()
+    })
+    act(() => current.setQuery("B next unsent question  "))
+    await act(async () => {
+      await oldDelete("alice-history")
+    })
+    expect(current.currentThreadId).toBe("new-thread-B")
+    expect(current.query).toBe("B next unsent question  ")
+    expect(
+      current.searchHistory.some((item) => item.id === "alice-history")
+    ).toBe(false)
+    expect(harness.removeMirror).toHaveBeenCalledTimes(1)
+  })
+
+  it("clears the unchanged query of the acknowledged deleted active thread", async () => {
+    localStorage.setItem(
+      getKnowledgeQaHistoryStorageKey(harness.snapshot.requestScope),
+      JSON.stringify([aliceHistory])
+    )
+    render(view())
+    await waitFor(() => expect(current.historyHydrated).toBe(true))
+    await act(async () => {
+      await current.createNewThread("A")
+    })
+    act(() => current.setQuery("Original question  "))
+    await act(async () => {
+      await current.deleteHistoryItem("alice-history")
+    })
+    expect(current.currentThreadId).toBeNull()
+    expect(current.query).toBe("")
+    expect(
+      current.searchHistory.some((item) => item.id === "alice-history")
+    ).toBe(false)
+  })
+
+  it.each(["media_ids=3%2C7", "note_ids=12345678-1234-4234-8234-123456789abc"])(
+    "does not replay transferred %s after the verified owner changes",
+    async (scope) => {
+      const routedView = () => (
+        <MemoryRouter initialEntries={[`/knowledge?${scope}`]}>
+          {view()}
+        </MemoryRouter>
+      )
+      const rendered = render(routedView())
+      await waitFor(() =>
+        expect(
+          scope.startsWith("media")
+            ? current.settings.include_media_ids
+            : current.settings.include_note_ids
+        ).toEqual(
+          scope.startsWith("media")
+            ? [3, 7]
+            : ["12345678-1234-4234-8234-123456789abc"]
+        )
+      )
+      account("bob")
+      rendered.rerender(routedView())
+      await waitFor(() => expect(current.historyHydrated).toBe(true))
+      await waitFor(() => expect(current.error).toMatch(/source selection/i))
+      expect(current.settings.include_media_ids).toEqual([])
+      expect(current.settings.sources).toEqual([])
+      expect(current.answer).toBeNull()
+    }
+  )
 
   it("does not start private QA from the SearchBar before authority is verified and can recover", async () => {
     harness.loading = true

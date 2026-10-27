@@ -30,13 +30,11 @@ function isLikelyModelId(value: string): boolean {
 }
 
 function extractModelMetadataList(metadataPayload: unknown): unknown[] {
-  return (
-    Array.isArray(metadataPayload) && metadataPayload.length > 0
-      ? metadataPayload
-      : isRecord(metadataPayload) && Array.isArray(metadataPayload.models)
-        ? metadataPayload.models
-        : []
-  )
+  return Array.isArray(metadataPayload) && metadataPayload.length > 0
+    ? metadataPayload
+    : isRecord(metadataPayload) && Array.isArray(metadataPayload.models)
+      ? metadataPayload.models
+      : []
 }
 
 /**
@@ -51,8 +49,7 @@ export function normalizeTldwModels(
 
   return list.map((entry: unknown) => {
     const m = isRecord(entry) ? entry : {}
-    const rawModel =
-      toNonEmptyString(m.model) || toNonEmptyString(m.model_id)
+    const rawModel = toNonEmptyString(m.model) || toNonEmptyString(m.model_id)
     const rawName = toNonEmptyString(m.name)
     const rawId = toNonEmptyString(m.id)
     const canonicalModelId =
@@ -87,6 +84,8 @@ export function normalizeTldwModels(
       id: canonicalModelId,
       name: displayName,
       provider,
+      is_server_default:
+        inheritedAvailability?.default_model === canonicalModelId,
       description: toNonEmptyString(m.description) ?? undefined,
       capabilities: Array.isArray(m.capabilities)
         ? m.capabilities.map((v: unknown) => String(v))
@@ -116,32 +115,31 @@ export function normalizeTldwModels(
           m.json_output
       ),
       type: typeof m.type === "string" ? m.type : undefined,
-      modalities:
-        isRecord(m.modalities)
-          ? {
-              input: Array.isArray(m.modalities.input)
-                ? m.modalities.input.map((v: unknown) => String(v))
-                : undefined,
-              output: Array.isArray(m.modalities.output)
-                ? m.modalities.output.map((v: unknown) => String(v))
-                : undefined
-            }
-          : {
-              input: Array.isArray(m.input_modality)
-                ? m.input_modality.map((v: unknown) => String(v))
-                : Array.isArray(m.input_modalities)
-                  ? m.input_modalities.map((v: unknown) => String(v))
-                  : typeof m.input_modality === "string"
-                    ? [String(m.input_modality)]
-                    : undefined,
-              output: Array.isArray(m.output_modality)
-                ? m.output_modality.map((v: unknown) => String(v))
-                : Array.isArray(m.output_modalities)
-                  ? m.output_modalities.map((v: unknown) => String(v))
-                  : typeof m.output_modality === "string"
-                    ? [String(m.output_modality)]
-                    : undefined
-            },
+      modalities: isRecord(m.modalities)
+        ? {
+            input: Array.isArray(m.modalities.input)
+              ? m.modalities.input.map((v: unknown) => String(v))
+              : undefined,
+            output: Array.isArray(m.modalities.output)
+              ? m.modalities.output.map((v: unknown) => String(v))
+              : undefined
+          }
+        : {
+            input: Array.isArray(m.input_modality)
+              ? m.input_modality.map((v: unknown) => String(v))
+              : Array.isArray(m.input_modalities)
+                ? m.input_modalities.map((v: unknown) => String(v))
+                : typeof m.input_modality === "string"
+                  ? [String(m.input_modality)]
+                  : undefined,
+            output: Array.isArray(m.output_modality)
+              ? m.output_modality.map((v: unknown) => String(v))
+              : Array.isArray(m.output_modalities)
+                ? m.output_modalities.map((v: unknown) => String(v))
+                : typeof m.output_modality === "string"
+                  ? [String(m.output_modality)]
+                  : undefined
+          },
       is_configured:
         toOptionalProviderBoolean(m.is_configured) ??
         toOptionalProviderBoolean(m.provider_configured) ??
@@ -168,14 +166,15 @@ export function normalizeTldwModels(
         inheritedAvailability?.readiness_message,
       chat_provider:
         toNonEmptyProviderString(m.chat_provider) ??
-        inheritedAvailability?.chat_provider
+        inheritedAvailability?.chat_provider,
+      provider_health: inheritedAvailability?.health
     }
   })
 }
 
 /**
- * Fetches model metadata and lazily enriches it with provider availability only
- * when the metadata does not already include model-level availability fields.
+ * Fetches model metadata and enriches chat choices with provider defaults and
+ * availability from the same catalog discovery.
  */
 export async function getNormalizedTldwModels(
   client: TldwModelsMetadataClient,

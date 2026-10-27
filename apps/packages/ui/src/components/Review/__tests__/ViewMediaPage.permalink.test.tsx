@@ -1,3 +1,4 @@
+vi.mock('@/services/tldw/quick-ingest-authority', () => ({ useQuickIngestAuthority: () => 'verified-fixture', quickIngestAuthority: { capture: () => ({ authorityKey: 'verified-fixture', requestScope: { config: { serverUrl: 'http://localhost:8000', authMode: 'multi-user' }, userId: 'fixture' }, isCurrent: () => true }) } }))
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
@@ -283,6 +284,7 @@ vi.mock('@/components/Media/ContentViewer', () => ({
     ...readingProps
   }: any) => (
     <div data-testid="mock-content-viewer">
+      <output data-testid="navigation-target">{JSON.stringify(readingProps.navigationTarget)}</output>
       {mocks.readingProbe && <ReadingProgressProbe selectedMedia={selectedMedia} {...readingProps} />}
       <div data-testid="selected-media-id">
         {selectedMedia?.id != null ? String(selectedMedia.id) : 'none'}
@@ -442,6 +444,23 @@ describe('ViewMediaPage Stage 3 permalinks', () => {
     })
   })
 
+  it('shows failed permalink recovery before any record is selected', async () => {
+    const original = mocks.bgRequest.getMockImplementation()!
+    let failed = false
+    mocks.bgRequest.mockImplementation((request: { path?: string }) => {
+      if (request.path !== '/api/v1/media/999') return original(request)
+      if (!failed) { failed = true; return Promise.reject({ status: 404 }) }
+      return Promise.resolve({ media_id: 999, source: { title: 'Recovered Rowan' }, content: { text: 'Recovered Rowan source' } })
+    })
+    renderMediaPage('/media?id=999')
+    const notice = await screen.findByTestId('media-detail-fetch-error')
+    expect(notice).toHaveTextContent('no longer available')
+    expect(screen.getByTestId('location-search')).toHaveTextContent('?id=999')
+    fireEvent.click(screen.getByTestId('media-detail-fetch-retry'))
+    await waitFor(() => expect(screen.queryByTestId('media-detail-fetch-error')).not.toBeInTheDocument())
+    expect(screen.getByTestId('location-search')).toHaveTextContent('?id=999')
+  })
+
   it('retains the incoming source permalink throughout initial hydration', async () => {
     const observedSearches: string[] = []
     const HydratingMediaPage = () => {
@@ -498,6 +517,25 @@ describe('ViewMediaPage Stage 3 permalinks', () => {
     expect(scroller.scrollTop).toBe(0)
     await act(async () => { await vi.advanceTimersByTimeAsync(1100) })
     expect(mocks.updateReadingProgress).toHaveBeenLastCalledWith('1', expect.objectContaining({ percentage: 0, zoom_level: 100 }))
+  })
+
+  it('omits metadata-only sections and aligns article targets while retaining the stored source', async () => {
+    const prefix = '[METADATA]\n{"title":"Envelope"}\n[/METADATA]\n\n'
+    const body = 'Article body'
+    mocks.readingProbe = true
+    mocks.detailById['1'] = { media_id: 1, source: { title: 'Article' }, content: { text: prefix + body } }
+    mocks.navigationData = { nodes: [
+      { id: 'metadata', title: '[METADATA]', level: 1, target_type: 'char_range', target_start: 0, target_end: prefix.length - 2 },
+      { id: 'article', title: 'Article body', level: 1, target_type: 'char_range', target_start: prefix.length, target_end: prefix.length + body.length }
+    ] }
+    renderMediaPage('/media?id=1')
+    const article = await screen.findByRole('button', { name: 'Jump to Article body' })
+    expect(screen.queryByRole('button', { name: 'Jump to [METADATA]' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('reading-scroller')).toHaveTextContent('[METADATA]')
+    fireEvent.click(article)
+    expect(JSON.parse(screen.getByTestId('navigation-target').textContent!)).toEqual({
+      target_type: 'char_range', target_start: 0, target_end: body.length, target_href: undefined
+    })
   })
 
   it('clears a deleted deep link without hydrating its cached row again', async () => {

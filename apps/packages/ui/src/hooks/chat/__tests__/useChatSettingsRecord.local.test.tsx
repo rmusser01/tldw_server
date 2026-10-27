@@ -57,3 +57,11 @@ it("migrates the local hook's legacy settings and applies patches through exactl
     (await memory.chatHistories.get("history-1")).local_settings_guard.pending
   ).toEqual([])
 })
+
+it("does not resurrect a cleared local character memory entry on reload", async () => {
+  const hook = renderHook(() => useChatSettingsRecord({ historyId: "history-1", serverChatId: null }))
+  await act(async () => { await hook.result.current.updateSettings({ characterMemoryById: { "7": { note: "Temporary note", updatedAt: "2026-10-08T00:00:00Z" } } }) })
+  await act(async () => { await hook.result.current.updateSettings({ characterMemoryById: {} }) })
+  const { getChatSettingsForKey } = await import("@/services/chat-settings")
+  expect((await getChatSettingsForKey("local:history-1"))?.characterMemoryById).toEqual({})
+})

@@ -49,6 +49,11 @@ CIRCUIT_BREAKER_HALF_OPEN_REQUESTS = 3  # Number of test requests in half-open s
 HEALTH_CHECK_INTERVAL = 30  # Check health every 30 seconds
 DEGRADED_THRESHOLD = 0.5  # Mark degraded if error rate > 50%
 
+# Reported for a provider that has not handled a request yet. Internally such a
+# provider stays HEALTHY so it remains eligible for fallback, but the report
+# must not claim health that was never observed (CC-01, #3111).
+UNKNOWN_HEALTH_STATUS = "unknown"
+
 #######################################################################################################################
 #
 # Classes:
@@ -315,7 +320,8 @@ class ProviderManager:
         This method is thread-safe.
 
         Returns:
-            Dictionary with health information for each provider
+            Dictionary with health information for each provider. A provider
+            that has not handled a request yet reports status "unknown".
         """
         report = {}
         with self._metrics_lock:
@@ -327,8 +333,14 @@ class ProviderManager:
                     if response_times_copy else None
                 )
 
+                never_used = health.success_count + health.failure_count == 0
+                status = (
+                    UNKNOWN_HEALTH_STATUS
+                    if never_used and health.status is ProviderStatus.HEALTHY
+                    else health.status.value
+                )
                 report[provider] = {
-                    "status": health.status.value,
+                    "status": status,
                     "success_count": health.success_count,
                     "failure_count": health.failure_count,
                     "consecutive_failures": health.consecutive_failures,

@@ -15,7 +15,6 @@ describe("PR 916 review follow-ups", () => {
 
     expect(dockerfile).toContain("COPY apps/extension/package.json /app/apps/extension/package.json")
     expect(dockerfile).toContain("COPY apps/extension/scripts/wxt-prepare.mjs")
-    expect(dockerfile).toContain("COPY apps/packages/voice-assistant-sdk/package.json")
     expect(dockerfile).toContain("ENV SKIP_WXT_PREPARE=1")
     expect(dockerfile).not.toContain("pkg.workspaces=")
     expect(dockerfile).toContain("RUN bun install --frozen-lockfile --cwd /app/apps")
@@ -33,6 +32,24 @@ describe("PR 916 review follow-ups", () => {
     expect(compose).toContain(
       "- TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=${TLDW_WEBUI_EXPOSE_RUNTIME_AUTH:-0}"
     )
+  })
+
+  it("includes the committed API contract exports in the Docker builder workspace", () => {
+    const dockerfile = readRepoFile("Dockerfiles/Dockerfile.webui")
+    const pkg = JSON.parse(readRepoFile("apps/packages/api-types/package.json"))
+    const copies = [...dockerfile.matchAll(/^COPY (\S+) (\S+)$/gm)]
+    for (const declaration of [pkg.types, pkg.exports["./paths"]]) {
+      const source = path.posix.join("apps/packages/api-types", declaration)
+      const target = `/app/${source}`
+      expect(
+        copies.some(
+          ([, from, to]) =>
+            (from === source && to === target) ||
+            (source.startsWith(`${from}/`) &&
+              target === `${to}/${source.slice(from.length + 1)}`)
+        )
+      ).toBe(true)
+    }
   })
 
   it("waits for healthy backing services in the host-storage compose stack", () => {

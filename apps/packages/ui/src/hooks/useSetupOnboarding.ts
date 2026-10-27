@@ -1,6 +1,11 @@
 import * as React from "react"
 
+import type { SetupRequestOptions } from "@/services/tldw/domains/setup-onboarding"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
+import { resolveAdvancedRequestTransportGuard } from "@/services/tldw/browser-networking"
+import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import type {
   AudioDefaultsRequest,
   AudioRecommendationsResponse,
@@ -46,16 +51,22 @@ type LoadOutcome<T> = {
   error: Error | null
 }
 
-let initialSetupStatePromise: Promise<LoadOutcome<FirstRunState>> | null = null
-let initialSetupMetadataPromise: Promise<LoadOutcome<FirstRunMetadata>> | null =
-  null
-let initialSetupSnapshot: InitialSetupCache | null = null
+type InitialSetupOwner = {
+  key: string
+  controller: AbortController
+  requestOptions: SetupRequestOptions
+  snapshot: InitialSetupCache | null
+  statePromise: Promise<LoadOutcome<FirstRunState>> | null
+  metadataPromise: Promise<LoadOutcome<FirstRunMetadata>> | null
+}
+let initialSetupOwner: InitialSetupOwner | null = null
 
 const rememberInitialSetupSnapshot = (
+  owner: InitialSetupOwner,
   patch: Partial<InitialSetupLoadResult> &
     Partial<Pick<InitialSetupCache, "stateLoaded" | "metadataLoaded">>
 ) => {
-  const current = initialSetupSnapshot ?? {
+  const current = owner.snapshot ?? {
     nextState: null,
     nextMetadata: null,
     firstError: null,
@@ -71,7 +82,7 @@ const rememberInitialSetupSnapshot = (
     patch,
     "firstError"
   )
-  initialSetupSnapshot = {
+  owner.snapshot = {
     nextState: hasNextState ? (patch.nextState ?? null) : current.nextState,
     nextMetadata: hasNextMetadata
       ? (patch.nextMetadata ?? null)
@@ -82,20 +93,20 @@ const rememberInitialSetupSnapshot = (
   }
 }
 
-const loadInitialSetupState = (): Promise<LoadOutcome<FirstRunState>> => {
-  if (initialSetupSnapshot?.stateLoaded) {
+const loadInitialSetupState = (owner: InitialSetupOwner): Promise<LoadOutcome<FirstRunState>> => {
+  if (owner.snapshot?.stateLoaded) {
     return Promise.resolve({
-      value: initialSetupSnapshot.nextState,
-      error: initialSetupSnapshot.nextState
+      value: owner.snapshot.nextState,
+      error: owner.snapshot.nextState
         ? null
-        : initialSetupSnapshot.firstError
+        : owner.snapshot.firstError
     })
   }
-  if (!initialSetupStatePromise) {
-    initialSetupStatePromise = tldwClient
-      .getFirstRunState()
+  if (!owner.statePromise) {
+    owner.statePromise = tldwClient
+      .getFirstRunState(owner.requestOptions)
       .then((nextState) => {
-        rememberInitialSetupSnapshot({
+        rememberInitialSetupSnapshot(owner, {
           nextState,
           firstError: null,
           stateLoaded: true
@@ -104,33 +115,33 @@ const loadInitialSetupState = (): Promise<LoadOutcome<FirstRunState>> => {
       })
       .catch((err) => {
         const error = toError(err)
-        rememberInitialSetupSnapshot({
+        rememberInitialSetupSnapshot(owner, {
           firstError: error,
           stateLoaded: true
         })
         return { value: null, error }
       })
       .finally(() => {
-        initialSetupStatePromise = null
+        owner.statePromise = null
       })
   }
-  return initialSetupStatePromise
+  return owner.statePromise
 }
 
-const loadInitialSetupMetadata = (): Promise<LoadOutcome<FirstRunMetadata>> => {
-  if (initialSetupSnapshot?.metadataLoaded) {
+const loadInitialSetupMetadata = (owner: InitialSetupOwner): Promise<LoadOutcome<FirstRunMetadata>> => {
+  if (owner.snapshot?.metadataLoaded) {
     return Promise.resolve({
-      value: initialSetupSnapshot.nextMetadata,
-      error: initialSetupSnapshot.nextMetadata
+      value: owner.snapshot.nextMetadata,
+      error: owner.snapshot.nextMetadata
         ? null
-        : initialSetupSnapshot.firstError
+        : owner.snapshot.firstError
     })
   }
-  if (!initialSetupMetadataPromise) {
-    initialSetupMetadataPromise = tldwClient
-      .getFirstRunMetadata()
+  if (!owner.metadataPromise) {
+    owner.metadataPromise = tldwClient
+      .getFirstRunMetadata(owner.requestOptions)
       .then((nextMetadata) => {
-        rememberInitialSetupSnapshot({
+        rememberInitialSetupSnapshot(owner, {
           nextMetadata,
           firstError: null,
           metadataLoaded: true
@@ -139,17 +150,17 @@ const loadInitialSetupMetadata = (): Promise<LoadOutcome<FirstRunMetadata>> => {
       })
       .catch((err) => {
         const error = toError(err)
-        rememberInitialSetupSnapshot({
+        rememberInitialSetupSnapshot(owner, {
           firstError: error,
           metadataLoaded: true
         })
         return { value: null, error }
       })
       .finally(() => {
-        initialSetupMetadataPromise = null
+        owner.metadataPromise = null
       })
   }
-  return initialSetupMetadataPromise
+  return owner.metadataPromise
 }
 
 type UseSetupOnboardingOptions = {
@@ -164,125 +175,169 @@ export function useSetupOnboarding(options: UseSetupOnboardingOptions = {}) {
     initialMetadata = null,
     autoLoad = true
   } = options
-  const cachedInitialState = autoLoad
-    ? (initialSetupSnapshot?.nextState ?? null)
-    : null
-  const cachedInitialMetadata = autoLoad
-    ? (initialSetupSnapshot?.nextMetadata ?? null)
-    : null
-  const [state, setState] = React.useState<FirstRunState | null>(
-    initialState ?? cachedInitialState
-  )
-  const [metadata, setMetadata] = React.useState<FirstRunMetadata | null>(
-    initialMetadata ?? cachedInitialMetadata
-  )
-  const [providerCatalog, setProviderCatalog] = React.useState<
-    SetupProviderCatalogEntry[]
-  >([])
-  const [mcpToolsCatalog, setMcpToolsCatalog] =
-    React.useState<McpToolsCatalogResponse | null>(null)
-  const [audioRecommendations, setAudioRecommendations] = React.useState<
-    AudioRecommendationsResponse["recommendations"]
-  >([])
-  const [loading, setLoading] = React.useState(
-    autoLoad &&
-      (!(initialState ?? cachedInitialState) ||
-        !(initialMetadata ?? cachedInitialMetadata))
-  )
-  const [error, setError] = React.useState<Error | null>(
-    autoLoad ? (initialSetupSnapshot?.firstError ?? null) : null
-  )
-  const autoLoadInFlightRef = React.useRef(false)
+  const [state, setState] = React.useState<FirstRunState | null>(initialState)
+  const [metadata, setMetadata] = React.useState<FirstRunMetadata | null>(initialMetadata)
+  const [providerCatalog, setProviderCatalog] = React.useState<SetupProviderCatalogEntry[]>([])
+  const [mcpToolsCatalog, setMcpToolsCatalog] = React.useState<McpToolsCatalogResponse | null>(null)
+  const [audioRecommendations, setAudioRecommendations] = React.useState<AudioRecommendationsResponse["recommendations"]>([])
+  const [loading, setLoading] = React.useState(autoLoad)
+  const [error, setError] = React.useState<Error | null>(null)
+  const [connectionConfigured, setConnectionConfigured] = React.useState(false)
+  const [connectionChecking, setConnectionChecking] = React.useState(true)
+  const ownerRef = React.useRef<InitialSetupOwner | null>(null)
+  const revisionRef = React.useRef(0)
+  const connectionReadyRef = React.useRef<Promise<InitialSetupOwner | null> | null>(null)
+  const initialDataRef = React.useRef({ initialState, initialMetadata })
+  initialDataRef.current = { initialState, initialMetadata }
 
-  const refresh = React.useCallback(async () => {
+  const isCurrentOwner = React.useCallback((owner: InitialSetupOwner) =>
+    ownerRef.current === owner && initialSetupOwner === owner, [])
+  const clearSetup = React.useCallback(() => {
+    setState(null); setMetadata(null); setError(null)
+    setProviderCatalog([]); setMcpToolsCatalog(null); setAudioRecommendations([])
+  }, [])
+
+  const resolveConnection = React.useCallback(async (reload = false, retire = false) => {
+    const revision = ++revisionRef.current
+    if (retire) {
+      // A connection authority event retires even a return to the same connection.
+      initialSetupOwner?.controller.abort()
+      initialSetupOwner = null
+      ownerRef.current = null
+      clearSetup()
+    }
+    setConnectionChecking(true)
+    setLoading(autoLoad)
+    try {
+      if (reload) await tldwClient.initialize()
+      const config = await tldwClient.getConfig()
+      if (revisionRef.current !== revision) return null
+      const transport = resolveBrowserRequestTransport({ config, path: "/api/v1/setup/first-run/state" })
+      const { isUnconfigured } = resolveAdvancedRequestTransportGuard({
+        transport, hasConfiguredServerUrl: Boolean(config?.serverUrl), isAbsolute: false
+      })
+      setConnectionConfigured(!isUnconfigured)
+      if (isUnconfigured) {
+        initialSetupOwner?.controller.abort()
+        initialSetupOwner = null
+        ownerRef.current = null
+        clearSetup()
+        return null
+      }
+      const key = JSON.stringify([transport, deriveConnectionAuthorityId(config)])
+      if (initialSetupOwner?.key !== key) {
+        if (ownerRef.current) clearSetup()
+        initialSetupOwner?.controller.abort()
+        const controller = new AbortController()
+        initialSetupOwner = {
+          key, controller,
+          requestOptions: { configSnapshot: structuredClone(config), abortSignal: controller.signal },
+          snapshot: null, statePromise: null, metadataPromise: null
+        }
+      }
+      const owner = initialSetupOwner!
+      ownerRef.current = owner
+      return owner
+    } catch (err) {
+      if (revisionRef.current === revision) setError(toError(err))
+      return null
+    } finally {
+      if (revisionRef.current === revision) {
+        setConnectionChecking(false)
+        setLoading(false)
+      }
+    }
+  }, [autoLoad, clearSetup])
+
+  const loadSetup = React.useCallback(async (owner: InitialSetupOwner, fresh = false) => {
+    if (!isCurrentOwner(owner)) return null
+    if (fresh) owner.snapshot = null
     setLoading(true)
     setError(null)
     try {
-      let nextState: FirstRunState | null = null
-      let firstError: Error | null = null
-      try {
-        nextState = await tldwClient.getFirstRunState()
-        rememberInitialSetupSnapshot({
-          nextState,
-          firstError: null,
-          stateLoaded: true
-        })
-        setState(nextState)
-      } catch (err) {
-        firstError = toError(err)
-      }
-      try {
-        const nextMetadata = await tldwClient.getFirstRunMetadata()
-        rememberInitialSetupSnapshot({
-          nextMetadata,
-          firstError: null,
-          metadataLoaded: true
-        })
-        setMetadata(nextMetadata)
-      } catch (err) {
-        firstError = firstError ?? toError(err)
-      }
-      if (firstError) {
-        rememberInitialSetupSnapshot({ firstError })
-        setError(firstError)
-        if (!nextState) {
-          throw firstError
-        }
-      }
-      return nextState
+      const stateOutcome = await loadInitialSetupState(owner)
+      if (!isCurrentOwner(owner)) return null
+      if (stateOutcome.value) setState(stateOutcome.value)
+      const metadataOutcome = await loadInitialSetupMetadata(owner)
+      if (!isCurrentOwner(owner)) return null
+      if (metadataOutcome.value) setMetadata(metadataOutcome.value)
+      const firstError = stateOutcome.error ?? metadataOutcome.error
+      rememberInitialSetupSnapshot(owner, { firstError })
+      setError(firstError)
+      if (fresh && firstError && !stateOutcome.value) throw firstError
+      return stateOutcome.value
     } finally {
-      setLoading(false)
+      if (isCurrentOwner(owner)) setLoading(false)
     }
-  }, [])
+  }, [isCurrentOwner])
+
+  const refresh = React.useCallback(async () => {
+    const owner = await resolveConnection()
+    if (!owner) return null
+    return loadSetup(owner, true)
+  }, [loadSetup, resolveConnection])
 
   React.useEffect(() => {
-    if (!autoLoad || (state && metadata)) return
-    if (autoLoadInFlightRef.current) return
     let mounted = true
-    autoLoadInFlightRef.current = true
-    setLoading(true)
-    setError(null)
-    loadInitialSetupState()
-      .then((stateOutcome) => {
-        if (!mounted) return
-        if (stateOutcome.value) setState(stateOutcome.value)
-        if (stateOutcome.error) setError(stateOutcome.error)
-        return loadInitialSetupMetadata()
+    const connect = (reload = false, retire = false) => {
+      connectionReadyRef.current = resolveConnection(reload, retire).then(async owner => {
+        if (!mounted || !owner || !isCurrentOwner(owner)) return null
+        if (autoLoad || reload) await loadSetup(owner)
+        else {
+          setState(initialDataRef.current.initialState)
+          setMetadata(initialDataRef.current.initialMetadata)
+        }
+        return owner
       })
-      .then((metadataOutcome) => {
-        if (!mounted || !metadataOutcome) return
-        if (metadataOutcome.value) setMetadata(metadataOutcome.value)
-        if (metadataOutcome.error) setError(metadataOutcome.error)
-      })
-      .finally(() => {
-        autoLoadInFlightRef.current = false
-        if (mounted) setLoading(false)
-      })
+    }
+    connect()
+    const stop = watchChatAccountChanges(invalidated => { connect(true, invalidated) })
     return () => {
       mounted = false
-      autoLoadInFlightRef.current = false
+      revisionRef.current += 1
+      ownerRef.current = null
+      stop()
     }
-  }, [autoLoad])
+  }, [autoLoad, isCurrentOwner, loadSetup, resolveConnection])
+
+  const requireOwner = React.useCallback(async () => {
+    const ready = connectionReadyRef.current
+    const originalOwner = ownerRef.current
+    const resolvedOwner = await ready
+    const owner = originalOwner ?? resolvedOwner
+    if (!owner) throw new Error("Connect your tldw server before continuing setup.")
+    if (!isCurrentOwner(owner)) throw new Error("The setup connection changed. Review the current server before continuing.")
+    return owner
+  }, [isCurrentOwner])
+  const assertOwner = React.useCallback((owner: InitialSetupOwner) => {
+    if (!isCurrentOwner(owner)) throw new Error("The setup connection changed. Review the current server before continuing.")
+  }, [isCurrentOwner])
 
   const adoptState = React.useCallback((nextState: FirstRunState) => {
-    rememberInitialSetupSnapshot({
+    const owner = ownerRef.current
+    if (!owner || !isCurrentOwner(owner)) return
+    rememberInitialSetupSnapshot(owner, {
       nextState,
       firstError: null,
       stateLoaded: true
     })
     setState(nextState)
-  }, [])
+  }, [isCurrentOwner])
 
   const loadProviderCatalog = React.useCallback(async () => {
-    const response = await tldwClient.getSetupProviderCatalog()
+    const owner = await requireOwner()
+    const response = await tldwClient.getSetupProviderCatalog(owner.requestOptions)
+    assertOwner(owner)
     setProviderCatalog(response.providers)
     return response.providers
-  }, [])
+  }, [assertOwner, requireOwner])
 
   const saveStep = React.useCallback(
     async (payload: FirstRunStepUpdateRequest) => {
-      const nextState = await tldwClient.updateFirstRunState(payload)
-      rememberInitialSetupSnapshot({
+      const owner = await requireOwner()
+      const nextState = await tldwClient.updateFirstRunState(payload, owner.requestOptions)
+      assertOwner(owner)
+      rememberInitialSetupSnapshot(owner, {
         nextState,
         firstError: null,
         stateLoaded: true
@@ -290,119 +345,192 @@ export function useSetupOnboarding(options: UseSetupOnboardingOptions = {}) {
       setState(nextState)
       return nextState
     },
-    []
+    [assertOwner, requireOwner]
   )
 
   const skip = React.useCallback(async (payload: FirstRunSkipRequest = {}) => {
-    const nextState = await tldwClient.skipFirstRun(payload)
-    rememberInitialSetupSnapshot({
+    const owner = await requireOwner()
+    const nextState = await tldwClient.skipFirstRun(payload, owner.requestOptions)
+    assertOwner(owner)
+    rememberInitialSetupSnapshot(owner, {
       nextState,
       firstError: null,
       stateLoaded: true
     })
     setState(nextState)
     return nextState
-  }, [])
+  }, [assertOwner, requireOwner])
 
   const saveProvider = React.useCallback(
     async (
       payload: SetupProviderSaveRequest
     ): Promise<SetupProviderSaveResponse> => {
-      const response = await tldwClient.saveSetupProvider(payload)
-      await refresh().catch(() => undefined)
+      const owner = await requireOwner()
+      const response = await tldwClient.saveSetupProvider(payload, owner.requestOptions)
+      assertOwner(owner)
+      if (
+        response.status === "saved" &&
+        (response.make_default ?? payload.make_default ?? true) &&
+        (state?.status === "not_started" || state?.status === "in_progress")
+      ) {
+        const baseUrl = response.base_url ?? payload.base_url ?? null
+        if (baseUrl) {
+          let url: URL
+          try {
+            url = new URL(baseUrl)
+          } catch {
+            throw new Error(
+              "Provider settings were saved; use a plain HTTP(S) base URL to remember onboarding progress."
+            )
+          }
+          if (
+            !/^https?:$/.test(url.protocol) ||
+            url.username ||
+            url.password ||
+            url.search ||
+            url.hash
+          ) {
+            throw new Error(
+              "Provider settings were saved; use a plain HTTP(S) base URL without credentials, query parameters, or fragments to remember onboarding progress."
+            )
+          }
+        }
+        await saveStep({
+          step: "providers",
+          data: {
+            acknowledged: false,
+            default_provider: response.provider_key,
+            default_model: response.model ?? payload.model ?? "",
+            default_base_url: baseUrl,
+            default_provider_credential_configured:
+              response.credential_configured === true
+          }
+        })
+      } else {
+        await refresh().catch(() => undefined)
+      }
+      assertOwner(owner)
       return response
     },
-    [refresh]
+    [assertOwner, requireOwner, refresh, saveStep, state?.status]
   )
 
   const validateProvider = React.useCallback(
     async (
       payload: SetupProviderSaveRequest
     ): Promise<SetupProviderValidationResponse> => {
-      return await tldwClient.validateSetupProvider(payload)
+      const owner = await requireOwner()
+      const response = await tldwClient.validateSetupProvider(payload, owner.requestOptions)
+      assertOwner(owner)
+      return response
     },
-    []
+    [assertOwner, requireOwner]
   )
 
   const saveIngestDefaults = React.useCallback(
     async (payload: IngestDefaultsRequest) => {
-      const response = await tldwClient.saveIngestDefaults(payload)
+      const owner = await requireOwner()
+      const response = await tldwClient.saveIngestDefaults(payload, owner.requestOptions)
+      assertOwner(owner)
       await refresh().catch(() => undefined)
+      assertOwner(owner)
       return response
     },
-    [refresh]
+    [assertOwner, refresh, requireOwner]
   )
 
   const saveAudioDefaults = React.useCallback(
     async (payload: AudioDefaultsRequest) => {
-      const response = await tldwClient.saveAudioDefaults(payload)
+      const owner = await requireOwner()
+      const response = await tldwClient.saveAudioDefaults(payload, owner.requestOptions)
+      assertOwner(owner)
       await refresh().catch(() => undefined)
+      assertOwner(owner)
       return response
     },
-    [refresh]
+    [assertOwner, refresh, requireOwner]
   )
 
   const loadAudioRecommendations = React.useCallback(async () => {
-    const response = await tldwClient.getSetupAudioRecommendations()
+    const owner = await requireOwner()
+    const response = await tldwClient.getSetupAudioRecommendations(owner.requestOptions)
+    assertOwner(owner)
     setAudioRecommendations(response.recommendations)
     return response.recommendations
-  }, [])
+  }, [assertOwner, requireOwner])
 
   const loadMcpToolsCatalog = React.useCallback(async () => {
-    const response = await tldwClient.getMcpToolsCatalog()
+    const owner = await requireOwner()
+    const response = await tldwClient.getMcpToolsCatalog(owner.requestOptions)
+    assertOwner(owner)
     setMcpToolsCatalog(response)
     return response
-  }, [])
+  }, [assertOwner, requireOwner])
 
   const applyMcpTools = React.useCallback(
     async (payload: McpToolsApplyRequest): Promise<McpToolsApplyResponse> => {
-      const response = await tldwClient.applyMcpTools(payload)
+      const owner = await requireOwner()
+      const response = await tldwClient.applyMcpTools(payload, owner.requestOptions)
+      assertOwner(owner)
       await refresh().catch(() => undefined)
+      assertOwner(owner)
       return response
     },
-    [refresh]
+    [assertOwner, refresh, requireOwner]
   )
 
   const validateMcpTools = React.useCallback(
     async (
       payload: McpToolsValidateRequest = {}
     ): Promise<McpToolsValidateResponse> => {
-      const response = await tldwClient.validateMcpTools(payload)
+      const owner = await requireOwner()
+      const response = await tldwClient.validateMcpTools(payload, owner.requestOptions)
+      assertOwner(owner)
       await refresh().catch(() => undefined)
+      assertOwner(owner)
       return response
     },
-    [refresh]
+    [assertOwner, refresh, requireOwner]
   )
 
   const saveOptionalAdvanced = React.useCallback(
     async (payload: OptionalAdvancedRequest) => {
-      const response = await tldwClient.saveOptionalAdvanced(payload)
+      const owner = await requireOwner()
+      const response = await tldwClient.saveOptionalAdvanced(payload, owner.requestOptions)
+      assertOwner(owner)
       await refresh().catch(() => undefined)
+      assertOwner(owner)
       return response
     },
-    [refresh]
+    [assertOwner, refresh, requireOwner]
   )
 
   const verifyFirstChat = React.useCallback(
     async (
       payload: FirstChatVerifyRequest
     ): Promise<FirstChatVerifyResponse> => {
-      const response = await tldwClient.verifyFirstRunChat(payload)
+      const owner = await requireOwner()
+      const response = await tldwClient.verifyFirstRunChat(payload, owner.requestOptions)
+      assertOwner(owner)
       await refresh().catch(() => undefined)
+      assertOwner(owner)
       return response
     },
-    [refresh]
+    [assertOwner, refresh, requireOwner]
   )
 
   const complete = React.useCallback(
     async (
       payload: FirstRunCompleteRequest = {}
     ): Promise<SetupCompleteResponse> => {
-      const response = await tldwClient.completeFirstRun(payload)
+      const owner = await requireOwner()
+      const response = await tldwClient.completeFirstRun(payload, owner.requestOptions)
+      assertOwner(owner)
       await refresh().catch(() => undefined)
+      assertOwner(owner)
       return response
     },
-    [refresh]
+    [assertOwner, refresh, requireOwner]
   )
 
   return {
@@ -413,6 +541,8 @@ export function useSetupOnboarding(options: UseSetupOnboardingOptions = {}) {
     audioRecommendations,
     loading,
     error,
+    connectionConfigured,
+    connectionChecking,
     refresh,
     adoptState,
     loadProviderCatalog,

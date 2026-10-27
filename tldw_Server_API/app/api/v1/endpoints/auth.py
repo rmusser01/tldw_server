@@ -164,6 +164,7 @@ from tldw_Server_API.app.services.auth_service import (
     verify_user_email_once as _svc_verify_user_email_once,
 )
 from tldw_Server_API.app.services.registration_service import RegistrationService
+from tldw_Server_API.app.services.storage_quota_service import resolved_storage_quota_mb
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 _AUTH_NONCRITICAL_EXCEPTIONS = (
@@ -3976,6 +3977,8 @@ async def get_current_user_info(
             detail="Invalid credentials",
         )
 
+    from tldw_Server_API.app.services.storage_quota_service import get_storage_service
+    storage_status = await (await get_storage_service()).user_quota_status(user_id)
     return DeprecatedUserResponse(
         warning="deprecated_endpoint",
         successor=successor,
@@ -3988,8 +3991,8 @@ async def get_current_user_info(
         is_verified=bool(_current_user_value(current_user, "is_verified", True)),
         created_at=_current_user_value(current_user, "created_at", datetime.utcnow()),
         last_login=_current_user_value(current_user, "last_login"),
-        storage_quota_mb=_current_user_value(current_user, "storage_quota_mb", 1000),
-        storage_used_mb=_current_user_value(current_user, "storage_used_mb", 0.0),
+        storage_quota_mb=await resolved_storage_quota_mb(user_id),
+        storage_used_mb=storage_status["used_mb"],
     )
 
 

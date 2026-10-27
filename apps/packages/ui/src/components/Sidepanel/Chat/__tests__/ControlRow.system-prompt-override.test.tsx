@@ -93,9 +93,11 @@ vi.mock("antd", () => ({
   Upload: ({ children }: { children?: React.ReactNode }) => <>{children}</>
 }))
 
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => chatModelsState
-}))
+vi.mock("@tanstack/react-query", async (original) => {
+  const actual = await original<typeof import("@tanstack/react-query")>()
+  const queryClient = new actual.QueryClient()
+  return { ...actual, useQuery: () => chatModelsState, useQueryClient: () => queryClient }
+})
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -231,6 +233,9 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
 }))
 
 const defaultProps = () => ({
+  draftReady: true,
+  handoffSourceKey: "owned-source-chat",
+  captureHandoffGuard: () => () => true,
   selectedModel: "gpt-4o",
   currentProvider: "openai",
   promptAssistContextKey: "local:history-7",
@@ -264,6 +269,16 @@ describe("ControlRow system prompt override ownership", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Recover model selection" })
     )
+
+    expect(mocks.openModelSelect).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId("chat-model-select")).toHaveFocus()
+  })
+
+  it("XS-02: lets a blocked Pro-mode Send open this row's model picker", () => {
+    const modelPickerRef = React.createRef<{ openAndFocus: () => void }>()
+    render(<ControlRow {...defaultProps()} modelPickerRef={modelPickerRef} />)
+
+    modelPickerRef.current?.openAndFocus()
 
     expect(mocks.openModelSelect).toHaveBeenCalledTimes(1)
     expect(screen.getByTestId("chat-model-select")).toHaveFocus()
@@ -361,152 +376,32 @@ describe("ControlRow system prompt override ownership", () => {
     ).toBeUndefined()
   })
 
-  it("uses catalog provider metadata when the active provider is absent", () => {
-    chatModelsState.data = [buildChatModel()]
-    chatModelsState.isLoading = false
-    useStoreChatModelSettings
-      .getState()
-      .updateScopedSetting(
-        "azure:gpt-4o",
-        "systemPrompt",
-        "Stale Azure override"
-      )
-
-    const props = { ...defaultProps(), currentProvider: undefined }
-    const { rerender } = render(<ControlRow {...props} />)
-
-    expect(useStoreChatModelSettings.getState().activeSettingsScope).toBe(
-      "openai:gpt-4o"
-    )
-    expect(screen.getByTestId("owned-system-prompt")).toHaveTextContent(
-      "undefined"
-    )
-    expect(screen.getByTestId("prompt-assist-route")).toHaveTextContent(
-      "gpt-4o:openai"
-    )
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Edit system override" })
-    )
-
-    expect(
-      useStoreChatModelSettings.getState().getEffectiveSettings("openai:gpt-4o")
-        .systemPrompt
-    ).toBe("Conversation override for openai")
-    expect(
-      useStoreChatModelSettings.getState().getEffectiveSettings("azure:gpt-4o")
-        .systemPrompt
-    ).toBe("Stale Azure override")
-    expect(
-      useStoreChatModelSettings.getState().globalSettings.systemPrompt
-    ).toBeUndefined()
-
-    rerender(<ControlRow {...props} selectedSystemPrompt="prompt-2" />)
-
-    expect(
-      useStoreChatModelSettings.getState().getEffectiveSettings("openai:gpt-4o")
-        .systemPrompt
-    ).toBeUndefined()
-    expect(
-      useStoreChatModelSettings.getState().getEffectiveSettings("azure:gpt-4o")
-        .systemPrompt
-    ).toBe("Stale Azure override")
-    expect(
-      useStoreChatModelSettings.getState().globalSettings.systemPrompt
-    ).toBeUndefined()
+  it("keeps the raw prompt scope through catalog arrival and reordering without inventing a provider", () => {
+    const props = { ...defaultProps(), currentProvider: undefined, selectedModel: "tldw:gpt-4o" }
+    useStoreChatModelSettings.getState().setActiveSettingsScope(props.selectedModel)
+    useStoreChatModelSettings.getState().setSystemPrompt("Retained raw instructions")
+    const view = render(<ControlRow {...props} />)
+    for (const models of [[], [buildChatModel()], [buildChatModel({ provider: "anthropic" }), buildChatModel()], [buildChatModel(), buildChatModel({ provider: "anthropic" })]]) {
+      chatModelsState.data = models
+      view.rerender(<ControlRow {...props} />)
+      expect(useStoreChatModelSettings.getState().activeSettingsScope).toBe(props.selectedModel)
+      expect(screen.getByTestId("owned-system-prompt")).toHaveTextContent("Retained raw instructions")
+      expect(screen.getByTestId("prompt-assist-route")).toHaveTextContent("gpt-4o:none")
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Edit system override" }))
+    expect(useStoreChatModelSettings.getState().getEffectiveSettings(props.selectedModel).systemPrompt).toBe("Conversation override for null")
+    expect(useStoreChatModelSettings.getState().globalSettings.systemPrompt).toBeUndefined()
+    expect(useStoreChatModelSettings.getState().getEffectiveSettings("openai:gpt-4o").systemPrompt).toBeUndefined()
+    view.rerender(<ControlRow {...props} currentProvider="openai" />)
+    expect(useStoreChatModelSettings.getState().activeSettingsScope).toBe("openai:gpt-4o")
+    expect(useStoreChatModelSettings.getState().getEffectiveSettings(props.selectedModel).systemPrompt).toBe("Conversation override for null")
   })
 
-  it("fails closed until provider metadata resolves and switches scope immediately", () => {
-    const props = { ...defaultProps(), currentProvider: undefined }
-    const rendered = render(<ControlRow {...props} />)
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Edit system override" })
-    )
-    expect(
-      useStoreChatModelSettings.getState().scopedSettingsByModelKey
-    ).toEqual({})
-    expect(
-      useStoreChatModelSettings.getState().globalSettings.systemPrompt
-    ).toBeUndefined()
-
-    chatModelsState.data = [
-      buildChatModel({
-        provider: "unknown",
-        chat_provider: undefined,
-        details: {
-          provider: undefined,
-          capabilities: ["chat"],
-          type: "chat",
-          modalities: ["text"]
-        }
-      })
-    ]
-    chatModelsState.isLoading = false
-    rendered.rerender(
-      <ControlRow {...props} promptAssistContextKey="local:history-missing" />
-    )
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Edit system override" })
-    )
-    expect(
-      useStoreChatModelSettings.getState().scopedSettingsByModelKey
-    ).toEqual({})
-    expect(
-      useStoreChatModelSettings.getState().globalSettings.systemPrompt
-    ).toBeUndefined()
-
-    chatModelsState.data = [buildChatModel()]
-    rendered.rerender(
-      <ControlRow {...props} promptAssistContextKey="local:history-resolved" />
-    )
-
-    expect(useStoreChatModelSettings.getState().activeSettingsScope).toBe(
-      "openai:gpt-4o"
-    )
-    fireEvent.click(
-      screen.getByRole("button", { name: "Edit system override" })
-    )
-    expect(
-      useStoreChatModelSettings.getState().getEffectiveSettings("openai:gpt-4o")
-        .systemPrompt
-    ).toBe("Conversation override for openai")
-
-    chatModelsState.data = [
-      buildChatModel({
-        provider: "anthropic",
-        chat_provider: "anthropic",
-        details: {
-          provider: "anthropic",
-          capabilities: ["chat"],
-          type: "chat",
-          modalities: ["text"]
-        }
-      })
-    ]
-    rendered.rerender(
-      <ControlRow {...props} promptAssistContextKey="local:history-anthropic" />
-    )
-
-    expect(screen.getByTestId("owned-system-prompt")).toHaveTextContent(
-      "undefined"
-    )
-    expect(screen.getByTestId("prompt-assist-route")).toHaveTextContent(
-      "gpt-4o:anthropic"
-    )
-    fireEvent.click(
-      screen.getByRole("button", { name: "Edit system override" })
-    )
-    expect(
-      useStoreChatModelSettings
-        .getState()
-        .getEffectiveSettings("anthropic:gpt-4o").systemPrompt
-    ).toBe("Conversation override for anthropic")
-    expect(
-      useStoreChatModelSettings.getState().getEffectiveSettings("openai:gpt-4o")
-        .systemPrompt
-    ).toBe("Conversation override for openai")
+  it("does not write a global override when no model is selected", () => {
+    render(<ControlRow {...defaultProps()} currentProvider={undefined} selectedModel={null} />)
+    fireEvent.click(screen.getByRole("button", { name: "Edit system override" }))
+    expect(useStoreChatModelSettings.getState().scopedSettingsByModelKey).toEqual({})
+    expect(useStoreChatModelSettings.getState().globalSettings.systemPrompt).toBeUndefined()
   })
 
   it("uses a provider-qualified selection without guessing from its model name", () => {

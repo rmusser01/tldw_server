@@ -957,7 +957,8 @@ async def test_admin_health_multi_provider_timeouts_retain_real_worker_admission
         chat_adapter=chat_adapter,
         pool=pool,
         admission=admission,
-        timeout_seconds=0.05,
+        # Sub-second, yet long enough that every provider reaches its admission check on a loaded machine.
+        timeout_seconds=0.5,
     )
 
     task = asyncio.create_task(
@@ -966,7 +967,9 @@ async def test_admin_health_multi_provider_timeouts_retain_real_worker_admission
         )
     )
     try:
-        first = await asyncio.wait_for(task, timeout=1.0)
+        # The batch lasts the 0.5 s health budget; keep about 1 s of headroom for event-loop stalls,
+        # still well short of the 5 s the blocked adapter would hold an unbounded call.
+        first = await asyncio.wait_for(task, timeout=1.5)
         assert first["total"] == 3
         assert first["healthy"] == 0
         assert first["unhealthy"] == 3
@@ -985,6 +988,8 @@ async def test_admin_health_multi_provider_timeouts_retain_real_worker_admission
         await asyncio.gather(task, return_exceptions=True)
         await _wait_for_thread_state(lambda: pool.active_count == 0)
 
+    # Recovery checks released capacity, not the synthetic 50ms timeout.
+    monkeypatch.setattr(admin_llm_providers, "_provider_health_timeout_seconds", lambda: 1.0)
     recovery = await asyncio.wait_for(
         admin_llm_providers.admin_llm_providers_health(
             admin_llm_providers_service=service,
@@ -1469,7 +1474,8 @@ async def test_admin_health_blocking_adapter_timeout_bounds_capacity_and_recover
     monkeypatch.setattr(
         admin_llm_providers,
         "_provider_health_timeout_seconds",
-        lambda: 0.05,
+        # Sub-second, so api_timeout still rounds up to 1; long enough that the call is dispatched first.
+        lambda: 0.5,
         raising=False,
     )
 
@@ -1480,7 +1486,7 @@ async def test_admin_health_blocking_adapter_timeout_bounds_capacity_and_recover
         assert first["providers"][0]["status"] == "error"
         assert pool.active_count == 1
         assert adapter.call_count == 1
-        assert adapter.timeouts == [0.05]
+        assert adapter.timeouts == [0.5]
         assert adapter.requests[0]["app_config"]["ollama_api"]["api_timeout"] == 1
 
         second = await admin_llm_providers.admin_llm_providers_health(

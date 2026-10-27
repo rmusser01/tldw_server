@@ -140,6 +140,33 @@
   "deleteFailed": {
     "message": "Delete failed"
   },
+  "deleteMessage_failed": {
+    "message": "We could not confirm deletion. Reload this conversation to check the saved message before trying again."
+  },
+  "deleteMessage_descendants": {
+    "message": "This message has replies. Delete those replies first, including any other branches, then try again."
+  },
+  "deleteMessage_changed": {
+    "message": "The saved message has changed. Reload this conversation and review the latest message before deleting it."
+  },
+  "deleteMessage_busy": {
+    "message": "A reply is still in progress. Wait for it to finish before deleting a saved message."
+  },
+  "deleteMessage_scope": {
+    "message": "The server or signed-in account changed. Return to the intended server and account, then reload this conversation."
+  },
+  "deleteMessage_unsupported": {
+    "message": "This conversation does not support deleting saved messages from this view yet."
+  },
+  "deleteMessage_sync": {
+    "message": "Your sync setup does not support deleting saved messages from this view yet."
+  },
+  "deleteMessage_unavailable": {
+    "message": "This saved message is unavailable. Reload the conversation to review its current messages."
+  },
+  "deleteMessage_refreshFailed": {
+    "message": "The message was deleted, but this view or its saved copy could not be refreshed. Reload the conversation before continuing."
+  },
   "continue": {
     "message": "Continue Response"
   },
@@ -148,6 +175,54 @@
   },
   "editMessage_placeholder": {
     "message": "Type a message..."
+  },
+  "editMessage_label": {
+    "message": "Edit message"
+  },
+  "editMessage_failed": {
+    "message": "We could not confirm whether your edit was saved. Your edited text is kept. Copy it, then cancel and reload this conversation to check the saved message before saving again."
+  },
+  "editMessage_changed": {
+    "message": "The saved message has changed. Your edited text is kept. Copy it, then cancel and reload this conversation to review the latest version."
+  },
+  "editMessage_busy": {
+    "message": "A reply is still in progress. Your edited text is kept. Wait for it to finish, then save your edit."
+  },
+  "editMessage_scope": {
+    "message": "The server or signed-in account changed. Your edited text is kept. Copy it, then return to the intended server and account and reload this conversation."
+  },
+  "editMessage_unsupported": {
+    "message": "This conversation does not support this edit action yet. Your edited text is kept. Copy it before cancelling."
+  },
+  "editMessage_payload": {
+    "message": "Only non-empty plain-text messages can be saved here. Your edited text is kept. Copy it before cancelling."
+  },
+  "editMessage_sync": {
+    "message": "Your sync setup does not support editing saved messages yet. Your edited text is kept. Copy it before cancelling."
+  },
+  "editMessage_retired": {
+    "message": "The conversation or edited text changed during this save. Your edited text is kept. Review the current message before saving again."
+  },
+  "editMessage_setup": {
+    "message": "Your edited text is kept. Review the conversation setup, then try Save & Send again."
+  },
+  "editMessage_unavailable": {
+    "message": "The saved message is unavailable in this conversation. Your edited text is kept. Copy it, then cancel and reload this conversation to review its current messages."
+  },
+  "editMessage_access": {
+    "message": "This account or connection cannot access the saved message. Your edited text is kept. Copy it, then check your server connection and sign-in and reload this conversation."
+  },
+  "editMessage_copy": {
+    "message": "Copy edit"
+  },
+  "editMessage_copied": {
+    "message": "Edit copied"
+  },
+  "editMessage_copying": {
+    "message": "Copying edit..."
+  },
+  "editMessage_copyFailed": {
+    "message": "Copy failed. Select your edited text and use your browser's Copy command."
   },
   "submit": {
     "message": "Submit"
@@ -849,13 +924,13 @@
     "message": "Show or hide the chat sidebar"
   },
   "commandPalette_placeholder": {
-    "message": "Type a command or search..."
+    "message": "Search commands, settings, and prompts…"
   },
   "commandPalette_noResults": {
     "message": "No results found"
   },
   "commandPalette_title": {
-    "message": "Command Palette"
+    "message": "Search commands"
   },
   "commandPalette_navigate": {
     "message": "navigate"
@@ -963,7 +1038,7 @@
     "message": "Folders"
   },
   "chatSidebar_tabs_local": {
-    "message": "Local"
+    "message": "On this device"
   },
   "chatSidebar_tabs_server": {
     "message": "Server"
@@ -1732,5 +1807,395 @@
   },
   "help_reload": {
     "message": "Reload page"
+  },
+  "chatSidebar_local_search": {
+    "message": "Search on-device chats…"
+  },
+  "chatSidebar_local_help": {
+    "message": "Chats stored on this device. Account-bound chats appear for the current account."
+  },
+  "chatSidebar_local_temporaryHelp": {
+    "message": "Your Temporary chat stays open. Select a chat to preview its stored messages."
+  },
+  "chatSidebar_local_readError": {
+    "message": "Could not load chats on this device."
+  },
+  "chatSidebar_local_noMatches": {
+    "message": "No matching chats on this device."
+  },
+  "chatSidebar_local_empty": {
+    "message": "No available chats on this device."
+  },
+  "chatSidebar_local_previewAction": {
+    "message": "Preview chat: {{title}}"
+  },
+  "chatSidebar_local_moreError": {
+    "message": "Could not load more chats. Previously loaded chats are still available."
+  },
+  "chatSidebar_local_previewError": {
+    "message": "Message previews are unavailable. You can still open a chat."
+  },
+  "chatSidebar_local_openError": {
+    "message": "Could not open this chat. Select it again to retry."
+  },
+  "chatSidebar_local_previewTitle": {
+    "message": "{{title}} — read-only preview"
+  },
+  "chatSidebar_local_closePreview": {
+    "message": "Close preview"
+  },
+  "chatSidebar_local_previewHelp": {
+    "message": "Your Temporary chat stays open. These are stored messages in time order; alternatives and comparison results may be included."
+  },
+  "chatSidebar_local_previewReadError": {
+    "message": "Could not read this chat."
+  },
+  "chatSidebar_local_unavailable": {
+    "message": "This chat is no longer available in this view."
+  },
+  "chatSidebar_local_storedMessages": {
+    "message": "Stored messages"
+  },
+  "chatSidebar_local_noMessages": {
+    "message": "No stored messages in this chat."
+  },
+  "chatSidebar_local_alternative": {
+    "message": "Alternative reply {{index}} of {{count}}"
+  },
+  "chatSidebar_local_comparison": {
+    "message": "Comparison result"
+  },
+  "chatSidebar_local_comparisonPrompt": {
+    "message": "Comparison prompt"
+  },
+  "chatSidebar_local_image": {
+    "message": "Image {{index}} from {{speaker}}"
+  },
+  "chatSidebar_local_roles_user": {
+    "message": "You"
+  },
+  "chatSidebar_local_roles_assistant": {
+    "message": "Assistant"
+  },
+  "chatSidebar_local_roles_system": {
+    "message": "System"
+  },
+  "chatSidebar_local_roles_tool": {
+    "message": "Tool"
+  },
+  "chatSidebar_findConversations": {
+    "message": "Find conversations"
+  },
+  "chatSidebar_searchScope": {
+    "message": "Search {{source}} history."
+  },
+  "chatSidebar_searchFromFolders": {
+    "message": "Typing searches Server and On this device history."
+  },
+  "commandPalette_loading": {
+    "message": "Loading commands…"
+  },
+  "commandPalette_loadFailed": {
+    "message": "Commands could not be loaded. Reconnect, save any edits, then reload the page."
+  },
+  "commandPalette_searchCommands": {
+    "message": "Search commands"
+  },
+  "commandPalette_open": {
+    "message": "Search commands"
+  },
+  "commandPalette_searchHistory": {
+    "message": "Find conversations"
+  },
+  "commandPalette_searchHistoryDesc": {
+    "message": "Focus conversation history search"
+  },
+  "chatSidebar_discovery_allScope": {
+    "message": "Search Server and On this device history."
+  },
+  "chatSidebar_discovery_serverGroup": {
+    "message": "Server results"
+  },
+  "chatSidebar_discovery_deviceGroup": {
+    "message": "On this device results"
+  },
+  "chatSidebar_discovery_verifyError": {
+    "message": "Could not verify the account for Server history."
+  },
+  "chatSidebar_discovery_verifying": {
+    "message": "Verifying the account for Server history…"
+  },
+  "chatSidebar_discovery_offline": {
+    "message": "Server history is offline. Owned cached copies remain available in On this device."
+  },
+  "chatSidebar_discovery_refreshError": {
+    "message": "Could not refresh Server history. Try again; cached copies remain in On this device."
+  },
+  "chatSidebar_discovery_noServerMatches": {
+    "message": "No matching chats on this Server page."
+  },
+  "chatSidebar_discovery_foreignScope": {
+    "message": "Some Server results were excluded because they belong to a different chat scope."
+  },
+  "chatSidebar_discovery_page": {
+    "message": "Page {{page}}"
+  },
+  "chatSidebar_local_cachedPreviewAction": {
+    "message": "Preview cached server chat: {{title}} · {{id}}"
+  },
+  "chatSidebar_local_cachedOrigin": {
+    "message": "Cached server copy · Read-only"
+  },
+  "chatSidebar_local_cachedWorkspace": {
+    "message": "Workspace {{id}}"
+  },
+  "chatSidebar_local_cachedUnknownScope": {
+    "message": "Chat scope unknown"
+  },
+  "chatSidebar_local_chatReference": {
+    "message": "Chat {{id}}"
+  },
+  "chatSidebar_local_cachedPreviewHelp": {
+    "message": "These are messages stored on this device. The copy may be incomplete or contain local edits. Your open chat stays unchanged; reconnect and open Server history to continue."
+  },
+  "chatSidebar_tabs_all": {
+    "message": "All"
+  },
+  "chatSidebar_local_cachedVerifyError": {
+    "message": "Could not verify the account for cached Server copies. Profile-owned chats are still available."
+  },
+  "chatSidebar_local_cachedVerifying": {
+    "message": "Verifying the account for cached Server copies. Profile-owned chats are still available."
+  },
+  "chatSidebar_local_retryAccount": {
+    "message": "Retry account verification"
+  },
+  "chatSidebar_folderConversationFallback": {
+    "message": "Conversation {{id}}"
+  },
+  "chatSidebar_folderAccountError": {
+    "message": "Unable to verify this account."
+  },
+  "chatSidebar_foldersUnavailable": {
+    "message": "Folders are unavailable on this server."
+  },
+  "chatSidebar_folderLoadError": {
+    "message": "Unable to load folders for this account."
+  },
+  "chatSidebar_folderReadOnly": {
+    "message": "Temporary chat can preview history. Switch to History to organize it."
+  },
+  "chatSidebar_folderTitlesLoading": {
+    "message": "Loading conversation details…"
+  },
+  "chatSidebar_folderTitlesPartial": {
+    "message": "Some conversation details are unavailable. Folder links remain visible."
+  },
+  "chatSidebar_foldersEmpty": {
+    "message": "No folders yet. Create a folder to organize your chats."
+  },
+  "chatSidebar_folderCreated": {
+    "message": "Folder created successfully"
+  },
+  "temporaryChatDiscardConfirmation": {
+    "message": "Discard this Temporary conversation?\n\nCancel keeps it on this device so you can copy messages before continuing. OK discards its messages."
+  },
+  "chatSidebar_deletedDeviceCopyRetained": {
+    "message": "Removed from server history. A cached copy remains on this device because it could not be removed."
+  },
+  "regenerateMessage": {
+    "settings": "Conversation settings could not be verified. No new reply was requested. Reload this saved chat or try again; your original exchange and draft are kept.",
+    "context": "The server refused regeneration because this saved chat uses unsupported context. Review the saved setup or start a compatible chat; your original exchange and draft are kept.",
+    "changed": "The saved message or conversation changed. Your original exchange and draft are kept. Reload the intended chat before regenerating again.",
+    "scope": "The server or signed-in account changed. Your original exchange and draft are kept. Return to the intended server and account and reload this chat.",
+    "unsupported": "This reply or its active setup does not support regeneration yet. Your original exchange and draft are kept. Review conversation and response settings or start a compatible saved chat.",
+    "failed": "We could not confirm the new reply. Your original exchange and draft are kept. Reload this chat and review recovery before regenerating again."
+  },
+  "chatSidebar_navigation": {
+    "message": "Navigation"
+  },
+  "shortcuts_goToChat": {
+    "message": "Go to Chat"
+  },
+  "shortcuts_goToWorldBooks": {
+    "message": "Go to World Books"
+  },
+  "shortcuts_goToDictionaries": {
+    "message": "Go to Dictionaries"
+  },
+  "shortcuts_goToCharacters": {
+    "message": "Go to Characters"
+  },
+  "shortcuts_toggleChatModeRag": {
+    "message": "Switch normal / RAG chat mode"
+  },
+  "shortcuts_searchThread": {
+    "message": "Search this conversation"
+  },
+  "shortcuts_toggleArtifacts": {
+    "message": "Toggle artifacts panel (when available)"
+  },
+  "shortcuts_toggleCompare": {
+    "message": "Toggle compare mode (when enabled)"
+  },
+  "shortcuts_toggleModes": {
+    "message": "Open mode launcher"
+  },
+  "shortcuts_variantSwitch": {
+    "message": "Previous / next response variant (focus a reply)"
+  },
+  "shortcuts_branchMessage": {
+    "message": "Fork from the focused message"
+  },
+  "shortcuts_regenerateLast": {
+    "message": "Regenerate the last reply (focus a reply)"
+  },
+  "shortcuts_groups_messageCards": {
+    "message": "Message cards"
+  },
+  "chatSidebar_tabs_serverTotal": {
+    "message": "Server ({{count}} total)"
+  },
+  "chatSidebar_tabs_foldersChats": {
+    "message": "Folders ({count, plural, one {# chat} other {# chats}})"
+  },
+  "modelSelect": {
+    "saveFailed": "This model is selected for this tab. Your preference could not be saved.",
+    "retrySave": "Retry saving model"
+  },
+  "table_label": {
+    "message": "Table"
+  },
+  "table_labelWithColumns": {
+    "message": "Table: {{columns}}"
+  },
+  "help_tutorialList": {
+    "message": "Tutorial list"
+  },
+  "help_shortcutList": {
+    "message": "Shortcut list"
+  },
+  "commandPalette_toggleChatWithPage": {
+    "message": "Toggle chat with current page"
+  },
+  "commandPalette_toggleChatWithPageDesc": {
+    "message": "Answer using the page open in this browser tab"
+  },
+  "chatSidebar_state_inProgress": {
+    "message": "In progress"
+  },
+  "chatSidebar_state_resolved": {
+    "message": "Resolved"
+  },
+  "chatSidebar_state_backlog": {
+    "message": "Backlog"
+  },
+  "chatSidebar_state_nonViable": {
+    "message": "Not viable"
+  },
+  "chatSidebar_groups_today": {
+    "message": "Today"
+  },
+  "chatSidebar_groups_thisWeek": {
+    "message": "This week"
+  },
+  "chatSidebar_groups_older": {
+    "message": "Older"
+  },
+  "chatSidebar_movedToTrash": {
+    "message": "Moved to Trash"
+  },
+  "chatSidebar_undoTrash": {
+    "message": "Undo"
+  },
+  "chatSidebar_viewTrash": {
+    "message": "View Trash"
+  },
+  "chatSidebar_permanentlyDeleted": {
+    "message": "Chat permanently deleted."
+  },
+  "chatSidebar_noSearchMatches": {
+    "message": "No chats match “{{query}}”"
+  },
+  "chatSidebar_clearSearch": {
+    "message": "Clear search"
+  },
+  "shortcuts_toggleChatWithPage": {
+    "message": "Toggle chat with current page"
+  },
+  "continueMessage_settings": {
+    "message": "Conversation settings could not be verified, so the reply was not continued. Reload this saved chat or try again; your original exchange and draft are kept."
+  },
+  "continueMessage_context": {
+    "message": "The server could not continue this reply because this saved chat uses unsupported context. Review the saved setup or start a compatible chat; your original exchange and draft are kept."
+  },
+  "continueMessage_changed": {
+    "message": "The saved message or conversation changed. Your original exchange and draft are kept. Reload the chat before continuing the reply."
+  },
+  "continueMessage_scope": {
+    "message": "The server or signed-in account changed. Your original exchange and draft are kept. Return to the intended server and account and reload this chat."
+  },
+  "continueMessage_unsupported": {
+    "message": "This reply can't be continued here. Your original exchange and draft are kept. To keep going, use New Branch on this reply or send a follow-up message."
+  },
+  "continueMessage_failed": {
+    "message": "We could not confirm the continued reply. Your original exchange and draft are kept. Reload this chat and check for the saved reply before trying again."
+  },
+  "modelSelect_saveFailed": {
+    "message": "This model is selected for this tab. Your preference could not be saved."
+  },
+  "modelSelect_retrySave": {
+    "message": "Retry saving model"
+  },
+  "modelSelect_change": {
+    "message": "Change model"
+  },
+  "modelSelect_choose": {
+    "message": "Choose model"
+  },
+  "modelSelect_group_default": {
+    "message": "Default"
+  },
+  "modelSelect_group_local": {
+    "message": "Local"
+  },
+  "modelSelect_readiness_notChecked": {
+    "message": "Not checked"
+  },
+  "modelSelect_readiness_working": {
+    "message": "Working"
+  },
+  "modelSelect_readiness_unreachable": {
+    "message": "Unreachable"
+  },
+  "copyCode": {
+    "message": "Copy code"
+  },
+  "codeCopied": {
+    "message": "Copied"
+  },
+  "table_scrollForMore": {
+    "message": "Scroll for more columns →"
+  },
+  "artifactsActions": {
+    "message": "Artifact actions"
+  },
+  "regenerateMessage_settings": {
+    "message": "Conversation settings could not be verified. No new reply was requested. Reload this saved chat or try again; your original exchange and draft are kept."
+  },
+  "regenerateMessage_context": {
+    "message": "The server refused regeneration because this saved chat uses unsupported context. Review the saved setup or start a compatible chat; your original exchange and draft are kept."
+  },
+  "regenerateMessage_changed": {
+    "message": "The saved message or conversation changed. Your original exchange and draft are kept. Reload the intended chat before regenerating again."
+  },
+  "regenerateMessage_scope": {
+    "message": "The server or signed-in account changed. Your original exchange and draft are kept. Return to the intended server and account and reload this chat."
+  },
+  "regenerateMessage_unsupported": {
+    "message": "This reply or its active setup does not support regeneration yet. Your original exchange and draft are kept. Review conversation and response settings or start a compatible saved chat."
+  },
+  "regenerateMessage_failed": {
+    "message": "We could not confirm the new reply. Your original exchange and draft are kept. Reload this chat and review recovery before regenerating again."
   }
 }

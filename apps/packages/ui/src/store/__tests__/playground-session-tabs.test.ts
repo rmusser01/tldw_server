@@ -42,6 +42,83 @@ describe("tab-owned playground session persistence", () => {
     expect(second.store.getState()).toMatchObject(character)
   })
 
+  it("retains Temporary transcript through current-tab reload and excludes it from a new tab after Clear", async () => {
+    const first = await openTab()
+    const chatDraftHandle = {
+      ownerHash: "a".repeat(64),
+      address: {
+        kind: "fresh" as const,
+        id: "temp",
+        scope: { type: "global" as const },
+        temporary: true
+      }
+    }
+    const temporaryTranscript = {
+      history: [{ role: "assistant" as const, content: "TEMP LOCAL REPLY" }],
+      messages: [
+        {
+          isBot: true,
+          name: "Assistant",
+          message: "TEMP LOCAL REPLY",
+          sources: []
+        }
+      ]
+    }
+    first.store
+      .getState()
+      .saveSession({ scopeKey: "scope:a", chatDraftHandle, temporaryTranscript })
+    const reload = await openTab(first.storage)
+    expect(reload.store.getState()).toMatchObject({
+      chatDraftHandle,
+      temporaryTranscript
+    })
+    expect(localStorage.getItem("tldw-playground-session")).not.toContain(
+      "TEMP LOCAL REPLY"
+    )
+    const newTab = await openTab()
+    expect(newTab.store.getState().temporaryTranscript).toBeNull()
+    reload.store.getState().clearSession()
+    const cleared = await openTab(first.storage)
+    expect(cleared.store.getState().temporaryTranscript).toBeNull()
+  })
+
+  it("keeps Temporary rows out of durable fallback when tab storage rejects a replacement", async () => {
+    const tab = await openTab()
+    const chatDraftHandle = {
+      ownerHash: "a".repeat(64),
+      address: {
+        kind: "fresh" as const,
+        id: "temp-quota",
+        scope: { type: "global" as const },
+        temporary: true
+      }
+    }
+    const temporaryTranscript = {
+      history: [{ role: "assistant" as const, content: "PRIVATE TEMP QUOTA" }],
+      messages: [
+        {
+          isBot: true,
+          name: "Assistant",
+          message: "PRIVATE TEMP QUOTA",
+          sources: []
+        }
+      ]
+    }
+    tab.store.getState().saveSession({ chatDraftHandle, temporaryTranscript })
+    vi.spyOn(tab.storage, "setItem").mockImplementation(() => {
+      throw new Error("Quota exceeded")
+    })
+    expect(() =>
+      tab.store.getState().saveSession({ temporaryTranscript })
+    ).not.toThrow()
+    expect(tab.storage.getItem("tldw-playground-session")).toBeNull()
+    expect(localStorage.getItem("tldw-playground-session")).not.toContain(
+      "PRIVATE TEMP QUOTA"
+    )
+    const reload = await openTab(tab.storage)
+    expect(reload.store.getState().temporaryTranscript).toBeNull()
+  })
+
   it("retains the durable last-session fallback for a new tab", async () => {
     const first = await openTab()
     first.store.getState().saveSession(character)

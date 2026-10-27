@@ -415,6 +415,7 @@ export const checkWatchlistSourcesNow = async (
   return bgRequest<SourcesCheckNowResponse>({
     path: "/api/v1/watchlists/sources/check-now" as any,
     method: "POST",
+    timeoutMs: 600000,
     body: { source_ids: sourceIds }
   })
 }
@@ -783,7 +784,8 @@ export const getWatchlistRunDiagnostics = async (
 export const triggerWatchlistRun = async (jobId: number): Promise<WatchlistRun> => {
   return bgRequest<WatchlistRun>({
     path: `/api/v1/watchlists/jobs/${jobId}/run` as any,
-    method: "POST"
+    method: "POST",
+    timeoutMs: 600000
   })
 }
 

@@ -1,3 +1,7 @@
+import {
+  buildChatSurfaceScopeKeyFromConfig,
+  deriveSingleUserApiKeyCredentialScope,
+} from "@/services/chat-surface-scope"
 import { describe, expect, it } from "vitest"
 
 import {
@@ -6,12 +10,43 @@ import {
   servicePromptSingleUserApiKeyScopeMatches,
   servicePromptTargetsMatch
 } from "../service-prompt-scope-error"
-import {
-  buildChatSurfaceScopeKeyFromConfig,
-  deriveSingleUserApiKeyCredentialScope,
-} from "@/services/chat-surface-scope"
-
+describe("B09 scoped analysis versions", () => {
+  it.each([
+    ["/api/v1/media/42/versions", "POST", true],
+    ["/api/v1/media/42/versions/2", "POST", false],
+    ["/api/v1/media/42/versions", "PUT", false],
+    ["/api/v1/media/a%2fb/versions", "POST", false],
+    ["/api/v1/media/../versions", "POST", false]
+  ])("bounds %s %s", (path, method, allowed) => expect(isServicePromptRequestPath(path, method)).toBe(allowed))
+})
 describe("Service Prompt scope policy", () => {
+  it.each([
+    ["/api/v1/config/docs-info", "GET", true],
+    ["/api/v1/config/docs-info", "POST", false],
+    ["/api/v1/config/docs-info/extra", "GET", false],
+    ["/api/v1/chats/owned/roleplay/messages", "POST", true],
+    ["/api/v1/chats/owned/roleplay/messages", "GET", false],
+    ["/api/v1/chats/owned/roleplay/messages/extra", "POST", false],
+    ["/api/v1/chats/a%2fb/roleplay/messages", "POST", false],
+    ["/api/v1/chats/%2e%2e/roleplay/messages", "POST", false],
+    ["/api/v1/chats//roleplay/messages", "POST", false]
+  ])("bounds original-scope Roleplay %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+
+  it.each([
+    ["/api/v1/files/create", "POST", true],
+    ["/api/v1/files/create", "GET", false],
+    ["/api/v1/files/create", "PUT", false],
+    ["/api/v1/files/create/extra", "POST", false],
+    ["/api/v1/files/create/", "POST", false],
+    ["/api/v1/files/../create", "POST", false],
+    ["/api/v1/files%2fcreate", "POST", false],
+    ["https://other.test/api/v1/files/create", "POST", false]
+  ])("bounds captured image creation %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+
   it.each([
     ["/api/v1/media/389", "PUT", true],
     ["/api/v1/media/389/metadata", "PATCH", true],
@@ -66,10 +101,13 @@ describe("Service Prompt scope policy", () => {
   })
   it.each([
     ["/api/v1/notes/", "POST", true],
+    ["/api/v1/notes/search/?tokens=workspace%3Aowned", "GET", true],
+    ["/api/v1/notes/search/", "POST", false],
+    ["/api/v1/notes/search/extra", "GET", false],
     ["/api/v1/notes/private-note", "GET", true],
     ["/api/v1/notes/private-note", "PUT", true],
-    ["/api/v1/notes/", "GET", false],
-    ["/api/v1/notes/private-note", "DELETE", false],
+    ["/api/v1/notes/", "GET", true],
+    ["/api/v1/notes/private-note", "DELETE", true],
     ["/api/v1/notes/private-note", "PATCH", false],
     ["/api/v1/notes/private-note/attachments", "POST", false],
     ["/api/v1/notes/%2e%2e", "PUT", false],
@@ -117,6 +155,23 @@ describe("Service Prompt scope policy", () => {
     }
 
     expect(servicePromptTargetsMatch(current, captured)).toBe(true)
+  })
+
+  it.each([undefined, null, ""])("keeps implicit manual authentication stable for %s", (authSource) => {
+    const implicit = { serverUrl: "https://api.example.test", authMode: "single-user", authSource }
+    const explicit = { ...implicit, authSource: "manual" }
+    expect(servicePromptTargetsMatch(implicit, explicit)).toBe(true)
+    expect(servicePromptTargetsMatch(explicit, implicit)).toBe(true)
+  })
+
+  it.each([
+    { authSource: "cookie-session" },
+    { serverUrl: "https://other.example.test" },
+    { authMode: "multi-user" },
+    { orgId: "other-org" }
+  ])("keeps changed target authority rejected for %j", (change) => {
+    const original = { serverUrl: "https://api.example.test", authMode: "single-user", orgId: "owned-org" }
+    expect(servicePromptTargetsMatch(original, { ...original, ...change })).toBe(false)
   })
 
   it("requires the captured single-user API-key scope to match", () => {
@@ -263,3 +318,203 @@ it.each([
 ])("scoped chat path %s %s has exact access %s", (path, method, expected) => {
   expect(isServicePromptRequestPath(path, method)).toBe(expected)
 })
+
+
+it.each([
+  ["/api/v1/chats/owned/restore","POST",true],
+  ["/api/v1/chats/owned/restore?scope_type=global&expected_version=4","POST",true],
+  ["/api/v1/chats/owned/restore","GET",false],
+  ["/api/v1/chats/owned/restore","PUT",false],
+  ["/api/v1/chats/owned/restore/extra","POST",false],
+  ["/api/v1/chats/a%2fb/restore","POST",false],
+  ["/api/v1/chats/%2e%2e/restore","POST",false],
+])("bounds captured Restore transport %s %s",(path,method,expected)=>{
+  expect(isServicePromptRequestPath(path,method)).toBe(expected)
+})
+
+it.each([
+  ['/api/v1/media/7', 'DELETE', true],
+  ['/api/v1/media/7/keywords', 'PATCH', true],
+  ['/api/v1/media/bulk/keyword-update', 'POST', true],
+  ['/api/v1/media/7/keywords', 'DELETE', false],
+  ['/api/v1/media/7/keywords/extra', 'PATCH', false],
+  ['/api/v1/media/7/keywords/', 'PATCH', false],
+  ['/api/v1/media/7%2fother', 'DELETE', false],
+  ['/api/v1/media/%2e%2e', 'DELETE', false],
+  ['/api/v1/media/7/permanent', 'DELETE', false],
+  ['/api/v1/media/7/extra', 'DELETE', false],
+  ['/api/v1/media/bulk/keyword-update/extra', 'POST', false],
+  ['/api/v1/media/bulk/keyword-update', 'DELETE', false],
+] as const)('bounds owned Review action %s %s', (path, method, allowed) => {
+  expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+})
+
+it.each([
+  ['/api/v1/users/storage', 'GET', true],
+  ['/api/v1/users/storage', 'POST', false],
+  ['/api/v1/users/storage/other', 'GET', false],
+  ['/api/v1/notes/7', 'DELETE', true],
+  ['/api/v1/notes/a9b7-uuid', 'DELETE', true],
+  ['/api/v1/notes/a9b7-uuid/restore?expected_version=8', 'POST', true],
+  ['/api/v1/media/7/restore', 'POST', true],
+  ['/api/v1/notes/tasks', 'DELETE', false],
+  ['/api/v1/notes/collections', 'DELETE', false],
+  ['/api/v1/notes/trash', 'DELETE', false],
+  ['/api/v1/notes/tasks/restore', 'POST', false],
+  ['/api/v1/notes/collections/restore', 'POST', false],
+  ['/api/v1/notes/7/permanent', 'DELETE', false],
+  ['/api/v1/notes/7/restore', 'DELETE', false],
+  ['/api/v1/media/word/restore', 'POST', false],
+  ['/api/v1/media/7/permanent', 'DELETE', false],
+] as const)('bounds Inspector recovery %s %s', (path, method, allowed) => {
+  expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+})
+it.each([
+  ["/api/v1/media/ingest/jobs?batch_id=known", "GET", true],
+  ["/api/v1/media/ingest/jobs", "DELETE", false],
+  ["/api/v1/media/ingest/jobs/", "GET", false],
+  ["/api/v1/media/ingest/jobs/extra", "GET", false],
+  ["/api/v1/media/ingest/jobs%2fextra", "GET", false]
+] as const)("bounds recent import reads %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+
+describe("exact registered Media listing route variants", () => {
+  it.each(["/api/v1/media?page=2", "/api/v1/media/?page=2"])(
+    "accepts GET %s",
+    (path) => {
+      expect(isServicePromptRequestPath(path, "GET")).toBe(true)
+    }
+  )
+  it.each([
+    "/api/v1/media//",
+    "/api/v1/media/%2e%2e",
+    "/api/v1/media/unrelated",
+    "/api/v1/media/%2F"
+  ])("rejects GET %s", (path) => {
+    expect(isServicePromptRequestPath(path, "GET")).toBe(false)
+  })
+  it.each(["POST", "DELETE", "PATCH", "PUT"])(
+    "rejects %s listing",
+    (method) => {
+      expect(isServicePromptRequestPath("/api/v1/media/", method)).toBe(false)
+    }
+  )
+})
+
+describe("canonical raw URL controls", () => {
+  it.each(["\t", "\r", "\n"])(
+    "rejects raw %j before matching scoped identity routes",
+    (control) => {
+      for (const path of [
+        `/api/v1/workspaces/${control}../sources`,
+        `/api/v1/web-clipper/${control}..`,
+        `/api/v1/workspaces/ws/sources/${control}../preview`,
+        `/api/v1/notes/${control}..`
+      ])
+        expect(isServicePromptRequestPath(path, "GET")).toBe(false)
+    }
+  )
+})
+
+
+it.each([
+  ["/api/v1/messages/owned", "GET", true],
+  ["/api/v1/messages/owned?scope_type=workspace&workspace_id=original", "PUT", true],
+  ["/api/v1/messages/owned", "DELETE", false],
+  ["/api/v1/messages/owned", "POST", false],
+  ["/api/v1/messages/owned/extra", "PUT", false],
+  ["/api/v1/messages/owned%2Fforeign", "GET", false],
+  ["/api/v1/messages/../foreign", "PUT", false]
+])("native Save admits only the exact scoped message read/write: %s %s", (path, method, allowed) => {
+  expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+})
+
+// Deployed request contracts are read-only authority for the original native owner.
+it.each([
+  ["/openapi.json", "GET", true],
+  ["/openapi.json", "POST", false],
+  ["/openapi.json", "PUT", false],
+  ["/openapi.json/", "GET", false],
+  ["/openapi.json/other", "GET", false],
+  ["https://foreign.test/openapi.json", "GET", false],
+  ["//foreign.test/openapi.json", "GET", false],
+  ["/api/../openapi.json", "GET", false],
+  ["/openapi%2ejson", "GET", false]
+])("bounds captured schema discovery %s %s", (path, method, allowed) => {
+  expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+})
+
+describe("Notes checkbox original ownership", () => {
+  it.each([
+    ["/api/v1/notes/", "GET", true],
+    ["/api/v1/notes/?page=1&limit=20", "GET", true],
+    ["/api/v1/notes/tasks/status", "POST", true],
+    ["/api/v1/notes/tasks/status?source=checkbox", "POST", true],
+    ["/api/v1/notes/tasks/status", "GET", false],
+    ["/api/v1/notes/tasks/status", "PATCH", false],
+    ["/api/v1/notes/tasks/status/", "POST", false],
+    ["/api/v1/notes/tasks/status/other", "POST", false],
+    ["/api/v1/notes/tasks/status%2fother", "POST", false],
+    ["/api/v1/notes/tasks", "POST", false]
+  ])("bounds scoped checkbox %s %s to %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+})
+
+describe("Notes activity original ownership", () => {
+  it.each([
+    ["/api/v1/notes/tasks/activity/event-1", "PATCH", true],
+    ["/api/v1/notes/tasks/activity/event-1?source=notice", "PATCH", true],
+    ["/api/v1/notes/tasks/activity/event-1", "GET", false],
+    ["/api/v1/notes/tasks/activity/event-1", "POST", false],
+    ["/api/v1/notes/tasks/activity/event-1", "PUT", false],
+    ["/api/v1/notes/tasks/activity/event-1", "DELETE", false],
+    ["/api/v1/notes/tasks/activity", "PATCH", false],
+    ["/api/v1/notes/tasks/activity/", "PATCH", false],
+    ["/api/v1/notes/tasks/activity/event-1/", "PATCH", false],
+    ["/api/v1/notes/tasks/activity/event-1/other", "PATCH", false],
+    ["/api/v1/notes/tasks/activity/event%2fother", "PATCH", false],
+    ["/api/v1/notes/tasks/activity/event%5cother", "PATCH", false],
+    ["/api/v1/notes/tasks/activity/%2e%2e", "PATCH", false],
+    ["/api/v1/notes/tasks/activity-events/event-1", "PATCH", false],
+    ["/api/v1/notes/tasks/event-1", "PATCH", false]
+  ] as const)("bounds owned activity %s %s to %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+})
+
+
+describe("owned Persona transport: bounded setup scope", () => {
+  it.each([
+    ["/api/v1/persona/profiles/owned", "PATCH", true],
+    ["/api/v1/persona/profiles/owned?expected_version=2", "PATCH", true],
+    ["/api/v1/persona/profiles/owned/voice-commands", "GET", true],
+    ["/api/v1/persona/profiles/owned/voice-commands?include_disabled=true", "GET", true],
+    ["/api/v1/persona/profiles/owned/connections", "GET", true],
+    ["/api/v1/persona/profiles/owned", "GET", true],
+    ["/api/v1/persona/profiles/owned", "PUT", false],
+    ["/api/v1/persona/profiles/owned/voice-commands", "POST", false],
+    ["/api/v1/persona/profiles/owned/connections", "PATCH", false],
+    ["/api/v1/persona/profiles/owned/connections/extra", "GET", false],
+    ["/api/v1/persona/profiles/owned/voice-commands/extra", "GET", false],
+    ["/api/v1/persona/profiles/owned/policy-rules", "GET", false],
+    ["/api/v1/persona/profiles/a%2fb/connections", "GET", false],
+    ["/api/v1/persona/profiles/%2e%2e", "PATCH", false],
+    ["/api/v1/persona/profiles//connections", "GET", false]
+  ])("owned Persona transport: %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+})
+
+// B05 captures a transcript upload's account, without broadening other audio operations.
+it.each([
+  ["/api/v1/audio/transcriptions", "POST", true],
+  ["/api/v1/audio/transcriptions", "GET", false],
+  ["/api/v1/audio/transcriptions/extra", "POST", false],
+  ["/api/v1/audio/translations", "POST", false],
+  ["/api/v1/audio/speech", "POST", false],
+  ["/api/v1/audio/../transcriptions", "POST", false],
+])("B05 scoped transcription path %s %s", (path, method, allowed) => {
+  expect(isServicePromptRequestPath(path, method)).toBe(allowed);
+});

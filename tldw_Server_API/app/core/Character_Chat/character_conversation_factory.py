@@ -32,6 +32,9 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets im
     get_builtin_presets,
     resolve_character_prompt_preset,
 )
+from tldw_Server_API.app.core.Character_Chat.roleplay_prompt_effects import (
+    _resolve_author_note_position,
+)
 from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
 from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
 from tldw_Server_API.app.core.Chat.chat_service import is_model_known_for_provider
@@ -107,6 +110,8 @@ PROMPT_COMPLETION_SETTING_CLASSIFICATION = dict.fromkeys(
         "autoSummaryWindowMessages",
         "characterMemoryById",
         "chatGenerationOverride",
+        "chat_dictionary_id",
+        "chat_dictionary_ids",
         "chatPresetOverrideId",
         "conversationContext",
         "deepResearchAttachment",
@@ -331,20 +336,7 @@ def _bounded_behavior_int(
 
 
 def _author_note_position(settings: Mapping[str, Any]) -> Any:
-    for key in (
-        "authorNotePosition",
-        "authorNotePlacement",
-        "authorNoteInjectionPosition",
-    ):
-        if key not in settings:
-            continue
-        value = settings.get(key)
-        if isinstance(value, Mapping):
-            return _safe_json(value)
-        if isinstance(value, (str, int)) and not isinstance(value, bool):
-            return value
-    # This must match the live prompt-construction default.
-    return "before_system"
+    return _safe_json(_resolve_author_note_position(settings))
 
 
 def _deduplicated_text_ids(value: Any) -> list[str]:
@@ -2097,6 +2089,15 @@ def _materialize_roleplay_behavior_settings_once(
         "effective_completion": effective,
         "participants": participants,
     }
+    if {"chat_dictionary_id", "chat_dictionary_ids", "conversationContext"}.intersection(changed_keys):
+        from tldw_Server_API.app.core.Character_Chat.chat_dictionary import ChatDictionaryService
+        from tldw_Server_API.app.core.Character_Chat.frozen_dictionary_context import assigned_dictionary_ids
+
+        dictionary_ids = assigned_dictionary_ids(merged_settings)
+        if dictionary_ids:
+            values["dictionaries"] = ChatDictionaryService.snapshot_assigned_dictionaries(conn, dictionary_ids)
+        else:
+            values.pop("dictionaries", None)
     pending_greeting = _validated_pending_greeting(
         merged_settings.get(PENDING_GREETING_SETTINGS_KEY),
         conversation=conversation,
@@ -2332,6 +2333,73 @@ def materialize_roleplay_behavior_settings(
     raise InputError("Behavior sources changed during settings materialization.")
 
 
+def bind_legacy_assigned_dictionaries(
+    db: Any, conn: Any, *, conversation_id: str, owner_user_id: str,
+    owner_key: str, view: dict[str, Any], scope_type: str, workspace_id: str | None,
+) -> None:
+    """Normalize valid owner-assigned legacy IDs before the H1 capture statement.
+
+    Existing malformed authority is never replaced. All other saved effects are
+    projected first; only then may the ordinary materializer read the catalog.
+    The caller supplies the capture transaction, and the settings CAS protects
+    a concurrent assignment. This writes no messages and dispatches no provider.
+    """
+    from copy import deepcopy
+
+    from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import validate_chat_settings_storage
+    from tldw_Server_API.app.core.Character_Chat.frozen_dictionary_context import (
+        assigned_dictionary_ids,
+        without_dictionary_assignment,
+    )
+    from tldw_Server_API.app.core.Chat.history_context import project_history_context
+    from tldw_Server_API.app.core.Chat.history_selection import (
+        HistorySelectionError,
+        resolve_history_selection,
+        snapshot_to_wire,
+    )
+
+    state = db.get_roleplay_resume_state(conversation_id, conn=conn, lock_for_update=True, owner_client_id=owner_user_id)
+    conversation = state["conversation"]
+    if (conversation.get("scope_type") or "global", conversation.get("workspace_id")) != (scope_type, workspace_id):
+        raise HistorySelectionError("scope_mismatch")
+    settings = state.get("settings") or {}
+    try:
+        dictionary_ids = assigned_dictionary_ids(settings)
+        if not dictionary_ids:
+            return
+        materialized = state.get("materialized_settings")
+        if materialized is None:
+            raise InputError("Assigned dictionaries require valid existing materialized behavior.")
+        if "dictionaries" in materialized["values"]:
+            project_history_context(state)
+            return
+        preflight = deepcopy(state)
+        preflight["settings"] = without_dictionary_assignment(settings)
+        controls = preflight["materialized_settings"]["values"]["behavior_controls"]
+        controls["applied_overrides"] = without_dictionary_assignment(controls["applied_overrides"])
+        controls["prompt_context"] = without_dictionary_assignment(controls["prompt_context"])
+        project_history_context(preflight)
+        prior = db.get_conversation_history_snapshot(conversation_id, owner_client_id=owner_user_id,
+            owner_key=owner_key, projection_id=view["interpretation"].get("projection_id"), conn=conn)
+        resolved = resolve_history_selection(snapshot_to_wire(prior), view, "send", "")
+        if resolved["status"] != "ready":
+            raise HistorySelectionError(resolved["code"])
+        materialized = materialize_roleplay_behavior_settings(
+            conn, conversation=state["conversation"], resume_state=state, merged_settings=settings,
+            owner_user_id=owner_user_id, changed_keys={"chat_dictionary_id", "chat_dictionary_ids"},
+        )
+        if materialized is None:
+            raise InputError("Assigned dictionaries could not be materialized.")
+        updated = {**settings, "roleplayBehaviorV1": materialized}
+        updated = validate_chat_settings_storage(updated, reject_credentials=True, allow_internal=True,
+                                                  behavior_snapshot=state["behavior_snapshot"], conversation=state["conversation"])
+        if not db.upsert_conversation_settings(conversation_id, updated, conn=conn,
+                                               expected_settings_version=state["settings_version"] or 0):
+            raise HistorySelectionError("stale_settings")
+    except InputError as exc:
+        raise HistorySelectionError("unsupported_history_context_dictionaries") from exc
+
+
 def create_character_conversation(
     db: CharactersRAGDB,
     *,
@@ -2351,11 +2419,15 @@ def create_character_conversation(
     fallback_greeting: Mapping[str, Any] | None = None,
     conversation_settings: Mapping[str, Any] | None = None,
     max_snapshot_bytes: int = DEFAULT_MAX_SNAPSHOT_BYTES,
+    create_request_fingerprint: str | None = None,
 ) -> str:
     """Create conversation, settings, messages, snapshot and trusted origin atomically.
 
     Provenance is a separate internal keyword; ordinary callers remain unknown.
     World-book schema preflight must stay outside the creation transaction.
+    ``create_request_fingerprint`` marks a client-id create (D7 P3) and is
+    written by the conversation INSERT; a taken id raises ``ConflictError``
+    and rolls the whole creation back.
     """
     owner_user_id = str(getattr(db, "client_id", "") or "").strip()
     if not owner_user_id:
@@ -2495,6 +2567,7 @@ def create_character_conversation(
 
                 conversation_id = db.add_conversation(
                     conversation_payload, conn=conn, assistant_startup=assistant_startup,
+                    create_request_fingerprint=create_request_fingerprint,
                 )
                 if not conversation_id:
                     raise InputError("Failed to create character conversation.")
@@ -2512,17 +2585,25 @@ def create_character_conversation(
                     messages_to_persist.insert(
                         0,
                         {
-                            "sender": str(
-                                accepted_participants[0]["identity"].get("name")
-                                or "Assistant"
-                            ),
+                            "sender": "assistant",
+                            "parent_message_id": None,
                             "content": str(accepted_greeting["content"]),
                         },
                     )
                 for initial_message in messages_to_persist:
                     message = dict(initial_message)
                     message["conversation_id"] = conversation_id
-                    db.add_message(message, conn=conn)
+                    message_id = db.add_message(message, conn=conn)
+                    if not message_id:
+                        raise InputError("Failed to retain initial message.")
+                    if message.get("tool_calls") is not None or message.get("extra_metadata") is not None:
+                        if not db.add_message_metadata(
+                            message_id,
+                            tool_calls=message.get("tool_calls"),
+                            extra=message.get("extra_metadata"),
+                            conn=conn,
+                        ):
+                            raise InputError("Failed to retain initial message metadata.")
                 db.conversation_resume_store.put_behavior_snapshot(
                     conversation_id,
                     current.snapshot,

@@ -59,6 +59,52 @@ class BuddyConflictError(ValueError):
     """An optimistic Buddy resource version no longer matches stored state."""
 
 
+class VNAssetGenerationError(ValueError):
+    """A stable VN generation code with internal operation context."""
+
+    def __init__(self, code: str, *, retryable: bool = False, **context: Any) -> None:
+        """Keep the public ValueError string stable and context immutable."""
+        self.code = code
+        self.retryable = retryable
+        self.context = MappingProxyType(dict(context))
+        super().__init__(code)
+
+
+class JobsRetryAdmissionIndexError(RuntimeError):
+    """Safe Jobs retry-index coordination, definition or verification failure.
+
+    RuntimeError compatibility is retained. Native database failures are not
+    wrapped in this type; the helper preserves their original propagation.
+    """
+
+
+class VNLegacyActivityCursorError(RuntimeError):
+    """A stalled read-only Jobs cursor during VN legacy display reconciliation.
+
+    Retains RuntimeError compatibility and the constant safe cursor error code.
+    Native Jobs/database read failures are not wrapped in this domain type.
+    """
+
+
+class LegacyDisplayReconciliationError(RuntimeError):
+    """Safe VN display rollback error, not a generation or SDK retry outcome.
+
+    Construct with the original reconciliation Exception. The public message
+    is always ``VN legacy display reconciliation failed``; ``error_type`` and
+    ``error_traceback`` retain its class and traceback for internal frame-only
+    diagnostics. Traceback frames may retain sensitive locals/source: never
+    format or publish them, or the original chained exception. Construction
+    does not log or change generation disposition; the repository raises this
+    wrapper with ``from None`` and the worker logs only frame metadata.
+    """
+
+    def __init__(self, error: Exception) -> None:
+        """Retain no original message; callers must not format traceback source/locals."""
+        super().__init__("VN legacy display reconciliation failed")
+        self.error_type = type(error)
+        self.error_traceback = error.__traceback__
+
+
 class BuddyPublicationRevokedError(RuntimeError):
     """An accepted Buddy turn no longer has permission to publish messages."""
 
@@ -155,6 +201,16 @@ class CharacterBehaviorSourceDrift(RuntimeError):
 
 class ConversationSettingsTargetMissing(RuntimeError):
     """Force rollback when settings outlive their live conversation target."""
+
+
+class SemanticAPIError(RuntimeError):
+    """Stable HTTP-facing semantic application error."""
+
+    def __init__(self, status_code: int, code: str) -> None:
+        self.status_code = status_code
+        self.code = code
+        self.failure_code = code
+        super().__init__(code)
 
 
 class WebhookError(TransactionPassthroughError):
@@ -877,13 +933,19 @@ class ChatBadRequestError(ChatAPIError):
 
 
 class ChatRateLimitError(ChatAPIError):
-    """Raised when a chat provider rate-limits a request."""
+    """Raised when a chat provider rate-limits a request.
+
+    ``quota_exhausted`` is True when the provider said the account's billing quota is spent
+    (OpenAI ``insufficient_quota``), so waiting will not help. It is a bool, never upstream text.
+    """
 
     def __init__(
         self,
         message: str = "Rate limit exceeded with the chat provider.",
         provider: str | None = None,
+        quota_exhausted: bool = False,
     ) -> None:
+        self.quota_exhausted = quota_exhausted is True
         super().__init__(message, status_code=429, provider=provider)
 
 
@@ -1688,6 +1750,10 @@ class UnknownBackupDatasetError(AdminDataOpsError):
     """Raised when a backup request references an unknown dataset."""
 
 
+class UnsupportedBackupBackendError(AdminDataOpsError):
+    """Requested dataset scope has no compatible backup/restore implementation."""
+
+
 class InvalidBackupUserIdError(AdminDataOpsError):
     """Raised when a backup request references an invalid user id."""
 
@@ -2024,3 +2090,33 @@ async def video_processing_exception_handler(
 
 def setup_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(VideoProcessingError, video_processing_exception_handler)
+
+
+class LLMQuotaExceededError(HTTPException):
+    """The user is over an LLM quota: HTTP 402 with a ``limit_exceeded`` body (LLM usage accounting spec §4).
+
+    An ``HTTPException`` and not a ``ChatAPIError``: endpoints report a
+    ``ChatAPIError`` as a provider failure, and most let an ``HTTPException``
+    through unchanged.
+    """
+
+    # Job workers read these: a quota window does not reset in seconds, so a refused job is not retried.
+    retryable = False
+    failure_code = "llm_quota_exceeded"
+
+    def __init__(self, *, category: str, current: float, limit: int | float, message: str, retry_after: int) -> None:
+        super().__init__(
+            status_code=402,
+            detail={
+                "error": "limit_exceeded",
+                "category": category,
+                "current": current,
+                "limit": limit,
+                "message": message,
+            },
+            headers={"Retry-After": str(int(retry_after))},
+        )
+        self.category = category
+        self.current = current
+        self.limit = limit
+        self.retry_after = int(retry_after)

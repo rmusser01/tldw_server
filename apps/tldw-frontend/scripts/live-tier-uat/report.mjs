@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from "node:util"
 import { assertPlaywrightNoSkips } from "../assert-playwright-no-skips.mjs"
 
 function emptyProjectResult() {
-  return { passed: 0, failed: 0, skipped: 0, interrupted: 0, elapsedMs: 0 }
+  return { passed: 0, failed: 0, skipped: 0, interrupted: 0, expectedFailures: 0, elapsedMs: 0 }
 }
 
 export function parseListOutput(output) {
@@ -45,6 +45,9 @@ export function summarizePlaywrightReport(report) {
       summary[project].elapsedMs += result?.duration ?? 0
       if (test.status === "skipped" || status === "skipped") {
         summary[project].skipped += 1
+      } else if (test.status === "expected" && test.expectedStatus === "failed") {
+        // test.fail() reproduction of a known, still-open defect.
+        summary[project].expectedFailures += 1
       } else if (status === "passed" && test.status !== "unexpected") {
         summary[project].passed += 1
       } else if (status === "interrupted") {
@@ -72,7 +75,7 @@ export function assertProjectAccounting({
   for (const project of projects) {
     const expected = listed[project] ?? 0
     const result = results[project] ?? emptyProjectResult()
-    const accounted = result.passed + result.failed + result.skipped + result.interrupted
+    const accounted = result.passed + result.failed + result.skipped + result.interrupted + (result.expectedFailures ?? 0)
     if (accounted !== expected) {
       throw new Error(
         `Playwright project ${project} listed ${expected} test(s) but accounted ${accounted}`
@@ -156,8 +159,8 @@ export function renderMarkdownReport({
     "Offline fallback: disabled",
     "Retries: 0",
     "",
-    "| Project | Listed | Passed | Failed | Skipped | Intercepted | Live |",
-    "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    "| Project | Listed | Passed | Failed | Expected fail | Skipped | Intercepted | Live |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
   ]
 
   for (const project of projects) {
@@ -165,7 +168,7 @@ export function renderMarkdownReport({
     const listedCount = listed[project] ?? 0
     const interceptedCount = Math.min(intercepted[project] ?? 0, listedCount)
     lines.push(
-      `| ${project} | ${listedCount} | ${projectResult.passed} | ${projectResult.failed} | ${projectResult.skipped} | ${interceptedCount} | ${Math.max(0, listedCount - interceptedCount)} |`
+      `| ${project} | ${listedCount} | ${projectResult.passed} | ${projectResult.failed} | ${projectResult.expectedFailures ?? 0} | ${projectResult.skipped} | ${interceptedCount} | ${Math.max(0, listedCount - interceptedCount)} |`
     )
     if (projectResult.interrupted) {
       lines.push(`<!-- ${project}: ${projectResult.interrupted} interrupted -->`)

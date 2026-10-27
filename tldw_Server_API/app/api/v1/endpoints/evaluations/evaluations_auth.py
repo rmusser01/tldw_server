@@ -115,7 +115,13 @@ async def verify_api_key(
     elif credentials:
         token = credentials.credentials
 
-    if not token:
+    cookie_candidate = (
+        settings.AUTH_MODE == "single_user"
+        and request.headers.get("Authorization") is None
+        and request.headers.get("X-API-KEY") is None
+        and bool(request.cookies.get(settings.SINGLE_USER_SESSION_COOKIE_NAME))
+    )
+    if not token and not cookie_candidate:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"error": {
@@ -139,6 +145,15 @@ async def verify_api_key(
                 "code": "ip_not_allowed",
             }},
         )
+
+    if cookie_candidate:
+        user = await get_request_user(
+            request=request,
+            api_key=None,
+            token=None,
+            legacy_token_header=None,
+        )
+        return f"user_{user.id_str}"
 
     # Test-mode convenience (single-user): must run under explicit pytest runtime.
     if _evals_test_mode_bypass_enabled() and settings.AUTH_MODE == "single_user":
@@ -251,24 +266,6 @@ async def get_eval_request_user(
     legacy_token_header: Optional[str] = Header(None, alias="Token"),
 ) -> User:
     """Resolve the authenticated User after evaluations auth validation."""
-    if not api_key and not token and not legacy_token_header:
-        if _evals_testing_bypass_enabled():
-            return await get_request_user(
-                request=request,
-                api_key=api_key,
-                token=token,
-                legacy_token_header=legacy_token_header,
-            )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "error": {
-                    "message": "Missing API key or token",
-                    "type": "authentication_error",
-                    "code": "missing_credentials",
-                }
-            },
-        )
     return await get_request_user(
         request=request,
         api_key=api_key,
@@ -360,11 +357,14 @@ async def _apply_rate_limit_headers(limiter, user_id: str, response: Response, m
         except Exception:
             response.headers["X-RateLimit-PerMinute-Remaining"] = "0"
         daily = limits.get("daily", {})
-        response.headers["X-RateLimit-Daily-Limit"] = str(daily.get("evaluations", 0))
-        response.headers["X-RateLimit-Daily-Remaining"] = str(remaining.get("daily_evaluations", 0))
-        response.headers["X-RateLimit-Tokens-Remaining"] = str(remaining.get("daily_tokens", 0))
-        response.headers["X-RateLimit-Daily-Cost-Remaining"] = f"{remaining.get('daily_cost', 0):.2f}"
-        response.headers["X-RateLimit-Monthly-Cost-Remaining"] = f"{remaining.get('monthly_cost', 0):.2f}"
+        # An unlimited daily cap is None: leave the header out rather than invent a number.
+        for header, value in (
+            ("X-RateLimit-Daily-Limit", daily.get("evaluations")),
+            ("X-RateLimit-Daily-Remaining", remaining.get("daily_evaluations")),
+            ("X-RateLimit-Tokens-Remaining", remaining.get("daily_tokens")),
+        ):
+            if value is not None:
+                response.headers[header] = str(value)
         response.headers["RateLimit-Limit"] = str(per_min_limit)
         if isinstance(meta, dict) and "requests_remaining" in meta:
             response.headers["RateLimit-Remaining"] = str(int(meta.get("requests_remaining") or 0))

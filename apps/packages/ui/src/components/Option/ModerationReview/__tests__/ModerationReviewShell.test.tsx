@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, renderHook, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { MODERATION_RULES_PATH } from "@/routes/route-paths"
 import { ModerationReviewShell } from "../ModerationReviewShell"
+import { useModerationReviewQueue } from "../hooks/useModerationReviewQueue"
 
 const mocks = vi.hoisted(() => ({
   listModerationReviewItems: vi.fn(),
@@ -113,17 +114,17 @@ describe("ModerationReviewShell", () => {
       undo_token: "undo-1"
     })
     mocks.undoModerationReviewDecision.mockResolvedValue(reviewItem)
-    mocks.bulkDecideModerationReviewItems.mockResolvedValue({
+    mocks.bulkDecideModerationReviewItems.mockImplementation(async ({ action }: { action: string }) => ({
       ok_count: 1,
       error_count: 0,
       results: [
         {
           item_id: "review-1",
           ok: true,
-          item: { ...reviewItem, status: "dismissed" }
+          item: { ...reviewItem, status: action === "approve" ? "approved" : "dismissed" }
         }
       ]
-    })
+    }))
     window.localStorage.clear()
   })
 
@@ -226,8 +227,8 @@ describe("ModerationReviewShell", () => {
   it("supports selecting rows and bulk dismissing with partial failure feedback", async () => {
     const user = userEvent.setup()
     mocks.listModerationReviewItems.mockResolvedValue({
-      items: [reviewItem, reviewItem2],
-      total: 2,
+      items: [reviewItem, reviewItem2, { ...reviewItem2, id: "untouched", excerpt: "Untouched fictional control" }],
+      total: 3,
       next_cursor: null
     })
     mocks.getModerationReviewItem.mockImplementation((itemId: string) =>
@@ -268,6 +269,157 @@ describe("ModerationReviewShell", () => {
     })
     expect(await screen.findByText(/1 failed/i)).toBeInTheDocument()
     expect(screen.getByText(/review-2: not_found/i)).toBeInTheDocument()
+    expect(matchingCount().getByText("2")).toBeInTheDocument()
+    expect(screen.getByLabelText("Select review item review-2")).toBeChecked()
+    expect(screen.queryByLabelText("Select review item review-1")).not.toBeInTheDocument()
+    expect(screen.getByLabelText("Select review item untouched")).not.toBeChecked()
+    expect(screen.getByText("Untouched fictional control")).toBeInTheDocument()
+  })
+
+
+  const matchingCount = () => within(screen.getByText("Matching items").parentElement!)
+
+  it("updates matching total when the last selected needs-review item is approved", async () => {
+    const user = userEvent.setup()
+    renderShell()
+    await screen.findAllByText(/hello \[REDACTED\]/i)
+    await user.click(screen.getByLabelText("Select review item review-1"))
+    await user.click(screen.getByRole("button", { name: "Approve selected" }))
+    await waitFor(() => expect(matchingCount().getByText("0")).toBeInTheDocument())
+    expect(screen.getByText("Review complete")).toBeInTheDocument()
+  })
+
+  it("keeps the completed bulk result and reason visible after the worklist empties", async () => {
+    const user = userEvent.setup()
+    renderShell()
+    await screen.findAllByText(/hello \[REDACTED\]/i)
+    await user.click(screen.getByLabelText("Select review item review-1"))
+    await user.type(screen.getByLabelText("Bulk decision reason"), "Fictional review")
+    await user.click(screen.getByRole("button", { name: "Approve selected" }))
+    expect(await screen.findByText("1 updated · 0 failed")).toBeInTheDocument()
+    expect(screen.getByLabelText("Bulk decision reason")).toHaveValue("Fictional review")
+    expect(screen.getByRole("button", { name: "Approve selected" })).toBeDisabled()
+    expect(screen.queryByLabelText("Select review item review-1")).not.toBeInTheDocument()
+  })
+
+  it("subtracts only removed visible rows from a paginated total", async () => {
+    const user = userEvent.setup()
+    mocks.listModerationReviewItems.mockResolvedValue({ items: [reviewItem, reviewItem2], total: 50, next_cursor: "next" })
+    renderShell()
+    await screen.findAllByText(/hello \[REDACTED\]/i)
+    await user.click(screen.getByLabelText("Select review item review-1"))
+    await user.click(screen.getByRole("button", { name: "Dismiss selected" }))
+    await waitFor(() => expect(matchingCount().getByText("49")).toBeInTheDocument())
+    expect(screen.getByLabelText("Select review item review-2")).not.toBeChecked()
+    expect(screen.getByRole("button", { name: "Load next page" })).toBeInTheDocument()
+    expect(mocks.listModerationReviewItems).toHaveBeenCalledTimes(1)
+  })
+
+  it("preserves All-status membership and count and clears feedback on new selection", async () => {
+    const user = userEvent.setup()
+    renderShell()
+    await screen.findAllByText(/hello \[REDACTED\]/i)
+    await user.selectOptions(screen.getByLabelText("Status"), "")
+    await user.click(screen.getByRole("button", { name: "Refresh" }))
+    await user.click(screen.getByLabelText("Select review item review-1"))
+    await user.click(screen.getByRole("button", { name: "Dismiss selected" }))
+    expect(await screen.findByText("1 updated · 0 failed")).toBeInTheDocument()
+    expect(matchingCount().getByText("1")).toBeInTheDocument()
+    expect(screen.getByLabelText("Select review item review-1")).not.toBeChecked()
+    await user.click(screen.getByLabelText("Select review item review-1"))
+    expect(screen.queryByText("1 updated · 0 failed")).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Clear selection" }))
+    expect(screen.queryByTestId("moderation-bulk-decision-bar")).not.toBeInTheDocument()
+  })
+
+  it("keeps displayed membership tied to loaded filters while an unsent filter draft changes during a decision", async () => {
+    const user = userEvent.setup()
+    let resolveBulk!: (value: unknown) => void
+    mocks.bulkDecideModerationReviewItems.mockImplementation(() => new Promise((resolve) => { resolveBulk = resolve }))
+    renderShell()
+    await screen.findAllByText(/hello \[REDACTED\]/i)
+    await user.click(screen.getByLabelText("Select review item review-1"))
+    await user.click(screen.getByRole("button", { name: "Approve selected" }))
+    await user.selectOptions(screen.getByLabelText("Status"), "approved")
+    await user.type(screen.getByLabelText("Search"), "unsent draft")
+    await act(async () => resolveBulk({ ok_count: 1, error_count: 0, results: [{ item_id: "review-1", ok: true, item: { ...reviewItem, status: "approved" } }] }))
+    expect(matchingCount().getByText("0")).toBeInTheDocument()
+    expect(screen.queryByLabelText("Select review item review-1")).not.toBeInTheDocument()
+    expect(screen.getByLabelText("Status")).toHaveValue("approved")
+    expect(screen.getByLabelText("Search")).toHaveValue("unsent draft")
+    expect(mocks.listModerationReviewItems).toHaveBeenCalledTimes(1)
+  })
+
+
+  it("uses loaded status rather than an unsent status draft already present at submission", async () => {
+    const user = userEvent.setup()
+    mocks.bulkDecideModerationReviewItems.mockResolvedValue({ ok_count: 1, error_count: 0, results: [{ item_id: "review-1", ok: true, item: { ...reviewItem, status: "approved" } }] })
+    renderShell()
+    await screen.findAllByText(/hello \[REDACTED\]/i)
+    await user.selectOptions(screen.getByLabelText("Status"), "approved")
+    await user.click(screen.getByLabelText("Select review item review-1"))
+    await user.click(screen.getByRole("button", { name: "Approve selected" }))
+    await waitFor(() => expect(screen.queryByLabelText("Select review item review-1")).not.toBeInTheDocument())
+    expect(matchingCount().getByText("0")).toBeInTheDocument()
+    expect(screen.getByLabelText("Status")).toHaveValue("approved")
+    expect(mocks.listModerationReviewItems).toHaveBeenCalledTimes(1)
+  })
+
+
+  it("does not decrement a newer refreshed total twice when a bulk response arrives late", async () => {
+    const user = userEvent.setup()
+    let resolveBulk!: (value: unknown) => void
+    mocks.bulkDecideModerationReviewItems.mockImplementation(() => new Promise((resolve) => { resolveBulk = resolve }))
+    mocks.listModerationReviewItems.mockResolvedValueOnce({ items: [reviewItem, reviewItem2], total: 2, next_cursor: null })
+    renderShell()
+    await screen.findAllByText(/hello \[REDACTED\]/i)
+    await user.click(screen.getByLabelText("Select review item review-1"))
+    await user.click(screen.getByRole("button", { name: "Approve selected" }))
+    mocks.listModerationReviewItems.mockResolvedValueOnce({ items: [reviewItem2], total: 1, next_cursor: null })
+    mocks.getModerationReviewItem.mockResolvedValue(reviewItem2)
+    await user.click(screen.getByRole("button", { name: "Refresh" }))
+    await waitFor(() => expect(screen.queryByLabelText("Select review item review-1")).not.toBeInTheDocument())
+    await act(async () => resolveBulk({ ok_count: 1, error_count: 0, results: [{ item_id: "review-1", ok: true, item: { ...reviewItem, status: "approved" } }] }))
+    expect(matchingCount().getByText("1")).toBeInTheDocument()
+    expect(screen.getByLabelText("Select review item review-2")).not.toBeChecked()
+  })
+
+
+  it("retains unknown total and the last loaded filters after a failed refresh during a decision", async () => {
+    let resolveBulk!: (value: unknown) => void
+    mocks.bulkDecideModerationReviewItems.mockImplementation(() => new Promise((resolve) => { resolveBulk = resolve }))
+    const { result } = renderHook(() => useModerationReviewQueue())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    act(() => result.current.toggleSelected("review-1"))
+    let pending!: Promise<void>
+    act(() => { pending = result.current.bulkDecideSelected("approve") })
+    act(() => result.current.updateFilter("status", "approved"))
+    mocks.listModerationReviewItems.mockRejectedValueOnce(new Error("refresh failed"))
+    await act(async () => { await result.current.refresh() })
+    expect(result.current.total).toBeNull()
+    expect(result.current.loadedFilters.status).toBe("needs_review")
+    await act(async () => {
+      resolveBulk({ ok_count: 1, error_count: 0, results: [{ item_id: "review-1", ok: true, item: { ...reviewItem, status: "approved" } }] })
+      await pending
+    })
+    expect(result.current.total).toBeNull()
+    expect(result.current.items).toEqual([])
+    expect(result.current.filters.status).toBe("approved")
+    expect(result.current.loadedFilters.status).toBe("needs_review")
+    expect(result.current.error).toEqual(new Error("refresh failed"))
+  })
+
+  it("failed bulk submission preserves the count and offers no success result", async () => {
+    const user = userEvent.setup()
+    mocks.bulkDecideModerationReviewItems.mockRejectedValueOnce(new Error("write rejected"))
+    renderShell()
+    await screen.findAllByText(/hello \[REDACTED\]/i)
+    await user.click(screen.getByLabelText("Select review item review-1"))
+    await user.click(screen.getByRole("button", { name: "Approve selected" }))
+    expect(await screen.findByText("write rejected")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Approve selected" })).toBeDisabled()
+    expect(matchingCount().getByText("1")).toBeInTheDocument()
+    expect(screen.queryByText("1 updated · 0 failed")).not.toBeInTheDocument()
   })
 
   it("saves and reapplies local filter presets", async () => {

@@ -152,3 +152,16 @@ describe("quick ingest open handoff", () => {
     ).toBeNull()
   })
 })
+
+
+describe("ordinary source seeds", () => {
+  it("seeds an ordinary HTTP URL", () => {
+    const seed = createQuickIngestSessionSeedFromOpenDetail({ source: "manual", url: "https://example.com/article" })
+    expect(seed?.openDetail).toMatchObject({ url: "https://example.com/article" })
+    expect(seed?.queueItems?.map(item => item.url)).toEqual(["https://example.com/article"])
+  })
+  it("keeps the active-tab builder reserved for playlists", () => {
+    expect(buildQuickIngestOpenDetailFromUrl("https://example.com/article")).toBeNull()
+    expect(buildQuickIngestOpenDetailFromUrl("chrome://settings")).toBeNull()
+  })
+})

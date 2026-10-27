@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 
 const cacheState = vi.hoisted(() => ({
   values: new Map<string, unknown>()
@@ -121,6 +122,475 @@ describe("server capabilities docs-info merge", () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  const resumeFeatures = [
+    "snapshot_completion",
+    "fenced_completion",
+    "idempotent_user_append",
+    "nonstream_assistant_persist"
+  ]
+  const resumeProof = {
+    capabilities: {
+      roleplay_resume_contract_version: 1,
+      roleplay_resume_features: resumeFeatures
+    }
+  }
+  const originalScope = {
+    config: {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "multi-user" as const,
+      expectedRefreshToken: "original-lineage"
+    },
+    userId: 17
+  }
+
+  it.each([
+    [1, resumeFeatures, true],
+    [2, [...resumeFeatures, "future_feature"], true],
+    ["1", resumeFeatures, false],
+    [true, resumeFeatures, false],
+    [1.5, resumeFeatures, false],
+    [0, resumeFeatures, false],
+    [Number.MAX_SAFE_INTEGER + 1, resumeFeatures, false],
+    [1, resumeFeatures.slice(1), false],
+    [1, { snapshot_completion: true }, false],
+    [1, [...resumeFeatures, 1], false],
+    [null, resumeFeatures, false]
+  ])(
+    "requires exact authenticated Resume fields %s %s",
+    async (version, features, supported) => {
+      mocks.bgRequest.mockResolvedValue({
+        capabilities: {
+          roleplay_resume_contract_version: version,
+          roleplay_resume_features: features
+        }
+      })
+      const { getServerCapabilities } = await importCapabilitiesModule()
+      const result = await getServerCapabilities({ requestScope: originalScope })
+      expect(result.hasRoleplayResumeV1).toBe(supported)
+      expect(mocks.getOpenAPISpec).not.toHaveBeenCalled()
+      expect(mocks.getConfig).not.toHaveBeenCalled()
+    }
+  )
+
+  it("does not combine contradictory capability aliases into Resume proof", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      capabilities: { roleplay_resume_contract_version: 1 },
+      supported_features: { roleplay_resume_features: resumeFeatures }
+    })
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    expect(
+      (await getServerCapabilities({ requestScope: originalScope }))
+        .hasRoleplayResumeV1
+    ).toBe(false)
+  })
+
+  it("requests fresh Resume proof with only the original scope and signal", async () => {
+    mocks.bgRequest.mockResolvedValue(resumeProof)
+    const signal = new AbortController().signal
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    expect(
+      (await getServerCapabilities({ requestScope: originalScope, signal }))
+        .hasRoleplayResumeV1
+    ).toBe(true)
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/config/docs-info",
+      method: "GET",
+      noAuth: false,
+      abortSignal: signal,
+      servicePromptConfig: { ...originalScope.config, expectedUserId: 17 },
+      headers: { "X-TLDW-Expected-User-ID": "17" }
+    })
+    expect(mocks.storageGet).not.toHaveBeenCalled()
+    expect(mocks.storageSet).not.toHaveBeenCalled()
+  })
+
+  it("never borrows cached or in-flight discovery for an original Resume scope", async () => {
+    let resolveGeneric!: (value: unknown) => void
+    mocks.getOpenAPISpec.mockResolvedValue({ paths: {} })
+    mocks.bgRequest.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveGeneric = resolve
+        })
+    )
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const generic = getServerCapabilities()
+    await vi.waitFor(() => expect(resolveGeneric).toBeTypeOf("function"))
+    mocks.bgRequest.mockResolvedValue(resumeProof)
+    const first = await getServerCapabilities({ requestScope: originalScope })
+    expect(first.hasRoleplayResumeV1).toBe(true)
+    resolveGeneric({})
+    await generic
+    mocks.bgRequest.mockResolvedValue({})
+    expect(
+      (await getServerCapabilities({ requestScope: originalScope }))
+        .hasRoleplayResumeV1
+    ).toBe(false)
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(3)
+  })
+
+  it.each([401, 412, 503])(
+    "propagates original-scope discovery failure %s",
+    async (status) => {
+      const error = Object.assign(new Error("original scope discovery failed"), {
+        status
+      })
+      mocks.bgRequest.mockRejectedValue(error)
+      const { getServerCapabilities } = await importCapabilitiesModule()
+      await expect(
+        getServerCapabilities({ requestScope: originalScope })
+      ).rejects.toBe(error)
+    }
+  )
+
+  it("retains a held discovery abort even if its transport resolves", async () => {
+    const controller = new AbortController()
+    mocks.bgRequest.mockImplementation(async () => {
+      controller.abort()
+      return resumeProof
+    })
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    await expect(
+      getServerCapabilities({
+        requestScope: originalScope,
+        signal: controller.signal
+      })
+    ).rejects.toMatchObject({ name: "AbortError" })
+  })
+
+  it("rejects an already aborted scoped proof before transport", async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    await expect(
+      getServerCapabilities({
+        requestScope: originalScope,
+        signal: controller.signal
+      })
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+  })
+
+  it("keeps the original single-user credential scope when its user ID is null", async () => {
+    const requestScope = {
+      config: {
+        serverUrl: "http://127.0.0.1:8000",
+        authMode: "single-user" as const,
+        expectedSingleUserApiKeyScope: "original-key-scope"
+      },
+      userId: null
+    }
+    mocks.bgRequest.mockResolvedValue(resumeProof)
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    expect(
+      (await getServerCapabilities({ requestScope })).hasRoleplayResumeV1
+    ).toBe(true)
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        servicePromptConfig: { ...requestScope.config, expectedUserId: null },
+        noAuth: false
+      })
+    )
+    expect(mocks.bgRequest.mock.calls[0][0]).not.toHaveProperty("headers")
+  })
+
+  it("does not reuse persisted V5 support after the authenticated contract changes", async () => {
+    cacheState.values.set("__tldwServerCapabilitiesCacheV5", {
+      key: buildChatSurfaceScopeKeyFromConfig({
+        serverUrl: "http://127.0.0.1:8000",
+        authMode: "single-user"
+      }),
+      fetchedAt: Date.now(),
+      capabilities: { hasRoleplayResumeV1: true }
+    })
+    mocks.getOpenAPISpec.mockResolvedValue({ paths: {} })
+    mocks.bgRequest.mockResolvedValue({})
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    expect((await getServerCapabilities()).hasRoleplayResumeV1).toBe(false)
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("authenticates ordinary discovery when captured credentials are usable", async () => {
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test-usable-key"
+    })
+    mocks.getOpenAPISpec.mockResolvedValue({ paths: {} })
+    mocks.bgRequest.mockResolvedValue(resumeProof)
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    expect((await getServerCapabilities()).hasRoleplayResumeV1).toBe(true)
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        noAuth: false,
+        configSnapshot: expect.objectContaining({ apiKey: "test-usable-key" })
+      })
+    )
+  })
+
+  it.each(["messages", "completion"] as const)(
+    "detects Boolean strict admission only in the actual %s POST request contract",
+    async (operation) => {
+      const capabilitiesModule = await importCapabilitiesModule()
+      const detect = capabilitiesModule.detectNativeHistoryBranchAdmission
+      const path =
+        operation === "messages"
+          ? "/api/v1/chats/{chat_id}/messages"
+          : "/api/v1/chat/completions"
+      const otherPath =
+        operation === "messages"
+          ? "/api/v1/chat/completions"
+          : "/api/v1/chats/{chat_id}/messages"
+      const request = {
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/Admission" }
+            }
+          }
+        }
+      }
+      const spec = {
+        paths: { [path]: { post: request } },
+        components: {
+          schemas: {
+            Admission: {
+              title: "Actual deployed request annotations",
+              description:
+                "The deployed schema includes the singular OpenAPI example annotation.",
+              example: { tldw_history_branch: true },
+              type: "object",
+              properties: {
+                tldw_history_branch: { type: "boolean", default: true }
+              }
+            }
+          }
+        }
+      }
+      expect(detect(spec, operation)).toBe(true)
+      expect(
+        detect({ ...spec, paths: { [otherPath]: { post: request } } }, operation)
+      ).toBe(false)
+      expect(
+        detect({ ...spec, paths: { [path]: { get: request } } }, operation)
+      ).toBe(false)
+      for (const schema of [
+        null,
+        {},
+        { properties: { tldw_history_branch: { type: "string" } } },
+        { $ref: "https://foreign.test/schema" },
+        { $ref: "#/components/schemas/Missing" },
+        { $ref: "#/components/schemas/Admission" }
+      ]) {
+        expect(
+          detect(
+            { ...spec, components: { schemas: { Admission: schema } } },
+            operation
+          )
+        ).toBe(false)
+      }
+    }
+  )
+
+  it.each(["messages", "completion"] as const)(
+    "recognizes the actual nullable Boolean %s field without accepting non-Boolean unions",
+    async (operation) => {
+      const { detectNativeHistoryBranchAdmission: detect } =
+        await importCapabilitiesModule()
+      const path =
+        operation === "messages"
+          ? "/api/v1/chats/{chat_id}/messages"
+          : "/api/v1/chat/completions"
+      const spec = (field: unknown) => ({
+        paths: {
+          [path]: {
+            post: {
+              requestBody: {
+                content: {
+                  "application/json": {
+                    schema: { properties: { tldw_history_branch: field } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      })
+      expect(
+        detect(
+          spec({ anyOf: [{ type: "boolean" }, { type: "null" }] }),
+          operation
+        )
+      ).toBe(true)
+      expect(
+        detect(
+          spec({ oneOf: [{ type: "boolean" }, { type: "null" }] }),
+          operation
+        )
+      ).toBe(true)
+      for (const field of [
+        { anyOf: [{ type: "string" }, { type: "null" }] },
+        { anyOf: [{ type: "boolean" }, { type: "string" }] },
+        { type: "null" },
+        { type: "boolean", enum: [true] },
+        { type: "boolean", allOf: [{ enum: [true] }] },
+        { type: "boolean", not: { const: false } },
+        { type: "string", anyOf: [{ type: "boolean" }, { type: "null" }] },
+        {
+          anyOf: [{ type: "boolean" }, { type: "null" }],
+          oneOf: [{ const: true }]
+        },
+        { oneOf: [{ type: "boolean" }, { type: "boolean" }, { type: "null" }] },
+        {
+          anyOf: [
+            { type: "boolean", allOf: [{ enum: [true] }] },
+            { type: "null" }
+          ]
+        }
+      ])
+        expect(detect(spec(field), operation)).toBe(false)
+    }
+  )
+
+  it("bounds nullable Boolean component refs without accepting cycles or foreign field refs", async () => {
+    const { detectNativeHistoryBranchAdmission: detect } =
+      await importCapabilitiesModule()
+    const spec = {
+      paths: {
+        "/api/v1/chat/completions": {
+          post: {
+            requestBody: {
+              content: {
+                "application/json": {
+                  schema: {
+                    properties: {
+                      tldw_history_branch: { $ref: "#/components/schemas/Flag" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      components: {
+        schemas: {
+          Flag: {
+            anyOf: [{ $ref: "#/components/schemas/Boolean" }, { type: "null" }]
+          },
+          Boolean: { type: "boolean" }
+        }
+      }
+    }
+    expect(detect(spec, "completion")).toBe(true)
+    const constrainedRef = {
+      ...spec,
+      components: {
+        schemas: {
+          ...spec.components.schemas,
+          Flag: {
+            $ref: "#/components/schemas/Boolean",
+            allOf: [{ enum: [true] }]
+          }
+        }
+      }
+    }
+    expect(detect(constrainedRef, "completion")).toBe(false)
+    const cyclic = {
+      ...spec,
+      components: { schemas: { Flag: { $ref: "#/components/schemas/Flag" } } }
+    }
+    expect(detect(cyclic, "completion")).toBe(false)
+    const foreign = {
+      ...spec,
+      components: {
+        schemas: { Flag: { $ref: "https://foreign.test/flag", type: "boolean" } }
+      }
+    }
+    expect(detect(foreign, "completion")).toBe(false)
+  })
+
+  it.each(["messages", "completion"] as const)(
+    "does not grant strict admission from unqualified request constraints or ref siblings for %s",
+    async (operation) => {
+      const { detectNativeHistoryBranchAdmission: detect } =
+        await importCapabilitiesModule()
+      const path =
+        operation === "messages"
+          ? "/api/v1/chats/{chat_id}/messages"
+          : "/api/v1/chat/completions"
+      const request = { properties: { tldw_history_branch: { type: "boolean" } } }
+      for (const schema of [
+        {
+          allOf: [
+            request,
+            { properties: { tldw_history_branch: { const: true } } }
+          ]
+        },
+        { ...request, type: "string" },
+        {
+          ...request,
+          not: {
+            properties: { tldw_history_branch: { const: false } },
+            required: ["tldw_history_branch"]
+          }
+        },
+        { ...request, patternProperties: { "^tldw": { const: true } } },
+        {
+          $ref: "#/components/schemas/Request",
+          allOf: [{ properties: { tldw_history_branch: { const: true } } }]
+        },
+        {
+          $ref: "#/components/schemas/Request",
+          not: {
+            properties: { tldw_history_branch: { const: false } },
+            required: ["tldw_history_branch"]
+          }
+        }
+      ]) {
+        const spec = {
+          paths: {
+            [path]: {
+              post: {
+                requestBody: { content: { "application/json": { schema } } }
+              }
+            }
+          },
+          components: { schemas: { Request: request } }
+        }
+        expect(detect(spec, operation)).toBe(false)
+      }
+    }
+  )
+
+  it("pins generic capability reads to the same connection as their cache key", async () => {
+    const original = {
+      serverUrl: "https://original.test",
+      authMode: "single-user" as const,
+      apiKey: "original-fixture"
+    }
+    mocks.getConfig.mockResolvedValue(original)
+    mocks.getOpenAPISpec.mockImplementation(async () => {
+      mocks.getConfig.mockResolvedValue({
+        ...original,
+        serverUrl: "https://replacement.test"
+      })
+      return { paths: { "/api/v1/chat/completions": {} } }
+    })
+    mocks.bgRequest.mockResolvedValue({})
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    await getServerCapabilities()
+    expect(mocks.getOpenAPISpec).toHaveBeenCalledWith({
+      configSnapshot: original
+    })
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/config/docs-info",
+        configSnapshot: original
+      })
+    )
   })
 
   it("requires both persona route support and docs-info persona feature flag", async () => {
@@ -1107,7 +1577,138 @@ describe("server capabilities docs-info merge", () => {
   it("keeps strict client path metadata aligned with Chatterbox voice conversion", () => {
     const source = readFileSync(resolve(process.cwd(), openApiGuardSourcePath), "utf8")
 
-    expect(source).toContain('| "/api/v1/audio/voice-conversion"')
-    expect(source).toContain('| "/api/v1/audio/tts/providers/{provider}/unload"')
+    expect(source).toContain('export type ClientPath = ApiPath')
+    const canonical = readFileSync(resolve(__dirname, "../../../../api-types/paths.d.ts"), "utf8")
+    expect(canonical).toContain('| "/api/v1/audio/voice-conversion"')
+    expect(canonical).toContain('| "/api/v1/audio/tts/providers/{provider}/unload"')
+  })
+})
+
+
+describe("protected Edit primary request capability", () => {
+  const path = (operation: "messages" | "completion") =>
+    operation === "messages"
+      ? "/api/v1/chats/{chat_id}/messages"
+      : "/api/v1/chat/completions"
+  const spec = (
+    operation: "messages" | "completion",
+    schema: unknown,
+    components = {}
+  ) => ({
+    paths: {
+      [path(operation)]: {
+        post: { requestBody: { content: { "application/json": { schema } } } }
+      }
+    },
+    components: { schemas: components }
+  })
+  it.each(["messages", "completion"] as const)(
+    "accepts only the supported primary %s schema",
+    async (operation) => {
+      const { protectedEditRequestSchema } = await import(
+        "./history-edit-fixture"
+      )
+      const { detectNativeHistoryEditAdmission: detect } =
+        await importCapabilitiesModule()
+      const schema = protectedEditRequestSchema()
+      expect(detect(spec(operation, schema), operation)).toBe(true)
+      expect(
+        detect(
+          spec(
+            operation,
+            { $ref: "#/components/schemas/Request" },
+            { Request: schema }
+          ),
+          operation
+        )
+      ).toBe(true)
+      const target = schema.properties.tldw_history_edit_v1.anyOf[0]
+      const refSchema = {
+        ...schema,
+        properties: {
+          ...schema.properties,
+          tldw_history_edit_v1: {
+            anyOf: [{ $ref: "#/components/schemas/Target" }, { type: "null" }]
+          }
+        }
+      }
+      expect(
+        detect(spec(operation, refSchema, { Target: target }), operation)
+      ).toBe(true)
+    }
+  )
+  it.each([
+    "missing field",
+    "false only",
+    "string branch",
+    "nullable only",
+    "open target",
+    "optional member",
+    "extra member",
+    "wrong version",
+    "coerced version",
+    "empty revision",
+    "ambiguous union",
+    "constraint sibling",
+    "external ref",
+    "cyclic ref",
+    "unrelated component",
+    "wrong operation",
+    "missing primary"
+  ])("does not grant Edit authority from %s", async (change) => {
+    const { protectedEditRequestSchema } = await import("./history-edit-fixture")
+    const { detectNativeHistoryEditAdmission: detect } =
+      await importCapabilitiesModule()
+    const schema = protectedEditRequestSchema()
+    const target = schema.properties.tldw_history_edit_v1.anyOf[0]
+    if (!target.properties || !target.required)
+      throw new Error("Missing target fixture")
+    let value: unknown
+    if (change === "missing field")
+      Reflect.deleteProperty(schema.properties, "tldw_history_edit_v1")
+    if (change === "false only")
+      Object.assign(schema.properties, {
+        tldw_history_branch: { type: "boolean", const: false }
+      })
+    if (change === "string branch")
+      Object.assign(schema.properties, {
+        tldw_history_branch: { type: "string" }
+      })
+    if (change === "nullable only")
+      Object.assign(schema.properties, { tldw_history_edit_v1: { type: "null" } })
+    if (change === "open target") target.additionalProperties = true
+    if (change === "optional member") target.required.pop()
+    if (change === "extra member")
+      Object.assign(target.properties, { optional: { type: "string" } })
+    if (change === "wrong version") target.properties.version.const = 2
+    if (change === "coerced version") target.properties.version.type = "number"
+    if (change === "empty revision")
+      target.properties.message_revision.minLength = 0
+    if (change === "ambiguous union")
+      schema.properties.tldw_history_edit_v1.anyOf.push(structuredClone(target))
+    if (change === "constraint sibling")
+      Object.assign(schema.properties.tldw_history_edit_v1, {
+        allOf: [{ type: "null" }]
+      })
+    if (change === "external ref")
+      Object.assign(schema.properties, {
+        tldw_history_edit_v1: {
+          $ref: "https://foreign.test/schema"
+        }
+      })
+    if (change === "cyclic ref")
+      value = spec(
+        "messages",
+        { $ref: "#/components/schemas/Loop" },
+        { Loop: { $ref: "#/components/schemas/Loop" } }
+      )
+    if (change === "unrelated component")
+      value = spec("messages", { type: "object" }, { Unused: schema })
+    if (change === "wrong operation") value = spec("completion", schema)
+    if (change === "missing primary")
+      value = {
+        paths: { [path("messages")]: { post: { responses: { 200: schema } } } }
+      }
+    expect(detect(value ?? spec("messages", schema), "messages")).toBe(false)
   })
 })

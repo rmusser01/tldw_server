@@ -70,6 +70,20 @@ describe('DiffViewModal stage 4 scalability guardrails', () => {
     vi.restoreAllMocks()
   })
 
+  it('terminates pending work when the modal closes', async () => {
+    const terminate = vi.fn()
+    vi.stubGlobal('Worker', class {
+      onmessage = null
+      onerror = null
+      terminate = terminate
+      postMessage() {}
+    })
+    const text = 'line\n'.repeat(2100)
+    const view = render(<DiffViewModal open onClose={vi.fn()} leftText={text} rightText={text} />)
+    view.rerender(<DiffViewModal open={false} onClose={vi.fn()} leftText={text} rightText={text} />)
+    await waitFor(() => expect(terminate).toHaveBeenCalledOnce())
+  })
+
   it('shows large-document warning before computing sampled diff over hard threshold', () => {
     const hugeLeft = 'A'.repeat(170_000)
     const hugeRight = 'B'.repeat(170_000)
@@ -136,4 +150,3 @@ describe('DiffViewModal stage 4 scalability guardrails', () => {
     })
   })
 })
-

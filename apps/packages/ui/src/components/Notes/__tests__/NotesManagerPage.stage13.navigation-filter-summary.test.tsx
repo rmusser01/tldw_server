@@ -150,9 +150,20 @@ vi.mock("@/services/settings/registry", async (importOriginal) => {
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn(async () => undefined),
+    getConfig: vi.fn(async () => ({
+      serverUrl: "https://notes.example.test",
+      authMode: "single-user",
+      authSource: "cookie-session"
+    })),
     getChat: vi.fn(async () => null),
     listChatMessages: vi.fn(async () => []),
     getCharacter: vi.fn(async () => null)
+  }
+}))
+
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: {
+    getCurrentUser: vi.fn(async () => ({ id: 1, is_active: true }))
   }
 }))
 
@@ -308,9 +319,20 @@ describe("NotesManagerPage stage 13 navigation filter summary", () => {
     fireEvent.click(screen.getByRole("button", { name: "Browse tags" }))
     await screen.findByText("Apply filters")
     fireEvent.click(screen.getByText(/^research\b/i))
+    expect(screen.getByRole("checkbox", { name: /^research\b/i })).toBeChecked()
     fireEvent.click(screen.getByRole("button", { name: "Apply filters" }))
 
     await waitFor(() => {
+      expect(mockBgRequest.mock.calls.some(([request]) => {
+        const path = String((request as { path?: string }).path || "")
+        if (!path.startsWith("/api/v1/notes/search/?")) return false
+        const url = new URL(`http://localhost${path}`)
+        return (
+          (url.searchParams.get("query") || "") === "" &&
+          url.searchParams.getAll("tokens").length === 1 &&
+          url.searchParams.get("tokens") === "research"
+        )
+      })).toBe(true)
       expect(screen.getByTestId("notes-active-filter-summary")).toHaveTextContent(
         "Showing 1 of 4 notes"
       )

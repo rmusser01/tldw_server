@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from fastapi import HTTPException
@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from tldw_Server_API.app.core.Buddy.publication import current_buddy_publication
 from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import validate_chat_settings_storage
 from tldw_Server_API.app.core.Character_Chat.modules.character_utils import sanitize_sender_name
+from tldw_Server_API.app.core.Chat.generation_metadata import sanitize_generation_metadata
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, NotFoundError
 
 SaveMessageFn = Callable[..., Awaitable[str | None]]
@@ -100,8 +101,13 @@ def build_assistant_message_payload(
     content: Any | None,
     tool_calls: Any | None,
     function_call: Any | None,
+    generation_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build the persisted assistant message payload for a chat completion."""
+    """Build the persisted assistant message payload for a chat completion.
+
+    ``generation_metadata`` (see ``core.Chat.generation_metadata``) is stored by
+    the save function in ``message_metadata.extra_json`` after allow-listing.
+    """
 
     asst_name = sanitize_sender_name(character_card_for_context.get("name") if character_card_for_context else None)
     message_payload: dict[str, Any] = {"role": "assistant", "name": asst_name}
@@ -113,7 +119,19 @@ def build_assistant_message_payload(
         message_payload["tool_calls"] = tool_calls
     if function_call is not None:
         message_payload["function_call"] = function_call
+    if generation_metadata:
+        message_payload["generation_metadata"] = dict(generation_metadata)
     return message_payload
+
+
+def assistant_generation_extra(message: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the allow-listed generation metadata to store for ``message``.
+
+    Only assistant messages carry it; anything outside the allow-list is dropped.
+    """
+    if message.get("role") != "assistant":
+        return {}
+    return sanitize_generation_metadata(message.get("generation_metadata"))
 
 
 async def save_assistant_message(
@@ -162,7 +180,9 @@ def native_history_owner_key(request: Any, user_id: Any) -> str:
     return "native-history-v1:sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-async def prepare_native_history_message(message: dict[str, Any], conversation_id: str, process_content: Any) -> dict[str, Any]:
+async def prepare_native_history_message(
+    message: dict[str, Any], conversation_id: str, process_content: Any
+) -> dict[str, Any]:
     """Prepare validated text/images and role metadata before opening an admission transaction."""
     content = message.get("content")
     parts = content if isinstance(content, list) else []
@@ -188,10 +208,13 @@ async def prepare_native_history_message(message: dict[str, Any], conversation_i
             extra[key] = message[key]
     if message.get("name"):
         extra["tool_name" if role == "tool" else "sender_name"] = message["name"]
-    if not text and not images:
+    if not "\n".join(text) and not images:
         if message.get("tool_calls"):
             text = ["[tool_calls]"]
             extra["content_placeholder_reason"] = "tool_calls"
+        elif role == "tool" and content == "" and message.get("tool_call_id") is not None:
+            text = ["[empty tool result]"]
+            extra["content_placeholder_reason"] = "empty_tool_result"
         elif message.get("function_call"):
             text = ["[function_call]"]
             extra["content_placeholder_reason"] = "function_call"

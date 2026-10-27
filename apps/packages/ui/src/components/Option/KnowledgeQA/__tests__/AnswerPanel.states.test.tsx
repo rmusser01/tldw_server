@@ -1,3 +1,4 @@
+vi.mock("@/hooks/useHomeMilestoneScope", () => ({ useHomeMilestoneScope: () => "owner-a" }))
 import { act, fireEvent, render as renderComponent, screen, waitFor } from "@testing-library/react"
 import { createInstance } from "i18next"
 import { I18nextProvider } from "react-i18next"
@@ -20,7 +21,7 @@ const messageOpenMock = vi.fn()
 const navigateMock = vi.fn()
 const trackMetricMock = vi.fn()
 const testI18n = createInstance().use(ICUWithInterpolation)
-const render: typeof renderComponent = (ui, options) => renderComponent(ui, {
+const render = (ui: Parameters<typeof renderComponent>[0], options?: Parameters<typeof renderComponent>[1]) => renderComponent(ui, {
   ...options,
   wrapper: ({ children }) => <I18nextProvider i18n={testI18n}>{children}</I18nextProvider>,
 })

@@ -3320,6 +3320,42 @@ def test_flashcard_assistant_respond_persists_user_and_assistant_messages(
     assert payload["thread"]["message_count"] == 2
 
 
+def test_flashcard_assistant_respond_refuses_an_over_quota_user(
+    client_with_flashcards_db: TestClient,
+    monkeypatch,
+):
+    """An over-quota user gets the 402 and the study assistant never calls the LLM."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    created = client_with_flashcards_db.post(
+        "/api/v1/flashcards",
+        json={"front": "What is the glomerulus?", "back": "It filters blood."},
+        headers=AUTH_HEADERS,
+    )
+    assert created.status_code == 200
+    card_uuid = created.json()["uuid"]
+    calls: list[dict[str, Any]] = []
+
+    async def recording_generate_reply(**kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {"assistant_text": "unused", "structured_payload": {}, "provider": "openai", "model": "gpt-test"}
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.flashcards.generate_study_assistant_reply",
+        recording_generate_reply,
+    )
+    refuse_llm_work(monkeypatch)
+
+    response = client_with_flashcards_db.post(
+        f"/api/v1/flashcards/{card_uuid}/assistant/respond",
+        json={"action": "explain"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert_llm_quota_402(response)
+    assert calls == []
+
+
 def test_flashcard_assistant_respond_returns_409_for_stale_thread_version(
     client_with_flashcards_db: TestClient,
     flashcards_db: CharactersRAGDB,
@@ -5662,3 +5698,33 @@ def test_flashcard_tag_suggestions_rejects_limit_over_max(
     )
 
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize("expected_user", [None, "1", "2", "invalid"])
+def test_deck_update_checks_optional_expected_user(
+    client_with_flashcards_db, monkeypatch, expected_user
+):
+    """A stale owner assertion must fail before a real deck can be renamed."""
+    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+    async def observed_principal(_request):
+        return AuthPrincipal(kind="user", user_id=1)
+
+    monkeypatch.setattr(auth_deps, "get_auth_principal", observed_principal)
+    client = client_with_flashcards_db
+    created = client.post("/api/v1/flashcards/decks", json={"name": "Opening name"})
+    assert created.status_code == 200  # nosec B101 - New pytest fixture setup contract.
+    original = created.json()
+    headers = {} if expected_user is None else {"X-TLDW-Expected-User-ID": expected_user}
+    response = client.patch(
+        f"/api/v1/flashcards/decks/{original['id']}",
+        json={"name": "Reviewed name", "expected_version": original["version"]},
+        headers=headers,
+    )
+    allowed = expected_user in (None, "1")
+    assert response.status_code == (200 if allowed else 412)  # nosec B101 - New pytest owner-boundary contract.
+    current = next(deck for deck in client.get("/api/v1/flashcards/decks").json() if deck["id"] == original["id"])
+    assert current["name"] == ("Reviewed name" if allowed else "Opening name")  # nosec B101 - New pytest persistence contract.
+    if not allowed:
+        assert current["version"] == original["version"]  # nosec B101 - Denial must leave the real version unchanged.

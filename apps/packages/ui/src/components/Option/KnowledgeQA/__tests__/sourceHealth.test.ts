@@ -61,7 +61,9 @@ describe("Knowledge QA source health normalization", () => {
       ],
     })
 
-    expect(buildSourceHealthSummary(normalized)).toBe("Sources ready: 1 of 2")
+    expect(buildSourceHealthSummary(normalized)).toBe(
+      "Available services: 1 of 2 · Personal items: unknown"
+    )
   })
 
   it("drops unknown source IDs and normalizes unknown statuses safely", () => {
@@ -132,4 +134,57 @@ describe("Knowledge QA source health normalization", () => {
       "Registry Unavailable"
     )
   })
+})
+
+it("uses stored totals without inventing vector readiness", () => {
+  const state = normalizeKnowledgeSourceHealth(
+    {
+      sources: [
+        {
+          source_id: "media_db",
+          available: true,
+          searchable: true,
+          index_status: "ready",
+          item_count: null,
+          indexed_count: null,
+          embedding_status: "unknown"
+        },
+        {
+          source_id: "notes",
+          available: true,
+          searchable: true,
+          index_status: "ready",
+          item_count: null,
+          indexed_count: null,
+          embedding_status: "unknown"
+        }
+      ]
+    },
+    { media_db: { pagination: { total: 0 } }, notes: { total: 0 } }
+  )
+  expect(state.bySource.media_db?.itemCount).toBe(0)
+  expect(state.bySource.notes?.itemCount).toBe(0)
+  expect(state.bySource.media_db?.indexedCount).toBeNull()
+  expect(state.bySource.media_db?.embeddingStatus).toBe("unknown")
+  expect(buildSourceHealthSummary(state)).toBe(
+    "Available services: 2 of 2 · Stored personal items: 0 · Searchable personal items: 0"
+  )
+})
+
+it("does not label stored content searchable when indexed counts are unknown", () => {
+  const state = normalizeKnowledgeSourceHealth(
+    {
+      sources: ["media_db", "notes"].map((source_id) => ({
+        source_id,
+        available: true,
+        searchable: true,
+        index_status: "ready",
+        indexed_count: null
+      }))
+    },
+    { media_db: { pagination: { total: 1 } }, notes: { total: 0 } }
+  )
+  expect(buildSourceHealthSummary(state)).toBe(
+    "Available services: 2 of 2 · Stored personal items: 1 · Searchable personal items: unknown"
+  )
 })

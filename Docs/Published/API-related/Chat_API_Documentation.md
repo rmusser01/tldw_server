@@ -27,7 +27,8 @@ Note:
 - Alias: `/api/v1/chats/conversations` maps to the conversation list/update/tree endpoints above.
 
 Parameter glossary:
-- `query`: full-text search term applied to conversation title.
+- `query`: full-text search term, matched against the fields named by `search_in`.
+- `search_in`: comma-separated fields that `query` is matched against: `title` (default) and/or `content` (the text of live messages). With `content`, title matches rank first, then content-only matches by the chosen ordering, and each item reports `matched_in`, `match_snippet` (a plain-text excerpt of the earliest matching message) and `match_message_id`. Deleted messages and trashed conversations never match; with `include_deleted` or `deleted_only` the search stays on title, topic and state.
 - `state`: conversation lifecycle state (`in-progress`, `resolved`, `backlog`, `non-viable`).
 - `topic_label`: exact topic label match; append `*` for prefix search.
 - `keywords`: repeatable query parameter; all values must match (AND).

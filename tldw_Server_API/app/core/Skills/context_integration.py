@@ -12,12 +12,14 @@ Provides helpers for integrating skills into the chat system:
 - Skill invocation handling
 """
 
+import asyncio
 from pathlib import Path
 from typing import Any, Optional
 
 from loguru import logger
 
 from tldw_Server_API.app.core.Context_Integrity.resolver import ContextIntegrityBlocked
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.Skills.skill_executor import (
     SKILL_TOOL_DEFINITION,
     RequestContext,
@@ -141,8 +143,12 @@ async def handle_skill_tool_call(
     from tldw_Server_API.app.core.Skills.exceptions import SkillNotFoundError, SkillsError
 
     try:
-        service = SkillsService(user_id=user_id, base_path=base_path, db=db)
-        skill_data = await service.get_skill(skill_name)
+        # The registry lookup gets its own operation, so its checkout is returned before a
+        # forked skill's LLM call, whatever operation the caller holds. The service's setup
+        # (4 table statements) runs off the event loop, like the lookup itself.
+        with chacha_operation(independent=True):
+            service = await asyncio.to_thread(SkillsService, user_id=user_id, base_path=base_path, db=db)
+            skill_data = await service.get_skill(skill_name)
 
         executor = SkillExecutor()
         result = await executor.execute(

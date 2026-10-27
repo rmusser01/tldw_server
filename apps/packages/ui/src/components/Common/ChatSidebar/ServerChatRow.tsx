@@ -38,6 +38,8 @@ type ServerChatRowCommonProps = {
   isPinned: boolean
   isActive: boolean
   /** Temporary mode: the row opens the chat but hides pin and management actions. */
+  showReference?: boolean
+  disabled?: boolean
   readOnly?: boolean
   openMenuFor: string | null
   setOpenMenuFor: (value: string | null) => void
@@ -49,7 +51,10 @@ type ServerChatRowCommonProps = {
   onEditTopic: (chat: ServerChatHistoryItem) => void
   onDeleteChat: (chat: ServerChatHistoryItem) => void | Promise<void>
   onRestoreChat: (chat: ServerChatHistoryItem) => void | Promise<void>
-  onUpdateState?: (chat: ServerChatHistoryItem, state: ConversationState) => void
+  onUpdateState?: (
+    chat: ServerChatHistoryItem,
+    state: ConversationState
+  ) => void
   t: TFunction
 }
 
@@ -72,6 +77,8 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
     chat,
     isTrashView,
     readOnly = false,
+    disabled = false,
+    showReference = false,
     isPinned,
     isActive,
     openMenuFor,
@@ -89,7 +96,13 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
   } = props
   const selectionMode = props.selectionMode
   const isSelected = props.selectionMode ? props.isSelected : false
-  const onToggleSelected = props.selectionMode ? props.onToggleSelected : undefined
+  const onToggleSelected = props.selectionMode
+    ? props.onToggleSelected
+    : undefined
+  const reference = t("common:chatSidebar.local.chatReference", {
+    defaultValue: "Chat {{id}}",
+    id: chat.id
+  })
   const lastModifiedMs = chat.updatedAtMs ?? chat.createdAtMs
   const lastModifiedLabel = Number.isNaN(lastModifiedMs)
     ? null
@@ -107,6 +120,17 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
     }
   }))
   const activeMenuItems = [
+    {
+      key: "pin",
+      icon: isPinned ? <PinOff className="size-3" /> : <Pin className="size-3" />,
+      label: isPinned
+        ? t("common:unpin", { defaultValue: "Unpin" })
+        : t("common:pin", { defaultValue: "Pin" }),
+      onClick: () => {
+        setOpenMenuFor(null)
+        onTogglePinned(chat.id)
+      }
+    },
     {
       key: "settings",
       icon: <Settings2 className="size-3" />,
@@ -144,7 +168,10 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
     {
       key: "topic",
       icon: <Tag className="size-3" />,
-      label: t("playground:composer.topicPlaceholder", "Topic label (optional)"),
+      label: t(
+        "playground:composer.topicPlaceholder",
+        "Topic label (optional)"
+      ),
       onClick: () => {
         setOpenMenuFor(null)
         onEditTopic(chat)
@@ -188,6 +215,14 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
   ]
   const menuItems = isTrashView ? trashMenuItems : activeMenuItems
 
+  // A topic that repeats the title adds nothing to the row (CS-08).
+  const topicLabel =
+    chat.topic_label &&
+    String(chat.topic_label).trim().toLowerCase() !==
+      String(chat.title ?? "").trim().toLowerCase()
+      ? String(chat.topic_label)
+      : null
+
   const renderSourceInfo = () => {
     if (chat.parent_conversation_id) {
       return (
@@ -195,9 +230,8 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
           title={t("common:serverChatForkedTooltip", {
             chatId: String(chat.parent_conversation_id).slice(0, 8),
             defaultValue: "Forked from chat {{chatId}}"
-          })}
-        >
-          <span className="inline-flex items-center gap-1">
+          })}>
+          <span className="inline-flex max-w-full items-center gap-1">
             <GitBranch className="size-3" />
             <span>
               {t("common:serverChatForkedLabel", {
@@ -218,104 +252,95 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
   }
 
   const handleRowClick = React.useCallback(() => {
+    if (disabled || (selectionMode && readOnly)) return
     if (selectionMode && onToggleSelected) {
       onToggleSelected(chat.id)
       return
     }
     onSelectChat(chat)
-  }, [selectionMode, onToggleSelected, chat, onSelectChat])
+  }, [disabled, readOnly, selectionMode, onToggleSelected, chat, onSelectChat])
 
   return (
     <div
       className={cn(
-        "flex py-2 px-2 items-center gap-3 relative rounded-md truncate group transition-opacity duration-300 ease-in-out border",
+        "group relative flex min-w-0 items-center gap-2 rounded-md px-2 py-2",
         isActive
-          ? "bg-surface2 border-border-strong text-text"
-          : "bg-surface text-text border-border hover:bg-surface2",
-        selectionMode && isSelected && "border-primary/40"
-      )}
-    >
+          ? "bg-surface text-text"
+          : "text-text hover:bg-surface",
+        selectionMode && isSelected && "bg-surface ring-1 ring-inset ring-primary/40"
+      )}>
       {selectionMode ? (
         <input
           type="checkbox"
+          disabled={disabled || readOnly}
           checked={isSelected}
           onChange={() => onToggleSelected?.(chat.id)}
           onClick={(event) => event.stopPropagation()}
           className="size-3 rounded border-border text-primary accent-primary"
-          aria-label={t("sidepanel:multiSelect.toggle", "Toggle selection")}
+          aria-label={`${t("sidepanel:multiSelect.toggle", "Toggle selection")}: ${chat.title} · ${reference}`}
         />
       ) : null}
       <button
         className="flex flex-col overflow-hidden flex-1 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-1 rounded"
         onClick={handleRowClick}
-      >
-        <span className="truncate text-sm" title={chat.title}>
-          {chat.title}
+        aria-label={showReference ? `${chat.title} · ${reference}` : undefined}
+        disabled={disabled || (selectionMode && readOnly)}>
+        <span className="flex w-full min-w-0 items-center gap-1.5">
+          <span className="truncate text-sm font-medium" title={chat.title}>{chat.title}</span>
+          {isPinned && <Pin role="img" aria-label={t("common:pinned", { defaultValue: "Pinned" })} className="size-3 shrink-0 text-text-muted" />}
         </span>
-        <div className="flex flex-wrap items-center gap-2 text-xs text-text-subtle mt-1">
-          <ChatStateBadge state={chat.state} />
+        {chat.match_snippet && (
+          // A search matched what was said in this chat: show it, since the title alone does not explain the hit.
+          <span
+            className="truncate text-xs text-text-subtle"
+            title={chat.match_snippet}
+            data-testid="server-chat-match-snippet"
+          >
+            {chat.match_snippet}
+          </span>
+        )}
+        <div
+          data-testid="server-chat-row-meta"
+          className="mt-1 flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-muted">
+          <ChatStateBadge state={chat.state} t={t} />
           {lastModifiedLabel && (
             <span
-              className="text-[11px] text-text-subtle"
-              title={lastModifiedTitle}
-            >
-              {t("common:updated", { defaultValue: "Updated" })}{" "}
+              className="shrink-0 text-xs text-text-muted"
+              title={`${t("common:updated", { defaultValue: "Updated" })}: ${lastModifiedTitle}`}>
               {lastModifiedLabel}
             </span>
           )}
-          {chat.topic_label && (
+          {topicLabel && (
             <span
-              className="truncate max-w-[12rem]"
-              title={String(chat.topic_label)}
-            >
-              {String(chat.topic_label)}
+              className="max-w-full truncate"
+              title={topicLabel}>
+              {topicLabel}
             </span>
           )}
         </div>
-        <span className="flex items-center gap-1 text-xs text-text-subtle">
-          {renderSourceInfo()}
-        </span>
+        <span className="flex w-full min-w-0 text-xs text-text-muted">{renderSourceInfo()}</span>
+        {showReference && (
+          <span className="text-xs text-text-subtle">{reference}</span>
+        )}
       </button>
       {!selectionMode && !readOnly && (
-        <div className="flex flex-col items-center gap-1">
-          {!isTrashView && (
-            <Tooltip title={isPinned ? t("common:unpin") : t("common:pin")}>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  onTogglePinned(chat.id)
-                }}
-                className="rounded p-1 text-text-subtle hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-focus)] h-7 w-7 sm:min-w-0 sm:min-h-0"
-                aria-label={isPinned ? t("common:unpin") : t("common:pin")}
-                aria-pressed={isPinned}
-              >
-                {isPinned ? (
-                  <PinOff className="size-3" />
-                ) : (
-                  <Pin className="size-3" />
-                )}
-              </button>
-            </Tooltip>
-          )}
+        <div className="shrink-0">
           <Dropdown
             menu={{ items: menuItems, id: `server-chat-actions-${chat.id}` }}
             trigger={["click"]}
             placement="bottomRight"
             open={openMenuFor === chat.id}
-            onOpenChange={(open) => setOpenMenuFor(open ? chat.id : null)}
-          >
+            onOpenChange={(open) => setOpenMenuFor(open ? chat.id : null)}>
             <button
               type="button"
               onClick={(event) => event.stopPropagation()}
-              className="rounded p-1 text-text-subtle hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-focus)] h-7 w-7 sm:min-w-0 sm:min-h-0"
+              className="rounded p-1 text-text-subtle hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus h-9 w-9 sm:min-w-0 sm:min-h-0"
               aria-label={`${t("option:header.moreActions", {
                 defaultValue: "More actions"
               })}: ${chat.title}`}
               aria-haspopup="menu"
               aria-expanded={openMenuFor === chat.id}
-              aria-controls={`server-chat-actions-${chat.id}`}
-            >
+              aria-controls={`server-chat-actions-${chat.id}`}>
               <MoreHorizontal className="size-3.5" />
             </button>
           </Dropdown>

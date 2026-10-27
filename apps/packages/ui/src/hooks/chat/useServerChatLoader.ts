@@ -1,3 +1,4 @@
+import { readSavedRoleplayPresentation } from "@/services/tldw/roleplay-resume"
 import { useHistorySelectionContext } from "./useHistorySelection"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { excludeLocalRagDiagnostics } from "@/utils/local-rag-diagnostic"
@@ -6,6 +7,7 @@ import React from "react"
 import { formatToMessage } from "@/db/dexie/helpers"
 import { shallow } from "zustand/shallow"
 import type { TFunction } from "i18next"
+import { notifyServerChatLoadFailure } from "@/hooks/chat/server-chat-load-failure-notice"
 import { useChatBaseState } from "@/hooks/chat/useChatBaseState"
 import { useStoreMessageOption } from "@/store/option"
 import type { Message } from "@/store/option"
@@ -39,7 +41,7 @@ import {
 import { isTrackedCharacterChatSource } from "@/utils/character-chat-session"
 
 type NotificationApi = {
-  error: (payload: { message: string; description?: string }) => void
+  error: (payload: { message: string; description?: string; key?: string }) => void
 }
 
 type UseServerChatLoaderOptions = {
@@ -193,9 +195,10 @@ export const fetchAllServerChatMessages = async (
       signal: options?.signal
     })
     options?.signal?.throwIfAborted()
-    if (!Array.isArray(batch) || batch.length === 0) {
-      break
-    }
+    if (!Array.isArray(batch)) throw new Error("The saved message page could not be verified.")
+    if (batch.length === 0) break
+    if (page === maxPages - 1 && batch.length >= limit)
+      throw new Error("The saved conversation reached the pagination limit. Its complete history could not be verified.")
     imageCharacters += batch.reduce((total, message) => total + (message.images || []).reduce((size, image) => size + image.length, 0), 0)
     if (imageCharacters > SERVER_CHAT_IMAGES_MAX_ENCODED_CHARS) {
       throw new Error("Saved chat attachments exceed the image history limit. Local work has been retained.")
@@ -831,13 +834,26 @@ export const useServerChatLoader = ({
             if (usePlaygroundSessionStore.getState().serverChatSelectionIntent !== selectionIntent) return
             handledSelectionIntent.current = selectionIntent
             const control = selectionRef.current
+            let accepted = !selectionIntent?.onLoaded
+            let selectionAccepted = false
             if (control && !await control.loadConversation({ serverChatId, scope, temporary: temporaryChat,
-              isCurrent: () => !controller.signal.aborted &&
-                usePlaygroundSessionStore.getState().serverChatSelectionIntent === selectionIntent &&
+              isCurrent: () => selectionIntent?.isCurrent?.() !== false && !controller.signal.aborted &&
+                (usePlaygroundSessionStore.getState().serverChatSelectionIntent === selectionIntent ||
+                  (selectionAccepted && usePlaygroundSessionStore.getState().serverChatSelectionIntent === null)) &&
                 useStoreMessageOption.getState().serverChatId === serverChatId
-            })) return
+            }, null, receipt => { accepted = selectionIntent?.onLoaded?.(receipt) ?? true })) return
             selectionCurrent = control?.fence() || (() => true)
+            const selected = control?.getCurrent()
+            if (!accepted && selected?.owner?.kind === "native" && selected.owner.conversation_id === serverChatId && selected.view) {
+              accepted = selectionIntent?.onLoaded?.({ owner: selected.owner, view: selected.view }) ?? false
+            }
+            // Temporary history is a display-only read; H1 supplies no owned receipt.
+            if ((!accepted && !temporaryChat) || selectionIntent?.isCurrent?.() === false) return
             if (controller.signal.aborted || usePlaygroundSessionStore.getState().serverChatSelectionIntent !== selectionIntent) return
+            // The qualified navigation has committed. Retire its single-use
+            // callback while preserving this load's H1 lease until a new intent.
+            selectionAccepted = true
+            usePlaygroundSessionStore.getState().completeServerChatSelection(selectionIntent)
           } else if (selectionRef.current?.canAutomaticallyLoad?.() === false) return
           setIsLoading(true)
           setServerChatLoadState("loading")
@@ -872,6 +888,7 @@ export const useServerChatLoader = ({
           if (forkChild && (forkOwner?.kind !== "native" || !forkOwner.validate_lease())) return
           if (!forkChild) await tldwClient.initialize().catch(() => null)
 
+          let savedRoleplay = useStoreMessageOption.getState().serverChatRoleplaySetup
           let assistantName = "Assistant"
           let chatTitle = serverChatTitle || ""
           let characterId = serverChatCharacterId ?? null
@@ -880,84 +897,82 @@ export const useServerChatLoader = ({
           let personaMemoryMode = serverChatPersonaMemoryMode
           let restoreAssistantSelection = true
 
+          // Required identity errors use the loader failure path; profile enrichment stays optional.
           if (!serverChatMetaLoaded) {
-            try {
-              const chat = await tldwClient.getChat(
-                serverChatId,
-                forkOwner?.kind === "native"
-                  ? { scope: forkOwner.scope, requestScope: forkOwner.request_scope, signal: snapshot.scopeSignal }
-                  : { scope, signal: snapshot.scopeSignal, requestScope: snapshot.requestScope }
-              )
-              if (!canCommitCurrentLoad()) {
-                return
-              }
-              const validatedServerChatId = validateCachedServerChatId({
-                cachedId: serverChatId,
-                serverScope: {
-                  scope_type: String((chat as any)?.scope_type || ""),
-                  workspace_id:
-                    typeof (chat as any)?.workspace_id === "string"
-                      ? (chat as any).workspace_id
-                      : null
-                },
-                expectedScope: scope || { type: "global" }
-              })
-              if (!validatedServerChatId) {
-                if (selectionRef.current) {
-                  await rejectCurrentOwner("server_chat_scope_mismatch")
-                } else {
-                setMessages([])
-                setHistory([])
-                setServerChatTitle(null)
-                setIsLoading(false)
-                setServerChatId(null)
-                }
-                return
-              }
-              const meta = chat as unknown as Record<string, unknown>
-              chatTitle = String(meta?.title || chatTitle || "")
-              const resolvedAssistantIdentity =
-                resolveServerChatAssistantIdentity(meta)
-              assistantKind = resolvedAssistantIdentity.assistantKind
-              assistantId = resolvedAssistantIdentity.assistantId
-              characterId = resolvedAssistantIdentity.characterId
-              personaMemoryMode = resolvedAssistantIdentity.personaMemoryMode
-              restoreAssistantSelection = getSelectedAssistantOperationRevision() === ownedSelectionRevision
-              setServerChatTitle(chatTitle || "")
-              setServerChatCharacterId(characterId)
-              setServerChatAssistantKind(assistantKind)
-              setServerChatAssistantId(assistantId)
-              setServerChatPersonaMemoryMode(personaMemoryMode)
-              setServerChatState(
-                normalizeConversationState(
-                  (meta?.state as string | null | undefined) ??
-                    (meta?.conversation_state as string | null | undefined)
-                )
-              )
-              setServerChatVersion(
-                typeof meta?.version === "number" ? meta.version : null
-              )
-              setServerChatTopic(
-                typeof meta?.topic_label === "string"
-                  ? meta.topic_label
-                  : null
-              )
-              setServerChatClusterId(
-                typeof meta?.cluster_id === "string" ? meta.cluster_id : null
-              )
-              setServerChatSource(
-                typeof meta?.source === "string" ? meta.source : null
-              )
-              setServerChatExternalRef(
-                typeof meta?.external_ref === "string"
-                  ? meta.external_ref
-                  : null
-              )
-              setServerChatMetaLoaded(true)
-            } catch (error) {
-              if (isMissingServerChatReferenceError(error) || isDeniedServerChatError(error)) throw error
-              // ignore metadata failures; still try to load messages
+            const chat = await tldwClient.getChat(
+              serverChatId,
+              forkOwner?.kind === "native"
+                ? { scope: forkOwner.scope, requestScope: forkOwner.request_scope, signal: snapshot.scopeSignal }
+                : { scope, signal: snapshot.scopeSignal, requestScope: snapshot.requestScope }
+            )
+            if (!canCommitCurrentLoad()) {
+              return
             }
+            const validatedServerChatId = validateCachedServerChatId({
+              cachedId: serverChatId,
+              serverScope: {
+                scope_type: String((chat as any)?.scope_type || ""),
+                workspace_id:
+                  typeof (chat as any)?.workspace_id === "string"
+                    ? (chat as any).workspace_id
+                    : null
+              },
+              expectedScope: scope || { type: "global" }
+            })
+            if (!validatedServerChatId) {
+              if (selectionRef.current) {
+                await rejectCurrentOwner("server_chat_scope_mismatch")
+              } else {
+              setMessages([])
+              setHistory([])
+              setServerChatTitle(null)
+              setIsLoading(false)
+              setServerChatId(null)
+              }
+              return
+            }
+            savedRoleplay = readSavedRoleplayPresentation(chat)
+            useStoreMessageOption.getState().setServerChatRoleplaySetup(savedRoleplay)
+            const meta = chat as unknown as Record<string, unknown>
+            chatTitle = String(meta?.title || chatTitle || "")
+            const resolvedAssistantIdentity =
+              resolveServerChatAssistantIdentity(meta)
+            assistantKind = resolvedAssistantIdentity.assistantKind
+            assistantId = resolvedAssistantIdentity.assistantId
+            characterId = resolvedAssistantIdentity.characterId
+            personaMemoryMode = resolvedAssistantIdentity.personaMemoryMode
+            restoreAssistantSelection = getSelectedAssistantOperationRevision() === ownedSelectionRevision
+            setServerChatTitle(chatTitle || "")
+            setServerChatCharacterId(characterId)
+            setServerChatAssistantKind(assistantKind)
+            setServerChatAssistantId(assistantId)
+            setServerChatPersonaMemoryMode(personaMemoryMode)
+            setServerChatState(
+              normalizeConversationState(
+                (meta?.state as string | null | undefined) ??
+                  (meta?.conversation_state as string | null | undefined)
+              )
+            )
+            setServerChatVersion(
+              typeof meta?.version === "number" ? meta.version : null
+            )
+            setServerChatTopic(
+              typeof meta?.topic_label === "string"
+                ? meta.topic_label
+                : null
+            )
+            setServerChatClusterId(
+              typeof meta?.cluster_id === "string" ? meta.cluster_id : null
+            )
+            setServerChatSource(
+              typeof meta?.source === "string" ? meta.source : null
+            )
+            setServerChatExternalRef(
+              typeof meta?.external_ref === "string"
+                ? meta.external_ref
+                : null
+            )
+            setServerChatMetaLoaded(true)
           }
 
           const deferredAssistantPresentationPromise = (async () => {
@@ -970,6 +985,9 @@ export const useServerChatLoader = ({
                   historyId: null,
                   serverChatId,
                   scope,
+                  requestScope: snapshot!.requestScope,
+                  signal: snapshot!.scopeSignal,
+                  validate_lease: canCommitCurrentLoad,
                   allowScratchFallback: false
                 })
               } catch {
@@ -977,6 +995,12 @@ export const useServerChatLoader = ({
               }
             }
 
+            if (savedRoleplay && assistantKind === "character") {
+              if (!canCommitCurrentLoad()) return null
+              const selection = characterToAssistantSelection(savedRoleplay)
+              if (!(await applyOwnedAssistantSelection(selection))) return null
+              return { assistantName: savedRoleplay.name, assistantAvatarUrl: null }
+            }
             if (assistantKind === "persona" && assistantId) {
               try {
                 const persona = await tldwClient.getPersonaProfile(assistantId, {
@@ -1201,6 +1225,10 @@ export const useServerChatLoader = ({
                   await syncChatSettingsForServerChat({
                     historyId: localHistoryId,
                     serverChatId,
+                    scope,
+                    requestScope: snapshot.requestScope,
+                    signal: snapshot.scopeSignal,
+                    validate_lease: canCommitCurrentLoad,
                     allowScratchFallback: false
                   })
                 } catch {
@@ -1270,11 +1298,10 @@ export const useServerChatLoader = ({
                   "Failed to load server chat. Check your connection and try again."
               })
             setServerChatLoadState("failed")
+            // Kept as the panel's technical detail, not shown as the message.
             setServerChatLoadError(description)
-            notification.error({
-              message: t("error", { defaultValue: "Error" }),
-              description
-            })
+            notifyServerChatLoadFailure({ notification, t,
+              messagesShown: useStoreMessageOption.getState().messages.length })
           }
         } finally {
           if (useStoreMessageOption.getState().serverChatId === serverChatId) setIsLoading(false)

@@ -16,6 +16,7 @@ async def test_stream_limits_shape(monkeypatch):
         _ = user_id
         return {
             "daily_minutes": 30.0,
+            "monthly_minutes": 100.0,
             "concurrent_streams": 1,
             "concurrent_jobs": 1,
             "max_file_size_mb": 25,
@@ -25,9 +26,9 @@ async def test_stream_limits_shape(monkeypatch):
         _ = user_id
         return 5.0
 
-    async def _active_streams_count(user_id: int):
+    async def _get_monthly_minutes_used(user_id: int):
         _ = user_id
-        return 0
+        return 20.0
 
     async def _get_user_tier(user_id: int):
         _ = user_id
@@ -35,7 +36,7 @@ async def test_stream_limits_shape(monkeypatch):
 
     monkeypatch.setattr(audio_streaming, "_get_limits_for_user", _get_limits_for_user)
     monkeypatch.setattr(audio_streaming, "_get_daily_minutes_used", _get_daily_minutes_used)
-    monkeypatch.setattr(audio_streaming, "_active_streams_count", _active_streams_count)
+    monkeypatch.setattr(audio_streaming, "_get_monthly_minutes_used", _get_monthly_minutes_used)
     monkeypatch.setattr(audio_streaming, "_get_user_tier", _get_user_tier)
 
     scope = {
@@ -63,7 +64,9 @@ async def test_stream_limits_shape(monkeypatch):
     assert "limits" in data and isinstance(data["limits"], dict)
     assert "used_today_minutes" in data
     assert "remaining_minutes" in data  # may be None for unlimited tiers
-    assert "active_streams" in data and isinstance(data["active_streams"], int)
+    assert data["active_streams"] is None
+    assert data["used_month_minutes"] == 20.0
+    assert data["remaining_month_minutes"] == 80.0
     assert "can_start_stream" in data and isinstance(data["can_start_stream"], bool)
 
     # Limits structure
@@ -77,6 +80,7 @@ async def test_stream_limits_shape(monkeypatch):
     assert isinstance(limits["concurrent_streams"], int)
     assert isinstance(limits["concurrent_jobs"], int)
     assert isinstance(limits["max_file_size_mb"], int)
+    assert data["can_start_stream"] is True
 
 
 @pytest.mark.unit
@@ -91,10 +95,10 @@ def test_stream_limits_off_path_through_real_app(monkeypatch):
         _ = user_id
         return 0.0
 
-    async def _active_streams_count(user_id: int):
-        """An active-streams-count stand-in reporting none active."""
+    async def _get_monthly_minutes_used(user_id: int):
+        """A monthly-minutes-used stand-in reporting none used."""
         _ = user_id
-        return 0
+        return 0.0
 
     async def _get_user_tier(user_id: int):
         """A tier-lookup stand-in reporting the free tier."""
@@ -102,7 +106,7 @@ def test_stream_limits_off_path_through_real_app(monkeypatch):
         return "free"
 
     monkeypatch.setattr(audio_streaming, "_get_daily_minutes_used", _get_daily_minutes_used)
-    monkeypatch.setattr(audio_streaming, "_active_streams_count", _active_streams_count)
+    monkeypatch.setattr(audio_streaming, "_get_monthly_minutes_used", _get_monthly_minutes_used)
     monkeypatch.setattr(audio_streaming, "_get_user_tier", _get_user_tier)
     # _get_limits_for_user is intentionally left unpatched: it must hit the real
     # get_limits_for_user() and return the quotas-off unlimited dict.

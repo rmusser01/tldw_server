@@ -1,7 +1,7 @@
 """Would-have-caught regression tests for the test-isolation defect class.
 
 Each test is a minimized reproducer of a specific process-global leak from
-audits/2026-07-04-test-suite-audit-round2.md (RA5). They assert that the
+Docs/Audit/2026-07-04-test-suite-audit-round2.md (RA5). They assert that the
 *reset hook* restores isolation — so removing/weakening that hook makes the
 test fail (the "would have caught it" property).
 

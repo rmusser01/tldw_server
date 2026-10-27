@@ -29,6 +29,8 @@ import {
 } from "./chat-share-links"
 import { getHeaderActionPolicy } from "./header-action-policy"
 import type { NotificationLifecycleState } from "@/services/notification-lifecycle"
+import { useServerChatSaveStatus } from "@/hooks/chat/useServerChatSaveStatus"
+import { resolveChatPersistenceKind } from "@/utils/chat-persistence-status"
 
 type Props = {
   onToggleSidebar?: () => void
@@ -61,8 +63,17 @@ export const Header: React.FC<Props> = ({
   )
   const hostedMode = isHostedTldwDeployment()
   const { mode: themeMode, toggleDarkMode } = useDarkMode()
-  const { clearChat, historyId, temporaryChat, setTemporaryChat, serverChatId, effectiveAssistantState } =
+  const { clearChat, historyId, temporaryChat, setTemporaryChat, serverChatId, serverChatLoadState, messages, effectiveAssistantState } =
     useMessageOption()
+  // The session badge reports acknowledged persistence, not connectivity (CS-03).
+  const serverChatSaveStatus = useServerChatSaveStatus(serverChatId)
+  const persistenceKind = resolveChatPersistenceKind({
+    temporaryChat,
+    serverChatId,
+    serverSaveStatus: serverChatSaveStatus,
+    // A chat that failed to open must not read "Saved" (CS-06).
+    serverChatNotLoaded: serverChatLoadState === "failed" && !messages?.length
+  })
   const [selectedCharacter, setSelectedCharacter] = useSelectedCharacter<Character | null>(
     null
   )
@@ -149,7 +160,6 @@ export const Header: React.FC<Props> = ({
   }, [clearChat, setSelectedCharacter, setTemporaryChat])
 
   const startCharacterChat = React.useCallback(() => {
-    setTemporaryChat(false)
     const characterId = selectedCharacter?.id ?? null
     if (!isChatRoute) {
       navigate(buildCharacterChatPath({ characterId }))
@@ -170,7 +180,7 @@ export const Header: React.FC<Props> = ({
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("tldw:focus-composer"))
     }
-  }, [isChatRoute, navigate, selectedCharacter, setTemporaryChat])
+  }, [isChatRoute, navigate, selectedCharacter])
 
   const refreshShareLinks = React.useCallback(async () => {
     if (!serverChatId) {
@@ -391,6 +401,7 @@ export const Header: React.FC<Props> = ({
         }
         showChatTitle={headerActionPolicy.showChatTitle}
         showSessionModeBadge={headerActionPolicy.showSessionModeBadge}
+        persistenceKind={persistenceKind}
         shortcutsExpanded={headerShortcutsExpanded}
         onToggleShortcuts={toggleHeaderShortcuts}
         commandKeyLabel={cmdKey}

@@ -19,6 +19,7 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     get_usage_event_logger,
 )
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.schemas.media_request_models import WebScrapingRequest
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.Web_Scraping.summary_prompts import resolve_web_summary_overrides
@@ -72,6 +73,10 @@ async def process_web_scraping_endpoint(
     the legacy behavior while routing through a local resolver seam so tests
     can patch deterministic task resolution.
     """
+    if payload.summarize_checkbox:
+        # Usage quotas (LLM usage accounting spec §4a), before any page is fetched. Summaries
+        # default to a provider when api_name is empty, so the checkbox alone means LLM work.
+        await enforce_llm_quota(current_user.id)
     try:
         # Usage logging is best-effort; never fail the request.
         with contextlib.suppress(Exception):

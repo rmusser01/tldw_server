@@ -3,7 +3,22 @@ import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { App, message } from "antd"
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query"
 import ServerAdminPage from "../ServerAdminPage"
+import { createAdminQueryClient } from "../AdminQueryProvider"
+
+/**
+ * Render the page under a fresh admin query client so each test owns its
+ * cache (B-S4): system stats now flow through react-query.
+ */
+const adminQueryClients: QueryClient[] = []
+const renderPage = (ui: React.ReactElement) => {
+  const client = createAdminQueryClient()
+  adminQueryClients.push(client)
+  return render(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+  )
+}
 
 const apiMock = vi.hoisted(() => ({
   getConfig: vi.fn(),
@@ -121,7 +136,7 @@ describe("ServerAdminPage design-system states", () => {
   const docsUrl = "https://github.com/rmusser01/tldw_server#documentation--resources"
 
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     apiMock.getConfig.mockReset()
     mockMatchMedia()
     resolveBaseAdminCalls()
@@ -129,20 +144,48 @@ describe("ServerAdminPage design-system states", () => {
   })
 
   afterEach(() => {
+    adminQueryClients.splice(0).forEach(client => client.clear())
     vi.restoreAllMocks()
   })
 
   it("loads multi-user creation controls under Strict Mode", async () => {
     apiMock.getConfig.mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user" })
-    render(<React.StrictMode><ServerAdminPage /></React.StrictMode>)
+    let resolveRetired!: (value: unknown) => void
+    const currentStats = {
+      users: { total: 41, active: 2, admins: 1, verified: 2, new_last_30d: 0 },
+      storage: {}, sessions: {}
+    }
+    apiMock.getSystemStats
+      .mockImplementationOnce(() => new Promise(resolve => { resolveRetired = resolve }))
+      .mockResolvedValueOnce(currentStats)
+    await act(async () => {
+      renderPage(<React.StrictMode><ServerAdminPage /></React.StrictMode>)
+    })
     expect(await screen.findByRole("button", { name: "Create user" })).toBeVisible()
-    expect(apiMock.getSystemStats).toHaveBeenCalledOnce()
+    await waitFor(() => expect(apiMock.getSystemStats).toHaveBeenCalledTimes(2))
+    const [retired, current] = apiMock.getSystemStats.mock.calls.map(([options]) => options)
+    const configSnapshot = {
+      serverUrl: "http://127.0.0.1:8000", authMode: "multi-user",
+      apiKey: undefined, accessToken: undefined, refreshToken: undefined,
+      orgId: undefined, authSource: undefined
+    }
+    for (const options of [retired, current]) {
+      expect(options).toEqual({ timeoutMs: 10000, configSnapshot, abortSignal: expect.any(AbortSignal) })
+    }
+    expect(retired.abortSignal.aborted).toBe(true)
+    expect(current.abortSignal).not.toBe(retired.abortSignal)
+    expect(current.abortSignal.aborted).toBe(false)
+    const statsCard = (await screen.findByText("System statistics")).closest(".ant-card") as HTMLElement
+    expect(await within(statsCard).findByText("41")).toBeVisible()
+    await act(async () => { resolveRetired({ ...currentStats, users: { total: 999 } }) })
+    expect(within(statsCard).getByText("41")).toBeVisible()
+    expect(within(statsCard).queryByText("999")).not.toBeInTheDocument()
   })
 
   it("does not start dashboard requests when a config lookup resolves after unmount", async () => {
     let resolveConfig!: (value: unknown) => void
     apiMock.getConfig.mockImplementation(() => new Promise((resolve) => { resolveConfig = resolve }))
-    const view = render(<ServerAdminPage />)
+    const view = renderPage(<ServerAdminPage />)
     view.unmount()
     const callsBeforeResolution = apiMock.getSystemStats.mock.calls.length
     await act(async () => {
@@ -158,7 +201,7 @@ describe("ServerAdminPage design-system states", () => {
     )
     apiMock.createAdminUser.mockResolvedValue({ id: 22, username: "alice", role: "user" })
     const staticSuccess = vi.spyOn(message, "success")
-    render(<App><ServerAdminPage /></App>)
+    renderPage(<App><ServerAdminPage /></App>)
     await waitFor(() => expect(apiMock.getConfig).toHaveBeenCalledOnce())
     await act(async () => {
       resolveConfig({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user" })
@@ -181,7 +224,7 @@ describe("ServerAdminPage design-system states", () => {
   it("keeps create-user errors inside the modal without losing the form", async () => {
     apiMock.getConfig.mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user" })
     apiMock.createAdminUser.mockRejectedValue(new Error("Username already exists"))
-    render(<ServerAdminPage />)
+    renderPage(<ServerAdminPage />)
     fireEvent.click(await screen.findByRole("button", { name: "Create user" }))
     const dialog = await screen.findByRole("dialog")
     fireEvent.change(within(dialog).getByLabelText("Username"), { target: { value: "alice" } })
@@ -198,7 +241,7 @@ describe("ServerAdminPage design-system states", () => {
       Object.assign(new Error("Request failed: 403 Forbidden"), { status: 403 })
     )
 
-    render(<ServerAdminPage />)
+    renderPage(<ServerAdminPage />)
 
     expect(await screen.findByText("Permission denied")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Request access" }))
@@ -215,7 +258,7 @@ describe("ServerAdminPage design-system states", () => {
       Object.assign(new Error("Request failed: 404 Not Found"), { status: 404 })
     )
 
-    render(<ServerAdminPage />)
+    renderPage(<ServerAdminPage />)
 
     expect(await screen.findByText("Blocked")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Review server configuration" }))
@@ -241,7 +284,9 @@ describe("ServerAdminPage design-system states", () => {
         sessions: { active: 2, unique_users: 2 }
       })
 
-    render(<ServerAdminPage />)
+    await act(async () => {
+      renderPage(<ServerAdminPage />)
+    })
 
     const errorLabel = await screen.findByText("Error")
     expect(errorLabel).toBeInTheDocument()
@@ -265,9 +310,10 @@ describe("ServerAdminPage design-system states", () => {
       pages: 0
     })
 
-    render(<ServerAdminPage />)
+    renderPage(<ServerAdminPage />)
 
-    expect(await screen.findByText("Empty")).toBeInTheDocument()
+    const budgetMessage = await screen.findByText("Select a user to inspect media ingestion limits and usage.")
+    expect(within(budgetMessage.closest("section") as HTMLElement).getByText("Empty")).toBeInTheDocument()
     expect(
       screen.getByText("Select a user to inspect media ingestion limits and usage.")
     ).toBeInTheDocument()
@@ -276,7 +322,7 @@ describe("ServerAdminPage design-system states", () => {
   it("renders user-load errors as an error state with retry, without a false empty panel", async () => {
     apiMock.listAdminUsers.mockRejectedValueOnce(new Error("Users exploded"))
 
-    render(<ServerAdminPage />)
+    renderPage(<ServerAdminPage />)
 
     expect(await screen.findByText("Unable to load users")).toBeInTheDocument()
     expect(screen.getByText("Users exploded")).toBeInTheDocument()
@@ -292,7 +338,7 @@ describe("ServerAdminPage design-system states", () => {
   it("renders role-load errors through the design-system Alert primitive", async () => {
     apiMock.listAdminRoles.mockRejectedValueOnce(new Error("Roles exploded"))
 
-    render(<ServerAdminPage />)
+    renderPage(<ServerAdminPage />)
 
     const alert = await expectDesignSystemAlertForTitle("Unable to load roles")
     expect(alert).toHaveTextContent("Roles exploded")
@@ -303,7 +349,18 @@ describe("ServerAdminPage design-system states", () => {
       new Error("Budget exploded")
     )
 
-    render(<ServerAdminPage />)
+    renderPage(<ServerAdminPage />)
+
+    // Diagnostics only fire after an explicit user selection (B-S5); the
+    // mousedown handler lives on the `.ant-select` root in antd v6.
+    const mediaBudgetCard = (await screen.findByText("Media ingestion budget")).closest(
+      ".ant-card"
+    ) as HTMLElement
+    const userSelect = (
+      within(mediaBudgetCard).getByText("User").closest(".ant-select") as HTMLElement
+    )
+    fireEvent.mouseDown(userSelect)
+    fireEvent.click(await screen.findByText("admin (#11)"))
 
     const alert = await expectDesignSystemAlertForTitle(
       "Unable to load media ingestion budget diagnostics"
@@ -311,35 +368,52 @@ describe("ServerAdminPage design-system states", () => {
     expect(alert).toHaveTextContent("Budget exploded")
   })
 
-  it("resets a user's password with a generated secret and reveals it once (#2918)", async () => {
-    apiMock.resetAdminUserPassword.mockResolvedValue({
-      user_id: 7,
-      force_password_change: true,
-      message: "ok"
-    })
+  // This test drives the heaviest admin page through a full mount plus two
+  // table interactions (popconfirm + reveal modal). That flow legitimately
+  // takes >5s of wall time on loaded CI runners (measured 8.4s on a loaded
+  // host: ~3.7s jsdom mount alone), so vitest's 5s default killed it
+  // mid-flow and read as a flake. The interaction itself is deterministic.
+  it(
+    "resets a user's password with a generated secret and reveals it once (#2918)",
+    async () => {
+      apiMock.resetAdminUserPassword.mockResolvedValue({
+        user_id: 7,
+        force_password_change: true,
+        message: "ok"
+      })
 
-    render(<ServerAdminPage />)
+      renderPage(<ServerAdminPage />)
 
-    const rowButton = (
-      await screen.findAllByRole("button", { name: "Reset password" })
-    )[0]
-    fireEvent.click(rowButton)
-    // Popconfirm opens with a verb-labeled confirm of the same name.
-    const confirmButtons = await screen.findAllByRole("button", {
-      name: "Reset password"
-    })
-    fireEvent.click(confirmButtons[confirmButtons.length - 1])
+      const rowButton = (
+        await screen.findAllByRole("button", { name: "Reset password" })
+      )[0]
+      fireEvent.click(rowButton)
+      // Popconfirm opens with a verb-labeled confirm of the same name. Wait
+      // for it explicitly: findAllByRole resolves as soon as the row button
+      // exists, so grabbing "the last match" without this could re-click the
+      // row button if the popconfirm portal has not landed yet.
+      await waitFor(() => {
+        expect(
+          screen.getAllByRole("button", { name: "Reset password" }).length
+        ).toBeGreaterThan(1)
+      })
+      const confirmButtons = screen.getAllByRole("button", {
+        name: "Reset password"
+      })
+      fireEvent.click(confirmButtons[confirmButtons.length - 1])
 
-    await waitFor(() => {
-      expect(apiMock.resetAdminUserPassword).toHaveBeenCalledTimes(1)
-    })
-    const [, payload] = apiMock.resetAdminUserPassword.mock.calls[0]
-    expect(payload.temporary_password.length).toBeGreaterThanOrEqual(10)
-    expect(payload.reason.length).toBeGreaterThanOrEqual(8)
-    expect(payload.force_password_change).toBe(true)
+      await waitFor(() => {
+        expect(apiMock.resetAdminUserPassword).toHaveBeenCalledTimes(1)
+      })
+      const [, payload] = apiMock.resetAdminUserPassword.mock.calls[0]
+      expect(payload.temporary_password.length).toBeGreaterThanOrEqual(10)
+      expect(payload.reason.length).toBeGreaterThanOrEqual(8)
+      expect(payload.force_password_change).toBe(true)
 
-    // The generated secret is revealed exactly once for the admin to share.
-    const reveal = await screen.findByTestId("admin-reset-password-result")
-    expect(reveal).toHaveTextContent(payload.temporary_password)
-  })
+      // The generated secret is revealed exactly once for the admin to share.
+      const reveal = await screen.findByTestId("admin-reset-password-result")
+      expect(reveal).toHaveTextContent(payload.temporary_password)
+    },
+    20000
+  )
 })

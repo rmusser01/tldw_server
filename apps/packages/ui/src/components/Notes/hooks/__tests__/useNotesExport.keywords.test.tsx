@@ -6,6 +6,8 @@ import { bgRequest } from "@/services/background-proxy";
 vi.mock("@/services/background-proxy", () => ({ bgRequest: vi.fn() }));
 
 let exported: Blob;
+// Larger than one export page, so tags must survive every page.
+const LIBRARY_SIZE = 150;
 beforeEach(() => {
   vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
     exported = blob as Blob;
@@ -13,22 +15,22 @@ beforeEach(() => {
   });
   vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  // Mirrors list_notes: limit/offset paging, pagination.total, and keywords
+  // only when include_keywords=true.
   vi.mocked(bgRequest).mockImplementation(async ({ path }) => {
     const query = new URL(String(path), "https://notes.test").searchParams;
-    const page = Number(query.get("page"));
-    return {
-      items: [
-        {
-          id: page,
-          title: `Note ${page}`,
-          content: "Body",
-          ...(query.get("include_keywords") === "true"
-            ? { keywords: [`tag-${page}`] }
-            : {}),
-        },
-      ],
-      pagination: { total_pages: 2 },
-    };
+    const limit = Number(query.get("limit") ?? 100);
+    const offset = Number(query.get("offset") ?? 0);
+    const ids = Array.from({ length: LIBRARY_SIZE }, (_, index) => index + 1);
+    const items = ids.slice(offset, offset + limit).map((id) => ({
+      id,
+      title: `Note ${id}`,
+      content: "Body",
+      ...(query.get("include_keywords") === "true"
+        ? { keywords: [`tag-${id}`] }
+        : {}),
+    }));
+    return { items, pagination: { limit, offset, total: LIBRARY_SIZE } };
   });
 });
 afterEach(() => vi.restoreAllMocks());
@@ -45,8 +47,8 @@ const deps = (): UseNotesExportDeps => ({
   listMode: "active",
   query: "",
   effectiveKeywordTokens: [],
-  total: 2,
-  filteredCount: 2,
+  total: LIBRARY_SIZE,
+  filteredCount: LIBRARY_SIZE,
   hasActiveFilters: false,
   selectedBulkNotes: [],
   fetchFilteredNotesRaw: vi.fn(),
@@ -65,7 +67,9 @@ it("retains linked tags on every page of an unfiltered JSON export", async () =>
     JSON.parse(await exported.text()).map(
       (note: { keywords: string[] }) => note.keywords,
     ),
-  ).toEqual([["tag-1"], ["tag-2"]]);
+  ).toEqual(
+    Array.from({ length: LIBRARY_SIZE }, (_, index) => [`tag-${index + 1}`]),
+  );
 });
 
 it("retains linked tags in filtered JSON exports", async () => {
@@ -86,3 +90,17 @@ it("retains linked tags in filtered JSON exports", async () => {
     "filtered-tag",
   ]);
 });
+
+it.each(["active", "deleted"])("exports the %s independent head for filtered and selected notes", async (state) => {
+  const history = { origin: "knowledge_qa", question: "Q" }
+  const marker = `<!-- tldw-knowledge:v1:${encodeURIComponent(JSON.stringify(history))} -->`
+  const note = { id: "n", title: "T", content: state === "active" ? "Edited" : `Edited\n\n${marker}`, keywords: [],
+    knowledge_provenance_state: state, knowledge_provenance: state === "active" ? history : null,
+  }
+  const options = { ...deps(), query: "Edited", hasActiveFilters: true, fetchFilteredNotesRaw: async () => ({ items: [note], total: 1 }), selectedBulkNotes: [note] }
+  const { result } = renderHook(() => useNotesExport(options))
+  await act(async () => { await result.current.exportAllJSON() })
+  expect(JSON.parse(await exported.text())[0].content.includes("tldw-knowledge:v1:")).toBe(state === "active")
+  act(() => { result.current.exportSelectedBulk() })
+  expect((await exported.text()).includes("tldw-knowledge:v1:")).toBe(state === "active")
+})

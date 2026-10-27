@@ -6,6 +6,7 @@ import {
   type Stage4HighRiskRoute,
 } from './stage4-axe-high-risk-routes.helpers';
 import { waitForAppShell, waitForVisualSettle } from '../utils/helpers';
+import { STAGE4_A11Y_RULES, formatAxeViolations } from '../utils/a11y';
 import { getRouteMetadata } from '../../../packages/ui/src/routes/route-metadata';
 
 const LOAD_TIMEOUT = 30_000;
@@ -115,17 +116,6 @@ const HIGH_RISK_ROUTES: Stage4HighRiskRoute[] = [
   },
 ];
 
-const STAGE4_A11Y_RULES = [
-  'landmark-one-main',
-  'region',
-  'link-name',
-  'image-alt',
-  'input-image-alt',
-  'select-name',
-  'aria-command-name',
-  'aria-toggle-field-name',
-];
-
 type A11yAnalysisResult =
   | {
       type: 'results';
@@ -219,23 +209,6 @@ async function clearSeededAuth(page: Parameters<typeof seedAuth>[0]): Promise<vo
       localStorage.removeItem('__tldw_allow_offline');
     } catch {}
   });
-}
-
-function formatAxeViolations(
-  routePath: string,
-  violations: Awaited<ReturnType<AxeBuilder['analyze']>>['violations']
-): string {
-  if (violations.length === 0) return `${routePath}: no violations`;
-  return [
-    `${routePath}: ${violations.length} serious/critical Axe violations`,
-    ...violations.map((violation) => {
-      const nodes = violation.nodes
-        .slice(0, 3)
-        .map((node) => node.target.join(' '))
-        .join(' | ');
-      return `- ${violation.id} [${violation.impact ?? 'unknown'}] -> ${nodes}`;
-    }),
-  ].join('\n');
 }
 
 async function waitForHighRiskRouteReady(

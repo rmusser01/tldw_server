@@ -19,16 +19,19 @@ import React from "react"
  * - `afterSend` runs only if the dispatch resolves. It receives the resolved
  *   `sendMessage` result so callers can distinguish successful submissions
  *   from handled failed/skipped results. On rejection it's skipped and the
- *   error propagates so the caller can render it.
+ *   error propagates so the caller can render it. `onSendError` receives that
+ *   rejection before rethrowing, so the caller can recover its current input.
  */
 
 export interface UseComposerSubmitOptions<TPayload, TResult = unknown> {
   sendMessage: (payload: TPayload) => Promise<TResult>
+  captureCompletionGuard?: () => () => boolean
 }
 
 export interface ComposerSubmitHooks<TResult = unknown> {
   beforeSend?: () => void
   afterSend?: (result: TResult) => void
+  onSendError?: (error: unknown) => void
 }
 
 export interface UseComposerSubmitResult<TPayload, TResult = unknown> {
@@ -40,18 +43,27 @@ export interface UseComposerSubmitResult<TPayload, TResult = unknown> {
 
 export function useComposerSubmit<TPayload, TResult = unknown>({
   sendMessage,
+  captureCompletionGuard,
 }: UseComposerSubmitOptions<TPayload, TResult>): UseComposerSubmitResult<
   TPayload,
   TResult
 > {
   const dispatch = React.useCallback(
     async (payload: TPayload, hooks?: ComposerSubmitHooks<TResult>) => {
+      const isCurrent = captureCompletionGuard?.() ?? (() => true)
+      if (!isCurrent()) throw new DOMException("The active chat changed before sending", "AbortError")
       hooks?.beforeSend?.()
-      const result = await sendMessage(payload)
-      hooks?.afterSend?.(result)
+      let result: TResult
+      try {
+        result = await sendMessage(payload)
+      } catch (error) {
+        if (isCurrent()) hooks?.onSendError?.(error)
+        throw error
+      }
+      if (isCurrent()) hooks?.afterSend?.(result)
       return result
     },
-    [sendMessage]
+    [sendMessage, captureCompletionGuard]
   )
 
   return { dispatch }

@@ -1155,3 +1155,51 @@ it("grouped deletion uses the atomic pending guard before removing any target me
   )
   expect(memory.messages.rows.size).toBe(3)
 })
+
+it.each(["edit", "delete"])(
+  "a retired message-mutation lease refuses %s before any write",
+  async (operation) => {
+    const captured = { ...owner, validate_lease: () => false }
+    const database = new PageAssistDatabase()
+    const mutation =
+      operation === "edit"
+        ? database.updateMessage("source", "u2", "replaced", captured)
+        : database.removeMessage("source", "u2", captured)
+    await expect(mutation).rejects.toThrow("request_config_scope_changed")
+    expect((await memory.messages.get("u2")).content).toBe("u2")
+  }
+)
+it("retiring an owned Delete during its mutation rolls back the tombstone", async () => {
+  let current = true
+  let release!: () => void
+  const original = memory.messages.delete
+  const held = vi
+    .spyOn(memory.messages, "delete")
+    .mockImplementation(async (id) => {
+      await original(id)
+      await new Promise<void>((resolve) => {
+        release = resolve
+      })
+    })
+  try {
+    const pending = new PageAssistDatabase().removeMessage("source", "u2", {
+      ...owner,
+      validate_lease: () => current
+    })
+    await vi.waitFor(() => expect(held).toHaveBeenCalled())
+    current = false
+    release()
+    await expect(pending).rejects.toThrow("request_config_scope_changed")
+    expect(await memory.messages.get("u2")).toBeDefined()
+  } finally {
+    held.mockRestore()
+  }
+})
+it("an idle local Delete retains its supplied rendered lease inside the transaction", async () => {
+  await expect(
+    new PageAssistDatabase().removeMessage("source", "u2", undefined, {
+      validate_lease: () => false
+    })
+  ).rejects.toThrow("request_config_scope_changed")
+  expect(await memory.messages.get("u2")).toBeDefined()
+})

@@ -121,6 +121,11 @@ describe("sidepanel chat WebUI handoff", () => {
     ).toBe("http://127.0.0.1:8080")
   })
 
+  it.each(["  {{user}}\n\tEXACT TEXT  ", " \n\t ", ""])("preserves the exact raw draft %j", draft => {
+    const encoded = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(), draft })
+    expect(decodeSidepanelChatWebUiHandoff(encoded)?.draft).toBe(draft)
+  })
+
   it("expires stale handoff payloads", () => {
     const encoded = encodeSidepanelChatWebUiHandoff({
       source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE,

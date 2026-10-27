@@ -1218,3 +1218,29 @@ def test_unmarked_local_snapshot_preserves_legacy_settings_reload(
     selector = local_adapters._select_local_app_config
 
     assert selector({}, credentials_resolved=False) is legacy_config
+
+
+@pytest.mark.parametrize("saved_penalty", [None, 1.0, 1.2])
+def test_kobold_explicit_repetition_penalty_survives_current_config_at_http_boundary(
+    saved_penalty,
+):
+    app_config = {"kobold_api": {"api_ip": "https://example.com/saved-kobold", "rep_pen": 2.2}}
+    request = _request(app_config)
+    request[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = _issue_local_credentials(
+        "kobold", "https://example.com/saved-kobold", None, app_config=app_config
+    )
+    if saved_penalty is not None:
+        request["repetition_penalty"] = saved_penalty
+    sent = []
+    response = _KoboldResponse()
+
+    def fetch(**kwargs):
+        sent.append(kwargs["json"])
+        return response
+
+    adapter = KoboldAdapter()
+    adapter.http_fetcher = fetch
+    adapter.chat(request)
+    assert sent[0]["rep_pen"] == (2.2 if saved_penalty is None else saved_penalty)
+    assert response.status_checked is True
+    assert response.close_count == 1

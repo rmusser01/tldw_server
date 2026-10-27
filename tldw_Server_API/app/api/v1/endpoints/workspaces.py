@@ -91,7 +91,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.core.exceptions import ResearchWorkspaceOutputJobError, WorkspaceArtifactExportStateError
 from tldw_Server_API.app.core.feature_flags import is_persona_enabled
-from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.manager import _JOB_NONCRITICAL_EXCEPTIONS, JobManager
 from tldw_Server_API.app.core.Research_Workspace.output_jobs import (
     get_research_workspace_output_job_status,
     submit_research_workspace_output_job,
@@ -280,33 +280,35 @@ def _ws_to_response(
         ws.get("assistant_defaults_json"),
         workspace_id=str(ws.get("id") or ""),
     )
-    return WorkspaceResponse(
-        id=ws["id"],
-        name=ws.get("name"),
-        archived=bool(ws.get("archived", False)),
-        study_materials_policy=str(ws.get("study_materials_policy") or "general"),
-        workspace_profile=str(ws.get("workspace_profile") or "research"),
-        deleted=bool(ws.get("deleted", False)),
-        banner_title=ws.get("banner_title"),
-        banner_subtitle=ws.get("banner_subtitle"),
-        banner_color=ws.get("banner_color"),
-        audio_provider=ws.get("audio_provider"),
-        audio_model=ws.get("audio_model"),
-        audio_voice=ws.get("audio_voice"),
-        audio_speed=ws.get("audio_speed"),
-        assistant_defaults=assistant_defaults,
-        assistant_defaults_explicit_none=ws.get("assistant_defaults_explicit_none", False),
-        effective_assistant_default=_effective_workspace_assistant_default(
-            db=db,
-            stored=assistant_defaults,
-            user_id=_user_id_for_workspace_scope(current_user),
-            invalid_stored_default=invalid_stored_default or bool(ws.get("_assistant_defaults_invalid")),
-            persona_profile_cache=persona_profile_cache,
-            assistant_defaults_explicit_none=ws.get("assistant_defaults_explicit_none", False),
-        ),
-        created_at=str(ws.get("created_at", "")),
-        last_modified=str(ws.get("last_modified", "")),
-        version=ws.get("version", 1),
+    return WorkspaceResponse.model_validate(
+        {
+            "id": ws["id"],
+            "name": ws.get("name"),
+            "archived": bool(ws.get("archived", False)),
+            "study_materials_policy": str(ws.get("study_materials_policy") or "general"),
+            "workspace_profile": str(ws.get("workspace_profile") or "research"),
+            "deleted": bool(ws.get("deleted", False)),
+            "banner_title": ws.get("banner_title"),
+            "banner_subtitle": ws.get("banner_subtitle"),
+            "banner_color": ws.get("banner_color"),
+            "audio_provider": ws.get("audio_provider"),
+            "audio_model": ws.get("audio_model"),
+            "audio_voice": ws.get("audio_voice"),
+            "audio_speed": ws.get("audio_speed"),
+            "assistant_defaults": assistant_defaults,
+            "assistant_defaults_explicit_none": ws.get("assistant_defaults_explicit_none", False),
+            "effective_assistant_default": _effective_workspace_assistant_default(
+                db=db,
+                stored=assistant_defaults,
+                user_id=_user_id_for_workspace_scope(current_user),
+                invalid_stored_default=invalid_stored_default or bool(ws.get("_assistant_defaults_invalid")),
+                persona_profile_cache=persona_profile_cache,
+                assistant_defaults_explicit_none=ws.get("assistant_defaults_explicit_none", False),
+            ),
+            "created_at": str(ws.get("created_at", "")),
+            "last_modified": str(ws.get("last_modified", "")),
+            "version": ws.get("version", 1),
+        }
     )
 
 
@@ -332,22 +334,24 @@ def _src_to_response(src: dict) -> WorkspaceSourceResponse:
 
 def _root_to_response(root: dict[str, Any]) -> WorkspaceRootResponse:
     """Convert a project root DB row to a redacted public response."""
-    return WorkspaceRootResponse(
-        workspace_id=root.get("workspace_id"),
-        root_id=root.get("root_id") or root.get("id"),
-        backend=_root_backend(root.get("backend")),
-        state=normalize_project_root_state(root.get("root_state") or root.get("state")),
-        display_name=root.get("display_name"),
-        path_hint=_root_path_hint(root),
-        git_state=root.get("git_state"),
-        file_inventory_state=root.get("file_inventory_state"),
-        file_inventory=_workspace_file_inventory_summary(root),
-        indexing_state=root.get("indexing_state"),
-        sandbox_mount_state=root.get("sandbox_mount_state"),
-        mcp_trust_state=root.get("mcp_trust_state"),
-        is_primary=bool(root.get("is_primary", True)),
-        version=root.get("version"),
-        updated_at=str(root["updated_at"]) if root.get("updated_at") else None,
+    return WorkspaceRootResponse.model_validate(
+        {
+            "workspace_id": root.get("workspace_id"),
+            "root_id": root.get("root_id") or root.get("id"),
+            "backend": _root_backend(root.get("backend")),
+            "state": normalize_project_root_state(root.get("root_state") or root.get("state")),
+            "display_name": root.get("display_name"),
+            "path_hint": _root_path_hint(root),
+            "git_state": root.get("git_state"),
+            "file_inventory_state": root.get("file_inventory_state"),
+            "file_inventory": _workspace_file_inventory_summary(root),
+            "indexing_state": root.get("indexing_state"),
+            "sandbox_mount_state": root.get("sandbox_mount_state"),
+            "mcp_trust_state": root.get("mcp_trust_state"),
+            "is_primary": bool(root.get("is_primary", True)),
+            "version": root.get("version"),
+            "updated_at": str(root["updated_at"]) if root.get("updated_at") else None,
+        }
     )
 
 
@@ -358,11 +362,13 @@ def _workspace_roots_response(
     roots: list[dict[str, Any]],
 ) -> WorkspaceRootsResponse:
     primary_root = next((root for root in roots if bool(root.get("is_primary"))), None)
-    return WorkspaceRootsResponse(
-        workspace_id=workspace_id,
-        workspace_profile=str(workspace.get("workspace_profile") or "research"),
-        primary_root=_root_to_response(primary_root) if primary_root else None,
-        roots=[_root_to_response(root) for root in roots],
+    return WorkspaceRootsResponse.model_validate(
+        {
+            "workspace_id": workspace_id,
+            "workspace_profile": str(workspace.get("workspace_profile") or "research"),
+            "primary_root": _root_to_response(primary_root) if primary_root else None,
+            "roots": [_root_to_response(root) for root in roots],
+        }
     )
 
 
@@ -529,10 +535,7 @@ def _safe_get_job(jm: JobManager | None, job_id: Any) -> dict[str, Any] | None:
         return None
     try:
         return jm.get_job(int(job_id))
-    except (AttributeError, TypeError, ValueError) as exc:
-        logger.warning("Workspace file inventory job lookup failed for id {}: {}", job_id, exc)
-        return None
-    except Exception as exc:
+    except _JOB_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning("Workspace file inventory job lookup failed for id {}: {}", job_id, exc)
         return None
 
@@ -542,23 +545,25 @@ def _workspace_file_inventory_status_response(
     *,
     job: dict[str, Any] | None = None,
 ) -> WorkspaceFileInventoryStatusResponse:
-    return WorkspaceFileInventoryStatusResponse(
-        workspace_id=str(status_payload.get("workspace_id") or ""),
-        root_id=status_payload.get("root_id"),
-        state=str(status_payload.get("state") or "not_started"),
-        durable_state=status_payload.get("durable_state"),
-        stale=bool(status_payload.get("stale", False)),
-        last_scan_id=status_payload.get("scan_id"),
-        last_scan_started_at=status_payload.get("started_at"),
-        last_scan_completed_at=status_payload.get("completed_at"),
-        root_version=status_payload.get("root_version"),
-        scan_root_version=status_payload.get("scan_root_version"),
-        ignore_policy_fingerprint=status_payload.get("ignore_policy_fingerprint"),
-        root_snapshot_token=status_payload.get("root_snapshot_token"),
-        counts=status_payload.get("counts") or {},
-        diagnostics=status_payload.get("diagnostics") or [],
-        job=_workspace_file_inventory_job_status(job),
-        updated_at=status_payload.get("updated_at"),
+    return WorkspaceFileInventoryStatusResponse.model_validate(
+        {
+            "workspace_id": str(status_payload.get("workspace_id") or ""),
+            "root_id": status_payload.get("root_id"),
+            "state": str(status_payload.get("state") or "not_started"),
+            "durable_state": status_payload.get("durable_state"),
+            "stale": bool(status_payload.get("stale", False)),
+            "last_scan_id": status_payload.get("scan_id"),
+            "last_scan_started_at": status_payload.get("started_at"),
+            "last_scan_completed_at": status_payload.get("completed_at"),
+            "root_version": status_payload.get("root_version"),
+            "scan_root_version": status_payload.get("scan_root_version"),
+            "ignore_policy_fingerprint": status_payload.get("ignore_policy_fingerprint"),
+            "root_snapshot_token": status_payload.get("root_snapshot_token"),
+            "counts": status_payload.get("counts") or {},
+            "diagnostics": status_payload.get("diagnostics") or [],
+            "job": _workspace_file_inventory_job_status(job),
+            "updated_at": status_payload.get("updated_at"),
+        }
     )
 
 
@@ -575,37 +580,39 @@ def _workspace_file_inventory_no_root_conflict() -> HTTPException:
 def _art_to_response(art: dict) -> WorkspaceArtifactResponse:
     """Convert a workspace artifact DB row dict to a WorkspaceArtifactResponse schema."""
     version = art.get("version") or 1
-    return WorkspaceArtifactResponse(
-        id=art["id"],
-        workspace_id=art["workspace_id"],
-        artifact_type=art["artifact_type"],
-        title=art["title"],
-        status=art.get("status", "pending"),
-        content=art.get("content"),
-        content_type=art.get("content_type") or "text/markdown",
-        preview_text=art.get("preview_text"),
-        summary=art.get("summary"),
-        review_state=art.get("review_state") or "draft",
-        owner_scope=art.get("owner_scope") or "user",
-        owner_id=art.get("owner_id"),
-        project_id=art.get("project_id"),
-        task_id=art.get("task_id"),
-        source_collection_id=art.get("source_collection_id"),
-        root_artifact_id=art.get("root_artifact_id") or art["id"],
-        artifact_version_id=art.get("artifact_version_id") or f"{art['id']}:v{version}",
-        previous_version_id=art.get("previous_version_id"),
-        producer_metadata=art.get("producer_metadata") or {},
-        source_lineage=art.get("source_lineage") or {},
-        review_metadata=art.get("review_metadata") or {},
-        version_metadata=art.get("version_metadata") or {},
-        export_refs=art.get("export_refs") or [],
-        redaction=art.get("redaction") or {"support_safe": True, "redacted": False},
-        schema_version=art.get("schema_version") or 1,
-        total_tokens=art.get("total_tokens"),
-        total_cost_usd=art.get("total_cost_usd"),
-        created_at=str(art.get("created_at", "")),
-        completed_at=str(art["completed_at"]) if art.get("completed_at") else None,
-        version=version,
+    return WorkspaceArtifactResponse.model_validate(
+        {
+            "id": art["id"],
+            "workspace_id": art["workspace_id"],
+            "artifact_type": art["artifact_type"],
+            "title": art["title"],
+            "status": art.get("status", "pending"),
+            "content": art.get("content"),
+            "content_type": art.get("content_type") or "text/markdown",
+            "preview_text": art.get("preview_text"),
+            "summary": art.get("summary"),
+            "review_state": art.get("review_state") or "draft",
+            "owner_scope": art.get("owner_scope") or "user",
+            "owner_id": art.get("owner_id"),
+            "project_id": art.get("project_id"),
+            "task_id": art.get("task_id"),
+            "source_collection_id": art.get("source_collection_id"),
+            "root_artifact_id": art.get("root_artifact_id") or art["id"],
+            "artifact_version_id": art.get("artifact_version_id") or f"{art['id']}:v{version}",
+            "previous_version_id": art.get("previous_version_id"),
+            "producer_metadata": art.get("producer_metadata") or {},
+            "source_lineage": art.get("source_lineage") or {},
+            "review_metadata": art.get("review_metadata") or {},
+            "version_metadata": art.get("version_metadata") or {},
+            "export_refs": art.get("export_refs") or [],
+            "redaction": art.get("redaction") or {"support_safe": True, "redacted": False},
+            "schema_version": art.get("schema_version") or 1,
+            "total_tokens": art.get("total_tokens"),
+            "total_cost_usd": art.get("total_cost_usd"),
+            "created_at": str(art.get("created_at", "")),
+            "completed_at": str(art["completed_at"]) if art.get("completed_at") else None,
+            "version": version,
+        }
     )
 
 
@@ -953,7 +960,8 @@ def _workspace_file_inventory_summary(source: dict[str, Any]) -> dict[str, Any]:
             ),
         }
 
-    counts = source.get("counts") if isinstance(source.get("counts"), dict) else {}
+    raw_counts = source.get("counts")
+    counts = raw_counts if isinstance(raw_counts, dict) else {}
     inventory_state = source.get("file_inventory_state") or source.get("state") or "not_started"
     return {
         "state": inventory_state,
@@ -990,7 +998,7 @@ def try_get_workspace_job_manager() -> JobManager | None:
     """Resolve the Jobs manager for workspace views without blocking workspace reads/writes."""
     try:
         return try_get_job_manager()
-    except Exception as exc:
+    except _JOB_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning("Workspace Jobs manager unavailable: {}", exc)
         return None
 
@@ -1209,13 +1217,16 @@ async def delete_workspace(
 ):
     """Soft-delete a workspace and cascade soft-delete its conversations."""
     ws = _require_workspace(db, workspace_id)
+    owner_user_id = current_user.id_int
+    if owner_user_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_user_id")
     try:
         db.delete_workspace(workspace_id, ws["version"])
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to delete workspace") from exc
     try:
-        await on_workspace_deleted(workspace_id, current_user.id)
-    except Exception:
+        await on_workspace_deleted(workspace_id, owner_user_id)
+    except (ImportError, OSError, RuntimeError):
         logger.warning(
             "Workspace sharing cleanup hook failed after workspace deletion; "
             "workspace_id={} owner_user_id={}",
@@ -1877,7 +1888,7 @@ async def get_workspace_context(
     membership_summary = {"total": 0, "by_resource_type": {}, "by_role": {}}
     try:
         membership_summary = WorkspaceMembershipService(db).workspace_membership_summary(workspace_id)
-    except Exception:
+    except (CharactersRAGDBError, WorkspaceMembershipServiceError, RuntimeError, TypeError, ValueError):
         logger.warning("Workspace membership summary unavailable for workspace {}", workspace_id)
         partial_errors.append(
             {
@@ -1899,27 +1910,29 @@ async def get_workspace_context(
         _job_status_payload(job)
         for job in _active_workspace_jobs(jobs, sources, workspace_id)
     ]
-    return WorkspaceContextResponse(
-        workspace_id=workspace_id,
-        workspace_profile=str(capability_payload.get("workspace_profile") or "research"),
-        workspace_kind=str(capability_payload.get("workspace_kind") or "research_workspace"),
-        schema_version=2,
-        generated_at=_utc_now_iso(),
-        workspace=_ws_to_response(workspace, db=db, current_user=current_user),
-        attention_state=str(core_context_payload.get("attention_state") or "needs_attention"),
-        resolution=capability_payload.get("resolution") or {},
-        project_root=capability_payload.get("project_root") or {},
-        sources={
-            "items": context_sources,
-            "summary": status_payload.get("summary") or {},
-        },
-        capabilities=WorkspaceCapabilitiesResponse(**capability_payload),
-        services=capability_payload.get("workspace_services") or {},
-        allowed_actions=capability_payload.get("allowed_actions") or {},
-        active_jobs=active_jobs,
-        active_operations=core_context_payload.get("active_operations") or [],
-        memberships=membership_summary,
-        partial_errors=partial_errors,
+    return WorkspaceContextResponse.model_validate(
+        {
+            "workspace_id": workspace_id,
+            "workspace_profile": str(capability_payload.get("workspace_profile") or "research"),
+            "workspace_kind": str(capability_payload.get("workspace_kind") or "research_workspace"),
+            "schema_version": 2,
+            "generated_at": _utc_now_iso(),
+            "workspace": _ws_to_response(workspace, db=db, current_user=current_user),
+            "attention_state": str(core_context_payload.get("attention_state") or "needs_attention"),
+            "resolution": capability_payload.get("resolution") or {},
+            "project_root": capability_payload.get("project_root") or {},
+            "sources": {
+                "items": context_sources,
+                "summary": status_payload.get("summary") or {},
+            },
+            "capabilities": WorkspaceCapabilitiesResponse(**capability_payload),
+            "services": capability_payload.get("workspace_services") or {},
+            "allowed_actions": capability_payload.get("allowed_actions") or {},
+            "active_jobs": active_jobs,
+            "active_operations": core_context_payload.get("active_operations") or [],
+            "memberships": membership_summary,
+            "partial_errors": partial_errors,
+        }
     )
 
 
@@ -2035,11 +2048,13 @@ async def provision_workspace_primary_sandbox_root(
         ) from exc
 
     response.status_code = result.http_status_code
-    return WorkspaceSandboxRootProvisionResponse(
-        workspace_id=result.workspace_id,
-        workspace_profile=result.workspace_profile,
-        operation=WorkspaceOperationResponse(**result.operation),
-        primary_root=_root_to_response(result.primary_root) if result.primary_root else None,
+    return WorkspaceSandboxRootProvisionResponse.model_validate(
+        {
+            "workspace_id": result.workspace_id,
+            "workspace_profile": result.workspace_profile,
+            "operation": WorkspaceOperationResponse(**result.operation),
+            "primary_root": (_root_to_response(result.primary_root) if result.primary_root else None),
+        }
     )
 
 
@@ -2243,6 +2258,7 @@ async def get_source_preview(
     source_id: str,
     max_chars: int = Query(default=3000, ge=1, le=12000),
     chunk_limit: int = Query(default=3, ge=0, le=10),
+    version_number: int | None = Query(default=None, ge=1),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     media_db: Any | None = Depends(try_get_media_db_for_user),
     jm: JobManager | None = Depends(try_get_workspace_job_manager),
@@ -2275,7 +2291,10 @@ async def get_source_preview(
         media_db=media_db,
         max_chars=max_chars,
         chunk_limit=chunk_limit,
+        version_number=version_number,
     )
+    if version_number is not None and not payload["content_available"]:
+        raise HTTPException(status_code=404, detail="Workspace source document version unavailable")
     return WorkspaceSourcePreviewResponse(**payload)
 
 

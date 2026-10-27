@@ -68,8 +68,14 @@ export default defineConfig({
     {
       name: 'chromium',
       testDir: 'e2e',
-      testIgnore: ['**/workflows/tier-*/**', '**/workflows/journeys/**'],
+      testIgnore: ['**/workflows/tier-*/**', '**/workflows/journeys/**', '**/ux-regression/**'],
       use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'notes-studio',
+      testDir: 'e2e/workflows',
+      testMatch: 'notes-studio-derived-note.spec.ts',
+      use: { ...devices['Desktop Chrome'], trace: 'retain-on-failure' },
     },
     {
       name: 'standalone-html-firefox',
@@ -115,6 +121,15 @@ export default defineConfig({
       testDir: 'e2e/workflows/journeys',
       timeout: 120_000,
       expect: { timeout: 30_000 },
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      // Red-first reproductions of verified UX defects (issue #3125). Runs only
+      // against an isolated real backend: bun run e2e:ux-regression
+      name: 'ux-regression',
+      testDir: 'e2e/ux-regression',
+      timeout: 120_000,
+      expect: { timeout: 20_000 },
       use: { ...devices['Desktop Chrome'] },
     },
   ],

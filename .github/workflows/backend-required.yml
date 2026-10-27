@@ -6,6 +6,11 @@ on:
       - main
       - dev
   workflow_dispatch:
+    inputs:
+      base_sha:
+        description: Exact base commit for change detection (manual diagnostic dispatches)
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -107,22 +112,26 @@ jobs:
     # jobs all skip concludes "success" -- so a failed licence audit used to
     # show green while running nothing. The last arm exists purely so a
     # negative verdict reaches the assertion step below and goes red.
+    #
+    # The first two arms are the `changes` job's own condition and deliberately
+    # do not ask for needs.changes.result == 'success': when change detection
+    # was admitted and did not succeed, this job was skipped, and GitHub counts
+    # a skipped required job as satisfied. It now runs and the second step
+    # fails it (TASK-13462).
     if: >-
       always() && !cancelled() &&
       (
         (
           github.event_name == 'workflow_run' &&
           needs.admission.result == 'success' &&
-          needs.admission.outputs.should_run == 'true' &&
-          needs.changes.result == 'success'
+          needs.admission.outputs.should_run == 'true'
         ) ||
         (
           github.event_name != 'workflow_run' &&
           (
             needs.await_license.result == 'skipped' ||
             needs.await_license.outputs.license_passed == 'true'
-          ) &&
-          needs.changes.result == 'success'
+          )
         ) ||
         (
           github.event_name != 'workflow_run' &&
@@ -139,6 +148,16 @@ jobs:
           needs.await_license.outputs.license_passed != 'true'
         run: |
           echo "::error::License audit did not pass for this PR head, so the gates were not run. Fix the licence policy failure and re-run."
+          exit 1
+
+      # Stays directly after the license refusal and before every other step:
+      # no later step uses a status function, so none runs once this has failed.
+      - name: Require change detection to have succeeded
+        if: needs.changes.result != 'success'
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+        run: |
+          echo "::error::Change detection (the 'changes' job) ended as '${CHANGES_RESULT}', not 'success', so this gate cannot tell what the head changed and ran nothing. Re-run the workflow."
           exit 1
 
       - name: No-op pass (backend unchanged)
@@ -187,10 +206,19 @@ jobs:
         id: mypy_changed
         continue-on-error: true
         shell: bash
+        env:
+          DISPATCH_BASE_SHA: ${{ inputs.base_sha }}
         run: |
           set -euo pipefail
           BASE_SHA="${{ needs.admission.outputs.base_sha || github.event.pull_request.base.sha || github.event.before }}"
           HEAD_SHA="${{ needs.admission.outputs.head_sha || github.event.pull_request.head.sha || github.sha }}"
+          # A dispatch carries no pull_request payload, so without this the base
+          # would be HEAD^ and only the last commit would be type-checked. The
+          # merge queue passes dev's tip. Empty on every other event, and already
+          # checked to be a 40-character SHA by the `changes` job.
+          if [[ -n "${DISPATCH_BASE_SHA:-}" ]]; then
+            BASE_SHA="$DISPATCH_BASE_SHA"
+          fi
           if [[ -z "${BASE_SHA:-}" || "${BASE_SHA:-}" == "0000000000000000000000000000000000000000" ]]; then
             BASE_SHA="$(git rev-parse HEAD^ 2>/dev/null || true)"
           fi
@@ -230,6 +258,7 @@ jobs:
         run: |
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
             tldw_Server_API/tests/CI/test_rls_coverage_ratchet.py \
+            tldw_Server_API/tests/CI/test_test_quality_ratchet.py \
             tldw_Server_API/tests/lint/test_route_auth_ratchet.py \
             tldw_Server_API/tests/lint/test_rg_route_map_lint.py \
             tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py
@@ -244,10 +273,11 @@ jobs:
       # The task-format ratchet checks only the task files this PR changed since its
       # merge base with BACKLOG_TASK_FORMAT_BASE, so it never fails a PR for a file
       # that reached dev through a backlog-only PR this gate did not run on.
+      # inputs.base_sha is set only on a dispatch (the merge queue passes dev's tip).
       - name: Enforce CI contracts and code ratchets
         if: needs.changes.outputs.backend_changed == 'true'
         env:
-          BACKLOG_TASK_FORMAT_BASE: ${{ needs.admission.outputs.base_sha || github.event.pull_request.base.sha || github.event.before }}
+          BACKLOG_TASK_FORMAT_BASE: ${{ inputs.base_sha || needs.admission.outputs.base_sha || github.event.pull_request.base.sha || github.event.before }}
           PYTHONPATH: .
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
           TEST_MODE: "true"
@@ -256,6 +286,12 @@ jobs:
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
             tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py \
             tldw_Server_API/tests/CI/test_frontend_license_gate_workflow.py \
+            tldw_Server_API/tests/CI/test_merge_queue_rules.py \
+            tldw_Server_API/tests/CI/test_merge_queue_actions.py \
+            tldw_Server_API/tests/CI/test_merge_queue_workflow.py \
+            tldw_Server_API/tests/CI/test_merge_queue_gate_workflows.py \
+            tldw_Server_API/tests/CI/test_merge_queue_frontend_required.py \
+            tldw_Server_API/tests/CI/test_merge_queue_license_dispatch.py \
             tldw_Server_API/tests/lint/test_private_coercion_ratchet.py \
             tldw_Server_API/tests/lint/test_first_party_source_pinning.py \
             tldw_Server_API/tests/CI/test_backlog_task_format_ratchet.py \
@@ -377,7 +413,7 @@ jobs:
           python Helper_Scripts/ci/minimal_env_smoke.py --timeout 150
 
       # OpenAPI contract drift gate (RF1 / #2590 class): recompute the schema
-      # fingerprint and fail if it drifts from the checked-in snapshot. A
+      # fingerprint and committed path union against the checked-in artifacts. A
       # backend Pydantic model change that alters the API without updating the
       # snapshot (and regenerating the frontend types) fails here. Runs in the
       # backend workflow because it is guaranteed to run on drift-causing PRs
@@ -388,4 +424,32 @@ jobs:
           PYTHONPATH: .
         run: |
           python Helper_Scripts/export_openapi_schema.py \
-            --check apps/tldw-frontend/lib/api/openapi.fingerprint.json
+            --check apps/packages/api-types/openapi.fingerprint.json \
+            --check-paths apps/packages/api-types/paths.d.ts
+
+  # Wakes the merge queue when the gate above fails (spec 4.6 of
+  # Docs/superpowers/specs/2026-10-11-merge-queue-approve-held-runs-design.md). A red gate causes
+  # none of the events merge-queue.yml listens for, and GitHub only re-runs a completed run, so
+  # this job cannot retry its own run: it dispatches a queue kick on dev that waits for this run
+  # to complete, then runs the queue. Not required and in no job's `needs`, so it cannot turn the
+  # required check red. Skipped while MERGE_QUEUE is unset or off, for forks, and on dispatches.
+  queue-tick:
+    name: Merge queue tick
+    needs: [backend-required]
+    if: >-
+      always() && !cancelled() &&
+      needs.backend-required.result == 'failure' &&
+      (vars.MERGE_QUEUE == 'dry' || vars.MERGE_QUEUE == 'on') &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Wake the merge queue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: gh api -X POST "repos/${REPOSITORY}/actions/workflows/security-required.yml/dispatches" -f ref=dev -f "inputs[queue_kick]=true" -f "inputs[wait_run]=${RUN_ID}"

@@ -1,5 +1,6 @@
 import { tldwModels } from "@/services/tldw"
 import { inferProviderFromModel } from "@/utils/provider-registry"
+import { normalizeProviderAvailabilityKey } from "@/services/tldw/model-provider-availability"
 
 type ResolveApiProviderOptions = {
   modelId?: string | null
@@ -21,14 +22,17 @@ export type ProviderQualifiedModelSelection = {
 }
 
 const PROVIDER_ALIASES: Record<string, string> = {
-  "custom_openai_api": "custom-openai-api",
+  custom_openai_api: "custom-openai-api",
   "custom-openai-api2": "custom-openai-api-2",
-  "custom_openai_api_2": "custom-openai-api-2",
-  "local_llm": "local-llm",
-  "llama": "llama.cpp",
+  custom_openai_api_2: "custom-openai-api-2",
+  local_llm: "local-llm",
+  localllm: "local-llm",
+  local: "local-llm",
+  llama: "llama.cpp",
   "llama-cpp": "llama.cpp",
-  "llama_cpp": "llama.cpp",
-  "llamacpp": "llama.cpp"
+  llama_cpp: "llama.cpp",
+  llamacpp: "llama.cpp",
+  tabby: "tabbyapi"
 }
 
 const KNOWN_PROVIDER_KEYS = new Set<string>([
@@ -54,8 +58,11 @@ const KNOWN_PROVIDER_KEYS = new Set<string>([
   "ollama",
   "aphrodite",
   "mlx",
-  "custom-openai-api",
-  "custom-openai-api-2",
+  ...Array.from({ length: 99 }, (_, index) =>
+    index === 0 ? "custom-openai-api" : `custom-openai-api-${index + 1}`
+  ),
+  "poe",
+  "minimax",
   "custom",
   "together",
   "xai",
@@ -84,22 +91,34 @@ const PROVIDER_MODEL_PREFIX_RULES: Array<[string, string]> = [
   ["groq", "groq"]
 ]
 
-const normalizeProvider = (value: unknown): string => {
-  const trimmed = String(value || "").trim().toLowerCase().replace(/\s+/g, "")
+export const normalizeApiProviderKey = (value: unknown): string => {
+  const trimmed = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "")
   if (!trimmed || trimmed === "unknown") return ""
+  const customSlot = /^custom_openai_api(\d*)$/.exec(
+    normalizeProviderAvailabilityKey(trimmed) ?? ""
+  )
+  if (customSlot)
+    return customSlot[1]
+      ? `custom-openai-api-${customSlot[1]}`
+      : "custom-openai-api"
   return PROVIDER_ALIASES[trimmed] ?? trimmed
 }
 
 const normalizeModelId = (value: unknown): string =>
-  String(value || "").trim().replace(/^tldw:/i, "")
+  String(value || "")
+    .trim()
+    .replace(/^tldw:/i, "")
 
 export const AUTO_MODEL_ID = "auto"
 
 export const isAutoModelId = (value: unknown): boolean =>
   normalizeModelId(value).toLowerCase() === AUTO_MODEL_ID
 
-const normalizeKnownProvider = (value: unknown): string => {
-  const normalized = normalizeProvider(value)
+export const normalizeKnownApiProviderKey = (value: unknown): string => {
+  const normalized = normalizeApiProviderKey(value)
   if (!normalized) return ""
   if (!KNOWN_PROVIDER_KEYS.has(normalized)) return ""
   return normalized
@@ -124,7 +143,9 @@ export const parseProviderQualifiedModelSelection = (
       return null
     }
 
-    const provider = normalizeKnownProvider(candidate.slice(0, separatorIndex))
+    const provider = normalizeKnownApiProviderKey(
+      candidate.slice(0, separatorIndex)
+    )
     if (!provider) return null
 
     const modelId = candidate.slice(separatorIndex + 1).trim()
@@ -170,15 +191,14 @@ export const resolveExplicitProviderForSelectedModel = ({
     return requestedSelection.provider
   }
 
-  const normalizedExplicitProvider = normalizeProvider(explicitProvider)
+  const normalizedExplicitProvider = normalizeApiProviderKey(explicitProvider)
   const normalizedRequestedModel = normalizeModelId(requestedSelection.modelId)
   if (!normalizedRequestedModel) {
     return normalizedExplicitProvider || undefined
   }
 
-  const currentSelection = parseProviderQualifiedModelSelection(
-    currentSelectedModel
-  )
+  const currentSelection =
+    parseProviderQualifiedModelSelection(currentSelectedModel)
   const normalizedCurrentModel = normalizeModelId(currentSelection.modelId)
   if (!normalizedCurrentModel) {
     return undefined
@@ -200,7 +220,7 @@ export const resolveExplicitProviderForSelectedModel = ({
 const inferInlineProvider = (normalizedModelId: string): string => {
   const slashIndex = normalizedModelId.indexOf("/")
   if (slashIndex <= 0) return ""
-  const prefix = normalizeProvider(normalizedModelId.slice(0, slashIndex))
+  const prefix = normalizeApiProviderKey(normalizedModelId.slice(0, slashIndex))
   if (!prefix || !KNOWN_PROVIDER_KEYS.has(prefix)) return ""
   return prefix
 }
@@ -225,10 +245,12 @@ const inferProviderFromServerModelCatalog = async (
     const matched = models.find((model) => {
       const id = normalizeModelId(model.id).toLowerCase()
       if (id === needle) return true
-      const name = String(model.name || "").trim().toLowerCase()
+      const name = String(model.name || "")
+        .trim()
+        .toLowerCase()
       return name === needle
     })
-    return normalizeProvider(matched?.provider)
+    return normalizeApiProviderKey(matched?.provider)
   } catch {
     return ""
   }
@@ -241,7 +263,7 @@ export const resolveApiProviderForModel = async ({
 }: ResolveApiProviderOptions): Promise<string | undefined> => {
   const modelSelection = parseProviderQualifiedModelSelection(modelId)
   const explicit =
-    modelSelection.provider || normalizeProvider(explicitProvider)
+    modelSelection.provider || normalizeApiProviderKey(explicitProvider)
   if (explicit) return explicit
 
   const rawModelId = modelSelection.modelId
@@ -255,9 +277,8 @@ export const resolveApiProviderForModel = async ({
   // catalog provider first. This avoids misrouting OpenRouter namespaced
   // IDs like "anthropic/..." to Anthropic directly.
   if (isTldwScopedModel) {
-    const catalogProvider = await inferProviderFromServerModelCatalog(
-      normalizedModelId
-    )
+    const catalogProvider =
+      await inferProviderFromServerModelCatalog(normalizedModelId)
     if (catalogProvider) return catalogProvider
   }
 
@@ -265,21 +286,20 @@ export const resolveApiProviderForModel = async ({
   if (inlineProvider) return inlineProvider
 
   if (!isTldwScopedModel) {
-    const catalogProvider = await inferProviderFromServerModelCatalog(
-      normalizedModelId
-    )
+    const catalogProvider =
+      await inferProviderFromServerModelCatalog(normalizedModelId)
     if (catalogProvider) return catalogProvider
   }
 
-  const hint = normalizeProvider(providerHint)
+  const hint = normalizeApiProviderKey(providerHint)
   if (hint) return hint
 
-  const inferredFromRegistry = normalizeKnownProvider(
+  const inferredFromRegistry = normalizeKnownApiProviderKey(
     inferProviderFromModel(normalizedModelId, "llm")
   )
   if (inferredFromRegistry) return inferredFromRegistry
 
-  const inferredFromPrefix = normalizeKnownProvider(
+  const inferredFromPrefix = normalizeKnownApiProviderKey(
     inferProviderFromPrefix(normalizedModelId)
   )
   if (inferredFromPrefix) return inferredFromPrefix

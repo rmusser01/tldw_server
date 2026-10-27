@@ -15,7 +15,7 @@ import contextlib
 import os
 import threading
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager, suppress
 from typing import Any, Optional, Union
 
@@ -48,12 +48,12 @@ from .query_utils import (
 
 # Try to import psycopg v3. Keep the legacy flag name for test compatibility.
 try:
-    import psycopg  # type: ignore
-    from psycopg.rows import dict_row  # type: ignore
+    import psycopg
+    from psycopg.rows import dict_row
     try:
-        import psycopg_pool  # type: ignore
+        import psycopg_pool
     except ImportError:  # pool is optional
-        psycopg_pool = None  # type: ignore
+        psycopg_pool = None
     PSYCOPG2_AVAILABLE = True  # Legacy name used by tests to simulate missing driver
 except ImportError:
     PSYCOPG2_AVAILABLE = False
@@ -75,7 +75,7 @@ else:
 # deadlock_detected, lock_not_available.
 _CONTENTION_SQLSTATES = frozenset({"40001", "40P01", "55P03"})
 
-_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS = (
+_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AssertionError,
     AttributeError,
     ConnectionError,
@@ -171,6 +171,8 @@ class PostgreSQLConnectionPool(ConnectionPool):
     on-demand pool creating connections up to pool_size.
     """
 
+    _apply_scope_settings: Callable[[Any], None]
+
     def __init__(self, config: DatabaseConfig):
         if not PSYCOPG2_AVAILABLE:
             # Keep message for backward-compatible tests
@@ -184,21 +186,7 @@ class PostgreSQLConnectionPool(ConnectionPool):
         self._fallback_lock = threading.Lock()
         self._managed_connecting = 0
 
-        # Prefer an explicit connection string when provided (e.g. DATABASE_URL)
-        # Fall back to composing a DSN from individual pg_* fields
-        if getattr(config, "connection_string", None):
-            self._dsn = str(config.connection_string)
-        else:
-            dsn = (
-                f"host={config.pg_host or 'localhost'} "
-                f"port={config.pg_port or 5432} "
-                f"dbname={config.pg_database or 'tldw'} "
-                f"user={config.pg_user or 'tldw_user'} "
-                f"password={config.pg_password or ''} "
-                f"sslmode={config.pg_sslmode or 'prefer'} "
-                f"connect_timeout={config.connect_timeout or 10}"
-            )
-            self._dsn = dsn
+        self._dsn = config.postgres_connection_string()
         self._use_psycopg_pool = psycopg_pool is not None
         if self._use_psycopg_pool:
             # Create a psycopg_pool.ConnectionPool with sane production defaults
@@ -231,9 +219,7 @@ class PostgreSQLConnectionPool(ConnectionPool):
             self._pool = None
 
     def _new_connection(self) -> Any:
-        conn = psycopg.connect(self._dsn)
-        # Ensure rows are dicts by default
-        conn.row_factory = dict_row
+        conn = psycopg.connect(self._dsn, row_factory=dict_row)
         return conn
 
     def get_connection(self) -> Any:
@@ -280,7 +266,7 @@ class PostgreSQLConnectionPool(ConnectionPool):
                         self._connections.append(conn)
                 pool_closed = self._closed
             if pool_closed:
-                with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                     conn.close()
                 raise DatabaseError("Connection pool is closed")
 
@@ -294,7 +280,7 @@ class PostgreSQLConnectionPool(ConnectionPool):
 
     def return_connection(self, connection: Any) -> None:
         if self._closed or connection is None:
-            with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                 connection.close()
             return
         if self._use_psycopg_pool:
@@ -302,7 +288,7 @@ class PostgreSQLConnectionPool(ConnectionPool):
             try:
                 self._pool.putconn(connection)
             except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
-                with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                     connection.close()
             return
         # Minimal pool:
@@ -319,7 +305,7 @@ class PostgreSQLConnectionPool(ConnectionPool):
                 )
 
         if not is_managed:
-            with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                 connection.close()
             return
 
@@ -353,7 +339,7 @@ class PostgreSQLConnectionPool(ConnectionPool):
                     self._free.append(connection)
                     return
 
-        with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+        with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
             connection.close()
 
     def invalidate_connection(self, connection: Any) -> None:
@@ -385,10 +371,10 @@ class PostgreSQLConnectionPool(ConnectionPool):
             # psycopg_pool must receive every checkout back for bookkeeping.
             # A closed connection is recognized as broken and replaced.
             try:
-                with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                     connection.close()
             finally:
-                with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                     self._pool.putconn(connection)
             return
 
@@ -399,7 +385,7 @@ class PostgreSQLConnectionPool(ConnectionPool):
             self._connections[:] = [
                 conn for conn in self._connections if conn is not connection
             ]
-        with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+        with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
             connection.close()
 
     @contextmanager
@@ -413,13 +399,13 @@ class PostgreSQLConnectionPool(ConnectionPool):
     def close_all(self) -> None:
         if self._use_psycopg_pool:
             self._closed = True
-            with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                 self._pool.close()
             return
-        # Close all tracked connections (both managed and currently free).
+        # Borrowers may be inside libpq on another thread; their return closes them.
         with self._fallback_lock:
             self._closed = True
-            connections = [*self._connections, *self._free]
+            connections = list(self._free)
             self._connections.clear()
             self._free.clear()
         seen_ids: set[int] = set()
@@ -428,7 +414,7 @@ class PostgreSQLConnectionPool(ConnectionPool):
             if conn_id in seen_ids:
                 continue
             seen_ids.add(conn_id)
-            with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                 conn.close()
 
     def get_stats(self) -> dict[str, Any]:
@@ -651,7 +637,7 @@ class PostgreSQLBackend(DatabaseBackend):
                 except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
                     cur.execute("RESET ROLE")
 
-            with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                 cur.execute("SET row_security = on")
 
             for sql_stmt, params in statements:
@@ -677,7 +663,7 @@ class PostgreSQLBackend(DatabaseBackend):
                         connection.execute("RESET SESSION AUTHORIZATION")
                     except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
                         connection.execute("RESET ROLE")
-                with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                     connection.execute("SET row_security = on")
                 for sql_stmt, params in statements:
                     try:
@@ -710,7 +696,7 @@ class PostgreSQLBackend(DatabaseBackend):
                             connection.execute("RESET SESSION AUTHORIZATION")
                         except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
                             connection.execute("RESET ROLE")
-                    with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                    with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                         connection.execute("SET row_security = on")
                     for sql_stmt, params in statements:
                         try:
@@ -938,21 +924,8 @@ class PostgreSQLBackend(DatabaseBackend):
             # Keep message for compatibility with existing tests
             raise DatabaseError("psycopg2 is not installed")
 
-        # Match pool initialization precedence: prefer explicit connection_string when present.
-        if getattr(self.config, "connection_string", None):
-            dsn = str(self.config.connection_string)
-        else:
-            dsn = (
-                f"host={self.config.pg_host or 'localhost'} "
-                f"port={self.config.pg_port or 5432} "
-                f"dbname={self.config.pg_database or 'tldw'} "
-                f"user={self.config.pg_user or 'tldw_user'} "
-                f"password={self.config.pg_password or ''} "
-                f"sslmode={self.config.pg_sslmode or 'prefer'} "
-                f"connect_timeout={self.config.connect_timeout or 10}"
-            )
-        conn = psycopg.connect(dsn)
-        conn.row_factory = dict_row
+        dsn = self.config.postgres_connection_string()
+        conn = psycopg.connect(dsn, row_factory=dict_row)
         try:
             self._apply_scope_settings(conn)
         except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as scope_exc:
@@ -1041,7 +1014,7 @@ class PostgreSQLBackend(DatabaseBackend):
     def _prepare_query(
         self,
         query: str,
-        params: Optional[Union[tuple, dict]]
+        params: Optional[Union[tuple, list, dict]]
     ) -> tuple[str, Optional[Union[tuple, dict]]]:
         """Prepare SQL and params for psycopg with robust placeholder handling.
 
@@ -1061,7 +1034,7 @@ class PostgreSQLBackend(DatabaseBackend):
     def execute(
         self,
         query: str,
-        params: Optional[Union[tuple, dict]] = None,
+        params: Optional[Union[tuple, list, dict]] = None,
         connection: Optional[Any] = None,
         *,
         log_errors: bool = True,
@@ -1073,7 +1046,6 @@ class PostgreSQLBackend(DatabaseBackend):
         """
         start_time = time.time()
         query, params = self._prepare_query(query, params)
-        redacted_failure = False
         unique_failure = False
         saved_view_name_failure = False
         constraint_failure = False
@@ -1180,31 +1152,29 @@ class PostgreSQLBackend(DatabaseBackend):
             logger.bind(exception_type=type(e).__name__, sqlstate=_sqlstate).error(
                 "PostgreSQL query execution failed"
             )
-            redacted_failure = True
         finally:
             if not external_conn:
                 self.get_pool().return_connection(conn)
 
-        if redacted_failure:
-            if saved_view_name_failure:
-                raise SavedViewNameUniqueConstraintError("PostgreSQL query execution failed")
-            if unique_failure:
-                raise UniqueConstraintError("PostgreSQL query execution failed")
-            if authorization_failure:
-                raise AuthorizationDeniedError(
-                    "PostgreSQL denied the statement: row-level security policy "
-                    "or insufficient privilege (SQLSTATE 42501)"
-                )
-            if constraint_failure:
-                raise ConstraintViolationError("PostgreSQL query execution failed")
-            if contention_failure:
-                raise TransientContentionError("PostgreSQL query execution failed")
-            raise DatabaseError("PostgreSQL query execution failed")
+        if saved_view_name_failure:
+            raise SavedViewNameUniqueConstraintError("PostgreSQL query execution failed")
+        if unique_failure:
+            raise UniqueConstraintError("PostgreSQL query execution failed")
+        if authorization_failure:
+            raise AuthorizationDeniedError(
+                "PostgreSQL denied the statement: row-level security policy "
+                "or insufficient privilege (SQLSTATE 42501)"
+            )
+        if constraint_failure:
+            raise ConstraintViolationError("PostgreSQL query execution failed")
+        if contention_failure:
+            raise TransientContentionError("PostgreSQL query execution failed")
+        raise DatabaseError("PostgreSQL query execution failed")
 
     def execute_many(
         self,
         query: str,
-        params_list: list[Union[tuple, dict]],
+        params_list: Sequence[Union[tuple, list, dict]],
         connection: Optional[Any] = None
     ) -> QueryResult:
         """Execute a query multiple times with different parameters."""
@@ -1606,11 +1576,11 @@ class PostgreSQLBackend(DatabaseBackend):
         try:
             # Use autocommit for VACUUM
             old_autocommit = getattr(conn, 'autocommit', False)
-            with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                 conn.autocommit = True
             cursor = conn.cursor()
             cursor.execute("VACUUM ANALYZE")
-            with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                 conn.autocommit = old_autocommit
         finally:
             if not external_conn:

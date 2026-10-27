@@ -16,6 +16,7 @@ import {
 } from "./personaVisualDiagnostics"
 
 type BuddyShellPopoverProps = {
+  isOpen?: boolean
   buddySummary: PersonaBuddySummary
   personaId?: string | null
   visualDiagnostic?: PersonaVisualDiagnostic | null
@@ -40,6 +41,7 @@ const generateDraftClientMessageId = () => {
 }
 
 export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
+  isOpen = true,
   buddySummary,
   personaId = null,
   visualDiagnostic = null,
@@ -138,6 +140,8 @@ export const BuddyShellPopover: React.FC<BuddyShellPopoverProps> = ({
       setSending(false)
     }
   }
+
+  if (!isOpen) return null
 
   return (
     <div

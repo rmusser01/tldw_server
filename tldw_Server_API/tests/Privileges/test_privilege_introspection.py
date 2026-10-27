@@ -3,23 +3,69 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List
 
 import pytest
 from fastapi import APIRouter, Depends, FastAPI
+from fastapi.routing import APIRoute
 
 from tldw_Server_API.app.core.AuthNZ.privilege_catalog import PrivilegeCatalog, load_catalog
+from tldw_Server_API.app.core.PrivilegeMaps import startup as privilege_startup
 from tldw_Server_API.app.core.PrivilegeMaps.introspection import (
     collect_privilege_route_registry,
     serialize_route_registry,
 )
-from tldw_Server_API.app.core.PrivilegeMaps import startup as privilege_startup
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.main import app as fastapi_app
+from tldw_Server_API.tests.helpers.app_main_state import reload_app_main
+
+
+@pytest.mark.parametrize("quotas_enabled", ["true", "false"])
+@pytest.mark.parametrize(
+    ("path", "scope", "endpoint_module", "endpoint_name"),
+    [
+        ("/api/v1/rag/search", "rag.search", "rag_unified", "unified_search_endpoint"),
+        ("/api/v1/text2sql/query", "text2sql.query", "text2sql", "query_text2sql"),
+    ],
+)
+def test_served_query_routes_register_quota_dependency_even_when_disabled(
+    monkeypatch, quotas_enabled, path, scope, endpoint_module, endpoint_name,
+):
+    """Quota enablement changes enforcement, never the served route contract."""
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", quotas_enabled)
+    app = reload_app_main().app
+    routes = [
+        served for served in iter_served_routes(app.routes)
+        if isinstance(served.route, APIRoute) and served.path == path and "POST" in served.methods
+    ]
+    assert len(routes) == 1
+    served = routes[0]
+    route = served.route
+    assert route.endpoint.__module__ == f"tldw_Server_API.app.api.v1.endpoints.{endpoint_module}"
+    assert route.endpoint.__name__ == endpoint_name
+    quota_dependencies = [
+        dependency.call for dependency in served.dependant.dependencies
+        if getattr(dependency.call, "__module__", None)
+        == "tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps"
+    ]
+    assert len(quota_dependencies) == 1
+    assert quota_dependencies[0].__qualname__ == "require_rag_query_quota.<locals>._check"
+    registry = serialize_route_registry(collect_privilege_route_registry(app, load_catalog(), strict=True))
+    expected = json.loads(Path("tldw_Server_API/tests/fixtures/privilege_route_registry_snapshot.json").read_text())
+    quota_record = {
+        "id": "usage_quota_deps._check",
+        "type": "dependency",
+        "module": "tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps",
+    }
+    for bucket in ("any", scope):
+        live = next(entry for entry in registry[bucket] if entry["path"] == path and entry["methods"] == ["POST"])
+        snapshot = next(entry for entry in expected[bucket] if entry["path"] == path and entry["methods"] == ["POST"])
+        assert quota_record in live["dependencies"]
+        assert snapshot == live
 
 
 def _build_test_catalog() -> PrivilegeCatalog:
     """Construct a minimal privilege catalog for introspection unit tests."""
-    payload: Dict[str, object] = {
+    payload: dict[str, object] = {
         "version": "test-1.0",
         "updated_at": datetime(2025, 1, 1, tzinfo=timezone.utc).isoformat(),
         "scopes": [
@@ -55,6 +101,7 @@ def _make_async_dependency(
     scope: str | None = None,
     endpoint: str | None = None,
     rate_resource: str | None = None,
+    rate_resources: tuple[str, ...] | None = None,
 ):
     async def _dependency():
         return None
@@ -62,12 +109,35 @@ def _make_async_dependency(
     _dependency.__name__ = name
     _dependency.__qualname__ = name
     if scope:
-        setattr(_dependency, "_tldw_scope_name", scope)
+        _dependency._tldw_scope_name = scope
     if endpoint:
-        setattr(_dependency, "_tldw_endpoint_id", endpoint)
+        _dependency._tldw_endpoint_id = endpoint
     if rate_resource:
-        setattr(_dependency, "_tldw_rate_limit_resource", rate_resource)
+        _dependency._tldw_rate_limit_resource = rate_resource
+    if rate_resources:
+        _dependency._tldw_rate_limit_resources = rate_resources
     return _dependency
+
+
+def test_collect_privilege_route_registry_supports_dynamic_rate_resources():
+    catalog = _build_test_catalog()
+    app = FastAPI()
+    scope_dep = _make_async_dependency("scope", scope="media.ingest")
+    rate_dep = _make_async_dependency(
+        "dynamic_rate",
+        rate_resources=("media.ingest", "rag.search"),
+    )
+
+    @app.get("/dynamic", dependencies=[Depends(scope_dep), Depends(rate_dep)])
+    async def dynamic_route():
+        return {"status": "ok"}
+
+    registry = collect_privilege_route_registry(app, catalog)
+
+    assert registry["media.ingest"][0].rate_limit_resources == (
+        "media.ingest",
+        "rag.search",
+    )
 
 
 def test_collect_privilege_route_registry_captures_metadata():
@@ -153,8 +223,8 @@ def test_collect_privilege_route_registry_strict_unknown_scope():
 def test_validate_privilege_metadata_on_startup_invokes_strict_mode(monkeypatch: pytest.MonkeyPatch):
     app = FastAPI()
     catalog = _build_test_catalog()
-    sample_registry: Dict[str, List[object]] = {"media.ingest": []}
-    calls: Dict[str, object] = {}
+    sample_registry: dict[str, list[object]] = {"media.ingest": []}
+    calls: dict[str, object] = {}
     monkeypatch.setenv("PRIVILEGE_METADATA_VALIDATE_ON_STARTUP", "1")
 
     def fake_load_catalog() -> PrivilegeCatalog:

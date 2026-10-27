@@ -5,6 +5,7 @@ import importlib
 import sys
 import threading
 from collections.abc import Callable
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
@@ -127,7 +128,9 @@ def _standalone_config(
     "spec_name",
     [
         "audio_jobs_task",
+        "tts_jobs_task",
         "audiobook_jobs_task",
+        "audio_studio_jobs_task",
         "presentation_render_jobs_task",
         "standalone_html_generation_jobs_task",
         "research_workspace_output_jobs_task",
@@ -159,12 +162,52 @@ def test_content_jobs_worker_specs_match_legacy_worker_contract(
     assert callable(spec.factory)
 
 
+@pytest.mark.parametrize(
+    "flag,test_mode,sidecar,route,expected",
+    [
+        (None, False, False, True, True),
+        ("0", False, False, True, False),
+        ("1", False, False, True, True),
+        (None, False, False, False, False),
+        (None, True, False, True, False),
+        ("1", False, True, True, False),
+        ("1", True, False, True, True),
+    ],
+)
+def test_b06_audio_studio_worker_preserves_default_and_explicit_startup_policy(
+    monkeypatch: pytest.MonkeyPatch,
+    flag,
+    test_mode,
+    sidecar,
+    route,
+    expected,
+) -> None:
+    if flag is None:
+        monkeypatch.delenv("AUDIO_STUDIO_JOBS_WORKER_ENABLED", raising=False)
+    else:
+        monkeypatch.setenv("AUDIO_STUDIO_JOBS_WORKER_ENABLED", flag)
+    context = WorkerLifecycleContext(
+        app=object(),
+        settings={},
+        test_mode=test_mode,
+        sidecar_mode=sidecar,
+        route_enabled=lambda *_args, **_kwargs: route,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+    spec = _specs_by_name(_import_startup_content_jobs_pollers())["audio_studio_jobs_task"]
+    assert spec.enabled(context) is expected  # nosec B101 - Existing route/flag/test/sidecar startup contract.
+
+
 def test_content_jobs_worker_specs_use_expected_names() -> None:
     startup_pollers = _import_startup_content_jobs_pollers()
 
-    assert [spec.name for spec in startup_pollers.provide_content_jobs_worker_specs()] == [
+    assert [spec.name for spec in startup_pollers.provide_content_jobs_worker_specs()] == [  # nosec B101 - Unit catalog contract now includes the Studio worker.
         "audio_jobs_task",
+        "tts_jobs_task",
         "audiobook_jobs_task",
+        "audio_studio_jobs_task",
         "presentation_render_jobs_task",
         "standalone_html_generation_jobs_task",
         "research_workspace_output_jobs_task",
@@ -189,7 +232,9 @@ def test_content_jobs_worker_spec_factories_delegate_to_existing_worker_services
 
     for spec_name, factory_name in [
         ("audio_jobs_task", "_run_audio_jobs_worker_service"),
+        ("tts_jobs_task", "_run_tts_jobs_worker_service"),
         ("audiobook_jobs_task", "_run_audiobook_jobs_worker_service"),
+        ("audio_studio_jobs_task", "_run_audio_studio_jobs_worker_service"),
         ("presentation_render_jobs_task", "_run_presentation_render_jobs_worker_service"),
         ("standalone_html_generation_jobs_task", "_run_standalone_html_generation_jobs_service"),
         ("research_workspace_output_jobs_task", "_run_research_workspace_output_jobs_worker_service"),
@@ -219,9 +264,11 @@ def test_content_jobs_worker_spec_factories_delegate_to_existing_worker_services
         assert spec.factory is not None
         assert spec.factory(_context(), f"{spec_name}-stop") == f"{spec_name}-awaitable"
 
-    assert calls == [
+    assert calls == [  # nosec B101 - Unit delegation contract includes the existing Studio service.
         ("audio_jobs_task", "audio_jobs_task-stop"),
+        ("tts_jobs_task", "tts_jobs_task-stop"),
         ("audiobook_jobs_task", "audiobook_jobs_task-stop"),
+        ("audio_studio_jobs_task", "audio_studio_jobs_task-stop"),
         ("presentation_render_jobs_task", "presentation_render_jobs_task-stop"),
         ("standalone_html_generation_jobs_task", "standalone_html_generation_jobs_task-stop"),
         ("research_workspace_output_jobs_task", "research_workspace_output_jobs_task-stop"),
@@ -254,12 +301,14 @@ def test_content_jobs_worker_spec_predicates_use_route_enabled_arguments(
     context = _context(route_enabled=_route_enabled)
     specs = _specs_by_name(startup_pollers)
     media_ingest_explicit_flag_specs = {
+        "tts_jobs_task",
         "media_ingest_jobs_task",
         "media_ingest_heavy_jobs_task",
     }
 
     for spec_name in [
         "audio_jobs_task",
+        "tts_jobs_task",
         "audiobook_jobs_task",
         "presentation_render_jobs_task",
         "research_workspace_output_jobs_task",
@@ -277,6 +326,7 @@ def test_content_jobs_worker_spec_predicates_use_route_enabled_arguments(
         monkeypatch.setenv(
             {
                 "audio_jobs_task": "AUDIO_JOBS_WORKER_ENABLED",
+                "tts_jobs_task": "TTS_JOBS_WORKER_ENABLED",
                 "audiobook_jobs_task": "AUDIOBOOK_JOBS_WORKER_ENABLED",
                 "presentation_render_jobs_task": "PRESENTATION_RENDER_JOBS_WORKER_ENABLED",
                 "research_workspace_output_jobs_task": "RESEARCH_WORKSPACE_OUTPUT_JOBS_WORKER_ENABLED",
@@ -314,6 +364,51 @@ def test_content_jobs_worker_spec_predicates_use_route_enabled_arguments(
         (("companion",), {}),
         (("scheduled-tasks-recurring-question",), {"default_stable": False}),
     ]
+
+
+def test_tts_jobs_worker_runs_in_process_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Long-form TTS jobs (POST /audio/speech/jobs) have no other worker in a default deployment (TASK-13849)."""
+    startup_pollers = _import_startup_content_jobs_pollers()
+    spec = _specs_by_name(startup_pollers)["tts_jobs_task"]
+    monkeypatch.delenv("TTS_JOBS_WORKER_ENABLED", raising=False)
+    routes: list[object] = []
+
+    def _route_enabled(route: object, *_args: object, **kwargs: object) -> bool:
+        routes.append((route, kwargs.get("default_stable")))
+        return True
+
+    live = replace(_context(route_enabled=_route_enabled), test_mode=False)
+    assert spec.enabled(live) is True
+    # default_stable=True is what turns it on where the audio route has no explicit setting.
+    assert routes == [("audio", True)]
+    # It follows the audio route's answer, not just its presence.
+    assert spec.enabled(replace(live, route_enabled=lambda *_a, **_k: False)) is False
+    # Test runs do not start it unless asked.
+    assert spec.enabled(_context(route_enabled=_route_enabled)) is False
+    # A sidecar deployment runs it as its own service instead.
+    assert spec.enabled(replace(live, sidecar_mode=True)) is False
+    # An explicit true runs it even where the audio route is off, as for media ingest.
+    monkeypatch.setenv("TTS_JOBS_WORKER_ENABLED", "true")
+    assert spec.enabled(replace(live, route_enabled=lambda *_a, **_k: False)) is True
+    monkeypatch.setenv("TTS_JOBS_WORKER_ENABLED", "false")
+    assert spec.enabled(live) is False
+
+
+def test_tts_jobs_worker_service_runs_the_tts_jobs_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The factory test stubs the service function; this runs its body, so a wrong import fails here."""
+    startup_pollers = _import_startup_content_jobs_pollers()
+    from tldw_Server_API.app.core.TTS import tts_jobs_worker
+
+    received: list[object] = []
+
+    def _run(stop_event: object) -> str:
+        received.append(stop_event)
+        return "running"
+
+    monkeypatch.setattr(tts_jobs_worker, "run_tts_jobs_worker", _run)
+    stop_event = object()
+    assert startup_pollers._run_tts_jobs_worker_service(stop_event) == "running"
+    assert received == [stop_event]
 
 
 def test_standalone_html_composite_worker_uses_slides_route_without_a_second_flag() -> None:

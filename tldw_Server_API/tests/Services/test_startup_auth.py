@@ -161,6 +161,7 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
         "tldw_Server_API.app.core.AuthNZ.pg_migrations_extra",
         ensure_user_timestamp_timezones_pg=_make_pg_ensure("user_timestamps"),
         ensure_authnz_core_tables_pg=_make_pg_ensure("authnz_core"),
+        ensure_org_stt_settings_pg=_make_pg_ensure("org_stt_settings"),
         ensure_admin_webhook_canonical_tables_pg=_make_pg_ensure(
             "admin_webhook_canonical"
         ),
@@ -171,6 +172,7 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
         ensure_privilege_snapshots_table_pg=_make_pg_ensure("privilege_snapshots"),
         ensure_api_keys_tables_pg=_make_pg_ensure("api_keys"),
         ensure_usage_tables_pg=_make_pg_ensure("usage"),
+        ensure_storage_quota_overrides_backfill_pg=_make_pg_ensure("storage_quota_backfill"),
         ensure_virtual_key_counters_pg=_make_pg_ensure("virtual_key_counters"),
         ensure_llm_provider_overrides_pg=_make_pg_ensure("provider_overrides"),
     )
@@ -183,6 +185,8 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
     assert pg_calls == [
         "user_timestamps",
         "authnz_core",
+        "org_stt_settings",
+        "storage_quota_backfill",
         "admin_webhook_canonical",
         "sharing",
         "notification_permissions",
@@ -209,6 +213,7 @@ async def test_pg_ensure_false_emits_high_signal_warning(
     pg_ensures = {
         "ensure_user_timestamp_timezones_pg": _successful_ensure,
         "ensure_authnz_core_tables_pg": _successful_ensure,
+        "ensure_org_stt_settings_pg": _successful_ensure,
         "ensure_admin_webhook_canonical_tables_pg": _successful_ensure,
         "ensure_notification_permissions_pg": _failed_ensure,
         "ensure_sharing_tables_pg": _successful_ensure,
@@ -217,6 +222,7 @@ async def test_pg_ensure_false_emits_high_signal_warning(
         "ensure_privilege_snapshots_table_pg": _successful_ensure,
         "ensure_api_keys_tables_pg": _successful_ensure,
         "ensure_usage_tables_pg": _successful_ensure,
+        "ensure_storage_quota_overrides_backfill_pg": _successful_ensure,
         "ensure_virtual_key_counters_pg": _successful_ensure,
         "ensure_llm_provider_overrides_pg": _successful_ensure,
     }
@@ -250,6 +256,7 @@ async def test_pg_authnz_core_readiness_failure_blocks_startup(
     pg_ensures = {
         "ensure_user_timestamp_timezones_pg": _successful_ensure,
         "ensure_authnz_core_tables_pg": _profile_version_not_ready,
+        "ensure_org_stt_settings_pg": _successful_ensure,
         "ensure_admin_webhook_canonical_tables_pg": _successful_ensure,
         "ensure_sharing_tables_pg": _successful_ensure,
         "ensure_notification_permissions_pg": _successful_ensure,
@@ -258,6 +265,7 @@ async def test_pg_authnz_core_readiness_failure_blocks_startup(
         "ensure_privilege_snapshots_table_pg": _successful_ensure,
         "ensure_api_keys_tables_pg": _successful_ensure,
         "ensure_usage_tables_pg": _successful_ensure,
+        "ensure_storage_quota_overrides_backfill_pg": _successful_ensure,
         "ensure_virtual_key_counters_pg": _successful_ensure,
         "ensure_llm_provider_overrides_pg": _successful_ensure,
     }
@@ -278,22 +286,32 @@ async def test_pg_authnz_core_readiness_failure_blocks_startup(
 
 
 @pytest.mark.parametrize("failure_mode", ["false", "exception"])
+@pytest.mark.parametrize(
+    "ensure_name,readiness_error",
+    [
+        ("ensure_user_timestamp_timezones_pg", "AUTHNZ_USER_TIMESTAMPS_NOT_READY"),
+        ("ensure_org_stt_settings_pg", "AUTHNZ_PG_STT_SCHEMA_NOT_READY"),
+    ],
+)
 @pytest.mark.unit
-async def test_pg_user_timestamp_readiness_failure_blocks_startup(
+async def test_pg_required_schema_readiness_failure_blocks_startup(
     monkeypatch: pytest.MonkeyPatch,
     failure_mode: str,
+    ensure_name: str,
+    readiness_error: str,
 ) -> None:
     async def _successful_ensure(_pool: object) -> bool:
         return True
 
-    async def _timestamp_ensure(_pool: object) -> bool:
+    async def _required_ensure(_pool: object) -> bool:
         if failure_mode == "exception":
-            raise RuntimeError("private timestamp migration failure")
+            raise RuntimeError("private schema migration failure")
         return False
 
     pg_ensures = {
-        "ensure_user_timestamp_timezones_pg": _timestamp_ensure,
+        "ensure_user_timestamp_timezones_pg": _successful_ensure,
         "ensure_authnz_core_tables_pg": _successful_ensure,
+        "ensure_org_stt_settings_pg": _successful_ensure,
         "ensure_admin_webhook_canonical_tables_pg": _successful_ensure,
         "ensure_sharing_tables_pg": _successful_ensure,
         "ensure_notification_permissions_pg": _successful_ensure,
@@ -302,9 +320,11 @@ async def test_pg_user_timestamp_readiness_failure_blocks_startup(
         "ensure_privilege_snapshots_table_pg": _successful_ensure,
         "ensure_api_keys_tables_pg": _successful_ensure,
         "ensure_usage_tables_pg": _successful_ensure,
+        "ensure_storage_quota_overrides_backfill_pg": _successful_ensure,
         "ensure_virtual_key_counters_pg": _successful_ensure,
         "ensure_llm_provider_overrides_pg": _successful_ensure,
     }
+    pg_ensures[ensure_name] = _required_ensure
     _install_module(
         monkeypatch,
         "tldw_Server_API.app.core.AuthNZ.pg_migrations_extra",
@@ -314,7 +334,7 @@ async def test_pg_user_timestamp_readiness_failure_blocks_startup(
 
     with pytest.raises(
         startup_auth.AuthStartupError,
-        match="AUTHNZ_USER_TIMESTAMPS_NOT_READY",
+        match=readiness_error,
     ) as exc_info:
         await startup_auth._ensure_pg_extras(SimpleNamespace(pool=object()))
 
@@ -338,6 +358,7 @@ async def test_pg_sharing_readiness_failure_blocks_startup(
     pg_ensures = {
         "ensure_user_timestamp_timezones_pg": _successful_ensure,
         "ensure_authnz_core_tables_pg": _successful_ensure,
+        "ensure_org_stt_settings_pg": _successful_ensure,
         "ensure_admin_webhook_canonical_tables_pg": _successful_ensure,
         "ensure_sharing_tables_pg": _failed_sharing_ensure,
         "ensure_notification_permissions_pg": _successful_ensure,
@@ -346,6 +367,7 @@ async def test_pg_sharing_readiness_failure_blocks_startup(
         "ensure_privilege_snapshots_table_pg": _successful_ensure,
         "ensure_api_keys_tables_pg": _successful_ensure,
         "ensure_usage_tables_pg": _successful_ensure,
+        "ensure_storage_quota_overrides_backfill_pg": _successful_ensure,
         "ensure_virtual_key_counters_pg": _successful_ensure,
         "ensure_llm_provider_overrides_pg": _successful_ensure,
     }

@@ -206,7 +206,22 @@ def get_adapter_or_raise(provider: str):
     return adapter
 
 
-def split_system_message(messages: list[dict[str, Any]]) -> tuple[str | None, list[dict[str, Any]]]:
+def split_system_message(
+    messages: list[dict[str, Any]],
+    *,
+    leading_only: bool = False,
+) -> tuple[str | None, list[dict[str, Any]]]:
+    """Keep legacy extraction or preserve an ordered leading system prefix."""
+    if leading_only:
+        parts: list[str] = []
+        index = 0
+        while index < len(messages) and messages[index].get("role") == "system":
+            text = messages[index].get("content")
+            if not isinstance(text, str):
+                raise TypeError("Leading system messages must contain text.")
+            parts.append(text)
+            index += 1
+        return "\n\n".join(parts) or None, messages[index:]
     system_message = None
     remaining: list[dict[str, Any]] = []
     for msg in messages:
@@ -221,6 +236,7 @@ def split_system_message(messages: list[dict[str, Any]]) -> tuple[str | None, li
 # ---------------------------------------------------------------------------
 # Shared utilities relocated from chat_calls.py (Feb 2026)
 # ---------------------------------------------------------------------------
+
 
 def _safe_cast(value: Any, cast_to: type, default: Any = None) -> Any:
     """Safely casts value to specified type, returning default on failure."""

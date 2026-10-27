@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
-from typing import Any, Optional
+from typing import Any, Optional, Protocol, TypeVar
 from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup
@@ -16,6 +16,7 @@ from loguru import logger
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.http_client import DEFAULT_MAX_REDIRECTS
 from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogram
+from tldw_Server_API.app.core.Security.egress import public_url_policy_scope
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Web_Scraping import preflight as preflight_facade
 from tldw_Server_API.app.core.Web_Scraping.content import convert_html_to_markdown
@@ -26,12 +27,13 @@ from tldw_Server_API.app.core.Web_Scraping.orchestration.article_browser import 
 from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import (
     PUBLIC_FAILURE_CODES,
     ArticleFailure,
+    ArticleLimits,
     ArticlePlan,
+    DirectBrowserProfile,
     article_failure_result,
 )
 from tldw_Server_API.app.core.Web_Scraping.orchestration.executor import (
     DEFAULT_EXTRACTION_EXECUTOR,
-    ExtractionExecutorManager,
 )
 from tldw_Server_API.app.core.Web_Scraping.policy import (
     DefaultProbeEgressGuard,
@@ -113,18 +115,29 @@ _JS_REQUIRED_DOMAINS = frozenset(
 )
 
 
+_T = TypeVar("_T")
+
+
+class _ArticleBrowser(Protocol):
+    async def acquire(self, url: str, profile: DirectBrowserProfile, limits: ArticleLimits) -> str: ...
+
+
+class _ArticleExecutor(Protocol):
+    async def run(self, func: Callable[..., _T], /, *args: Any, **kwargs: Any) -> _T: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ArticleDependencies:
     """Injectable collaborators for a single standard article request."""
 
-    load_config: Callable[[], Mapping[str, Any]]
+    load_config: Callable[[], Mapping[str, Any] | None]
     resolve_plan: Callable[[str, Mapping[str, Any]], ArticlePlan]
     evaluate_target: Callable[..., Awaitable[Any]]
     run_preflight: Callable[..., Awaitable[Any]]
     apply_preflight_advice: Callable[..., tuple[str, str, Any]]
     fetch_client: FetchClient
-    browser: GuardedArticleBrowser
-    executor: ExtractionExecutorManager
+    browser: _ArticleBrowser
+    executor: _ArticleExecutor
     extract: Callable[..., dict[str, Any]]
     build_preflight_context: Callable[..., Any]
     preflight_options: Callable[[Mapping[str, Any]], Any]
@@ -580,6 +593,7 @@ async def _run_article(
     allow_llm_extraction: bool,
     *,
     dependencies: ArticleDependencies,
+    credential_free: bool = False,
 ) -> dict[str, Any]:
     """Run one request through its immutable route and governed dependencies."""
     prepared = await _prepare_article(
@@ -587,6 +601,7 @@ async def _run_article(
         custom_cookies,
         dependencies=dependencies,
         source="article_extract",
+        plan_modifier=ArticlePlan.for_public_capture if credential_free else None,
     )
     if isinstance(prepared, dict):
         return prepared
@@ -1068,7 +1083,9 @@ def _default_rules_path() -> str:
     return str(Path(__file__).resolve().parents[4] / "Config_Files" / "custom_scrapers.yaml")
 
 
-def _build_default_dependencies(custom_cookies: Sequence[Mapping[str, Any]] | None) -> ArticleDependencies:
+def _build_default_dependencies(
+    custom_cookies: Sequence[Mapping[str, Any]] | None, *, credential_free: bool = False
+) -> ArticleDependencies:
     """Build the live standard-article dependencies at request time."""
     resolved_backend_settings: dict[int, str] = {}
 
@@ -1116,7 +1133,7 @@ def _build_default_dependencies(custom_cookies: Sequence[Mapping[str, Any]] | No
         observe_histogram=observe_histogram,
         clock=time.monotonic,
         log=log,
-        policy_checker=DefaultWebOutboundPolicyChecker(),
+        policy_checker=DefaultWebOutboundPolicyChecker(credential_free=credential_free),
         backend_setting=lambda plan: resolved_backend_settings.get(id(plan), plan.backend),
     )
 
@@ -1126,16 +1143,23 @@ async def scrape_article(
     custom_cookies: list[dict[str, Any]] | None = None,
     *,
     allow_llm_extraction: bool = True,
+    credential_free: bool = False,
 ) -> dict[str, typing.Any]:
     """Scrape one article through canonical governed orchestration."""
-    cookie_snapshot = _snapshot_cookies(custom_cookies)
-    dependencies = _build_default_dependencies(cookie_snapshot)
-    return await _run_article(
-        url,
-        cookie_snapshot,
-        allow_llm_extraction,
-        dependencies=dependencies,
-    )
+    cookie_snapshot = () if credential_free else _snapshot_cookies(custom_cookies)
+    with public_url_policy_scope(enabled=credential_free):
+        dependencies = (
+            _build_default_dependencies(cookie_snapshot, credential_free=True)
+            if credential_free
+            else _build_default_dependencies(cookie_snapshot)
+        )
+        return await _run_article(
+            url,
+            cookie_snapshot,
+            allow_llm_extraction and not credential_free,
+            dependencies=dependencies,
+            credential_free=credential_free,
+        )
 
 
 def _reject_active_event_loop() -> None:

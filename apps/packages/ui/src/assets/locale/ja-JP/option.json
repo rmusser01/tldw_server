@@ -600,7 +600,7 @@
     "reviewStorageCapWarning_one": "{{count}} 件のファイルがローカル下書き上限 ({{cap}}) を超えています。音声/動画を保存する前にソースを添付してください。",
     "reviewStorageCapWarning_other": "{{count}} 件のファイルがローカル下書き上限 ({{cap}}) を超えています。音声/動画を保存する前にソースを添付してください。",
     "storeAfterReview": "レビュー後に保存",
-    "reviewBeforeStorage": "保存前にレビュー",
+    "reviewBeforeStorage": "保存前に抽出した内容を確認",
     "reviewBeforeStorageHint": "今すぐ処理し、サーバーに保存する前にローカルで下書きを編集します。",
     "reviewEnabled": "レビューモード",
     "reviewStorageCap": "ローカル下書きは {{cap}} 件までです。",

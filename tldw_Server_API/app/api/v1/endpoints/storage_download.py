@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, require_api_key_scope
 from tldw_Server_API.app.api.v1.endpoints.storage_helpers import (
     _resolve_storage_base_dir,
 )
@@ -24,6 +24,7 @@ async def _get_storage_service() -> StorageQuotaService:
 @router.get(
     "/files/{file_id}/download",
     response_class=FileResponse,
+    dependencies=[Depends(require_api_key_scope("read"))],
     responses={
         200: {
             "description": "Generated file download.",

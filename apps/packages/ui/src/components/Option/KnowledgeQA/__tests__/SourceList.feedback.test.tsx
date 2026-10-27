@@ -26,6 +26,7 @@ const state = {
   focusSource: vi.fn(),
   setQuery: vi.fn(),
   query: "How is revenue trending?",
+  resultQuery: "How is revenue trending?",
   currentThreadId: "thread-feedback",
   messages: [{ id: "assistant-2", role: "assistant" }] as Array<{
     id: string
@@ -44,6 +45,7 @@ vi.mock("../KnowledgeQAProvider", () => ({
     focusSource: state.focusSource,
     setQuery: state.setQuery,
     query: state.query,
+    resultQuery: state.resultQuery,
     currentThreadId: state.currentThreadId,
     messages: state.messages,
   }),
@@ -69,11 +71,13 @@ describe("SourceList source feedback", () => {
     vi.clearAllMocks()
     submitExplicitFeedbackMock.mockResolvedValue({ ok: true })
     trackMetricMock.mockResolvedValue(undefined)
+    state.query = "How is revenue trending?"
     state.currentThreadId = "thread-feedback"
     state.messages = [{ id: "assistant-2", role: "assistant" }]
   })
 
-  it("submits per-source relevance feedback with document and chunk ids", async () => {
+  it("submits per-source relevance feedback for the answered question after the input changes", async () => {
+    state.query = "Unsearched new question"
     render(<SourceList />)
 
     fireEvent.click(screen.getByRole("button", { name: "Yes" }))
@@ -111,6 +115,15 @@ describe("SourceList source feedback", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry feedback" }))
 
     await waitFor(() => expect(submitExplicitFeedbackMock).toHaveBeenCalledTimes(2))
+  })
+
+  it("retains source feedback when only the editable search input changes", async () => {
+    const { rerender } = render(<SourceList />)
+    fireEvent.click(screen.getByRole("button", { name: "Yes" }))
+    await waitFor(() => expect(screen.getByRole("button", { name: "Yes" })).toHaveAttribute("aria-pressed", "true"))
+    state.query = "Unsearched new question"
+    rerender(<SourceList />)
+    expect(screen.getByRole("button", { name: "Yes" })).toHaveAttribute("aria-pressed", "true")
   })
 
   it("resets source feedback state when the active answer session changes with the same results", async () => {

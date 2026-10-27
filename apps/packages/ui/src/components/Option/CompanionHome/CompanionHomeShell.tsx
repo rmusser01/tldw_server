@@ -1,11 +1,10 @@
-import { useQuery } from "@tanstack/react-query"
+import { EMPTY_CHAT_MODELS, useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import React from "react"
 import { Link } from "react-router-dom"
 import { browser } from "wxt/browser"
 
 import { useIsConnected } from "@/hooks/useConnectionState"
 import { useSafeDemoMode } from "@/context/demo-mode"
-import { fetchChatModels } from "@/services/tldw-server"
 import { StorageQuotaBanner } from "@/components/Common/StorageQuotaBanner"
 import { CompanionHomePage } from "./CompanionHomePage"
 
@@ -30,12 +29,7 @@ export function CompanionHomeShell({
   const demoExitPath = surface === "sidepanel" ? "/settings" : "/setup"
 
   const isConnected = useIsConnected()
-  const { data: models = [], isSuccess } = useQuery({
-    queryKey: ["companion-home:chatModels"],
-    queryFn: () => fetchChatModels(),
-    enabled: isConnected && !demoEnabled,
-    staleTime: 30_000,
-  })
+  const { data: models = EMPTY_CHAT_MODELS, isSuccess } = useChatModelCatalog(isConnected && !demoEnabled)
   const needsProvider = isConnected && !demoEnabled && isSuccess && models.length === 0
 
   const actions: QuickAction[] =

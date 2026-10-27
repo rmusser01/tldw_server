@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import SharedLayout from "@/components/Layouts/Layout"
+import { CommandPaletteHost } from "@/components/Common/CommandPaletteHost"
 import type { CommandItem } from "@/components/Common/CommandPalette"
 import { useTutorialStore } from "@/store/tutorials"
 import WebLayout from "../../../components/layout/WebLayout"
@@ -46,17 +47,26 @@ vi.mock("@/hooks/keyboard/useKeyboardShortcuts", () => ({
   useModeNavigationShortcuts: () => undefined
 }))
 vi.mock("@/hooks/useMessageOption", () => ({ useMessageOption: () => messageState }))
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (select: (state: { historyId: null; serverChatId: null }) => unknown) =>
-    select({ historyId: null, serverChatId: null })
-}))
+vi.mock("@/store/option", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/store/option")>()
+  const state = { ...actual.useStoreMessageOption.getState(), historyId: null, serverChatId: null }
+  return { ...actual, useStoreMessageOption: Object.assign((select: (value: typeof state) => unknown) => select(state), {
+    getState: () => state, subscribe: () => () => undefined
+  }) }
+})
 vi.mock("@/store/quick-chat", () => ({
   useQuickChatStore: () => ({ isOpen: false, setIsOpen: vi.fn() })
 }))
 vi.mock("@/hooks/useMigration", () => ({ useMigration: () => ({ isLoading: false }) }))
 vi.mock("@/hooks/useStorageMigrations", () => ({ useStorageMigrations: () => undefined }))
 vi.mock("@/hooks/useLayoutEffectsOwner", () => ({ useLayoutEffectsOwner: () => false }))
-vi.mock("@/hooks/useFeatureFlags", () => ({ useChatSidebar: () => [false] }))
+vi.mock("@/hooks/useFeatureFlags", async (importOriginal) => ({
+  // Spread the real module so shared help/empty-state components that read
+  // other flags (for example COMPARE_MODE) keep working; every flag reads off.
+  ...(await importOriginal<typeof import("@/hooks/useFeatureFlags")>()),
+  useFeatureFlag: () => [false, () => undefined, true],
+  useChatSidebar: () => [false]
+}))
 vi.mock("@/hooks/useMediaQuery", () => ({ useMobile: () => false }))
 vi.mock("@/hooks/useSetting", () => ({ useSetting: () => [""] }))
 vi.mock("@/hooks/useServerOnline", () => ({ useServerOnline: () => undefined }))
@@ -92,7 +102,6 @@ vi.mock("@web/components/notifications/NotificationToastBridge", () => ({ Notifi
 vi.mock("@/components/Timeline", () => ({ TimelineModal: () => null }))
 vi.mock("@/components/Common/TutorialRunner", () => ({ TutorialRunner: () => null }))
 vi.mock("@/components/Common/TutorialPrompt", () => ({ TutorialPrompt: () => null }))
-vi.mock("@/components/Common/KeyboardShortcutsModal", () => ({ KeyboardShortcutsModal: () => null }))
 vi.mock("@/components/Common/PageHelpModal", () => ({
   PageHelpModal: () => <div role="dialog" aria-label="Page help">Help</div>
 }))
@@ -148,12 +157,12 @@ for (const { name, Layout } of layouts) {
       expect(screen.getByRole("textbox", { name: "Search commands" })).toBe(input)
       expect(input).toHaveValue("go to settings")
       expect(input).toHaveFocus()
-      expect(screen.getAllByRole("dialog", { name: "Command Palette" })).toHaveLength(1)
+      expect(screen.getAllByRole("dialog", { name: "Search commands" })).toHaveLength(1)
       expect(addListener.mock.calls.filter(([event]) => event === "tldw:open-command-palette")).toHaveLength(1)
       expect(removeListener.mock.calls.filter(([event]) => event === "tldw:open-command-palette")).toHaveLength(0)
 
       fireEvent.keyDown(input, { key: "Escape" })
-      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Command Palette" })).not.toBeInTheDocument())
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Search commands" })).not.toBeInTheDocument())
       await waitFor(() => expect(trigger).toHaveFocus())
     })
 
@@ -162,12 +171,8 @@ for (const { name, Layout } of layouts) {
       view.rerender(tree(hidden))
       await waitFor(() => expect(Boolean(screen.queryByTestId("shell-header"))).toBe(!hidden))
       act(() => window.dispatchEvent(new CustomEvent("tldw:open-help-modal")))
-      if (name === "SharedLayout" || hidden) {
-        expect(await screen.findByRole("dialog", { name: "Page help" })).toBeInTheDocument()
-        expect(screen.getAllByRole("dialog", { name: "Page help" })).toHaveLength(1)
-      } else {
-        expect(screen.queryByRole("dialog", { name: "Page help" })).not.toBeInTheDocument()
-      }
+      expect(await screen.findByRole("dialog", { name: "Page help" })).toBeInTheDocument()
+      expect(screen.getAllByRole("dialog", { name: "Page help" })).toHaveLength(1)
     })
   })
 }
@@ -192,3 +197,91 @@ it("keeps the shared layout's current prompt commands after nested header change
   expect(currentAction).toHaveBeenCalledTimes(1)
   expect(previousAction).not.toHaveBeenCalled()
 })
+
+
+it('lets the compact debug page own one real command palette inside its hidden Web shell', async () => {
+  const toggleSidebar = vi.fn();
+  render(
+    <MemoryRouter initialEntries={['/__debug__/sidepanel-chat']}>
+      <WebLayout hideHeader hideSidebar>
+        <button type="button">Compact trigger</button>
+        <CommandPaletteHost
+          commandPaletteProps={{ scope: 'sidepanel', onToggleSidebar: toggleSidebar }}
+        />
+      </WebLayout>
+    </MemoryRouter>
+  );
+  const trigger = screen.getByRole('button', { name: 'Compact trigger' });
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: 'k', ctrlKey: true });
+  await waitFor(() =>
+    expect(screen.getAllByRole('dialog', { name: 'Search commands' })).toHaveLength(1)
+  );
+  const input = screen.getByRole('textbox', { name: 'Search commands' });
+  await waitFor(() => expect(input).toHaveFocus());
+  fireEvent.change(input, { target: { value: 'Toggle Sidebar' } });
+  fireEvent.click(screen.getByRole('option', { name: /^Toggle Sidebar/ }));
+  expect(toggleSidebar).toHaveBeenCalledOnce();
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog', { name: 'Search commands' })).not.toBeInTheDocument()
+  );
+});
+
+
+it('keeps the Find destination focused after the real palette closes', async () => {
+  const find = vi.fn(() => screen.getByRole('textbox', { name: 'Conversation search' }).focus());
+  render(
+    <MemoryRouter initialEntries={['/__debug__/sidepanel-chat']}>
+      <WebLayout hideHeader hideSidebar>
+        <button type="button">Compact trigger</button>
+        <input aria-label="Conversation search" />
+        <CommandPaletteHost commandPaletteProps={{ scope: 'sidepanel', onSearchHistory: find }} />
+      </WebLayout>
+    </MemoryRouter>
+  );
+  const trigger = screen.getByRole('button', { name: 'Compact trigger' });
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: 'k', ctrlKey: true });
+  const input = await screen.findByRole('textbox', { name: 'Search commands' });
+  await waitFor(() => expect(input).toHaveFocus());
+  fireEvent.click(screen.getByRole('option', { name: /^Find conversations/ }));
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog', { name: 'Search commands' })).not.toBeInTheDocument()
+  );
+  await act(async () => {
+    await new Promise((resolve) => window.setTimeout(resolve, 10));
+  });
+  expect(find).toHaveBeenCalledOnce();
+  expect(screen.getByRole('textbox', { name: 'Conversation search' })).toHaveFocus();
+});
+
+
+it('cancels the old close focus return when a real palette reopens before its timer', async () => {
+  render(
+    <MemoryRouter initialEntries={['/__debug__/sidepanel-chat']}>
+      <WebLayout hideHeader hideSidebar>
+        <button type="button">Compact trigger</button>
+        <CommandPaletteHost commandPaletteProps={{ scope: 'sidepanel' }} />
+      </WebLayout>
+    </MemoryRouter>
+  );
+  const trigger = screen.getByRole('button', { name: 'Compact trigger' });
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: 'k', ctrlKey: true });
+  const input = await screen.findByRole('textbox', { name: 'Search commands' });
+  await waitFor(() => expect(input).toHaveFocus());
+  const oldReturn = vi.spyOn(trigger, 'focus');
+  vi.useFakeTimers();
+  try {
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Search commands' })).not.toBeInTheDocument();
+    expect(document.body).toHaveFocus();
+    act(() => window.dispatchEvent(new CustomEvent('tldw:open-command-palette')));
+    expect(screen.getByRole('dialog', { name: 'Search commands' })).toBeInTheDocument();
+    act(() => vi.runOnlyPendingTimers());
+    expect(oldReturn).not.toHaveBeenCalled();
+    expect(screen.getByRole('textbox', { name: 'Search commands' })).toHaveFocus();
+  } finally {
+    vi.useRealTimers();
+  }
+});

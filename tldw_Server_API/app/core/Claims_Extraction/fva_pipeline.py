@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
         MultiDatabaseRetriever,
@@ -61,6 +63,11 @@ except ImportError:
 
     def observe_histogram(*args, **kwargs) -> None:
         pass
+
+
+# Each supporting document costs one stance call per falsified claim, so adjudication assesses the documents the
+# verifier judged, not every base document the request retrieved. process_claim passes it as the verifier's top_k.
+_ADJUDICATED_SUPPORTING_DOCS = 5
 
 
 def _load_fva_config_from_settings() -> dict[str, Any]:
@@ -203,6 +210,7 @@ class FVAPipeline:
             claim=claim,
             query=query,
             base_documents=documents,
+            top_k=_ADJUDICATED_SUPPORTING_DOCS,
             budget=budget,
             job_context=job_context,
         )
@@ -268,7 +276,7 @@ class FVAPipeline:
                         if anti_docs:
                             adjudication = await self.adjudicator.adjudicate(
                                 claim=claim,
-                                supporting_docs=documents,
+                                supporting_docs=documents[:_ADJUDICATED_SUPPORTING_DOCS],
                                 contradicting_docs=anti_docs,
                                 original_verification=original_verification,
                             )
@@ -324,6 +332,8 @@ class FVAPipeline:
                         # Keep original verification on timeout
                         final_verification = original_verification
 
+                    except LLMQuotaExceededError:
+                        raise  # the user's limit fails the claim; it does not keep the unchallenged verdict
                     except Exception as e:
                         logger.error(f"Falsification error for claim {claim.id}: {e}")
                         # Keep original verification on error
@@ -407,6 +417,9 @@ class FVAPipeline:
             *[process_with_semaphore(c) for c in claims],
             return_exceptions=True,
         )
+        refusal = next((r for r in results if isinstance(r, LLMQuotaExceededError)), None)
+        if refusal is not None:
+            raise refusal  # the user's limit fails the batch; a refused claim is not dropped from it
 
         # Filter out exceptions
         valid_results: list[FVAResult] = [

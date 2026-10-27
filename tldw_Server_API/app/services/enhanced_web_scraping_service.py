@@ -733,7 +733,8 @@ class WebScrapingService:
                 system_prompt or load_prompt("webscraping", "article_summary_system")
                 or "You are a professional summarizer."
             )
-            summary = analyze(
+            summary = await asyncio.to_thread(
+                analyze,
                 input_data=content,
                 custom_prompt_arg=custom_prompt,
                 api_name=api_name or "openai",
@@ -797,7 +798,7 @@ class WebScrapingService:
         effective_user_id = user_id if user_id is not None else 1
         db_path = get_user_media_db_path(effective_user_id)
         with managed_media_database(
-            client_id=f"webscraping_service_{effective_user_id}",
+            client_id=str(effective_user_id),
             db_path=db_path,
             initialize=False,
         ) as db:
@@ -1018,6 +1019,7 @@ class WebScrapingService:
                         author=article.get("author", None),
                         ingestion_date=None,  # Will use current time
                         overwrite=False,
+                        owner_user_id=effective_user_id,
                         chunks=chunks_for_sql,
                     )
                     _dt = max(0.0, time.perf_counter() - _t0)

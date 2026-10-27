@@ -166,7 +166,7 @@ def test_real_sqlite_schema_bootstrap_creates_core_objects(tmp_path) -> None:
 
     The dispatch tests above verify routing with the initializers stubbed;
     this one closes the gap flagged in
-    audits/2026-07-04-test-suite-audit-round2.md (RA2): nothing here ever
+    Docs/Audit/2026-07-04-test-suite-audit-round2.md (RA2): nothing here ever
     executed the actual schema DDL, so a broken bootstrap kept the suite
     green.
     """
@@ -870,6 +870,47 @@ def test_sync_postgres_sequences_positive_scalar_uses_max_id_branch() -> None:
         ('"custom_schema"."media_id_seq"', 7),
         conn,
     )
+
+
+@pytest.mark.unit
+def test_sync_postgres_sequences_raises_a_failing_table() -> None:
+    """Media keeps raising a table's error; only ChaCha skips it (TASK-13901)."""
+    from tldw_Server_API.app.core.DB_Management.media_db.schema import (
+        postgres_sequence_maintenance as postgres_sequence_maintenance_module,
+    )
+
+    conn = SimpleNamespace(transaction=lambda **_kwargs: nullcontext())
+    queries: list[str] = []
+
+    class FakeBackend:
+        @staticmethod
+        def escape_identifier(value: str) -> str:
+            return f'"{value}"'
+
+        def execute(
+            self,
+            query: str,
+            params: tuple[object, ...] | None = None,
+            *,
+            connection: object,
+        ) -> SimpleNamespace:
+            queries.append(query.strip())
+            if len(queries) == 1:
+                return SimpleNamespace(
+                    rows=[
+                        {"sequence_schema": "public", "sequence_name": f"{table}_id_seq", "table_name": table, "column_name": "id"}
+                        for table in ("keywords", "media")
+                    ]
+                )
+            if query.startswith("SELECT last_value"):
+                return SimpleNamespace(rows=[{"last_value": 1, "is_called": False}])
+            if query.startswith("SELECT COALESCE(MAX"):
+                raise BackendDatabaseError("PostgreSQL query execution failed")
+            return SimpleNamespace()
+
+    with pytest.raises(BackendDatabaseError):
+        postgres_sequence_maintenance_module.sync_postgres_sequences(SimpleNamespace(backend=FakeBackend()), conn)
+    assert not any("media_id_seq" in query for query in queries)
 
 
 @pytest.mark.unit
@@ -2957,11 +2998,7 @@ def test_fresh_sqlite_bootstrap_includes_claims_analytics_export_job_fields() ->
         db.close_connection()
 
 
-@pytest.mark.integration
-def test_on_disk_sqlite_migration_to_v24_adds_claims_export_job_fields_and_preserves_rows(
-    tmp_path,
-) -> None:
-    db_path = tmp_path / "media_v23_claims_exports.sqlite"
+def _create_media_v23_claims_exports_database(db_path: Path) -> MediaDatabase:
     db = MediaDatabase(str(db_path), client_id="claims-export-jobs-migration")
     db.close_connection()
 
@@ -3008,6 +3045,15 @@ def test_on_disk_sqlite_migration_to_v24_adds_claims_export_job_fields_and_prese
             UPDATE schema_version SET version = 23;
             """
         )
+    return db
+
+
+@pytest.mark.integration
+def test_on_disk_sqlite_migration_to_v24_adds_claims_export_job_fields_and_preserves_rows(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "media_v23_claims_exports.sqlite"
+    db = _create_media_v23_claims_exports_database(db_path)
 
     try:
         db._initialize_schema()
@@ -3073,6 +3119,71 @@ def test_on_disk_sqlite_migration_to_v24_adds_claims_export_job_fields_and_prese
         }
     finally:
         db.close_connection()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("consumer", ["pool-borrow", "same-path-constructor"])
+def test_supported_sqlite_upgrade_preserves_pool_connection(tmp_path, consumer) -> None:
+    db_path = tmp_path / "media_v23_pool_upgrade.sqlite"
+    db = _create_media_v23_claims_exports_database(db_path)
+    previous_connection = db.get_connection()
+    try:
+        db._initialize_schema()
+
+        if consumer == "same-path-constructor":
+            reopened = MediaDatabase(str(db_path), client_id="same-path-upgrade")
+            assert reopened.backend is db.backend
+            connection = reopened.get_connection()
+        else:
+            connection = db.backend.get_pool().get_connection()
+
+        assert connection.execute("SELECT version FROM schema_version").fetchone()[0] == 26
+        assert connection is not previous_connection
+        assert connection.row_factory is sqlite3.Row
+        assert connection.execute(
+            "SELECT payload_json FROM claims_analytics_exports WHERE export_id = 'export-existing'"
+        ).fetchone()[0] == '{"claim_count": 1}'
+        assert db.get_connection() is connection
+    finally:
+        db.backend.get_pool().clear_thread_local_connection()
+
+
+@pytest.mark.integration
+def test_failed_sqlite_upgrade_preserves_pool_reborrow_and_retry(tmp_path) -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
+
+    db_path = tmp_path / "media_v23_pool_failed_upgrade.sqlite"
+    db = _create_media_v23_claims_exports_database(db_path)
+    previous_connection = db.get_connection()
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TRIGGER reject_v24_upgrade
+            BEFORE UPDATE ON schema_version
+            WHEN NEW.version = 24
+            BEGIN
+                SELECT RAISE(ABORT, 'synthetic migration failure');
+            END;
+            """
+        )
+
+    try:
+        with pytest.raises(DatabaseError, match="Database migration failed"):
+            db._initialize_schema()
+
+        connection = db.backend.get_pool().get_connection()
+        assert connection.execute("SELECT version FROM schema_version").fetchone()[0] == 23
+        assert connection is not previous_connection
+        connection.execute("DROP TRIGGER reject_v24_upgrade")
+        connection.commit()
+
+        reopened = MediaDatabase(str(db_path), client_id="failed-upgrade-retry")
+        assert reopened.backend is db.backend
+        assert reopened.get_connection().execute(
+            "SELECT version FROM schema_version"
+        ).fetchone()[0] == 26
+    finally:
+        db.backend.get_pool().clear_thread_local_connection()
 
 
 @pytest.mark.integration

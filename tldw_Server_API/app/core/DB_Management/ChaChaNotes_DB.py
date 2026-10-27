@@ -39,6 +39,8 @@ changes in the `sync_log` and in individual records.
 import hashlib  # noqa: E402
 import json  # noqa: E402
 import math  # noqa: E402
+import os  # noqa: E402
+import queue  # noqa: E402
 import re  # noqa: E402
 import sqlite3  # noqa: E402
 import sys  # noqa: E402
@@ -53,16 +55,22 @@ from configparser import ConfigParser  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
 from functools import wraps  # noqa: E402
 from pathlib import Path  # noqa: E402
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, Protocol, TypeAlias  # noqa: E402
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Protocol, TypeAlias, overload  # noqa: E402
 
 from loguru import logger  # noqa: E402
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.api.v1.schemas.quizzes import OsceQuizExportV2
+    from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
+    from tldw_Server_API.app.core.DB_Management.chacha.message_store import (
+        MAX_CHAT_ATTACHMENT_READ_BYTES,
+    )
+    from tldw_Server_API.app.core.DB_Management.chacha.moodboard_sync_store import GraphConnection
+    from tldw_Server_API.app.core.DB_Management.chacha.task_store import TaskConnection
     from tldw_Server_API.app.core.Sharing.clone_models import WorkspaceCloneSnapshot
 
 try:  # Prefer psycopg v3 sql helper, fall back to psycopg2 if available
-    from psycopg import sql as psycopg_sql  # type: ignore
+    from psycopg import sql as psycopg_sql
 except ImportError:  # pragma: no cover - compatibility fallback
     try:
         from psycopg2 import sql as psycopg_sql  # type: ignore
@@ -109,6 +117,7 @@ from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noq
 )
 from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (  # noqa: E402
+    ChaChaOperation,
     ClosedChaChaOperationError,
     ConnectionState,
     ExternalConnection,
@@ -304,6 +313,7 @@ def _build_scheduler_next_interval_previews(
         return build_fsrs_next_interval_previews(card, scheduler_settings_envelope["fsrs"], now=now)
     return build_next_interval_previews(card, scheduler_settings_envelope["sm2_plus"], now=now)
 
+
 # --- Order-by validation helpers (defense in depth) ---
 _ORDER_BY_COLUMN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?$")
 _ORDER_BY_EXPR_RE = re.compile(
@@ -314,6 +324,13 @@ _ORDER_BY_EXPR_RE = re.compile(
 )
 _SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _CHAT_GRAMMAR_VALIDATION_STATUSES = frozenset({"unchecked", "valid", "invalid"})
+
+# The persona older Sync v2 projections stored for a chat that named no assistant
+# (#3182). It never existed. This one definition serves the migration that clears it
+# from stored chats and the Sync materializer, which reads it in a payload as no assistant.
+RETIRED_SYNC_PLACEHOLDER_ASSISTANT_KIND = "persona"
+RETIRED_SYNC_PLACEHOLDER_ASSISTANT_ID = "sync-v2"
+
 
 # --- Custom Exceptions ---
 class CharactersRAGDBError(Exception):
@@ -448,6 +465,112 @@ _CHACHA_NONCRITICAL_EXCEPTIONS = (
     ConflictError,
 )
 
+_DROPPED_CHECKOUTS: queue.SimpleQueue[tuple[Any, Any, Any, int]] = queue.SimpleQueue()
+
+
+class _LegacyCheckout:
+    """Queue a legacy PostgreSQL checkout for return when its thread-local slot is dropped.
+
+    Outside a ChaCha operation each thread keeps its checkout in the handle's
+    ``threading.local``. psycopg's ``Connection.__del__`` skips pooled connections,
+    so without this guard the checkout and its pool slot are lost with the slot.
+
+    - Dropped on its owning thread (that thread's exit, which CPython finalizes on
+      that thread, or that thread's own collection of the handle), the guard closes
+      the connection, so a session left in a transaction does not keep its locks and
+      snapshot, and queues it so the pool gets its slot back.
+    - Dropped on any other thread (the handle collected elsewhere), it only queues
+      the checkout, with a strong reference to its owner ``Thread``. The owner may
+      be inside libpq on that connection: psycopg's C generators keep the raw
+      ``PGconn*`` across yields and call libpq without the GIL, so closing or
+      returning it from another thread would free it in use.
+      ``_return_dropped_checkouts`` keeps such an entry queued while the owner
+      ``is_alive()``. The reference is strong because a handle is cyclic garbage,
+      and the collector clears weak references inside garbage before any
+      finalizer runs (bpo-38006). So a collected handle used on a long-lived
+      thread (the main thread, an executor thread) holds its pool slot until that
+      thread exits, and a thread never seen to exit (a ``_DummyThread``) holds it
+      for good; dev lost those slots anyway.
+    - ``close_all_connections()`` keeps the ``threading.local`` on PostgreSQL, so it
+      never drops another thread's slot. Another live thread's session then stays
+      open, idle in a transaction if it left one, and keeps serving that thread
+      until the thread closes it or exits; dev ended an idle one. That only
+      happens in tests and shutdown, on a caller's own pool.
+    - Each entry records the pid that queued it. A forked child inherits a copy of
+      the queue, and its drain forgets the parent's entries untouched: they are the
+      parent's sockets.
+    """
+
+    __slots__ = ("backend", "conn", "owner", "pid", "thread_id")
+
+    def __init__(self, conn: Any, backend: Any) -> None:
+        self.conn = conn
+        self.backend = backend
+        self.owner = threading.current_thread()  # strong: see the class docstring
+        self.pid = os.getpid()
+        self.thread_id = threading.get_ident()
+
+    def disarm(self) -> None:
+        """The checkout was returned or closed explicitly."""
+        self.conn = None
+
+    def __del__(self) -> None:
+        # A finalizer must never raise, even at interpreter teardown with module globals gone.
+        try:
+            if self.conn is None or os.getpid() != self.pid:
+                return  # disarmed, or a forked child: the parent still owns this session
+            owner = self.owner
+            if threading.get_ident() == self.thread_id:
+                # The owner's own slot: nothing else is using the connection, so end the
+                # session now (PQfinish). psycopg's close() takes no lock and makes no pool
+                # call, because these pools do not set close_returns.
+                self.conn.close()
+                owner = None  # closed, so the drain may return it at once
+            # Lock-free: a collection can run this on any thread, even one holding the
+            # pool's own lock, so the pool's bookkeeping waits for _return_dropped_checkouts().
+            _DROPPED_CHECKOUTS.put((self.backend, self.conn, owner, self.pid))
+        except Exception:  # noqa: BLE001  # nosec B110
+            pass  # nothing may escape a finalizer
+
+
+def _disarm_legacy_checkout(state: Any) -> None:
+    guard = getattr(state, "checkout_guard", None)
+    if guard is not None:
+        guard.disarm()
+        state.checkout_guard = None
+
+
+def _return_dropped_checkouts() -> None:
+    """Return checkouts queued by _LegacyCheckout, outside any finalizer.
+
+    An entry whose owner thread is still alive goes back on the queue: that thread may
+    be inside libpq on the connection (see ``_LegacyCheckout``). An entry queued by
+    another process (inherited across fork) is dropped untouched.
+    """
+    still_owned = []
+    while True:
+        try:
+            entry = _DROPPED_CHECKOUTS.get_nowait()
+        except queue.Empty:
+            break
+        backend, conn, owner, pid = entry
+        if pid != os.getpid():
+            continue  # the parent's socket: neither return nor close it here
+        try:
+            owner_alive = owner is not None and owner.is_alive()
+        except AssertionError:  # a stopped _DummyThread asserts instead of answering
+            owner_alive = False
+        if owner_alive:
+            still_owned.append(entry)
+            continue
+        try:
+            backend.get_pool().return_connection(conn)
+        except Exception as exc:  # noqa: BLE001 - keep draining; one bad return must not strand the rest
+            logger.warning("Returning a dropped legacy checkout failed ({})", type(exc).__name__)
+    for entry in still_owned:
+        _DROPPED_CHECKOUTS.put(entry)
+
+
 class BackendCursorAdapter:
     """Adapter exposing QueryResult via a cursor-like interface."""
 
@@ -535,7 +658,7 @@ class BackendCursorWrapper:
         self._adapter: BackendCursorAdapter | None = None
         self.rowcount: int = -1
         self.lastrowid: int | None = None
-        self.description = None
+        self.description: Sequence[Sequence[Any]] | None = None
 
     @_owned_wrapper_call
     def execute(self, query: str, params: tuple | list | dict | None = None):
@@ -663,8 +786,17 @@ class BackendConnectionWrapper:
     @property
     def in_transaction(self) -> bool:
         if self._backend.backend_type == BackendType.SQLITE:
-            return self._connection.in_transaction
-        return True
+            in_transaction: bool = self._connection.in_transaction
+            return in_transaction
+        state = self._operation_state
+        if state is None and self._operation_owned:
+            state = self._db._connection_state()
+        status = getattr(getattr(self._connection, "info", None), "transaction_status", None)
+        return bool(
+            getattr(state, "tx_depth", 0)
+            or getattr(self._backend, "_tx_depth")(self._connection)  # noqa: B009 - lazy duck typing
+            or getattr(status, "name", None) != "IDLE"
+        )
 
     def __getattr__(self, item):
         return getattr(self._connection, item)
@@ -692,14 +824,21 @@ class BackendManagedTransaction:
         self._db = db
         self._preserve_existing = preserve_existing
         self._raw_conn = None
-        self._wrapper = None
+        self._wrapper: BackendConnectionWrapper | None = None
         self._managed = False
         self._depth = 0
+        self._claimed = False
 
     def __enter__(self):
         self._state = self._db._connection_state()
         self._use = self._state.use() if isinstance(self._state, ConnectionState) else contextlib.nullcontext()
         self._use.__enter__()
+        try:
+            # An operation's threads share this state: one transaction at a time (TASK-13899).
+            self._claimed = isinstance(self._state, ConnectionState) and self._state.enter_transaction()
+        except BaseException:
+            self._use.__exit__(*sys.exc_info())
+            raise
         self._depth = getattr(self._state, "tx_depth", 0)
         try:
             self._raw_conn = self._db._get_thread_connection()
@@ -710,13 +849,15 @@ class BackendManagedTransaction:
                 self._managed = bool(
                     self._managed
                     and getattr(status, "name", None) == "IDLE"
-                    and backend._tx_depth(self._raw_conn) == 0
+                    and getattr(backend, "_tx_depth")(self._raw_conn) == 0  # noqa: B009 - lazy duck typing
                 )
             self._state.tx_depth = self._depth + 1
             self._wrapper = BackendConnectionWrapper(self._db, self._raw_conn, backend)
             return self._wrapper
         except BaseException:
             self._state.tx_depth = self._depth
+            if self._claimed:
+                self._state.leave_transaction()
             self._use.__exit__(*sys.exc_info())
             raise
 
@@ -755,6 +896,8 @@ class BackendManagedTransaction:
                         )
         finally:
             self._state.tx_depth = self._depth
+            if self._claimed:
+                self._state.leave_transaction()
             self._wrapper = None
             self._raw_conn = None
             cleanup_error = sys.exc_info()
@@ -788,8 +931,424 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 74  # Permanent Workspace startup receipts after Companion storage
-    _POSTGRES_SCHEMA_VERSION = 78
+    if TYPE_CHECKING:
+
+        def add_character_card(self, card_data: dict[str, Any]) -> int | None: ...
+
+        def get_character_card_by_name(self, name: str, *, include_deleted: bool = False) -> dict[str, Any] | None: ...
+
+        def get_roleplay_resume_state(
+            self,
+            conversation_id: str,
+            *,
+            conn: Any | None = None,
+            lock_for_update: bool = False,
+            owner_client_id: str | None = None,
+        ) -> dict[str, Any]: ...
+
+        def add_conversation(
+            self,
+            conv_data: dict[str, Any],
+            *,
+            conn: Any | None = None,
+            assistant_startup: AssistantStartup | None = None,
+            create_request_fingerprint: str | None = None,
+        ) -> str | None: ...
+
+        def upsert_conversation_from_sync(
+            self,
+            *,
+            conversation_id: str,
+            title: str | None,
+            sync_client_id: str,
+            object_revision: int,
+            object_hash: str,
+            root_id: str | None = None,
+            assistant_kind: str | None = None,
+            assistant_id: str | None = None,
+            character_id: int | str | None = None,
+            persona_memory_mode: str | None = None,
+            state: str | None = None,
+            topic_label: str | None = None,
+            cluster_id: str | None = None,
+            source: str | None = None,
+            external_ref: str | None = None,
+            rating: int | None = None,
+            scope_type: str | None = None,
+            workspace_id: str | None = None,
+        ) -> bool: ...
+
+        def tombstone_conversation_from_sync(
+            self, *, conversation_id: str, sync_client_id: str, object_revision: int, object_hash: str
+        ) -> bool: ...
+
+        def tombstone_unsynced_conversation_from_sync(
+            self, *, conversation_id: str, sync_client_id: str, object_revision: int, object_hash: str
+        ) -> str: ...
+
+        def unsynced_conversation_is_foreign(self, *, conversation_id: str, sync_client_id: str) -> bool: ...
+
+        def update_conversation(
+            self, conversation_id: str, update_data: dict[str, Any], expected_version: int
+        ) -> bool | None: ...
+
+        def restore_conversation(
+            self, conversation_id: str, expected_version: int, *, require_already_active: bool = False
+        ) -> bool | None: ...
+
+        def count_keywords(self) -> int: ...
+
+        def add_message(self, msg_data: dict[str, Any], *, conn: Any | None = None) -> str | None: ...
+
+        def append_message_from_sync(
+            self,
+            *,
+            stable_message_id: str,
+            conversation_id: str,
+            sender: str,
+            content: str | None,
+            timestamp: str | None,
+            sync_client_id: str,
+            object_revision: int,
+            payload_hash: str,
+            parent_message_id: str | None = None,
+            ranking: int | None = None,
+            projection_message_id: str | None = None,
+        ) -> dict[str, Any]: ...
+
+        def tombstone_message_from_sync(
+            self,
+            *,
+            stable_message_id: str,
+            sync_client_id: str,
+            object_revision: int,
+            object_hash: str,
+            owner_client_id: str | None = None,
+        ) -> bool: ...
+
+        def tombstone_unsynced_message_from_sync(
+            self,
+            *,
+            stable_message_id: str,
+            sync_client_id: str,
+            object_revision: int,
+            object_hash: str,
+        ) -> str: ...
+
+        def unsynced_message_is_foreign(
+            self, *, stable_message_id: str, sync_client_id: str, object_hash: str
+        ) -> bool: ...
+
+        def get_message_by_id(
+            self, message_id: str, include_deleted: bool = False, *, strict_images: bool = False
+        ) -> dict[str, Any] | None: ...
+
+        def search_messages_by_content(
+            self, content_query: str, conversation_id: str | None = None, limit: int = 10, offset: int = 0
+        ) -> list[dict[str, Any]]: ...
+
+        def get_message_metadata(
+            self, message_id: str, *, conn: Any | None = None, strict: bool = False
+        ) -> dict[str, Any] | None: ...
+
+        def bind_local_moodboard_graph_to_dataset(
+            self, *, owner_user_id: str, target_dataset_id: str, conn: GraphConnection | None = None
+        ) -> dict[str, int]: ...
+
+        def bind_local_studio_graph_to_dataset(
+            self, *, owner_user_id: str, target_dataset_id: str, conn: GraphConnection | None = None
+        ) -> dict[str, int]: ...
+
+        def page_moodboards_for_sync_bootstrap(
+            self, *, owner_user_id: str, dataset_id: str, after_sync_id: str | None = None, limit: int = 100
+        ) -> list[dict[str, Any]]: ...
+
+        def page_moodboard_placements_for_sync_bootstrap(
+            self,
+            *,
+            owner_user_id: str,
+            dataset_id: str,
+            after_moodboard_sync_id: str | None = None,
+            after_note_id: str | None = None,
+            limit: int = 100,
+        ) -> list[dict[str, Any]]: ...
+
+        def page_studio_documents_for_sync_bootstrap(
+            self, *, owner_user_id: str, dataset_id: str, after_note_id: str | None = None, limit: int = 100
+        ) -> list[dict[str, Any]]: ...
+
+        def create_note_studio_document(
+            self,
+            *,
+            note_id: str,
+            payload_json: dict[str, Any],
+            template_type: str,
+            handwriting_mode: str,
+            source_note_id: str | None = None,
+            excerpt_snapshot: str | None = None,
+            excerpt_hash: str | None = None,
+            diagram_manifest_json: dict[str, Any] | None = None,
+            companion_content_hash: str | None = None,
+            render_version: int,
+            provenance_kind: str = "manual",
+            provenance_provider: str | None = None,
+            provenance_model: str | None = None,
+            conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        ) -> dict[str, Any]: ...
+
+        def create_persona_profile(self, profile_data: dict[str, Any]) -> str: ...
+
+        def resolve_task_compatibility_dataset_id(
+            self, *, owner_user_id: str, conn: TaskConnection | None = None
+        ) -> str: ...
+
+        def bind_local_task_graph_to_dataset(
+            self, *, owner_user_id: str, target_dataset_id: str, conn: TaskConnection | None = None
+        ) -> dict[str, int]: ...
+        # Runtime methods below delegate to NoteStore and remain replaceable by callers.
+        def add_note(
+            self,
+            title: str,
+            content: str,
+            note_id: str | None = None,
+            conversation_id: str | None = None,
+            message_id: str | None = None,
+            conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+            semantic_dataset_id: str | None = None,
+        ) -> str | None: ...
+
+        def get_note_by_id(
+            self,
+            note_id: str,
+            include_deleted: bool = False,
+            include_studio_summary: bool = False,
+        ) -> dict[str, Any] | None: ...
+
+        def update_note(
+            self,
+            note_id: str,
+            update_data: dict[str, Any],
+            expected_version: int,
+            conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+            semantic_dataset_id: str | None = None,
+        ) -> bool | None: ...
+
+        def _ensure_conversation_settings_table(self, *, connection: Any | None = None) -> None: ...
+
+        def _ensure_persona_live_voice_session_summaries_table(self, *, connection: Any | None = None) -> None: ...
+
+        def add_keyword(self, keyword_text: str) -> int | None: ...
+
+        def add_keyword_collection(self, name: str, parent_id: int | None = None) -> int | None: ...
+
+        def add_message_metadata(
+            self, message_id: str, tool_calls: Any | None = None, extra: Any | None = None, *, conn: Any | None = None
+        ) -> bool: ...
+
+        def count_collection_keyword_links(self) -> int: ...
+
+        def count_conversation_keyword_links(self) -> int: ...
+
+        def count_deleted_notes(self) -> int: ...
+
+        def count_keyword_collections(self) -> int: ...
+
+        def count_note_titles_matching(self, search_term: str) -> int: ...
+
+        def count_notes(self, include_deleted: bool = False, only_deleted: bool = False) -> int: ...
+
+        def count_notes_matching_keywords(
+            self, search_term: str | None, keyword_tokens: list[str], match: str = "all"
+        ) -> int: ...
+
+        def get_conversation_by_id(
+            self, conversation_id: str, include_deleted: bool = False
+        ) -> dict[str, Any] | None: ...
+
+        def get_keyword_by_id(self, keyword_id: int) -> dict[str, Any] | None: ...
+
+        def get_keyword_by_text(self, keyword_text: str) -> dict[str, Any] | None: ...
+
+        def get_keyword_collection_by_id(self, collection_id: int) -> dict[str, Any] | None: ...
+
+        def get_keywords_for_collection(self, collection_id: int) -> list[dict[str, Any]]: ...
+
+        def get_keywords_for_conversation(self, conversation_id: str) -> list[dict[str, Any]]: ...
+
+        def get_keywords_for_note(self, note_id: str) -> list[dict[str, Any]]: ...
+
+        def get_keywords_for_notes(self, note_ids: list[str]) -> dict[str, list[dict[str, Any]]]: ...
+
+        def get_message_conversation_id(self, message_id: str) -> str | None: ...
+
+        def get_message_rag_context(self, message_id: str) -> dict[str, Any] | None: ...
+
+        def get_messages_for_conversation(
+            self,
+            conversation_id: str,
+            limit: int = 100,
+            offset: int = 0,
+            order_by_timestamp: str = "ASC",
+            include_deleted: bool = False,
+            *,
+            strict_images: bool = False,
+            image_byte_limit: int = MAX_CHAT_ATTACHMENT_READ_BYTES,
+        ) -> list[dict[str, Any]]: ...
+
+        def get_note_counts_for_keywords(self, keyword_ids: list[int] | None = None) -> dict[int, int]: ...
+
+        def get_note_studio_document(self, note_id: str) -> dict[str, Any] | None: ...
+
+        def get_notes_for_keyword(self, keyword_id: int, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]: ...
+
+        def hard_delete_conversation(self, conversation_id: str) -> bool: ...
+
+        def link_collection_to_keyword(self, collection_id: int, keyword_id: int) -> bool: ...
+
+        def link_conversation_to_keyword(self, conversation_id: str, keyword_id: int) -> bool: ...
+
+        def link_note_to_keyword(self, note_id: str, keyword_id: int) -> bool: ...
+
+        def list_collection_keyword_links(self, limit: int, offset: int) -> list[dict[str, Any]]: ...
+
+        def list_conversation_keyword_links(self, limit: int, offset: int) -> list[dict[str, Any]]: ...
+
+        def list_deleted_notes(
+            self,
+            limit: int = 100,
+            offset: int = 0,
+            sort_by: str = "last_modified",
+            sort_order: str = "desc",
+        ) -> list[dict[str, Any]]: ...
+
+        def list_keyword_collections(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]: ...
+
+        def list_keywords(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]: ...
+
+        def list_notes(
+            self,
+            limit: int = 100,
+            offset: int = 0,
+            include_deleted: bool = False,
+            only_deleted: bool = False,
+            sort_by: str = "last_modified",
+            sort_order: str = "desc",
+        ) -> list[dict[str, Any]]: ...
+
+        def merge_keywords(
+            self,
+            *,
+            source_keyword_id: int,
+            target_keyword_id: int,
+            expected_source_version: int,
+            expected_target_version: int | None = None,
+        ) -> dict[str, Any]: ...
+
+        def rename_keyword(self, keyword_id: int, new_keyword_text: str, expected_version: int) -> dict[str, Any]: ...
+
+        def resolve_moodboard_compatibility_dataset_id(
+            self, *, owner_user_id: str, conn: sqlite3.Connection | BackendConnectionWrapper | None = None
+        ) -> str: ...
+
+        def resolve_studio_compatibility_dataset_id(
+            self, *, owner_user_id: str, conn: sqlite3.Connection | BackendConnectionWrapper | None = None
+        ) -> str: ...
+
+        def restore_note(
+            self, note_id: str, expected_version: int, semantic_dataset_id: str | None = None
+        ) -> bool | None: ...
+
+        def search_keywords(self, search_term: str, limit: int = 10) -> list[dict[str, Any]]: ...
+
+        def search_note_titles(self, search_term: str, limit: int = 10, offset: int = 0) -> list[dict[str, Any]]: ...
+
+        def search_notes(
+            self, search_term: str, limit: int = 10, offset: int = 0, *, match_any: bool = False
+        ) -> list[dict[str, Any]]: ...
+
+        def search_notes_with_keywords(
+            self,
+            search_term: str | None,
+            keyword_tokens: list[str],
+            limit: int = 10,
+            offset: int = 0,
+            match: str = "all",
+        ) -> list[dict[str, Any]]: ...
+
+        def soft_delete_conversation(self, conversation_id: str, expected_version: int) -> bool | None: ...
+
+        def soft_delete_keyword(self, keyword_id: int, expected_version: int) -> bool: ...
+
+        def soft_delete_keyword_collection(self, collection_id: int, expected_version: int) -> bool: ...
+
+        def soft_delete_message(
+            self,
+            message_id: str,
+            expected_version: int,
+            *,
+            require_leaf: bool = False,
+            expected_revision: str | None = None,
+            conn: Any | None = None,
+        ) -> bool | None: ...
+
+        def soft_delete_note(
+            self, note_id: str, expected_version: int, semantic_dataset_id: str | None = None
+        ) -> bool | None: ...
+
+        def tombstone_note_from_sync(
+            self,
+            *,
+            note_id: str,
+            sync_client_id: str,
+            object_revision: int,
+            object_hash: str,
+            conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+            semantic_dataset_id: str | None = None,
+        ) -> bool: ...
+
+        def tombstone_unsynced_note_from_sync(
+            self,
+            *,
+            note_id: str,
+            sync_client_id: str,
+            object_revision: int,
+            object_hash: str,
+            conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        ) -> str: ...
+
+        def unlink_collection_from_keyword(self, collection_id: int, keyword_id: int) -> bool: ...
+
+        def unlink_conversation_from_keyword(self, conversation_id: str, keyword_id: int) -> bool: ...
+
+        def unlink_note_from_keyword(self, note_id: str, keyword_id: int) -> bool: ...
+
+        def update_keyword_collection(
+            self, collection_id: int, update_data: dict[str, Any], expected_version: int
+        ) -> bool: ...
+
+        def update_message(
+            self, message_id: str, update_data: dict[str, Any], expected_version: int, *, conn: Any | None = None
+        ) -> bool | None: ...
+
+        def upsert_note_from_sync(
+            self,
+            *,
+            note_id: str,
+            title: str,
+            content: str,
+            conversation_id: str | None,
+            message_id: str | None,
+            sync_client_id: str,
+            object_revision: int,
+            object_hash: str,
+            expected_product_version: int | None = None,
+            projection_timestamp: str | None = None,
+            conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+            semantic_dataset_id: str | None = None,
+        ) -> bool: ...
+
+    _CURRENT_SCHEMA_VERSION = 84  # Notes semantic index lifecycle
+    _POSTGRES_SCHEMA_VERSION = 89
     _POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT = "30s"
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
@@ -7191,6 +7750,439 @@ DROP POLICY IF EXISTS note_graph_suggestion_evidence_tenant_isolation ON note_gr
 CREATE POLICY note_graph_suggestion_evidence_tenant_isolation ON note_graph_suggestion_evidence USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
 """
 
+    _MIGRATION_SQL_V81_TO_V82 = """
+CREATE TABLE note_semantic_index_configs(
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  desired_state TEXT NOT NULL CHECK(desired_state IN ('enabled', 'disabled')),
+  active_generation_id TEXT,
+  configuration_revision INTEGER NOT NULL DEFAULT 1 CHECK(configuration_revision >= 1),
+  semantic_index_revision INTEGER NOT NULL DEFAULT 0 CHECK(semantic_index_revision >= 0),
+  capability_revision TEXT,
+  disclosure_hash TEXT,
+  compatibility_hash TEXT,
+  provider TEXT,
+  model TEXT,
+  endpoint_origin_revision TEXT,
+  endpoint_origin_display TEXT,
+  data_boundary TEXT,
+  vector_backend TEXT,
+  storage_boundary TEXT,
+  storage_label TEXT,
+  metric TEXT NOT NULL DEFAULT 'cosine' CHECK(metric = 'cosine'),
+  dimension_state TEXT NOT NULL CHECK(dimension_state IN ('pending', 'resolved')),
+  dimensions INTEGER CHECK(dimensions IS NULL OR dimensions >= 1),
+  normalization_version TEXT NOT NULL CHECK(length(trim(normalization_version)) > 0),
+  chunker_version TEXT NOT NULL CHECK(length(trim(chunker_version)) > 0),
+  enabled_at DATETIME,
+  disabled_at DATETIME,
+  consented_at DATETIME,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(owner_user_id, dataset_id),
+  CHECK(
+    (dimension_state = 'pending' AND dimensions IS NULL AND compatibility_hash IS NULL)
+    OR
+    (dimension_state = 'resolved' AND dimensions IS NOT NULL AND compatibility_hash IS NOT NULL
+      AND length(compatibility_hash) BETWEEN 1 AND 128
+      AND substr(compatibility_hash, 1, 1) GLOB '[A-Za-z0-9]'
+      AND compatibility_hash NOT GLOB '*[^A-Za-z0-9._:-]*')
+  )
+);
+
+CREATE TABLE note_semantic_generations(
+  id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  configuration_revision INTEGER NOT NULL CHECK(configuration_revision >= 1),
+  state TEXT NOT NULL CHECK(state IN ('staging', 'active', 'retired', 'failed', 'deleting')),
+  compatibility_hash TEXT,
+  dimension_state TEXT NOT NULL CHECK(dimension_state IN ('pending', 'resolved')),
+  dimensions INTEGER CHECK(dimensions IS NULL OR dimensions >= 1),
+  root_job_id TEXT,
+  expected_note_count INTEGER NOT NULL DEFAULT 0 CHECK(expected_note_count >= 0),
+  expected_chunk_count INTEGER NOT NULL DEFAULT 0 CHECK(expected_chunk_count >= 0),
+  published_note_count INTEGER NOT NULL DEFAULT 0 CHECK(published_note_count >= 0),
+  published_chunk_count INTEGER NOT NULL DEFAULT 0 CHECK(published_chunk_count >= 0),
+  manifest_hash TEXT,
+  publication_receipt TEXT,
+  terminal_error_code TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  published_at DATETIME,
+  retired_at DATETIME,
+  deleted_at DATETIME,
+  UNIQUE(owner_user_id, dataset_id, id),
+  FOREIGN KEY(owner_user_id, dataset_id) REFERENCES note_semantic_index_configs(owner_user_id, dataset_id) ON DELETE CASCADE ON UPDATE CASCADE,
+  CHECK(
+    (dimension_state = 'pending' AND dimensions IS NULL AND compatibility_hash IS NULL)
+    OR
+    (dimension_state = 'resolved' AND dimensions IS NOT NULL AND compatibility_hash IS NOT NULL
+      AND length(compatibility_hash) BETWEEN 1 AND 128
+      AND substr(compatibility_hash, 1, 1) GLOB '[A-Za-z0-9]'
+      AND compatibility_hash NOT GLOB '*[^A-Za-z0-9._:-]*')
+  )
+);
+
+CREATE TABLE note_semantic_note_state(
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  generation_id TEXT NOT NULL,
+  note_id TEXT NOT NULL,
+  content_version INTEGER NOT NULL CHECK(content_version >= 1),
+  content_fingerprint TEXT NOT NULL CHECK(
+    length(content_fingerprint) = 71
+    AND substr(content_fingerprint, 1, 7) = 'sha256:'
+    AND substr(content_fingerprint, 8) NOT GLOB '*[^0-9a-f]*'
+  ),
+  dirty_generation INTEGER NOT NULL CHECK(dirty_generation >= 1),
+  state TEXT NOT NULL CHECK(state IN ('pending', 'indexed', 'excluded', 'failed', 'tombstoned')),
+  chunk_count INTEGER NOT NULL DEFAULT 0 CHECK(chunk_count >= 0),
+  manifest_hash TEXT,
+  error_code TEXT,
+  published_at DATETIME,
+  PRIMARY KEY(owner_user_id, dataset_id, generation_id, note_id),
+  FOREIGN KEY(owner_user_id, dataset_id, generation_id) REFERENCES note_semantic_generations(owner_user_id, dataset_id, id) ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, note_id) REFERENCES notes(client_id, id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE TABLE note_semantic_chunks(
+  chunk_id TEXT PRIMARY KEY CHECK(length(trim(chunk_id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  generation_id TEXT NOT NULL,
+  note_id TEXT NOT NULL,
+  content_version INTEGER NOT NULL CHECK(content_version >= 1),
+  ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+  field TEXT NOT NULL CHECK(field IN ('title', 'content')),
+  start_offset INTEGER NOT NULL CHECK(start_offset >= 0),
+  end_offset INTEGER NOT NULL CHECK(end_offset > start_offset),
+  chunk_fingerprint TEXT NOT NULL CHECK(
+    length(chunk_fingerprint) = 71
+    AND substr(chunk_fingerprint, 1, 7) = 'sha256:'
+    AND substr(chunk_fingerprint, 8) NOT GLOB '*[^0-9a-f]*'
+  ),
+  normalization_version TEXT NOT NULL CHECK(length(trim(normalization_version)) > 0),
+  chunker_version TEXT NOT NULL CHECK(length(trim(chunker_version)) > 0),
+  UNIQUE(owner_user_id, dataset_id, chunk_id),
+  UNIQUE(owner_user_id, dataset_id, generation_id, note_id, ordinal),
+  FOREIGN KEY(owner_user_id, dataset_id, generation_id, note_id) REFERENCES note_semantic_note_state(owner_user_id, dataset_id, generation_id, note_id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE TABLE note_semantic_work(
+  id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  kind TEXT NOT NULL CHECK(kind IN ('index_note', 'delete_note_vectors', 'delete_generation')),
+  note_id TEXT,
+  generation_id TEXT,
+  dirty_generation INTEGER CHECK(dirty_generation IS NULL OR dirty_generation >= 1),
+  fencing_token TEXT NOT NULL CHECK(length(trim(fencing_token)) > 0),
+  claim_state TEXT NOT NULL CHECK(claim_state IN ('pending', 'claimed', 'completed', 'failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0 AND attempt_count <= 5),
+  next_eligible_at DATETIME NOT NULL,
+  claim_token TEXT,
+  claimed_at DATETIME,
+  error_code TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(owner_user_id, dataset_id, id),
+  FOREIGN KEY(owner_user_id, dataset_id, generation_id) REFERENCES note_semantic_generations(owner_user_id, dataset_id, id) ON DELETE CASCADE ON UPDATE CASCADE,
+  CHECK(generation_id IS NOT NULL AND (
+    (kind = 'delete_generation' AND note_id IS NULL AND dirty_generation IS NULL)
+    OR
+    (kind IN ('index_note', 'delete_note_vectors') AND note_id IS NOT NULL AND dirty_generation IS NOT NULL)
+  )),
+  CHECK((claim_state = 'claimed' AND claim_token IS NOT NULL AND claimed_at IS NOT NULL) OR (claim_state != 'claimed'))
+);
+
+CREATE UNIQUE INDEX idx_note_semantic_generations_one_active ON note_semantic_generations(owner_user_id, dataset_id) WHERE state = 'active';
+CREATE UNIQUE INDEX idx_note_semantic_generations_one_staging ON note_semantic_generations(owner_user_id, dataset_id) WHERE state = 'staging';
+CREATE INDEX idx_note_semantic_note_state_pending ON note_semantic_note_state(owner_user_id, dataset_id, generation_id, state, dirty_generation);
+CREATE INDEX idx_note_semantic_chunks_note ON note_semantic_chunks(owner_user_id, dataset_id, generation_id, note_id, ordinal);
+CREATE INDEX idx_note_semantic_work_claimable ON note_semantic_work(owner_user_id, dataset_id, claim_state, next_eligible_at, id);
+CREATE UNIQUE INDEX idx_note_semantic_work_note_coalesce ON note_semantic_work(owner_user_id, dataset_id, kind, note_id) WHERE note_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_note_semantic_work_generation_coalesce ON note_semantic_work(owner_user_id, dataset_id, kind, generation_id) WHERE generation_id IS NOT NULL AND kind = 'delete_generation';
+"""
+
+    _MIGRATION_SQL_V85_TO_V86_POSTGRES = """
+CREATE TABLE IF NOT EXISTS note_semantic_index_configs(
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  desired_state TEXT NOT NULL CHECK(desired_state IN ('enabled', 'disabled')),
+  active_generation_id TEXT,
+  configuration_revision INTEGER NOT NULL DEFAULT 1 CHECK(configuration_revision >= 1),
+  semantic_index_revision INTEGER NOT NULL DEFAULT 0 CHECK(semantic_index_revision >= 0),
+  capability_revision TEXT, disclosure_hash TEXT, compatibility_hash TEXT, provider TEXT, model TEXT,
+  endpoint_origin_revision TEXT, endpoint_origin_display TEXT, data_boundary TEXT, vector_backend TEXT,
+  storage_boundary TEXT, storage_label TEXT,
+  metric TEXT NOT NULL DEFAULT 'cosine' CHECK(metric = 'cosine'),
+  dimension_state TEXT NOT NULL CHECK(dimension_state IN ('pending', 'resolved')),
+  dimensions INTEGER CHECK(dimensions IS NULL OR dimensions >= 1),
+  normalization_version TEXT NOT NULL CHECK(char_length(btrim(normalization_version)) > 0),
+  chunker_version TEXT NOT NULL CHECK(char_length(btrim(chunker_version)) > 0),
+  enabled_at TIMESTAMPTZ, disabled_at TIMESTAMPTZ, consented_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(owner_user_id, dataset_id),
+  CHECK(
+    (dimension_state = 'pending' AND dimensions IS NULL AND compatibility_hash IS NULL)
+    OR
+    (dimension_state = 'resolved' AND dimensions IS NOT NULL AND compatibility_hash IS NOT NULL
+      AND compatibility_hash ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$')
+  )
+);
+CREATE TABLE IF NOT EXISTS note_semantic_generations(
+  id TEXT PRIMARY KEY CHECK(char_length(btrim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  configuration_revision INTEGER NOT NULL CHECK(configuration_revision >= 1),
+  state TEXT NOT NULL CHECK(state IN ('staging', 'active', 'retired', 'failed', 'deleting')),
+  compatibility_hash TEXT,
+  dimension_state TEXT NOT NULL CHECK(dimension_state IN ('pending', 'resolved')),
+  dimensions INTEGER CHECK(dimensions IS NULL OR dimensions >= 1), root_job_id TEXT,
+  expected_note_count INTEGER NOT NULL DEFAULT 0 CHECK(expected_note_count >= 0),
+  expected_chunk_count INTEGER NOT NULL DEFAULT 0 CHECK(expected_chunk_count >= 0),
+  published_note_count INTEGER NOT NULL DEFAULT 0 CHECK(published_note_count >= 0),
+  published_chunk_count INTEGER NOT NULL DEFAULT 0 CHECK(published_chunk_count >= 0),
+  manifest_hash TEXT, publication_receipt TEXT, terminal_error_code TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, published_at TIMESTAMPTZ,
+  retired_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ,
+  UNIQUE(owner_user_id, dataset_id, id),
+  FOREIGN KEY(owner_user_id, dataset_id) REFERENCES note_semantic_index_configs(owner_user_id, dataset_id) ON DELETE CASCADE ON UPDATE CASCADE,
+  CHECK(
+    (dimension_state = 'pending' AND dimensions IS NULL AND compatibility_hash IS NULL)
+    OR
+    (dimension_state = 'resolved' AND dimensions IS NOT NULL AND compatibility_hash IS NOT NULL
+      AND compatibility_hash ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$')
+  )
+);
+CREATE TABLE IF NOT EXISTS note_semantic_note_state(
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0), generation_id TEXT NOT NULL, note_id TEXT NOT NULL,
+  content_version INTEGER NOT NULL CHECK(content_version >= 1), content_fingerprint TEXT NOT NULL CHECK(content_fingerprint ~ '^sha256:[0-9a-f]{64}$'),
+  dirty_generation INTEGER NOT NULL CHECK(dirty_generation >= 1),
+  state TEXT NOT NULL CHECK(state IN ('pending', 'indexed', 'excluded', 'failed', 'tombstoned')),
+  chunk_count INTEGER NOT NULL DEFAULT 0 CHECK(chunk_count >= 0), manifest_hash TEXT, error_code TEXT, published_at TIMESTAMPTZ,
+  PRIMARY KEY(owner_user_id, dataset_id, generation_id, note_id),
+  FOREIGN KEY(owner_user_id, dataset_id, generation_id) REFERENCES note_semantic_generations(owner_user_id, dataset_id, id) ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, note_id) REFERENCES notes(client_id, id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE TABLE IF NOT EXISTS note_semantic_chunks(
+  chunk_id TEXT PRIMARY KEY CHECK(char_length(btrim(chunk_id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0), dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  generation_id TEXT NOT NULL, note_id TEXT NOT NULL, content_version INTEGER NOT NULL CHECK(content_version >= 1), ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+  field TEXT NOT NULL CHECK(field IN ('title', 'content')), start_offset INTEGER NOT NULL CHECK(start_offset >= 0), end_offset INTEGER NOT NULL CHECK(end_offset > start_offset),
+  chunk_fingerprint TEXT NOT NULL CHECK(chunk_fingerprint ~ '^sha256:[0-9a-f]{64}$'), normalization_version TEXT NOT NULL CHECK(char_length(btrim(normalization_version)) > 0),
+  chunker_version TEXT NOT NULL CHECK(char_length(btrim(chunker_version)) > 0),
+  UNIQUE(owner_user_id, dataset_id, chunk_id), UNIQUE(owner_user_id, dataset_id, generation_id, note_id, ordinal),
+  FOREIGN KEY(owner_user_id, dataset_id, generation_id, note_id) REFERENCES note_semantic_note_state(owner_user_id, dataset_id, generation_id, note_id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE TABLE IF NOT EXISTS note_semantic_work(
+  id TEXT PRIMARY KEY CHECK(char_length(btrim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0), dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  kind TEXT NOT NULL CHECK(kind IN ('index_note', 'delete_note_vectors', 'delete_generation')), note_id TEXT, generation_id TEXT,
+  dirty_generation INTEGER CHECK(dirty_generation IS NULL OR dirty_generation >= 1), fencing_token TEXT NOT NULL CHECK(char_length(btrim(fencing_token)) > 0),
+  claim_state TEXT NOT NULL CHECK(claim_state IN ('pending', 'claimed', 'completed', 'failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0 AND attempt_count <= 5), next_eligible_at TIMESTAMPTZ NOT NULL,
+  claim_token TEXT, claimed_at TIMESTAMPTZ, error_code TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(owner_user_id, dataset_id, id),
+  FOREIGN KEY(owner_user_id, dataset_id, generation_id) REFERENCES note_semantic_generations(owner_user_id, dataset_id, id) ON DELETE CASCADE ON UPDATE CASCADE,
+  CHECK(generation_id IS NOT NULL AND (
+    (kind = 'delete_generation' AND note_id IS NULL AND dirty_generation IS NULL)
+    OR
+    (kind IN ('index_note', 'delete_note_vectors') AND note_id IS NOT NULL AND dirty_generation IS NOT NULL)
+  )),
+  CHECK((claim_state = 'claimed' AND claim_token IS NOT NULL AND claimed_at IS NOT NULL) OR (claim_state != 'claimed'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_semantic_generations_one_active ON note_semantic_generations(owner_user_id, dataset_id) WHERE state = 'active';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_semantic_generations_one_staging ON note_semantic_generations(owner_user_id, dataset_id) WHERE state = 'staging';
+CREATE INDEX IF NOT EXISTS idx_note_semantic_note_state_pending ON note_semantic_note_state(owner_user_id, dataset_id, generation_id, state, dirty_generation);
+CREATE INDEX IF NOT EXISTS idx_note_semantic_chunks_note ON note_semantic_chunks(owner_user_id, dataset_id, generation_id, note_id, ordinal);
+CREATE INDEX IF NOT EXISTS idx_note_semantic_work_claimable ON note_semantic_work(owner_user_id, dataset_id, claim_state, next_eligible_at, id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_semantic_work_note_coalesce ON note_semantic_work(owner_user_id, dataset_id, kind, note_id) WHERE note_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_semantic_work_generation_coalesce ON note_semantic_work(owner_user_id, dataset_id, kind, generation_id) WHERE generation_id IS NOT NULL AND kind = 'delete_generation';
+ALTER TABLE note_semantic_index_configs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_index_configs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_index_configs_tenant_isolation ON note_semantic_index_configs;
+CREATE POLICY note_semantic_index_configs_tenant_isolation ON note_semantic_index_configs USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+ALTER TABLE note_semantic_generations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_generations FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_generations_tenant_isolation ON note_semantic_generations;
+CREATE POLICY note_semantic_generations_tenant_isolation ON note_semantic_generations USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+ALTER TABLE note_semantic_note_state ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_note_state FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_note_state_tenant_isolation ON note_semantic_note_state;
+CREATE POLICY note_semantic_note_state_tenant_isolation ON note_semantic_note_state USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+ALTER TABLE note_semantic_chunks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_chunks FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_chunks_tenant_isolation ON note_semantic_chunks;
+CREATE POLICY note_semantic_chunks_tenant_isolation ON note_semantic_chunks USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+ALTER TABLE note_semantic_work ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_work FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_work_tenant_isolation ON note_semantic_work;
+CREATE POLICY note_semantic_work_tenant_isolation ON note_semantic_work USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+"""
+
+    _MIGRATION_SQL_V82_TO_V83 = """
+CREATE TABLE note_semantic_obsolete_vectors(
+  id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  generation_id TEXT NOT NULL CHECK(length(trim(generation_id)) > 0),
+  vector_id TEXT NOT NULL CHECK(length(trim(vector_id)) > 0),
+  note_id TEXT,
+  source_kind TEXT NOT NULL CHECK(source_kind IN (
+    'unpublished','manifest_replace','tombstone','hard_delete','note_failure'
+  )),
+  dirty_generation INTEGER CHECK(dirty_generation IS NULL OR dirty_generation >= 1),
+  claim_state TEXT NOT NULL CHECK(claim_state IN ('pending','claimed','failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0 AND attempt_count <= 5),
+  next_eligible_at DATETIME NOT NULL,
+  claim_token TEXT,
+  claimed_at DATETIME,
+  error_code TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(owner_user_id,dataset_id,generation_id,vector_id),
+  CHECK(
+    (claim_state='claimed' AND claim_token IS NOT NULL AND claimed_at IS NOT NULL)
+    OR
+    (claim_state<>'claimed' AND claim_token IS NULL AND claimed_at IS NULL)
+  )
+);
+CREATE INDEX idx_note_semantic_obsolete_vectors_claimable
+  ON note_semantic_obsolete_vectors(
+    owner_user_id,dataset_id,claim_state,next_eligible_at,generation_id,id
+  );
+CREATE INDEX idx_note_semantic_obsolete_vectors_generation
+  ON note_semantic_obsolete_vectors(owner_user_id,dataset_id,generation_id,vector_id);
+"""
+
+    _MIGRATION_SQL_V86_TO_V87_POSTGRES = """
+CREATE TABLE IF NOT EXISTS note_semantic_obsolete_vectors(
+  id TEXT PRIMARY KEY CHECK(char_length(btrim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  generation_id TEXT NOT NULL CHECK(char_length(btrim(generation_id)) > 0),
+  vector_id TEXT NOT NULL CHECK(char_length(btrim(vector_id)) > 0),
+  note_id TEXT,
+  source_kind TEXT NOT NULL CHECK(source_kind IN (
+    'unpublished','manifest_replace','tombstone','hard_delete','note_failure'
+  )),
+  dirty_generation INTEGER CHECK(dirty_generation IS NULL OR dirty_generation >= 1),
+  claim_state TEXT NOT NULL CHECK(claim_state IN ('pending','claimed','failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0 AND attempt_count <= 5),
+  next_eligible_at TIMESTAMPTZ NOT NULL,
+  claim_token TEXT,
+  claimed_at TIMESTAMPTZ,
+  error_code TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(owner_user_id,dataset_id,generation_id,vector_id),
+  CHECK(
+    (claim_state='claimed' AND claim_token IS NOT NULL AND claimed_at IS NOT NULL)
+    OR
+    (claim_state<>'claimed' AND claim_token IS NULL AND claimed_at IS NULL)
+  )
+);
+CREATE INDEX IF NOT EXISTS idx_note_semantic_obsolete_vectors_claimable
+  ON note_semantic_obsolete_vectors(
+    owner_user_id,dataset_id,claim_state,next_eligible_at,generation_id,id
+  );
+CREATE INDEX IF NOT EXISTS idx_note_semantic_obsolete_vectors_generation
+  ON note_semantic_obsolete_vectors(owner_user_id,dataset_id,generation_id,vector_id);
+ALTER TABLE note_semantic_obsolete_vectors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_obsolete_vectors FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_obsolete_vectors_tenant_isolation
+  ON note_semantic_obsolete_vectors;
+CREATE POLICY note_semantic_obsolete_vectors_tenant_isolation
+  ON note_semantic_obsolete_vectors
+  USING (
+    owner_user_id=current_setting('app.current_user_id', true)
+    AND dataset_id=current_setting('app.current_dataset_id', true)
+  )
+  WITH CHECK (
+    owner_user_id=current_setting('app.current_user_id', true)
+    AND dataset_id=current_setting('app.current_dataset_id', true)
+  );
+"""
+
+    _MIGRATION_SQL_V83_TO_V84 = """
+ALTER TABLE note_semantic_index_configs ADD COLUMN model_revision TEXT;
+ALTER TABLE note_semantic_generations ADD COLUMN model_revision TEXT;
+CREATE UNIQUE INDEX idx_note_semantic_generations_root_job
+  ON note_semantic_generations(owner_user_id,dataset_id,root_job_id)
+  WHERE root_job_id IS NOT NULL;
+CREATE TABLE note_semantic_operation_receipts(
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  key_digest TEXT NOT NULL CHECK(length(key_digest) = 64),
+  action TEXT NOT NULL CHECK(action IN ('enable','cancel')),
+  request_fingerprint TEXT NOT NULL CHECK(length(request_fingerprint) = 64),
+  run_id TEXT,
+  expected_revision INTEGER NOT NULL CHECK(expected_revision >= 0),
+  state TEXT NOT NULL CHECK(state IN ('pending','completed')),
+  response_json TEXT CHECK(response_json IS NULL OR length(response_json) <= 8192),
+  expires_at DATETIME NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(owner_user_id,key_digest)
+);
+CREATE INDEX idx_note_semantic_operation_receipts_scope
+  ON note_semantic_operation_receipts(
+    owner_user_id,dataset_id,action,state,updated_at,key_digest
+  );
+CREATE INDEX idx_note_semantic_operation_receipts_expiry
+  ON note_semantic_operation_receipts(
+    owner_user_id,dataset_id,expires_at,key_digest
+  );
+"""
+
+    _MIGRATION_SQL_V87_TO_V88_POSTGRES = """
+ALTER TABLE note_semantic_index_configs
+  ADD COLUMN IF NOT EXISTS model_revision TEXT;
+ALTER TABLE note_semantic_generations
+  ADD COLUMN IF NOT EXISTS model_revision TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_semantic_generations_root_job
+  ON note_semantic_generations(owner_user_id,dataset_id,root_job_id)
+  WHERE root_job_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS note_semantic_operation_receipts(
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  key_digest TEXT NOT NULL CHECK(char_length(key_digest) = 64),
+  action TEXT NOT NULL CHECK(action IN ('enable','cancel')),
+  request_fingerprint TEXT NOT NULL CHECK(char_length(request_fingerprint) = 64),
+  run_id TEXT,
+  expected_revision INTEGER NOT NULL CHECK(expected_revision >= 0),
+  state TEXT NOT NULL CHECK(state IN ('pending','completed')),
+  response_json TEXT CHECK(response_json IS NULL OR octet_length(response_json) <= 8192),
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(owner_user_id,key_digest)
+);
+CREATE INDEX IF NOT EXISTS idx_note_semantic_operation_receipts_scope
+  ON note_semantic_operation_receipts(
+    owner_user_id,dataset_id,action,state,updated_at,key_digest
+  );
+CREATE INDEX IF NOT EXISTS idx_note_semantic_operation_receipts_expiry
+  ON note_semantic_operation_receipts(
+    owner_user_id,dataset_id,expires_at,key_digest
+  );
+ALTER TABLE note_semantic_operation_receipts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_operation_receipts FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_operation_receipts_tenant_isolation
+  ON note_semantic_operation_receipts;
+CREATE POLICY note_semantic_operation_receipts_tenant_isolation
+  ON note_semantic_operation_receipts
+  USING (
+    owner_user_id=current_setting('app.current_user_id', true)
+    AND dataset_id=current_setting('app.current_dataset_id', true)
+  )
+  WITH CHECK (
+    owner_user_id=current_setting('app.current_user_id', true)
+    AND dataset_id=current_setting('app.current_dataset_id', true)
+  );
+"""
+
     _NOTE_GRAPH_SUGGESTION_RECEIPT_DELETE_SQLITE_TRIGGER_SQL = """
 CREATE TRIGGER note_graph_suggestion_operation_receipts_clear_references
 BEFORE DELETE ON note_graph_suggestion_operation_receipts
@@ -7600,6 +8592,53 @@ ALTER TABLE conversations ADD COLUMN assistant_startup_json TEXT
 UPDATE db_schema_version SET version = 74 WHERE schema_name = 'rag_char_chat_schema' AND version = 73;
 """
 
+    # D7 P3: fingerprint of a client-id create request, written by the same INSERT.
+    # Existing chats stay NULL, so they are never mistaken for client-id creates.
+    _MIGRATION_SQL_V74_TO_V75 = """
+ALTER TABLE conversations ADD COLUMN create_request_fingerprint TEXT
+    CHECK (create_request_fingerprint IS NULL OR (
+        typeof(create_request_fingerprint) = 'text'
+        AND length(create_request_fingerprint) = 64
+        AND length(CAST(create_request_fingerprint AS BLOB)) = 64
+        AND create_request_fingerprint NOT GLOB '*[^0-9a-f]*'
+    ));
+UPDATE db_schema_version SET version = 75 WHERE schema_name = 'rag_char_chat_schema' AND version = 74;
+"""
+
+    _MIGRATION_SQL_V78_TO_V79_POSTGRES = """
+ALTER TABLE conversations ADD COLUMN create_request_fingerprint TEXT
+    CHECK (create_request_fingerprint IS NULL OR (
+        length(create_request_fingerprint) = 64 AND create_request_fingerprint !~ '[^0-9a-f]'
+    ));
+UPDATE db_schema_version SET version = 79 WHERE schema_name = 'rag_char_chat_schema' AND version = 78;
+"""
+
+    # #3182: until the Sync v2 conversation materializer stopped doing it, a chat whose
+    # payload named no assistant was stored as persona 'sync-v2'. That persona never
+    # existed, so persona admission answered 404 for the chat. The repair makes such a
+    # row a plain chat: no kind, no id, no memory mode, and no startup provenance, which
+    # belongs to a binding the chat never really had.
+    #
+    # Only the exact placeholder is matched, compared byte for byte. A chat whose owner
+    # has, or had, a persona profile with that id is that owner's own binding and is
+    # left alone, as is any chat bound to a character. `version` and `last_modified` do
+    # not move: nothing was edited, and under Sync the row version is the object revision.
+    _RETIRED_SYNC_PLACEHOLDER_REPAIR_SQL = f"""
+UPDATE conversations
+   SET assistant_kind = NULL,
+       assistant_id = NULL,
+       persona_memory_mode = NULL,
+       assistant_startup_json = NULL
+ WHERE assistant_kind = '{RETIRED_SYNC_PLACEHOLDER_ASSISTANT_KIND}'
+   AND assistant_id = '{RETIRED_SYNC_PLACEHOLDER_ASSISTANT_ID}'
+   AND character_id IS NULL
+   AND NOT EXISTS (
+       SELECT 1 FROM persona_profiles AS profile
+        WHERE profile.id = '{RETIRED_SYNC_PLACEHOLDER_ASSISTANT_ID}'
+          AND profile.user_id = conversations.client_id
+   )
+"""  # nosec B608 - the interpolated values are the two module constants above.
+
     _MIGRATION_SQL_V10_TO_V11_POSTGRES = """
 ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 """
@@ -7668,6 +8707,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         backend: DatabaseBackend | None = None,
         config: ConfigParser | None = None,
         owner_user_id: str | None = None,
+        require_existing_sqlite: bool = False,
     ) -> None:
         """
         Initializes the CharactersRAGDB instance.
@@ -7683,6 +8723,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             owner_user_id: Canonical owner supplied by trusted dependency construction,
                            never request metadata. Defaults to the initial client_id
                            for standalone callers that already use it as their owner.
+            require_existing_sqlite: Open file-backed SQLite with ``mode=rw`` so
+                                     construction cannot create a missing database.
 
         Raises:
             ValueError: If `client_id` is empty or None.
@@ -7699,8 +8741,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         if not client_id:
             raise ValueError("Client ID cannot be empty or None.")  # noqa: TRY003
+        if not isinstance(require_existing_sqlite, bool):
+            raise ValueError("require_existing_sqlite must be a boolean.")  # noqa: TRY003
         self.client_id = client_id
         self._owner_user_id = str(client_id if owner_user_id is None else owner_user_id)
+        self._require_existing_sqlite = require_existing_sqlite
         self._local = threading.local()
         self._schema_lock = threading.RLock()
         self._bootstrapped_backend_targets: set[str] = set()
@@ -7717,6 +8762,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         from tldw_Server_API.app.core.DB_Management.chacha.character_store import (
             CharacterStore,
         )
+        from tldw_Server_API.app.core.DB_Management.chacha.chat_import_store import ChatImportStore
         from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
             ConversationResumeStore,
         )
@@ -7744,6 +8790,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             NoteGraphSuggestionStore,
         )
         from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import NotesLinkStore
+        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import NoteProvenanceStore
+        from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_store import NoteSemanticStore
         from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
         from tldw_Server_API.app.core.DB_Management.chacha.persona_state_store import (
             PersonaStateStore,
@@ -7761,12 +8809,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self.native_assets = NativeChatAssetStore(self)
         self.conversation_resume_store = ConversationResumeStore(self)
         self.message_store = MessageStore(self)
+        self.chat_imports = ChatImportStore(self)
         self.note_store = NoteStore(self)
+        self.note_provenance_store = NoteProvenanceStore(self)
         self.moodboard_sync_store = MoodboardSyncStore(self)
         self.note_attachment_store = NoteAttachmentStore(self)
         self.notes_link_store = NotesLinkStore(self)
         self.note_graph_projection_store = NoteGraphProjectionStore(self)
         self.note_graph_suggestion_store = NoteGraphSuggestionStore(self)
+        self.note_semantic_store = NoteSemanticStore(self)
         self.task_store = TaskStore(self)
         self.keyword_store = KeywordStore(self)
         self.persona_state_store = PersonaStateStore(self)
@@ -7776,6 +8827,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self.is_memory_db = False
 
         if self.backend_type == BackendType.SQLITE and not self.is_memory_db:
+            if self._require_existing_sqlite and not self.db_path.is_file():
+                raise CharactersRAGDBError(  # noqa: TRY003
+                    "Existing SQLite database is required."
+                )
             db_parent = self.db_path.parent.resolve(strict=False)
             allowed_roots = self._sqlite_allowed_roots()
             if not any(self._path_is_within(db_parent, root) for root in allowed_roots):
@@ -7840,9 +8895,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._owner_managed_backend = False
                 return candidate, True
 
+        sqlite_path = self.db_path_str
+        if self._require_existing_sqlite and not self.is_memory_db:
+            sqlite_path = f"{self.db_path.as_uri()}?mode=rw"
         fallback_config = DatabaseConfig(
             backend_type=BackendType.SQLITE,
-            sqlite_path=self.db_path_str,
+            sqlite_path=sqlite_path,
         )
         if not self.is_memory_db:
             # Contract: default file-backed SQLite for CharactersRAGDB is intentionally
@@ -7937,12 +8995,25 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def backend_type(self) -> BackendType:
         return self.backend.backend_type
 
+    @overload
+    def _prepare_backend_statement(
+        self,
+        query: str,
+        params: tuple | dict,
+    ) -> tuple[str, tuple | dict]: ...
+
+    @overload
+    def _prepare_backend_statement(
+        self,
+        query: str,
+        params: tuple | list | dict | None = None,
+    ) -> tuple[str, tuple | list | dict | None]: ...
 
     def _prepare_backend_statement(
         self,
         query: str,
         params: tuple | list | dict | None = None,
-    ) -> tuple[str, tuple | dict | None]:
+    ) -> tuple[str, tuple | list | dict | None]:
         return prepare_backend_statement(
             self.backend_type,
             query,
@@ -7956,8 +9027,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _prepare_backend_many_statement(
         self,
         query: str,
-        params_list: list[tuple | list | dict],
-    ) -> tuple[str, list[tuple | dict]]:
+        params_list: Sequence[tuple | list | dict],
+    ) -> tuple[str, list[tuple | list | dict]]:
         converted_query, prepared_params = prepare_backend_many_statement(
             self.backend_type,
             query,
@@ -7980,12 +9051,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             return query
         return transform_sqlite_query_for_postgres(query)
 
-
     def _open_new_connection(self, backend: DatabaseBackend | None = None) -> RawBackendConnection:
+        _return_dropped_checkouts()
         active_backend = backend or self.backend
         try:
             pool = active_backend.get_pool()
-            conn = pool.get_connection()
+            conn: RawBackendConnection = pool.get_connection()
             # Apply per-tenant session guard for PostgreSQL (RLS via current_setting('app.current_user_id'))
             if active_backend.backend_type == BackendType.POSTGRESQL and self.client_id:
                 conn = self._apply_postgres_client_scope(conn, pool)
@@ -8007,7 +9078,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         def _set_session(target) -> None:
             cur = target.cursor()
-            if psycopg_sql is not None:  # type: ignore[name-defined]
+            if psycopg_sql is not None:
                 statement = psycopg_sql.SQL(
                     "SELECT set_config('app.current_user_id', {}, false)"
                 ).format(psycopg_sql.Literal(user_value))
@@ -8019,11 +9090,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
 
         def _replace_connection(bad_conn: RawBackendConnection) -> RawBackendConnection:
-            with contextlib.suppress(_CHACHA_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
                 bad_conn.close()
-            with contextlib.suppress(_CHACHA_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
                 pool.return_connection(bad_conn)
-            return pool.get_connection()
+            replacement: RawBackendConnection = pool.get_connection()
+            return replacement
 
         def _safe_rollback(target, context: str) -> bool:
             try:
@@ -8145,7 +9217,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     try:
                         # Prefer public helper to clear thread-local connection state
                         if hasattr(pool, 'clear_thread_local_connection'):
-                            pool.clear_thread_local_connection()  # type: ignore[attr-defined]
+                            pool.clear_thread_local_connection()
                     except _CHACHA_NONCRITICAL_EXCEPTIONS:
                         # Best-effort; ignore if pool doesn't expose the helper
                         pass
@@ -8167,6 +9239,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if getattr(state, "borrowed", False):
                 raise CharactersRAGDBError("The borrowed database connection is closed")
             self._release_connection(conn, backend=backend)
+            _disarm_legacy_checkout(state)
             conn = None
             state.conn = None
             state.backend_ref = None
@@ -8176,6 +9249,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             conn = self._open_new_connection(backend)
             state.conn = conn
             state.backend_ref = backend
+            if state is self._local:
+                state.checkout_guard = _LegacyCheckout(conn, backend)
             logger.debug(
                 'Acquired backend connection ({}) for thread {}',
                 backend.backend_type.value,
@@ -8202,6 +9277,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         If a transaction is active and uncommitted on this connection, it attempts a rollback.
         Clears the connection reference from `threading.local` for the current thread.
         """
+        _return_dropped_checkouts()
         state = self._connection_state()
         if state is not self._local:
             state.release()
@@ -8249,6 +9325,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self.db_path_str,
                 )
             else:
+                _disarm_legacy_checkout(self._local)
                 backend.get_pool().return_connection(conn)
                 logger.debug(
                     'Returned backend connection ({}) for thread {}.',
@@ -8271,24 +9348,48 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 try:
                     pool = backend.get_pool()
                     if hasattr(pool, 'clear_thread_local_connection'):
-                        pool.clear_thread_local_connection()  # type: ignore[attr-defined]
+                        pool.clear_thread_local_connection()
                 except _CHACHA_NONCRITICAL_EXCEPTIONS:
                     pass
+
+    def _discard_legacy_checkout(self) -> None:
+        """Close this thread's legacy PostgreSQL checkout instead of queuing its return."""
+        conn = getattr(self._local, "conn", None) if self._connection_state() is self._local else None
+        if conn is None:
+            self.close_connection()
+            return
+        backend = self._get_pinned_backend() or self._backend
+        self._local.conn = None
+        self._local.backend_ref = None
+        _disarm_legacy_checkout(self._local)
+        backend.get_pool().discard_connection(conn)
 
     def close_all_connections(self) -> None:
         """
         Force-close all backend connections managed by this instance.
 
         Primarily used in tests/shutdown to ensure no background SQLite threads remain.
+        On PostgreSQL the shared content pool is never closed here: every user's
+        handle draws from it, and content-backend shutdown owns it. Other threads'
+        checkouts are left to those threads, which close them on their own exit.
         """
-        self.close_connection()
+        if self.backend_type == BackendType.POSTGRESQL:
+            if self._uses_shared_content_backend:
+                self.close_connection()
+                return
+            # The caller's pool is closed below. putconn hands a checkout to a pool
+            # worker for its reset, and a pool closed first discards that work, leaving
+            # the connection open and unreset, so close this thread's checkout now.
+            self._discard_legacy_checkout()
+        else:
+            self.close_connection()
 
         if (
             self.backend_type == BackendType.SQLITE
             and is_factory_managed_backend(self.backend)
         ):
             release_managed_backend(self.backend)
-            with contextlib.suppress(_CHACHA_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
                 self._local = threading.local()
             return
 
@@ -8313,9 +9414,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
                 logger.warning("Error closing all backend connections for {}: {}", self.db_path_str, exc)
 
-        # Reset thread-local reference regardless of backend
-        with contextlib.suppress(_CHACHA_NONCRITICAL_EXCEPTIONS):
-            self._local = threading.local()
+        # Reset the thread-local reference, except on PostgreSQL: replacing it would drop every
+        # other thread's slot here, while those threads may be inside libpq on their checkouts.
+        # Each guard stays in its own slot and is finalized on its own thread instead.
+        if self.backend_type != BackendType.POSTGRESQL:
+            with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
+                self._local = threading.local()
 
     def backup_database(self, backup_file_path: str) -> bool:
         """
@@ -8678,7 +9782,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _sqlite_linear_migration_steps(self) -> dict[int, Callable[[sqlite3.Connection], None]]:
         """Return SQLite schema migrations keyed by their source schema version."""
-        steps = {
+        steps: dict[int, Callable[[sqlite3.Connection], None]] = {
             4: self._migrate_from_v4_to_v5,
             5: self._migrate_from_v5_to_v6,
             6: self._migrate_from_v6_to_v7,
@@ -8751,6 +9855,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (71, "_migrate_from_v71_to_v72"),
             (72, "_migrate_from_v72_to_v73_persona_companion"),
             (73, "_migrate_from_v73_to_v74"),
+            (74, "_migrate_from_v74_to_v75"),
+            (75, "_migrate_from_v75_to_v76"),
+            (76, "_migrate_from_v76_to_v77"),
+            (77, "_migrate_from_v77_to_v78"),
+            (78, "_migrate_from_v78_to_v79"),
+            (79, "_migrate_from_v79_to_v80"),
+            (80, "_migrate_from_v80_to_v81"),
+            (81, "_migrate_from_v81_to_v82_sqlite"),
+            (82, "_migrate_from_v82_to_v83_sqlite"),
+            (83, "_migrate_from_v83_to_v84_sqlite"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -11526,7 +12640,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not directed and source_note_id > target_note_id:
             raise SchemaError("Notes link v58 undirected endpoints must use canonical order.")  # noqa: TRY003
 
-        weight_value = 1.0 if row.get("weight") is None else row.get("weight")
+        raw_weight = row.get("weight")
+        weight_value = 1.0 if raw_weight is None else raw_weight
         if isinstance(weight_value, bool):
             raise SchemaError("Notes link v58 weight is invalid.")  # noqa: TRY003
         try:
@@ -11588,7 +12703,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         }
 
     @staticmethod
-    def _validate_notes_link_v58_unique(rows: list[Mapping[str, Any]]) -> None:
+    def _validate_notes_link_v58_unique(rows: Sequence[Mapping[str, Any]]) -> None:
         """Fail closed when legacy rows collide under canonical logical identity."""
 
         identities: set[tuple[str, str, bool, str, str]] = set()
@@ -13912,10 +15027,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             }
             diagnostic_code = diagnostic_hash = None
             try:
-                payload = parse_notes_moodboard_note_v1(placement_payload_source)
-                placement_id = placement_object_id(payload)
+                placement_payload = parse_notes_moodboard_note_v1(
+                    placement_payload_source
+                )
+                placement_id = placement_object_id(placement_payload)
                 canonical_hash = notes_moodboard_note_object_hash(
-                    payload, revision=1, deleted=False
+                    placement_payload, revision=1, deleted=False
                 )
             except NotesMoodboardStudioContractError:
                 diagnostic = moodboard_studio_legacy_source_diagnostic(
@@ -14407,6 +15524,105 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 raise
             raise SchemaError(f"Notes graph suggestion v64 SQLite migration failed: {exc}") from exc
 
+    def _migrate_from_v81_to_v82_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Add the durable owner/dataset Notes semantic-index authority ledger."""
+        if self._get_db_version(conn) != 81:
+            raise SchemaError("Notes semantic v82 migration requires schema version 81.")  # noqa: TRY003
+        savepoint = "note_semantic_v82_migration"
+        savepoint_active = False
+        try:
+            conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+            savepoint_active = True
+            for statement in split_sql_statements(self._MIGRATION_SQL_V81_TO_V82):
+                conn.execute(statement)
+            cursor = conn.execute(
+                "UPDATE db_schema_version SET version = ? WHERE schema_name = ? AND version = ?",
+                (82, self._SCHEMA_NAME, 81),
+            )
+            if cursor.rowcount != 1 or self._get_db_version(conn) != 82:
+                raise SchemaError("Notes semantic v82 SQLite version transition failed.")  # noqa: TRY003
+            conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+            savepoint_active = False
+        except (SchemaError, sqlite3.Error) as exc:
+            if savepoint_active:
+                try:
+                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+                except sqlite3.Error as rollback_exc:
+                    raise SchemaError(
+                        "Notes semantic v82 SQLite migration rollback failed: "
+                        f"{rollback_exc}"
+                    ) from exc
+            if isinstance(exc, SchemaError):
+                raise
+            raise SchemaError(f"Notes semantic v82 SQLite migration failed: {exc}") from exc
+
+    def _migrate_from_v82_to_v83_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Add crash-durable semantic obsolete-vector cleanup authority."""
+        if self._get_db_version(conn) != 82:
+            raise SchemaError("Notes semantic v83 migration requires schema version 82.")  # noqa: TRY003
+        savepoint = "note_semantic_v83_migration"
+        savepoint_active = False
+        try:
+            conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+            savepoint_active = True
+            for statement in split_sql_statements(self._MIGRATION_SQL_V82_TO_V83):
+                conn.execute(statement)
+            cursor = conn.execute(
+                "UPDATE db_schema_version SET version=? WHERE schema_name=? AND version=?",
+                (83, self._SCHEMA_NAME, 82),
+            )
+            if cursor.rowcount != 1 or self._get_db_version(conn) != 83:
+                raise SchemaError("Notes semantic v83 SQLite version transition failed.")  # noqa: TRY003
+            conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+            savepoint_active = False
+        except (SchemaError, sqlite3.Error) as exc:
+            if savepoint_active:
+                try:
+                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")  # nosec B608
+                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608
+                except sqlite3.Error as rollback_exc:
+                    raise SchemaError(
+                        "Notes semantic v83 SQLite migration rollback failed: "
+                        f"{rollback_exc}"
+                    ) from exc
+            if isinstance(exc, SchemaError):
+                raise
+            raise SchemaError(f"Notes semantic v83 SQLite migration failed: {exc}") from exc
+
+    def _migrate_from_v83_to_v84_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Add durable semantic operation and resolved-model authority."""
+        if self._get_db_version(conn) != 83:
+            raise SchemaError("Notes semantic v84 migration requires schema version 83.")
+        savepoint = "note_semantic_v84_migration"
+        savepoint_active = False
+        try:
+            conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608
+            savepoint_active = True
+            for statement in split_sql_statements(self._MIGRATION_SQL_V83_TO_V84):
+                conn.execute(statement)
+            cursor = conn.execute(
+                "UPDATE db_schema_version SET version=? WHERE schema_name=? AND version=?",
+                (84, self._SCHEMA_NAME, 83),
+            )
+            if cursor.rowcount != 1 or self._get_db_version(conn) != 84:
+                raise SchemaError("Notes semantic v84 SQLite version transition failed.")
+            conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608
+            savepoint_active = False
+        except (SchemaError, sqlite3.Error) as exc:
+            if savepoint_active:
+                try:
+                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")  # nosec B608
+                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608
+                except sqlite3.Error as rollback_exc:
+                    raise SchemaError(
+                        "Notes semantic v84 SQLite migration rollback failed: "
+                        f"{rollback_exc}"
+                    ) from exc
+            if isinstance(exc, SchemaError):
+                raise
+            raise SchemaError(f"Notes semantic v84 SQLite migration failed: {exc}") from exc
+
     @staticmethod
     def _notes_moodboard_studio_v61_postgres_checkpoint(_stage: str) -> None:
         """Fault-injection seam after durable PostgreSQL v61 phase commits."""
@@ -14512,7 +15728,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _postgres_v61_phase_is_complete(self, conn: Any, phase: str) -> bool:
         """Return whether a durable metadata or verification phase completed."""
-        return self._postgres_v61_progress_row(conn, phase)["status"] == "complete"
+        phase_is_complete: bool = (
+            self._postgres_v61_progress_row(conn, phase)["status"] == "complete"
+        )
+        return phase_is_complete
 
     def _complete_postgres_v61_phase(self, conn: Any, phase: str) -> None:
         """Record a content-free completion marker in the migration transaction."""
@@ -17265,8 +18484,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     @classmethod
     def _verify_note_task_v59_authority_catalog(
         cls,
-        relation_rows: list[Mapping[str, Any]],
-        policy_rows: list[Mapping[str, Any]],
+        relation_rows: Sequence[Mapping[str, Any]],
+        policy_rows: Sequence[Mapping[str, Any]],
     ) -> tuple[str, ...]:
         """Verify the sole reviewed v59 authority/RLS state before migration DDL."""
         expected_relations = ("notes", *cls._NOTE_TASK_V60_TABLES[:-1])
@@ -17364,8 +18583,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             ).rows
         ]
         for row in read_states:
-            owner = event_owners.get(str(row.get("event_id")))
-            if owner is None or owner != str(row.get("user_id") or ""):
+            read_state_owner = event_owners.get(str(row.get("event_id")))
+            if read_state_owner is None or read_state_owner != str(
+                row.get("user_id") or ""
+            ):
                 raise SchemaError("Notes task v60 migration could not prove read-state ownership.")  # noqa: TRY003
 
         reconciliation = [
@@ -17633,6 +18854,42 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self._configure_note_graph_suggestion_receipt_delete_trigger_postgres(conn)
         if self._get_schema_version_postgres(conn) != 64:
             raise SchemaError("Notes graph suggestion v64 PostgreSQL version verification failed.")  # noqa: TRY003
+
+    def _migrate_from_v85_to_v86_postgres(self, conn: Any) -> None:
+        """Add durable, forced-RLS Notes semantic-index persistence."""
+        if self._get_schema_version_postgres(conn) != 85:
+            raise SchemaError("Notes semantic v86 PostgreSQL migration requires schema version 85.")  # noqa: TRY003
+        self._apply_postgres_migration_script(
+            self._MIGRATION_SQL_V85_TO_V86_POSTGRES,
+            conn,
+            expected_version=86,
+        )
+        if self._get_schema_version_postgres(conn) != 86:
+            raise SchemaError("Notes semantic v86 PostgreSQL version verification failed.")  # noqa: TRY003
+
+    def _migrate_from_v86_to_v87_postgres(self, conn: Any) -> None:
+        """Add forced-RLS crash-durable semantic cleanup authority."""
+        if self._get_schema_version_postgres(conn) != 86:
+            raise SchemaError("Notes semantic v87 PostgreSQL migration requires schema version 86.")  # noqa: TRY003
+        self._apply_postgres_migration_script(
+            self._MIGRATION_SQL_V86_TO_V87_POSTGRES,
+            conn,
+            expected_version=87,
+        )
+        if self._get_schema_version_postgres(conn) != 87:
+            raise SchemaError("Notes semantic v87 PostgreSQL version verification failed.")  # noqa: TRY003
+
+    def _migrate_from_v87_to_v88_postgres(self, conn: Any) -> None:
+        """Add forced-RLS operation receipts and resolved-model authority."""
+        if self._get_schema_version_postgres(conn) != 87:
+            raise SchemaError("Notes semantic v88 PostgreSQL migration requires schema version 87.")
+        self._apply_postgres_migration_script(
+            self._MIGRATION_SQL_V87_TO_V88_POSTGRES,
+            conn,
+            expected_version=88,
+        )
+        if self._get_schema_version_postgres(conn) != 88:
+            raise SchemaError("Notes semantic v88 PostgreSQL version verification failed.")
 
     def _configure_note_graph_suggestion_receipt_delete_trigger_postgres(self, conn: Any) -> None:
         """Clear only receipt IDs before PostgreSQL deletes an expiring receipt."""
@@ -17933,6 +19190,197 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_schema_version_postgres(conn) != 76:
             raise SchemaError("Native fork PostgreSQL migration V75->V76 failed version verification.")  # noqa: TRY003
 
+    def _migrate_from_v80_to_v81(self, conn: sqlite3.Connection) -> None:
+        """Issue private row identity independently of copied IDs and journal retention."""
+        conn.execute("ALTER TABLE conversations ADD COLUMN source_incarnation_id TEXT")
+        conn.execute("UPDATE conversations SET source_incarnation_id = lower(hex(randomblob(16)))")
+        conn.execute(
+            """CREATE TRIGGER conversation_incarnation_input BEFORE INSERT ON conversations
+            WHEN NEW.source_incarnation_id IS NOT NULL BEGIN
+            SELECT RAISE(ABORT, 'conversation_incarnation_reserved'); END"""
+        )
+        conn.execute(
+            """CREATE TRIGGER conversation_incarnation_create AFTER INSERT ON conversations BEGIN
+            UPDATE conversations SET source_incarnation_id = lower(hex(randomblob(16))) WHERE id = NEW.id; END"""
+        )
+        conn.execute(
+            """CREATE TRIGGER conversation_incarnation_immutable BEFORE UPDATE OF source_incarnation_id ON conversations
+            WHEN OLD.source_incarnation_id IS NOT NULL AND NEW.source_incarnation_id IS NOT OLD.source_incarnation_id BEGIN
+            SELECT RAISE(ABORT, 'conversation_incarnation_immutable'); END"""
+        )
+        conn.execute(
+            "UPDATE db_schema_version SET version = 81 WHERE schema_name = ? AND version = 80", (self._SCHEMA_NAME,)
+        )
+        if self._get_db_version(conn) != 81:
+            raise SchemaError("Conversation incarnation migration failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v84_to_v85_postgres(self, conn: Any) -> None:
+        """Use server UUID issuance on all INSERT paths, preserving forced-owner RLS."""
+        self.backend.execute(
+            "ALTER TABLE conversations ADD COLUMN source_incarnation_id TEXT NOT NULL DEFAULT gen_random_uuid()::text",
+            connection=conn,
+        )
+        self.backend.execute(
+            """CREATE FUNCTION conversation_source_incarnation_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                IF TG_OP = 'INSERT' THEN
+                    NEW.source_incarnation_id := gen_random_uuid()::text;
+                ELSIF NEW.source_incarnation_id IS DISTINCT FROM OLD.source_incarnation_id THEN
+                    RAISE EXCEPTION 'conversation_incarnation_immutable';
+                END IF;
+                RETURN NEW;
+            END; $$""",
+            connection=conn,
+        )
+        self.backend.execute(
+            "CREATE TRIGGER conversation_incarnation_guard BEFORE INSERT OR UPDATE OF source_incarnation_id ON conversations FOR EACH ROW EXECUTE FUNCTION conversation_source_incarnation_guard()",
+            connection=conn,
+        )
+        self.backend.execute(
+            "UPDATE db_schema_version SET version = 85 WHERE schema_name = %s AND version = 84",
+            (self._SCHEMA_NAME,),
+            connection=conn,
+        )
+        if self._get_schema_version_postgres(conn) != 85:
+            raise SchemaError("Conversation incarnation migration failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v79_to_v80(self, conn: sqlite3.Connection) -> None:
+        """Preserve unknown legacy roles rather than infer them from representation."""
+        conn.execute(
+            "ALTER TABLE native_chat_asset_references ADD COLUMN role TEXT "
+            "CHECK (role IN ('message_image','document_context','generated_image','reference_image'))"
+        )
+        conn.execute(
+            "UPDATE db_schema_version SET version = 80 WHERE schema_name = ? AND version = 79",
+            (self._SCHEMA_NAME,),
+        )
+        if self._get_db_version(conn) != 80:
+            raise SchemaError("Native reference role migration failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v83_to_v84_postgres(self, conn: Any) -> None:
+        """Add explicit roles without changing existing forced-owner RLS or rows."""
+        self.backend.execute(
+            "ALTER TABLE native_chat_asset_references ADD COLUMN role TEXT "
+            "CHECK (role IN ('message_image','document_context','generated_image','reference_image'))",
+            connection=conn,
+        )
+        self.backend.execute(
+            "UPDATE db_schema_version SET version = 84 WHERE schema_name = %s AND version = 83",
+            (self._SCHEMA_NAME,),
+            connection=conn,
+        )
+        if self._get_schema_version_postgres(conn) != 84:
+            raise SchemaError("Native reference role migration failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v78_to_v79(self, conn: sqlite3.Connection) -> None:
+        """Freeze quota identity before external authority work in the native store."""
+        conn.execute('ALTER TABLE native_chat_quota_intents ADD COLUMN quota_owner_json TEXT')
+        conn.execute('UPDATE db_schema_version SET version = 79 WHERE schema_name = ? AND version = 78', (self._SCHEMA_NAME,))
+        if self._get_db_version(conn) != 79:
+            raise SchemaError('Native quota descriptor migration failed version verification.')
+
+    def _migrate_from_v82_to_v83_postgres(self, conn: Any) -> None:
+        """Retain the existing forced-owner RLS while adding frozen quota identity."""
+        self.backend.execute('ALTER TABLE native_chat_quota_intents ADD COLUMN quota_owner_json TEXT', connection=conn)
+        self.backend.execute('UPDATE db_schema_version SET version = 83 WHERE schema_name = %s AND version = 82', (self._SCHEMA_NAME,), connection=conn)
+        if self._get_schema_version_postgres(conn) != 83:
+            raise SchemaError('Native quota descriptor migration failed version verification.')
+
+    def _migrate_from_v77_to_v78(self, conn: sqlite3.Connection) -> None:
+        """Install owner-scoped local provenance receipts in the Notes transaction."""
+        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import (
+            notes_provenance_receipts_schema_sql,
+        )
+
+        conn.execute(notes_provenance_receipts_schema_sql())
+        conn.execute(
+            "UPDATE db_schema_version SET version = 78 WHERE schema_name = ? AND version = 77", (self._SCHEMA_NAME,)
+        )
+        if self._get_db_version(conn) != 78:
+            raise SchemaError("Knowledge provenance receipt SQLite migration failed version verification.")
+
+    def _verify_dictionary_schema_postgres(self, conn: Any) -> None:
+        """Validate registered shared catalog ownership without request DDL."""
+        from tldw_Server_API.app.core.DB_Management.chacha.dictionary_schema import verify_postgres_dictionary_schema
+
+        verify_postgres_dictionary_schema(
+            self.backend, getattr(conn, "_connection", conn),
+            self._normalize_postgres_catalog_expression,
+        )
+
+    def _bridge_legacy_dictionary_v86_postgres(self, conn: Any) -> None:
+        """Complete semantic86 for the verified PR-only dictionary86 layout."""
+        semantic_tables = (
+            "note_semantic_index_configs", "note_semantic_generations", "note_semantic_note_state",
+            "note_semantic_chunks", "note_semantic_work", "note_semantic_obsolete_vectors",
+            "note_semantic_operation_receipts",
+        )
+        if any(self.backend.table_exists(table, connection=conn) for table in semantic_tables):
+            self._ensure_note_semantic_schema_postgres(conn)
+            return
+        self._verify_dictionary_schema_postgres(conn)
+        self._apply_postgres_migration_script(
+            self._MIGRATION_SQL_V85_TO_V86_POSTGRES, conn, expected_version=86,
+        )
+
+    def _migrate_from_v88_to_v89_postgres(self, conn: Any) -> None:
+        """Quarantine unowned legacy dictionaries before publishing forced RLS."""
+        if self._get_schema_version_postgres(conn) != 88:
+            raise SchemaError("Dictionary PostgreSQL owner migration requires schema version 88.")
+        from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import build_dictionary_rls_sql
+        from tldw_Server_API.app.core.DB_Management.chacha.dictionary_schema import (
+            postgres_dictionary_schema_statements,
+        )
+
+        for statement in (*postgres_dictionary_schema_statements(), *build_dictionary_rls_sql()):
+            self.backend.execute(statement, connection=conn)
+        self._verify_dictionary_schema_postgres(conn)
+        self.backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 88",
+            (89, self._SCHEMA_NAME), connection=conn,
+        )
+        if self._get_schema_version_postgres(conn) != 89:
+            raise SchemaError("Dictionary PostgreSQL owner migration failed version verification.")
+
+    def _migrate_from_v81_to_v82_postgres(self, conn: Any) -> None:
+        """Install permanent local receipts with forced owner RLS before the version bump."""
+        from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (
+            build_notes_provenance_receipts_rls_sql,
+        )
+        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import (
+            notes_provenance_receipts_schema_sql,
+        )
+
+        for statement in (notes_provenance_receipts_schema_sql(), *build_notes_provenance_receipts_rls_sql()):
+            self.backend.execute(statement, connection=conn)
+        self.backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 81",
+            (82, self._SCHEMA_NAME),
+            connection=conn,
+        )
+        if self._get_schema_version_postgres(conn) != 82:
+            raise SchemaError("Knowledge provenance receipt PostgreSQL migration failed version verification.")
+
+    def _migrate_from_v76_to_v77(self, conn: sqlite3.Connection) -> None:
+        """Install owner-bound Knowledge evidence in the registered SQLite migration."""
+        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import notes_provenance_schema_sql
+
+        conn.execute(notes_provenance_schema_sql(postgres=False))
+        conn.execute("UPDATE db_schema_version SET version = 77 WHERE schema_name = ? AND version = 76", (self._SCHEMA_NAME,))
+        if self._get_db_version(conn) != 77:
+            raise SchemaError("Knowledge provenance SQLite migration failed version verification.")
+
+    def _migrate_from_v80_to_v81_postgres(self, conn: Any) -> None:
+        """Install owner-bound Knowledge evidence and forced RLS before version bump."""
+        from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import build_notes_provenance_rls_sql
+        from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import notes_provenance_schema_sql
+
+        for statement in (notes_provenance_schema_sql(postgres=True), *build_notes_provenance_rls_sql()):
+            self.backend.execute(statement, connection=conn)
+        self.backend.execute("UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 80", (81, self._SCHEMA_NAME), connection=conn)
+        if self._get_schema_version_postgres(conn) != 81:
+            raise SchemaError("Knowledge provenance PostgreSQL migration failed version verification.")
+
     def _migrate_from_v73_to_v74(self, conn: sqlite3.Connection) -> None:
         """Install permanent startup receipts inside the registered SQLite migration."""
         from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_schema import (
@@ -17944,6 +19392,85 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         conn.execute("UPDATE db_schema_version SET version = 74 WHERE schema_name = ? AND version = 73", (self._SCHEMA_NAME,))
         if self._get_db_version(conn) != 74:
             raise SchemaError("Workspace startup migration V73->V74 failed version verification.")
+
+    def _migrate_from_v74_to_v75(self, conn: sqlite3.Connection) -> None:
+        """Add client-id create fingerprints without inferring them for existing chats."""
+        for statement in split_sql_statements(self._MIGRATION_SQL_V74_TO_V75):
+            conn.execute(statement)
+        if self._get_db_version(conn) != 75:
+            raise SchemaError("Conversation create fingerprint migration V74->V75 failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v78_to_v79_postgres(self, conn: Any) -> None:
+        """Add PostgreSQL client-id create fingerprints in the caller's upgrade transaction."""
+        for statement in split_sql_statements(self._MIGRATION_SQL_V78_TO_V79_POSTGRES):
+            self.backend.execute(statement, connection=conn)
+        if self._get_schema_version_postgres(conn) != 79:
+            raise SchemaError(  # noqa: TRY003
+                "Conversation create fingerprint PostgreSQL migration V78->V79 failed version verification."
+            )
+
+    def _migrate_from_v75_to_v76(self, conn: sqlite3.Connection) -> None:
+        """Clear the retired Sync placeholder persona from this owner's chats."""
+        conn.execute(self._RETIRED_SYNC_PLACEHOLDER_REPAIR_SQL)
+        conn.execute(
+            "UPDATE db_schema_version SET version = 76 WHERE schema_name = ? AND version = 75", (self._SCHEMA_NAME,)
+        )
+        if self._get_db_version(conn) != 76:
+            raise SchemaError("Sync placeholder repair migration V75->V76 failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v79_to_v80_postgres(self, conn: Any) -> None:
+        """Clear the retired Sync placeholder persona from every owner's chats.
+
+        One PostgreSQL database holds every owner's chats, and `conversations`
+        has a forced tenant policy. A role that bypasses row-level security (the
+        documented superuser setup) sees all rows. A table owner that does not
+        bypass it would repair only the rows its session happens to see and then
+        record the version, leaving the other owners' chats broken for good. So
+        the policy is lifted for the owner inside this transaction, behind an
+        ACCESS EXCLUSIVE lock that keeps every other session out of the table,
+        and put back before the version bump.
+        """
+        backend = self.backend
+        backend.execute("LOCK TABLE conversations IN ACCESS EXCLUSIVE MODE", connection=conn)
+        states = backend.execute(
+            """
+            SELECT table_row.relrowsecurity,
+                   table_row.relforcerowsecurity,
+                   pg_has_role(current_user, table_row.relowner, 'USAGE') AS is_table_owner,
+                   (SELECT role_row.rolsuper OR role_row.rolbypassrls
+                      FROM pg_roles AS role_row
+                     WHERE role_row.rolname = current_user) AS bypasses_rls
+              FROM pg_class AS table_row
+              JOIN pg_namespace AS namespace_row ON namespace_row.oid = table_row.relnamespace
+             WHERE namespace_row.nspname = current_schema()
+               AND table_row.relkind IN ('r', 'p')
+               AND table_row.relname = 'conversations'
+            """,
+            connection=conn,
+        ).rows
+        if len(states) != 1:
+            raise SchemaError("Sync placeholder repair v80 cannot verify the conversations relation.")  # noqa: TRY003
+        state = states[0]
+        policy_applies = bool(state.get("relrowsecurity")) and not bool(state.get("bypasses_rls"))
+        is_table_owner = bool(state.get("is_table_owner"))
+        if policy_applies and not is_table_owner:
+            raise SchemaError(  # noqa: TRY003
+                "Sync placeholder repair v80 requires the PostgreSQL schema-owner migration path."
+            )
+        lift_forced_policy = policy_applies and bool(state.get("relforcerowsecurity"))
+        if lift_forced_policy:
+            backend.execute("ALTER TABLE conversations NO FORCE ROW LEVEL SECURITY", connection=conn)
+        backend.execute(self._RETIRED_SYNC_PLACEHOLDER_REPAIR_SQL, connection=conn)
+        if lift_forced_policy:
+            backend.execute("ALTER TABLE conversations FORCE ROW LEVEL SECURITY", connection=conn)
+        backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 79",
+            (80, self._SCHEMA_NAME), connection=conn,
+        )
+        if self._get_schema_version_postgres(conn) != 80:
+            raise SchemaError(  # noqa: TRY003
+                "Sync placeholder repair PostgreSQL migration V79->V80 failed version verification."
+            )
 
     def _migrate_from_v77_to_v78_postgres(self, conn: Any) -> None:
         """Install PostgreSQL receipts with forced owner RLS before the version bump."""
@@ -18340,6 +19867,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _repair_conversation_assistant_identity(self, conn: Any) -> None:
         """Repair only historical missing Character fields, comparing locked normalized bindings."""
+        repair_scope: contextlib.AbstractContextManager[ChaChaOperation | None]
         if self.backend_type == BackendType.POSTGRESQL:
             # Schema transactions own their checkout independently of a live request.
             repair_scope = chacha_operation(
@@ -18892,6 +20420,25 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if missing:
             raise SchemaError(f"Notes graph suggestion v64 SQLite schema is incomplete: {sorted(missing)}")
 
+    def _ensure_note_semantic_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Verify the schema-version-owned Notes semantic-index relations."""
+        if self._get_db_version(conn) < 82:
+            return
+        required_tables = {
+            "note_semantic_index_configs",
+            "note_semantic_generations",
+            "note_semantic_note_state",
+            "note_semantic_chunks",
+            "note_semantic_work",
+        }
+        if self._get_db_version(conn) >= 83:
+            required_tables.add("note_semantic_obsolete_vectors")
+        if self._get_db_version(conn) >= 84:
+            required_tables.add("note_semantic_operation_receipts")
+        missing = required_tables - self._sqlite_table_names(conn)
+        if missing:
+            raise SchemaError(f"Notes semantic v82 SQLite schema is incomplete: {sorted(missing)}")
+
     def _ensure_note_studio_schema_postgres(self, conn: Any) -> None:
         """Create the legacy sidecar before v63 or verify schema-owned v63 state."""
         if self._get_schema_version_postgres(conn) >= 63:
@@ -18936,6 +20483,27 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         ]
         if missing:
             raise SchemaError(f"Notes graph suggestion v64 PostgreSQL schema is incomplete: {missing}")
+
+    def _ensure_note_semantic_schema_postgres(self, conn: Any) -> None:
+        """Verify the forced-RLS Notes semantic-index relations."""
+        if self._get_schema_version_postgres(conn) < 86:
+            return
+        required_tables = (
+            "note_semantic_index_configs",
+            "note_semantic_generations",
+            "note_semantic_note_state",
+            "note_semantic_chunks",
+            "note_semantic_work",
+        )
+        if self._get_schema_version_postgres(conn) >= 87:
+            required_tables += ("note_semantic_obsolete_vectors",)
+        if self._get_schema_version_postgres(conn) >= 88:
+            required_tables += ("note_semantic_operation_receipts",)
+        missing = [
+            table for table in required_tables if not self.backend.table_exists(table, connection=conn)
+        ]
+        if missing:
+            raise SchemaError(f"Notes semantic v86 PostgreSQL schema is incomplete: {missing}")
 
     def _supports_notes_moodboard_studio_v61(self) -> bool:
         """Return whether this database instance has the v61 product catalog revision."""
@@ -19109,6 +20677,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def list_note_clipper_workspace_placements(self, clip_id: str) -> list[dict[str, Any]]:
         """Return active workspace placements for a clip."""
+        params: tuple[str, str, bool] | tuple[str, int]
         if self.backend_type == BackendType.POSTGRESQL:
             query = (
                 "SELECT clip_id, workspace_id, workspace_note_id, source_note_id, source_note_version "
@@ -20914,6 +22483,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         self._ensure_flashcard_fts_triggers_sqlite(conn)
                         self._ensure_character_cards_fts_triggers_sqlite(conn)
                         self._ensure_notes_fts_triggers_sqlite(conn)
+                        self._ensure_messages_fts_triggers_sqlite(conn)
                         self._ensure_recent_persona_schema_sqlite(conn)
                         self._ensure_recent_voice_command_schema_sqlite(conn)
                         self._ensure_note_folder_schema_sqlite(conn)
@@ -21148,6 +22718,27 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         current_db_version = self._get_db_version(conn)
                     if target_version >= 74 and current_db_version == 73:
                         self._migrate_from_v73_to_v74(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 75 and current_db_version == 74:
+                        self._migrate_from_v74_to_v75(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 76 and current_db_version == 75:
+                        self._migrate_from_v75_to_v76(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 77 and current_db_version == 76:
+                        self._migrate_from_v76_to_v77(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 78 and current_db_version == 77:
+                        self._migrate_from_v77_to_v78(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 79 and current_db_version == 78:
+                        self._migrate_from_v78_to_v79(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 80 and current_db_version == 79:
+                        self._migrate_from_v79_to_v80(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 81 and current_db_version == 80:
+                        self._migrate_from_v80_to_v81(conn)
                         current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
@@ -21620,12 +23211,40 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 74 and current_db_version == 73:
                     self._migrate_from_v73_to_v74(conn)
                     current_db_version = self._get_db_version(conn)
+                if target_version >= 75 and current_db_version == 74:
+                    self._migrate_from_v74_to_v75(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 76 and current_db_version == 75:
+                    self._migrate_from_v75_to_v76(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 77 and current_db_version == 76:
+                    self._migrate_from_v76_to_v77(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 78 and current_db_version == 77:
+                    self._migrate_from_v77_to_v78(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 79 and current_db_version == 78:
+                    self._migrate_from_v78_to_v79(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 80 and current_db_version == 79:
+                    self._migrate_from_v79_to_v80(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 81 and current_db_version == 80:
+                    self._migrate_from_v80_to_v81(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 66 and current_db_version == 65:
+                    self._migrate_from_v65_to_v66_sqlite(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 67 and current_db_version == 66:
+                    self._migrate_from_v66_to_v67_sqlite(conn)
+                    current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
                 self._ensure_recent_voice_command_schema_sqlite(conn)
                 self._ensure_note_folder_schema_sqlite(conn)
                 self._ensure_note_studio_schema_sqlite(conn)
                 self._ensure_note_graph_suggestion_schema_sqlite(conn)
+                self._ensure_note_semantic_schema_sqlite(conn)
                 self._ensure_web_clipper_schema_sqlite(conn)
                 self._ensure_prompt_presets_schema_sqlite(conn)
                 self._ensure_workspace_assistant_defaults_schema_sqlite(conn)
@@ -21645,6 +23264,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self._ensure_note_graph_suggestion_schema_sqlite(conn)
                 elif final_version_check >= 60:
                     self._verify_note_task_schema_sqlite(conn)
+                if final_version_check >= 65:
+                    self._ensure_note_semantic_schema_sqlite(conn)
                 # Verify core FTS tables after migrations complete
                 self._verify_required_fts_tables_sqlite(conn)
                 self._ensure_workspace_subresource_schema_sqlite(conn)
@@ -21663,6 +23284,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._ensure_flashcard_fts_triggers_sqlite(conn)
                 self._ensure_character_cards_fts_triggers_sqlite(conn)
                 self._ensure_notes_fts_triggers_sqlite(conn)
+                self._ensure_messages_fts_triggers_sqlite(conn)
                 # Seed/heal character_cards_fts before request traffic. Schema V4
                 # inserts "Default Assistant" before FTS triggers are created.
                 self._self_heal_character_cards_fts_sqlite(conn)
@@ -21830,6 +23452,30 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
         except sqlite3.Error as exc:
             raise SchemaError(f"Failed ensuring character_cards FTS triggers: {exc}") from exc  # noqa: TRY003
+
+    def _ensure_messages_fts_triggers_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Normalize message triggers so only indexed live rows relinquish FTS terms."""
+        try:
+            with TransactionContextManager(self):
+                conn.execute("DROP TRIGGER IF EXISTS messages_ai")
+                conn.execute("DROP TRIGGER IF EXISTS messages_au")
+                conn.execute("DROP TRIGGER IF EXISTS messages_ad")
+                conn.execute("""CREATE TRIGGER messages_ai AFTER INSERT ON messages BEGIN
+                    INSERT INTO messages_fts(rowid,content)
+                    SELECT new.rowid,new.content WHERE new.deleted = 0;
+                    END""")
+                conn.execute("""CREATE TRIGGER messages_au AFTER UPDATE ON messages BEGIN
+                    INSERT INTO messages_fts(messages_fts,rowid,content)
+                    SELECT 'delete',old.rowid,old.content WHERE old.deleted = 0;
+                    INSERT INTO messages_fts(rowid,content)
+                    SELECT new.rowid,new.content WHERE new.deleted = 0;
+                    END""")
+                conn.execute("""CREATE TRIGGER messages_ad AFTER DELETE ON messages BEGIN
+                    INSERT INTO messages_fts(messages_fts,rowid,content)
+                    SELECT 'delete',old.rowid,old.content WHERE old.deleted = 0;
+                    END""")
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring messages FTS triggers: {exc}") from exc  # noqa: TRY003
 
     def _ensure_conversations_fts_triggers_sqlite(self, conn: sqlite3.Connection) -> None:
         """Normalize conversations FTS triggers to avoid invalid delete operations.
@@ -25410,8 +27056,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self._verify_note_attachment_schema_postgres(conn, runtime=True)
         self._verify_note_task_schema_postgres(conn, runtime=True)
         self._verify_notes_moodboard_studio_schema_postgres(conn)
+        self._ensure_note_semantic_schema_postgres(conn)
+        if current_version >= 89:
+            self._verify_dictionary_schema_postgres(conn)
         for fts_table, source_table, _ in self._FTS_CONFIG:
-            self.backend.register_fts_table(fts_table, self._map_table_for_backend(source_table))
+            # Required PostgreSQL capability stays lazy and bound before mapping each source.
+            register_fts_table: Callable[[str, str], None] = getattr(self.backend, "register_fts_table")  # noqa: B009
+            register_fts_table(fts_table, self._map_table_for_backend(source_table))
         self._runtime_schema_version = current_version
         return True
 
@@ -25445,6 +27096,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 raise SchemaError(  # noqa: TRY003
                     f"Database schema version ({current_version}) is newer than supported by code ({target_version})."
                 )
+            if current_version == 86 and target_version >= 89:
+                self._bridge_legacy_dictionary_v86_postgres(conn)
+
             # H1 previously published v68 for history projections, while dev
             # published v68 for owner-scoped character names. Inspect the actual
             # catalog under the migration lock before replaying the missing step.
@@ -25480,7 +27134,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._set_schema_version_postgres(conn, 72)
                 current_version = 72
 
-            if current_version in (71, 72, 73, 74, 75, 76, 77) and target_version >= 72:
+            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88) and target_version >= 72:
                 # Completed dev schemas need only the new migrations, avoiding
                 # replay of the earlier schema reconciliation and its DDL.
                 if current_version == 71:
@@ -25505,6 +27159,39 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 78 and current_version < 78:
                     self._migrate_from_v77_to_v78_postgres(conn)
                     current_version = 78
+                if target_version >= 79 and current_version < 79:
+                    self._migrate_from_v78_to_v79_postgres(conn)
+                    current_version = 79
+                if target_version >= 80 and current_version < 80:
+                    self._migrate_from_v79_to_v80_postgres(conn)
+                    current_version = 80
+                if target_version >= 81 and current_version < 81:
+                    self._migrate_from_v80_to_v81_postgres(conn)
+                    current_version = 81
+                if target_version >= 82 and current_version < 82:
+                    self._migrate_from_v81_to_v82_postgres(conn)
+                    current_version = 82
+                if target_version >= 83 and current_version < 83:
+                    self._migrate_from_v82_to_v83_postgres(conn)
+                    current_version = 83
+                if target_version >= 84 and current_version < 84:
+                    self._migrate_from_v83_to_v84_postgres(conn)
+                    current_version = 84
+                if target_version >= 85 and current_version < 85:
+                    self._migrate_from_v84_to_v85_postgres(conn)
+                    current_version = 85
+                if target_version >= 86 and current_version < 86:
+                    self._migrate_from_v85_to_v86_postgres(conn)
+                    current_version = 86
+                if target_version >= 87 and current_version < 87:
+                    self._migrate_from_v86_to_v87_postgres(conn)
+                    current_version = 87
+                if target_version >= 88 and current_version < 88:
+                    self._migrate_from_v87_to_v88_postgres(conn)
+                    current_version = 88
+                if target_version >= 89 and current_version < 89:
+                    self._migrate_from_v88_to_v89_postgres(conn)
+                    current_version = 89
                 if target_version >= 74:
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 self._postgres_schema_is_current(conn)
@@ -25519,6 +27206,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self._verify_notes_moodboard_studio_schema_postgres(conn)
                 if current_version >= 64:
                     self._ensure_note_graph_suggestion_schema_postgres(conn)
+                if current_version >= 65:
+                    self._ensure_note_semantic_schema_postgres(conn)
 
             if current_version < 36:
                 self._ensure_postgres_workspaces_table_base(conn)
@@ -25777,6 +27466,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._ensure_note_folder_schema_postgres(conn)
             self._ensure_note_studio_schema_postgres(conn)
             self._ensure_note_graph_suggestion_schema_postgres(conn)
+            self._ensure_note_semantic_schema_postgres(conn)
             self._ensure_web_clipper_schema_postgres(conn)
             self._ensure_prompt_presets_schema_postgres(conn)
             self._ensure_workspace_subresource_schema_postgres(conn)
@@ -25951,6 +27641,55 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v77_to_v78_postgres(conn)
                 self._runtime_schema_version = 78
                 current_version = 78
+            if target_version >= 79 and current_version < 79:
+                self._migrate_from_v78_to_v79_postgres(conn)
+                self._runtime_schema_version = 79
+                current_version = 79
+
+            if target_version >= 80 and current_version < 80:
+                self._migrate_from_v79_to_v80_postgres(conn)
+                self._runtime_schema_version = 80
+                current_version = 80
+
+            if target_version >= 81 and current_version < 81:
+                self._migrate_from_v80_to_v81_postgres(conn)
+                self._runtime_schema_version = 81
+                current_version = 81
+
+            if target_version >= 82 and current_version < 82:
+                self._migrate_from_v81_to_v82_postgres(conn)
+                self._runtime_schema_version = 82
+                current_version = 82
+            if target_version >= 83 and current_version < 83:
+                self._migrate_from_v82_to_v83_postgres(conn)
+                self._runtime_schema_version = 83
+                current_version = 83
+            if target_version >= 84 and current_version < 84:
+                self._migrate_from_v83_to_v84_postgres(conn)
+                self._runtime_schema_version = 84
+                current_version = 84
+            if target_version >= 85 and current_version < 85:
+                self._migrate_from_v84_to_v85_postgres(conn)
+                self._runtime_schema_version = 85
+                current_version = 85
+            if target_version >= 86 and current_version < 86:
+                self._migrate_from_v85_to_v86_postgres(conn)
+                self._runtime_schema_version = 86
+                current_version = 86
+            if target_version >= 87 and current_version < 87:
+                self._migrate_from_v86_to_v87_postgres(conn)
+                self._runtime_schema_version = 87
+                current_version = 87
+            if target_version >= 88 and current_version < 88:
+                self._migrate_from_v87_to_v88_postgres(conn)
+                self._runtime_schema_version = 88
+                current_version = 88
+            if target_version >= 89 and current_version < 89:
+                self._migrate_from_v88_to_v89_postgres(conn)
+                self._runtime_schema_version = 89
+                current_version = 89
+
+            self._ensure_note_semantic_schema_postgres(conn)
 
             if current_version < target_version:
                 logger.warning(
@@ -26017,7 +27756,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self.backend_type == BackendType.POSTGRESQL:
             try:
                 with self.transaction() as conn:
-                    raw_conn = conn._connection
+                    # The managed transaction supplies this required raw-connection capability.
+                    raw_conn: RawBackendConnection = getattr(conn, "_connection")  # noqa: B009
                     for fts_table, source_table, columns in self._FTS_CONFIG:
                         actual_source = self._map_table_for_backend(source_table)
                         self.backend.create_fts_table(
@@ -26249,6 +27989,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         try:
             rows: list[dict[str, Any]] = []
+            params: tuple[str] | tuple[str, int]
             if self.backend_type == BackendType.SQLITE:
                 query = "SELECT id, content, version FROM messages WHERE sender = ? AND deleted = 0"
                 params = ("assistant",)
@@ -26264,19 +28005,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     q += " LIMIT %s"
                     params = ("assistant", limit)
                 res = self.backend.execute(q, params)
-                fetched = res.fetchall()
-                # Convert to dicts (backend returns sequence rows)
+                fetched = res.rows
+                # The backend normalizes native result rows to named dictionaries.
                 for r in fetched:
-                    # Row maybe mapping or tuple; try subscripting by name first
-                    try:
-                        rows.append({"id": r[0], "content": r[1], "version": r[2]})
-                    except _CHACHA_NONCRITICAL_EXCEPTIONS:
-                        with contextlib.suppress(_CHACHA_NONCRITICAL_EXCEPTIONS):
-                            rows.append({"id": r['id'], "content": r['content'], "version": r['version']})
+                    with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
+                        rows.append({"id": r["id"], "content": r["content"], "version": r["version"]})
 
             for row in rows:
                 counts["scanned"] += 1
                 mid = row.get('id')
+                if not isinstance(mid, str) or not mid:
+                    continue
                 content = row.get('content') or ""
                 version = row.get('version') or 1
                 extracted = _extract(content)
@@ -26486,60 +28225,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
 
     def _sync_postgres_sequences(self, conn) -> None:
-        """Ensure PostgreSQL sequences match current maxima for managed tables."""
+        """Advance ChaCha-owned serials without reusing tenant-hidden allocations."""
+        from tldw_Server_API.app.core.DB_Management.backends.postgres_sequence_maintenance import (
+            sync_owned_postgres_sequences,
+        )
 
-        backend = self.backend
-        ident = backend.escape_identifier
-
-        for table_name, column_name in self._POSTGRES_SEQUENCE_TABLES:
-            try:
-                # Skip tables that may not exist yet at this schema version
-                try:
-                    if not backend.table_exists(table_name, connection=conn):
-                        continue
-                except _CHACHA_NONCRITICAL_EXCEPTIONS:
-                    continue
-                seq_result = backend.execute(
-                    "SELECT pg_get_serial_sequence(%s, %s) AS seq",
-                    (table_name, column_name),
-                    connection=conn,
-                )
-                sequence_name = seq_result.scalar if seq_result else None
-                if not sequence_name:
-                    continue
-
-                max_result = backend.execute(
-                    (
-                        f"SELECT COALESCE(MAX({ident(column_name)}), 0) AS max_id "  # nosec B608
-                        f"FROM {ident(table_name)}"
-                    ),
-                    connection=conn,
-                )
-
-                try:
-                    max_id = int(max_result.scalar or 0)
-                except (TypeError, ValueError):
-                    max_id = 0
-
-                if max_id <= 0:
-                    backend.execute(
-                        "SELECT setval(%s, %s, false)",
-                        (sequence_name, 1),
-                        connection=conn,
-                    )
-                else:
-                    backend.execute(
-                        "SELECT setval(%s, %s)",
-                        (sequence_name, max_id),
-                        connection=conn,
-                    )
-            except BackendDatabaseError as exc:  # noqa: BLE001
-                logger.warning(
-                    'Failed to synchronize PostgreSQL sequence for {}.{}: {}',
-                    table_name,
-                    column_name,
-                    exc,
-                )
+        sync_owned_postgres_sequences(
+            self, conn, self._POSTGRES_SEQUENCE_TABLES, continue_on_error=True
+        )
 
     # --- Internal Helpers ---
     def _get_current_utc_timestamp_iso(self) -> str:
@@ -26711,7 +28404,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.warning(f"Record in {table_name} with {pk_col_name} = {pk_value} is soft-deleted.")
             raise ConflictError(f"Record is soft-deleted in {table_name}.", entity=table_name, entity_id=pk_value)  # noqa: TRY003
 
-        return row['version']
+        version: int = row["version"]
+        return version
 
     def _ensure_json_string(self, data: list | dict | set | None) -> str | None:
         """
@@ -27230,6 +28924,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self._ensure_skill_registry_table()
         now = self._get_current_utc_timestamp_iso()
         next_version = expected_version + 1
+        params: tuple[str | int, ...]
         if directory_path is None:
             query = (
                 "UPDATE skill_registry SET deleted = ?, last_modified = ?, version = ? "
@@ -27542,7 +29237,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"Database error restoring skill '{name}': {exc}")
             raise
 
-    def _deserialize_row_fields(self, row: sqlite3.Row, json_fields: list[str]) -> dict[str, Any] | None:
+    def _deserialize_row_fields(self, row: sqlite3.Row, json_fields: Sequence[str]) -> dict[str, Any] | None:
         """
         Converts a sqlite3.Row object to a dictionary, deserializing specified JSON fields.
 
@@ -27552,7 +29247,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         Args:
             row: The sqlite3.Row object to convert. If None, returns None.
-            json_fields: A list of field names that should be treated as JSON strings
+            json_fields: A sequence of field names that should be treated as JSON strings
                          and deserialized.
 
         Returns:
@@ -28213,7 +29908,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Read a visible Workspace, optionally locking it in an existing transaction."""
         if for_update and (
             conn is None or not getattr(conn, "in_transaction", False)
-            or (self.backend_type == BackendType.POSTGRESQL and not getattr(self._local, "tx_depth", 0))
+            or (self.backend_type == BackendType.POSTGRESQL and not getattr(self._connection_state(), "tx_depth", 0))
         ):
             raise InputError("Workspace locking reads require a transaction connection.")
         query = "SELECT * FROM workspaces WHERE id = ? AND system_operation_state IS NULL"
@@ -28276,7 +29971,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 pool = backend.get_pool()
                 connection = pool.get_connection()
                 connection.rollback()
-                backend.apply_and_verify_scope(
+                # Keep the required native capability lazy for duck-typed backends.
+                apply_and_verify_scope: Callable[..., None] = getattr(backend, "apply_and_verify_scope")  # noqa: B009
+                apply_and_verify_scope(
                     connection,
                     fallback_user_id=self.client_id,
                 )
@@ -28539,6 +30236,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if residual is not None:
             raise self._workspace_delete_incomplete(workspace_id)
         if not hard:
+            if expected_version is None:
+                raise self._workspace_delete_incomplete(workspace_id)
             cursor = conn.execute(
                 "UPDATE workspaces SET deleted = 1, last_modified = ?, version = ? "
                 "WHERE id = ? AND client_id = ? AND version = ? AND native_chat_admission_closed = ?",
@@ -28855,25 +30554,25 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             conflict: dict[str, Any] | None = None
             workspace_found = False
             try:
-                conn = BackendConnectionWrapper(self, raw_conn, backend)
-                conn.execute(
+                fresh_pg_conn = BackendConnectionWrapper(self, raw_conn, backend)
+                fresh_pg_conn.execute(
                     "SELECT set_config('app.current_user_id', ?, true)",
                     (str(owner_user_id),),
                 )
-                workspace_found = conn.execute(
+                workspace_found = fresh_pg_conn.execute(
                     "SELECT id FROM workspaces WHERE id = ? AND client_id = ? AND deleted = ?",
                     (workspace_id, owner_user_id, self._workspace_active_deleted_value()),
                 ).fetchone() is not None
                 if workspace_found:
                     conflict = self._find_workspace_source_saved_view_name_with_conn(
-                        conn,
+                        fresh_pg_conn,
                         owner_user_id,
                         workspace_id,
                         name_key,
                     )
                 raw_conn.commit()
             except BaseException:
-                with contextlib.suppress(_CHACHA_NONCRITICAL_EXCEPTIONS):
+                with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
                     raw_conn.rollback()
                 raise
             finally:
@@ -28882,8 +30581,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 raise WorkspaceSourceSavedViewNotFoundError
             self._raise_workspace_source_saved_view_name_conflict(conflict)
 
-        with self.transaction() as conn:
-            conflict = find_scoped_conflict(conn)
+        with self.transaction() as transaction_conn:
+            conflict = find_scoped_conflict(transaction_conn)
         self._raise_workspace_source_saved_view_name_conflict(conflict)
 
     def create_workspace_source_saved_view(
@@ -29850,6 +31549,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return CharactersRAGDBError(f"Workspace file inventory write failed: {exc}")  # noqa: TRY003
 
     @staticmethod
+    @overload
+    def _workspace_file_inventory_int(value: Any, *, field_name: str, required: Literal[True]) -> int: ...
+
+    @staticmethod
+    @overload
+    def _workspace_file_inventory_int(value: Any, *, field_name: str, required: bool = False) -> int | None: ...
+
+    @staticmethod
     def _workspace_file_inventory_int(value: Any, *, field_name: str, required: bool = False) -> int | None:
         if value is None:
             if required:
@@ -30794,8 +32501,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if receipt is None:
                 continue
             try:
-                expected_byte_count = int(expected.get("byte_count"))
-                receipt_byte_count = int(receipt.get("byte_count"))
+                expected_byte_count_value = expected.get("byte_count")
+                receipt_byte_count_value = receipt.get("byte_count")
+                if expected_byte_count_value is None or receipt_byte_count_value is None:
+                    raise TypeError
+                expected_byte_count = int(expected_byte_count_value)
+                receipt_byte_count = int(receipt_byte_count_value)
             except (TypeError, ValueError):
                 mismatched.append(chunk_id)
                 continue
@@ -30837,7 +32548,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         sha256 = str(data.get("sha256") or "").strip().lower()
         chunk_kind = str(data.get("chunk_kind") or "workspace_bundle").strip()
         try:
-            byte_count = int(data.get("byte_count"))
+            byte_count_value = data.get("byte_count")
+            if byte_count_value is None:
+                raise TypeError
+            byte_count = int(byte_count_value)
         except (TypeError, ValueError) as exc:
             raise InputError("byte_count must be an integer.") from exc  # noqa: TRY003
         if not all((normalized_migration_id, normalized_chunk_id, sha256, chunk_kind)):
@@ -30868,7 +32582,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     entity_id=normalized_chunk_id,
                 )
             try:
-                expected_byte_count = int(expected.get("byte_count"))
+                expected_byte_count_value = expected.get("byte_count")
+                if expected_byte_count_value is None:
+                    raise TypeError
+                expected_byte_count = int(expected_byte_count_value)
             except (TypeError, ValueError) as exc:
                 raise ConflictError(  # noqa: TRY003
                     "Workspace migration chunk declaration has an invalid byte count.",
@@ -31109,7 +32826,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "INSERT INTO workspace_sources "
             "(id, workspace_id, media_id, title, source_type, url, position, selected, added_at, "
             "review_state, review_state_updated_at, reviewed_at, reviewed_by_user_id, version) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)"
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1) "
+            "ON CONFLICT(workspace_id, id) DO NOTHING"
         )
         params = (
             source_id,
@@ -31119,7 +32837,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             data.get("source_type", ""),
             data.get("url"),
             data.get("position", 0),
-            1 if data.get("selected", True) else 0,
+            bool(data.get("selected", True)),
             now,
             review_transition["review_state"],
             review_transition["review_state_updated_at"],
@@ -31130,12 +32848,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             try:
                 conn.execute(query, params)
             except sqlite3.IntegrityError as exc:
-                existing = conn.execute(
-                    "SELECT * FROM workspace_sources WHERE workspace_id = ? AND id = ?",
-                    (workspace_id, source_id),
-                ).fetchone()
-                if existing is not None:
-                    return dict(existing)
                 raise ConflictError(  # noqa: TRY003
                     f"Workspace source '{source_id}' could not be added.",
                     entity="workspace_sources",
@@ -31531,14 +33243,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """
         with self.transaction() as conn:
             conn.execute(
-                "UPDATE workspace_sources SET selected = 0, version = version + 1 WHERE workspace_id = ?",
-                (workspace_id,),
+                "UPDATE workspace_sources SET selected = ?, version = version + 1 WHERE workspace_id = ?",
+                (False, workspace_id),
             )
             if selected_ids:
                 placeholders = ", ".join("?" for _ in selected_ids)
                 conn.execute(
-                    f"UPDATE workspace_sources SET selected = 1, version = version + 1 WHERE workspace_id = ? AND id IN ({placeholders})",  # nosec B608
-                    (workspace_id, *selected_ids),
+                    f"UPDATE workspace_sources SET selected = ?, version = version + 1 WHERE workspace_id = ? AND id IN ({placeholders})",  # nosec B608
+                    (True, workspace_id, *selected_ids),
                 )
 
     def reorder_workspace_sources(self, workspace_id: str, ordered_ids: list[str]) -> None:
@@ -33459,6 +35171,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         # Add created_at for new inserts
         cols_str_list_insert = cols_str_list + ['created_at', 'last_modified', 'client_id', 'version', 'deleted']
+        deleted_value: bool | int
         if self.backend_type == BackendType.POSTGRESQL:
             placeholders_str_list_insert = placeholders_str_list + ['?', '?', '?', '?', '?']
             version_value = 1
@@ -33482,7 +35195,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         else:
             params_tuple_insert = tuple([main_col_value] + other_values + [now, now, client_id_to_use])
 
-
         try:
             with self.transaction() as conn:
                 # Check if a soft-deleted item exists and undelete it
@@ -33491,11 +35203,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     (main_col_value,) + owner_params)
                 existing_deleted = undelete_cursor.fetchone()
                 if existing_deleted:
-                    item_id, current_version = existing_deleted['id'], existing_deleted['version']
+                    item_id: int = existing_deleted["id"]
+                    current_version = existing_deleted["version"]
                     next_version = current_version + 1
 
                     update_set_parts = [f"{unique_col_name} = ?"]
-                    update_params_list = [main_col_value]
+                    update_params_list: list[object] = [main_col_value]
                     for i, col_db in enumerate(other_cols):
                         if col_db == "sync_id":
                             continue
@@ -33531,11 +35244,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 logger.info(f"Added {table_name} '{main_col_value}' with ID: {item_id_insert}.")
                 return item_id_insert
         except sqlite3.IntegrityError as e:
-             if f"unique constraint failed: {table_name}.{unique_col_name}" in str(e).lower(): # Use lower for robustness
+            if f"unique constraint failed: {table_name}.{unique_col_name}" in str(e).lower(): # Use lower for robustness
                 logger.warning(f"{table_name} with {unique_col_name} '{main_col_value}' already exists and is active.")
                 raise ConflictError(f"{table_name} '{main_col_value}' already exists and is active.", entity=table_name,  # noqa: TRY003
                                     entity_id=main_col_value) from e
-             raise CharactersRAGDBError(f"Database integrity error adding {table_name}: {e}") from e  # noqa: TRY003
+            raise CharactersRAGDBError(f"Database integrity error adding {table_name}: {e}") from e  # noqa: TRY003
         except ConflictError: # From undelete path
             raise
         except CharactersRAGDBError as e:
@@ -33702,10 +35415,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             # If we must update metadata anyway if version matches:
             # Fall through to add metadata updates. The query will work fine.
 
-
         next_version_val = expected_version + 1
         current_fields_to_update_sql = list(fields_to_update_sql) # clone
-        current_params_for_set_clause = list(params_for_set_clause) # clone
+        current_params_for_set_clause: list[object] = list(params_for_set_clause) # clone
 
         current_fields_to_update_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
         current_params_for_set_clause.extend([now, next_version_val, self.client_id])
@@ -33954,7 +35666,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     # Notes (Now with UUID and specific methods)
     # Note CRUD/search methods are delegated to NoteStore at module bottom.
 
-
     def count_notes_matching(self, search_term: str) -> int:
         """Returns the total number of active notes matching the FTS query."""
         if self.backend_type == BackendType.POSTGRESQL:
@@ -34006,7 +35717,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         query = queries.get(category)
         if query is None:
             return 0
-        params = ()
+        params: tuple[str, ...] = ()
         if category == "world_books" and self.backend_type == BackendType.POSTGRESQL:
             query = "SELECT COUNT(*) AS count FROM world_books WHERE deleted = FALSE AND client_id = ?"
             params = (self.client_id,)
@@ -34040,7 +35751,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         query = queries.get(category)
         if query is None:
             return []
-        params = ()
+        params: tuple[str, ...] = ()
         if category == "world_books" and self.backend_type == BackendType.POSTGRESQL:
             query = "SELECT id FROM world_books WHERE deleted = FALSE AND client_id = ? ORDER BY id ASC"
             params = (self.client_id,)
@@ -34241,7 +35952,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             with self.transaction() as conn:
                 if not self._supports_notes_moodboard_studio_v61():
                     cursor = conn.execute(legacy_query, legacy_params)
-                    return int(cursor.lastrowid)
+                    legacy_moodboard_id = cursor.lastrowid
+                    if legacy_moodboard_id is None:
+                        raise CharactersRAGDBError("Failed to determine moodboard ID after insert.")  # noqa: TRY003
+                    return int(legacy_moodboard_id)
                 owner = str(self.client_id)
                 dataset = self.resolve_moodboard_compatibility_dataset_id(
                     owner_user_id=owner, conn=conn
@@ -34302,9 +36016,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     moodboard_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(query, params)
-                    moodboard_id = int(cursor.lastrowid)
+                    moodboard_id = cursor.lastrowid
                 if moodboard_id is None:
                     raise CharactersRAGDBError("Failed to determine moodboard ID after insert.")  # noqa: TRY003
+                moodboard_id = int(moodboard_id)
                 return moodboard_id
         except sqlite3.IntegrityError as exc:
             raise CharactersRAGDBError(f"Database integrity error adding moodboard: {exc}") from exc  # noqa: TRY003
@@ -34380,7 +36095,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 params.extend([limit, offset])
                 cursor = conn.execute(query, tuple(params))
                 rows = cursor.fetchall()
-                return [self._deserialize_moodboard_row(row) for row in rows if row]
+                return [item for row in rows if (item := self._deserialize_moodboard_row(row)) is not None]
         if only_deleted:
             predicates.append("deleted = ?")
             params.append(True if self.backend_type == BackendType.POSTGRESQL else 1)
@@ -34397,7 +36112,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         params.extend([limit, offset])
         cursor = self.execute_query(query, tuple(params))
         rows = cursor.fetchall()
-        return [self._deserialize_moodboard_row(row) for row in rows if row]
+        return [item for row in rows if (item := self._deserialize_moodboard_row(row)) is not None]
 
     def count_moodboards(
         self,
@@ -35204,7 +36919,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             row["cover_image_url"] = None
         return paged
 
-
     # --- Linking Table Methods (with manual sync_log entries) ---
     def _manage_link(self, link_table: str, col1_name: str, col1_val: Any, col2_name: str, col2_val: Any,
                      operation: str, *, owner_client_id: str | None = None) -> bool:
@@ -35238,16 +36952,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                             f"INSERT OR IGNORE INTO {link_table} ({col1_name}, {col2_name}, created_at) "
                             "VALUES (?, ?, ?)"
                         )
-                    params = (col1_val, col2_val, now_iso)
-                    cursor = conn.execute(query, params)
+                    link_params = (col1_val, col2_val, now_iso)
+                    cursor = conn.execute(query, link_params)
                     rows_affected = cursor.rowcount
                     if rows_affected > 0:  # Link was actually created
                         log_sync_entry = True
                         sync_payload_dict = {col1_name: col1_val, col2_name: col2_val, 'created_at': now_iso}
                 elif operation == "unlink":
                     query = f"DELETE FROM {link_table} WHERE {col1_name} = ? AND {col2_name} = ?"  # nosec B608
-                    params = (col1_val, col2_val)
-                    cursor = conn.execute(query, params)
+                    unlink_params = (col1_val, col2_val)
+                    cursor = conn.execute(query, unlink_params)
                     rows_affected = cursor.rowcount
                     if rows_affected > 0:  # Link was actually deleted
                         log_sync_entry = True
@@ -35310,7 +37024,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except CharactersRAGDBError as e:  # Catch custom errors like InputError
             logger.error(f"Application error during {operation} for {link_table}: {e}", exc_info=True)
             raise
-
 
     # Conversation <-> Keyword
     # Keyword/note link helper methods are delegated to extracted stores at module bottom.
@@ -35607,10 +37320,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 existing_ids: set[int] = set()
                 for row in existing_rows:
                     record = self._coerce_mapping_row(row) or {}
-                    folder_id = record.get("folder_id")
-                    if folder_id is None:
+                    existing_folder_id = record.get("folder_id")
+                    if existing_folder_id is None:
                         continue
-                    existing_ids.add(int(folder_id))
+                    existing_ids.add(int(existing_folder_id))
                 desired_ids = {folder_id for _, folder_id in desired_pairs}
                 desired_keys = {
                     canonical_key
@@ -35824,6 +37537,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if target_deck_id is not None and parent_id == target_deck_id:
             raise InputError("Deck cannot be its own parent")  # noqa: TRY003
 
+        owner_params: tuple[str, ...]
         if self.backend_type == BackendType.POSTGRESQL:
             parent_lookup_query = (
                 "SELECT id, parent_deck_id FROM decks WHERE id = ? AND deleted = 0 AND client_id = ? FOR UPDATE"
@@ -35963,7 +37677,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     "name, description, parent_deck_id, workspace_id, visibility, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, client_id, version, deleted"
                     ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 )
-                params = (
+                insert_params = (
                     name,
                     description,
                     parent_for_insert,
@@ -35980,16 +37694,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
 
                 if self.backend_type == BackendType.POSTGRESQL:
-                    cursor = conn.execute(insert_sql + " RETURNING id", params)
+                    cursor = conn.execute(insert_sql + " RETURNING id", insert_params)
                     row = cursor.fetchone()
-                    deck_id = int(row["id"]) if row else None
+                    inserted_deck_id = int(row["id"]) if row else None
                 else:
-                    cursor = conn.execute(insert_sql, params)
-                    deck_id = int(cursor.lastrowid)
+                    cursor = conn.execute(insert_sql, insert_params)
+                    inserted_deck_id = cursor.lastrowid
 
-                if deck_id is None:
+                if inserted_deck_id is None:
                     raise CharactersRAGDBError("Failed to determine deck ID after insert")  # noqa: TRY003
-                return deck_id
+                inserted_deck_id = int(inserted_deck_id)
+                return inserted_deck_id
         except sqlite3.IntegrityError as e:
             if "UNIQUE constraint failed: decks.name" in str(e):
                 raise ConflictError("Deck name already exists", entity="decks", identifier=name) from e  # noqa: TRY003
@@ -36044,7 +37759,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         owner_filter, owner_params = self._flashcard_owner_filter()
         query = select_sql + "WHERE 1 = 1" + owner_filter
-        params = list(owner_params)
+        params: list[str | int] = list(owner_params)
         if not include_deleted:
             query += " AND deleted = 0"
         if workspace_id is not None:
@@ -36175,7 +37890,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def list_deck_shares(self, deck_id: int) -> list[dict[str, Any]]:
         """List all per-user share records for a deck owned by this DB."""
         owner_filter = ""
-        owner_params = ()
+        owner_params: tuple[str, ...] = ()
         if self.backend_type == BackendType.POSTGRESQL:
             owner_filter = " AND EXISTS (SELECT 1 FROM decks d WHERE d.id = deck_shares.deck_id AND d.client_id = ?)"
             owner_params = (self.client_id,)
@@ -36197,7 +37912,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def get_deck_share(self, deck_id: int, *, user_id: int) -> dict[str, Any] | None:
         """Fetch one per-user share record for a deck owned by this DB."""
         owner_filter = ""
-        owner_params = ()
+        owner_params: tuple[str, ...] = ()
         if self.backend_type == BackendType.POSTGRESQL:
             owner_filter = " AND EXISTS (SELECT 1 FROM decks d WHERE d.id = deck_shares.deck_id AND d.client_id = ?)"
             owner_params = (self.client_id,)
@@ -36219,7 +37934,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def delete_deck_share(self, deck_id: int, *, user_id: int) -> bool:
         """Remove one per-user share record from a deck owned by this DB."""
         owner_filter = ""
-        owner_params = ()
+        owner_params: tuple[str, ...] = ()
         if self.backend_type == BackendType.POSTGRESQL:
             owner_filter = " AND EXISTS (SELECT 1 FROM decks d WHERE d.id = deck_shares.deck_id AND d.client_id = ?)"
             owner_params = (self.client_id,)
@@ -36577,13 +38292,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if self.backend_type == BackendType.POSTGRESQL:
                     cursor = conn.execute(insert_sql + " RETURNING id", params)
                     row = cursor.fetchone()
-                    template_id = int(row["id"]) if row else None
+                    inserted_template_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, params)
-                    template_id = int(cursor.lastrowid)
-                if template_id is None:
+                    inserted_template_id = cursor.lastrowid
+                if inserted_template_id is None:
                     raise CharactersRAGDBError("Failed to determine flashcard template ID after insert")  # noqa: TRY003
-                return template_id
+                inserted_template_id = int(inserted_template_id)
+                return inserted_template_id
         except sqlite3.IntegrityError as exc:
             if "UNIQUE constraint failed: flashcard_templates.name" in str(exc):
                 raise ConflictError(
@@ -38048,7 +39764,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 card_id = int(card["id"])
                 card_deck_id = int(card["deck_id"]) if card["deck_id"] is not None else None
                 explicit_scope = review_mode is not None
-                scope_mode = self._normalize_flashcard_review_mode(review_mode if explicit_scope else "due")
+                scope_mode = self._normalize_flashcard_review_mode(review_mode if review_mode is not None else "due")
                 scope_deck_id = review_deck_id if explicit_scope else card_deck_id
                 scope_tag = self._normalize_nullable_text(review_tag_filter) if explicit_scope else None
                 scope_key = (
@@ -38825,14 +40541,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         }
         # ensure keywords exist and collect ids
         desired_kw_ids = set()
+        keyword_id: int | None
         for t in tags:
             if self.backend_type == BackendType.POSTGRESQL:
-                kid = self._flashcard_owned_keyword_id(conn, t)
+                keyword_id = self._flashcard_owned_keyword_id(conn, t)
             else:
                 kw = self.get_keyword_by_text(t)
-                kid = self.add_keyword(t) if not kw else kw['id']
-            if kid is not None:
-                desired_kw_ids.add(int(kid))
+                keyword_id = self.add_keyword(t) if not kw else kw["id"]
+            if keyword_id is not None:
+                desired_kw_ids.add(int(keyword_id))
         # link missing
         insert_ts = self._get_current_utc_timestamp_iso()
         for kid in desired_kw_ids - cur_kw_ids:
@@ -38882,9 +40599,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _source_review_timestamp_value(value: Any) -> str:
         """Serialize computed due timestamps consistently for both backends."""
         if isinstance(value, datetime):
-            if value.tzinfo is None:
-                value = value.replace(tzinfo=timezone.utc)
-            return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+            timestamp: datetime = value
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            return timestamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
         return str(value)
 
     def create_source_review_plan(
@@ -39382,10 +41100,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     pack_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, params)
-                    pack_id = int(cursor.lastrowid)
+                    pack_id = cursor.lastrowid
 
                 if pack_id is None:
                     raise CharactersRAGDBError("Failed to determine study pack ID after insert")  # noqa: TRY003
+                pack_id = int(pack_id)
                 return pack_id
         except sqlite3.Error as exc:
             raise CharactersRAGDBError(f"Failed to create study pack: {exc}") from exc  # noqa: TRY003
@@ -39654,9 +41373,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """  # nosec B608
         cursor = self.execute_query(query, (anchor_type, anchor_id, *owner_params))
         return [
-            self._deserialize_row_fields(row, self._SUGGESTION_SNAPSHOT_JSON_FIELDS)
+            item
             for row in cursor.fetchall()
-            if row
+            if (item := self._deserialize_row_fields(row, self._SUGGESTION_SNAPSHOT_JSON_FIELDS)) is not None
         ]
 
     def _suggestion_link_owner_filter(self) -> tuple[str, tuple[str, ...]]:
@@ -40724,11 +42443,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             except (TypeError, ValueError):
                 return "0"
         if question_type == "multi_select":
-            normalized = self._normalize_multi_select_indices(correct_answer)
-            return json.dumps(normalized, ensure_ascii=True)
+            normalized_indices = self._normalize_multi_select_indices(correct_answer)
+            return json.dumps(normalized_indices, ensure_ascii=True)
         if question_type == "matching":
-            normalized = self._normalize_matching_map(correct_answer)
-            return json.dumps(normalized, ensure_ascii=True, sort_keys=True)
+            normalized_matching = self._normalize_matching_map(correct_answer)
+            return json.dumps(normalized_matching, ensure_ascii=True, sort_keys=True)
         if question_type == "true_false":
             val = str(correct_answer).strip().lower()
             return "true" if val in {"true", "1", "yes", "y"} else "false"
@@ -40930,7 +42649,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     @staticmethod
     def _normalize_osce_station_content(content: Any) -> dict[str, Any]:
         if hasattr(content, "model_dump"):
-            payload = content.model_dump(mode="json")
+            payload: dict[str, Any] = content.model_dump(mode="json")
         elif isinstance(content, Mapping):
             payload = dict(content)
         else:
@@ -41905,9 +43624,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     quiz_row = conn.execute(insert_quiz_sql + " RETURNING id", quiz_params).fetchone()
                     quiz_id = int(quiz_row["id"]) if quiz_row else None
                 else:
-                    quiz_id = int(conn.execute(insert_quiz_sql, quiz_params).lastrowid)
+                    quiz_id = conn.execute(insert_quiz_sql, quiz_params).lastrowid
                 if quiz_id is None:
                     raise CharactersRAGDBError("Failed to determine quiz ID after insert")  # noqa: TRY003
+                quiz_id = int(quiz_id)
 
                 station_ids = [
                     self._insert_osce_station_row(conn, quiz_id, station, now=now)
@@ -41958,7 +43678,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         from tldw_Server_API.app.services.osce_practice import materialize_station_content
 
         validated = OsceQuizExportV2.model_validate(entry)
-        stations = [
+        stations: list[dict[str, object]] = [
             {
                 "content": materialize_station_content(station.content),
                 "order_index": station.order_index,
@@ -42049,9 +43769,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     quiz_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, params)
-                    quiz_id = int(cursor.lastrowid)
+                    quiz_id = cursor.lastrowid
                 if quiz_id is None:
                     raise CharactersRAGDBError("Failed to determine quiz ID after insert")  # noqa: TRY003
+                quiz_id = int(quiz_id)
                 return quiz_id
         except sqlite3.Error as e:
             raise CharactersRAGDBError(f"Failed to create quiz: {e}") from e  # noqa: TRY003
@@ -42407,9 +44128,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     question_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, params)
-                    question_id = int(cursor.lastrowid)
+                    question_id = cursor.lastrowid
                 if question_id is None:
                     raise CharactersRAGDBError("Failed to determine question ID after insert")  # noqa: TRY003
+                question_id = int(question_id)
                 self._recount_quiz_questions(conn, quiz_id)
                 return question_id
         except sqlite3.Error as e:
@@ -42425,6 +44147,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     ) -> dict[str, Any] | None:
         """Get question by ID."""
         self._reject_question_for_osce_quiz(question_id, quiz_id)
+        params: tuple[int | str, ...]
         if self.backend_type == BackendType.POSTGRESQL:
             deleted_clause = "" if include_deleted else "AND qq.deleted = FALSE"
             parent_clause = " AND qq.quiz_id = ?" if quiz_id is not None else ""
@@ -42484,7 +44207,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if self.backend_type == BackendType.POSTGRESQL:
                 tsquery = FTSQueryTranslator.normalize_query(q, 'postgresql')
                 if not tsquery:
-                    return []
+                    return {"items": [], "count": 0}
                 fts_filter = "AND quiz_questions_fts_tsv @@ to_tsquery('english', ?)"
                 params.append(tsquery)
             else:
@@ -42743,9 +44466,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     attempt_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, params)
-                    attempt_id = int(cursor.lastrowid)
+                    attempt_id = cursor.lastrowid
                 if attempt_id is None:
                     raise CharactersRAGDBError("Failed to determine attempt ID after insert")  # noqa: TRY003
+                attempt_id = int(attempt_id)
                 return {
                     "id": attempt_id,
                     "quiz_id": quiz_id,
@@ -42899,6 +44623,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         include_answers: bool = False,
     ) -> dict[str, Any] | None:
         """Get attempt with full answer breakdown."""
+        params: tuple[int | str, ...]
         if self.backend_type == BackendType.POSTGRESQL:
             query = (
                 "SELECT qa.id, qa.quiz_id, qa.started_at, qa.completed_at, qa.score, "
@@ -43265,9 +44990,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         conversion_id = int(row["id"]) if row else None
                     else:
                         cursor = conn.execute(insert_sql, insert_params)
-                        conversion_id = int(cursor.lastrowid)
+                        conversion_id = cursor.lastrowid
                     if conversion_id is None:
                         raise CharactersRAGDBError("Failed to determine remediation conversion ID after insert")  # noqa: TRY003
+                    conversion_id = int(conversion_id)
 
                     if previous_active and replace_active:
                         conn.execute(
@@ -43375,9 +45101,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     conversion_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, params)
-                    conversion_id = int(cursor.lastrowid)
+                    conversion_id = cursor.lastrowid
                 if conversion_id is None:
                     raise CharactersRAGDBError("Failed to determine remediation conversion ID after insert")  # noqa: TRY003
+                conversion_id = int(conversion_id)
             created = self.execute_query(
                 "SELECT id, attempt_id, quiz_id, question_id, status, superseded_by_id, "
                 "target_deck_id, target_deck_name_snapshot, flashcard_count, flashcard_uuids_json, "
@@ -43560,9 +45287,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     thread_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, params)
-                    thread_id = int(cursor.lastrowid)
+                    thread_id = cursor.lastrowid
                 if thread_id is None:
                     raise CharactersRAGDBError("Failed to determine study assistant thread ID after insert")  # noqa: TRY003
+                thread_id = int(thread_id)
         except sqlite3.IntegrityError as exc:
             if not self._is_unique_violation(exc):
                 raise CharactersRAGDBError(f"Failed to create study assistant thread: {exc}") from exc  # noqa: TRY003
@@ -43692,10 +45420,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     message_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, insert_params)
-                    message_id = int(cursor.lastrowid)
+                    message_id = cursor.lastrowid
 
                 if message_id is None:
                     raise CharactersRAGDBError("Failed to determine study assistant message ID after insert")  # noqa: TRY003
+                message_id = int(message_id)
 
                 thread_update_params: tuple[Any, ...]
                 thread_update_sql = (
@@ -43747,7 +45476,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         correct = question.get("correct_answer")
         if q_type == "multiple_choice":
             try:
-                return int(user_answer) == int(correct)
+                user_index = int(user_answer)
+                if correct is None:
+                    return False
+                return user_index == int(correct)
             except (TypeError, ValueError):
                 return False
         if q_type == "multi_select":
@@ -44002,6 +45734,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         version_parent_id = self._normalize_nullable_text(version_parent_id)
+        params: tuple[str, str, str, int, str | None, str, str, bool | int, str, int]
         if self.backend_type == BackendType.POSTGRESQL:
             params = (
                 final_id,
@@ -45707,6 +47440,8 @@ for _conversation_store_method in (
     "add_conversation",
     "upsert_conversation_from_sync",
     "tombstone_conversation_from_sync",
+    "tombstone_unsynced_conversation_from_sync",
+    "unsynced_conversation_is_foreign",
     "get_conversation_by_id",
     "get_conversation_by_source_ref",
     "conversation_title_exists",
@@ -45735,6 +47470,9 @@ for _conversation_store_method in (
 
 
 for _conversation_resume_store_method in (
+    "append_idempotent_user_message",
+    "prepare_roleplay_resume_generation",
+    "commit_roleplay_resume_generation",
     "put_behavior_snapshot",
     "get_conversation_behavior_snapshot",
     "get_roleplay_resume_state",
@@ -45794,9 +47532,14 @@ for _message_store_method in (
     "validate_history_selection",
     "append_selected_history_input",
     "append_selected_history_inputs",
+    "reuse_selected_history_admission",
+    "validate_history_admission",
     "settle_history_admission",
+    "settle_selected_existing_input",
     "append_message_from_sync",
     "tombstone_message_from_sync",
+    "tombstone_unsynced_message_from_sync",
+    "unsynced_message_is_foreign",
     "get_messages_by_sync_stable_id",
     "_insert_message_images",
     "append_message_image",
@@ -45856,6 +47599,8 @@ for _note_store_method in (
     "delete_note",
     "restore_note",
     "search_notes",
+    "search_note_titles",
+    "count_note_titles_matching",
     "search_notes_with_keywords",
     "count_notes_matching_keywords",
     "link_note_to_keyword",
@@ -45866,6 +47611,7 @@ for _note_store_method in (
     "get_note_counts_for_keywords",
     "upsert_note_from_sync",
     "tombstone_note_from_sync",
+    "tombstone_unsynced_note_from_sync",
 ):
     setattr(
         CharactersRAGDB,
@@ -46110,13 +47856,13 @@ class TransactionContextManager:
         if self.is_outermost_transaction:
             if exc_type:
                 logger.error(
-                    "Transaction (outermost) failed, rolling back on thread {}: {} - {}",
-                    threading.get_ident(), exc_type.__name__, exc_val, exc_info=False) # exc_info=exc_tb if full traceback wanted here
+                    "Transaction (outermost) failed, rolling back on thread {}: {}",
+                    threading.get_ident(), exc_type.__name__)
                 try:
                     self.conn.rollback()
                     logger.debug(f"Rollback successful on thread {threading.get_ident()}.")
                 except sqlite3.Error as rb_err:
-                    logger.critical("Rollback FAILED on thread {}: {}", threading.get_ident(), rb_err, exc_info=True)
+                    logger.critical("Rollback FAILED on thread {}: {}", threading.get_ident(), type(rb_err).__name__)
             else:
                 try:
                     self.conn.commit()
@@ -46124,14 +47870,14 @@ class TransactionContextManager:
                         f"Transaction (outermost) committed successfully on thread {threading.get_ident()}.")
                 except sqlite3.Error as commit_err:
                     logger.error("Commit FAILED on thread {}, attempting rollback: {}",
-                                 threading.get_ident(), commit_err, exc_info=True)
+                                 threading.get_ident(), type(commit_err).__name__)
                     try:
                         self.conn.rollback()
                         logger.debug(f"Rollback after failed commit successful on thread {threading.get_ident()}.")
                     except sqlite3.Error as rb_err_after_commit_fail:
                         logger.critical(
                             "Rollback after failed commit also FAILED on thread {}: {}",
-                            threading.get_ident(), rb_err_after_commit_fail, exc_info=True)
+                            threading.get_ident(), type(rb_err_after_commit_fail).__name__)
                     # Re-raise the commit error so the caller knows the transaction failed.
                     # Encapsulate it if it's not already a DB-specific error from our library.
                     if not isinstance(commit_err, CharactersRAGDBError):
@@ -46148,6 +47894,8 @@ class TransactionContextManager:
         # allowing them to be handled by the caller or to propagate further up.
         # This is standard behavior for context managers.
         return False
+
+
 #
 # End of ChaChaNotes_DB.py
 #######################################################################################################################

@@ -335,7 +335,7 @@ export function ContentViewer({
   const readAlong = useMediaReadAlongSession({
     mediaId: selectedMediaId,
     mediaKind: selectedMedia?.kind || null,
-    content,
+    content: rendering.readingContent,
     displayContent: rendering.displayContent,
     renderMode: rendering.effectiveRenderMode,
     hideTranscriptTimings: rendering.shouldHideTranscriptTimings,
@@ -400,7 +400,7 @@ export function ContentViewer({
   // --- Hook: Transcript Display ---
   const transcript = useTranscriptDisplay({
     displayContent: rendering.displayContent,
-    content,
+    content: rendering.readingContent,
     selectedMedia,
     effectiveRenderMode: rendering.effectiveRenderMode,
     shouldHideTranscriptTimings: rendering.shouldHideTranscriptTimings,
@@ -455,7 +455,7 @@ export function ContentViewer({
   const readingProgress = useReadingProgress({
     selectedMedia,
     mediaDetail,
-    content,
+    content: rendering.readingContent,
     contentScrollContainerRef,
     contentBodyRef,
     navigationTarget,
@@ -1308,9 +1308,7 @@ export function ContentViewer({
                     ) : modals.embeddedMediaUrl ? (
                       modals.mediaType === 'video' ? (
                         <video
-                          ref={(node) => {
-                            modals.mediaPlayerRef.current = node
-                          }}
+                          ref={modals.setMediaPlayerRef}
                           src={modals.embeddedMediaUrl}
                           controls
                           preload="metadata"
@@ -1319,9 +1317,7 @@ export function ContentViewer({
                         />
                       ) : (
                         <audio
-                          ref={(node) => {
-                            modals.mediaPlayerRef.current = node
-                          }}
+                          ref={modals.setMediaPlayerRef}
                           src={modals.embeddedMediaUrl}
                           controls
                           preload="metadata"

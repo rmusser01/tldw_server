@@ -618,6 +618,13 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
     # static subpaths are not shadowed by /{note_id}.
     for notes_spec in (
         ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.notes_semantic_index",
+            log_name="notes_semantic_index",
+            prefix=f"{API_V1_PREFIX}/notes",
+            tags=("notes",),
+            route_key="notes",
+        ),
+        ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.notes_graph_suggestions",
             log_name="notes_graph_suggestions",
             prefix=f"{API_V1_PREFIX}/notes",
@@ -797,6 +804,13 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
         append_imported_router_spec(specs, persona_spec)
 
     for tail_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.storage",
+            log_name="storage",
+            prefix=API_V1_PREFIX,
+            tags=("storage",),
+            route_key="storage",
+        ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.files",
             log_name="files",

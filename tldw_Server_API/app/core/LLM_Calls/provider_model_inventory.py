@@ -20,6 +20,7 @@ from urllib.parse import urlencode, urlsplit
 
 from tldw_Server_API.app.core.http_client import RetryPolicy
 from tldw_Server_API.app.core.http_client import fetch as _http_fetch
+from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
 
 if TYPE_CHECKING:
@@ -388,6 +389,13 @@ def resolve_provider_model_selection(
         return ModelDiscoveryResult("not_found")
     if model in inventory.models:
         return ModelDiscoveryResult("ready", (model,))
+    selected_provider = None
+    lookup_model = model
+    if provider == "anthropic":
+        # A saved dotted name (claude-sonnet-4.5) is checked as its dashed API ID; request builders send that ID.
+        lookup_model = canonical_anthropic_model_id(model)
+        if lookup_model in inventory.models:
+            return ModelDiscoveryResult("ready", (model,))
     if provider == "openrouter":
         parts = model.split(":")
         routing = {"nitro", "floor", "exacto", "online"}
@@ -399,8 +407,6 @@ def resolve_provider_model_selection(
             return ModelDiscoveryResult("not_found")
         catalog_id = parts[0] + (":" + variants[0] if variants else "")
         return ModelDiscoveryResult("ready", (model,)) if catalog_id in inventory.models else ModelDiscoveryResult("not_found")
-    selected_provider = None
-    lookup_model = model
     if provider == "huggingface":
         if model.count(":") != 1:
             return ModelDiscoveryResult("not_found")

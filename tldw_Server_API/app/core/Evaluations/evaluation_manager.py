@@ -34,6 +34,7 @@ from tldw_Server_API.app.core.DB_Management.migrations import migrate_evaluation
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
 from tldw_Server_API.app.core.Evaluations.identity import canonical_evaluations_user_scope
 from tldw_Server_API.app.core.Evaluations.scoring import normalize_judge_score
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 
 
@@ -656,6 +657,8 @@ class EvaluationManager:
                 "raw_output": response
             }
 
+        except LLMQuotaExceededError:
+            raise  # the user's limit is not a 0.0 score
         except Exception as e:
             logger.error(f"Custom metric evaluation failed: {e}")
             return {

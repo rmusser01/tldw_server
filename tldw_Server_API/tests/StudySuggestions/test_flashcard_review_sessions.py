@@ -11,6 +11,7 @@ from tldw_Server_API.app.api.v1.endpoints.flashcards import router as flashcards
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     ConflictError,
@@ -34,6 +35,7 @@ def client(db: CharactersRAGDB):
     from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(flashcards_router, prefix="/api/v1")
 
     def override_get_db():

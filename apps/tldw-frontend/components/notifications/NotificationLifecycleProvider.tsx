@@ -117,8 +117,9 @@ export const buildWebNotificationScopeKey = (): string => {
 
 const hasMissingConfiguredAuth = (): boolean => {
   const config = getEffectiveStoredTldwConfig()
-  return config?.authMode === "multi-user" &&
-    config.authSource !== "cookie-session" && !getApiBearer()
+  if (config?.authSource === "cookie-session") return false
+  return (config?.authMode === "multi-user" && !getApiBearer()) ||
+    (config?.authMode === "single-user" && !getApiKey())
 }
 
 export const useOptionalNotificationLifecycle = (): NotificationLifecycleContextValue | null =>

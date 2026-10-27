@@ -122,13 +122,29 @@ export const RateLimitsWidget: React.FC<RateLimitsWidgetProps> = ({
 
   const dailyUsed = rateLimits.usage.evaluations_today
   const dailyLimit = rateLimits.limits.evaluations_per_day
+  // A null limit means unlimited; a limit of 0 blocks, so it reads as full.
   const dailyPercent =
-    dailyLimit > 0 ? Math.round((dailyUsed / dailyLimit) * 100) : 0
+    dailyLimit == null
+      ? 0
+      : dailyLimit > 0
+        ? Math.round((dailyUsed / dailyLimit) * 100)
+        : 100
 
   const tokensUsed = rateLimits.usage.tokens_today
   const tokensLimit = rateLimits.limits.tokens_per_day
   const tokensPercent =
-    tokensLimit > 0 ? Math.round((tokensUsed / tokensLimit) * 100) : 0
+    tokensLimit == null
+      ? 0
+      : tokensLimit > 0
+        ? Math.round((tokensUsed / tokensLimit) * 100)
+        : 100
+  const unlimitedLabel = t("evaluations:rateLimitsUnlimited", {
+    defaultValue: "Unlimited"
+  })
+  const dailyText = `${dailyUsed}/${dailyLimit == null ? unlimitedLabel : dailyLimit}`
+  const tokensText = `${tokensUsed.toLocaleString()}/${
+    tokensLimit == null ? unlimitedLabel : tokensLimit.toLocaleString()
+  }`
 
   if (compact) {
     return (
@@ -140,15 +156,17 @@ export const RateLimitsWidget: React.FC<RateLimitsWidgetProps> = ({
             })}
             :
           </span>
-          <Progress
-            percent={dailyPercent}
-            size="small"
-            className="flex-1"
-            status={dailyPercent >= 90 ? "exception" : undefined}
-          />
-          <span className="w-16 text-right">
-            {dailyUsed}/{dailyLimit}
-          </span>
+          {dailyLimit == null ? (
+            <span className="flex-1" />
+          ) : (
+            <Progress
+              percent={dailyPercent}
+              size="small"
+              className="flex-1"
+              status={dailyPercent >= 90 ? "exception" : undefined}
+            />
+          )}
+          <span className="min-w-16 text-right">{dailyText}</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="w-16 text-text-subtle">
@@ -157,15 +175,17 @@ export const RateLimitsWidget: React.FC<RateLimitsWidgetProps> = ({
             })}
             :
           </span>
-          <Progress
-            percent={tokensPercent}
-            size="small"
-            className="flex-1"
-            status={tokensPercent >= 90 ? "exception" : undefined}
-          />
-          <span className="w-16 text-right">
-            {tokensUsed.toLocaleString()}/{tokensLimit.toLocaleString()}
-          </span>
+          {tokensLimit == null ? (
+            <span className="flex-1" />
+          ) : (
+            <Progress
+              percent={tokensPercent}
+              size="small"
+              className="flex-1"
+              status={tokensPercent >= 90 ? "exception" : undefined}
+            />
+          )}
+          <span className="min-w-16 text-right">{tokensText}</span>
         </div>
       </div>
     )
@@ -187,14 +207,14 @@ export const RateLimitsWidget: React.FC<RateLimitsWidgetProps> = ({
           })}
           {": "}
         </Text>
-        <Text>
-          {dailyUsed}/{dailyLimit}
-        </Text>
-        <Progress
-          percent={dailyPercent}
-          size="small"
-          status={dailyPercent >= 90 ? "exception" : undefined}
-        />
+        <Text>{dailyText}</Text>
+        {dailyLimit != null && (
+          <Progress
+            percent={dailyPercent}
+            size="small"
+            status={dailyPercent >= 90 ? "exception" : undefined}
+          />
+        )}
       </div>
       <div>
         <Text type="secondary">
@@ -203,14 +223,14 @@ export const RateLimitsWidget: React.FC<RateLimitsWidgetProps> = ({
           })}
           {": "}
         </Text>
-        <Text>
-          {tokensUsed.toLocaleString()}/{tokensLimit.toLocaleString()}
-        </Text>
-        <Progress
-          percent={tokensPercent}
-          size="small"
-          status={tokensPercent >= 90 ? "exception" : undefined}
-        />
+        <Text>{tokensText}</Text>
+        {tokensLimit != null && (
+          <Progress
+            percent={tokensPercent}
+            size="small"
+            status={tokensPercent >= 90 ? "exception" : undefined}
+          />
+        )}
       </div>
       <div>
         <Text type="secondary">

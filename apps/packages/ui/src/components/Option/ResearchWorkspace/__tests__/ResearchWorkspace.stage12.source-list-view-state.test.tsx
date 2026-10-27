@@ -1,12 +1,47 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render as renderUI,
+  screen,
+  waitFor,
+  within
+} from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import userEvent from "@testing-library/user-event"
 import React from "react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
-import type { WorkspaceSourceSavedViewResponse } from "@/services/tldw/domains/workspace-api"
+import type { WorkspaceSourceSavedViewResponse, WorkspaceSourceSavedViewValidResponse } from "@/services/tldw/domains/workspace-api"
 import type { WorkspaceSourceSavedViewStateV1 } from "@/types/workspace-source-saved-view"
 import { ResearchWorkspace } from "../index"
+
+
+// Match the router context provided by both deployed shells.
+const render: typeof renderUI = (ui, options) =>
+  renderUI(ui, {
+    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>,
+    ...options
+  })
 import type { SourceListViewState } from "../SourcesPane/source-list-view"
 import type { SourceSavedViewsController } from "../SourcesPane/use-source-saved-views"
+
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async (
+    _ids: unknown,
+    options: { signal: AbortSignal }
+  ) => ({
+    requestScope: {
+      config: {
+        serverUrl: "https://saved-views.test",
+        authMode: "single-user",
+        expectedSingleUserApiKeyScope: "fixture-key-scope"
+      },
+      userId: null
+    },
+    scopeSignal: options.signal,
+    scopeInvalidatedSignal: new AbortController().signal,
+    release: () => {}
+  })
+}))
 
 const savedViewHarness = vi.hoisted(() => ({
   hookInvocations: vi.fn(),
@@ -24,6 +59,17 @@ const savedViewHarness = vi.hoisted(() => ({
   deleteWorkspaceSourceView: vi.fn()
 }))
 
+const scopedOptions = expect.objectContaining({
+  requestScope: {
+    config: {
+      serverUrl: "https://saved-views.test",
+      authMode: "single-user",
+      expectedSingleUserApiKeyScope: "fixture-key-scope"
+    },
+    userId: null
+  },
+  signal: expect.any(AbortSignal)
+})
 const wireState = (
   overrides: Partial<WorkspaceSourceSavedViewStateV1> = {}
 ): WorkspaceSourceSavedViewStateV1 => ({
@@ -50,8 +96,8 @@ const wireState = (
 
 const validView = (
   workspaceId: string,
-  overrides: Partial<WorkspaceSourceSavedViewResponse> = {}
-): WorkspaceSourceSavedViewResponse => ({
+  overrides: Partial<WorkspaceSourceSavedViewValidResponse> = {}
+): WorkspaceSourceSavedViewValidResponse => ({
   id: `${workspaceId}-view-${savedViewHarness.nextId}`,
   workspace_id: workspaceId,
   name: "Current filters",
@@ -234,9 +280,15 @@ vi.mock("@/store/workspace", () => ({
     })
 }))
 
-vi.mock("@/utils/research-workspace-prefill", () => ({
-  consumeResearchWorkspacePrefill: vi.fn().mockResolvedValue(null),
-  buildKnowledgeQaSeedNote: vi.fn().mockReturnValue("")
+vi.mock("@/utils/use-research-workspace-prefill", () => ({
+  useResearchWorkspacePrefill: () => ({
+    attached: 0,
+    pending: 0,
+    failed: 0,
+    importing: false,
+    error: null,
+    retry: vi.fn(),
+  }),
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -508,7 +560,7 @@ describe("ResearchWorkspace source list view state", () => {
         const existing = savedViewHarness.rows.find(
           (view) => view.workspace_id === workspaceId && view.id === viewId
         )
-        if (!existing) throw new Error("Saved view not found")
+        if (!existing || !existing.valid) throw new Error("Valid saved view not found")
         const updated = validView(workspaceId, {
           ...existing,
           name: body.name ?? existing.name,
@@ -551,7 +603,8 @@ describe("ResearchWorkspace source list view state", () => {
 
     await waitFor(() =>
       expect(savedViewHarness.listWorkspaceSourceViews).toHaveBeenCalledWith(
-        "workspace-1"
+        "workspace-1",
+        scopedOptions
       )
     )
     expect(savedViewHarness.getWorkspaceSources).toHaveBeenCalledWith(
@@ -598,7 +651,8 @@ describe("ResearchWorkspace source list view state", () => {
     await act(async () => upsertB.resolve({ id: "workspace-2" }))
     await waitFor(() =>
       expect(savedViewHarness.listWorkspaceSourceViews).toHaveBeenCalledWith(
-        "workspace-2"
+        "workspace-2",
+        scopedOptions
       )
     )
   })
@@ -673,12 +727,24 @@ describe("ResearchWorkspace source list view state", () => {
     expect(invokers).toHaveLength(2)
     await user.click(invokers[0]!)
     expect(screen.getAllByRole("textbox", { name: "View name" })).toHaveLength(1)
+    let closingDialog = screen.getByRole("textbox", { name: "View name" }).closest("[role=dialog]")!
     await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(closingDialog.className).toContain("ant-zoom-leave-active"))
+    expect(invokers[0]).not.toHaveFocus()
+    fireEvent(closingDialog, new Event("webkitAnimationEnd", { bubbles: true }))
+    fireEvent.animationEnd(closingDialog)
+    await waitFor(() => expect(closingDialog).not.toBeInTheDocument())
     await waitFor(() => expect(document.activeElement).toBe(invokers[0]))
 
     await user.click(invokers[1]!)
     expect(screen.getAllByRole("textbox", { name: "View name" })).toHaveLength(1)
+    closingDialog = screen.getByRole("textbox", { name: "View name" }).closest("[role=dialog]")!
     await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(closingDialog.className).toContain("ant-zoom-leave-active"))
+    expect(invokers[1]).not.toHaveFocus()
+    fireEvent(closingDialog, new Event("webkitAnimationEnd", { bubbles: true }))
+    fireEvent.animationEnd(closingDialog)
+    await waitFor(() => expect(closingDialog).not.toBeInTheDocument())
     await waitFor(() => expect(document.activeElement).toBe(invokers[1]))
   })
 
@@ -709,7 +775,8 @@ describe("ResearchWorkspace source list view state", () => {
       expect.anything()
     )
     expect(savedViewHarness.listWorkspaceSourceViews).not.toHaveBeenCalledWith(
-      "local"
+      "local",
+      scopedOptions
     )
     expect(screen.getByRole("button", { name: "Save source view" })).toBeDisabled()
     fireEvent.click(screen.getByRole("button", { name: "Save source view" }))
@@ -783,8 +850,14 @@ describe("ResearchWorkspace source list view state", () => {
     const sourcesTab = screen.getByRole("tab", { name: /Sources/ })
     await user.click(screen.getByRole("tab", { name: /Chat/ }))
     expect(screen.queryByRole("button", { name: "Save source view" })).not.toBeInTheDocument()
+    const closingDialog = screen.getByRole("textbox", { name: "View name" }).closest("[role=dialog]")!
     await user.click(screen.getByRole("button", { name: "Cancel" }))
 
+    await waitFor(() => expect(closingDialog.className).toContain("ant-zoom-leave-active"))
+    expect(sourcesTab).not.toHaveFocus()
+    fireEvent(closingDialog, new Event("webkitAnimationEnd", { bubbles: true }))
+    fireEvent.animationEnd(closingDialog)
+    await waitFor(() => expect(closingDialog).not.toBeInTheDocument())
     await waitFor(() => expect(document.activeElement).toBe(sourcesTab))
   })
 

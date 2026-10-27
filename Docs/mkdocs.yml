@@ -38,7 +38,7 @@ plugins:
       enable_git_follow: false
       strict: false
       fallback_to_build_date: true
-      enable_creation_date: true
+      enable_creation_date: false
       type: timeago
       locale: en
 

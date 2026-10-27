@@ -6,12 +6,25 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, fallbackOrOptions?: string | { defaultValue?: string }) => {
       if (typeof fallbackOrOptions === 'string') return fallbackOrOptions
-      return fallbackOrOptions?.defaultValue || key
+      return (fallbackOrOptions?.defaultValue || key).replace('{{title}}', String((fallbackOrOptions as { title?: string })?.title || ''))
     }
   })
 }))
 
 describe('ResultsList', () => {
+  it('keeps same-ID Media and Notes checkbox identities separate without bubbling Space to the row', () => {
+    const toggle = vi.fn()
+    render(<ResultsList results={[{ id: 1, kind: 'media', title: 'Media one' }, { id: 1, kind: 'note', title: 'Note one' }]} selectedId={null} onSelect={vi.fn()} totalCount={2} loadedCount={2} selectionMode selectedIds={new Set(['media:1'])} onToggleSelected={toggle} />)
+    const media = screen.getByRole('checkbox', { name: 'Select Media one' })
+    const note = screen.getByRole('checkbox', { name: 'Select Note one' })
+    expect(media).toBeChecked()
+    expect(note).not.toBeChecked()
+    fireEvent.keyDown(note, { key: ' ' })
+    expect(toggle).not.toHaveBeenCalled()
+    fireEvent.click(note)
+    expect(toggle).toHaveBeenCalledExactlyOnceWith('note:1')
+  })
+
   afterEach(() => {
     vi.useRealTimers()
   })

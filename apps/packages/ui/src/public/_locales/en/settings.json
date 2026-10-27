@@ -1440,7 +1440,7 @@
     "message": "{{count}} characters found"
   },
   "manageCharacters_confirm_delete": {
-    "message": "Are you sure you want to delete this character? This action cannot be undone."
+    "message": "Move this character to Trash? You can restore it later."
   },
   "manageCharacters_conversations_title": {
     "message": "Conversations for {{name}}"
@@ -1741,6 +1741,9 @@
   },
   "manageCharacters_notification_deletedSuccess": {
     "message": "Character deleted"
+  },
+  "manageCharacters_notification_deletedWithUndo": {
+    "message": "Character {{name}} moved to Trash"
   },
   "manageCharacters_notification_defaultSet": {
     "message": "Default character set"
@@ -6652,5 +6655,74 @@
   },
   "chatMacrosSettings_user": {
     "message": "User"
+  },
+  "manageCharacters_quickChat_copied": {
+    "message": "Draft copied. Your popup is still open."
+  },
+  "manageCharacters_quickChat_retainFailed": {
+    "message": "Your draft could not be kept. Copy it before closing this popup."
+  },
+  "manageCharacters_quickChat_cardLoadFailed": {
+    "message": "Could not load this character for your account. Your draft is kept. Retry when the server is available."
+  },
+  "manageCharacters_quickChat_copyExplanation": {
+    "message": "Copies your next message for pasting. Your draft in full chat stays unchanged."
+  },
+  "manageCharacters_quickChat_retryCharacter": {
+    "message": "Retry character"
+  },
+  "manageCharacters_quickChat_savingPolicy": {
+    "message": "Confirmed replies are saved in Conversations. If a save is unconfirmed, review it before sending again. Closing keeps the saved chat and retains your unsent draft on this browser."
+  },
+  "manageCharacters_quickChat_newTab": {
+    "message": "(opens in a new tab)"
+  },
+  "manageCharacters_quickChat_copyAndContinue": {
+    "message": "Copy draft and continue"
+  },
+  "manageCharacters_quickChat_characterNotLoaded": {
+    "message": "Character not loaded"
+  },
+  "manageCharacters_quickChat_copyFailed": {
+    "message": "Could not copy your draft. Select the text and copy it manually; your popup stays open."
+  },
+  "manageCharacters_quickChat_loadingCharacter": {
+    "message": "Loading character…"
+  },
+  "manageCharacters_quickChat_copyDraft": {
+    "message": "Copy draft"
+  },
+  "manageCharacters_quickChat_startFullChat": {
+    "message": "Start in full chat"
+  },
+  "manageCharacters_quickChat_continueFullChat": {
+    "message": "Continue in full chat"
+  },
+  "manageCharacters_quickChat_copyAndReview": {
+    "message": "Copy draft and review"
+  },
+  "manageCharacters_quickChat_continueFailed": {
+    "message": "Could not continue. Your popup and draft are still here. Check draft storage, clipboard access and the saved conversation, then try again."
+  },
+  "manageCharacters_quickChat_messageLabel": {
+    "message": "Quick chat message"
+  },
+  "manageCharacters_quickChat_previousAttempt": {
+    "message": "An earlier attempt may have saved this character chat. Review retained drafts in full chat before starting another conversation."
+  },
+  "manageCharacters_quickChat_reviewFullChat": {
+    "message": "Review in full chat"
+  },
+  "manageCharacters_quickChat_previewOnly": {
+    "message": "Opening preview · not sent or saved"
+  },
+  "manageCharacters_quickChat_verifyingAccount": {
+    "message": "Verify your account before chatting."
+  },
+  "manageCharacters_quickChat_retryAccount": {
+    "message": "Retry verification"
+  },
+  "manageCharacters_quickChat_savedModelGuidance": {
+    "message": "This chat uses its saved model and provider. Review its settings in full chat."
   }
 }

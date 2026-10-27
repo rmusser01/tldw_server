@@ -73,22 +73,16 @@ export type EvaluationRateLimitStatus = {
   tier: string
   limits: {
     evaluations_per_minute: number
-    evaluations_per_day: number
-    tokens_per_day: number
-    cost_per_day: number
-    cost_per_month: number
+    evaluations_per_day: number | null
+    tokens_per_day: number | null
   }
   usage: {
     evaluations_today: number
     tokens_today: number
-    cost_today: number
-    cost_month: number
   }
   remaining: {
-    daily_evaluations: number
-    daily_tokens: number
-    daily_cost: number
-    monthly_cost: number
+    daily_evaluations: number | null
+    daily_tokens: number | null
   }
   reset_at: string
 }

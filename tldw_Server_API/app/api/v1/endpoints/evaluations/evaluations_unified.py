@@ -19,6 +19,7 @@ from fastapi.routing import APIRoute
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole, User, get_auth_principal, rbac_rate_limit
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 
 # Import unified schemas
@@ -851,22 +852,16 @@ async def get_rate_limit_status(
             tier=summary.get("tier", "free"),
             limits={
                 "evaluations_per_minute": summary.get("limits", {}).get("per_minute", {}).get("evaluations", 0),
-                "evaluations_per_day": summary.get("limits", {}).get("daily", {}).get("evaluations", 0),
-                "tokens_per_day": summary.get("limits", {}).get("daily", {}).get("tokens", 0),
-                "cost_per_day": int(summary.get("limits", {}).get("daily", {}).get("cost", 0)),
-                "cost_per_month": int(summary.get("limits", {}).get("monthly", {}).get("cost", 0))
+                "evaluations_per_day": summary.get("limits", {}).get("daily", {}).get("evaluations"),
+                "tokens_per_day": summary.get("limits", {}).get("daily", {}).get("tokens")
             },
             usage={
                 "evaluations_today": summary.get("usage", {}).get("today", {}).get("evaluations", 0),
-                "tokens_today": summary.get("usage", {}).get("today", {}).get("tokens", 0),
-                "cost_today": int(summary.get("usage", {}).get("today", {}).get("cost", 0)),
-                "cost_month": int(summary.get("usage", {}).get("month", {}).get("cost", 0))
+                "tokens_today": summary.get("usage", {}).get("today", {}).get("tokens", 0)
             },
             remaining={
-                "daily_evaluations": summary.get("remaining", {}).get("daily_evaluations", 0),
-                "daily_tokens": summary.get("remaining", {}).get("daily_tokens", 0),
-                "daily_cost": int(summary.get("remaining", {}).get("daily_cost", 0)),
-                "monthly_cost": int(summary.get("remaining", {}).get("monthly_cost", 0))
+                "daily_evaluations": summary.get("remaining", {}).get("daily_evaluations"),
+                "daily_tokens": summary.get("remaining", {}).get("daily_tokens")
             },
             reset_at=datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
         )
@@ -994,6 +989,8 @@ async def evaluate_geval(
     """
     credential_runtime: Optional[ProviderCredentialRuntime] = None
     try:
+        # Usage quotas (LLM usage accounting spec §4a), before the rate limiter reserves anything.
+        await enforce_llm_quota(current_user.id)
         # Per-user usage limits
         limiter = get_user_rate_limiter_for_user(current_user.id)
         tokens_est = _estimate_tokens_from_texts(
@@ -1002,7 +999,7 @@ async def evaluate_geval(
             provider=getattr(request, "api_name", None),
             model=request.model,
         )
-        allowed, meta = await limiter.check_rate_limit(str(current_user.id), endpoint="evals:geval", is_batch=False, tokens_requested=tokens_est, estimated_cost=0.0)
+        allowed, meta = await limiter.check_rate_limit(str(current_user.id), endpoint="evals:geval", is_batch=False, tokens_requested=tokens_est)
         if not allowed:
             retry_after = meta.get("retry_after", 60)
             raise HTTPException(
@@ -1067,7 +1064,7 @@ async def evaluate_geval(
         try:
             usage = result.get("usage") if isinstance(result, dict) else None
             if usage and isinstance(usage, dict):
-                await limiter.record_actual_usage(str(current_user.id), "evals:geval", int(usage.get("total_tokens", 0)), float(usage.get("cost", 0.0) or 0.0), reserved_tokens=tokens_est)
+                await limiter.record_actual_usage(str(current_user.id), "evals:geval", int(usage.get("total_tokens", 0)), reserved_tokens=tokens_est)
         except asyncio.CancelledError:
             raise
         except _EVALS_NONCRITICAL_EXCEPTIONS:
@@ -1209,6 +1206,8 @@ async def evaluate_rag(
     """
     credential_runtime: Optional[ProviderCredentialRuntime] = None
     try:
+        # Usage quotas (LLM usage accounting spec §4a), before the rate limiter reserves anything.
+        await enforce_llm_quota(current_user.id)
         # Per-user usage limits
         limiter = get_user_rate_limiter_for_user(current_user.id)
         tokens_est = _estimate_tokens_from_texts(
@@ -1219,7 +1218,7 @@ async def evaluate_rag(
             provider=getattr(request, "api_name", None),
             model=request.model,
         )
-        allowed, meta = await limiter.check_rate_limit(str(current_user.id), endpoint="evals:rag", is_batch=False, tokens_requested=tokens_est, estimated_cost=0.0)
+        allowed, meta = await limiter.check_rate_limit(str(current_user.id), endpoint="evals:rag", is_batch=False, tokens_requested=tokens_est)
         if not allowed:
             retry_after = meta.get("retry_after", 60)
             raise HTTPException(
@@ -1285,7 +1284,7 @@ async def evaluate_rag(
         try:
             usage = result.get("usage") if isinstance(result, dict) else None
             if usage and isinstance(usage, dict):
-                await limiter.record_actual_usage(str(current_user.id), "evals:rag", int(usage.get("total_tokens", 0)), float(usage.get("cost", 0.0) or 0.0), reserved_tokens=tokens_est)
+                await limiter.record_actual_usage(str(current_user.id), "evals:rag", int(usage.get("total_tokens", 0)), reserved_tokens=tokens_est)
         except asyncio.CancelledError:
             raise
         except _EVALS_NONCRITICAL_EXCEPTIONS:
@@ -1405,6 +1404,8 @@ async def evaluate_response_quality(
     """
     credential_runtime: Optional[ProviderCredentialRuntime] = None
     try:
+        # Usage quotas (LLM usage accounting spec §4a), before the rate limiter reserves anything.
+        await enforce_llm_quota(current_user.id)
         # Per-user usage limits
         limiter = get_user_rate_limiter_for_user(current_user.id)
         tokens_est = _estimate_tokens_from_texts(
@@ -1414,7 +1415,7 @@ async def evaluate_response_quality(
             provider=getattr(request, "api_name", None),
             model=request.model,
         )
-        allowed, meta = await limiter.check_rate_limit(str(current_user.id), endpoint="evals:response_quality", is_batch=False, tokens_requested=tokens_est, estimated_cost=0.0)
+        allowed, meta = await limiter.check_rate_limit(str(current_user.id), endpoint="evals:response_quality", is_batch=False, tokens_requested=tokens_est)
         if not allowed:
             retry_after = meta.get("retry_after", 60)
             raise HTTPException(
@@ -1480,7 +1481,7 @@ async def evaluate_response_quality(
         try:
             usage = result.get("usage") if isinstance(result, dict) else None
             if usage and isinstance(usage, dict):
-                await limiter.record_actual_usage(str(current_user.id), "evals:response_quality", int(usage.get("total_tokens", 0)), float(usage.get("cost", 0.0) or 0.0), reserved_tokens=tokens_est)
+                await limiter.record_actual_usage(str(current_user.id), "evals:response_quality", int(usage.get("total_tokens", 0)), reserved_tokens=tokens_est)
         except asyncio.CancelledError:
             raise
         except _EVALS_NONCRITICAL_EXCEPTIONS:
@@ -1613,7 +1614,6 @@ async def evaluate_propositions_endpoint(
             endpoint="evals:propositions",
             is_batch=False,
             tokens_requested=tokens_est,
-            estimated_cost=0.0,
         )
         if not allowed:
             retry_after = meta.get("retry_after", 60)
@@ -1693,6 +1693,9 @@ async def batch_evaluate(
     try:
         start_time = time.time()
         service = get_unified_evaluation_service_for_user(current_user.id)
+        if request.evaluation_type in {"geval", "rag", "response_quality"}:
+            # Usage quotas (LLM usage accounting spec §4a): these types make LLM calls inside the request.
+            await enforce_llm_quota(current_user.id)
         if request.evaluation_type in {"geval", "rag", "response_quality"}:
             credential_runtime = _build_eval_credential_runtime(
                 current_user=current_user,
@@ -1780,7 +1783,6 @@ async def batch_evaluate(
             endpoint=f"evals:batch:{etype}",
             is_batch=True,
             tokens_requested=tokens_total,
-            estimated_cost=0.0,
             evaluations_requested=max(1, len(request.items or [])),
         )
         if not allowed:
@@ -2256,7 +2258,7 @@ async def evaluate_ocr_endpoint(
         except _EVALS_NONCRITICAL_EXCEPTIONS:
             pass
         tokens_est = _estimate_tokens_from_texts("\n".join(texts))
-        allowed, meta = await limiter.check_rate_limit(str(current_user.id), endpoint="evals:ocr", is_batch=False, tokens_requested=tokens_est, estimated_cost=0.0)
+        allowed, meta = await limiter.check_rate_limit(str(current_user.id), endpoint="evals:ocr", is_batch=False, tokens_requested=tokens_est)
         if not allowed:
             retry_after = meta.get("retry_after", 60)
             raise HTTPException(status_code=429, detail=meta.get("error", "Rate limit exceeded"), headers={"Retry-After": str(retry_after)})
@@ -2273,7 +2275,7 @@ async def evaluate_ocr_endpoint(
         try:
             usage = result.get("usage") if isinstance(result, dict) else None
             if usage and isinstance(usage, dict):
-                await limiter.record_actual_usage(str(current_user.id), "evals:ocr", int(usage.get("total_tokens", 0)), float(usage.get("cost", 0.0) or 0.0), reserved_tokens=tokens_est)
+                await limiter.record_actual_usage(str(current_user.id), "evals:ocr", int(usage.get("total_tokens", 0)), reserved_tokens=tokens_est)
         except _EVALS_NONCRITICAL_EXCEPTIONS:
             pass
         # Apply headers
@@ -2324,7 +2326,7 @@ async def evaluate_ocr_pdf_endpoint(
         except _EVALS_NONCRITICAL_EXCEPTIONS:
             pass
         tokens_est = max(0, size_est // 4)
-        allowed, meta = await limiter.check_rate_limit(str(current_user.id), endpoint="evals:ocr_pdf", is_batch=False, tokens_requested=tokens_est, estimated_cost=0.0)
+        allowed, meta = await limiter.check_rate_limit(str(current_user.id), endpoint="evals:ocr_pdf", is_batch=False, tokens_requested=tokens_est)
         if not allowed:
             retry_after = meta.get("retry_after", 60)
             raise HTTPException(status_code=429, detail=meta.get("error", "Rate limit exceeded"), headers={"Retry-After": str(retry_after)})
@@ -2400,7 +2402,7 @@ async def evaluate_ocr_pdf_endpoint(
         try:
             usage = result.get("usage") if isinstance(result, dict) else None
             if usage and isinstance(usage, dict):
-                await limiter.record_actual_usage(str(current_user.id), "evals:ocr_pdf", int(usage.get("total_tokens", 0)), float(usage.get("cost", 0.0) or 0.0), reserved_tokens=tokens_est)
+                await limiter.record_actual_usage(str(current_user.id), "evals:ocr_pdf", int(usage.get("total_tokens", 0)), reserved_tokens=tokens_est)
         except _EVALS_NONCRITICAL_EXCEPTIONS:
             pass
         try:

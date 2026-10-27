@@ -1,6 +1,7 @@
 # Backup_Manager.py
 #
 # Imports:
+import math
 import os
 import shutil
 import sqlite3
@@ -9,6 +10,7 @@ import time
 import urllib.parse
 from datetime import datetime
 from typing import Optional
+from uuid import uuid4
 
 from loguru import logger
 
@@ -561,11 +563,129 @@ def _pg_dump_path() -> Optional[str]:
     return path
 
 
+class PostgresToolTimeout(TimeoutError):
+    """Retain uncertain tool ownership; callers must keep the target offline."""
+
+    def __init__(self, process: subprocess.Popen, *, process_running: bool, cleanup_exceeded: bool = False):
+        super().__init__(
+            f"PostgreSQL tool timed out; target must remain offline (owned PID {process.pid}, running={process_running})"
+        )
+        self.cleanup_exceeded = cleanup_exceeded
+        self.process_running = process_running
+        self.process = process
+
+
+def _run_postgres_tool(
+    command: list[str], *, env: dict[str, str], timeout_seconds: float
+) -> subprocess.CompletedProcess:
+    """Run one explicit tool with a deadline and graceful-only owned shutdown."""
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        raise ValueError("positive_finite_tool_timeout_required")
+    deadline = time.monotonic() + timeout_seconds
+    # Ambient libpq target/SQL settings must not redirect an admitted database.
+    safe_env = {
+        key: value
+        for key, value in env.items()
+        if not key.startswith("PG") or key in {"PGPASSWORD", "PGSSLMODE", "PGCONNECT_TIMEOUT"}
+    }
+    process = subprocess.Popen(command, env=safe_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)  # nosec B603 -- trusted tool path and explicit argument list; no shell.
+    try:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(command, timeout_seconds)
+        stdout, stderr = process.communicate(timeout=remaining)
+    except BaseException as failure:
+        try:
+            process.terminate()
+        except ProcessLookupError:
+            pass
+        cleanup_exceeded = False
+        while True:
+            try:
+                process.communicate(timeout=15)
+                break
+            except (subprocess.TimeoutExpired, KeyboardInterrupt, SystemExit):
+                if not cleanup_exceeded:
+                    logger.error(
+                        "PostgreSQL cleanup exceeded15s/interrupted; STOP, no force. Holding owned PID {} until natural exit; target stays offline",
+                        process.pid,
+                    )
+                cleanup_exceeded = True
+            except (OSError, ValueError):
+                for stream in (process.stdout, process.stderr):
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except OSError:
+                            pass
+                try:
+                    process.wait(timeout=15)
+                    break
+                except (subprocess.TimeoutExpired, KeyboardInterrupt, SystemExit):
+                    cleanup_exceeded = True
+        if isinstance(failure, subprocess.TimeoutExpired):
+            raise PostgresToolTimeout(process, process_running=False, cleanup_exceeded=cleanup_exceeded) from None
+        raise
+    if time.monotonic() >= deadline:
+        raise PostgresToolTimeout(process, process_running=False)
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
+def assert_postgres_database_offline(config, *, timeout_seconds: float) -> None:
+    """Refuse any other target session, including idle sessions and other roles."""
+    import psycopg
+
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        raise ValueError("positive_finite_inspection_timeout_required")
+    timeout = min(timeout_seconds, 15)
+    deadline = time.monotonic() + timeout
+    try:
+        with psycopg.connect(
+            config.postgres_connection_string(),
+            autocommit=True,
+            connect_timeout=max(1, math.ceil(timeout)),
+            options=f"-c default_transaction_read_only=on -c statement_timeout={max(1, int(timeout * 1000))}",
+        ) as connection:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("offline_session_check_timeout")
+            connection.execute(
+                "SELECT set_config('statement_timeout', %s, false)", (str(max(1, int(remaining * 1000))),)
+            )
+            if time.monotonic() >= deadline:
+                raise RuntimeError("offline_session_check_timeout")
+            row = connection.execute(
+                "SELECT count(*) FROM pg_stat_activity "
+                "WHERE datid = (SELECT oid FROM pg_database WHERE datname = current_database()) "
+                "AND pid <> pg_backend_pid()"
+            ).fetchone()
+            if time.monotonic() >= deadline:
+                raise RuntimeError("offline_session_check_timeout")
+    except (psycopg.Error, OSError) as exc:
+        raise RuntimeError("offline_session_check_failed") from exc
+    if row is None or row[0] is None:
+        raise RuntimeError("offline_session_check_failed")
+    if int(row[0]) != 0:
+        raise RuntimeError("other_database_clients: stop all API, Jobs and Scheduler clients and prevent reconnection")
+
+
+def validate_postgres_backup(dump_file: str, *, timeout_seconds: float) -> str:
+    """Inspect the actual custom archive with pg_restore without connecting."""
+    tool = shutil.which("pg_restore")
+    if not tool:
+        return "pg_restore not found on PATH"
+    result = _run_postgres_tool(
+        [tool, "--list", "--", dump_file], env=os.environ.copy(), timeout_seconds=timeout_seconds
+    )
+    return "ok" if result.returncode == 0 else "invalid_postgresql_archive"
+
+
 def create_postgres_backup(
     backend: DatabaseBackend,
     backup_dir: str,
     *,
     label: str = "content",
+    timeout_seconds: float | None = None,
 ) -> str:
     """Create a PostgreSQL backup using pg_dump.
 
@@ -606,6 +726,8 @@ def create_postgres_backup(
         return msg
     os.makedirs(backup_dir_real, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if label.startswith("postgresql"):
+        timestamp += "_" + uuid4().hex
     safe_label = _sanitize_backup_label(label, "content")
     out_file = _safe_join(backup_dir_real, f"{safe_label}_pgdump_{timestamp}.dump")
     if not out_file:
@@ -613,32 +735,50 @@ def create_postgres_backup(
         logger.error(msg)
         return msg
 
+    work_file = out_file + ".partial" if timeout_seconds is not None else out_file
+
     # Build pg_dump command
     cmd = [
         pg_dump,
-        "-h", host,
-        "-p", port,
-        "-U", user,
-        "-F", "c",            # custom format (compressed, pg_restore-compatible)
+        "-h",
+        host,
+        "-p",
+        port,
+        "-U",
+        user,
+        "-F",
+        "c",  # custom format (compressed, pg_restore-compatible)
         "--no-owner",
         "--no-privileges",
-        "-f", out_file,
+        "-f",
+        work_file,
         "--",
         dbname,
     ]
 
     env = os.environ.copy()
+    env["PGCONNECT_TIMEOUT"] = str(config.connect_timeout or 10)
+    if config.pg_sslmode:
+        env["PGSSLMODE"] = str(config.pg_sslmode)
     if password:
         env["PGPASSWORD"] = str(password)
 
     try:
         logger.info(f"Running pg_dump → {out_file}")
-        proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
+        proc = (
+            _run_postgres_tool(cmd, env=env, timeout_seconds=timeout_seconds)
+            if timeout_seconds is not None
+            else subprocess.run(cmd, env=env, capture_output=True, text=True)
+        )
         if proc.returncode != 0:
             logger.error(f"pg_dump failed ({proc.returncode}): {proc.stderr.strip()}")
             return f"pg_dump failed: {proc.stderr.strip()}"
+        if work_file != out_file:
+            os.replace(work_file, out_file)
         logger.info(f"PostgreSQL backup created: {out_file}")
         return out_file
+    except PostgresToolTimeout:
+        raise
     except FileNotFoundError:
         msg = "pg_dump executable not found; ensure PostgreSQL client tools are installed"
         logger.error(msg)
@@ -646,6 +786,9 @@ def create_postgres_backup(
     except Exception:  # noqa: BLE001
         logger.error("pg_dump error")
         return "pg_dump error"
+    finally:
+        if timeout_seconds is not None and os.path.isfile(work_file):
+            os.remove(work_file)
 
 
 def _get_postgres_backup_base_dir(config) -> str:
@@ -667,6 +810,7 @@ def restore_postgres_backup(
     dump_file: str,
     *,
     drop_first: bool = True,
+    timeout_seconds: float | None = None,
 ) -> str:
     """Restore a PostgreSQL backup created with pg_dump (custom format).
 
@@ -710,9 +854,7 @@ def restore_postgres_backup(
     candidate_paths: list[str] = []
 
     has_separator = (
-        os.path.sep in backup_id
-        or (os.altsep is not None and os.altsep in backup_id)
-        or os.path.isabs(backup_id)
+        os.path.sep in backup_id or (os.altsep is not None and os.altsep in backup_id) or os.path.isabs(backup_id)
     )
     if backup_id and has_separator:
         resolved_input = _ensure_within_base(backup_base_dir, backup_id)
@@ -748,29 +890,44 @@ def restore_postgres_backup(
 
     cmd = [
         pg_restore,
-        "-h", host,
-        "-p", port,
-        "-U", user,
-        "-d", dbname,
-        "-1",              # single transaction
+        "-h",
+        host,
+        "-p",
+        port,
+        "-U",
+        user,
+        "-d",
+        dbname,
+        "-1",  # single transaction
+        "--no-owner",  # Keep objects owned by the configured restore principal.
+        "--no-privileges",  # Source-role grants do not belong in another deployment.
     ]
     if drop_first:
-        cmd.append("-c")    # clean (drop) database objects before recreating
+        cmd.extend(["-c", "--if-exists"])  # A fresh restore target has no objects to drop.
     cmd.append("--")
     cmd.append(safe_dump_path)
 
     env = os.environ.copy()
+    env["PGCONNECT_TIMEOUT"] = str(config.connect_timeout or 10)
+    if config.pg_sslmode:
+        env["PGSSLMODE"] = str(config.pg_sslmode)
     if password:
         env["PGPASSWORD"] = str(password)
 
     try:
         logger.info(f"Running pg_restore on {safe_dump_path} into database '{dbname}'")
-        proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
+        proc = (
+            _run_postgres_tool(cmd, env=env, timeout_seconds=timeout_seconds)
+            if timeout_seconds is not None
+            else subprocess.run(cmd, env=env, capture_output=True, text=True)
+        )
         if proc.returncode != 0:
             logger.error(f"pg_restore failed ({proc.returncode}): {proc.stderr.strip()}")
             return f"pg_restore failed: {proc.stderr.strip()}"
         logger.info("PostgreSQL restore completed successfully")
         return "ok"
+    except PostgresToolTimeout:
+        raise
     except FileNotFoundError:
         msg = "pg_restore executable not found; ensure PostgreSQL client tools are installed"
         logger.error(msg)

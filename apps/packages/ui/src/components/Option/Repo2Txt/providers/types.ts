@@ -17,6 +17,7 @@ export type ParsedRepoInfo = {
 export type FetchTreeOptions = {
   branch?: string
   path?: string
+  signal?: AbortSignal
 }
 
 export type RepoTreeNode = {
@@ -43,5 +44,5 @@ export interface IProvider {
   validateUrl(url: string): boolean
   parseUrl(url: string): ParsedRepoInfo
   fetchTree(url: string, options?: FetchTreeOptions): Promise<RepoTreeNode[]>
-  fetchFile(node: RepoTreeNode): Promise<RepoFileContent>
+  fetchFile(node: RepoTreeNode, signal?: AbortSignal): Promise<RepoFileContent>
 }

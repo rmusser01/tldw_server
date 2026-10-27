@@ -139,7 +139,7 @@ Circuit breaker observability and tuning
 Application
 - CPU workers: set `UVICORN_WORKERS` (default 4 in Dockerfile.prod). Monitor latency and CPU to tune.
 - Caching: ensure embeddings/model caches reside on fast disk; configure per module where available.
-- Background jobs: Chatbooks worker enabled by default (core backend). Control via `CHATBOOKS_CORE_WORKER_ENABLED`. Media ingest jobs worker follows the `media` route policy by default; control via `MEDIA_INGEST_JOBS_WORKER_ENABLED`, or use sidecar workers for multi-worker deployments.
+- Background jobs: Chatbooks worker enabled by default (core backend). Control via `CHATBOOKS_CORE_WORKER_ENABLED`. Media ingest jobs worker follows the `media` route policy by default; control via `MEDIA_INGEST_JOBS_WORKER_ENABLED`, or use sidecar workers for multi-worker deployments. The long-form TTS jobs worker (`POST /api/v1/audio/speech/jobs`) follows the `audio` route policy the same way; control via `TTS_JOBS_WORKER_ENABLED`, and in sidecar mode run the `tts` sidecar worker.
 - SQLite deployments: avoid multiple Uvicorn workers with in-process jobs. Use sidecar workers or Postgres for higher concurrency.
 
 Database
@@ -165,7 +165,7 @@ Secrets and auth
 
 Registration controls (multi-user)
 - Toggle with `ENABLE_REGISTRATION=true|false` and `REQUIRE_REGISTRATION_CODE=true|false`.
-- Default storage quota per user: `DEFAULT_STORAGE_QUOTA_MB`.
+- Storage quotas: `DEFAULT_STORAGE_QUOTA_MB` is deprecated and sets no one's quota. Set `limits.storage_quota_mb` per user, team or org instead (nothing is set by default, so storage is unlimited); see `Docs/Operations/Usage_Quotas.md`.
 
 Network
 - Enforce TLS at the proxy and restrict `ALLOWED_ORIGINS`.

@@ -1,23 +1,38 @@
 // @vitest-environment jsdom
+import "@/hooks/chat/__tests__/native-plasmo-storage-fixture"
 import React from "react"
 import { createInstance } from "i18next"
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { act, cleanup, render as renderComponent, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { encodeSidepanelChatWebUiHandoff, SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE } from "@/services/tldw/sidepanel-chat-webui-handoff"
+import { useSimpleForm } from "@/hooks/useSimpleForm"
 import * as mediaHandoff from "@/services/tldw/media-chat-handoff"
+import * as sidepanelCopy from "@/services/sidepanel-chat-handoff"
 import type { MediaChatHandoffPayload } from "@/services/tldw/media-chat-handoff"
 import { useMilestoneStore } from "@/store/milestones"
 import { DISCUSS_MEDIA_PROMPT_SETTING } from "@/services/settings/ui-settings"
 import { useChatActions } from "@/hooks/chat/useChatActions"
+import { useServerChatLoader } from "@/hooks/chat/useServerChatLoader"
+import { useStoreChatModelSettings } from "@/store/model"
+import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
+import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
+import { chatDraftOwnerKey } from "@/utils/chat-draft-owner"
+import { freshChatDraftAddress } from "@/utils/chat-draft-address"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { usePlaygroundSessionPersistence } from "@/hooks/usePlaygroundSessionPersistence"
+import { HistorySelectionProvider } from "@/hooks/chat/useHistorySelection"
 import { chatRagMethods } from "@/services/tldw/domains/chat-rag"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
+import { resolveServicePromptScope } from "@/services/service-prompts"
+import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import type { TldwApiClientCore } from "@/services/tldw/TldwApiClient"
-const handoff = vi.hoisted(() => ({ scope: "server-a:alice" as string | null, search: "", draftReady: true, get: vi.fn(), clear: vi.fn(), setRagMediaIds: vi.fn() }))
+const handoff = vi.hoisted(() => ({ scope: "server-a:alice" as string | null, search: "", draftReady: true, verificationState: "ready" as "pending" | "ready" | "error", retryVerification: vi.fn(), models: vi.fn(async () => [{ model: "tldw:gpt-4o-mini", provider: "openai", is_configured: true, provider_is_configured: true }]), get: vi.fn(), clear: vi.fn(), setRagMediaIds: vi.fn() }))
+const SourceFlowActionsContext = React.createContext<ReturnType<typeof useSourceFlowActions> | null>(null)
 vi.mock("@/hooks/useHomeMilestoneScope", () => ({ useHomeMilestoneScope: () => handoff.scope }))
 
 // These cases keep the Form, submit hook, action router, session restore, RAG
@@ -27,10 +42,16 @@ const sourceFlow = vi.hoisted(() => ({
   request: vi.fn(),
   stream: vi.fn(),
   getFullChatData: vi.fn(),
+  setAssistant: vi.fn(async () => undefined),
   snapshot: null as ServicePromptSnapshot | null,
   restore: null as null | (() => Promise<unknown>),
   sessionReady: false,
-  config: { serverUrl: "https://handoff.test", authMode: "single-user" as const, apiKey: "synthetic-handoff" }
+  userId: 1,
+  config: { serverUrl: "https://handoff.test", authMode: "multi-user" as const,
+    authSource: "manual" as const, accessToken: "header.eyJzdWIiOiIxIn0.signature" }
+}))
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: async () => ({ id: sourceFlow.userId }) }
 }))
 vi.mock("@/services/background-proxy", () => ({ bgRequest: (...args: unknown[]) => sourceFlow.request(...args) }))
 vi.mock("@/services/service-prompts", async () => ({
@@ -38,9 +59,50 @@ vi.mock("@/services/service-prompts", async () => ({
   loadServicePromptSnapshot: async () => sourceFlow.snapshot
 }))
 vi.mock("@/models", () => ({ pageAssistModel: async () => ({ stream: sourceFlow.stream }) }))
-vi.mock("@/services/actor-settings", () => ({ getActorSettingsForChat: async () => null }))
+const sceneIo = vi.hoisted(() => ({ read: vi.fn(), submissions: vi.fn(), staticController: null as any, sdkAddress: null as ReturnType<typeof freshChatDraftAddress> | null }))
+vi.mock("@/services/actor-settings", async importOriginal => ({
+  ...await importOriginal<typeof import("@/services/actor-settings")>(),
+  getActorSceneForChat: (...args: unknown[]) => sceneIo.read(...args)
+}))
+vi.mock("@/hooks/chat/useHistorySelection", async importOriginal => {
+  const actual = await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>()
+  return { ...actual, useHistorySelectionContext: () => sourceFlow.enabled ? actual.useHistorySelectionContext() : sceneIo.staticController }
+})
+vi.mock("@/hooks/chat/actor-scene-source", async importOriginal => {
+  const actual = await importOriginal<typeof import("@/hooks/chat/actor-scene-source")>()
+  return { ...actual, captureActorSceneSend: (controller: any, commandIsCurrent = () => true) => {
+    if (!sourceFlow.enabled) return actual.captureActorSceneSend(controller, commandIsCurrent)
+    const standaloneComposer = () => {
+      if (controller === null) return true
+      const state = controller.getCurrent()
+      return state.status === "idle" && !state.owner && !state.view && !state.capture
+    }
+    if (!standaloneComposer()) return actual.captureActorSceneSend(controller, commandIsCurrent)
+    // Legacy SDK actions/session stay outside the child composer provider (not native acceptance).
+    const entry = sourceFlow.snapshot
+    if (!entry) return null
+    const key = chatDraftOwnerKey(entry.requestScope)
+    const composerIsCurrent = () => standaloneComposer() && (controller === null ||
+      (controller.draftAccount?.isCurrent() && controller.draftAccount.requestScope &&
+        chatDraftOwnerKey(controller.draftAccount.requestScope) === key))
+    if (!composerIsCurrent()) return null
+    const account = { requestScope: entry.requestScope, isCurrent: () => composerIsCurrent() && sourceFlow.snapshot === entry &&
+      !entry.scopeSignal.aborted && !entry.scopeInvalidatedSignal.aborted &&
+      chatDraftOwnerKey(sourceFlow.snapshot.requestScope) === key }
+    const session = usePlaygroundSessionStore.getState()
+    const address = sceneIo.sdkAddress
+    const isCurrent = () => sceneIo.sdkAddress === address && commandIsCurrent() && account.isCurrent() &&
+      usePlaygroundSessionStore.getState().restoreRevision === session.restoreRevision &&
+      usePlaygroundSessionStore.getState().sourceSelectionRevision === session.sourceSelectionRevision
+    const source = captureChatDraftSource(isCurrent)
+    const target = captureActorSettingsTarget({ address,
+      requestScope: account.requestScope, accountIsCurrent: account.isCurrent, isCurrent: source.isCurrent })
+    return actual.captureActorSceneSendForTarget(target, account, source.isCurrent, isCurrent)
+  } }
+})
 vi.mock("@/db/dexie/nickname", () => ({ getModelNicknameByID: async () => null }))
-vi.mock("@/services/chat-settings", () => ({ syncChatSettingsForServerChat: async () => null }))
+vi.mock("@/services/chat-settings", async importOriginal => ({
+  ...await importOriginal<typeof import("@/services/chat-settings")>(), syncChatSettingsForServerChat: async () => null }))
 vi.mock("@/services/tldw/server-capabilities", () => ({ getServerCapabilities: async () => ({ hasChatSaveToDb: true }) }))
 vi.mock("@/services/title", () => ({ generateTitle: async () => "Cedar saved chat" }))
 vi.mock("@/services/app", async () => ({
@@ -70,7 +132,10 @@ const createMessageOptionState = () => ({
   messages: [],
   selectedModel: "deepseek-chat",
   selectedModelIsLoading: false,
-  setSelectedModel: vi.fn(),
+  setSelectedModel: vi.fn((value: string | null) => {
+    messageOptionState.value.selectedModel = value
+    return useStoreMessageOption.getState().setSelectedModel(value)
+  }),
   chatMode: "normal",
   setChatMode: vi.fn(),
   compareMode: false,
@@ -143,9 +208,8 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: [] }),
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+vi.mock("@tanstack/react-query", async importOriginal => ({
+  ...await importOriginal<typeof import("@tanstack/react-query")>(),
   useMutation: ({
     mutationFn,
     onMutate,
@@ -312,9 +376,14 @@ vi.mock("@plasmohq/storage/hook", () => ({
 
 vi.mock("~/hooks/useMessageOption", () => ({
   useMessageOption: () => {
+    const sourceActions = React.useContext(SourceFlowActionsContext)
+    const staticOptions = useStaticMessageOptions()
     // The fixture is selected before mount and reset only after cleanup.
-    const useOptions = sourceFlow.enabled ? useSourceFlowActions : useStaticMessageOptions
-    return useOptions()
+    if (sourceFlow.enabled) {
+      if (!sourceActions) throw new Error("Missing source-flow actions")
+      return sourceActions
+    }
+    return staticOptions
   }
 }))
 
@@ -324,16 +393,14 @@ vi.mock("@/store/option", async () => {
     (selector: (state: any) => unknown, equality?: (left: unknown, right: unknown) => boolean) => sourceFlow.enabled
       ? actual.useStoreMessageOption(selector, equality)
       : selector({
+      ...actual.useStoreMessageOption.getState(),
       setRagMediaIds: handoff.setRagMediaIds,
       setRagPinnedResults: vi.fn()
     }), actual.useStoreMessageOption) }
 })
 
-vi.mock("@/store/model", () => ({
-  useStoreChatModelSettings: (selector: (state: any) => unknown) =>
-    (selector ?? ((state: unknown) => state))({
+const modelSettingsFixture: import("@/store/model").ChatModelSettings = {
       systemPrompt: "",
-      setSystemPrompt: vi.fn(),
       temperature: 0.7,
       numPredict: 512,
       topP: 0.9,
@@ -355,11 +422,7 @@ vi.mock("@/store/model", () => ({
       llamaGrammarOverride: "",
       jsonMode: false,
       numCtx: 8192,
-      setActiveSettingsScope: vi.fn(),
-      updateSetting: vi.fn(),
-      updateSettings: vi.fn()
-    })
-}))
+    }
 
 vi.mock("@/store/chat-surface-coordinator", () => ({
   shouldEnableOptionalResource: () => false,
@@ -457,8 +520,9 @@ vi.mock("@/hooks/useChatMoodBadgePreference", () => ({
   useChatMoodBadgePreference: () => [false, vi.fn()]
 }))
 
-vi.mock("@/hooks/useSelectedAssistant", () => ({
-  useSelectedAssistant: () => [null, vi.fn()]
+vi.mock("@/hooks/useSelectedAssistant", async importOriginal => ({
+  ...await importOriginal<typeof import("@/hooks/useSelectedAssistant")>(),
+  useSelectedAssistant: () => [null, sourceFlow.setAssistant, { isLoading: false }]
 }))
 
 vi.mock("@/hooks/useVoiceChatSettings", () => ({
@@ -550,10 +614,13 @@ vi.mock("react-router-dom", () => ({
       {children}
     </a>
   ),
-  useLocation: () => ({ pathname: "/chat", search: React.useSyncExternalStore(
-    callback => { window.addEventListener("popstate", callback); return () => window.removeEventListener("popstate", callback) },
-    () => handoff.search
-  ), hash: "" }),
+  useLocation: () => {
+    const search = React.useSyncExternalStore(
+      callback => { window.addEventListener("popstate", callback); return () => window.removeEventListener("popstate", callback) },
+      () => handoff.search
+    )
+    return React.useMemo(() => ({ pathname: "/chat", search, hash: "", key: search }), [search])
+  },
   useNavigate: () => (route: string | { search?: string }) => {
     handoff.search = typeof route === "string" ? route.slice(route.indexOf("?")) : route.search || ""
     window.dispatchEvent(new PopStateEvent("popstate"))
@@ -583,7 +650,7 @@ vi.mock("@/db/dexie/helpers", async () => ({
 
 vi.mock("@/services/tldw-server", () => ({
   defaultEmbeddingModelForRag: vi.fn(async () => "embedding"),
-  fetchChatModels: vi.fn(async () => []),
+  fetchChatModels: handoff.models,
   fetchImageModels: vi.fn(async () => []),
   systemPromptForNonRagOption: async () => ""
 }))
@@ -596,6 +663,13 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn(async () => undefined),
     getConfig: async () => sourceFlow.config,
+    ensureConfigForRequest: async () => sourceFlow.config,
+    getChat: async (id: string) => ({ id, title: "Cedar saved chat", scope_type: "global",
+      assistant_kind: null, assistant_id: null, character_id: null, persona_memory_mode: null }),
+    listChatMessages: async () => cedarRows.map((row, index) => ({
+      ...row, created_at: new Date(row.createdAt).toISOString(),
+      parent_message_id: index ? cedarRows[index - 1].id : null
+    })),
     ragSearch: (query: string, options: unknown) => chatRagMethods.ragSearch.call({ normalizeRagQuery: (value: string) => value } as unknown as TldwApiClientCore, query, options),
     createResearchRun: vi.fn(async () => ({})),
     updateChat: vi.fn(async () => ({}))
@@ -839,45 +913,32 @@ vi.mock("../hooks", async () => {
       useDroppedFiles: vi.fn()
     }),
     useComposerInput: () => {
-      const [values, setValues] = React.useState({ message: "", image: "" })
-      const form = {
-        values,
-        errors: { message: null },
-        setFieldValue: (field: string, value: string) =>
-          setValues((prev) => ({ ...prev, [field]: value })),
-        setFieldError: vi.fn(),
-        clearFieldError: vi.fn(),
-        reset: () => setValues({ message: "", image: "" }),
-        onSubmit:
-          (handler: (values: { message: string; image: string }) => void) =>
-          async (event?: React.FormEvent) => {
-            event?.preventDefault?.()
-            await handler(values)
-          },
-        getInputProps: (field: "message" | "image") => ({
-          value: values[field],
-          onChange: (
-            event: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>
-          ) =>
-            setValues((prev) => ({
-              ...prev,
-              [field]: event.target.value
-            }))
-        })
-      }
+      const form = useSimpleForm({initialValues:{message:"",image:""}})
+      const values = form.values
+      const renderedOwner = handoff.scope
+      const isDraftOwnerCurrent = React.useMemo(() => () => handoff.scope === renderedOwner, [renderedOwner])
 
       return {
         form,
+        restorePromptAssistAttempt: vi.fn(),
         beginPromptAssistReset: vi.fn(() => 1),
         markPromptAssistAttemptSaved: vi.fn(),
+        captureDraftOwnership: () => ({
+          isCurrent: () => true,
+          isOwnerCurrent: () => true,
+          normalizeMessage: () => true
+        }),
         typing: false,
         setMessageValue: (value: string) =>
-          setValues((prev) => ({ ...prev, message: value })),
-        restoreMessageValue: vi.fn(),
+          form.setFieldValue("message", value),
+        restoreMessageValue: (value: string) =>
+          form.setFieldValue("message", value),
         messageDisplayValue: values.message,
         collapsedDisplayMeta: null,
         textareaRef: { current: null },
         textAreaFocus: vi.fn(),
+        captureCompletionGuard: () => () => true,
+        creationRecovery: {active:null,unavailable:false},
         syncCollapsedCaret: vi.fn(),
         commitCollapsedEdit: vi.fn(),
         replaceCollapsedRange: vi.fn(),
@@ -887,7 +948,7 @@ vi.mock("../hooks", async () => {
         handleTextareaMouseUp: vi.fn(),
         handleTextareaChange: (
           event: React.ChangeEvent<HTMLTextAreaElement>
-        ) => setValues((prev) => ({ ...prev, message: event.target.value })),
+        ) => form.setFieldValue("message", event.target.value),
         handleTextareaSelect: vi.fn(),
         markComposerPerf: vi.fn(),
         measureComposerPerf: vi.fn(),
@@ -895,6 +956,10 @@ vi.mock("../hooks", async () => {
         wrapComposerProfile: (_label: string, node: React.ReactNode) => node,
         draftSaved: false,
         draftReady: handoff.draftReady,
+        draftOwnerVerificationState: handoff.verificationState,
+        retryDraftOwnerVerification: handoff.retryVerification,
+        draftOwnerKey: renderedOwner,
+        isDraftOwnerCurrent,
         selectedQuickPrompt: null,
         setSelectedQuickPrompt: vi.fn()
       }
@@ -1047,6 +1112,7 @@ vi.mock("@/hooks/playground", () => ({
     imageBackendBadgeLabel: "Mock Backend"
   }),
   useActionBarVisibility: () => ({
+    composerTextareaExpanded: false,
     actionBarVisible: true,
     actionBarVisibilityClass: "",
     handlers: {
@@ -1129,6 +1195,9 @@ void sourceFlowI18n.init({ lng: "en", resources: {}, initImmediate: false })
 
 function useSourceFlowActions() {
   const state = useStoreMessageOption((value) => value)
+  const notification = React.useMemo(() => ({ error: vi.fn(), warning: vi.fn(), info: vi.fn(), success: vi.fn(), open: vi.fn(), destroy: vi.fn() }), [])
+  const noMirror = React.useCallback(async () => null, [])
+  useServerChatLoader({ ensureServerChatHistoryId: noMirror, notification, t: sourceFlowI18n.t })
   const [abortController, setAbortController] = React.useState<AbortController | null>(null)
   const actions = useChatActions({
     ...state,
@@ -1149,7 +1218,10 @@ function useSourceFlowActions() {
     isCharacterConversation: false,
     setSelectedModel: state.setSelectedModel
   } as Parameters<typeof useChatActions>[0])
-  return { ...createMessageOptionState(), ...state, ...actions }
+  return { ...createMessageOptionState(), ...state, ...actions, onSubmit: (input: Parameters<typeof actions.onSubmit>[0]) => {
+    sceneIo.submissions(input)
+    return actions.onSubmit(input)
+  } }
 }
 
 function useStaticMessageOptions() {
@@ -1158,9 +1230,14 @@ function useStaticMessageOptions() {
 
 function SourceFlowHarness() {
   const session = usePlaygroundSessionPersistence()
+  const sourceActions = useSourceFlowActions()
   sourceFlow.restore = session.restoreSession
   sourceFlow.sessionReady = session.sessionScopeReady
-  return <PlaygroundForm droppedFiles={[]} />
+  return (
+    <SourceFlowActionsContext.Provider value={sourceActions}>
+      <HistorySelectionProvider><PlaygroundForm droppedFiles={[]} /></HistorySelectionProvider>
+    </SourceFlowActionsContext.Provider>
+  )
 }
 
 const defer = <T,>() => {
@@ -1189,25 +1266,60 @@ const deliverMediaHandoff = async (payload: MediaChatHandoffPayload) => {
   if (replace) await userEvent.setup().click(replace)
 }
 
+let queryClient: QueryClient
+beforeEach(() => {
+  handoff.scope = "server-a:alice"
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  useStoreChatModelSettings.getState().reset()
+  useStoreChatModelSettings.getState().updateSettings(modelSettingsFixture)
+  useStoreMessageOption.setState(useStoreMessageOption.getInitialState(), true)
+  useStoreMessageOption.getState().startNewChatDraft(false)
+  sceneIo.sdkAddress = freshChatDraftAddress(false)
+  useStoreMessageOption.setState({ selectedModel: "deepseek-chat" })
+  const requestScope = { config: structuredClone(sourceFlow.config), userId: 1 }
+  const owner = handoff.scope
+  sceneIo.staticController = {
+    status: "idle", settingsMode: () => "ordinary",
+    getCurrent: () => ({ status: "idle", owner: null, view: null }),
+    fence: () => captureChatDraftSource(() => handoff.scope === owner).isCurrent,
+    draftAccount: { requestScope, isCurrent: () => handoff.scope === owner }
+  }
+  sceneIo.submissions.mockReset()
+  sceneIo.read.mockReset().mockImplementation(async ({ target, validate_lease }) => {
+    if (!target.isCurrent() || validate_lease?.() === false) throw new Error("actor_settings_scope_changed")
+    return { target, originalRecord: null, settings: (await import("@/types/actor")).createDefaultActorSettings(), origin: "default", profileUnavailable: false }
+  })
+})
+afterEach(() => { cleanup(); queryClient.clear() })
+const render = (ui: React.ReactElement) => renderComponent(ui, {
+  wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+})
+const renderForm = (ui: React.ReactElement) => renderComponent(ui, {
+  wrapper: ({ children }) => <QueryClientProvider client={queryClient}><HistorySelectionProvider>{children}</HistorySelectionProvider></QueryClientProvider>
+})
+
 describe("Home source handoff through the real Chat and RAG send boundary", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     sourceFlow.enabled = true
     sourceFlow.sessionReady = false
     sourceFlow.restore = null
     sourceFlow.config.serverUrl = "https://handoff.test"
-    sourceFlow.config.apiKey = "synthetic-handoff"
+    sourceFlow.config.accessToken = "header.eyJzdWIiOiIxIn0.signature"
+    sourceFlow.userId = 1
     localStorage.clear()
     sessionStorage.clear()
     useStoreMessageOption.setState(useStoreMessageOption.getInitialState(), true)
     useStoreMessageOption.setState({ selectedModel: "openai:gpt-4o-mini", temporaryChat: false, fileRetrievalEnabled: false })
     usePlaygroundSessionStore.getState().clearSession()
-    const scopeKey = buildChatSurfaceScopeKeyFromConfig(sourceFlow.config)
+    const requestScope = await resolveServicePromptScope()
+    const scopeKey = requestScope.scopeKey!
+    cedarData.historyInfo.server_scope_key = serverChatMirrorOwnerKey({ requestScope })
     usePlaygroundSessionStore.getState().saveSession({
       scopeKey, historyId: "cedar-local", serverChatId: "cedar-server", chatMode: "normal", ragMediaIds: null
     })
     const controller = new AbortController()
     sourceFlow.snapshot = {
-      scopeKey, requestScope: { config: sourceFlow.config, userId: 1 },
+      scopeKey, requestScope,
       scopeSignal: controller.signal, scopeInvalidatedSignal: controller.signal,
       capability: "supported", release: vi.fn(),
       definitions: Object.fromEntries(["chat.rag.answer", "chat.rag.question_rewrite"].map((id) => [id, {
@@ -1218,6 +1330,8 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     handoff.scope = "server-a:alice"
     handoff.search = ""
     handoff.draftReady = true
+    handoff.verificationState = "ready"
+    handoff.retryVerification.mockReset()
     sessionStorage.clear()
     handoff.get.mockReset().mockResolvedValue(undefined)
     handoff.clear.mockReset().mockResolvedValue(undefined)
@@ -1229,6 +1343,24 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
 
   afterEach(() => { cleanup(); sourceFlow.enabled = false })
 
+  it("reviews one-time prompts in the actual Form and preserves exact text through Cancel and Append", async () => {
+    render(<SourceFlowHarness />)
+    const user = userEvent.setup()
+    const textarea = screen.getByTestId("composer-textarea")
+    await user.type(textarea, "Original draft")
+    act(() => { useStoreMessageOption.getState().setSelectedQuickPrompt("  Cancel this prompt  ") })
+    const cancel = await screen.findByRole("button", { name: "Cancel" })
+    expect(textarea).toHaveValue("Original draft")
+    await user.click(cancel)
+    expect(textarea).toHaveValue("Original draft")
+    expect(screen.queryByRole("button", { name: "Append" })).toBeNull()
+    act(() => { useStoreMessageOption.getState().setSelectedQuickPrompt("  Append this prompt  ") })
+    await user.click(await screen.findByRole("button", { name: "Append" }))
+    expect(textarea).toHaveValue("Original draft\n\n  Append this prompt  ")
+    expect(useStoreMessageOption.getState().selectedQuickPrompt).toBeNull()
+    expect(sourceFlow.stream).not.toHaveBeenCalled()
+  })
+
   const consume = async (payload: MediaChatHandoffPayload = rowanPayload) => {
     await deliverMediaHandoff(payload)
     await waitFor(() => expect(screen.getByTestId("composer-textarea")).toHaveValue("Chat with this media: Rowan.md\n\nSummarize this source."))
@@ -1238,9 +1370,41 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     await act(async () => { await sourceFlow.restore!() })
   }
   const send = async () => {
+    if (useStoreMessageOption.getState().serverChatId)
+      await waitFor(() => expect(useStoreMessageOption.getState().serverChatMetaLoaded).toBe(true))
     await userEvent.setup().click(screen.getAllByRole("button", { name: "Send" })[0])
     await waitFor(() => expect(useStoreMessageOption.getState().streaming).toBe(false))
   }
+
+  it("forwards the original private Scene to real source actions and retires its authority", async () => {
+    render(<SourceFlowHarness />)
+    await restore()
+    await consume()
+    await send()
+    const receipt = sceneIo.submissions.mock.calls[0][0].actorSceneSend
+    expect(receipt.scene.target.address).toEqual(sceneIo.sdkAddress)
+    expect(receipt.requestScope).toEqual(sourceFlow.snapshot!.requestScope)
+    expect(receipt.isCurrent()).toBe(true)
+    sourceFlow.snapshot = { ...sourceFlow.snapshot!, scopeInvalidatedSignal: new AbortController().signal }
+    expect(receipt.isCurrent()).toBe(false)
+  })
+
+  it("preserves raw input and original messages when the private Scene read fails", async () => {
+    render(<SourceFlowHarness />)
+    await restore()
+    await waitFor(() => expect(useStoreMessageOption.getState().serverChatLoadState).toBe("loaded"))
+    await consume()
+    const input = screen.getByTestId("composer-textarea") as HTMLTextAreaElement
+    const originalInput = input.value
+    const originalMessages = structuredClone(useStoreMessageOption.getState().messages)
+    sceneIo.read.mockRejectedValueOnce(new Error("Scene storage unavailable"))
+    await send()
+    expect(input).toHaveValue(originalInput)
+    expect(useStoreMessageOption.getState().messages).toEqual(originalMessages)
+    expect(sourceFlow.request).not.toHaveBeenCalled()
+    expect(sourceFlow.stream).not.toHaveBeenCalled()
+    expect(sceneIo.submissions).not.toHaveBeenCalled()
+  })
 
   const persistSourceSession = async (enabled = true, failedRetrieval = false) => {
     const view = render(<SourceFlowHarness />)
@@ -1305,7 +1469,10 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
 
   it.each(["account", "server"])("rejects source activation from a cold session owned by another %s", async changed => {
     await rehydrateColdSession(await persistSourceSession())
-    if (changed === "account") sourceFlow.config.apiKey = "synthetic-other-owner"
+    if (changed === "account") {
+      sourceFlow.userId = 2
+      sourceFlow.config.accessToken = "header.eyJzdWIiOiIyIn0.signature"
+    }
     else sourceFlow.config.serverUrl = "https://other-handoff.test"
     render(<SourceFlowHarness />)
     await restore()
@@ -1446,6 +1613,7 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     })
     render(<SourceFlowHarness />)
     await restore()
+    await waitFor(() => expect(useStoreMessageOption.getState().serverChatLoadState).toBe("loaded"))
     await consume()
     await userEvent.setup().click(screen.getAllByRole("button", { name: "Send" })[0])
     await waitFor(() => expect(sourceFlow.request).toHaveBeenCalledTimes(1))
@@ -1528,7 +1696,10 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     render(<SourceFlowHarness />)
     await waitFor(() => expect(sourceFlow.sessionReady).toBe(true))
     await consume()
-    if (changed === "account") sourceFlow.config.apiKey = "synthetic-other-owner"
+    if (changed === "account") {
+      sourceFlow.userId = 2
+      sourceFlow.config.accessToken = "header.eyJzdWIiOiIyIn0.signature"
+    }
     sourceFlow.getFullChatData.mockResolvedValue({ ...cedarData, historyInfo: { ...cedarData.historyInfo, id: "other-local", server_chat_id: "other-server" } })
     await act(async () => usePlaygroundSessionStore.getState().saveSession({ scopeKey: buildChatSurfaceScopeKeyFromConfig(sourceFlow.config), historyId: "other-local", serverChatId: "other-server", chatMode: "rag", ragMediaIds: [7] }))
     await restore()
@@ -1564,6 +1735,8 @@ describe("PlaygroundForm OpenUI mode", () => {
     handoff.scope = "server-a:alice"
     handoff.search = ""
     handoff.draftReady = true
+    handoff.verificationState = "ready"
+    handoff.retryVerification.mockReset()
     sessionStorage.clear()
     handoff.get.mockReset().mockResolvedValue(undefined)
     handoff.clear.mockReset().mockResolvedValue(undefined)
@@ -1572,10 +1745,212 @@ describe("PlaygroundForm OpenUI mode", () => {
     messageOptionState.value = createMessageOptionState()
   })
 
+
+  it("shows verification recovery while a copied draft waits for an owned review", async () => {
+    const user = userEvent.setup()
+    const pkg = await sidepanelCopy.createSidepanelChatHandoff({
+      draftText: "COPIED AFTER CHECK"
+    })
+    const readCopy = vi.spyOn(sidepanelCopy, "readSidepanelChatHandoff")
+    const consumeCopy = vi.spyOn(sidepanelCopy, "consumeSidepanelChatHandoff")
+    handoff.scope = null
+    handoff.draftReady = false
+    handoff.verificationState = "pending"
+    handoff.search = "?handoff=" + pkg.id
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    await user.type(
+      screen.getByTestId("composer-textarea"),
+      "UNSAVED WHILE VERIFYING"
+    )
+    expect(
+      screen.getByText(
+        "Checking your account before restoring or saving drafts…"
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Recover drafts" })
+    ).toBeDisabled()
+    expect(readCopy).not.toHaveBeenCalled()
+    expect(consumeCopy).not.toHaveBeenCalled()
+    handoff.verificationState = "error"
+    view.rerender(<PlaygroundForm droppedFiles={[]} />)
+    expect(
+      screen.getByText(
+        "Your account could not be verified. Draft saving, recovery, and imports are paused. Retry or check your connection settings."
+      )
+    ).toBeInTheDocument()
+    const retry = screen.getByRole("button", {
+      name: "Retry account verification"
+    })
+    expect(retry).toBeEnabled()
+    await user.click(retry)
+    expect(handoff.retryVerification).toHaveBeenCalledOnce()
+    expect(readCopy).not.toHaveBeenCalled()
+    expect(consumeCopy).not.toHaveBeenCalled()
+    handoff.verificationState = "pending"
+    view.rerender(<PlaygroundForm droppedFiles={[]} />)
+    expect(
+      screen.queryByRole("button", { name: "Retry account verification" })
+    ).not.toBeInTheDocument()
+    expect(screen.getByTestId("composer-textarea")).toHaveValue(
+      "UNSAVED WHILE VERIFYING"
+    )
+    handoff.scope = "server-a:alice"
+    handoff.draftReady = true
+    handoff.verificationState = "ready"
+    view.rerender(<PlaygroundForm droppedFiles={[]} />)
+    await screen.findByRole("region", { name: "Review copied chat" })
+    expect(readCopy).toHaveBeenCalledWith(pkg.id, { throwOnReadError: false })
+    expect(consumeCopy).not.toHaveBeenCalled()
+    expect(
+      screen.queryByText(
+        "Checking your account before restoring or saving drafts…"
+      )
+    ).not.toBeInTheDocument()
+    expect(screen.getByTestId("composer-textarea")).toHaveValue(
+      "UNSAVED WHILE VERIFYING"
+    )
+    await user.click(
+      screen.getByRole("button", { name: "Insert handoff draft" })
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("composer-textarea")).toHaveValue(
+        "UNSAVED WHILE VERIFYING\n\nCOPIED AFTER CHECK"
+      )
+    )
+    await waitFor(() =>
+      expect(consumeCopy).toHaveBeenCalledWith(pkg.id, expect.any(Function))
+    )
+  })
+
+  it("previews bounded page references and shortening before a local copy choice", async () => {
+    const user = userEvent.setup();
+    render(<PlaygroundForm droppedFiles={[]} />);
+    await user.type(screen.getByTestId("composer-textarea"), "KEEP THIS DRAFT");
+    const pkg = await sidepanelCopy.createSidepanelChatHandoff({
+      draftText: "<script>literal copied draft</script>  ",
+      pageContext: {
+        title: "<img src=x> literal page title",
+        url: "javascript:literal-reference",
+        snippets: [
+          {
+            kind: "selection",
+            label: "Copied selection",
+            text: "Long copied text beyond the banner preview. ".repeat(110),
+          },
+        ],
+      },
+    });
+    await act(async () => {
+      handoff.search = "?handoff=" + pkg.id;
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await screen.findByText("Copied draft");
+    const disclosure = screen.getByText("Copied page references");
+    expect(screen.getByTestId("composer-textarea")).toHaveValue(
+      "KEEP THIS DRAFT",
+    );
+    expect(await sidepanelCopy.readSidepanelChatHandoff(pkg.id)).not.toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Imported sidepanel context" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This copy does not identify its source account. Review the content before importing.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Some copied text or page references were shortened."),
+    ).toBeInTheDocument();
+    await user.click(disclosure);
+    const preview = screen.getByRole("region", {
+      name: "Copied page references",
+    });
+    expect(preview).toHaveTextContent(pkg.pageContext!.title!);
+    expect(preview).toHaveTextContent(pkg.pageContext!.url!);
+    expect(preview.querySelector("pre")?.textContent).toBe(
+      pkg.pageContext!.snippets[0].text,
+    );
+    expect(preview.querySelector("a, img, script")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Cancel import" }));
+    await waitFor(async () =>
+      expect(await sidepanelCopy.readSidepanelChatHandoff(pkg.id)).toBeNull(),
+    );
+    expect(screen.getByTestId("composer-textarea")).toHaveValue(
+      "KEEP THIS DRAFT",
+    );
+    expect(
+      screen.queryByRole("region", { name: "Imported sidepanel context" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("adds reviewed page references without replacing a destination draft for a context-only copy", async () => {
+    const user = userEvent.setup();
+    render(<PlaygroundForm droppedFiles={[]} />);
+    await user.type(
+      screen.getByTestId("composer-textarea"),
+      "MY CURRENT QUESTION",
+    );
+    const pkg = await sidepanelCopy.createSidepanelChatHandoff({
+      draftText: "",
+      pageContext: {
+        title: "Context-only page",
+        url: "https://example.test/page",
+        snippets: [],
+      },
+    });
+    await act(async () => {
+      handoff.search = "?handoff=" + pkg.id;
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await screen.findByText("Import page references?");
+    expect(
+      screen.queryByRole("button", { name: "Replace current draft" }),
+    ).not.toBeInTheDocument();
+    expect(await sidepanelCopy.readSidepanelChatHandoff(pkg.id)).not.toBeNull();
+    await user.click(
+      screen.getByRole("button", { name: "Add page references" }),
+    );
+    await screen.findByRole("region", { name: "Imported sidepanel context" });
+    expect(screen.getByTestId("composer-textarea")).toHaveValue(
+      "MY CURRENT QUESTION",
+    );
+    expect(screen.getByText("Page references imported.")).toBeInTheDocument();
+    await waitFor(async () =>
+      expect(await sidepanelCopy.readSidepanelChatHandoff(pkg.id)).toBeNull(),
+    );
+    expect(handoff.search).toBe("");
+  });
+
+  it("reviews current/copied passive settings in the actual Form and applies them only with consent", async () => {
+    const encoded = encodeSidepanelChatWebUiHandoff({ source: SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE, createdAt: Date.now(),
+      draft: "EXACT COPIED TEXT  ", selectedModel: "openai:gpt-4o-mini", chatMode: "vision", webSearch: true, toolChoice: "required", useOCR: true,
+      selectedQuickPrompt: "Do not trigger a second insertion", selectedSystemPrompt: "foreign-prompt", temporaryChat: true });
+    handoff.search = "?handoff=" + encoded;
+    render(<PlaygroundForm droppedFiles={[]} />);
+    const consent = await screen.findByRole("checkbox", { name: "Apply supported settings" });
+    expect(consent).not.toBeChecked();
+    expect(screen.getByRole("table", { name: "Copied settings" })).toHaveTextContent("deepseek-chat");
+    expect(screen.getByRole("table", { name: "Copied settings" })).toHaveTextContent("openai:gpt-4o-mini");
+    expect(messageOptionState.value.setSelectedModel).not.toHaveBeenCalled();
+    await userEvent.setup().click(consent);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Replace current draft" }));
+    await waitFor(() => expect(screen.getByTestId("composer-textarea")).toHaveValue("EXACT COPIED TEXT  "));
+    expect(handoff.models).toHaveBeenCalledWith(expect.objectContaining({ requireFresh: true }));
+    expect(messageOptionState.value.setSelectedModel).toHaveBeenCalledWith("openai:gpt-4o-mini");
+    expect(messageOptionState.value.setChatMode).toHaveBeenCalledWith("vision");
+    expect(messageOptionState.value.setWebSearch).toHaveBeenCalledWith(true);
+    expect(messageOptionState.value.setToolChoice).toHaveBeenCalledWith("required");
+    expect(messageOptionState.value.setUseOCR).toHaveBeenCalledWith(true);
+    expect(messageOptionState.value.setSelectedQuickPrompt).not.toHaveBeenCalledWith("Do not trigger a second insertion");
+    expect(messageOptionState.value.setSelectedSystemPrompt).not.toHaveBeenCalledWith("foreign-prompt");
+    expect(messageOptionState.value.setTemporaryChat).not.toHaveBeenCalledWith(true);
+  });
+
   it("ignores legacy unowned shared handoffs instead of assigning them to the current tab", async () => {
     handoff.scope = null
     handoff.get.mockResolvedValue({ mediaId: "42", content: "Private legacy source" })
-    render(<PlaygroundForm droppedFiles={[]} />)
+    renderForm(<PlaygroundForm droppedFiles={[]} />)
     await act(async () => {})
     expect(screen.getByTestId("composer-textarea")).toHaveValue("")
     expect(handoff.setRagMediaIds).not.toHaveBeenCalled()
@@ -1585,7 +1960,7 @@ describe("PlaygroundForm OpenUI mode", () => {
   it("does not let an unrelated mounted Character tab consume a shared media payload or replace its draft", async () => {
     const user = userEvent.setup()
     messageOptionState.value.serverChatId = "testbot-chat"
-    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    const view = renderForm(<PlaygroundForm droppedFiles={[]} />)
     await user.type(screen.getByTestId("composer-textarea"), "PRIVATE TESTBOT DRAFT")
     handoff.clear.mockClear()
     let pending = { ownerScope: "server-a:alice", mediaId: "1", title: "Media source", content: "All source lines", mode: "normal" } as unknown
@@ -1604,7 +1979,7 @@ describe("PlaygroundForm OpenUI mode", () => {
   it("leaves an explicitly addressed source untouched in an unrelated mounted Character tab", async () => {
     const user = userEvent.setup()
     messageOptionState.value.serverChatId = "testbot-chat"
-    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    const view = renderForm(<PlaygroundForm droppedFiles={[]} />)
     await user.type(screen.getByTestId("composer-textarea"), "ALICE-CHARACTER-DRAFT-742")
     const source = { ...rowanPayload, content: Array.from({ length: 13 }, (_, i) => 'Source line ' + i).join('\n') }
     const token = await mediaHandoff.createMediaChatHandoff(source)
@@ -1618,11 +1993,11 @@ describe("PlaygroundForm OpenUI mode", () => {
 
   it("cannot replay a consumed token after the composer remounts", async () => {
     const token = await openMediaHandoff(rowanPayload)
-    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    const view = renderForm(<PlaygroundForm droppedFiles={[]} />)
     await waitFor(() => expect(handoff.search).toBe(""))
     view.unmount()
     handoff.search = new URL(mediaHandoff.buildMediaChatHandoffRoute(token), "http://localhost").search
-    render(<PlaygroundForm droppedFiles={[]} />)
+    renderForm(<PlaygroundForm droppedFiles={[]} />)
     await userEvent.setup().type(screen.getByTestId("composer-textarea"), "NEW PRIVATE DRAFT")
     expect(screen.getByTestId("composer-textarea")).toHaveValue("NEW PRIVATE DRAFT")
     expect(await mediaHandoff.readMediaChatHandoff(token, "server-a:alice")).toBeNull()
@@ -1632,7 +2007,7 @@ describe("PlaygroundForm OpenUI mode", () => {
     handoff.scope = null
     handoff.draftReady = false
     const token = await openMediaHandoff(rowanPayload)
-    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    const view = renderForm(<PlaygroundForm droppedFiles={[]} />)
     await act(async () => {})
     handoff.scope = "server-a:alice"
     view.rerender(<PlaygroundForm droppedFiles={[]} />)
@@ -1647,7 +2022,7 @@ describe("PlaygroundForm OpenUI mode", () => {
 
   it.each(["insert", "replace", "cancel"])("preserves a destination draft until the user chooses %s", async action => {
     const user = userEvent.setup()
-    render(<PlaygroundForm droppedFiles={[]} />)
+    renderForm(<PlaygroundForm droppedFiles={[]} />)
     await user.type(screen.getByTestId("composer-textarea"), "MY EXISTING DRAFT")
     let token!: string
     await act(async () => { token = await openMediaHandoff(rowanPayload) })
@@ -1662,7 +2037,7 @@ describe("PlaygroundForm OpenUI mode", () => {
 
   it.each(["Insert media source", "Replace current draft"])("does not consume or apply a delayed %s after the destination unmounts", async action => {
     const user = userEvent.setup()
-    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    const view = renderForm(<PlaygroundForm droppedFiles={[]} />)
     await user.type(screen.getByTestId("composer-textarea"), "PRIVATE DESTINATION DRAFT")
     let token!: string
     await act(async () => { token = await openMediaHandoff(rowanPayload) })
@@ -1684,7 +2059,7 @@ describe("PlaygroundForm OpenUI mode", () => {
 
   it("does not expose or consume a source addressed to a different account", async () => {
     const token = await openMediaHandoff({ ...rowanPayload, ownerScope: "server-a:bob" })
-    render(<PlaygroundForm droppedFiles={[]} />)
+    renderForm(<PlaygroundForm droppedFiles={[]} />)
     await act(async () => {})
     expect(screen.getByTestId("composer-textarea")).toHaveValue("")
     expect(await mediaHandoff.readMediaChatHandoff(token, "server-a:bob")).not.toBeNull()
@@ -1694,7 +2069,7 @@ describe("PlaygroundForm OpenUI mode", () => {
     let resolve!: (value: unknown) => void
     onSubmitMock.mockImplementation(() => new Promise(done => { resolve = done }) as never)
     const user = userEvent.setup()
-    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    const view = renderForm(<PlaygroundForm droppedFiles={[]} />)
     await user.type(screen.getByTestId("composer-textarea"), "Hello")
     await user.click(screen.getAllByRole("button", { name: "Send" })[0])
     await waitFor(() => expect(resolve).toBeTypeOf("function"))
@@ -1705,9 +2080,33 @@ describe("PlaygroundForm OpenUI mode", () => {
     expect(useMilestoneStore.getState().scopedMilestones["server-a:bob"]?.first_chat).toBeUndefined()
   })
 
+  it("keeps OpenUI reselected while the earlier send is pending", async () => {
+    const held=defer<unknown>();onSubmitMock.mockImplementationOnce(()=>held.promise as never)
+    const user=userEvent.setup();render(<PlaygroundForm droppedFiles={[]} />)
+    const toggle=screen.getByRole("button",{name:/OpenUI/i})
+    await user.click(toggle);await user.type(screen.getByTestId("composer-textarea"),"Original UI")
+    await user.click(screen.getAllByRole("button",{name:"Send"})[0])
+    await waitFor(()=>expect(onSubmitMock).toHaveBeenCalledOnce())
+    await user.click(toggle);await user.click(toggle)
+    expect(toggle).toHaveAttribute("aria-pressed","true")
+    await act(async()=>{held.resolve({status:"submitted"})})
+    expect(toggle).toHaveAttribute("aria-pressed","true")
+  })
+
+  it.each(["failed","skipped"])("retains OpenUI intent for a handled %s send", async status => {
+    const held=defer<unknown>();onSubmitMock.mockImplementationOnce(()=>held.promise as never)
+    const user=userEvent.setup();render(<PlaygroundForm droppedFiles={[]} />)
+    const toggle=screen.getByRole("button",{name:/OpenUI/i})
+    await user.click(toggle);await user.type(screen.getByTestId("composer-textarea"),"Retry this UI")
+    await user.click(screen.getAllByRole("button",{name:"Send"})[0])
+    await waitFor(()=>expect(onSubmitMock).toHaveBeenCalledOnce())
+    await act(async()=>{held.resolve({status})})
+    expect(toggle).toHaveAttribute("aria-pressed","true")
+  })
+
   it("sends the next prompt with OpenUI request overrides", async () => {
     const user = userEvent.setup()
-    render(<PlaygroundForm droppedFiles={[]} />)
+    renderForm(<PlaygroundForm droppedFiles={[]} />)
 
     const openUIButton = screen.getByRole("button", { name: /OpenUI/i })
     expect(openUIButton).toBeInTheDocument()

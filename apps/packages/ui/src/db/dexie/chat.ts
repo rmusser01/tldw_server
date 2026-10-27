@@ -1,7 +1,13 @@
+import { assertPromptOwnedBy, isPromptOwnedBy, resolvePromptOwnerId } from "@/services/prompt-local-owner"
+import type { CapturedPromptOwnerScope } from "@/services/prompt-local-owner"
 import {
   assertNoPendingLocalSettingsWrite,
+  isReadableOnDeviceHistory,
+  type OnDeviceHistoryReadOptions,
+  type OnDeviceHistoryScope,
   withLocalMessageMutation,
   type LocalHistoryOwnerV1,
+  type HistoryOperationOptions,
   sanitizeImportedHistory,
   sanitizeImportedMessage,
   stripHistoryAuthority
@@ -21,21 +27,31 @@ import {
   Webshare,
 
 } from "./types"
-import type { UpdateSpec } from "dexie"
+import Dexie, { type ObservabilitySet, type UpdateSpec } from "dexie"
 import { db } from './schema';
 import { getAllModelNicknames } from "./nickname";
 const PAGE_SIZE = 30;
+
+export { isOnDeviceHistory, isReadableOnDeviceHistory, isOwnedCachedServerHistory, type OnDeviceHistoryScope, type OnDeviceHistoryReadOptions, type VisibleServerChats } from "./history-selection";
+
+async function assertOnDeviceReader(scope: OnDeviceHistoryScope): Promise<void> {
+  if (!scope.isCurrent()) throw new Error("on_device_history_scope_changed");
+  const settings = await db.userSettings.get("main");
+  if (!scope.isCurrent() || (settings?.history_profile_id ?? null) !== scope.profileId) {
+    throw new Error("on_device_history_scope_changed");
+  }
+}
 
 function searchQueryInContent(content: string, query: string): boolean {
   if (!content || !query) {
     return false;
   }
-  
+
   const normalizedContent = content.toLowerCase();
   const normalizedQuery = query.toLowerCase().trim();
-  
+
   const wordBoundaryPattern = new RegExp(`\\b${normalizedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-  
+
   return wordBoundaryPattern.test(normalizedContent);
 }
 
@@ -146,6 +162,19 @@ export class PageAssistDatabase {
     return await db.chatHistories.orderBy('createdAt').reverse().toArray();
   }
 
+  /** The `limit` most recently active histories that pass `filter`, newest first. */
+  async getRecentChatHistories(
+    limit: number,
+    filter: (history: HistoryInfo) => boolean = () => true
+  ): Promise<ChatHistory> {
+    return await db.chatHistories
+      .orderBy('createdAt')
+      .reverse()
+      .filter(filter)
+      .limit(limit)
+      .toArray();
+  }
+
   async fullTextSearchChatHistories(query: string): Promise<ChatHistory> {
     const normalizedQuery = query.toLowerCase().trim();
     if (!normalizedQuery) {
@@ -246,10 +275,18 @@ export class PageAssistDatabase {
     };
   }
 
-  async getHistoriesWithMetadata(historyIds: string[]): Promise<Map<string, {
+  async getHistoriesWithMetadata(historyIds: string[], scope?: OnDeviceHistoryScope, options?: OnDeviceHistoryReadOptions): Promise<Map<string, {
     messageCount: number;
     lastMessage?: { content: string; role: string; createdAt: number };
   }>> {
+    if (scope) return db.transaction("r", [db.userSettings, db.chatHistories, db.messages], async () => {
+      await assertOnDeviceReader(scope);
+      const rows = await Promise.all(historyIds.map(id => db.chatHistories.get(id)));
+      const eligible = rows.filter((row): row is HistoryInfo => !!row && isReadableOnDeviceHistory(row, scope, options));
+      const metadata = await this.getHistoriesWithMetadata(eligible.map(row => row.id));
+      await assertOnDeviceReader(scope);
+      return metadata;
+    });
     const result = new Map();
 
     // Batch fetch all messages for the given history IDs
@@ -359,22 +396,28 @@ export class PageAssistDatabase {
   async removeMessage(
     history_id: string,
     message_id: string,
-    owner?: LocalHistoryOwnerV1
+    owner?: LocalHistoryOwnerV1,
+    options?: HistoryOperationOptions
   ) {
-    return withLocalMessageMutation(history_id, owner, async () => {
-      const row = await db.messages.get(message_id);
-      if (!row) throw new Error("missing_message");
-      if (row.history_id !== history_id)
-        throw new Error("message_owner_mismatch");
-      const rows = await db.messages
-        .where("history_id")
-        .equals(history_id)
-        .toArray();
-      if (rows.some((child) => child.parent_message_id === message_id))
-        throw new Error("message_has_descendants");
-      await db.messages.delete(message_id);
-      return row;
-    });
+    return withLocalMessageMutation(
+      history_id,
+      owner,
+      async () => {
+        const row = await db.messages.get(message_id)
+        if (!row) throw new Error("missing_message")
+        if (row.history_id !== history_id)
+          throw new Error("message_owner_mismatch")
+        const rows = await db.messages
+          .where("history_id")
+          .equals(history_id)
+          .toArray()
+        if (rows.some((child) => child.parent_message_id === message_id))
+          throw new Error("message_has_descendants")
+        await db.messages.delete(message_id)
+        return row
+      },
+      options
+    )
   }
 
   async updateLastUsedModel(history_id: string, model_id: string) {
@@ -416,18 +459,28 @@ export class PageAssistDatabase {
   async deleteMessage(history_id: string) {
     await db.messages.where('history_id').equals(history_id).delete();
   }
-  async getChatHistoriesPaginated(page: number = 1, searchQuery?: string): Promise<{
+  async getChatHistoriesPaginated(page: number = 1, searchQuery?: string, scope?: OnDeviceHistoryScope, options?: OnDeviceHistoryReadOptions): Promise<{
     histories: ChatHistory;
     hasMore: boolean;
     totalCount: number;
   }> {
     const offset = (page - 1) * PAGE_SIZE;
+    const query = searchQuery?.trim();
+    if (scope) return db.transaction("r", [db.userSettings, db.chatHistories, db.messages], async () => {
+      await assertOnDeviceReader(scope);
+      const candidates = query ? await this.fullTextSearchChatHistories(query) : await this.getChatHistories();
+      const eligible = candidates.filter(history => isReadableOnDeviceHistory(history, scope, options, query));
+      await assertOnDeviceReader(scope);
+      return {
+        histories: eligible.slice(offset, offset + PAGE_SIZE),
+        hasMore: offset + PAGE_SIZE < eligible.length,
+        totalCount: eligible.length
+      };
+    });
 
-    if (searchQuery) {
-      console.log("Searching chat histories with query:", searchQuery);
-      const allResults = await this.fullTextSearchChatHistories(searchQuery);
-      const paginatedResults = allResults.slice(offset, offset + PAGE_SIZE)
-      console.log("Paginated search results:", paginatedResults);
+    if (query) {
+      const allResults = await this.fullTextSearchChatHistories(query);
+      const paginatedResults = allResults.slice(offset, offset + PAGE_SIZE);
       return {
         histories: paginatedResults,
         hasMore: offset + PAGE_SIZE < allResults.length,
@@ -446,7 +499,7 @@ export class PageAssistDatabase {
 
       return {
         histories,
-        hasMore: histories.length === PAGE_SIZE,
+        hasMore: offset + PAGE_SIZE < totalCount,
         totalCount
       };
     } else {
@@ -467,6 +520,18 @@ export class PageAssistDatabase {
       };
     }
   }
+  /** Stored rows for a labelled read-only preview; no H1 path or bookmark is adopted. */
+  async getOnDeviceChatPreview(id: string, scope: OnDeviceHistoryScope, options?: OnDeviceHistoryReadOptions): Promise<{ historyInfo: HistoryInfo; messages: Message[] } | null> {
+    return db.transaction("r", [db.userSettings, db.chatHistories, db.messages], async () => {
+      await assertOnDeviceReader(scope);
+      const historyInfo = await db.chatHistories.get(id);
+      if (!historyInfo || !isReadableOnDeviceHistory(historyInfo, scope, options)) return null;
+      const messages = await db.messages.where("history_id").equals(id).toArray();
+      await assertOnDeviceReader(scope);
+      return { historyInfo, messages: messages.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id)) };
+    });
+  }
+
   async getChatHistoriesPaginatedOptimized(lastEntry?: any, searchQuery?: string): Promise<{
     histories: ChatHistory;
     hasMore: boolean;
@@ -507,23 +572,44 @@ export class PageAssistDatabase {
   }
 
   // Prompts Methods
-  async getAllPrompts(): Promise<Prompts> {
+  /** Read shared, unlinked legacy data without probing authenticated ownership. */
+  async getSharedLocalPrompts(deleted = false): Promise<Prompts> {
+    return await db.prompts
+      .filter(p => p.ownerId == null && isPromptOwnedBy(p, null) && !!p.deletedAt === deleted)
+      .reverse()
+      .sortBy(deleted ? 'deletedAt' : 'createdAt');
+  }
+
+  async getAllPrompts(expectedOwnerId?: string | null): Promise<Prompts> {
+    const ownerId = await resolvePromptOwnerId(expectedOwnerId);
     // Only return non-deleted prompts
     return await db.prompts
-      .filter(p => !p.deletedAt)
+      .filter(p => !p.deletedAt && isPromptOwnedBy(p, ownerId))
       .reverse()
       .sortBy('createdAt');
   }
 
-  async getDeletedPrompts(): Promise<Prompts> {
+  async getDeletedPrompts(expectedOwnerId?: string | null): Promise<Prompts> {
+    const ownerId = await resolvePromptOwnerId(expectedOwnerId);
     // Return soft-deleted prompts (trash)
     return await db.prompts
-      .filter(p => !!p.deletedAt)
+      .filter(p => !!p.deletedAt && isPromptOwnedBy(p, ownerId))
       .reverse()
       .sortBy('deletedAt');
   }
 
-  async addPrompt(prompt: Prompt) {
+  /** Copy historical storage verbatim; migration has no authority to claim links. */
+  async migrateLegacyPrompt(prompt: Prompt) {
+    await db.prompts.add(prompt);
+  }
+
+  async countStoredPromptsForMigration(): Promise<number> {
+    return (await db.prompts.toArray()).length;
+  }
+
+  async addPrompt(prompt: Prompt, expectedOwnerId?: string | null) {
+    const ownerId = await resolvePromptOwnerId(expectedOwnerId);
+    if (prompt.ownerId && prompt.ownerId !== ownerId) throw new Error("Prompt account changed");
     const mergedKeywords = prompt.keywords ?? prompt.tags;
     const now = Date.now();
     const normalizedUsageCount =
@@ -532,6 +618,7 @@ export class PageAssistDatabase {
         : 0;
     const normalized: Prompt = {
       ...prompt,
+      ownerId,
       title: prompt.title || prompt.name,
       name: prompt.name ?? prompt.title,
       tags: mergedKeywords ?? prompt.tags,
@@ -555,17 +642,23 @@ export class PageAssistDatabase {
   }
 
   async deletePrompt(id: string) {
+    assertPromptOwnedBy(await db.prompts.get(id), await resolvePromptOwnerId());
     // Soft delete: set deletedAt timestamp
     const now = Date.now();
     await db.prompts.update(id, { deletedAt: now, updatedAt: now });
   }
 
-  async permanentlyDeletePrompt(id: string) {
+  async permanentlyDeletePrompt(id: string, expectedOwnerId?: string | null) {
+    assertPromptOwnedBy(await db.prompts.get(id), await resolvePromptOwnerId(expectedOwnerId));
     // Hard delete: remove from database entirely
     await db.prompts.delete(id);
   }
 
-  async restorePromptSnapshot(snapshot: Prompt) {
+  async restorePromptSnapshot(snapshot: Prompt, expectedOwnerId?: string | null) {
+    const ownerId = await resolvePromptOwnerId(expectedOwnerId);
+    const existing = await db.prompts.get(snapshot.id);
+    assertPromptOwnedBy(existing, ownerId);
+    if (snapshot.ownerId !== existing.ownerId) throw new Error("Prompt owner cannot change");
     if (!(await db.prompts.get(snapshot.id))) {
       throw new Error('prompt_snapshot_target_missing');
     }
@@ -573,24 +666,27 @@ export class PageAssistDatabase {
   }
 
   async restorePrompt(id: string) {
+    assertPromptOwnedBy(await db.prompts.get(id), await resolvePromptOwnerId());
     // Restore from trash: clear deletedAt
     const now = Date.now();
     await db.prompts.update(id, { deletedAt: null, updatedAt: now });
   }
 
-  async emptyTrash(): Promise<number> {
+  async emptyTrash(expectedOwnerId?: string | null): Promise<number> {
     // Permanently delete all trashed prompts
-    const deleted = await db.prompts.filter(p => !!p.deletedAt).toArray();
+    const ownerId = await resolvePromptOwnerId(expectedOwnerId);
+    const deleted = await db.prompts.filter(p => !!p.deletedAt && isPromptOwnedBy(p, ownerId)).toArray();
     const ids = deleted.map(p => p.id);
     await db.prompts.bulkDelete(ids);
     return ids.length;
   }
 
-  async autoCleanupTrash(maxAgeDays: number = 30): Promise<number> {
+  async autoCleanupTrash(maxAgeDays: number = 30, expectedOwnerId?: string | null): Promise<number> {
     // Auto-purge prompts deleted more than maxAgeDays ago
+    const ownerId = await resolvePromptOwnerId(expectedOwnerId);
     const cutoff = Date.now() - (maxAgeDays * 24 * 60 * 60 * 1000);
     const expired = await db.prompts
-      .filter(p => !!p.deletedAt && p.deletedAt < cutoff)
+      .filter(p => !!p.deletedAt && p.deletedAt < cutoff && isPromptOwnedBy(p, ownerId))
       .toArray();
     const ids = expired.map(p => p.id);
     await db.prompts.bulkDelete(ids);
@@ -609,10 +705,12 @@ export class PageAssistDatabase {
       favorite?: boolean
       usageCount?: number
       lastUsedAt?: number | null
-    }
+    },
+    expectedOwnerId?: string | null
   ) {
     const existing = await db.prompts.get(id);
     if (!existing) return;
+    assertPromptOwnedBy(existing, await resolvePromptOwnerId(expectedOwnerId));
 
     const mergedKeywords = updates.keywords ?? updates.tags;
     const resolvedUsageCount =
@@ -628,6 +726,7 @@ export class PageAssistDatabase {
     const merged: Prompt = {
       ...existing,
       ...updates,
+      ownerId: existing.ownerId,
       title: updates.name ?? updates.title ?? existing.title,
       name: updates.name ?? existing.name ?? existing.title,
       content: updates.content ?? existing.content,
@@ -660,6 +759,7 @@ export class PageAssistDatabase {
   }
 
   async incrementPromptUsage(id: string) {
+    assertPromptOwnedBy(await db.prompts.get(id), await resolvePromptOwnerId());
     const existing = await db.prompts.get(id);
     if (!existing || existing.deletedAt) return null;
 
@@ -681,45 +781,32 @@ export class PageAssistDatabase {
     };
   }
 
-  async getPromptById(id: string): Promise<Prompt | undefined> {
-    return await db.prompts.get(id);
+  async getPromptById(id: string, expectedOwnerId?: string | null): Promise<Prompt | undefined> {
+    const prompt = await db.prompts.get(id);
+    const ownerId = await resolvePromptOwnerId(expectedOwnerId);
+    return prompt && isPromptOwnedBy(prompt, ownerId) ? prompt : undefined;
   }
 
   // ─── Prompt Sync Methods ───
 
   async getPromptByServerId(serverId: number): Promise<Prompt | undefined> {
-    return await db.prompts
-      .where('serverId')
-      .equals(serverId)
-      .first();
+    return (await this.getAllPrompts()).find(p => p.serverId === serverId);
   }
 
   async getPromptsBySyncStatus(status: PromptSyncStatus): Promise<Prompts> {
-    return await db.prompts
-      .where('syncStatus')
-      .equals(status)
-      .filter(p => !p.deletedAt)
-      .toArray();
+    return (await this.getAllPrompts()).filter(p => p.syncStatus === status);
   }
 
   async getPromptsByStudioProject(projectId: number): Promise<Prompts> {
-    return await db.prompts
-      .where('studioProjectId')
-      .equals(projectId)
-      .filter(p => !p.deletedAt)
-      .toArray();
+    return (await this.getAllPrompts()).filter(p => p.studioProjectId === projectId);
   }
 
   async getSyncedPrompts(): Promise<Prompts> {
-    return await db.prompts
-      .filter(p => !p.deletedAt && !!p.serverId)
-      .toArray();
+    return (await this.getAllPrompts()).filter(p => !!p.serverId);
   }
 
   async getLocalOnlyPrompts(): Promise<Prompts> {
-    return await db.prompts
-      .filter(p => !p.deletedAt && !p.serverId && p.syncStatus !== 'synced')
-      .toArray();
+    return (await this.getAllPrompts()).filter(p => !p.serverId && p.syncStatus !== 'synced');
   }
 
   async updatePromptSyncStatus(id: string, updates: {
@@ -729,9 +816,10 @@ export class PageAssistDatabase {
     studioPromptId?: number | null;
     lastSyncedAt?: number | null;
     serverUpdatedAt?: string | null;
-  }) {
+  }, expectedOwnerId?: string | null) {
     const existing = await db.prompts.get(id);
     if (!existing) return;
+    assertPromptOwnedBy(existing, await resolvePromptOwnerId(expectedOwnerId));
 
     await db.prompts.update(id, {
       ...updates,
@@ -783,6 +871,15 @@ export class PageAssistDatabase {
         const destination = await db.chatHistories.get(history.id);
         if (destination?.local_settings_guard)
           history.local_settings_guard = destination.local_settings_guard;
+        if (destination && (destination.local_owner_key != null || destination.server_scope_key != null || destination.server_chat_id != null || destination.message_source === "server")) {
+          // Restoring public data cannot clear or redirect an existing trusted owner.
+          Object.assign(history, {
+            local_owner_key: destination.local_owner_key,
+            server_scope_key: destination.server_scope_key,
+            server_chat_id: destination.server_chat_id,
+            message_source: destination.message_source
+          });
+        }
       }
       if (!mergeData && !replaceExisting) {
         (await db.chatHistories.toArray()).forEach(assertNoPendingLocalSettingsWrite);
@@ -819,12 +916,12 @@ export class PageAssistDatabase {
   async importPromptsV2(data: Prompt[], options: {
     replaceExisting?: boolean;
     mergeData?: boolean;
+    expectedOwnerId?: string | null;
+    ownerScope?: CapturedPromptOwnerScope;
   } = {}) {
     const { replaceExisting = false, mergeData = true } = options;
-
-    if (!mergeData && !replaceExisting) {
-      await db.prompts.clear();
-    }
+    options.ownerScope?.assertCurrent();
+    const ownerId = options.ownerScope ? options.ownerScope.ownerId : await resolvePromptOwnerId(options.expectedOwnerId);
 
     // Normalize all prompts first
     const normalizedPrompts = data.map(prompt => {
@@ -839,6 +936,17 @@ export class PageAssistDatabase {
           : null;
       return {
         ...prompt,
+        // Imports are content copies, never authority to another account's link.
+        ownerId,
+        serverId: null,
+        studioProjectId: null,
+        studioPromptId: null,
+        serverLibraryId: null,
+        serverLibraryUuid: null,
+        syncStatus: 'local',
+        sourceSystem: 'workspace',
+        lastSyncedAt: null,
+        serverUpdatedAt: null,
         title: prompt.title || prompt.name,
         name: prompt.name ?? prompt.title,
         tags: mergedKeywords ?? prompt.tags,
@@ -854,12 +962,25 @@ export class PageAssistDatabase {
 
     // Use transaction for atomic batch operations
     await db.transaction('rw', db.prompts, async () => {
+      const foreign = await db.prompts.filter(p => !isPromptOwnedBy(p, ownerId)).toArray();
+      options.ownerScope?.assertCurrent();
+      const foreignIds = new Set(foreign.map(p => p.id));
+      const allowed = normalizedPrompts.filter(p => !foreignIds.has(p.id));
       if (replaceExisting) {
-        // Replace mode should fully replace the existing prompt dataset.
-        await db.prompts.clear();
-        await db.prompts.bulkPut(normalizedPrompts);
-        imported = normalizedPrompts.length;
+        const visible = await db.prompts.filter(p => isPromptOwnedBy(p, ownerId)).toArray();
+        options.ownerScope?.assertCurrent();
+        await db.prompts.bulkDelete(visible.map(p => p.id));
+        options.ownerScope?.assertCurrent();
+        await db.prompts.bulkPut(allowed);
+        imported = allowed.length;
+        skipped = normalizedPrompts.length - allowed.length;
         return;
+      }
+
+      if (!mergeData) {
+        const visible = await db.prompts.filter(p => isPromptOwnedBy(p, ownerId)).toArray();
+        options.ownerScope?.assertCurrent();
+        await db.prompts.bulkDelete(visible.map(p => p.id));
       }
 
       // Filter out existing prompts
@@ -867,7 +988,8 @@ export class PageAssistDatabase {
         (await db.prompts.where('id').anyOf(normalizedPrompts.map(p => p.id)).toArray())
           .map(p => p.id)
       );
-      const newPrompts = normalizedPrompts.filter(p => !existingIds.has(p.id));
+      const newPrompts = allowed.filter(p => !existingIds.has(p.id));
+      options.ownerScope?.assertCurrent();
       skipped = normalizedPrompts.length - newPrompts.length;
       if (newPrompts.length > 0) {
         await db.prompts.bulkPut(newPrompts);
@@ -915,3 +1037,15 @@ export class PageAssistDatabase {
 }
 
 export const pageAssistDatabase = new PageAssistDatabase()
+
+/** Invalidate existing history queries without scanning stored message bodies. */
+export function watchOnDeviceHistoryChanges(changed: (profileChanged: boolean) => void): () => void {
+  const listener = (parts: ObservabilitySet) => {
+    const keys = Object.keys(parts)
+    const touches = (table: string) => keys.some(key => key === "all" || key.startsWith(`idb://${db.name}/${table}/`))
+    const profileChanged = touches("userSettings")
+    if (profileChanged || touches("chatHistories") || touches("messages")) changed(profileChanged)
+  }
+  Dexie.on("storagemutated", listener)
+  return () => Dexie.on.storagemutated.unsubscribe(listener)
+}

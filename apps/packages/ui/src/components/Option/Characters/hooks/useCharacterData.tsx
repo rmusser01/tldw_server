@@ -342,14 +342,6 @@ export function useCharacterData(deps: UseCharacterDataDeps) {
         }
         return await loadLegacyCharacterList()
       }
-      const buildEmptyCharacterQueryResponse = () => ({
-        items: [],
-        total: 0,
-        page: currentPage,
-        page_size: pageSize,
-        has_more: false
-      })
-
       try {
         await tldwClient.initialize()
         if (useServerQuery) {
@@ -382,7 +374,7 @@ export function useCharacterData(deps: UseCharacterDataDeps) {
               defaultValue: "Something went wrong. Please try again later"
             })
         })
-        return buildEmptyCharacterQueryResponse()
+        throw e
       }
     },
     staleTime: 5 * 60 * 1000,
@@ -499,7 +491,9 @@ export function useCharacterData(deps: UseCharacterDataDeps) {
   // --- Edit world books ---
   const {
     data: characterWorldBookData = EMPTY_CHARACTER_WORLD_BOOK_DATA,
-    isFetching: worldBookOptionsLoading
+    isFetching: worldBookOptionsLoading,
+    error: worldBookOptionsError,
+    refetch: refetchWorldBookOptions
   } = useQuery<{ options: CharacterWorldBookOption[]; attachedIds: number[] }>({
     queryKey: ["tldw:characterEditWorldBooks", editCharacterNumericId],
     queryFn: async () => {
@@ -555,7 +549,8 @@ export function useCharacterData(deps: UseCharacterDataDeps) {
       return
     }
     if (editCharacterNumericId == null) return
-    if (worldBookOptionsLoading) return
+    if (worldBookOptionsLoading || worldBookOptionsError) return
+    if (characterWorldBookData === EMPTY_CHARACTER_WORLD_BOOK_DATA) return
     if (editWorldBooksInitializedRef.current) return
     const attachedIds = normalizeWorldBookIds(characterWorldBookData.attachedIds)
     editWorldBooksInitializedRef.current = true
@@ -565,7 +560,9 @@ export function useCharacterData(deps: UseCharacterDataDeps) {
     editCharacterNumericId,
     editForm,
     openEdit,
-    worldBookOptionsLoading
+    worldBookOptionsLoading,
+    worldBookOptionsError,
+    characterWorldBookData
   ])
 
   // --- Filtered/merged data ---
@@ -867,6 +864,8 @@ export function useCharacterData(deps: UseCharacterDataDeps) {
     previewCharacterWorldBooksLoading,
     characterWorldBookData,
     worldBookOptionsLoading,
+    worldBookOptionsError,
+    refetchWorldBookOptions,
     worldBookOptions,
 
     // Tags & filters

@@ -7,6 +7,7 @@ the /api/v1/chat/completions endpoint so the endpoint can orchestrate at a
 higher level. The goal is to reduce duplication and cognitive load while
 keeping the wire behavior identical.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -80,6 +81,11 @@ from tldw_Server_API.app.core.Chat.chat_logging import (
 )
 from tldw_Server_API.app.core.Chat.chat_loop_engine import is_chat_loop_mode_enabled
 from tldw_Server_API.app.core.Chat.completion_pipeline import ChatCompletionPipeline
+from tldw_Server_API.app.core.Chat.generation_metadata import (
+    GENERATION_STATUS_COMPLETE,
+    GENERATION_STATUS_LENGTH,
+    build_generation_metadata,
+)
 from tldw_Server_API.app.core.Chat.message_utils import should_persist_message_role
 from tldw_Server_API.app.core.Chat.moderation_pipeline import (
     OutputModerationRuntime,
@@ -90,7 +96,10 @@ from tldw_Server_API.app.core.Chat.persistence_service import (
     save_assistant_message,
     save_tool_messages,
 )
-from tldw_Server_API.app.core.Chat.prompt_cost_envelope import build_prompt_cost_envelope
+from tldw_Server_API.app.core.Chat.prompt_cost_envelope import (
+    build_prompt_cost_envelope,
+    estimate_segment_tokens,
+)
 from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (
     PromptCostGuardrailDecision,
     evaluate_prompt_cost_guardrails,
@@ -163,8 +172,9 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_number,
     iter_custom_openai_provider_numbers,
 )
-from tldw_Server_API.app.core.exceptions import EgressPolicyError, raise_detached_error
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls import adapter_registry as _adapter_registry
+from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
 from tldw_Server_API.app.core.LLM_Calls.error_utils import (
     privacy_safe_chat_error,
@@ -208,7 +218,9 @@ from tldw_Server_API.app.core.testing import (
 from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
-from tldw_Server_API.app.core.Usage.llm_usage_normalizer import normalize_llm_usage
+from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
+from tldw_Server_API.app.core.Usage.llm_quota_gate import check_llm_call_async, check_llm_call_sync
+from tldw_Server_API.app.core.Usage.llm_usage_normalizer import normalize_llm_usage, usage_with_service_tier
 from tldw_Server_API.app.core.Usage.pricing_catalog import (
     get_pricing_catalog,
     list_provider_models,
@@ -805,7 +817,8 @@ async def resolve_input_moderation_chat_type(
     loop: Any,
 ) -> str:
     """Resolve chat_type for input moderation from request fields and saved conversation state."""
-    if getattr(request_data, "tldw_history_selection_v1", None) is not None:
+    if (getattr(request_data, "tldw_history_selection_v1", None) is not None
+            or getattr(request_data, "tldw_history_server_existing_input_v1", None) is not None):
         conversation = await loop.run_in_executor(None, chat_db.get_conversation_by_id, request_data.conversation_id)
         return "character" if conversation and (conversation.get("character_id") or conversation.get("assistant_kind")) else "regular"
     default_character_id = await _resolve_default_character_id(chat_db, loop)
@@ -1297,6 +1310,8 @@ def _resolve_run_first_completion_outcome(exc: Exception) -> str:
         ):
             return "blocked"
     return "error"
+
+
 def _tool_names_from_tool_calls(tool_calls: Any) -> list[str]:
     """Extract normalized tool names from OpenAI-style tool call payloads."""
     if not isinstance(tool_calls, list):
@@ -1341,6 +1356,7 @@ def _emit_chat_run_first_rollout_metrics(
     except _CHAT_RUN_FIRST_METRIC_EXCEPTIONS as exc:
         logger.warning("Chat run-first rollout metric emission failed: {}", exc)
     return context
+
 
 def _emit_chat_run_first_tool_path_metrics(
     metrics: Any,
@@ -1570,7 +1586,12 @@ def infer_provider_from_model_catalog(
         return current_provider, debug
 
     debug["attempted"] = True
-    has_current_match = _provider_has_model_cached(current_provider, model_value)
+    # A saved dotted name (claude-sonnet-4.5) finds the catalog entry of its dashed API ID; the name as written
+    # is tried first, so a provider that lists the dotted name itself keeps it.
+    lookup_model = canonical_anthropic_model_id(model_value)
+    has_current_match = _provider_has_model_cached(current_provider, model_value) or _provider_has_model_cached(
+        current_provider, lookup_model
+    )
     debug["current_provider_has_model"] = has_current_match
     if has_current_match:
         debug["reason"] = "current_provider_match"
@@ -1578,6 +1599,9 @@ def infer_provider_from_model_catalog(
 
     candidates = [
         name for name in _find_catalog_providers_for_model_cached(model_value)
+        if _is_local_chat_provider(name)
+    ] or [
+        name for name in _find_catalog_providers_for_model_cached(lookup_model)
         if _is_local_chat_provider(name)
     ]
     debug["candidates"] = candidates
@@ -2682,6 +2706,8 @@ def _call_policy_after_model_discovery(
 
 def perform_chat_api_call(**kwargs: Any) -> Any:
     """Adapter-backed replacement for chat_orchestrator.chat_api_call."""
+    # LLM usage accounting spec §4b: refuse before the try below, which can rebuild any error as a provider error.
+    checked = check_llm_call_sync()
     provider, request, internal = _build_adapter_request_from_chat_args(kwargs)
     registry = _get_llm_registry()
     adapter = registry.get_adapter(provider)
@@ -2691,8 +2717,10 @@ def perform_chat_api_call(**kwargs: Any) -> Any:
     timeout = internal.get("timeout")
     timeout_kwargs = {"timeout": timeout} if timeout is not None else {}
     privacy_safe_errors = _privacy_safe_provider_errors_enabled(request)
+    # A checked call's adapter method is not checked again; one that could not be checked here is.
+    admitted = llm_call_context(prechecked=True) if checked else contextlib.nullcontext()
     try:
-        with provider_error_privacy_scope(privacy_safe_errors):
+        with provider_error_privacy_scope(privacy_safe_errors), admitted:
             call_started = time.monotonic()
             _validate_audited_call_policy_transport(registry, provider, request)
             _validate_provider_model_selection(provider, request)
@@ -2714,6 +2742,8 @@ def perform_chat_api_call(**kwargs: Any) -> Any:
 
 async def perform_chat_api_call_async(**kwargs: Any) -> Any:
     """Async adapter-backed replacement for chat_orchestrator.chat_api_call_async."""
+    # LLM usage accounting spec §4b: refuse before the try below, which can rebuild any error as a provider error.
+    await check_llm_call_async()
     provider, request, internal = _build_adapter_request_from_chat_args(kwargs)
     registry = _get_llm_registry()
     adapter = registry.get_adapter(provider)
@@ -2725,7 +2755,7 @@ async def perform_chat_api_call_async(**kwargs: Any) -> Any:
     privacy_safe_errors = _privacy_safe_provider_errors_enabled(request)
 
     try:
-        with provider_error_privacy_scope(privacy_safe_errors):
+        with provider_error_privacy_scope(privacy_safe_errors), llm_call_context(prechecked=True):
             call_started = time.monotonic()
             strict_policy = _validate_audited_call_policy_transport(
                 registry, provider, request
@@ -2846,6 +2876,9 @@ def build_call_params_from_request(
             "stream",
             "save_to_db",
             "tldw_history_selection_v1",
+            "tldw_history_server_existing_input_v1",
+            "tldw_history_branch",
+            "tldw_history_edit_v1",
             "tldw_history_admission_v1",
             "history_message_limit",
             "history_message_order",
@@ -2957,8 +2990,18 @@ def build_call_params_from_request(
     )["extra_body"]
     for extension in ("extra_body", "extra_headers"):
         if isinstance(call_params.get(extension), dict):
-            call_params[extension] = {key: value for key, value in call_params[extension].items()
-                if key.lower().replace("-", "_") not in {"tldw_history_selection_v1", "tldw_history_admission_v1"}}
+            call_params[extension] = {
+                key: value
+                for key, value in call_params[extension].items()
+                if key.lower().replace("-", "_")
+                not in {
+                    "tldw_history_selection_v1",
+                    "tldw_history_branch",
+                    "tldw_history_edit_v1",
+                    "tldw_history_admission_v1",
+                    "tldw_history_server_existing_input_v1",
+                }
+            }
     billing_prompt_cache_intent = getattr(request_data, "billing_prompt_cache_intent", None)
     if billing_prompt_cache_intent is not None:
         call_params["billing_prompt_cache_intent"] = billing_prompt_cache_intent
@@ -3074,64 +3117,21 @@ def inject_research_context_into_prompt(
 
 
 def estimate_tokens_from_json(request_json: str) -> int:
-    """Rough estimate: assume ~4 chars per token for rate limiting.
+    """Heuristic prompt size for rate limits, quotas, billing and queue admission.
 
-    This matches the existing heuristic in the endpoint.
+    The chat path's one estimate (``estimate_segment_tokens``: data:image payloads
+    redacted, four characters per token rounded up), never below 1.
     """
     try:
-        sanitized = _sanitize_data_uris(request_json)
-        return max(1, len(sanitized) // 4)
+        return max(1, estimate_segment_tokens(request_json))
     except _CHAT_NONCRITICAL_EXCEPTIONS:
         return 1
 
 
-_DATA_URI_RE = re.compile(r'(data:image[^,]*,)[^"\s]+', re.IGNORECASE)
-
-
-def _sanitize_data_uris(text: str) -> str:
-    """Redact data URI payloads to avoid inflating token estimates."""
-    try:
-        return _DATA_URI_RE.sub(r"\1<omitted>", text)
-    except _CHAT_NONCRITICAL_EXCEPTIONS:
-        return text
-
-
-def _sanitize_messages_for_token_estimate(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return a copy of messages with base64 image payloads replaced."""
-    sanitized: list[dict[str, Any]] = []
-    for msg in messages or []:
-        if not isinstance(msg, dict):
-            continue
-        msg_copy = msg.copy()
-        content = msg_copy.get("content")
-        if isinstance(content, list):
-            new_parts: list[Any] = []
-            for part in content:
-                if not isinstance(part, dict):
-                    new_parts.append(part)
-                    continue
-                if part.get("type") == "image_url":
-                    image_url = part.get("image_url") or {}
-                    if isinstance(image_url, dict):
-                        url_val = image_url.get("url")
-                        if isinstance(url_val, str) and url_val.startswith("data:image"):
-                            new_image_url = dict(image_url)
-                            new_image_url["url"] = "data:image/omitted"
-                            new_parts.append({**part, "image_url": new_image_url})
-                            continue
-                new_parts.append(part)
-            msg_copy["content"] = new_parts
-        elif isinstance(content, str):
-            msg_copy["content"] = _sanitize_data_uris(content)
-        sanitized.append(msg_copy)
-    return sanitized
-
-
 def _estimate_tokens_from_messages(messages: list[dict[str, Any]]) -> int:
-    """Estimate tokens from message payloads with base64 redaction."""
+    """The same estimate for a message list, taken over its JSON."""
     try:
-        sanitized = _sanitize_messages_for_token_estimate(messages)
-        return max(1, len(_json.dumps(sanitized, default=str)) // 4)
+        return estimate_tokens_from_json(_json.dumps(messages, default=str))
     except _CHAT_NONCRITICAL_EXCEPTIONS:
         return 1
 
@@ -3548,9 +3548,13 @@ def build_structured_http_exception(exc: StructuredGenerationError) -> HTTPExcep
 
 
 def _is_trusted_local_chat_http_exception(exc: BaseException) -> bool:
-    """Return whether an HTTP error was created and bounded by this service."""
+    """Return whether an HTTP error was created and bounded by this service.
 
-    return isinstance(exc, UnsupportedMultiChoiceToolAutoexecError) or (
+    An LLM quota refusal is trusted: it is the user's limit, not a provider failure,
+    and reaches the caller as its own 402 (LLM usage accounting spec §4b).
+    """
+
+    return isinstance(exc, (UnsupportedMultiChoiceToolAutoexecError, LLMQuotaExceededError)) or (
         isinstance(exc, HTTPException)
         and trusted_local_chat_signal_kind(exc) is not None
     )
@@ -3606,6 +3610,7 @@ def _build_assistant_message_payload(
     content: Any | None,
     tool_calls: Any | None,
     function_call: Any | None,
+    generation_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compatibility wrapper for tests/imports that use the old local helper."""
 
@@ -3615,6 +3620,30 @@ def _build_assistant_message_payload(
         content=content,
         tool_calls=tool_calls,
         function_call=function_call,
+        generation_metadata=generation_metadata,
+    )
+
+
+def _nonstream_generation_metadata(
+    *,
+    llm_response: Any,
+    choice: NonStreamChoice | None,
+    model: str,
+    provider: str,
+) -> dict[str, Any]:
+    """Describe how a non-streamed reply was produced, for settlement (D7 P2)."""
+
+    raw_choice = choice.choice if choice is not None else None
+    finish_reason = raw_choice.get("finish_reason") if isinstance(raw_choice, dict) else None
+    usage = llm_response.get("usage") if isinstance(llm_response, dict) else None
+    return build_generation_metadata(
+        generation_status=(
+            GENERATION_STATUS_LENGTH if finish_reason == "length" else GENERATION_STATUS_COMPLETE
+        ),
+        model_id=model,
+        provider=provider,
+        finish_reason=finish_reason,
+        usage=usage,
     )
 
 
@@ -4178,6 +4207,68 @@ async def _resolve_saved_regeneration(
     return user, legacy_reply
 
 
+def _format_selected_history_messages(
+    snapshot: Any,
+    content: Any,
+    character_card: dict[str, Any],
+    *,
+    user_name: str = "User",
+    replace_user_placeholders: bool = True,
+) -> list[dict[str, Any]]:
+    """Format only detached owner-selected rows; never reload current sources."""
+    from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
+
+    output: list[dict[str, Any]] = []
+    source_nodes = {row["id"]: row for row in snapshot.nodes}
+    for item in content:
+        extra = item.get("extra_metadata") or {}
+        source_role = map_sender_to_role(source_nodes[item["id"]]["role"], character_card.get("name"))
+        role = extra.get("sender_role") or source_role
+        text = _saved_image_text(
+            {
+                "content": item["message"],
+                "images": item["images"],
+                "sender": source_nodes[item["id"]]["role"],
+                "version": item["_message_version"],
+            },
+            extra,
+        )
+        image_details = _saved_image_details(extra, len(item["images"]))
+        if text and role != "tool" and (role != "user" or replace_user_placeholders):
+            text = replace_placeholders(text, character_card.get("name", "Char"), user_name)
+        placeholder = extra.get("content_placeholder_reason")
+        if placeholder == "invalid_content" or (
+            placeholder in {"tool_calls", "function_call"}
+            and (
+                role != "assistant"
+                or not (item.get("tool_calls") if placeholder == "tool_calls" else extra.get("function_call"))
+            )
+        ):
+            raise HistorySelectionError("unsupported_history_context_content_placeholder")
+        if placeholder == "empty_tool_result":
+            if role != "tool" or item["images"]:
+                raise HistorySelectionError("unsupported_history_context_content_placeholder")
+            if item["_message_version"] == 1 and text == "[empty tool result]":
+                text = ""
+        entry = {"role": role, "content": text}
+        if item["images"]:
+            entry["content"] = ([{"type": "text", "text": text}] if text else []) + [
+                {"type": "image_url", "image_url": {"url": image, "detail": detail}}
+                for image, detail in zip(item["images"], image_details)
+            ]
+        if extra.get("content_placeholder_reason") in ("tool_calls", "function_call"):
+            entry["content"] = None
+        if item.get("tool_calls") is not None:
+            entry["tool_calls"] = item["tool_calls"]
+        for key in ("function_call", "tool_call_id"):
+            if extra.get(key) is not None:
+                entry[key] = extra[key]
+        if extra.get("sender_name") or extra.get("tool_name"):
+            entry["name"] = extra.get("sender_name") or extra.get("tool_name")
+        output.append(entry)
+    return output
+
+
 async def build_context_and_messages(
     chat_db: Any,
     request_data: Any,
@@ -4197,14 +4288,28 @@ async def build_context_and_messages(
     regenerate_reply_id = request_metadata.get("tldw_regenerate_from_message_id") if isinstance(request_metadata, dict) else None
     if regenerate_reply_id is not None:
         if not isinstance(regenerate_reply_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", regenerate_reply_id):
-            raise HTTPException(status_code=422, detail="A valid saved reply ID is required for regeneration.")
+            # 400: the chat endpoint turns statuses outside its allow-list (422) into 500.
+            raise HTTPException(status_code=400, detail="A valid saved reply ID is required for regeneration.")
         if (not final_conversation_id or explicit_failed_retry
                 or getattr(request_data, "tldw_continuation", None) is not None):
             raise HTTPException(status_code=409, detail="Regeneration requires an existing saved answered turn.")
+    from tldw_Server_API.app.core.Chat.history_continuation import (
+        continued_reply_prefix,
+        parse_continue_reply_id,
+    )
+
+    continue_reply_id = parse_continue_reply_id(
+        request_data,
+        conversation_id=final_conversation_id,
+        regenerate_reply_id=regenerate_reply_id,
+        explicit_failed_retry=explicit_failed_retry,
+    )
+    continue_prefix: str | None = None
     reuse_saved_turn = explicit_failed_retry or regenerate_reply_id is not None
 
-    history_selection = getattr(request_data, "tldw_history_selection_v1", None)
-    if history_selection is not None and reuse_saved_turn:
+    server_existing_input = getattr(request_data, "tldw_history_server_existing_input_v1", None)
+    history_selection = getattr(request_data, "tldw_history_selection_v1", None) or server_existing_input
+    if history_selection is not None and (explicit_failed_retry or (server_existing_input is not None and (regenerate_reply_id is not None or continue_reply_id is not None))):
         raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "unsupported_history_legacy_retry"})
     versioned = history_selection is not None
     history_runtime = runtime_state or {}
@@ -4214,35 +4319,151 @@ async def build_context_and_messages(
     history_snapshot = None
     admission = None
     if versioned:
-        from tldw_Server_API.app.core.Chat.history_context import project_history_context
+        from tldw_Server_API.app.core.Chat.history_context import (
+            project_history_context,
+            selected_unanswered_text_question,
+        )
         from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError, HistorySelectionSnapshotV1
+
         if getattr(request_data, "prompt_template_name", None) not in (None, "", DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name):
             raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "unsupported_history_context_prompt_template"})
         selection = history_selection.model_dump(mode="json")
+        edit_target = getattr(request_data, "tldw_history_edit_v1", None)
+        edit_target = edit_target.model_dump(mode="json") if edit_target is not None else None
         owner = history_runtime["history_owner_key"]
+        continuation_holder: dict[str, str] = {}
+
         def accept_history() -> tuple[
             HistorySelectionSnapshotV1,
             tuple[dict[str, Any], ...],
-            dict[str, Any],
+            dict[str, Any] | None,
             dict[str, Any],
             tuple[dict[str, Any] | None, int | None, dict[str, Any]],
         ]:
             with chat_db.transaction() as conn:
-                state = chat_db.get_roleplay_resume_state(final_conversation_id, conn=conn, lock_for_update=True,
-                    owner_client_id=history_runtime["history_owner_client_id"])
-                snap, content = chat_db.validate_history_selection(final_conversation_id, selection,
-                    owner_client_id=history_runtime["history_owner_client_id"], owner_key=owner, conn=conn)
+                state = chat_db.get_roleplay_resume_state(
+                    final_conversation_id,
+                    conn=conn,
+                    lock_for_update=True,
+                    owner_client_id=history_runtime["history_owner_client_id"],
+                )
+                snap, content = chat_db.validate_history_selection(
+                    final_conversation_id,
+                    selection,
+                    owner_client_id=history_runtime["history_owner_client_id"],
+                    owner_key=owner,
+                    conn=conn,
+                    history_edit=edit_target,
+                )
+                question = (selected_unanswered_text_question(snap, content, selection)
+                    if server_existing_input is not None else None)
                 context = project_history_context(state, character_override=getattr(request_data, "character_id", None))
-                for item in content:
-                    _saved_image_details(item.get("extra_metadata"), len(item["images"]))
-                accepted = chat_db.append_selected_history_inputs(final_conversation_id, selection, history_runtime["history_inputs"],
-                    owner_client_id=history_runtime["history_owner_client_id"], owner_key=owner, conn=conn)
+                dictionary_plan = context[2].pop("history_dictionary_plan", None)
+                if dictionary_plan is not None:
+                    from tldw_Server_API.app.core.Character_Chat.frozen_dictionary_context import (
+                        transform_frozen_user_content,
+                    )
+                    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
+
+                    try:
+                        context[2]["history_dictionary_user_content"] = transform_frozen_user_content(
+                            ([{"role": "user", "content": question["message"]}] if question is not None
+                                else [message.model_dump(exclude_none=True) for message in request_data.messages]), dictionary_plan,
+                        )
+                    except InputError as exc:
+                        raise HistorySelectionError("unsupported_history_context_dictionaries") from exc
+                _format_selected_history_messages(snap, content, context[0] or {})
+                reused_reply_id = regenerate_reply_id if regenerate_reply_id is not None else continue_reply_id
+                unsupported_code = (
+                    "unsupported_history_continuation" if continue_reply_id is not None
+                    else "unsupported_history_regeneration"
+                )
+                if server_existing_input is not None:
+                    accepted = None
+                elif reused_reply_id is not None:
+                    if getattr(request_data, "tldw_history_branch", None) is not True:
+                        raise HistorySelectionError(unsupported_code)
+                    inputs = [
+                        message.model_dump(exclude_none=True)
+                        for message in request_data.messages
+                        if message.role != "system"
+                    ]
+                    if len(inputs) != 1 or inputs[0].get("role") != "user":
+                        raise HistorySelectionError("invalid_regeneration_input")
+                    try:
+                        accepted = chat_db.reuse_selected_history_admission(
+                            final_conversation_id,
+                            selection,
+                            reused_reply_id,
+                            owner_client_id=history_runtime["history_owner_client_id"],
+                            owner_key=owner,
+                            conn=conn,
+                        )
+                    except HistorySelectionError as exc:
+                        if exc.code == "unsupported_history_regeneration":
+                            raise HistorySelectionError(unsupported_code) from exc
+                        raise
+                    original = next(item for item in content if item["id"] == accepted["input_message_id"])
+                    extra = original.get("extra_metadata") or {}
+                    if (
+                        original.get("tool_calls") is not None
+                        or extra.get("function_call") is not None
+                        or extra.get("tool_call_id") is not None
+                    ):
+                        raise HistorySelectionError(unsupported_code)
+                    text = _saved_image_text(
+                        {
+                            "sender": "user",
+                            "version": original["_message_version"],
+                            "content": original["message"],
+                            "images": original["images"],
+                        },
+                        extra,
+                    )
+                    details = _saved_image_details(extra, len(original["images"]))
+                    parts = ([{"type": "text", "text": text}] if text else []) + [
+                        {"type": "image_url", "image_url": {"url": image, "detail": detail}}
+                        for image, detail in zip(original["images"], details)
+                    ]
+                    if (
+                        _retry_content_components(inputs[0].get("content")) != _retry_content_components(parts)
+                        or any(
+                            inputs[0].get(key) is not None for key in ("tool_calls", "function_call", "tool_call_id")
+                        )
+                        or inputs[0].get("name") not in (None, extra.get("sender_name"))
+                    ):
+                        raise HistorySelectionError("regeneration_input_changed")
+                    if continue_reply_id is not None:
+                        # Continue keeps the saved reply as the final context message.
+                        continuation_holder["prefix"] = continued_reply_prefix(
+                            next(item for item in content if item["id"] == continue_reply_id)
+                        )
+                    else:
+                        content = tuple(item for item in content if item["id"] != regenerate_reply_id)
+                else:
+                    accepted = chat_db.append_selected_history_inputs(
+                        final_conversation_id,
+                        selection,
+                        history_runtime["history_inputs"],
+                        owner_client_id=history_runtime["history_owner_client_id"],
+                        owner_key=owner,
+                        conn=conn,
+                        history_branch=getattr(request_data, "tldw_history_branch", None),
+                        history_edit=edit_target,
+                    )
                 return snap, content, accepted, state["conversation"], context
+
         try:
             history_snapshot, selected_content, admission, existing_conversation, context = await asyncio.to_thread(accept_history)
         except HistorySelectionError as exc:
-            failure = "unsupported_history_capability" if exc.code.startswith("unsupported_history_context") else "stale_selection"
-            raise HTTPException(409, detail={"status": failure, "code": exc.code}) from exc
+            failure = (
+                "unsupported_history_capability"
+                if (exc.code.startswith("unsupported_history_context")
+                    or exc.code in {"unsupported_history_regeneration", "unsupported_history_continuation"})
+                else "stale_selection"
+            )
+            raise HTTPException(409, detail={"status": failure, "code": exc.code, **exc.details}) from exc
+        continue_prefix = continuation_holder.get("prefix")
         character_card, character_db_id, assistant_context = context
         for field, value in assistant_context.pop("history_sampling", {}).items():
             if field not in request_data.model_fields_set:
@@ -4327,7 +4548,7 @@ async def build_context_and_messages(
         )
         should_persist = False
 
-    if regenerate_reply_id:
+    if regenerate_reply_id or continue_reply_id:
         if (not should_persist or not existing_conversation
                 or existing_conversation.get("client_id") != client_id_from_db
                 or not (is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation or versioned
@@ -4503,7 +4724,12 @@ async def build_context_and_messages(
                     hist_entry["tool_calls"] = tool_calls_meta
                 if function_call_meta and not hist_entry.get("tool_calls"):
                     hist_entry["function_call"] = function_call_meta
-                if content_placeholder_reason in {"tool_calls", "function_call"}:
+                if content_placeholder_reason in {"tool_calls", "function_call"} or (
+                    content_placeholder_reason == "empty_tool_result"
+                    and role == "tool"
+                    and db_msg.get("version") == 1
+                    and db_msg.get("content") == "[empty tool result]"
+                ):
                     hist_entry["content"] = ""
                 if role == "tool" and tool_call_id_meta:
                     hist_entry["tool_call_id"] = tool_call_id_meta
@@ -4554,7 +4780,7 @@ async def build_context_and_messages(
     retry_user_message_id: str | None = None
     saved_retry_system_messages: list[dict[str, Any]] = []
     legacy_regenerated_reply: dict[str, Any] | None = None
-    if regenerate_reply_id:
+    if regenerate_reply_id and not versioned:
         if not request_messages:
             raise HTTPException(status_code=409, detail="Regeneration requires the saved user turn.")
         if any(message.get("role") != "system" for message in request_messages[:-1]):
@@ -4724,36 +4950,23 @@ async def build_context_and_messages(
                         )
 
     if versioned:
-        source_nodes = {row["id"]: row for row in history_snapshot.nodes}
-        for item in selected_content:
-            extra = item.get("extra_metadata") or {}
-            source_role = map_sender_to_role(source_nodes[item["id"]]["role"], character_card.get("name"))
-            role = extra.get("sender_role") or source_role
-            text = _saved_image_text({
-                "content": item["message"], "images": item["images"],
-                "sender": source_nodes[item["id"]]["role"], "version": item["_message_version"],
-            }, extra)
-            image_details = _saved_image_details(extra, len(item["images"]))
-            if text and role != "tool":
-                text = replace_placeholders(text, character_card.get("name", "Char"), "User")
-            entry = {"role": role, "content": text}
-            if item["images"]:
-                entry["content"] = ([{"type": "text", "text": text}] if text else []) + [
-                    {"type": "image_url", "image_url": {"url": image, "detail": detail}}
-                    for image, detail in zip(item["images"], image_details)]
-            if extra.get("content_placeholder_reason") in ("tool_calls", "function_call"):
-                entry["content"] = None
-            if item.get("tool_calls") is not None:
-                entry["tool_calls"] = item["tool_calls"]
-            for key in ("function_call", "tool_call_id"):
-                if extra.get(key) is not None:
-                    entry[key] = extra[key]
-            if extra.get("sender_name") or extra.get("tool_name"):
-                entry["name"] = extra.get("sender_name") or extra.get("tool_name")
-            historical_msgs.append(entry)
-        assistant_parent_message_id = admission["input_message_id"]
+        if regenerate_reply_id is not None or continue_reply_id is not None:
+            overlap_cut = len(request_messages)
+        formatted_history = _format_selected_history_messages(history_snapshot, selected_content, character_card)
+        if server_existing_input is not None:
+            existing_dictionary_content = assistant_context.pop("history_dictionary_user_content", [])
+            if existing_dictionary_content:
+                formatted_history[-1]["content"] = existing_dictionary_content[0]
+        historical_msgs.extend(formatted_history)
+        assistant_parent_message_id = (selected_content[-1]["id"] if server_existing_input is not None
+            else admission["input_message_id"])
         runtime_state["assistant_parent_message_id"] = assistant_parent_message_id
-        runtime_state["tldw_history_admission_v1"] = admission
+        if server_existing_input is not None:
+            runtime_state["tldw_history_server_existing_input_v1"] = history_selection.model_dump(mode="json")
+        else:
+            runtime_state["tldw_history_admission_v1"] = admission
+        if continue_prefix is not None:
+            runtime_state["history_continue_prefix"] = continue_prefix
 
     if retry_user_message_id and any(message.get("role") == "user" for message in request_messages[overlap_cut:-1]):
         raise HTTPException(status_code=409, detail="This retry contains extra unsaved user messages. Resolve the local conversation before retrying.")
@@ -4775,7 +4988,7 @@ async def build_context_and_messages(
         except ConflictError as exc:
             raise HTTPException(status_code=409, detail="The saved reply changed. Reload before regenerating.") from exc
 
-    persisted_user_message_id: str | None = admission["input_message_id"] if versioned else retry_user_message_id
+    persisted_user_message_id: str | None = assistant_parent_message_id if versioned else retry_user_message_id
     system_block_id = str(_uuid.uuid4())
     if (should_persist and retry_system_messages
             and _extract_system_messages(retry_system_messages) != _extract_system_messages(saved_retry_system_messages)):
@@ -4807,6 +5020,7 @@ async def build_context_and_messages(
                 detail="Unable to save updated retry instructions. Try again.",
             ) from exc
     current_turn: list[dict[str, Any]] = list(retry_system_messages)
+    dictionary_user_content = iter(assistant_context.pop("history_dictionary_user_content", []))
     for index, msg_dict in enumerate(request_messages[overlap_cut:], start=overlap_cut):
         role = msg_dict.get("role")
         msg_for_db = msg_dict.copy()
@@ -4823,6 +5037,8 @@ async def build_context_and_messages(
             if role == "user":
                 persisted_user_message_id = str(saved_message_id) if saved_message_id else None
         msg_for_llm = msg_dict.copy()
+        if versioned and role == "user":
+            msg_for_llm["content"] = next(dictionary_user_content, msg_for_llm.get("content"))
         if role == "assistant" and character_card and character_card.get("name"):
             name = sanitize_sender_name(character_card.get("name"))
             if name:
@@ -4864,6 +5080,14 @@ async def build_context_and_messages(
     historical_msgs_for_payload = historical_msgs
 
     llm_payload_messages = historical_msgs_for_payload + current_turn
+    if versioned and assistant_context.get("history_world_book_plan") is not None:
+        from tldw_Server_API.app.core.Character_Chat.world_book_prompt_context import (
+            build_frozen_world_book_prompt_context,
+        )
+
+        character_card["_history_world_book_context"] = build_frozen_world_book_prompt_context(
+            llm_payload_messages, assistant_context["history_world_book_plan"],
+        )
 
     return character_card, character_db_id, conv_id, conversation_created, llm_payload_messages, should_persist
 
@@ -4937,7 +5161,8 @@ def apply_prompt_templating(
 
     Returns (final_system_message, templated_llm_payload)
     """
-    active_template = (DEFAULT_RAW_PASSTHROUGH_TEMPLATE if getattr(request_data, "tldw_history_selection_v1", None) is not None
+    active_template = (DEFAULT_RAW_PASSTHROUGH_TEMPLATE if (getattr(request_data, "tldw_history_selection_v1", None) is not None
+            or getattr(request_data, "tldw_history_server_existing_input_v1", None) is not None)
         else load_template(getattr(request_data, "prompt_template_name", None) or DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name))
     template_data: dict[str, Any] = {}
     if character_card:
@@ -4983,6 +5208,12 @@ def apply_prompt_templating(
     elif character_card and character_card.get("system_prompt"):
         final_system_message = character_card.get("system_prompt")
         logger.debug("Using character system prompt summary {}", text_summary(final_system_message))
+
+    if (getattr(request_data, "tldw_history_selection_v1", None) is not None
+            or getattr(request_data, "tldw_history_server_existing_input_v1", None) is not None):
+        lore = character_card.get("_history_world_book_context")
+        if lore is not None and lore.text:
+            final_system_message = "\n\n".join(part for part in (final_system_message, lore.text) if part)
 
     logger.debug("Final system message summary {}", text_summary(final_system_message))
 
@@ -5331,6 +5562,8 @@ async def execute_streaming_call(
                                 queued=True,
                             )
                     return result
+                except LLMQuotaExceededError:
+                    raise  # the user's limit, not the provider's health: no failure, no fallback
                 except Exception as proc_error:  # noqa: BLE001 - adapter trust boundary
                     latency = time.time() - local_start
                     metrics.track_llm_call(
@@ -5581,11 +5814,13 @@ async def execute_streaming_call(
                 "message": "Prompt cost guardrail blocked request before provider dispatch.",
             }
         await _maybe_refund_streaming_rg(rg_refund_cb, cancelled=False, error=True)
+        if isinstance(he, LLMQuotaExceededError):
+            raise  # the user's limit: the caller gets the 402, not a provider-style error frame (spec §4b)
         response = StreamingResponse(
             _terminal_stream_error(error_payload),
             media_type="text/event-stream",
             headers={
-                "Cache-Control": "no-cache",
+                "Cache-Control": "no-cache, no-transform",
                 "X-Accel-Buffering": "no",
             },
         )
@@ -5674,7 +5909,7 @@ async def execute_streaming_call(
                             ),
                             media_type="text/event-stream",
                             headers={
-                                "Cache-Control": "no-cache",
+                                "Cache-Control": "no-cache, no-transform",
                                 "X-Accel-Buffering": "no",
                             },
                         )
@@ -5729,7 +5964,7 @@ async def execute_streaming_call(
                 _terminal_stream_error(error_payload),
                 media_type="text/event-stream",
                 headers={
-                    "Cache-Control": "no-cache",
+                    "Cache-Control": "no-cache, no-transform",
                     "X-Accel-Buffering": "no",
                 },
             )
@@ -5791,16 +6026,15 @@ async def execute_streaming_call(
     except _CHAT_NONCRITICAL_EXCEPTIONS:
         loop_compat_enabled = False
 
-    async def save_callback(
-        full_reply: str,
-        tool_calls: list[dict[str, Any]] | None,
-        function_call: dict[str, Any] | None,
-    ):
-        nonlocal stream_metrics_recorded
-        saved_message_id: str | None = None
-        tool_execution_payload: list[dict[str, Any]] | None = None
-        structured_events: list[dict[str, Any]] = []
-        full_reply_to_save = full_reply
+    async def _apply_stream_output_policies(full_reply: str) -> tuple[str | None, bool]:
+        """Run self-monitoring and output moderation on a reply before it is saved.
+
+        Shared by complete and partial settlement so both store the same text.
+
+        Returns:
+            The text to save (None when blocked) and whether the reply was blocked.
+        """
+        full_reply_to_save: str | None = full_reply
         post_stream_blocked = False
 
         # Self-monitoring output check (streaming)
@@ -5982,6 +6216,67 @@ async def execute_streaming_call(
         except _CHAT_NONCRITICAL_EXCEPTIONS:
             pass
 
+        return full_reply_to_save, post_stream_blocked
+
+    def _stream_generation_metadata(generation: dict[str, Any] | None) -> dict[str, Any]:
+        """Combine what the stream observed with the model and provider that produced it."""
+        observed = generation if isinstance(generation, dict) else {}
+        return build_generation_metadata(
+            generation_status=observed.get("generation_status", GENERATION_STATUS_COMPLETE),
+            model_id=model,
+            provider=selected_provider,
+            finish_reason=observed.get("finish_reason"),
+            usage=observed.get("usage"),
+        )
+
+    # Partial replies are kept only for turns admitted through native history
+    # selection, where the server owns settlement. Other save_to_db clients
+    # retry an unanswered turn with tldw_retry_failed_turn, and that contract
+    # needs the failed turn to have no saved reply.
+    keep_partial_replies = bool(should_persist and history_persistence_ack)
+
+    async def partial_save_callback(full_reply: str, *, generation: dict[str, Any]) -> str | None:
+        """Keep an unfinished reply after a disconnect, stop or provider failure (D7 S3-1).
+
+        Only the text is kept: partial tool calls are incomplete, and tool
+        execution, success accounting and audit success belong to complete
+        replies. A reply blocked by output policy is never saved.
+        """
+        if not keep_partial_replies or not final_conversation_id:
+            return None
+        if stream_mod_state.get("pending_stop_error") is not None:
+            return None
+        full_reply_to_save, post_stream_blocked = await _apply_stream_output_policies(full_reply)
+        if post_stream_blocked or not isinstance(full_reply_to_save, str) or not full_reply_to_save.strip():
+            return None
+        message_payload = build_assistant_message_payload(
+            character_card_for_context=character_card_for_context,
+            assistant_parent_message_id=assistant_parent_message_id,
+            content=full_reply_to_save,
+            tool_calls=None,
+            function_call=None,
+            generation_metadata=_stream_generation_metadata(generation),
+        )
+        return await save_assistant_message(
+            chat_db=chat_db,
+            conversation_id=final_conversation_id,
+            save_message_fn=save_message_fn,
+            payload=message_payload,
+        )
+
+    async def save_callback(
+        full_reply: str,
+        tool_calls: list[dict[str, Any]] | None,
+        function_call: dict[str, Any] | None,
+        *,
+        generation: dict[str, Any] | None = None,
+    ):
+        nonlocal stream_metrics_recorded
+        saved_message_id: str | None = None
+        tool_execution_payload: list[dict[str, Any]] | None = None
+        structured_events: list[dict[str, Any]] = []
+        full_reply_to_save, post_stream_blocked = await _apply_stream_output_policies(full_reply)
+
         if structured_request_context is not None:
             try:
                 structured_metadata = validate_structured_response(
@@ -6048,6 +6343,7 @@ async def execute_streaming_call(
                 content=full_reply_to_save,
                 tool_calls=tool_calls,
                 function_call=function_call,
+                generation_metadata=_stream_generation_metadata(generation),
             )
             saved_message_id = await save_assistant_message(
                 chat_db=chat_db,
@@ -6497,6 +6793,7 @@ async def execute_streaming_call(
                     conversation_id=final_conversation_id,
                     model_name=model,
                     save_callback=save_callback,
+                    partial_save_callback=partial_save_callback if keep_partial_replies else None,
                     finalize_callback=_finalize_stream,
                     on_first_output=_record_provider_output_once,
                     idle_timeout=CHAT_IDLE_TIMEOUT,
@@ -6585,7 +6882,7 @@ async def execute_streaming_call(
             _gen(),
             media_type="text/event-stream",
             headers={
-                "Cache-Control": "no-cache",
+                "Cache-Control": "no-cache, no-transform",
                 "X-Accel-Buffering": "no",
             },
         )
@@ -6595,7 +6892,7 @@ async def execute_streaming_call(
         streaming_generator,
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-transform",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
@@ -6694,7 +6991,7 @@ async def _execute_non_stream_call_impl(
         """Record token and durable usage for one validated dict response."""
 
         choices = response.get("choices")
-        usage = response.get("usage")
+        usage = usage_with_service_tier(response)  # OpenAI reports service_tier beside usage
         if usage:
             try:
                 normalized_usage = normalize_llm_usage(
@@ -6875,6 +7172,8 @@ async def _execute_non_stream_call_impl(
                                 queued=True,
                             )
                     return result
+                except LLMQuotaExceededError:
+                    raise  # the user's limit, not the provider's health: no failure, no fallback
                 except _CHAT_NONCRITICAL_EXCEPTIONS as proc_error:
                     latency = time.time() - local_start
                     metrics.track_llm_call(
@@ -7271,6 +7570,12 @@ async def _execute_non_stream_call_impl(
             content=content_to_save,
             tool_calls=tool_calls_to_save,
             function_call=function_call_to_save,
+            generation_metadata=_nonstream_generation_metadata(
+                llm_response=llm_response,
+                choice=first_choice,
+                model=model,
+                provider=selected_provider,
+            ),
         )
         assistant_message_id = await save_assistant_message(
             chat_db=chat_db,
@@ -7285,6 +7590,12 @@ async def _execute_non_stream_call_impl(
             content=content_to_save,
             tool_calls=tool_calls_to_save,
             function_call=function_call_to_save,
+            generation_metadata=_nonstream_generation_metadata(
+                llm_response=llm_response,
+                choice=first_choice,
+                model=model,
+                provider=selected_provider,
+            ),
         )
 
     if should_run_legacy_tool_autoexec(cleaned_args) and isinstance(tool_calls_to_save, list) and tool_calls_to_save:
@@ -7488,6 +7799,12 @@ async def _execute_non_stream_call_impl(
                                 content=content_to_save,
                                 tool_calls=tool_calls_to_save,
                                 function_call=function_call_to_save,
+                                generation_metadata=_nonstream_generation_metadata(
+                                    llm_response=llm_response,
+                                    choice=first_choice,
+                                    model=model,
+                                    provider=selected_provider,
+                                ),
                             )
                             continuation_message_id = await save_assistant_message(
                                 chat_db=chat_db,

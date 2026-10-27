@@ -62,6 +62,27 @@ describe("WorldBookToolbar", () => {
     ).toBeInTheDocument()
   })
 
+  it("makes compact filters reachable without taking the initial composer-sized space", async () => {
+    render(<WorldBookToolbar {...defaultProps} compact />)
+    expect(screen.getByTestId("world-books-search-input")).toBeVisible()
+    const disclosure = screen.getByTestId("world-books-filters-toggle")
+    expect(disclosure).toHaveTextContent("Filters")
+    const details = disclosure.closest("details")!
+    expect(details).not.toHaveAttribute("open")
+    await userEvent.setup().click(disclosure)
+    expect(details).toHaveAttribute("open")
+    const enabled = screen.getByTestId("world-books-enabled-filter")
+    const attachments = screen.getByTestId("world-books-attachment-filter")
+    expect(enabled).toBeVisible()
+    expect(attachments).toBeVisible()
+    await userEvent.setup().click(enabled)
+    await userEvent.setup().click(await screen.findByText("Enabled", { selector: ".ant-select-item-option-content" }))
+    await waitFor(() => expect(defaultProps.onEnabledFilterChange).toHaveBeenCalledWith("enabled", expect.anything()))
+    await userEvent.setup().click(attachments)
+    await userEvent.setup().click(await screen.findByText("Has attachments", { selector: ".ant-select-item-option-content" }))
+    await waitFor(() => expect(defaultProps.onAttachmentFilterChange).toHaveBeenCalledWith("attached", expect.anything()))
+  })
+
   it("renders 'New World Book' as a primary button", () => {
     render(<WorldBookToolbar {...defaultProps} />)
 

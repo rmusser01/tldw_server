@@ -13,7 +13,15 @@ vi.mock("@/services/background-proxy", () => ({
 
 vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: () => ({
-    get: vi.fn(async () => null),
+    get: vi.fn(async (key: string) => key === "tldwConfig" ? {
+      serverUrl: "https://characters.test",
+      authMode: "single-user",
+      authSource: "manual",
+      apiKey: "character-test-api-key",
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: "https://characters.test"
+    } : null),
     set: vi.fn(async () => undefined),
     remove: vi.fn(async () => undefined)
   }),

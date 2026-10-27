@@ -112,4 +112,25 @@ describe("chat error message recovery actions", () => {
       recoveryLabel: "Choose another model"
     })
   })
+
+  it.each([false, true])("recognizes numeric HTTP413 through direct and wrapped errors: %s", wrapped => {
+    const serverError = Object.assign(new Error("413 /Users/example/private.png https://provider.test?api_key=synthetic-sensitive-value"), { status: 413 })
+    const error = wrapped ? new Error("Stream completion failed", { cause: serverError }) : serverError
+    const payload = decodeChatErrorPayload(buildFriendlyErrorMessage(error))
+    expect(payload).toMatchObject({
+      summary: "Your message is too large.",
+      hint: "Use a smaller image or shorten your message, then try again.",
+      detail: "413 [redacted-path] [server-url]"
+    })
+    expect(JSON.stringify(payload)).not.toMatch(/synthetic-sensitive-value|\/Users\/example|provider\.test/)
+  })
+
+  it("keeps unrelated status and quoted size text generic through circular causes", () => {
+    const inner = Object.assign(new Error("Model description mentions HTTP413 and too large"), { status: 500 })
+    const wrapped = new Error("Stream completion failed", { cause: inner })
+    Object.assign(inner, { cause: wrapped })
+    expect(decodeChatErrorPayload(buildFriendlyErrorMessage(wrapped))?.summary)
+      .toBe("Something went wrong while talking to your tldw server.")
+  })
+
 })

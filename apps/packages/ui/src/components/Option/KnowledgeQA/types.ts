@@ -18,6 +18,7 @@ export type ScopeSnapshot = {
   preset: RagPresetName
   sources: RagSettings["sources"]
   webFallback: boolean
+  keywordFilter?: RagSettings["keyword_filter"]
   collectionId: number | null
   includeMediaIds: number[]
   includeNoteIds: string[]
@@ -235,6 +236,7 @@ export type KnowledgeSourceHealth = {
 }
 
 export type KnowledgeSourceHealthState = {
+  personalContentError?: string | null
   bySource: Partial<Record<RagSettings["sources"][number], KnowledgeSourceHealth>>
   sources: KnowledgeSourceHealth[]
   loading: boolean
@@ -290,6 +292,8 @@ export type KnowledgeQAMessage = {
 export type KnowledgeQAState = {
   // Search state
   query: string
+  // Question associated with displayed results; optional for legacy consumers.
+  resultQuery?: string | null
   isSearching: boolean
   hasSearched: boolean
   results: RagResult[]
@@ -335,7 +339,12 @@ export type KnowledgeQAState = {
 export type KnowledgeQAActions = {
   // Search actions
   setQuery: (query: string) => void
-  search: () => Promise<void>
+  /**
+   * Run a search. `queryOverride` lets the SearchBar submit path pass its
+   * local (un-debounced) query text so submission never races the 250ms
+   * reducer sync debounce (WP-08).
+   */
+  search: (queryOverride?: string) => Promise<void>
   cancelSearch: () => void
   clearResults: () => void
   rerunWithTokenLimit: (tokenLimit: number) => Promise<void>
@@ -381,11 +390,13 @@ export type KnowledgeQAActions = {
 // Context value combining state and actions
 export type KnowledgeQAContextValue = KnowledgeQAState &
   KnowledgeQAActions & {
-    historyHydrated: boolean
-    client: import("./knowledgeQaClient").KnowledgeQaClient
-    isAuthorityCurrent: () => boolean
-    storageScopeKey: string | null
-  }
+    historyHydrated: boolean;
+    client: import("./knowledgeQaClient").KnowledgeQaClient;
+    isAuthorityCurrent: () => boolean;
+    storageScopeKey: string | null;
+    notesAuthorityScope: string | null;
+    notesAuthorityId: string | null;
+  };
 
 // Export format options
 export type ExportFormat = "markdown" | "pdf" | "chatbook"

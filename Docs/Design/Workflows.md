@@ -103,7 +103,7 @@ Registered under `StepTypeRegistry`:
 
 - `prompt`: Render a prompt template using sandboxed template engine; returns `{ text }`. Supports `simulate_delay_ms` for testing timeouts/retries and optional artifact persistence.
 - `rag_search`: Execute RAG search via unified pipeline; returns `{ documents, metadata, timings, citations? }`. Passes through core pipeline options such as reranking, security filters, and generation.
-- `media_ingest`: Ingest local files (`file://...`) or optional network sources via yt-dlp/ffmpeg (egress allowlisted). Supports text extraction, chunking strategies, optional indexing into the Media DB, and artifact persistence of downloaded files.
+- `media_ingest`: Ingest local files (`file://...`) or optional network sources via yt-dlp/ffmpeg (egress allowlisted). Supports text extraction, chunking strategies, optional indexing into the Media DB, and artifact persistence of downloaded files. A network download finishes before the step returns: the step waits for yt-dlp to exit, up to the step's `timeout_seconds` (default 300), which all of the step's sources share. A download that outlasts it is stopped (SIGTERM, then SIGKILL after 5 s), and the step fails, as does the run unless `on_failure` routes around it, with `step_timeout`. For long media, raise the step's own `timeout_seconds` (the step-level key, beside `type`, not under `config`; the WebUI editor has no control for it, so set it in the definition's JSON). yt-dlp exiting with an error, or writing no file, is recorded as `download_failed` with its `returncode`.
 - `mcp_tool`: Execute MCP tools through the unified server registry. Test-friendly fallback for `tool_name=echo`.
 - `webhook`: Send events to a URL (HMAC signing and SSRF/egress controls) or dispatch to registered webhooks.
 - `wait_for_human`: Pause run with status `waiting_human` until `approve`/`reject`.
@@ -111,7 +111,8 @@ Registered under `StepTypeRegistry`:
 - `delay`: Pause the workflow for a fixed time (milliseconds). Useful for demos, backoffs or pacing.
 - `log`: Log a templated message at the chosen level (`debug|info|warning|error`). Helps with debugging and audit trails.
 - `branch`: Evaluate a boolean condition and optionally jump to a target step id (`true_next` / `false_next`).
-- `map`: Fan-out over a list and apply a nested step with optional concurrency; returns a list of `results`.
+- `map`: Fan-out over a list and apply a nested step with optional concurrency; returns a list of `results`. If an item's step raises, the other items are cancelled and the map step fails with that error.
+- `parallel`: Run a list of sub-steps (`steps: [{type, config}]`) together, up to `max_concurrency` at a time (default 5); returns `{ results, count, errors }`, with `results` in step order. A sub-step that raises an adapter-level error (`AdapterError`, `ValueError`, `RuntimeError`, `OSError`, `TimeoutError` and similar) gets `{"error": "parallel_step_error"}` in its slot and does not fail the step; with `fail_fast` the error is also listed in `errors`. Any other sub-step error fails the step when `fail_fast` is set, and is recorded the same way when it is not. An LLM quota refusal always fails the step. When the step fails, its other sub-steps, running or queued, are cancelled first.
 
 See `adapters.py` for configuration keys and behavior of each step.
 

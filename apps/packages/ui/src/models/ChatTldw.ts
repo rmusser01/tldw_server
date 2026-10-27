@@ -13,14 +13,21 @@ import {
   type ChatResearchContext
 } from "@/services/tldw"
 import type { ToolCall } from "@/types/tool-calls"
+import type { ChatScope } from "@/types/chat-scope"
 import { publishChatLoopEvent } from "@/services/chat-loop/bridge"
 import { extractChatLoopEvent } from "@/services/chat-loop/stream"
-import { extractStreamTransportInterruption } from "@/utils/extract-token-from-chunk"
+import { extractStreamTransportInterruption, extractTokenFromChunk } from "@/utils/extract-token-from-chunk"
+import { readChunkFinishReason } from "@/utils/output-limit-reply"
 import type { ChatRequestDebugMetadata } from "@/services/tldw/chat-request-debug"
 import { prepareChatCompletionRequest } from "@/services/tldw/TldwChat"
 import type { ChatCompletionRequest } from "@/services/tldw/TldwApiClient"
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import { ImageSupportUnconfirmedError } from "@/utils/chat-error-message"
+import {
+  beginServerChatWrite,
+  type ServerChatWriteOutcome
+} from "@/store/server-chat-save-status"
+import { CHAT_REQUEST_SAMPLING_FALLBACKS } from "./chat-sampling-defaults"
 
 export interface ChatTldwOptions {
   model: string
@@ -58,6 +65,7 @@ export interface ChatTldwOptions {
   researchContext?: ChatResearchContext
   chatDebugMetadata?: ChatRequestDebugMetadata
   requestScope?: ServicePromptRequestScope
+  scope?: ChatScope
   retryFailedTurn?: boolean
   clientMessageId?: string
   regenerateFromMessageId?: string
@@ -82,6 +90,8 @@ export class ChatTldw {
   conversationId?: string
   serverMessageId?: string
   userServerMessageId?: string
+  /** The last stream's `finish_reason` ("length" when the output limit cut it off, CM-03). */
+  finishReason?: string
   historyMessageLimit?: number
   historyMessageOrder?: string
   slashCommandInjectionMode?: string
@@ -91,6 +101,7 @@ export class ChatTldw {
   researchContext?: ChatResearchContext
   chatDebugMetadata?: ChatRequestDebugMetadata
   requestScope?: ServicePromptRequestScope
+  scope?: ChatScope
   retryFailedTurn?: boolean
   clientMessageId?: string
   regenerateFromMessageId?: string
@@ -99,11 +110,15 @@ export class ChatTldw {
     // Normalize model id: drop internal prefix like "tldw:" so server receives provider/model
     this.model = String(options.model || "").replace(/^tldw:/, "")
     this.routing = options.routing
-    this.temperature = options.temperature ?? 0.7
+    this.temperature =
+      options.temperature ?? CHAT_REQUEST_SAMPLING_FALLBACKS.temperature
     this.maxTokens = options.maxTokens
-    this.topP = options.topP ?? 1
-    this.frequencyPenalty = options.frequencyPenalty ?? 0
-    this.presencePenalty = options.presencePenalty ?? 0
+    this.topP = options.topP ?? CHAT_REQUEST_SAMPLING_FALLBACKS.topP
+    this.frequencyPenalty =
+      options.frequencyPenalty ??
+      CHAT_REQUEST_SAMPLING_FALLBACKS.frequencyPenalty
+    this.presencePenalty =
+      options.presencePenalty ?? CHAT_REQUEST_SAMPLING_FALLBACKS.presencePenalty
     this.systemPrompt = options.systemPrompt
     this.streaming = options.streaming ?? false
     this.reasoningEffort = options.reasoningEffort
@@ -128,6 +143,7 @@ export class ChatTldw {
     this.researchContext = options.researchContext
     this.chatDebugMetadata = options.chatDebugMetadata
     this.requestScope = options.requestScope
+    this.scope = options.scope
     this.retryFailedTurn = options.retryFailedTurn
     this.clientMessageId = options.clientMessageId
     this.regenerateFromMessageId = options.regenerateFromMessageId
@@ -137,7 +153,7 @@ export class ChatTldw {
    * Streaming API used by existing chat modes.
    *
    * This intentionally mirrors the previous `ollama.stream(...)` contract:
-   * - yields plain string tokens
+   * - yields text tokens and optional reasoning frames
    * - optionally calls `callbacks[i].handleLLMEnd(result)` once at the end
    */
   async stream(
@@ -145,6 +161,8 @@ export class ChatTldw {
     options?: {
       signal?: AbortSignal
       preparedRequest?: ChatCompletionRequest
+      onDispatch?: () => void
+      onChunk?: (chunk: unknown) => Promise<void>
       // Matches the shape used in normalChatMode/search/rag, where
       // callbacks: [{ handleLLMEnd(output) { ... } }]
       callbacks?: Array<{ handleLLMEnd?: (output: any) => any }>
@@ -153,6 +171,7 @@ export class ChatTldw {
     const { signal, callbacks } = options || {}
     this.serverMessageId = undefined
     this.userServerMessageId = undefined
+    this.finishReason = undefined
 
     const tldwMessages = options?.preparedRequest
       ? []
@@ -194,7 +213,7 @@ export class ChatTldw {
       })
     }
 
-    const handleChunk = (chunk: any) => {
+    const consumeChunk = (chunk: any) => {
       if (signal?.aborted) return
       const streamedConversationId =
         typeof chunk?.tldw_conversation_id === "string" &&
@@ -206,16 +225,16 @@ export class ChatTldw {
             : null
       // Nonpersisted completions also carry a request-scoped conversation UUID.
       // It must not turn local history into a link to a nonexistent server chat.
-      if (streamedConversationId && this.saveToDb !== false) {
+      if (!options?.onChunk && streamedConversationId && this.saveToDb !== false) {
         this.conversationId = streamedConversationId
         this.saveToDb = true
       }
-      if (this.saveToDb !== false && typeof chunk?.tldw_message_id === "string") {
+      if (!options?.onChunk && this.saveToDb !== false && typeof chunk?.tldw_message_id === "string") {
         const savedMessageId = chunk.tldw_message_id.trim()
         if (savedMessageId) this.serverMessageId = savedMessageId
       }
 
-      if (this.saveToDb !== false && typeof chunk?.tldw_user_message_id === "string") {
+      if (!options?.onChunk && this.saveToDb !== false && typeof chunk?.tldw_user_message_id === "string") {
         const savedUserMessageId = chunk.tldw_user_message_id.trim()
         if (savedUserMessageId) this.userServerMessageId = savedUserMessageId
       }
@@ -229,6 +248,9 @@ export class ChatTldw {
         interruptionChunk = chunk as Record<string, unknown>
       }
 
+      const finishReason = readChunkFinishReason(chunk)
+      if (finishReason) this.finishReason = finishReason
+
       const deltas =
         chunk?.choices?.[0]?.delta?.tool_calls ??
         chunk?.choices?.[0]?.tool_calls ??
@@ -238,6 +260,9 @@ export class ChatTldw {
       }
     }
 
+    const handleChunk = (chunk: unknown) => options?.onChunk
+      ? options.onChunk(chunk).then(() => consumeChunk(chunk)) : consumeChunk(chunk)
+
     const stream = tldwChat.streamMessage(
       tldwMessages,
       {
@@ -245,6 +270,7 @@ export class ChatTldw {
         // all modes (not just polling `signal.aborted` at the loop top).
         signal,
         preparedRequest: options?.preparedRequest,
+        onDispatch: options?.onDispatch,
         model: this.model,
         temperature: this.temperature,
         maxTokens: this.maxTokens,
@@ -270,23 +296,35 @@ export class ChatTldw {
         extraBody: this.extraBody,
         researchContext: this.researchContext,
         chatDebugMetadata: this.chatDebugMetadata,
-        requestScope: this.requestScope
+        requestScope: this.requestScope,
+        scope: this.scope
       },
-      handleChunk
+      handleChunk,
+      true
     )
 
+    // A completion the server persists into an existing server chat is a
+    // server write. Record its outcome so chat persistence labels only claim
+    // the server once it has acknowledged the turn (CS-03 / XS-05, #3104).
+    const serverWriteChatId =
+      this.saveToDb === true && !this.clientManagedHistory && !options?.onChunk
+        ? this.conversationId
+        : undefined
+
     async function* generator() {
+      const endServerWrite = serverWriteChatId
+        ? beginServerChatWrite(serverWriteChatId)
+        : null
+      // Stops and dropped transports leave the server outcome unknown.
+      let serverWriteOutcome: ServerChatWriteOutcome = "unknown"
       let fullText = ""
       try {
+        signal?.throwIfAborted()
         for await (const token of stream) {
           if (signal?.aborted) {
             break
           }
-          if (typeof token !== "string") continue
-          fullText += token
-          // Downstream chat-modes treat chunks as strings or objects with
-          // `content` / `choices[0].delta.content`. Yielding the plain
-          // string keeps the simple path working (`typeof chunk === 'string'`).
+          fullText += extractTokenFromChunk(token)
           yield token
         }
         // The extension port can drop after the first byte; TldwChat surfaces a
@@ -296,7 +334,14 @@ export class ChatTldw {
         if (interruptionChunk && !signal?.aborted) {
           yield interruptionChunk
         }
+        if (!interruptionChunk && !signal?.aborted) {
+          serverWriteOutcome = "saved"
+        }
+      } catch (error) {
+        if (!signal?.aborted) serverWriteOutcome = "failed"
+        throw error
       } finally {
+        endServerWrite?.(serverWriteOutcome)
         // Synthesize a minimal LangChain-style result for handleLLMEnd
         if (callbacks && callbacks.length > 0) {
           const generationInfo =
@@ -322,6 +367,16 @@ export class ChatTldw {
   prepareClientManagedRequest(messages: BaseMessage[]): ChatCompletionRequest {
     if (!this.clientManagedHistory)
       throw new Error("client_managed_history_required")
+    return this.prepareHistoryRequest(messages)
+  }
+
+  prepareNativeHistoryRequest(messages: BaseMessage[]): ChatCompletionRequest {
+    if (this.clientManagedHistory || this.saveToDb !== true || !this.conversationId)
+      throw new Error("native_history_persistence_required")
+    return this.prepareHistoryRequest(messages)
+  }
+
+  private prepareHistoryRequest(messages: BaseMessage[]): ChatCompletionRequest {
     // Custom provider objects can contain credentials. No implicit redaction/projection.
     if (this.extraBody && Object.keys(this.extraBody).length) {
       throw new Error("unsupported_history_custom_provider_body")
@@ -358,7 +413,8 @@ export class ChatTldw {
       tools: this.tools,
       apiProvider: this.apiProvider,
       extraHeaders: this.extraHeaders,
-      saveToDb: false,
+      saveToDb: this.clientManagedHistory ? false : this.saveToDb,
+      ...(!this.clientManagedHistory ? { conversationId: this.conversationId } : {}),
       researchContext: this.researchContext,
       slashCommandInjectionMode: this.slashCommandInjectionMode
     })
@@ -399,6 +455,7 @@ export class ChatTldw {
       researchContext: this.researchContext,
       chatDebugMetadata: this.chatDebugMetadata,
       requestScope: this.requestScope,
+      scope: this.scope,
       signal: options?.signal
     })
 

@@ -78,11 +78,16 @@ For host-visible storage instead, see the `docker-compose.host-storage.yml` vari
 
 ### Steps
 
+Choose a unique admin password with at least 10 characters, uppercase and lowercase letters, a number, and a symbol. Avoid your username and three-character repeats or sequences. The prompt below hides your input.
+
 ```bash
 git clone https://github.com/rmusser01/tldw_server.git
 cd tldw_server
 export ADMIN_USERNAME=tldw-admin
-export ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+printf 'Admin password: '
+IFS= read -rs ADMIN_PASSWORD
+printf '\n'
+export ADMIN_PASSWORD
 make setup-docker-multi
 make start-docker-multi
 make verify-docker-multi
@@ -98,14 +103,14 @@ make verify-docker-multi
 
 ### Next: create the first admin user
 
-Set `ADMIN_USERNAME` and the generated `ADMIN_PASSWORD` before `make setup-docker-multi` to create the first admin automatically. Keep the variables in the same shell so the manual login example can reuse them:
+Set `ADMIN_USERNAME` and your chosen `ADMIN_PASSWORD` before `make setup-docker-multi` to create the first admin automatically. Keep the variables in the same shell so the manual login example can reuse them:
 
 ```bash
 JWT=$(
   curl -sS -X POST http://127.0.0.1:8000/api/v1/auth/login \
     -H "Content-Type: application/x-www-form-urlencoded" \
-    -d "username=$ADMIN_USERNAME" \
-    -d "password=$ADMIN_PASSWORD" | jq -r '.access_token'
+    --data-urlencode "username=$ADMIN_USERNAME" \
+    --data-urlencode "password=$ADMIN_PASSWORD" | jq -r '.access_token'
 )
 
 curl -sS http://127.0.0.1:8000/api/v1/auth/me \

@@ -6,6 +6,29 @@ configurations). Prefer importing from the shared plugin; fall back to local
 definitions if unavailable.
 """
 
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+
+
+@pytest.fixture
+def backup_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """Own an isolated backup workspace and clear cached settings at both boundaries."""
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("TLDW_DB_BACKUP_PATH", str(tmp_path / "backups"))
+    monkeypatch.setenv("TLDW_DB_ALLOWED_BASE_DIRS", str(tmp_path))
+    monkeypatch.delenv("TLDW_POSTGRES_BACKUP_DSN", raising=False)
+    reset_settings()
+    try:
+        yield tmp_path
+    finally:
+        reset_settings()
+
+
 try:
     # Prefer the shared plugin implementations
     from tldw_Server_API.tests._plugins.authnz_fixtures import (
@@ -14,7 +37,6 @@ try:
     )
 except Exception:
     # Fallback: define lightweight local fixtures matching the shared ones
-    import pytest
 
     def _run_async(coro):
 

@@ -23,14 +23,6 @@
     "verify:openapi": "node ../../extension/scripts/verify-openapi-client-paths.mjs",
     "verify:design-system-state": "node scripts/verify-design-system-product-state.mjs"
   },
-  "exports": {
-    ".": "./index.ts",
-    "./components/ui/state": "./src/components/ui/state/index.ts",
-    "./assets/tailwind.css": {
-      "style": "./src/assets/tailwind.css",
-      "default": "./src/assets/tailwind.css"
-    }
-  },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.1",
@@ -40,9 +32,12 @@
     "@types/js-yaml": "^4.0.9",
     "@vitest/coverage-v8": "4.0.18",
     "axe-core": "^4.11.1",
-    "jsdom": "^28.1.0",
+    "jsdom": "28.1.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.16"
+    "vitest": "^4.0.16",
+    "@tldw/api-types": "workspace:*",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.19"
   },
   "dependencies": {
     "@noble/hashes": "2.0.1",

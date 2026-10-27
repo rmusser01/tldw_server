@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
 import React from "react"
+import Dexie from "dexie"
 import i18n from "i18next"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createSafeStorage } from "@/utils/safe-storage"
 
-import { useChatActions } from "../useChatActions"
-import type { ChatHistory, Message } from "@/store/option"
+import { useChatActions as useRawChatActions } from "../useChatActions"
+import { useStoreMessageOption, type ChatHistory, type Message, type State } from "@/store/option"
+import { createCoreSlice } from "@/store/option/slices/core-slice"
+import { createServerChatSlice } from "@/store/option/slices/server-chat-slice"
 import { useStoreChatModelSettings } from "@/store/model"
 import { chatRagMethods } from "@/services/tldw/domains/chat-rag"
 import { generateID } from "@/db/dexie/helpers"
@@ -18,6 +21,34 @@ import { db } from "@/db/dexie/schema"
 import type { HistoryInfo, Message as SavedMessage } from "@/db/dexie/types"
 import { reconcileServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { getChatModelSendOutcome, resetChatModelSendOutcomes } from "@/utils/chat-model-readiness"
+
+vi.mock("@/db/dexie/schema", () => {
+  const table = () => ({
+    toArray: vi.fn().mockResolvedValue([]),
+    get: vi.fn().mockResolvedValue(undefined),
+    put: vi.fn().mockResolvedValue(undefined),
+    add: vi.fn().mockResolvedValue(undefined),
+    update: vi.fn().mockResolvedValue(0),
+    delete: vi.fn().mockResolvedValue(undefined),
+    where: vi.fn().mockReturnThis(),
+    equals: vi.fn().mockReturnThis(),
+    first: vi.fn().mockResolvedValue(undefined),
+    count: vi.fn().mockResolvedValue(0),
+    bulkPut: vi.fn().mockResolvedValue(undefined),
+    bulkDelete: vi.fn().mockResolvedValue(undefined)
+  })
+  return {
+    db: {
+      chatHistories: table(),
+      messages: table(),
+      modelNickname: table(),
+      sessionFiles: table(),
+      transaction: vi.fn().mockImplementation(async (_mode, _tables, operation) => operation())
+    },
+    PageAssistDexieDB: vi.fn()
+  }
+})
 
 const {
   getCharacterMock,
@@ -38,16 +69,16 @@ const {
   bgStreamMock: vi.fn(),
   saveLocalErrorMock: vi.fn(async (_payload: unknown) => "history-character"),
   saveLocalSuccessMock: vi.fn(async (_payload: unknown) => "history-character"),
-  addChatMessageMock: vi.fn(async () => ({ id: "user-server-1", version: 1 })),
+  addChatMessageMock: vi.fn(async (..._args: Parameters<typeof import("@/services/tldw/TldwApiClient").tldwClient.addChatMessage>) => ({ id: "user-server-1", version: 1 })),
   createChatMock: vi.fn(),
   detectCharacterMoodMock: vi.fn(),
   streamCharacterChatCompletionMock: vi.fn(),
-  persistCharacterCompletionMock: vi.fn(async () => ({
+  persistCharacterCompletionMock: vi.fn(async (..._args: Parameters<typeof import("@/services/tldw/TldwApiClient").tldwClient.persistCharacterCompletion>) => ({
     assistant_message_id: "assistant-server-1",
     version: 1
   })),
   normalChatModeMock: vi.fn(),
-  resolveVisualIdentityBindingMock: vi.fn(async () => ({
+  resolveVisualIdentityBindingMock: vi.fn(async (..._args: Parameters<typeof import("@/services/tldw/TldwApiClient").tldwClient.resolveVisualIdentityBinding>) => ({
     actor_kind: "character",
     actor_id: 12,
     pack_id: 1,
@@ -135,7 +166,8 @@ vi.mock("@/services/service-prompts", () => ({
   }
 }))
 
-vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
+vi.mock("@/hooks/chat-modes/normalChatMode", async importOriginal => ({
+  ...await importOriginal<typeof import("@/hooks/chat-modes/normalChatMode")>(),
   normalChatMode: normalChatModeMock
 }))
 
@@ -222,7 +254,8 @@ vi.mock("@/db/dexie/branch", () => ({
 }))
 
 vi.mock("@/services/actor-settings", () => ({
-  getActorSettingsForChat: vi.fn(async () => null)
+  getActorSettingsForChat: vi.fn(async () => null),
+  getActorSceneForChat: vi.fn(async ({ target }) => ({ target, settings: (await import("@/types/actor")).createDefaultActorSettings(), originalRecord: null, origin: "default", profileUnavailable: false }))
 }))
 
 vi.mock("@/utils/character-mood", () => ({
@@ -257,7 +290,10 @@ vi.mock("@plasmohq/storage/hook", () => ({
 
 vi.mock("@/store/option", () => ({
   useStoreMessageOption: {
-    getState: () => messageStoreState.value
+    getState: () => messageStoreState.value,
+    setState: (update: Record<string, unknown> | ((state: typeof messageStoreState.value) => Record<string, unknown>)) => {
+      Object.assign(messageStoreState.value, typeof update === "function" ? update(messageStoreState.value) : update)
+    }
   }
 }))
 
@@ -280,6 +316,94 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
+import { freshChatDraftAddress, type ChatDraftAddress } from "@/utils/chat-draft-address"
+import { captureActorSceneSendForTarget } from "../actor-scene-source"
+import { captureChatDraftSource, chatDraftAddressForReceipt } from "../chat-draft-transition"
+import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
+
+let fixtureSceneSnapshot: ServicePromptSnapshot | null = null
+
+// The SDK fixtures declare a private scene locator and original account. They
+// deliberately do not install an H1 controller or native mutation capability.
+const useChatActions = (options: Parameters<typeof useRawChatActions>[0]) => {
+  const lifetime = React.useRef({ active: true, accountRetired: false })
+  const fixture = React.useRef<{ requestScope: ServicePromptSnapshot["requestScope"]; accountIsCurrent: () => boolean } | null>(null)
+  if (!fixture.current) {
+    const custom = fixtureSceneSnapshot
+    const config = actualAuthority.config
+    const actualAccount = actualAuthority.enabled
+    const requestScope: ServicePromptSnapshot["requestScope"] = custom?.requestScope ?? (actualAccount && config ? {
+      config: { serverUrl: String(config.serverUrl), authMode: config.authMode as "single-user" | "multi-user", authSource: config.authSource as "manual" | "cookie-session" | undefined,
+        orgId: config.orgId as number | undefined,
+        expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope(String(config.authMode), config.apiKey as string | undefined) ?? undefined },
+      userId: null
+    } : { config: { serverUrl: "http://127.0.0.1:8000", authMode: "single-user" }, userId: null })
+    const authority = recoveryAuthority.controller
+    const accountIsCurrent = () => !lifetime.current.accountRetired && !authority.signal.aborted &&
+      !custom?.scopeInvalidatedSignal.aborted && (!actualAccount || !actualAuthority.snapshot?.scopeInvalidatedSignal.aborted)
+    const state = messageStoreState.value as typeof messageStoreState.value & Record<string, unknown>
+    const serverId = state.serverChatId || options.serverChatId
+    const historyId = options.historyId
+    const owner = serverId ? { kind: "native" as const, conversation_id: serverId, owner_key: "legacy-character-scene-owner",
+      request_scope: requestScope, scope: options.scope, validate_lease: accountIsCurrent } : historyId && historyId !== "temp" ? {
+      kind: "local" as const, conversation_id: historyId, owner_key: "legacy-character-local-owner", profile_id: "legacy-character-profile",
+      validate_lease: accountIsCurrent
+    } : null
+    const view = owner ? { owner_key: owner.owner_key, conversation_id: owner.conversation_id, view_session_id: "legacy-character-scene-view",
+      selection_revision: 0, interpretation: { kind: "parent_graph_v1" as const }, cursor: { kind: "empty" as const } } : null
+    Object.assign(state, { historyId, serverChatId: serverId,
+      serverChatMetaLoaded: state.serverChatMetaLoaded ?? (serverId ? options.serverChatMetaLoaded : false),
+      chatDraftRevision: state.chatDraftRevision ?? 0,
+      chatDraftAddress: state.chatDraftAddress ?? (owner && view ? chatDraftAddressForReceipt({ owner, view }) : freshChatDraftAddress(options.temporaryChat)),
+      selectedModel: options.selectedModel, selectedModelRevision: state.selectedModelRevision ?? 0, toolChoice: options.toolChoice,
+      temporaryChat: options.temporaryChat })
+    fixture.current = { requestScope: structuredClone(requestScope), accountIsCurrent }
+  }
+  React.useLayoutEffect(() => {
+    const original = lifetime.current
+    original.active = true
+    const release = watchChatAccountChanges(invalidated => { if (invalidated) original.accountRetired = true })
+    return () => { original.active = false; release() }
+  }, [])
+  const state = messageStoreState.value as typeof messageStoreState.value & Record<string, unknown>
+  state.messages = options.messages
+  const address = state.chatDraftAddress as ChatDraftAddress
+  const source = captureChatDraftSource(() => lifetime.current.active)
+  const { requestScope, accountIsCurrent } = fixture.current
+  const owner = address.kind === "native" ? { kind: "native" as const, conversation_id: address.id, owner_key: address.ownerKey,
+    request_scope: requestScope, scope: address.scope, validate_lease: accountIsCurrent } : address.kind === "local" ? {
+    kind: "local" as const, conversation_id: address.id, owner_key: "legacy-character-local-owner", profile_id: address.profileId,
+    validate_lease: accountIsCurrent
+  } : null
+  const view = owner ? { owner_key: owner.owner_key, conversation_id: owner.conversation_id, view_session_id: "legacy-character-scene-view",
+    selection_revision: 0, interpretation: { kind: "parent_graph_v1" as const }, cursor: { kind: "empty" as const } } : null
+  const target = captureActorSettingsTarget({ address, owner, view, requestScope, accountIsCurrent, isCurrent: source.isCurrent })
+  const capture = captureActorSceneSendForTarget(target, { requestScope, isCurrent: accountIsCurrent }, source.isCurrent)
+  const actions = useRawChatActions(options)
+  const read = async () => {
+    if (!capture) throw new Error("Legacy Character fixture has no qualified original scene")
+    return capture.read()
+  }
+  return { ...actions,
+    onSubmit: async (input: Parameters<typeof actions.onSubmit>[0]) => actions.onSubmit({ ...input, actorSceneSend: input.actorSceneSend ?? await read() }),
+    regenerateLastMessage: async (input?: Parameters<typeof actions.regenerateLastMessage>[0]) => actions.regenerateLastMessage({ ...input,
+      actorSceneSend: input?.actorSceneSend ?? await read() }) }
+}
+
+// These legacy SDK fixtures have no H1 controller. Their passed identity and
+// metadata setters must still publish the real slice semantics synchronously;
+// recording an issued ID alone is not a physical publication acknowledgement.
+const publishFixtureState: Parameters<typeof createCoreSlice>[0] = (update) => {
+  Object.assign(messageStoreState.value, typeof update === "function"
+    ? update(messageStoreState.value as unknown as State) : update)
+}
+const getFixtureState = () => messageStoreState.value as unknown as State
+const fixtureCore = createCoreSlice(publishFixtureState, getFixtureState)
+const fixtureServerChat = createServerChatSlice(publishFixtureState, getFixtureState)
+
 const createHookOptions = () => ({
   t: (_key: string, fallback?: string) => fallback || _key,
   notification: {
@@ -295,7 +419,7 @@ const createHookOptions = () => ({
   history: [],
   setHistory: vi.fn(),
   historyId: "history-character",
-  setHistoryId: vi.fn(),
+  setHistoryId: vi.fn(fixtureCore.setHistoryId),
   temporaryChat: false,
   selectedModel: "deepseek-chat",
   useOCR: false,
@@ -320,6 +444,7 @@ const createHookOptions = () => ({
   ragSources: [],
   ragAdvancedOptions: {},
   serverChatId: "tracked-chat-1",
+  serverChatMetaLoaded: true,
   serverChatTitle: "Tracked character chat",
   serverChatCharacterId: "char-tracked",
   serverChatAssistantKind: "character" as const,
@@ -330,19 +455,19 @@ const createHookOptions = () => ({
   serverChatClusterId: null,
   serverChatSource: null,
   serverChatExternalRef: null,
-  setServerChatId: vi.fn(),
-  setServerChatTitle: vi.fn(),
-  setServerChatCharacterId: vi.fn(),
-  setServerChatAssistantKind: vi.fn(),
-  setServerChatAssistantId: vi.fn(),
-  setServerChatPersonaMemoryMode: vi.fn(),
-  setServerChatMetaLoaded: vi.fn(),
-  setServerChatState: vi.fn(),
-  setServerChatVersion: vi.fn(),
-  setServerChatTopic: vi.fn(),
-  setServerChatClusterId: vi.fn(),
-  setServerChatSource: vi.fn(),
-  setServerChatExternalRef: vi.fn(),
+  setServerChatId: vi.fn(fixtureServerChat.setServerChatId),
+  setServerChatTitle: vi.fn(fixtureServerChat.setServerChatTitle),
+  setServerChatCharacterId: vi.fn(fixtureServerChat.setServerChatCharacterId),
+  setServerChatAssistantKind: vi.fn(fixtureServerChat.setServerChatAssistantKind),
+  setServerChatAssistantId: vi.fn(fixtureServerChat.setServerChatAssistantId),
+  setServerChatPersonaMemoryMode: vi.fn(fixtureServerChat.setServerChatPersonaMemoryMode),
+  setServerChatMetaLoaded: vi.fn(fixtureServerChat.setServerChatMetaLoaded),
+  setServerChatState: vi.fn(fixtureServerChat.setServerChatState),
+  setServerChatVersion: vi.fn(fixtureServerChat.setServerChatVersion),
+  setServerChatTopic: vi.fn(fixtureServerChat.setServerChatTopic),
+  setServerChatClusterId: vi.fn(fixtureServerChat.setServerChatClusterId),
+  setServerChatSource: vi.fn(fixtureServerChat.setServerChatSource),
+  setServerChatExternalRef: vi.fn(fixtureServerChat.setServerChatExternalRef),
   ensureServerChatHistoryId: vi.fn(async () => "history-character"),
   contextFiles: [],
   setContextFiles: vi.fn(),
@@ -423,6 +548,7 @@ describe("useChatActions character integration", () => {
     actualAuthority.enabled = false
     actualAuthority.config = null
     actualAuthority.snapshot = null
+    fixtureSceneSnapshot = null
     safeStorage.values.clear()
     safeStorage.watchers.clear()
     vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
@@ -467,6 +593,85 @@ describe("useChatActions character integration", () => {
   })
 
 
+
+  it.each(["prop", "store"])("retains a Character draft when %s identity is still unloaded", async boundary => {
+    const options = { ...createHookOptions(), serverChatMetaLoaded: boundary !== "prop" }
+    if (boundary === "store") Object.assign(messageStoreState.value, { serverChatMetaLoaded: false })
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    await act(async () => {
+      expect(await result.current.onSubmit({ message: "Keep this Character draft", image: "" })).toMatchObject({
+        status: "failed", restoreDraft: true
+      })
+    })
+    expect(useStoreMessageOption.getState().serverChatMetaLoaded).toBe(false)
+    expect(streamCharacterChatCompletionMock).not.toHaveBeenCalled()
+    expect(saveLocalSuccessMock).not.toHaveBeenCalled()
+    expect(addChatMessageMock).not.toHaveBeenCalled()
+    expect(options.setMessages).not.toHaveBeenCalled()
+  })
+
+  it("publishes full-page legacy Thinking progress before any answer or persistence", async () => {
+    let release!: () => void, entered = false, enter!: () => void
+    const opened = new Promise<void>(resolve => { enter = resolve })
+    const held = new Promise<void>(resolve => { release = resolve })
+    streamCharacterChatCompletionMock.mockImplementationOnce(async function* () {
+      yield { choices: [{ delta: { reasoning_content: "Plan the full reply" } }] }
+      entered = true
+      enter()
+      await held
+      yield { choices: [{ delta: { content: "Full answer" } }] }
+    })
+    const { captureActorSettingsTarget } = await import("@/utils/actor-settings-target")
+    const { captureActorSceneSendForTarget } = await import("../actor-scene-source")
+    const { captureChatDraftSource, chatDraftAddressForReceipt } = await import("../chat-draft-transition")
+    const requestScope = { config: { serverUrl: "http://127.0.0.1:8000", authMode: "single-user" as const }, userId: null }
+    const owner = { kind: "native" as const, conversation_id: "tracked-chat-1", owner_key: "legacy-scene-owner", request_scope: requestScope,
+      validate_lease: () => true }
+    const selection = { owner_key: owner.owner_key, conversation_id: owner.conversation_id, view_session_id: "legacy-scene-view",
+      selection_revision: 0, interpretation: { kind: "parent_graph_v1" as const }, cursor: { kind: "empty" as const } }
+    // The legacy SDK caller supplies a prepared scoped scene. This private
+    // scene receipt does not install a native sender/H1 mutation capability.
+    Object.assign(messageStoreState.value, { chatDraftAddress: chatDraftAddressForReceipt({ owner, view: selection }), chatDraftRevision: 0,
+      historyId: "history-character", serverChatId: "tracked-chat-1", serverChatCharacterId: "char-tracked", toolChoice: "auto", temporaryChat: false })
+    const source = captureChatDraftSource()
+    const target = captureActorSettingsTarget({ address: (messageStoreState.value as unknown as { chatDraftAddress: import("@/utils/chat-draft-address").ChatDraftAddress }).chatDraftAddress,
+      owner, view: selection, requestScope, accountIsCurrent: owner.validate_lease, isCurrent: source.isCurrent })
+    expect(target).not.toBeNull()
+    const actorSceneSend = await captureActorSceneSendForTarget(target, target!.account, source.isCurrent)!.read()
+    const options = createHookOptions()
+    const controller = new AbortController()
+    let generatedId = 0
+    vi.mocked(generateID).mockImplementation(() => `reasoning-row-${++generatedId}`)
+    const view = renderHook(() => {
+      const [messages, setMessages] = React.useState<Message[]>([])
+      const [history, setHistory] = React.useState<ChatHistory>([])
+      return { ...useChatActions({ ...options, messages, setMessages, history, setHistory } as unknown as Parameters<typeof useChatActions>[0]), messages }
+    })
+    let settled = false
+    let pending!: ReturnType<typeof view.result.current.onSubmit>
+    try {
+      act(() => { pending = view.result.current.onSubmit({ message: "One full question", image: "", controller, actorSceneSend }) })
+      void pending.then(() => { settled = true }, () => { settled = true })
+      await Promise.race([opened, pending.then(outcome => { throw new Error(`Legacy turn settled before its declared provider: ${JSON.stringify(outcome)}`) })])
+      expect(entered).toBe(true)
+      expect(controller.signal.aborted).toBe(false)
+      expect(recoveryAuthority.controller.signal.aborted).toBe(false)
+      expect(actorSceneSend.isCurrent()).toBe(true)
+      expect(settled).toBe(false)
+      expect(options.notification.error).not.toHaveBeenCalled()
+      await waitFor(() => expect(view.result.current.messages.find(row => !row.isBot)?.serverMessageId).toBe("user-server-1"))
+      expect(view.result.current.messages.find(row => row.isBot)?.id).not.toBe(view.result.current.messages.find(row => !row.isBot)?.id)
+      await waitFor(() => expect(view.result.current.messages.find(row => row.isBot)?.message).toContain("<think>Plan the full reply"))
+      expect(settled).toBe(false)
+      expect(controller.signal.aborted).toBe(false)
+      expect(options.notification.error).not.toHaveBeenCalled()
+      expect(persistCharacterCompletionMock).not.toHaveBeenCalled()
+      expect(saveLocalSuccessMock).not.toHaveBeenCalled()
+      await act(async () => { release(); await pending })
+      expect(view.result.current.messages.find(row => row.isBot)?.message).toBe("<think>Plan the full reply</think>Full answer")
+      expect(persistCharacterCompletionMock).toHaveBeenCalledOnce()
+    } finally { release?.(); await pending?.catch(() => {}); view.unmount() }
+  })
 
   it.each(["messages", "history", "saved-greeting", "new-chat"] as const)("keeps existing transcript greeting provenance for %s", async kind => {
     const greeting = "Welcome from the Character default"
@@ -638,15 +843,26 @@ describe("useChatActions character integration", () => {
         selectedCharacter: selection,
         selectedAssistant: selection
       }
+      const { useStoreMessageOption } = await vi.importActual<typeof import("@/store/option")>("@/store/option")
+      const previous = useStoreMessageOption.getState()
+      useStoreMessageOption.setState({ temporaryChat: true, serverChatId: null })
+      options.setServerChatId = vi.fn(useStoreMessageOption.getState().setServerChatId)
       const { result } = renderHook(() =>
         useChatActions(
           options as unknown as Parameters<typeof useChatActions>[0]
         )
       )
-      await act(async () => {
-        await result.current.onSubmit({ message: "Hello", image: "" })
-      })
-      expect(streamCharacterChatCompletionMock).toHaveBeenCalledTimes(1)
+      try {
+        await act(async () => {
+          await result.current.onSubmit({ message: "Hello", image: "" })
+        })
+        expect(streamCharacterChatCompletionMock).toHaveBeenCalledTimes(1)
+        expect(useStoreMessageOption.getState()).toMatchObject({
+          serverChatId: "temporary-character-chat", temporaryChat: true
+        })
+      } finally {
+        useStoreMessageOption.setState(previous, true)
+      }
     }
   )
   it.each([42, 88])(
@@ -795,7 +1011,7 @@ describe("useChatActions character integration", () => {
       let outcome: unknown
       await act(async () => {
         if (ownerChanges) {
-          result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] }])
+          result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] , name: undefined }])
           logout()
           expect(actualAuthority.snapshot!.scopeInvalidatedSignal.aborted).toBe(true)
           expect(actualAuthority.snapshot!.scopeSignal.aborted).toBe(true)
@@ -851,7 +1067,7 @@ describe("useChatActions character integration", () => {
         const [history, setHistory] = React.useState<ChatHistory>([])
         return { ...useChatActions({ ...options, messages, setMessages, history, setHistory } as unknown as Parameters<typeof useChatActions>[0]), messages, setMessages }
       })
-      replaceDraft = () => result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] }])
+      replaceDraft = () => result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] , name: undefined }])
       let outcome: unknown
       await act(async () => { outcome = await result.current.onSubmit({ message: "Owned question", image: "" }) })
       expect(actualAuthority.snapshot!.scopeInvalidatedSignal.aborted).toBe(true)
@@ -886,7 +1102,7 @@ describe("useChatActions character integration", () => {
       const [messages, setMessages] = React.useState<Message[]>([])
       return { ...useChatActions({ ...options, messages, setMessages } as unknown as Parameters<typeof useChatActions>[0]), messages, setMessages }
     })
-    replaceDraft = () => result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] }])
+    replaceDraft = () => result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] , name: undefined }])
     let outcome: unknown
     await act(async () => { outcome = await result.current.onSubmit({ message: "Owned question", image: "" }) })
     expect(createChatMock).toHaveBeenCalledTimes(1)
@@ -959,7 +1175,7 @@ describe("useChatActions character integration", () => {
       } else if (mode === "caller-abort" || mode === "authority-abort") {
         await act(async () => {
           if (mode === "authority-abort") {
-            result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] }])
+            result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] , name: undefined }])
             recoveryAuthority.controller.abort()
             // Explicit caller cancellation accompanies this invalidated snapshot.
             // Invalidation-only delivery is a separately retained diagnostic.
@@ -1005,7 +1221,7 @@ describe("useChatActions character integration", () => {
       } }), { status: 200, headers: { "content-type": "text/event-stream" } })
     }))
     const { result } = renderHook(() => {
-      const [messages, setMessages] = React.useState<Message[]>([{ id: "greeting", isBot: true, message: "Welcome", role: "assistant", messageType: "character:greeting", serverMessageId: "greeting-server", sources: [] }])
+      const [messages, setMessages] = React.useState<Message[]>([{ id: "greeting", isBot: true, message: "Welcome", role: "assistant", messageType: "character:greeting", serverMessageId: "greeting-server", sources: [] , name: undefined }])
       const [history, setHistory] = React.useState<ChatHistory>([{ role: "assistant", content: "Welcome", messageType: "character:greeting" }])
       const actions = useChatActions({ ...createHookOptions(), messages, setMessages, history, setHistory } as unknown as Parameters<typeof useChatActions>[0])
       return { ...actions, messages, history }
@@ -1021,6 +1237,46 @@ describe("useChatActions character integration", () => {
     expect(result.current.messages.at(-1)?.message).toBe("Recovered answer")
     expect(createChatMock).not.toHaveBeenCalled()
     expect(addChatMessageMock.mock.calls.filter(([, body]) => (body as { role?: string }).role === "user")).toHaveLength(1)
+  })
+
+  it("CC-01: a Character turn that gets a 502 marks its model Unreachable, and a reply marks it Working", async () => {
+    actualAuthority.enabled = true
+    realErrorPersistence.enabled = true
+    resetChatModelSendOutcomes()
+    await i18n.init({ lng: "en", resources: {} })
+    await configureActualAuthority()
+    const actualProxy = await vi.importActual<typeof import("@/services/background-proxy")>("@/services/background-proxy")
+    bgStreamMock.mockImplementation(actualProxy.bgStream)
+    streamCharacterChatCompletionMock.mockImplementation(chatRagMethods.streamCharacterChatCompletion)
+    let localId = 0
+    vi.mocked(generateID).mockImplementation(() => `readiness-${++localId}`)
+    const requests: Array<Record<string, unknown>> = []
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      requests.push(JSON.parse(String(init.body)))
+      if (requests.length === 1) return new Response(JSON.stringify({ detail: { error_code: "provider_unavailable", message: "The chat service provider is currently unavailable." } }), { status: 502, headers: { "content-type": "application/json" } })
+      return new Response(new ReadableStream({ start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Back online"}}]}\n\ndata: [DONE]\n\n'))
+        controller.close()
+      } }), { status: 200, headers: { "content-type": "text/event-stream" } })
+    }))
+    const { result } = renderHook(() => {
+      const [messages, setMessages] = React.useState<Message[]>([{ id: "greeting", name: "Assistant", isBot: true, message: "Welcome", role: "assistant", messageType: "character:greeting", serverMessageId: "greeting-server", sources: [] }])
+      const [history, setHistory] = React.useState<ChatHistory>([{ role: "assistant", content: "Welcome", messageType: "character:greeting" }])
+      const actions = useChatActions({ ...createHookOptions(), messages, setMessages, history, setHistory } as unknown as Parameters<typeof useChatActions>[0])
+      return { ...actions, messages, history }
+    })
+
+    await act(async () => { await result.current.onSubmit({ message: "Anyone there?", image: "" }) })
+    expect(requests).toHaveLength(1)
+    const { provider, model } = requests[0] as { provider: string; model: string }
+    expect(model).toBeTruthy()
+    expect(getChatModelSendOutcome(provider, model)).toBe("unreachable")
+
+    await act(async () => { await result.current.regenerateLastMessage() })
+    expect(requests).toHaveLength(2)
+    expect(result.current.messages.at(-1)?.message).toBe("Back online")
+    expect(getChatModelSendOutcome(provider, model)).toBe("working")
+    resetChatModelSendOutcomes()
   })
 
   it("retries failed complete-v2 in its original conversation with the greeting and user receipts intact", async () => {
@@ -1208,7 +1464,11 @@ describe("useChatActions character integration", () => {
         visible = typeof next === "function" ? next(visible) : next
       }
     }
-    const retire = () => usePlaygroundSessionStore.setState(state => ({ restoreRevision: state.restoreRevision + 1 }))
+    const retire = (event: Event) => {
+      usePlaygroundSessionStore.getState().cancelPendingRestore()
+      const detail = (event as CustomEvent<import("@/utils/character-chat-mode-intent").ChatRouteReplacementDetail>).detail
+      detail.onRestoreCancelled?.(usePlaygroundSessionStore.getState().restoreRevision)
+    }
     window.addEventListener(CHAT_ROUTE_REPLACEMENT_EVENT, retire)
     const view = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
     try {
@@ -1306,13 +1566,13 @@ describe("useChatActions character integration", () => {
     const entered = new Promise<void>(resolve => { writeEntered = resolve })
     const held = new Promise<void>(resolve => { finishWrite = resolve })
     const table = boundary === "link" ? db.chatHistories : db.messages
-    vi.spyOn(table, "add").mockImplementationOnce(async (row: any) => {
+    vi.spyOn(table, "add").mockImplementationOnce((row: any) => Dexie.Promise.resolve().then(async () => {
       if (boundary === "link") histories.set(row.id, structuredClone(row))
       else savedMessages.set(row.id, structuredClone(row))
       writeEntered()
       await held
       return row.id
-    })
+    }))
     const options = {
       ...createHookOptions(), historyId: parent.id,
       messages: [
@@ -1355,6 +1615,7 @@ describe("useChatActions character integration", () => {
     }
     const snapshots = vi.spyOn(await import("@/services/service-prompts"), "loadServicePromptSnapshot")
     snapshots.mockResolvedValueOnce(owner)
+    fixtureSceneSnapshot = owner
     getChatMock.mockRejectedValueOnce(Object.assign(new Error("Source not authorized"), { status }))
     const rows: Message[] = [
       { id: "alice-user", serverMessageId: "alice-user", role: "user", isBot: false,
@@ -2101,7 +2362,7 @@ describe("useChatActions character integration", () => {
       })
 
       const tldwAddCalls = addChatMessageMock.mock.calls.filter(
-        ([, payload]: [unknown, any]) => payload?.role === "assistant"
+        ([, payload]) => payload?.role === "assistant"
       )
       expect(tldwAddCalls).toHaveLength(0)
       expect(saveLocalErrorMock).toHaveBeenCalledWith(expect.objectContaining({ assistantServerMessageId: "assistant-degraded-1" }))
@@ -2150,7 +2411,7 @@ describe("useChatActions character integration", () => {
 
     const tldwAddCalls = addChatMessageMock.mock.calls
     const assistantAddCall = tldwAddCalls.find(
-      ([, payload]: [unknown, any]) => payload?.role === "assistant"
+      ([, payload]) => payload?.role === "assistant"
     )
     expect(assistantAddCall?.[1]).toMatchObject({
       role: "assistant",

@@ -13,6 +13,11 @@ from loguru import logger
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAuthenticationError,
     ChatProviderError,
+    ChatRateLimitError,
+)
+from tldw_Server_API.app.core.LLM_Calls.error_utils import (
+    build_sanitized_chat_error,
+    raise_chat_error_from_http,
 )
 from tldw_Server_API.app.core.LLM_Calls.providers.base import ChatProvider
 from tldw_Server_API.app.core.LLM_Calls.providers.cohere_adapter import CohereAdapter
@@ -151,6 +156,65 @@ def test_base_error_normalization_preserves_taxonomy_without_reflecting_upstream
     assert url_sentinel not in str(normalized)
     assert body_sentinel not in str(normalized)
     assert f"private-exception-{status_code}" not in str(normalized)
+
+
+_SPENT_QUOTA_BODY = {
+    "error": {"message": "private-quota-body", "type": "insufficient_quota", "code": "insufficient_quota"}
+}
+
+
+def _httpx_429(content: bytes, *, read: bool = True) -> httpx.HTTPStatusError:
+    """A 429 as httpx raises it; ``read=False`` leaves the body unread, as a streamed reply does."""
+    request = httpx.Request("POST", "https://api.openai.example/v1/chat/completions")
+    if read:
+        response = httpx.Response(429, request=request, content=content)
+    else:
+        response = httpx.Response(429, request=request, stream=httpx.ByteStream(content))
+    return httpx.HTTPStatusError("private-exception", request=request, response=response)
+
+
+@pytest.mark.parametrize(
+    ("content", "read", "expected"),
+    [
+        (json.dumps(_SPENT_QUOTA_BODY).encode(), True, True),
+        (json.dumps({"error": {"type": "tokens", "code": "rate_limit_exceeded"}}).encode(), True, False),
+        (json.dumps({"error": {"code": ["insufficient_quota"]}}).encode(), True, False),
+        (json.dumps({"error": "insufficient_quota"}).encode(), True, False),
+        (b"insufficient_quota", True, False),
+        (json.dumps(_SPENT_QUOTA_BODY).encode(), False, False),
+    ],
+    ids=["insufficient-quota", "rate-limit", "list-code", "string-error", "not-json", "unread-body"],
+)
+def test_a_rate_limit_says_whether_the_billing_quota_is_spent(
+    content: bytes,
+    read: bool,
+    expected: bool,
+) -> None:
+    normalized = _DummyProvider().normalize_error(_httpx_429(content, read=read))
+
+    assert isinstance(normalized, ChatRateLimitError)
+    assert normalized.status_code == 429
+    assert normalized.quota_exhausted is expected
+    assert "private-quota-body" not in repr(vars(normalized))
+
+
+def test_requests_adapters_keep_the_spent_quota_signal() -> None:
+    response = requests.Response()
+    response.status_code = 429
+    response._content = json.dumps(_SPENT_QUOTA_BODY).encode()
+    error = requests.HTTPError("private-exception", response=response)
+
+    with pytest.raises(ChatRateLimitError) as exc_info:
+        raise_chat_error_from_http("moonshot", error)
+
+    assert exc_info.value.quota_exhausted is True
+
+
+def test_a_rate_limit_without_an_upstream_reply_is_not_a_spent_quota() -> None:
+    error = build_sanitized_chat_error("openai", status_code=429)
+
+    assert isinstance(error, ChatRateLimitError)
+    assert error.quota_exhausted is False
 
 
 def test_base_generic_error_normalization_never_reflects_exception_text() -> None:

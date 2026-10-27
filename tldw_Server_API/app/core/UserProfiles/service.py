@@ -437,16 +437,17 @@ class UserProfileService:
         return org_ids, team_ids
 
     async def _build_quotas(self, user: dict[str, Any]) -> dict[str, Any]:
+        user_id = int(user.get("id"))
+        from tldw_Server_API.app.services.storage_quota_service import (
+            get_storage_service,
+            resolved_storage_quota_mb,
+        )
+
         quotas: dict[str, Any] = {
-            "storage_quota_mb": int(user.get("storage_quota_mb", 0) or 0),
+            "storage_quota_mb": await resolved_storage_quota_mb(user_id),
             "storage_used_mb": float(user.get("storage_used_mb", 0.0) or 0.0),
         }
-        user_id = int(user.get("id"))
         try:
-            from tldw_Server_API.app.services.storage_quota_service import (
-                get_storage_service,
-            )
-
             storage_service = await get_storage_service()
             storage_info = await storage_service.calculate_user_storage(
                 user_id=user_id,
@@ -454,18 +455,25 @@ class UserProfileService:
             )
             live_quota = storage_info.get("quota_mb")
             live_used = storage_info.get("total_mb")
-            if live_quota is not None:
-                quotas["storage_quota_mb"] = int(live_quota)
+            quotas["storage_quota_mb"] = live_quota
             if live_used is not None:
                 quotas["storage_used_mb"] = float(live_used)
+            quotas['legacy_storage_used_mb'] = storage_info.get('legacy_mb')
+            quotas['native_storage_used_mb'] = storage_info.get('native_mb')
         except _PROFILE_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("Live storage quotas unavailable for user {}: {}", user_id, exc)
+            # A scan failure may fall back to the stored legacy counter, never to an empty native ledger.
+            storage_service = await get_storage_service()
+            native = await storage_service.native_usage(user_id)
+            quotas['storage_used_mb'] = float(user.get('legacy_storage_used_mb', user.get('storage_used_mb', 0.0)) or 0.0) + native['bytes'] / 1048576
+            quotas['legacy_storage_used_mb'] = float(user.get('legacy_storage_used_mb', user.get('storage_used_mb', 0.0)) or 0.0)
+            quotas['native_storage_used_mb'] = native['bytes'] / 1048576
 
         try:
             from tldw_Server_API.app.core.Usage.audio_quota import (
-                active_streams_count,
                 get_daily_minutes_used,
                 get_limits_for_user,
+                get_monthly_minutes_used,
             )
 
             limits = await get_limits_for_user(user_id)
@@ -474,17 +482,24 @@ class UserProfileService:
             remaining = None
             if daily_limit is not None:
                 remaining = max(0.0, float(daily_limit) - float(used))
-            active_streams = await active_streams_count(user_id)
+            monthly_limit = limits.get("monthly_minutes")
+            monthly_used = await get_monthly_minutes_used(user_id)
+            monthly_remaining = None
+            if monthly_limit is not None:
+                monthly_remaining = max(0.0, float(monthly_limit) - float(monthly_used))
             quotas["audio"] = {
                 "daily_minutes_limit": daily_limit,
                 "daily_minutes_used": float(used),
                 "daily_minutes_remaining": remaining,
+                "monthly_minutes_limit": monthly_limit,
+                "monthly_minutes_used": float(monthly_used),
+                "monthly_minutes_remaining": monthly_remaining,
                 "concurrent_streams_limit": (
                     int(limits["concurrent_streams"])
                     if limits.get("concurrent_streams") is not None
                     else None
                 ),
-                "concurrent_streams_active": int(active_streams),
+                "concurrent_streams_active": None,
                 "concurrent_jobs_limit": (
                     int(limits["concurrent_jobs"])
                     if limits.get("concurrent_jobs") is not None
@@ -530,6 +545,13 @@ class UserProfileService:
             }
         except _PROFILE_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("Prompt Studio quotas unavailable for user {}: {}", user_id, exc)
+
+        try:
+            from tldw_Server_API.app.core.Usage.quota_checks import llm_quota_summary
+
+            quotas["llm"] = await llm_quota_summary(user_id)
+        except Exception as exc:  # noqa: BLE001 - one unavailable block must not fail the quotas section
+            logger.debug("LLM quotas unavailable for user {}: {}", user_id, exc)
 
         return quotas
 

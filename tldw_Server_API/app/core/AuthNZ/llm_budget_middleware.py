@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.AuthNZ.key_resolution import resolve_api_key_by_ha
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, get_settings_generation
 from tldw_Server_API.app.core.AuthNZ.virtual_keys import get_key_limits
+from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import allowlist_has_model
 from tldw_Server_API.app.core.testing import env_flag_enabled
 
 _LLM_BUDGET_PARSE_EXCEPTIONS = (TypeError, ValueError, UnicodeError, json.JSONDecodeError)
@@ -306,7 +307,8 @@ class LLMBudgetMiddleware(BaseHTTPMiddleware):
                         if body_bytes:
                             data = json.loads(body_bytes.decode('utf-8'))
                             model = data.get('model')
-                            if model and model not in allowed_models:
+                            # A dotted Anthropic name (claude-sonnet-4.5) and its dashed ID are the same model.
+                            if model and not allowlist_has_model(allowed_models, model):
                                 return JSONResponse({
                                     "error": "forbidden",
                                     "message": f"Model '{model}' not allowed for this key"

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useCallback, useLayoutEffect, useState } from "react"
 
 type TextareaStyleLike = {
   height: string
@@ -58,44 +58,68 @@ export const applyDynamicTextareaSize = (
 }
 
 /**
- * Custom hook for dynamically resizing a textarea to fit content.
- * Batches style writes in rAF and skips redundant height updates.
+ * Fits the mounted textarea to content and width, within its existing cap.
+ * Return the DOM ref callback; the supplied object remains available for focus.
  */
 const useDynamicTextareaSize = (
-  textareaRef: React.RefObject<HTMLTextAreaElement>,
+  textareaRef: React.MutableRefObject<HTMLTextAreaElement | null>,
   textContent: string,
   maxHeight?: number
-): void => {
-  const rafRef = useRef<number | null>(null)
-  const lastAppliedHeightRef = useRef<number | null>(null)
+): React.RefCallback<HTMLTextAreaElement> => {
+  const [textarea, setTextarea] = useState<HTMLTextAreaElement | null>(null)
+  const attachTextarea = useCallback(
+    (node: HTMLTextAreaElement | null) => {
+      textareaRef.current = node
+      setTextarea(node)
+    },
+    [textareaRef]
+  )
 
-  useEffect(() => {
-    if (typeof window === "undefined") return
-    const textarea = textareaRef.current
-    if (!textarea) return
-
-    if (rafRef.current != null) {
-      window.cancelAnimationFrame(rafRef.current)
-      rafRef.current = null
+  useLayoutEffect(() => {
+    if (typeof window === "undefined" || !textarea) return
+    let active = true
+    let raf: number | null = null
+    let lastAppliedHeight: number | null = null
+    let width: number | null = null
+    const schedule = () => {
+      if (!active || textareaRef.current !== textarea || raf != null) return
+      raf = window.requestAnimationFrame(() => {
+        raf = null
+        if (!active || textareaRef.current !== textarea) return
+        lastAppliedHeight = applyDynamicTextareaSize(
+          textarea,
+          maxHeight,
+          lastAppliedHeight
+        ).heightPx
+      })
     }
-
-    rafRef.current = window.requestAnimationFrame(() => {
-      rafRef.current = null
-      const result = applyDynamicTextareaSize(
-        textarea,
-        maxHeight,
-        lastAppliedHeightRef.current
-      )
-      lastAppliedHeightRef.current = result.heightPx
-    })
+    const observer =
+      typeof window.ResizeObserver === "function"
+        ? new window.ResizeObserver((entries) => {
+            for (const entry of entries) {
+              if (
+                entry.target !== textarea ||
+                entry.contentRect.width === width
+              )
+                continue
+              width = entry.contentRect.width
+              schedule()
+            }
+          })
+        : null
+    observer?.observe(textarea)
+    if (!observer) window.addEventListener("resize", schedule)
+    schedule()
 
     return () => {
-      if (rafRef.current != null) {
-        window.cancelAnimationFrame(rafRef.current)
-        rafRef.current = null
-      }
+      active = false
+      observer?.disconnect()
+      if (!observer) window.removeEventListener("resize", schedule)
+      if (raf != null) window.cancelAnimationFrame(raf)
     }
-  }, [textareaRef, textContent, maxHeight])
+  }, [textarea, textareaRef, textContent, maxHeight])
+
+  return attachTextarea
 }
 
 export default useDynamicTextareaSize

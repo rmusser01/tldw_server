@@ -10,6 +10,7 @@ import contextlib
 import os
 from typing import Any
 
+from tldw_Server_API.app.core.DB_Management.jobs_failed_requeue import ensure_retry_admission_index
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
 
 from .migrations import (
@@ -523,6 +524,20 @@ CREATE TABLE IF NOT EXISTS slides_standalone_reconciliation (
     CHECK (unexpired_reference_count >= 0)
 );
 INSERT INTO slides_standalone_reconciliation(singleton_id) VALUES (1)
+ON CONFLICT (singleton_id) DO NOTHING;
+
+-- Durable, content-free cursor and partial totals for the bounded Notes
+-- semantic health sweep. Metrics are emitted only after a complete sweep.
+CREATE TABLE IF NOT EXISTS notes_semantic_health_sweep (
+  singleton_id SMALLINT PRIMARY KEY CHECK (singleton_id = 1),
+  revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+  after_owner_id BIGINT CHECK (after_owner_id IS NULL OR after_owner_id > 0),
+  after_dataset_id TEXT,
+  totals_json TEXT NOT NULL DEFAULT '[]' CHECK (LENGTH(totals_json) <= 65536),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_completed_at TIMESTAMPTZ
+);
+INSERT INTO notes_semantic_health_sweep(singleton_id) VALUES (1)
 ON CONFLICT (singleton_id) DO NOTHING;
 
 -- Job dependencies (DAG edges)
@@ -1625,12 +1640,15 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                 audit_cur.execute("RELEASE SAVEPOINT slides_generation_audit")
         # Create hot-path indexes concurrently (outside transaction) when possible
         archive_batch_read_indexes_verified = False
+        retry_admission_index_verified = False
         try:
             with psycopg.connect(_dsn, autocommit=True) as c2:
                 with c2.cursor() as k:
                     _configure_pg_archive_migration_session(k, local=False)
                     _ensure_pg_archive_batch_read_indexes(k)
                     archive_batch_read_indexes_verified = True
+                    ensure_retry_admission_index(k, backend="postgres")
+                    retry_admission_index_verified = True
                     for index_name, (unique, columns, predicate) in _SLIDES_ARCHIVE_INDEXES_PG.items():
                         if _pg_archive_index_matches(
                             k,
@@ -1700,6 +1718,10 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                     raise
                 raise RuntimeError(
                     "PostgreSQL Jobs archive batch-read index migration failed"
+                ) from exc
+            if not retry_admission_index_verified:
+                raise RuntimeError(
+                    "PostgreSQL Jobs retry-admission index migration failed"
                 ) from exc
             if isinstance(exc, psycopg.Error):
                 # Optional standalone index/readiness setup must not break

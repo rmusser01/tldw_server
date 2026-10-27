@@ -1,0 +1,5 @@
+# Empty native history recovery — TASK-13673
+
+A saved native request may have an uncertain outcome and an empty captured history. The source review and retained result remain available, but Review requires nodes. Expose the existing explicit Refresh history operation for a qualified ready native empty source with a retained server outcome. Keep the original cursor, journal and owner; never choose latest or resend automatically. Guard its callback by the rendered draft/source fence and native lease, and disable it during pending actions. Existing controller handles read failures and ownership checks.
+
+This is a source-confirmed missing recovery route, not proof that the earlier intermittent Stop timeout had this cause. The restored current17-case cockpit passed37.5s; failed and diagnostic runs remain separate. No assumption that a pre-admission Stop saved rows. Scope is shared recovery UI and meaningful empty/source-retirement controls. ADR assessment: existing ADR-049; no new protocol, storage or authority rule.

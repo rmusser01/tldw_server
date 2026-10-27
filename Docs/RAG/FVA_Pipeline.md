@@ -15,7 +15,7 @@ The FVA pipeline introduces a new verification status:
 | Status | Description |
 |--------|-------------|
 | `VERIFIED` | Claim is supported by evidence with high confidence |
-| `REFUTED` | Claim is contradicted by strong evidence |
+| `REFUTED` | Contradicting evidence dominates. Once the contradict score reaches 0.1, the claim is refuted when it is at least 1.5 × the support score (support's share at most `contested_threshold`), or above 0.7 with support below 0.4. So with no supporting document judged SUPPORTS, one contradicting document at confidence 0.1 or more refutes the claim |
 | `CONTESTED` | **New**: Claim has significant evidence both supporting AND contradicting it |
 | `UNVERIFIED` | Insufficient evidence to determine claim validity |
 
@@ -36,6 +36,10 @@ When falsification is triggered, the pipeline generates counter-queries to find 
 - **Contrary queries**: "[opposite of claim]"
 - **Alternative queries**: "[different perspective on claim]"
 
+Each query runs the hybrid (full-text and vector) search of the user's media DB, at most 5 documents per query. `min_relevance_score` (0.3) applies to the full-text scores, min-max normalised within each query's results, before they are fused with the vector results: it drops the weakest full-text matches, and the best one always passes. Fused scores are not filtered again, and vector results have no floor. So no absolute relevance floor applies: the adjudicator's stance check decides which documents count, and a neutral one does not.
+
+Adjudication assesses every counter-evidence document and, on the supporting side, the first 5 retrieved documents, the window the verifier draws its evidence from. Each assessment is one LLM call.
+
 ### Adjudication
 
 When both supporting and contradicting evidence exists, the adjudicator weighs the evidence:
@@ -51,6 +55,12 @@ When both supporting and contradicting evidence exists, the adjudicator weighs t
 ```
 POST /api/v1/claims/verify/fva
 ```
+
+### Query Parameter
+
+- `user_id` (optional): the user to verify for. It counts only for a platform admin, as for the claims rebuild endpoints. The request then reads that user's media DB and vector store (their personal media only; media shared with their teams or orgs is not searched), and its LLM calls are quota-checked and recorded for that user. Anyone else's `user_id` is ignored, and the request runs for the caller.
+
+An LLM call refused by the user's quota answers HTTP 402 with the `limit_exceeded` body (`Docs/Operations/Usage_Quotas.md`).
 
 ### Request Body
 

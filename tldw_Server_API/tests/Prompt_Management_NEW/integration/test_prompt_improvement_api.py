@@ -33,6 +33,7 @@ from tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (
 )
 from tldw_Server_API.app.api.v1.endpoints import prompts
 from tldw_Server_API.app.core.AuthNZ.llm_budget_guard import enforce_llm_budget
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.LLM_Calls.routing import InMemoryRoutingDecisionStore
 from tldw_Server_API.app.core.Prompt_Management.prompt_improvement import (
     MAX_DRAFT_CHARS,
@@ -46,6 +47,7 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_improvement import (
     PROMPT_IMPROVEMENT_LIMITS,
 )
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
+from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402
 
 pytestmark = pytest.mark.integration
 
@@ -1637,3 +1639,23 @@ async def test_dispatch_maps_rate_limit_retry_after_and_provider_refusal(monkeyp
         )
     assert refused.value.code == "model_refusal"
     byok.touch_last_used.assert_awaited_once_with()
+
+
+def test_llm_quota_refusal_answers_402_not_retryable_provider_unavailable(monkeypatch):
+    """The user's LLM limit is let through as the 402, not mapped to a retryable provider outage (TASK-13638)."""
+    refusal = LLMQuotaExceededError(
+        category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+    )
+    provider_call = AsyncMock(side_effect=refusal)
+    # A keyless local provider: the real route resolution and credential lookup run. Stubbed: the
+    # provider call, and the model catalog, which depends on the local config.
+    dispatch = _dispatch_module()
+    monkeypatch.setattr(dispatch, "is_model_known_for_provider", lambda *_args: True)
+    monkeypatch.setattr(dispatch, "perform_chat_api_call_async", provider_call)
+    payload = _payload(model_selection={"selected_model": "llama3", "provider_hint": "ollama"})
+
+    with _isolated_prompt_client() as (client, _app, _route):
+        response = client.post("/api/v1/prompts/improve", json=payload)
+
+    assert_llm_quota_402(response)
+    provider_call.assert_awaited_once()

@@ -276,7 +276,7 @@ describe("CommandPalette shortcut hints", () => {
 
     expect(await screen.findByRole("dialog")).toBeInTheDocument()
 
-    const searchInput = screen.getByPlaceholderText(/Type a command or search/i)
+    const searchInput = screen.getByPlaceholderText(/Search commands, settings, and prompts/i)
     expect(searchInput.className).toContain("focus-visible:ring-2")
     expect(searchInput.className).toContain("focus-visible:ring-focus")
     expect(searchInput.className).toContain("focus-visible:ring-offset-2")
@@ -493,5 +493,22 @@ describe("CommandPalette shortcut hints", () => {
     fireEvent.click(goToMcpHub)
 
     expect(screen.getByTestId("current-route")).toHaveTextContent("/mcp-hub")
+  })
+  it("names the side panel's Ctrl+E mode 'chat with current page', like its menu and help sheet (XS-08)", async () => {
+    render(
+      <MemoryRouter>
+        <CommandPalette scope="sidepanel" onToggleRag={vi.fn()} />
+      </MemoryRouter>
+    )
+
+    window.dispatchEvent(new CustomEvent("tldw:open-command-palette"))
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    expect(
+      screen.getByRole("option", { name: /Toggle chat with current page/i })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("option", { name: /Toggle Search & Context/i })
+    ).not.toBeInTheDocument()
   })
 })

@@ -106,7 +106,7 @@ class UserProfileSecurity(BaseModel):
 class UserProfileQuotas(BaseModel):
     """Quota and usage section of the profile response."""
 
-    storage_quota_mb: int = Field(..., description="Storage quota in MB")
+    storage_quota_mb: Optional[int] = Field(None, description="Storage quota in MB; null is unlimited")
     storage_used_mb: float = Field(..., description="Storage used in MB")
     audio: Optional[dict[str, Any]] = Field(
         None,
@@ -119,6 +119,11 @@ class UserProfileQuotas(BaseModel):
     prompt_studio: Optional[dict[str, Any]] = Field(
         None,
         description="Prompt Studio quota summary",
+    )
+    llm: Optional[dict[str, Any]] = Field(
+        None,
+        description="LLM tokens used this month and USD spent today and this month, with the user's LLM limits; "
+        "an unset limit is absent",
     )
 
 

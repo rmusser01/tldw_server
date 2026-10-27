@@ -12,6 +12,24 @@ Set environment flags before starting the server:
 
 Check application logs for lines prefixed with `Workflows:` or `Artifacts:` hints.
 
+## WebSocket connection failures
+
+For `/api/v1/workflows/ws`, check application logs for `Workflows WS closed: code=... reason=... error_type=...`. Expected authentication/ownership refusals are warnings; internal lookup or streaming failures are errors. Structured records also include `component=workflows`, `endpoint=workflows_ws`, `close_code`, `reason`, and `error_type`.
+
+| Code | Stable reason | Action |
+| --- | --- | --- |
+| 4401 | `authentication_required` | Supply a valid supported credential. |
+| 4401 | `invalid_token` | Refresh or correct the bearer token. |
+| 4401 / 4403 | `cookie_auth_rejected` | Check session validity, Origin, and cookie authentication configuration. |
+| 4404 | `run_not_found` | Verify that the run exists in this server's workflow database. |
+| 4403 | `not_run_owner` | Connect as the run's creator; the existing owner-only rule still applies. |
+| 1011 | `run_lookup_error` | Investigate database availability and the logged exception class. |
+| 1011 | `stream_error` | Investigate event reads or stream delivery using the exception class. |
+
+Refusals before WebSocket acceptance may appear in browsers as an HTTP 403 handshake failure or code 1006 rather than a close frame; use the server record to distinguish them. Accepted streams that fail internally close with 1011 and the fixed reason. A peer disconnect is logged at INFO with its close code and `peer_disconnected`.
+
+These diagnostic records contain fixed labels and exception class names, without credentials, run/owner identifiers, raw exception messages, peer-supplied reasons, or traceback locals. Do not add tokens to diagnostic captures. Authentication precedence and access rules are unchanged.
+
 ## Investigation-First Triage
 
 For failed or flaky runs, start with the derived diagnostics endpoints before reading raw events:

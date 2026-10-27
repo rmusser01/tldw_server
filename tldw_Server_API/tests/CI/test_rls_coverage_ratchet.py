@@ -227,3 +227,13 @@ def test_policy_and_enable_without_force_is_not_owner_safe_coverage():
         "ALTER TABLE owner_bound ENABLE ROW LEVEL SECURITY;\n"
     )])
     assert "owner_bound" in report.uncovered  # nosec B101 - regression assertion
+
+
+def test_native_accounting_authority_is_explicit_and_does_not_exempt_chat_intents(report):
+    """Multi-user accounting and tenant chat intents have different authorities."""
+    ledger = "native_chat_quota_reservations"
+    intents = "native_chat_quota_intents"
+    exemptions = load_exemptions(DEFAULT_EXEMPTIONS)
+    assert ledger in report.owned_tables and ledger in exemptions
+    assert ledger not in load_baseline(BASELINE)
+    assert intents in report.policy_tables and intents not in exemptions

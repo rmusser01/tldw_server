@@ -71,12 +71,14 @@ class MediaRepository:
         chunks: list[dict[str, Any]] | None = None,
         visibility: str | None = None,
         owner_user_id: int | None = None,
+        deduplicate_content: bool = True,
     ) -> tuple[int | None, str | None, str]:
         """Add or update media while the legacy API migrates behind repository seams.
 
         This intentionally centralizes the transitional compatibility logic in one
         place while callers migrate off the legacy shim and onto repository
-        helpers.
+        helpers. Callers with distinct URL identities can disable content
+        deduplication without disabling URL matching.
         """
         db = self.session
         (
@@ -412,7 +414,7 @@ class MediaRepository:
                     "id, uuid, version, url, content_hash, source_hash, visibility, owner_user_id, org_id, team_id"
                 )
 
-                if not row and media_type != "email":
+                if not row and media_type != "email" and deduplicate_content:
                     if owner_lookup_value:
                         row = _fetchone(
                             "SELECT id, uuid, version, url, content_hash, source_hash, visibility, owner_user_id, org_id, team_id "
@@ -1038,6 +1040,7 @@ class MediaRepository:
         chunks: list[dict[str, Any]] | None = None,
         visibility: str | None = None,
         owner_user_id: int | None = None,
+        deduplicate_content: bool = True,
     ) -> tuple[int | None, str | None, str]:
         return self.add_media_with_keywords(
             url=url,
@@ -1057,4 +1060,5 @@ class MediaRepository:
             chunks=chunks,
             visibility=visibility,
             owner_user_id=owner_user_id,
+            deduplicate_content=deduplicate_content,
         )

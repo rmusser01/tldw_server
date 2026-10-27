@@ -1,10 +1,12 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { ConfigProvider } from "antd"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ManageTab, buildFlashcardsWorkspaceVisibilityOptions } from "../ManageTab"
 import { clearSetting } from "@/services/settings/registry"
 import { FLASHCARDS_SHORTCUT_HINT_DENSITY_SETTING } from "@/services/settings/ui-settings"
 import type { Flashcard } from "@/services/flashcards"
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import { DEFAULT_SCHEDULER_SETTINGS_ENVELOPE } from "../../utils/scheduler-settings"
 import {
   useUpdateFlashcardsBulkMutation,
@@ -322,14 +324,14 @@ describe("ManageTab scheduling metadata visibility", () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {})
     render(<ManageTab onNavigateToImport={() => {}} onReviewCard={() => {}} isActive />)
     fireEvent.click(screen.getByTestId(`flashcard-item-${sampleCard.uuid}-select`))
-    fireEvent.click(screen.getByRole("button", { name: "Delete", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }))
     await waitFor(() => expect(screen.queryByTestId(`flashcard-item-${sampleCard.uuid}`)).not.toBeInTheDocument())
     fireEvent.click(screen.getByRole("radio", { name: /Trash/ }))
     const deleted = await screen.findByTestId(`flashcard-trash-${sampleCard.uuid}`)
     expect(within(deleted).getByRole("timer")).toHaveAccessibleName(/Permanently deletes in \d+ seconds/)
-    fireEvent.click(within(deleted).getByRole("button", { name: "Undo", exact: true }))
+    fireEvent.click(within(deleted).getByRole("button", { name: "Undo" }))
     expect(screen.queryByTestId(`flashcard-trash-${sampleCard.uuid}`)).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("radio", { name: "Cards", exact: true }))
+    fireEvent.click(screen.getByRole("radio", { name: "Cards" }))
     expect(screen.getByTestId(`flashcard-item-${sampleCard.uuid}`)).toBeInTheDocument()
     expect(errors.mock.calls.flat().map(String).join("\n")).not.toMatch(/\[antd: List\]/)
   })
@@ -816,4 +818,164 @@ describe("ManageTab scheduling metadata visibility", () => {
       })
     })
   })
+
+  const openSelectedDeckEditor = async (scope?: ServicePromptSnapshot | null) => {
+    // Match existing real-AntD fixtures: jsdom never finishes CSS transitions.
+    const view = render(<ManageTab onNavigateToImport={() => {}} onReviewCard={() => {}} isActive scope={scope} />, {
+      wrapper: ({ children }) => <ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider>
+    })
+    const select = within(screen.getByTestId("flashcards-manage-deck-select")).getByRole("combobox")
+    fireEvent.mouseDown(select)
+    fireEvent.keyDown(select, { key: "ArrowDown", code: "ArrowDown" })
+    fireEvent.keyDown(select, { key: "Enter", code: "Enter" })
+    const edit = screen.getByTestId("flashcards-manage-move-scope")
+    await waitFor(() => expect(edit).not.toBeDisabled())
+    fireEvent.click(edit)
+    return { name: screen.getByRole("textbox", { name: "Deck name" }), rerender: view.rerender, unmount: view.unmount }
+  }
+
+  it("renames the selected deck with its version and preserves scope", async () => {
+    const { name } = await openSelectedDeckEditor()
+    expect(name).toHaveValue("Biology")
+    fireEvent.change(name, { target: { value: "  Biology reviewed  " } })
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/i }))
+    await waitFor(() => expect(updateDeckMutateAsync).toHaveBeenCalledTimes(1))
+    expect(updateDeckMutateAsync).toHaveBeenCalledWith({
+      deckId: 1,
+      update: { name: "Biology reviewed", workspace_id: null, parent_deck_id: null, expected_version: 1 }
+    })
+  }, 15000)
+
+  it("rejects a whitespace-only deck name before any update", async () => {
+    const { name } = await openSelectedDeckEditor()
+    fireEvent.change(name, { target: { value: "   " } })
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/i }))
+    await waitFor(() => expect(screen.getByText("Enter a deck name.")).toBeVisible())
+    expect(updateDeckMutateAsync).not.toHaveBeenCalled()
+  }, 15000)
+
+  it("keeps the deck rename draft when the version-checked update fails", async () => {
+    updateDeckMutateAsync.mockRejectedValueOnce(new Error("version conflict"))
+    const { name } = await openSelectedDeckEditor()
+    fireEvent.change(name, { target: { value: "Biology retry draft" } })
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/i }))
+    await waitFor(() => expect(updateDeckMutateAsync).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeVisible())
+    expect(name).toHaveValue("Biology retry draft")
+  }, 15000)
+
+  it("retains the opening version when the deck query refreshes during editing", async () => {
+    const { name, rerender } = await openSelectedDeckEditor()
+    const current = vi.mocked(useDecksQuery).mock.results.at(-1)!
+    if (current.type !== "return") throw new Error("Deck query did not return")
+    vi.mocked(useDecksQuery).mockReturnValue({
+      ...current.value,
+      data: current.value.data?.map(deck => ({ ...deck, name: "Concurrent rename", version: 2 }))
+    })
+    rerender(<ManageTab onNavigateToImport={() => {}} onReviewCard={() => {}} isActive />)
+    expect(name).toHaveValue("Biology")
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/i }))
+    await waitFor(() => expect(updateDeckMutateAsync).toHaveBeenCalledTimes(1))
+    expect(updateDeckMutateAsync).toHaveBeenCalledWith({
+      deckId: 1,
+      update: { workspace_id: null, parent_deck_id: null, expected_version: 1 }
+    })
+  }, 15000)
+
+  it("refuses to send the open deck draft to a changed owner", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const { name, rerender } = await openSelectedDeckEditor()
+    fireEvent.change(name, { target: { value: "Private pending name" } })
+    const current = vi.mocked(useDecksQuery).mock.results.at(-1)!
+    if (current.type !== "return") throw new Error("Deck query did not return")
+    vi.mocked(useDecksQuery).mockReturnValue({
+      ...current.value,
+      data: current.value.data?.map(deck => ({ ...deck, client_id: "another-owner" }))
+    })
+    rerender(<ManageTab onNavigateToImport={() => {}} onReviewCard={() => {}} isActive />)
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/i }))
+    await waitFor(() => expect(warning).toHaveBeenCalledWith("[flashcards:error]",
+      expect.objectContaining({ raw: "Deck selection changed. Reopen the editor." })))
+    expect(updateDeckMutateAsync).not.toHaveBeenCalled()
+    expect(name).toHaveValue("Private pending name")
+  }, 15000)
+
+  it("sends a bound editor save through its opening account and cancellation signal", async () => {
+    const controller = new AbortController()
+    const scope: ServicePromptSnapshot = {
+      scopeKey: "rename-owner-a",
+      requestScope: { config: { serverUrl: "https://source.test", authMode: "multi-user" }, userId: 1 },
+      capability: "supported", definitions: {}, scopeSignal: controller.signal,
+      scopeInvalidatedSignal: controller.signal, release: vi.fn()
+    }
+    const { name } = await openSelectedDeckEditor(scope)
+    fireEvent.change(name, { target: { value: "Bound rename" } })
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/i }))
+    await waitFor(() => expect(updateDeckMutateAsync).toHaveBeenCalledWith({
+      deckId: 1,
+      requestOptions: { signal: controller.signal, requestScope: scope.requestScope },
+      update: { name: "Bound rename", workspace_id: null, parent_deck_id: null, expected_version: 1 }
+    }))
+    expect(useDecksQuery).toHaveBeenLastCalledWith(expect.objectContaining({ scope }))
+  }, 15000)
+
+  it("does not open a deck editor while account scope is unresolved", async () => {
+    render(<ManageTab onNavigateToImport={() => {}} onReviewCard={() => {}} isActive scope={null} />)
+    const select = within(screen.getByTestId("flashcards-manage-deck-select")).getByRole("combobox")
+    fireEvent.mouseDown(select)
+    fireEvent.keyDown(select, { key: "ArrowDown", code: "ArrowDown" })
+    fireEvent.keyDown(select, { key: "Enter", code: "Enter" })
+    fireEvent.click(screen.getByTestId("flashcards-manage-move-scope"))
+    expect(screen.queryByRole("textbox", { name: "Deck name" })).not.toBeInTheDocument()
+    expect(useDecksQuery).toHaveBeenLastCalledWith(expect.objectContaining({ scope: null }))
+    expect(updateDeckMutateAsync).not.toHaveBeenCalled()
+  })
+
+  it("blocks a retired editor scope after asynchronous form validation", async () => {
+    const controller = new AbortController()
+    const scope: ServicePromptSnapshot = {
+      scopeKey: "rename-owner-a",
+      requestScope: { config: { serverUrl: "https://source.test", authMode: "multi-user" }, userId: 1 },
+      capability: "supported", definitions: {}, scopeSignal: controller.signal,
+      scopeInvalidatedSignal: controller.signal, release: vi.fn()
+    }
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const { name } = await openSelectedDeckEditor(scope)
+    fireEvent.change(name, { target: { value: "Private rename draft" } })
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/i }))
+    controller.abort()
+    await waitFor(() => expect(warning).toHaveBeenCalledWith("[flashcards:error]",
+      expect.objectContaining({ raw: "Deck selection changed. Reopen the editor." })))
+    expect(updateDeckMutateAsync).not.toHaveBeenCalled()
+    expect(name).toHaveValue("Private rename draft")
+  }, 15000)
+
+  it("does not let an old save completion close a reopened deck editor", async () => {
+    let finish!: () => void
+    updateDeckMutateAsync.mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve }))
+    const { name } = await openSelectedDeckEditor()
+    fireEvent.change(name, { target: { value: "First saved name" } })
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/i }))
+    await waitFor(() => expect(updateDeckMutateAsync).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel$/i }))
+    fireEvent.click(screen.getByTestId("flashcards-manage-move-scope"))
+    const nextName = screen.getByRole("textbox", { name: "Deck name" })
+    fireEvent.change(nextName, { target: { value: "Second pending name" } })
+    await act(async () => { finish() })
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Deck name" })).toBeVisible()
+      expect(nextName).toHaveValue("Second pending name")
+    })
+  }, 15000)
+
+  it("does not dispatch an editor save after unmount during validation", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    const { name, unmount } = await openSelectedDeckEditor()
+    fireEvent.change(name, { target: { value: "Leaving page draft" } })
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/i }))
+    unmount()
+    await waitFor(() => expect(warning).toHaveBeenCalledWith("[flashcards:error]",
+      expect.objectContaining({ raw: "Deck selection changed. Reopen the editor." })))
+    expect(updateDeckMutateAsync).not.toHaveBeenCalled()
+  }, 15000)
 })

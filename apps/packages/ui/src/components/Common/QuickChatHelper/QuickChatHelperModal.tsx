@@ -1,11 +1,11 @@
-import React, { useRef, useEffect, useCallback } from "react"
+import { flushSync } from "react-dom"
+import { EMPTY_CHAT_MODELS, useChatModelCatalog } from "@/hooks/useChatModelCatalog"
+import React, { useRef, useEffect, useCallback, useState } from "react"
 import { Modal, Button, Tooltip, Select, Segmented } from "antd"
 import { ExternalLink, AlertCircle } from "lucide-react"
-import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { useQuickChat } from "@/hooks/useQuickChat"
 import { useQuickChatStore } from "@/store/quick-chat"
-import { fetchChatModels } from "@/services/tldw-server"
 import { QuickChatMessage } from "./QuickChatMessage"
 import { QuickChatInput } from "./QuickChatInput"
 import { browser } from "wxt/browser"
@@ -15,7 +15,8 @@ import { useChatModelsSelect } from "@/hooks/useChatModelsSelect"
 import { QuickChatGuidesPanel } from "./QuickChatGuidesPanel"
 import { buildQuickChatPopoutState } from "./popout-state"
 import { useLocation, useNavigate } from "react-router-dom"
-import { useTutorialStore } from "@/store/tutorials"
+import { useStartTutorial } from "@/hooks/useStartTutorial"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 
 const EMPTY_POP_OUT_TOOLTIP_STYLES = {
   root: { maxWidth: "200px" }
@@ -24,15 +25,17 @@ const EMPTY_POP_OUT_TOOLTIP_STYLES = {
 type Props = {
   open: boolean
   onClose: () => void
+  getTutorialFocusTarget?: () => HTMLElement | null
 }
 
-export const QuickChatHelperModal: React.FC<Props> = ({ open, onClose }) => {
+export const QuickChatHelperModal: React.FC<Props> = ({ open, onClose, getTutorialFocusTarget }) => {
   const { t } = useTranslation(["option", "common"])
   const navigate = useNavigate()
   const location = useLocation()
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { assistantMode, setAssistantMode } = useQuickChatStore()
-  const startTutorial = useTutorialStore((state) => state.startTutorial)
+  const startTutorial = useStartTutorial()
+  const [handedOff, setHandedOff] = useState(false)
   const {
     messages,
     sendMessage,
@@ -47,13 +50,7 @@ export const QuickChatHelperModal: React.FC<Props> = ({ open, onClose }) => {
   const phase = useConnectionPhase()
   const isConnected = useIsConnected()
   const isConnectionReady = isConnected && phase === ConnectionPhase.CONNECTED
-  const { data: models = [], isLoading: modelsLoading } = useQuery({
-    queryKey: ["quickChatModels"],
-    queryFn: () => fetchChatModels({ returnEmpty: true }),
-    staleTime: 5 * 60 * 1000,
-    refetchOnWindowFocus: false,
-    select: (data) => data.filter((model) => model?.model)
-  })
+  const { data: models = EMPTY_CHAT_MODELS, isLoading: modelsLoading, isError: modelsDiscoveryFailed, refetch: retryModels } = useChatModelCatalog()
 
   const { allowClear, modelOptions, modelPlaceholder, handleModelChange } =
     useChatModelsSelect({
@@ -74,7 +71,7 @@ export const QuickChatHelperModal: React.FC<Props> = ({ open, onClose }) => {
     if (!messagesEndRef.current || messages.length === 0) {
       return
     }
-    messagesEndRef.current.scrollIntoView({ behavior: "smooth" })
+    messagesEndRef.current.scrollIntoView({ behavior: smoothScrollBehavior() })
   }, [messages, isStreaming])
 
   const handlePopOut = useCallback(() => {
@@ -173,10 +170,12 @@ export const QuickChatHelperModal: React.FC<Props> = ({ open, onClose }) => {
 
   const handleStartTutorial = useCallback(
     (tutorialId: string) => {
+      if (!startTutorial(tutorialId, getTutorialFocusTarget?.())) return
+      // Commit the handoff before the parent unmounts this modal.
+      flushSync(() => setHandedOff(true))
       onClose()
-      startTutorial(tutorialId)
     },
-    [onClose, startTutorial]
+    [onClose, startTutorial, getTutorialFocusTarget]
   )
 
   return (
@@ -202,6 +201,7 @@ export const QuickChatHelperModal: React.FC<Props> = ({ open, onClose }) => {
       }
       open={open}
       onCancel={onClose}
+      focusable={{ focusTriggerAfterClose: !handedOff }}
       footer={null}
       width={480}
       className="quick-chat-helper-modal"
@@ -212,6 +212,14 @@ export const QuickChatHelperModal: React.FC<Props> = ({ open, onClose }) => {
       aria-labelledby="quick-chat-title"
       aria-describedby={descriptionId}>
       <div className="flex flex-col h-[50vh] max-h-[400px]">
+        {modelsDiscoveryFailed && (
+          <div role="alert" className="px-1 pb-2 text-xs text-text">
+            {t("playground:composer.modelsDiscoveryFailed", "Could not check chat models")}
+            <Button size="small" onClick={() => { void retryModels() }}>
+              {t("playground:characterChatReadiness.model.retryAction", "Try again")}
+            </Button>
+          </div>
+        )}
         <div className="flex items-center gap-2 px-1 pb-2">
           <Select
             className="flex-1"

@@ -13,6 +13,7 @@ import {
   UploadCloud
 } from 'lucide-react'
 import { getTextStats } from '@/utils/text-stats'
+import { stripMediaMetadata } from '@/utils/media-metadata-display'
 import { formatRelativeTime } from '@/utils/dateFormatters'
 import { estimateReadingTimeMinutes } from '../mediaMetadataUtils'
 import type { MediaResultItem } from '../types'
@@ -59,7 +60,7 @@ export const normalizeVectorProcessingStatus = (value: unknown): string | null =
   if (typeof value === 'number' && Number.isFinite(value)) {
     if (value >= 1) return 'completed'
     if (value < 0) return 'failed'
-    return 'pending'
+    return 'not_indexed'
   }
   if (typeof value === 'string' && value.trim().length > 0) {
     const lowered = value.trim().toLowerCase()
@@ -69,7 +70,8 @@ export const normalizeVectorProcessingStatus = (value: unknown): string | null =
     if (['-1', 'false', 'failed', 'error'].includes(lowered)) {
       return 'failed'
     }
-    if (['0', 'pending', 'queued', 'in_progress', 'in-progress'].includes(lowered)) {
+    if (lowered === '0') return 'not_indexed'
+    if (['pending', 'queued', 'in_progress', 'in-progress'].includes(lowered)) {
       return 'pending'
     }
     return lowered
@@ -189,7 +191,7 @@ export function useContentMetadata(deps: UseContentMetadataDeps) {
 
   // Text stats
   const { wordCount, charCount, paragraphCount } = useMemo(() => {
-    const text = content || ''
+    const text = isNote ? content : stripMediaMetadata(content)
     const apiWordCount = mediaDetail?.content?.word_count
     const {
       wordCount: computedWordCount,
@@ -197,13 +199,13 @@ export function useContentMetadata(deps: UseContentMetadataDeps) {
       paragraphCount
     } = getTextStats(text)
     const wordCountValue =
-      typeof apiWordCount === 'number' ? apiWordCount : computedWordCount
+      text === content && typeof apiWordCount === 'number' ? apiWordCount : computedWordCount
     return {
       wordCount: wordCountValue,
       charCount,
       paragraphCount
     }
-  }, [content, mediaDetail])
+  }, [content, isNote, mediaDetail])
 
   const readingTimeMinutes = useMemo(
     () =>

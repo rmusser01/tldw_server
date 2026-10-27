@@ -12,11 +12,9 @@ from tldw_Server_API.app.core.DB_Management.backends import pg_rls_policies
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     AuthorizationDeniedError,
     BackendType,
+    ConstraintViolationError,
     DatabaseConfig,
     UniqueConstraintError,
-)
-from tldw_Server_API.app.core.DB_Management.backends.base import (
-    ConstraintViolationError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
@@ -135,12 +133,10 @@ def test_postgres_v61_migration_uses_only_reviewed_policy_block_and_versions_las
     )
     normalized_script = " ".join(script.split())
     assert (
-        "( 'shared_workspace_chat_threads', "
-        "'shared_workspace_chat_threads_tenant_isolation' )"
+        "( 'shared_workspace_chat_threads', " "'shared_workspace_chat_threads_tenant_isolation' )"
     ) in normalized_script
     assert (
-        "( 'shared_workspace_chat_requests', "
-        "'shared_workspace_chat_requests_tenant_isolation' )"
+        "( 'shared_workspace_chat_requests', " "'shared_workspace_chat_requests_tenant_isolation' )"
     ) in normalized_script
 
 
@@ -302,9 +298,7 @@ def _insert_request(
 def _shared_chat_rows(backend: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Read complete rows as the fixture admin to observe rejected-write rollback."""
     return (
-        backend.execute(
-            "SELECT * FROM shared_workspace_chat_threads ORDER BY recipient_user_id, share_id"
-        ).rows,
+        backend.execute("SELECT * FROM shared_workspace_chat_threads ORDER BY recipient_user_id, share_id").rows,
         backend.execute(
             "SELECT * FROM shared_workspace_chat_requests ORDER BY recipient_user_id, share_id, request_id"
         ).rows,
@@ -357,9 +351,7 @@ def test_postgres_v61_executes_constraints_defaults_and_cascades(
     db = CharactersRAGDB(":memory:", client_id="recipient-a", backend=backend)
     try:
         bypasses_rls = bool(
-            backend.execute(
-                "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user"
-            ).scalar
+            backend.execute("SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user").scalar
         )
         assert bypasses_rls, "The PostgreSQL constraint test requires the fixture admin role"
 
@@ -405,7 +397,8 @@ def test_postgres_v61_executes_constraints_defaults_and_cascades(
         ).rows
         assert {row["conname"]: (row["convalidated"], row["definition"]) for row in request_checks} == {
             "shared_workspace_chat_requests_recipient_user_id_check": (
-                True, "CHECK ((char_length(btrim(recipient_user_id)) > 0))",
+                True,
+                "CHECK ((char_length(btrim(recipient_user_id)) > 0))",
             ),
             "shared_workspace_chat_requests_share_id_check": (True, "CHECK ((share_id > 0))"),
         }
@@ -568,12 +561,8 @@ def test_postgres_v61_executes_constraints_defaults_and_cascades(
                 ("cascade-conversation",),
                 connection=conn,
             )
-        assert backend.execute(
-            "SELECT count(*) FROM shared_workspace_chat_threads WHERE share_id = 30"
-        ).scalar == 0
-        assert backend.execute(
-            "SELECT count(*) FROM shared_workspace_chat_requests WHERE share_id = 30"
-        ).scalar == 0
+        assert backend.execute("SELECT count(*) FROM shared_workspace_chat_threads WHERE share_id = 30").scalar == 0
+        assert backend.execute("SELECT count(*) FROM shared_workspace_chat_requests WHERE share_id = 30").scalar == 0
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()
@@ -591,9 +580,7 @@ def test_postgres_v61_restricted_role_enforces_recipient_rls_predicates(
     role_created = False
     try:
         bypasses_rls = bool(
-            backend.execute(
-                "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user"
-            ).scalar
+            backend.execute("SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user").scalar
         )
         assert bypasses_rls, "The PostgreSQL RLS test requires the fixture admin role for seeding"
 
@@ -714,14 +701,20 @@ def test_postgres_v61_restricted_role_enforces_recipient_rls_predicates(
                 "rolbypassrls": False,
             }
             assert setting in (None, "")
-            assert backend.execute(
-                "SELECT share_id FROM shared_workspace_chat_threads",
-                connection=conn,
-            ).rows == []
-            assert backend.execute(
-                "SELECT request_id FROM shared_workspace_chat_requests",
-                connection=conn,
-            ).rows == []
+            assert (
+                backend.execute(
+                    "SELECT share_id FROM shared_workspace_chat_threads",
+                    connection=conn,
+                ).rows
+                == []
+            )
+            assert (
+                backend.execute(
+                    "SELECT request_id FROM shared_workspace_chat_requests",
+                    connection=conn,
+                ).rows
+                == []
+            )
 
         def assert_rls_denied(
             query: str,
@@ -813,10 +806,13 @@ def test_postgres_v61_restricted_role_enforces_recipient_rls_predicates(
                 conversation_id="conversation-a",
                 user_message_id="message-a",
             )
-        assert backend.execute(
-            "SELECT count(*) FROM shared_workspace_chat_requests WHERE request_id = ?",
-            ("restricted-valid-write",),
-        ).scalar == 1
+        assert (
+            backend.execute(
+                "SELECT count(*) FROM shared_workspace_chat_requests WHERE request_id = ?",
+                ("restricted-valid-write",),
+            ).scalar
+            == 1
+        )
     finally:
         if role_created:
             with backend.transaction() as conn:
@@ -838,6 +834,7 @@ def test_postgres_v60_to_v61_constraints_forced_rls_and_head_rerun(
         patch.setattr(CharactersRAGDB, "_initialize_schema", lambda self: None)
         db = CharactersRAGDB(":memory:", client_id="recipient-a", backend=backend)
     try:
+
         class _ReachedHistoricalV60(Exception):
             pass
 
@@ -860,32 +857,36 @@ def test_postgres_v60_to_v61_constraints_forced_rls_and_head_rerun(
                 db._initialize_schema_postgres()
         assert len(stopped_connections) == 1
         assert stopped_connections[0].closed
-        assert backend.execute(
-            "SELECT count(*) FROM pg_locks WHERE pid=%s AND locktype='advisory' AND granted",
-            (stopped_process_ids[0],),
-        ).scalar == 0
-        assert backend.execute(
-            "SELECT version FROM db_schema_version WHERE schema_name = %s",
-            (CharactersRAGDB._SCHEMA_NAME,),
-        ).scalar == 60
+        assert (
+            backend.execute(
+                "SELECT count(*) FROM pg_locks WHERE pid=%s AND locktype='advisory' AND granted",
+                (stopped_process_ids[0],),
+            ).scalar
+            == 0
+        )
+        assert (
+            backend.execute(
+                "SELECT version FROM db_schema_version WHERE schema_name = %s",
+                (CharactersRAGDB._SCHEMA_NAME,),
+            ).scalar
+            == 60
+        )
         assert not backend.table_exists("shared_workspace_chat_threads")
         assert not backend.table_exists("shared_workspace_chat_requests")
 
         conversation_id = "conversation-a"
         with backend.transaction() as conn:
             _insert_conversation(backend, conn, conversation_id, "recipient-a")
-        conversation_before = backend.execute(
-            "SELECT * FROM conversations WHERE id = %s", (conversation_id,)
-        ).rows
+        conversation_before = backend.execute("SELECT * FROM conversations WHERE id = %s", (conversation_id,)).rows
         assert "history_version" not in conversation_before[0]
         assert "conversations_fts_tsv" not in conversation_before[0]
         with schema_bootstrap.postgres_schema_migration(
             backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT
         ) as conn:
             db._migrate_from_v60_to_v61_postgres(conn)
-        assert backend.execute(
-            "SELECT * FROM conversations WHERE id = %s", (conversation_id,)
-        ).rows == conversation_before
+        assert (
+            backend.execute("SELECT * FROM conversations WHERE id = %s", (conversation_id,)).rows == conversation_before
+        )
 
         version = backend.execute(
             "SELECT version FROM db_schema_version WHERE schema_name = %s",
@@ -963,6 +964,7 @@ def test_postgres_v60_to_v61_constraints_forced_rls_and_head_rerun(
                 )
         assert _shared_chat_rows(backend) == shared_rows_before
 
+        source_identity = None
         for _ in range(2):
             db._initialize_schema_postgres()
             rerun_version = backend.execute(
@@ -976,9 +978,16 @@ def test_postgres_v60_to_v61_constraints_forced_rls_and_head_rerun(
             assert _shared_chat_rows(backend) == shared_rows_before
             # Later migrations add history, startup and native-fork metadata.
             # Every historical column and value remains unchanged.
-            assert backend.execute(
-                "SELECT * FROM conversations WHERE id = %s", (conversation_id,)
-            ).rows == [
+            preserved = [
+                dict(row)
+                for row in backend.execute("SELECT * FROM conversations WHERE id = %s", (conversation_id,)).rows
+            ]
+            assigned_identity = preserved[0].pop("source_incarnation_id")
+            assert isinstance(assigned_identity, str) and assigned_identity
+            if source_identity is not None:
+                assert assigned_identity == source_identity
+            source_identity = assigned_identity
+            assert preserved == [
                 {
                     **conversation_before[0],
                     "history_version": 1,
@@ -988,6 +997,7 @@ def test_postgres_v60_to_v61_constraints_forced_rls_and_head_rerun(
                     "native_creation_operation_kind": None,
                     "native_creation_operation_id": None,
                     "native_bundle_json": None,
+                    "create_request_fingerprint": None,
                 },
             ]
     finally:
@@ -998,7 +1008,8 @@ def test_postgres_v60_to_v61_constraints_forced_rls_and_head_rerun(
 @pytest.mark.integration
 @pytest.mark.parametrize("damage", ["missing_policy", "missing_check", "unforced_rls"])
 def test_postgres_v61_verifier_rejects_incomplete_security_catalog(
-    pg_database_config: DatabaseConfig, damage: str,
+    pg_database_config: DatabaseConfig,
+    damage: str,
 ) -> None:
     """Stored-tree verification still fails closed on each original catalog invariant."""
     driver = pytest.importorskip("psycopg")
@@ -1013,15 +1024,21 @@ def test_postgres_v61_verifier_rejects_incomplete_security_catalog(
         with pytest.raises(driver.errors.RaiseException, match=expected):
             with backend.transaction() as conn:
                 if damage == "unforced_rls":
-                    backend.execute("ALTER TABLE shared_workspace_chat_requests NO FORCE ROW LEVEL SECURITY",
-                                    connection=conn)
+                    backend.execute(
+                        "ALTER TABLE shared_workspace_chat_requests NO FORCE ROW LEVEL SECURITY", connection=conn
+                    )
                 else:
-                    backend.execute("DROP POLICY shared_workspace_chat_requests_tenant_isolation "
-                                    "ON shared_workspace_chat_requests", connection=conn)
+                    backend.execute(
+                        "DROP POLICY shared_workspace_chat_requests_tenant_isolation "
+                        "ON shared_workspace_chat_requests",
+                        connection=conn,
+                    )
                     if damage == "missing_check":
-                        backend.execute("CREATE POLICY shared_workspace_chat_requests_tenant_isolation "
-                                        "ON shared_workspace_chat_requests FOR SELECT USING (true)",
-                                        connection=conn)
+                        backend.execute(
+                            "CREATE POLICY shared_workspace_chat_requests_tenant_isolation "
+                            "ON shared_workspace_chat_requests FOR SELECT USING (true)",
+                            connection=conn,
+                        )
                 # The backend intentionally redacts driver messages; inspect this fixed verifier directly.
                 conn.execute(CharactersRAGDB._SHARED_WORKSPACE_CHAT_V61_POSTGRES_VERIFY_SQL)
     finally:

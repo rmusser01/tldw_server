@@ -6,7 +6,9 @@ import type { AssistantSelection } from "@/types/assistant-selection"
 import type { EffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
 import type { SelectedChatModelValidationResult } from "@/utils/chat-model-validation"
 import { act, render, renderHook, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+
+const fixtureResolvedSnapshot = vi.hoisted(() => ({ current: null as import("@/services/service-prompts").ServicePromptSnapshot | null }))
 
 const mocks = vi.hoisted(() => {
   const setMessages = vi.fn()
@@ -241,9 +243,9 @@ const mocks = vi.hoisted(() => {
   }
 })
 
-vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({ invalidateQueries: vi.fn() })
-}))
+vi.mock('@tanstack/react-query', () => ({
+  useQueryClient: () => ({ cancelQueries: vi.fn(), invalidateQueries: vi.fn() }),
+}));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -258,8 +260,11 @@ vi.mock("~/services/tldw-server", () => ({
 }))
 
 vi.mock("@/services/service-prompts", () => ({
-  loadServicePromptSnapshot: (...args: unknown[]) =>
-    mocks.loadServicePromptSnapshot(...args),
+  loadServicePromptSnapshot: async (...args: unknown[]) => {
+    const snapshot = await mocks.loadServicePromptSnapshot(...args)
+    if (snapshot) fixtureResolvedSnapshot.current = snapshot
+    return snapshot
+  },
   renderServicePromptPart: (...args: unknown[]) =>
     mocks.renderServicePromptPart(...args)
 }))
@@ -268,15 +273,42 @@ vi.mock("~/store/option", async (importOriginal) => {
   const actual = await importOriginal<typeof import("~/store/option")>()
   return {
     useStoreMessageOption: Object.assign(
-      (selector?: (state: Record<string, unknown>) => unknown) =>
+      (
+        selector?: (state: Record<string, unknown>) => unknown,
+        equalityFn?: (a: unknown, b: unknown) => boolean
+      ) =>
         mocks.useRealQueueState
-          ? actual.useStoreMessageOption(selector ?? (state => state))
-          : selector ? selector(mocks.storeState) : mocks.storeState,
+          ? actual.useStoreMessageOption(
+              selector ?? ((state) => state),
+              equalityFn
+            )
+          : selector
+            ? selector(mocks.storeState)
+            : mocks.storeState,
       {
-        getState: () => mocks.useRealQueueState
-          ? actual.useStoreMessageOption.getState() : mocks.storeState,
-        subscribe: (listener: Parameters<typeof actual.useStoreMessageOption.subscribe>[0]) =>
-          mocks.useRealQueueState ? actual.useStoreMessageOption.subscribe(listener) : () => {}
+        setState: (
+          update:
+            | Record<string, unknown>
+            | ((state: typeof mocks.storeState) => Record<string, unknown>)
+        ) => {
+          if (mocks.useRealQueueState)
+            actual.useStoreMessageOption.setState(update)
+          else
+            Object.assign(
+              mocks.storeState,
+              typeof update === "function" ? update(mocks.storeState) : update
+            )
+        },
+        getState: () =>
+          mocks.useRealQueueState
+            ? actual.useStoreMessageOption.getState()
+            : mocks.storeState,
+        subscribe: (
+          listener: Parameters<typeof actual.useStoreMessageOption.subscribe>[0]
+        ) =>
+          mocks.useRealQueueState
+            ? actual.useStoreMessageOption.subscribe(listener)
+            : () => {}
       }
     )
   }
@@ -314,12 +346,20 @@ vi.mock("@/hooks/chat/useSelectedModel", () => ({
   useSelectedModel: () => ({ selectedModel: "model-1", setSelectedModel: vi.fn() })
 }))
 
-vi.mock("@/store/model", () => ({
-  useStoreChatModelSettings: () => ({
+vi.mock("@/store/model", () => {
+  const settings = {
     apiProvider: "provider-1",
-    reset: vi.fn()
-  })
-}))
+    reset: vi.fn(),
+    activeSettingsScope: "global",
+    getEffectiveSettings: () => ({ apiProvider: "provider-1" })
+  }
+  return {
+    useStoreChatModelSettings: Object.assign(
+      (selector?: (state: typeof settings) => unknown) => selector ? selector(settings) : settings,
+      { getState: () => settings }
+    )
+  }
+})
 
 vi.mock("@/hooks/useSelectedCharacter", () => ({
   useSelectedCharacter: () => [mocks.selectedCharacter, vi.fn()]
@@ -328,6 +368,11 @@ vi.mock("@/hooks/useSelectedCharacter", () => ({
 vi.mock("@/hooks/useSelectedAssistant", () => ({
   getSelectedAssistantOperationRevision: () => 0,
   useSelectedAssistant: () => [mocks.selectedAssistant, vi.fn()]
+}))
+
+vi.mock("@/services/actor-settings", async original => ({
+  ...await original<typeof import("@/services/actor-settings")>(),
+  getActorSceneForChat: vi.fn(async ({ target }) => ({ target, settings: (await import("@/types/actor")).createDefaultActorSettings(), originalRecord: null, origin: "default", profileUnavailable: false }))
 }))
 
 vi.mock("@/hooks/useAntdNotification", () => ({
@@ -394,6 +439,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     addChatMessage: vi.fn(async () => ({ id: "saved-user", version: 1 })),
     streamCharacterChatCompletion: vi.fn(async function* () { yield { delta: "Image received" } }),
     persistCharacterCompletion: vi.fn(async () => ({ assistant_message_id: "saved-answer", version: 1 })),
+    getMessage: vi.fn(),
     deleteMessage: mocks.deleteMessage,
     addMedia: (...args: unknown[]) => mocks.addMedia(...args),
     ragSearch: (...args: unknown[]) => mocks.ragSearch(...args)
@@ -486,7 +532,10 @@ vi.mock("@/hooks/handlers/messageHandlers", async importOriginal => ({
   createRegenerateLastMessage: () => vi.fn()
 }))
 
-vi.mock("../chat-modes/normalChatMode", () => ({ normalChatMode: vi.fn() }))
+vi.mock("../chat-modes/normalChatMode", async importOriginal => ({
+  ...await importOriginal<typeof import("../chat-modes/normalChatMode")>(),
+  normalChatMode: vi.fn()
+}))
 vi.mock("../chat-modes/tabChatMode", () => ({ tabChatMode: vi.fn() }))
 vi.mock("../chat-modes/documentChatMode", () => ({ documentChatMode: vi.fn() }))
 
@@ -494,9 +543,96 @@ vi.mock("@/utils/mcp-disclosure", () => ({
   applyMcpModuleDisclosureFromToolCalls: vi.fn()
 }))
 
-import { useMessage } from "../useMessage"
+import { useMessage as useRawMessage } from "../useMessage"
 import { validateSelectedChatModelAvailability } from "@/utils/chat-model-validation"
 import { normalChatMode } from "../chat-modes/normalChatMode"
+
+import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
+import { freshChatDraftAddress, type ChatDraftAddress } from "@/utils/chat-draft-address"
+import { captureActorSceneSendForTarget } from "@/hooks/chat/actor-scene-source"
+import { captureChatDispatchSource } from "@/hooks/chat/chat-dispatch-source"
+import { captureChatDraftSource, chatDraftAddressForReceipt } from "@/hooks/chat/chat-draft-transition"
+import { useStoreMessageOption } from "@/store/option"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import { chatDraftOwnerKey } from "@/utils/chat-draft-owner"
+
+beforeEach(() => { fixtureResolvedSnapshot.current = null })
+
+// Model/transport mocks remain legacy. Only the caller's original private scene
+// read is qualified, using the same real capture helpers as the composer.
+const useMessage = () => {
+  const lifetime = React.useRef({ active: true, accountRetired: false })
+  const requestScope = React.useRef(structuredClone(mocks.makeSnapshot().requestScope)).current
+  const accountIsCurrent = () => {
+    const observed = fixtureResolvedSnapshot.current
+    return !lifetime.current.accountRetired && (!observed ||
+      chatDraftOwnerKey(observed.requestScope) === chatDraftOwnerKey(requestScope))
+  }
+  const seeded = React.useRef(false)
+  if (!seeded.current) {
+    const state = useStoreMessageOption.getState()
+    const historyId = mocks.useRealQueueState ? state.historyId : mocks.chatBaseState.historyId
+    const owner = state.serverChatId ? { kind: "native" as const, conversation_id: state.serverChatId, owner_key: "legacy-compact-scene-owner",
+      request_scope: requestScope, validate_lease: accountIsCurrent } : historyId && historyId !== "temp" ? {
+      kind: "local" as const, conversation_id: historyId, owner_key: "legacy-compact-local-owner", profile_id: "legacy-compact-profile",
+      validate_lease: accountIsCurrent
+    } : null
+    const view = owner ? { owner_key: owner.owner_key, conversation_id: owner.conversation_id, view_session_id: "legacy-compact-scene-view",
+      selection_revision: 0, interpretation: { kind: "parent_graph_v1" as const }, cursor: { kind: "empty" as const } } : null
+    const currentAddress = state.chatDraftAddress
+    const addressMatches = currentAddress && (owner ? currentAddress.kind !== "fresh" && currentAddress.id === owner.conversation_id : currentAddress.kind === "fresh")
+    useStoreMessageOption.setState({ historyId, selectedModel: "model-1", selectedModelRevision: state.selectedModelRevision ?? 0,
+      toolChoice: state.toolChoice ?? "required", chatDraftRevision: state.chatDraftRevision ?? 0,
+      chatDraftAddress: addressMatches ? currentAddress : owner && view ? chatDraftAddressForReceipt({ owner, view }) : freshChatDraftAddress(state.temporaryChat) })
+    seeded.current = true
+  }
+  React.useLayoutEffect(() => {
+    const original = lifetime.current
+    original.active = true
+    const release = watchChatAccountChanges(invalidated => { if (invalidated) original.accountRetired = true })
+    return () => { original.active = false; release() }
+  }, [])
+  const actions = useRawMessage()
+  const renderedSource = captureChatDraftSource(() => lifetime.current.active)
+  const renderedAddress = useStoreMessageOption.getState().chatDraftAddress as ChatDraftAddress
+  const renderedRevision = useStoreMessageOption.getState().chatDraftRevision
+  const renderedSession = usePlaygroundSessionStore.getState()
+  const read = async (input?: Parameters<typeof actions.onSubmit>[0]) => {
+    const address = renderedAddress
+    const queued = input?.assertQueuedDispatchCurrent
+    const admittedQueue = queued?.isSourceCurrent?.() === true
+    const sourceIsCurrent = () => renderedSource.isCurrent() || (admittedQueue && queued?.isSourceCurrent?.() === true && lifetime.current.active &&
+      useStoreMessageOption.getState().chatDraftAddress === renderedAddress && useStoreMessageOption.getState().chatDraftRevision === renderedRevision &&
+      usePlaygroundSessionStore.getState().restoreRevision === renderedSession.restoreRevision &&
+      usePlaygroundSessionStore.getState().sourceSelectionRevision === renderedSession.sourceSelectionRevision)
+    const owner = address.kind === "native" ? { kind: "native" as const, conversation_id: address.id, owner_key: address.ownerKey,
+      request_scope: requestScope, scope: address.scope, validate_lease: accountIsCurrent } : address.kind === "local" ? {
+      kind: "local" as const, conversation_id: address.id, owner_key: "legacy-compact-local-owner", profile_id: address.profileId, validate_lease: accountIsCurrent
+    } : null
+    const view = owner ? { owner_key: owner.owner_key, conversation_id: owner.conversation_id, view_session_id: "legacy-compact-scene-view",
+      selection_revision: 0, interpretation: { kind: "parent_graph_v1" as const }, cursor: { kind: "empty" as const } } : null
+    const target = captureActorSettingsTarget({ address, owner, view, requestScope, accountIsCurrent, isCurrent: sourceIsCurrent })
+    const dispatchIsCurrent = captureChatDispatchSource({
+      selectedModel: input?.requestOverrides?.selectedModel || "model-1",
+      toolChoice: input?.requestOverrides?.toolChoice,
+      selectionSource: {
+        model: input?.requestOverrides?.selectedModel ? "explicit" : "global",
+        toolChoice: input?.requestOverrides?.toolChoice ? "explicit" : "global"
+      }
+    })
+    const originalIntentIsCurrent = () => lifetime.current.active && accountIsCurrent() && dispatchIsCurrent() &&
+      useStoreMessageOption.getState().chatDraftAddress === renderedAddress &&
+      useStoreMessageOption.getState().chatDraftRevision === renderedRevision &&
+      usePlaygroundSessionStore.getState().restoreRevision === renderedSession.restoreRevision &&
+      usePlaygroundSessionStore.getState().sourceSelectionRevision === renderedSession.sourceSelectionRevision
+    const capture = captureActorSceneSendForTarget(target, { requestScope, isCurrent: accountIsCurrent }, sourceIsCurrent, originalIntentIsCurrent)
+    if (!capture) throw new Error("Legacy compact fixture has no qualified original scene")
+    return capture.read()
+  }
+  return { ...actions, onSubmit: async (input: Parameters<typeof actions.onSubmit>[0]) => actions.onSubmit({ ...input,
+    actorSceneSend: input.actorSceneSend ?? await read(input) }) }
+}
 
 describe("sidepanel saved conversation metadata lifetime", () => {
   it.each([false, true])("uses the real Persona creation helper without adopting a replacement (replaced=%s)", async (replaced) => {
@@ -516,18 +652,18 @@ describe("sidepanel saved conversation metadata lifetime", () => {
     const submission = hook.result.current.onSubmit({
       message: "First queued Persona turn", image: "", requestOverrides: { chatMode: "normal" },
       assertQueuedDispatchCurrent: guard
-    }).then(() => null, (error: unknown) => error)
+    })
     try {
       await waitFor(() => expect(mocks.createChat).toHaveBeenCalledTimes(1))
       if (replaced) mocks.storeState.serverChatId = "foreign-replacement"
       await act(async () => { resolveCreation({ id: "created-persona", assistant_kind: "persona", assistant_id: "p1" }) })
-      const error = await submission
+      const result = await submission
       if (replaced) {
         expect(mocks.storeState.serverChatId).toBe("foreign-replacement")
-        expect(error).toBeInstanceOf(Error)
+        expect(result).toMatchObject({ status: "skipped" })
         expect(normalChatMode).not.toHaveBeenCalled()
       } else {
-        expect(error).toBeNull()
+        expect(result).toBeUndefined()
         expect(mocks.storeState.serverChatId).toBe("created-persona")
         expect(mocks.storeState.serverChatMetaLoaded).toBe(true)
         expect(normalChatMode).toHaveBeenCalledTimes(1)
@@ -605,6 +741,28 @@ describe("sidepanel saved conversation metadata lifetime", () => {
 })
 
 describe("useMessage legacy Sidepanel Service Prompts", () => {
+  let restoreProjectionMocks: (() => void) | undefined
+  const projectLegacyChatState = () => {
+    const previousMessages = mocks.setMessages.getMockImplementation()
+    const previousHistory = mocks.setHistory.getMockImplementation()
+    let messages = structuredClone(mocks.storeState.messages) as Message[]
+    let history = structuredClone(mocks.history)
+    mocks.setMessages.mockImplementation((next) => {
+      messages = typeof next === "function" ? next(messages) : next
+    })
+    mocks.setHistory.mockImplementation((next) => {
+      history = typeof next === "function" ? next(history) : next
+    })
+    restoreProjectionMocks = () => {
+      mocks.setMessages.mockImplementation(previousMessages ?? (() => {}))
+      mocks.setHistory.mockImplementation(previousHistory ?? (() => {}))
+    }
+    return { get messages() { return messages }, get history() { return history } }
+  }
+  afterEach(() => {
+    restoreProjectionMocks?.()
+    restoreProjectionMocks = undefined
+  })
   const expectNoMessageMutation = () => {
     expect(mocks.resetChatLoopState).not.toHaveBeenCalled()
     expect(mocks.setEmbeddingController).not.toHaveBeenCalled()
@@ -653,6 +811,25 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
           Object.prototype.hasOwnProperty.call(values, key) ? values[key] : _match
         )
     )
+  })
+
+  it.each([false, true])("sends preset requests with the resolved model and OCR override (%s)", async (useOCR) => {
+    const { result } = renderHook(() => useMessage())
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Summarize this page",
+        image: "",
+        messageType: "summary",
+        requestOverrides: { chatMode: "normal", selectedModel: "override-model", useOCR }
+      })
+    })
+    expect(mocks.pageAssistModel).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "override-model" })
+    )
+    expect(mocks.humanMessageFormatter).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "override-model", useOCR })
+    )
+    expect(mocks.finalModel.stream).toHaveBeenCalled()
   })
 
   it.each([
@@ -708,33 +885,410 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
     }
   })
 
-  it.each(["local", "server"])("deletes a qualified sidepanel row and clears the %s reply target", async replyKind => {
-    const previous = { ...mocks.storeState }
-    const localId = "history-A:server:answer"
-    const canonicalId = "canonical-answer"
-    try {
-      mocks.mirrorHistories.set("history-1", {
-        id: "history-1", title: "Cedar", createdAt: 1, is_rag: false,
-        message_source: "server", server_chat_id: "cedar",
-        server_scope_key: serverChatMirrorOwnerKey(mocks.makeSnapshot())
+  it.each([
+    ...(["rag", "vision", "preset", "character"] as const).flatMap((mode) =>
+      (["current", "source", "stop", "newer-controller", "unmount"] as const).map(
+        (boundary) => ({ mode, boundary })
+      )
+    ),
+    { mode: "rag" as const, boundary: "account" as const }
+  ])(
+    "deferred legacy $mode text respects its $boundary boundary",
+    async ({ mode, boundary }) => {
+      const { useStoreMessageOption: realStore } =
+        await vi.importActual<typeof import("@/store/option")>("@/store/option")
+      const { tldwClient } = await import("@/services/tldw/TldwApiClient")
+      const previous = realStore.getState()
+      const oldCharacter = mocks.selectedCharacter
+      const oldAssistant = mocks.selectedAssistant
+      const oldEffective = mocks.effectiveAssistantState
+      const controller = new AbortController()
+      const account = new AbortController()
+      let resume!: () => void
+      let entered!: () => void
+      const held = new Promise<void>((resolve) => {
+        resume = resolve
       })
-      const stored: StoredMessage = { id: localId, history_id: "history-1", name: "Cedar",
-        role: "assistant", content: "Cedar reply", createdAt: 1,
-        serverMessageId: canonicalId, serverMessageVersion: 2 }
-      const draft = { ...stored, id: "same-text-draft", serverMessageId: undefined }
-      const otherHistory = { ...stored, id: "other-history:server:answer", history_id: "other-history" }
-      for (const row of [stored, draft, otherHistory]) mocks.mirrorMessages.set(row.id, row)
-      Object.assign(mocks.storeState, { serverChatId: "cedar", replyTarget: { id: replyKind === "local" ? localId : canonicalId }, messages: [{ id: localId, serverMessageId: canonicalId, serverMessageVersion: 2, isBot: true, name: "Cedar", message: "Cedar reply" }] })
-      const { result } = renderHook(() => useMessage())
-      await act(async () => { await result.current.deleteMessage(0) })
-      expect(mocks.deleteMessage).toHaveBeenCalledWith(canonicalId, 2, "cedar")
-      expect([...mocks.mirrorMessages.values()]).toEqual([draft, otherHistory])
-      expect(mocks.setMessages).toHaveBeenCalledWith([])
-      expect(mocks.storeState.clearReplyTarget).toHaveBeenCalledOnce()
+      const started = new Promise<void>((resolve) => {
+        entered = resolve
+      })
+      const stream = async function* () {
+        yield "Deferred answer"
+        entered()
+        await held
+      }
+      mocks.useRealQueueState = true
+      realStore.getState().startNewChatDraft()
+      realStore.setState({
+        historyId: null,
+        serverChatId: mode === "character" ? "character-chat" : null,
+        messages: [],
+        history: [],
+        chatMode: mode === "character" || mode === "preset" ? "normal" : mode,
+        temporaryChat: false,
+        selectedSystemPrompt: null,
+        streaming: false,
+        isProcessing: false,
+        serverChatMetaLoaded: true
+      })
+      if (mode === "character") {
+        mocks.selectedCharacter = { id: 42, name: "Mira", greeting: "" }
+        mocks.effectiveAssistantState = {
+          mode: "tracked_character",
+          kind: "character",
+          id: "42",
+          displayName: "Mira",
+          avatarUrl: null,
+          systemPromptSnapshot: null,
+          source: "tracked"
+        }
+        vi.mocked(
+          tldwClient.streamCharacterChatCompletion
+        ).mockImplementationOnce(stream)
+      } else {
+        mocks.finalModel.stream.mockResolvedValueOnce(stream())
+      }
+      mocks.loadServicePromptSnapshot.mockResolvedValue(
+        mocks.makeSnapshot("supported", undefined, undefined, {
+          scopeInvalidatedSignal: account.signal
+        })
+      )
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+      const hook = renderHook(() => useMessage())
+      let submission!: ReturnType<typeof hook.result.current.onSubmit>
+      try {
+        await act(async () => {
+          submission = hook.result.current.onSubmit({
+            message: "Current request",
+            image: "",
+            controller,
+            ...(mode === "preset" ? { messageType: "summary" } : {})
+          })
+          await Promise.race([started, submission.then(outcome => { throw new Error(`Legacy compact turn ended before its held provider: ${JSON.stringify(outcome)}`) })])
+        })
+        const before = realStore.getState().messages
+        expect(before.at(-1)?.message).toBe("▋")
+        if (boundary === "source")
+          act(() => realStore.getState().startNewChatDraft())
+        if (boundary === "stop") controller.abort()
+        if (boundary === "unmount") hook.unmount()
+        if (boundary === "account") account.abort()
+        if (boundary === "newer-controller") {
+          mocks.selectedCharacter = null
+          mocks.selectedAssistant = {
+            kind: "character",
+            id: "overlay-current",
+            name: "Overlay",
+            metadata: { selectionMode: "overlay" }
+          }
+          mocks.effectiveAssistantState = null
+          hook.rerender()
+          vi.mocked(normalChatMode).mockImplementationOnce(async () => ({
+            status: "submitted"
+          }))
+          await act(async () => {
+            await hook.result.current.onSubmit({
+              message: "Newer request",
+              image: "",
+              controller: new AbortController(),
+              requestOverrides: { chatMode: "normal" }
+            })
+          })
+        }
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(80)
+        })
+        if (boundary === "current")
+          expect(realStore.getState().messages.at(-1)?.message).toBe(
+            "Deferred answer▋"
+          )
+        else expect(realStore.getState().messages).toBe(before)
+        await act(async () => {
+          resume()
+          await submission
+        })
+        if (boundary === "current")
+          expect(realStore.getState().messages.at(-1)?.message).toBe(
+            "Deferred answer"
+          )
+      } finally {
+        resume()
+        try { if (submission) await submission.catch(() => {}) } finally {
+          hook.unmount()
+          vi.useRealTimers()
+          realStore.setState(previous, true)
+          mocks.useRealQueueState = false
+          mocks.selectedCharacter = oldCharacter
+          mocks.selectedAssistant = oldAssistant
+          mocks.effectiveAssistantState = oldEffective
+          vi.mocked(normalChatMode).mockReset()
+        }
+      }
+    }
+  )
+
+  it("keeps a fresh compact settings publisher usable after an address-only draft change", async () => {
+    const { useStoreMessageOption: realStore } =
+      await vi.importActual<typeof import("@/store/option")>("@/store/option")
+    const previous = realStore.getState()
+    mocks.useRealQueueState = true
+    realStore.getState().startNewChatDraft()
+    realStore.setState({
+      historyId: null,
+      serverChatId: null,
+      messages: [],
+      history: [],
+      chatMode: "normal",
+      temporaryChat: false,
+      selectedSystemPrompt: null,
+      streaming: false,
+      isProcessing: false
+    })
+    const hook = renderHook(() => useMessage())
+    try {
+      act(() => realStore.getState().startNewChatDraft())
+      vi.mocked(normalChatMode).mockImplementationOnce(async (...args) => {
+        args[6].setHistoryId("fresh-current-history")
+        return { status: "submitted" }
+      })
+      await act(async () => {
+        await hook.result.current.onSubmit({
+          message: "First current request",
+          image: ""
+        })
+      })
+      expect(realStore.getState().historyId).toBe("fresh-current-history")
     } finally {
-      Object.assign(mocks.storeState, previous)
+      hook.unmount()
+      realStore.setState(previous, true)
+      mocks.useRealQueueState = false
+      vi.mocked(normalChatMode).mockReset()
     }
   })
+
+  it.each(["current", "new", "same-id", "unmount", "account", "history-new", "history-aba", "server-new", "server-aba"] as const)(
+    "keeps scratch-to-server save publication and its settings lease owned across %s",
+    async (boundary) => {
+      const { useStoreMessageOption: realStore } =
+        await vi.importActual<typeof import("@/store/option")>("@/store/option")
+      const { syncChatSettingsForServerChat } = await import(
+        "@/services/chat-settings"
+      )
+      const previous = realStore.getState()
+      const previousAssistant = mocks.selectedAssistant
+      const previousEffectiveAssistant = mocks.effectiveAssistantState
+      mocks.selectedAssistant = null
+      mocks.effectiveAssistantState = null
+      mocks.useRealQueueState = true
+      realStore.getState().startNewChatDraft()
+      realStore.setState({
+        historyId: null,
+        serverChatId: null,
+        serverChatMetaLoaded: false,
+        messages: [],
+        history: [],
+        temporaryChat: false,
+        chatMode: "normal",
+        streaming: false,
+        isProcessing: false,
+        selectedSystemPrompt: null
+      })
+      const source = realStore.getState()
+      const scope = new AbortController()
+      let stopSubscriber: (() => void) | undefined
+      let subscriberReplacement: ReturnType<typeof realStore.getState> | undefined
+      let finishPersistence!: () => void
+      const held = new Promise<void>((resolve) => {
+        finishPersistence = resolve
+      })
+      mocks.saveMessageOnSuccess.mockImplementation(async (payload) => {
+        await held
+        payload.setHistoryId("created-local-history")
+        return "created-local-history"
+      })
+      vi.mocked(normalChatMode).mockImplementationOnce(async (...args) => {
+        await args[6].saveMessageOnSuccess({
+          historyId: null,
+          setHistoryId: args[6].setHistoryId,
+          conversationId: "created-server",
+          saveToDb: true,
+          scopeSignal: scope.signal,
+          message: "Original request",
+          fullText: "Saved reply"
+        })
+        return { status: "submitted" }
+      })
+      const hook = renderHook(() => useMessage())
+      const submission = hook.result.current.onSubmit({
+        message: "Original request",
+        image: "",
+        controller: new AbortController(),
+        requestOverrides: { chatMode: "normal" }
+      })
+      try {
+        await waitFor(() =>
+          expect(mocks.saveMessageOnSuccess).toHaveBeenCalledOnce()
+        )
+        if (boundary === "new" || boundary === "same-id") {
+          act(() => {
+            realStore.getState().startNewChatDraft()
+            realStore.setState({
+              historyId: boundary === "same-id" ? "reopened-local-history" : null,
+              serverChatId: boundary === "same-id" ? "created-server" : null,
+              serverChatMetaLoaded: true
+            })
+          })
+        }
+        if (boundary === "unmount") hook.unmount()
+        if (boundary === "account") scope.abort()
+        if (boundary.startsWith("history-") || boundary.startsWith("server-")) {
+          const field = boundary.startsWith("history-") ? "historyId" : "serverChatId"
+          const issuedId = field === "historyId" ? "created-local-history" : "created-server"
+          stopSubscriber = realStore.subscribe((state, previousState) => {
+            if (subscriberReplacement || state[field] !== issuedId || previousState[field] === issuedId) return
+            // Retire during the actual guarded setter, before it can acknowledge its ID.
+            stopSubscriber?.()
+            realStore.getState().startNewChatDraft()
+            realStore.setState({
+              historyId: boundary.endsWith("aba") ? "created-local-history" : null,
+              serverChatId: boundary === "server-aba" ? "created-server" : null,
+              serverChatMetaLoaded: true,
+              serverChatTitle: "Replacement owns these details"
+            })
+            subscriberReplacement = realStore.getState()
+          })
+        }
+        const currentView = realStore.getState()
+        await act(async () => {
+          finishPersistence()
+          await submission
+        })
+        if (boundary === "current") {
+          expect(realStore.getState().historyId).toBe("created-local-history")
+          expect(realStore.getState().serverChatId).toBe("created-server")
+          expect(syncChatSettingsForServerChat).toHaveBeenCalledOnce()
+          const options = vi.mocked(syncChatSettingsForServerChat).mock
+            .calls[0][0]
+          expect(options.sourceDraftAddress).toBe(source.chatDraftAddress)
+          expect(options.validate_lease?.()).toBe(true)
+          act(() => {
+            realStore.getState().startNewChatDraft()
+            realStore.setState({
+              historyId: "created-local-history",
+              serverChatId: "created-server"
+            })
+          })
+          expect(options.validate_lease?.()).toBe(false)
+        } else {
+          const expectedView = subscriberReplacement ?? currentView
+          if (boundary.startsWith("history-") || boundary.startsWith("server-")) {
+            expect(subscriberReplacement).toBeDefined()
+            expect(realStore.getState().chatDraftAddress).toBe(expectedView.chatDraftAddress)
+            expect(realStore.getState().chatDraftRevision).toBe(expectedView.chatDraftRevision)
+            expect(realStore.getState().serverChatMetaLoaded).toBe(true)
+            expect(realStore.getState().serverChatTitle).toBe("Replacement owns these details")
+          }
+          expect(realStore.getState().serverChatId).toBe(expectedView.serverChatId)
+          expect(syncChatSettingsForServerChat).not.toHaveBeenCalled()
+          if (boundary !== "account")
+            expect(realStore.getState().historyId).toBe(expectedView.historyId)
+        }
+        expect(mocks.saveMessageOnSuccess).toHaveBeenCalledOnce()
+      } finally {
+        stopSubscriber?.()
+        finishPersistence()
+        await submission
+        hook.unmount()
+        realStore.setState(previous, true)
+        mocks.useRealQueueState = false
+        mocks.selectedAssistant = previousAssistant
+        mocks.effectiveAssistantState = previousEffectiveAssistant
+        mocks.saveMessageOnSuccess.mockReset()
+        vi.mocked(normalChatMode).mockReset()
+      }
+    }
+  )
+
+  it.each(["local", "server"])(
+    "refuses server mirror deletion without canonical ownership for the %s Reply target",
+    async (replyKind) => {
+      const previous = { ...mocks.storeState }
+      const localId = "history-A:server:answer"
+      const canonicalId = "canonical-answer"
+      try {
+        mocks.mirrorHistories.set("history-1", {
+          id: "history-1",
+          title: "Cedar",
+          createdAt: 1,
+          is_rag: false,
+          message_source: "server",
+          server_chat_id: "cedar",
+          server_scope_key: serverChatMirrorOwnerKey(mocks.makeSnapshot())
+        })
+        const stored: StoredMessage = {
+          id: localId,
+          history_id: "history-1",
+          name: "Cedar",
+          role: "assistant",
+          content: "Cedar reply",
+          createdAt: 1,
+          serverMessageId: canonicalId,
+          serverMessageVersion: 2
+        }
+        const draft = {
+          ...stored,
+          id: "same-text-draft",
+          serverMessageId: undefined
+        }
+        const otherHistory = {
+          ...stored,
+          id: "other-history:server:answer",
+          history_id: "other-history"
+        }
+        for (const row of [stored, draft, otherHistory])
+          mocks.mirrorMessages.set(row.id, row)
+        Object.assign(mocks.storeState, {
+          serverChatId: "cedar",
+          replyTarget: { id: replyKind === "local" ? localId : canonicalId },
+          messages: [
+            {
+              id: localId,
+              serverMessageId: canonicalId,
+              serverMessageVersion: 2,
+              isBot: true,
+              name: "Cedar",
+              message: "Cedar reply"
+            }
+          ]
+        })
+        const { result } = renderHook(() => useMessage())
+        const original = { ...mocks.storeState }
+        mocks.setMessages.mockClear()
+        mocks.setHistory.mockClear()
+        await act(async () => {
+          await expect(result.current.deleteMessage(0)).rejects.toThrow(
+            "native_history_mutation_unavailable"
+          )
+        })
+        expect(mocks.deleteMessage).not.toHaveBeenCalled()
+        expect(
+          (await import("@/services/tldw/TldwApiClient")).tldwClient.getMessage
+        ).not.toHaveBeenCalled()
+        expect(mocks.removeMessageById).not.toHaveBeenCalled()
+        expect([...mocks.mirrorMessages.values()]).toEqual([
+          stored,
+          draft,
+          otherHistory
+        ])
+        expect(mocks.setMessages).not.toHaveBeenCalled()
+        expect(mocks.setHistory).not.toHaveBeenCalled()
+        expect(mocks.storeState.replyTarget).toEqual(original.replyTarget)
+        expect(mocks.storeState.clearReplyTarget).not.toHaveBeenCalled()
+      } finally {
+        Object.assign(mocks.storeState, previous)
+      }
+    }
+  )
 
   it("loads one immutable RAG snapshot before the first message mutation", async () => {
     const controller = new AbortController()
@@ -751,7 +1305,7 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
     expect(mocks.loadServicePromptSnapshot).toHaveBeenCalledTimes(1)
     expect(mocks.loadServicePromptSnapshot).toHaveBeenCalledWith(
       ["chat.rag.answer", "chat.rag.question_rewrite"],
-      { signal: controller.signal }
+      { signal: controller.signal, requestScope: mocks.makeSnapshot().requestScope }
     )
     expect(mocks.loadServicePromptSnapshot.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.setMessages.mock.invocationCallOrder[0]
@@ -1192,6 +1746,7 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
         scopeController.abort()
       })()
     )
+    const projection = projectLegacyChatState()
     const { result } = renderHook(() => useMessage())
 
     await act(async () => {
@@ -1204,8 +1759,8 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
 
     expect(mocks.saveMessageOnSuccess).not.toHaveBeenCalled()
     expect(mocks.saveMessageOnError).not.toHaveBeenCalled()
-    expect(mocks.setMessages).toHaveBeenLastCalledWith(mocks.storeState.messages)
-    expect(mocks.setHistory).toHaveBeenLastCalledWith(mocks.history)
+    expect(projection.messages).toEqual(mocks.storeState.messages)
+    expect(projection.history).toEqual(mocks.history)
     expect(release).toHaveBeenCalledTimes(1)
   })
 
@@ -1250,8 +1805,8 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
 
   it("discards a Sidepanel turn when its prompt scope changes during final persistence", async () => {
     let resolveSave!: () => void
-    const pendingSave = new Promise<void>((resolve) => {
-      resolveSave = resolve
+    const pendingSave = new Promise<string | undefined>((resolve) => {
+      resolveSave = () => resolve(undefined)
     })
     mocks.saveMessageOnSuccess.mockReturnValueOnce(pendingSave)
     const scopeController = new AbortController()
@@ -1267,6 +1822,7 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
       }
     )
     mocks.loadServicePromptSnapshot.mockResolvedValue(snapshot)
+    const projection = projectLegacyChatState()
     const { result } = renderHook(() => useMessage())
 
     const submission = result.current.onSubmit({
@@ -1291,15 +1847,15 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
     })
 
     expect(mocks.saveMessageOnError).not.toHaveBeenCalled()
-    expect(mocks.setMessages).toHaveBeenLastCalledWith(mocks.storeState.messages)
-    expect(mocks.setHistory).toHaveBeenLastCalledWith(mocks.history)
+    expect(projection.messages).toEqual(mocks.storeState.messages)
+    expect(projection.history).toEqual(mocks.history)
     expect(release).toHaveBeenCalledTimes(1)
   })
 
   it("does not duplicate a completed Sidepanel turn when Stop fires during final persistence", async () => {
     let resolveSave!: () => void
-    const pendingSave = new Promise<void>((resolve) => {
-      resolveSave = resolve
+    const pendingSave = new Promise<string | undefined>((resolve) => {
+      resolveSave = () => resolve(undefined)
     })
     mocks.saveMessageOnSuccess.mockReturnValueOnce(pendingSave)
     const userController = new AbortController()
@@ -1418,6 +1974,7 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
         throw new Error("provider failed")
       })()
     )
+    const projection = projectLegacyChatState()
     const { result } = renderHook(() => useMessage())
 
     const submission = result.current.onSubmit({
@@ -1443,8 +2000,8 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
       await submission
     })
 
-    expect(mocks.setMessages).toHaveBeenLastCalledWith(mocks.storeState.messages)
-    expect(mocks.setHistory).toHaveBeenLastCalledWith(mocks.history)
+    expect(projection.messages).toEqual(mocks.storeState.messages)
+    expect(projection.history).toEqual(mocks.history)
     expect(release).toHaveBeenCalledTimes(1)
   })
 
@@ -1475,6 +2032,7 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
         throw new Error("provider failed")
       })()
     )
+    const projection = projectLegacyChatState()
     const { result } = renderHook(() => useMessage())
 
     const submission = result.current.onSubmit({
@@ -1499,8 +2057,8 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
       await submission
     })
 
-    expect(mocks.setMessages).toHaveBeenLastCalledWith(mocks.storeState.messages)
-    expect(mocks.setHistory).toHaveBeenLastCalledWith(mocks.history)
+    expect(projection.messages).toEqual(mocks.storeState.messages)
+    expect(projection.history).toEqual(mocks.history)
     expect(release).toHaveBeenCalledTimes(1)
   })
 })
@@ -1564,6 +2122,78 @@ describe("Character greeting continuity in the sidebar caller", () => {
       mocks.selectedCharacter = null
       mocks.effectiveAssistantState = null
       mocks.setMessages.mockImplementation(() => {})
+    }
+  })
+})
+
+
+describe("compact legacy character reasoning progress", () => {
+  it("publishes held Thinking progress before any answer or persistence", async () => {
+    vi.clearAllMocks()
+    const previousStore = { ...mocks.storeState }
+    const previousBase = { ...mocks.chatBaseState }
+    const previousEffective = mocks.effectiveAssistantState
+    const originalMessages = mocks.setMessages.getMockImplementation()
+    const { tldwClient } = await import("@/services/tldw/TldwApiClient")
+    const stream = vi.mocked(tldwClient.streamCharacterChatCompletion)
+    const originalStream = stream.getMockImplementation()
+    let visible: Message[] = [], entered = false, release!: () => void, enter!: () => void
+    const opened = new Promise<void>(resolve => { enter = resolve })
+    const held = new Promise<void>(resolve => { release = resolve })
+    stream.mockImplementationOnce(async function* () {
+      yield { choices: [{ delta: { reasoning_content: "Plan the compact reply" } }] }
+      entered = true
+      enter()
+      await held
+      yield { choices: [{ delta: { content: "Compact answer" } }] }
+    })
+    mocks.effectiveAssistantState = { mode: "tracked_character", kind: "character", id: "42", displayName: "Mira", avatarUrl: null, systemPromptSnapshot: null, source: "tracked" }
+    mocks.loadServicePromptSnapshot.mockResolvedValue(mocks.makeSnapshot())
+    Object.assign(mocks.storeState, { messages: [], serverChatId: "character-chat", serverChatCharacterId: 42, serverChatMetaLoaded: true })
+    mocks.chatBaseState.history = []
+    mocks.setMessages.mockImplementation(next => { visible = typeof next === "function" ? next(visible) : next; mocks.storeState.messages = visible })
+    const { captureActorSettingsTarget } = await import("@/utils/actor-settings-target")
+    const { captureActorSceneSendForTarget } = await import("@/hooks/chat/actor-scene-source")
+    const { captureChatDraftSource, chatDraftAddressForReceipt } = await import("@/hooks/chat/chat-draft-transition")
+    const requestScope = mocks.makeSnapshot().requestScope
+    const owner = { kind: "native" as const, conversation_id: "character-chat", owner_key: "legacy-compact-scene-owner", request_scope: requestScope,
+      validate_lease: () => true }
+    const selection = { owner_key: owner.owner_key, conversation_id: owner.conversation_id, view_session_id: "legacy-compact-scene-view",
+      selection_revision: 0, interpretation: { kind: "parent_graph_v1" as const }, cursor: { kind: "empty" as const } }
+    // Prepared scene ownership is explicit; the legacy SDK transport is not
+    // silently replaced by the native H1 sender in this publisher control.
+    Object.assign(mocks.storeState, { chatDraftAddress: chatDraftAddressForReceipt({ owner, view: selection }), chatDraftRevision: 0,
+      historyId: mocks.chatBaseState.historyId, selectedModel: "model-1", toolChoice: "auto", temporaryChat: false })
+    const source = captureChatDraftSource()
+    const target = captureActorSettingsTarget({ address: mocks.storeState.chatDraftAddress as import("@/utils/chat-draft-address").ChatDraftAddress,
+      owner, view: selection, requestScope, accountIsCurrent: owner.validate_lease, isCurrent: source.isCurrent })
+    expect(target).not.toBeNull()
+    const actorSceneSend = await captureActorSceneSendForTarget(target, target!.account, source.isCurrent)!.read()
+    const hook = renderHook(() => useMessage())
+    let pending!: ReturnType<typeof hook.result.current.onSubmit>
+    try {
+      act(() => { pending = hook.result.current.onSubmit({ message: "One compact question", image: "", requestOverrides: { chatMode: "normal" }, actorSceneSend }) })
+      void pending.catch(() => {})
+      await Promise.race([opened, pending.then(outcome => { throw new Error(`Compact legacy turn settled before its declared provider: ${JSON.stringify(outcome)}`) })])
+      expect(entered).toBe(true)
+      await waitFor(() => expect(visible.find(row => row.isBot)?.message).toContain("<think>Plan the compact reply"))
+      expect(tldwClient.persistCharacterCompletion).not.toHaveBeenCalled()
+      expect(mocks.saveMessageOnSuccess).not.toHaveBeenCalled()
+      await act(async () => { release(); await pending })
+      expect(visible.find(row => row.isBot)?.message).toBe("<think>Plan the compact reply</think>Compact answer")
+      expect(tldwClient.persistCharacterCompletion).toHaveBeenCalledOnce()
+    } finally {
+      release?.()
+      try { await pending?.catch(() => {}) } finally {
+        hook.unmount()
+        Object.assign(mocks.storeState, previousStore)
+        Object.assign(mocks.chatBaseState, previousBase)
+        mocks.effectiveAssistantState = previousEffective
+        mocks.setMessages.mockReset()
+        if (originalMessages) mocks.setMessages.mockImplementation(originalMessages)
+        stream.mockReset()
+        if (originalStream) stream.mockImplementation(originalStream)
+      }
     }
   })
 })

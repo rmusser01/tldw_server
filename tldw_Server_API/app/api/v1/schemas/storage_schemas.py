@@ -182,6 +182,9 @@ class StorageUsageResponse(BaseModel):
     usage: StorageUsage
     quota_mb: int | None = Field(default=None, description="User quota in MB")
     quota_used_mb: float | None = Field(default=None, description="Total quota used")
+    legacy_quota_used_mb: float = Field(default=0.0, description="Legacy storage component, excluding retained native chat assets")
+    native_bytes: int = Field(default=0, ge=0, description="Active retained native chat bytes")
+    native_mb: float = Field(default=0.0, ge=0, description="Active retained native chat usage in MB")
     available_mb: float | None = Field(default=None, description="Available quota")
     usage_percentage: float | None = Field(default=None, description="Usage percentage")
     at_soft_limit: bool = Field(default=False, description="True if at/above 80% soft limit")
@@ -196,9 +199,13 @@ class UsageBreakdownResponse(BaseModel):
     by_folder: list[FolderInfo]
     total_bytes: int
     total_mb: float
-    quota_mb: int
-    available_mb: float
-    usage_percentage: float
+    legacy_quota_used_mb: float = 0.0
+    native_bytes: int = Field(default=0, ge=0)
+    native_mb: float = Field(default=0.0, ge=0)
+    quota_used_mb: float | None = None
+    quota_mb: int | None = Field(default=None, description="User quota in MB; null means unlimited")
+    available_mb: float | None = Field(default=None, description="Available quota in MB; null means unlimited")
+    usage_percentage: float | None = Field(default=None, description="Usage percentage; null means unlimited")
 
 
 # =========================================================================
@@ -209,6 +216,8 @@ class QuotaStatus(BaseModel):
     """Quota status for user/team/org."""
     quota_mb: int | None = Field(default=None, description="Quota limit in MB")
     used_mb: float = Field(default=0.0, description="Used storage in MB")
+    legacy_used_mb: float = Field(default=0.0, description="Legacy storage component in MB")
+    native_used_mb: float = Field(default=0.0, ge=0, description="Retained native chat component in MB")
     remaining_mb: float | None = Field(default=None, description="Remaining storage")
     usage_pct: float = Field(default=0.0, description="Usage percentage")
     at_soft_limit: bool = Field(default=False, description="At soft limit (warning)")
@@ -247,6 +256,13 @@ class CombinedQuotaResponse(BaseModel):
 class SetQuotaRequest(BaseModel):
     """Request to set a quota."""
     quota_mb: int = Field(ge=100, description="Quota in MB (minimum 100)")
+    soft_limit_pct: int = Field(default=80, ge=0, le=100, description="Soft limit percentage")
+    hard_limit_pct: int = Field(default=100, ge=0, le=100, description="Hard limit percentage")
+
+
+class SetUserQuotaRequest(BaseModel):
+    """Set a user's own storage quota (MB); null removes it (unlimited unless a team/org value applies)."""
+    quota_mb: int | None = Field(..., ge=0, description="Quota in MB; 0 blocks uploads; null removes the user's value")
     soft_limit_pct: int = Field(default=80, ge=0, le=100, description="Soft limit percentage")
     hard_limit_pct: int = Field(default=100, ge=0, le=100, description="Hard limit percentage")
 

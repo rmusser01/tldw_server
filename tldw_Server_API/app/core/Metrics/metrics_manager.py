@@ -448,6 +448,14 @@ class MetricsRegistry:
                 labels=["provider", "model"]
             )
         )
+        self.register_metric(
+            MetricDefinition(
+                name="llm_quota_refusals_total",
+                type=MetricType.COUNTER,
+                description="LLM work refused because a user was over an LLM quota",
+                labels=["category"],
+            )
+        )
         # Detailed LLM usage variants for dashboards
         self.register_metric(
             MetricDefinition(
@@ -2042,7 +2050,7 @@ class MetricsRegistry:
                 return
 
             definition = self.metrics[metric_name]
-            label_key = self._normalize_label_key(labels)
+            label_key = tuple(sorted((labels or {}).items()))
             store_sample = True
 
             if definition.type == MetricType.COUNTER and value < 0:

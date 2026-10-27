@@ -20,6 +20,7 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.jobs_failed_requeue import ensure_retry_admission_index
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection,
 )
@@ -578,6 +579,22 @@ CREATE TABLE IF NOT EXISTS slides_standalone_reconciliation (
     CHECK (unexpired_reference_count >= 0)
 );
 INSERT OR IGNORE INTO slides_standalone_reconciliation(singleton_id) VALUES (1);
+
+-- Durable, content-free cursor and partial totals for the bounded Notes
+-- semantic health sweep. Metrics are emitted only after a complete sweep.
+CREATE TABLE IF NOT EXISTS notes_semantic_health_sweep (
+  singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+  revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+  after_owner_id CHECK (
+    after_owner_id IS NULL OR
+    (TYPEOF(after_owner_id) = 'integer' AND after_owner_id > 0)
+  ),
+  after_dataset_id TEXT,
+  totals_json TEXT NOT NULL DEFAULT '[]' CHECK (LENGTH(totals_json) <= 65536),
+  updated_at TEXT NOT NULL DEFAULT (DATETIME('now')),
+  last_completed_at TEXT
+);
+INSERT OR IGNORE INTO notes_semantic_health_sweep(singleton_id) VALUES (1);
 
 -- Append-only outbox for job events (CDC/event bus)
 CREATE TABLE IF NOT EXISTS job_events (
@@ -1380,6 +1397,7 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
             _ensure_sqlite_archive_locators(conn)
             if not conn.in_transaction:
                 conn.execute("BEGIN IMMEDIATE")
+            ensure_retry_admission_index(conn, backend="sqlite")
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                 conn.execute("ALTER TABLE jobs ADD COLUMN batch_group TEXT")
             columns = {

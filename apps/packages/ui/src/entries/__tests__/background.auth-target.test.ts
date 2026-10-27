@@ -290,3 +290,100 @@ it.each(["direct", "extension"])(
     })
   },
 )
+
+describe("source-view scope admission in the actual extension worker", () => {
+  const paths = [
+    ["GET", "/api/v1/workspaces/ws/source-views"],
+    ["POST", "/api/v1/workspaces/ws/source-views"],
+    ["PATCH", "/api/v1/workspaces/ws/source-views/view"],
+    ["DELETE", "/api/v1/workspaces/ws/source-views/view"]
+  ]
+  const ownerConfig = () => ({
+    ...target,
+    accessToken: `fixture.${btoa(JSON.stringify({ sub: "7" }))}.signature`
+  })
+  const send = (path: string, method: string) =>
+    new Promise<unknown>((resolve) => {
+      ;[...runtimeMessageListeners][0](
+        {
+          type: "tldw:request",
+          payload: {
+            path,
+            method,
+            headers: { "X-TLDW-Expected-User-ID": "7" },
+            servicePromptConfig: { ...target, expectedUserId: 7 }
+          }
+        },
+        { id: "extension-id" },
+        resolve
+      )
+    })
+  it.each(paths)(
+    "dispatches admitted %s %s under the captured owner",
+    async (method, path) => {
+      storageState.persistent.set("tldwConfig", ownerConfig())
+      const fetchMock = vi.fn<typeof fetch>(
+        async () =>
+          new Response(JSON.stringify({ items: [] }), {
+            headers: { "content-type": "application/json" }
+          })
+      )
+      vi.stubGlobal("fetch", fetchMock)
+      await expect(send(path, method)).resolves.toMatchObject({
+        ok: true,
+        status: 200
+      })
+      expect(fetchMock).toHaveBeenCalledOnce()
+      expect(String(fetchMock.mock.calls[0][0])).toBe(
+        new URL(path, target.serverUrl).toString()
+      )
+      expect(fetchMock.mock.calls[0][1]?.method).toBe(method)
+      const headers = new Headers(fetchMock.mock.calls[0][1]?.headers)
+      expect(headers.get("X-TLDW-Expected-User-ID")).toBe("7")
+      expect(headers.get("Authorization")).toBe(
+        `Bearer ${ownerConfig().accessToken}`
+      )
+    }
+  )
+  it.each(["withdrawal", "principal", "server"])(
+    "denies every source-view method after owner %s",
+    async (change) => {
+      storageState.persistent.set(
+        "tldwConfig",
+        change === "withdrawal"
+          ? null
+          : change === "server"
+            ? { ...ownerConfig(), serverUrl: "https://other.test" }
+            : {
+                ...ownerConfig(),
+                accessToken: `fixture.${btoa(JSON.stringify({ sub: "8" }))}.signature`
+              }
+      )
+      const fetchMock = vi.fn<typeof fetch>()
+      vi.stubGlobal("fetch", fetchMock)
+      for (const [method, path] of paths)
+        await expect(send(path, method)).resolves.toMatchObject({
+          ok: false,
+          status: 412
+        })
+      expect(fetchMock).not.toHaveBeenCalled()
+    }
+  )
+  it.each([
+    ["DELETE", "/api/v1/workspaces/ws/source-views"],
+    ["GET", "/api/v1/workspaces/ws/source-views/view"],
+    ["PUT", "/api/v1/workspaces/ws/source-views/view"],
+    ["PATCH", "/api/v1/workspaces/ws/source-views/view/extra"],
+    ["POST", "/api/v1/workspaces/ws/source-views/../sources"],
+    ["POST", "/api/v1/workspaces/ws/source-views%2fextra"],
+    ["POST", "/api/v1/workspaces/ws/source-views\n"],
+    ["POST", "/api/v1/workspaces/ws/source-views\t"],
+    ["POST", "/api/v1/workspaces/ws/source-views\r"]
+  ])("denies raw scoped %s %s in the actual worker", async (method, path) => {
+    storageState.persistent.set("tldwConfig", ownerConfig())
+    const fetchMock = vi.fn<typeof fetch>()
+    vi.stubGlobal("fetch", fetchMock)
+    await expect(send(path, method)).resolves.toMatchObject({ ok: false })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})

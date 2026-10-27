@@ -121,6 +121,76 @@ def test_submit_media_ingest_jobs_creates_one_job_per_item(
     shutil.rmtree(file_payload["temp_dir"], ignore_errors=True)
 
 
+@pytest.mark.asyncio
+async def test_uploaded_txt_worker_and_detail_preserve_exact_source(
+    media_ingest_jobs_client,
+    auth_headers,
+    monkeypatch,
+    tmp_path,
+):
+    """Keep the source body intact through real upload, Jobs, chunking, and storage."""
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.api.v1.schemas.media_response_models import (
+        MediaDetailResponse,
+    )
+    from tldw_Server_API.app.core.DB_Management.media_db.api import (
+        get_full_media_details_rich,
+        get_media_by_id,
+    )
+    from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    source = (
+        b"Rowan Observatory\n\n"
+        b"Rowan Observatory opened in 2019 in Cedar Ridge. Its director is Dr. Mira Vale.\n"
+        b"The observatory's main telescope is named Selene.\n\n"
+        b"Public tours begin every Friday at 18:00. Visitors must reserve a place before\n"
+        b"arriving. The tour reference code is ORBIT-742.\n\n"
+        b"The observatory studies variable stars and shares a monthly public report.\n"
+        b"The source provides no ticket price and no current weather forecast.\n"
+    )
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_databases"))
+
+    response = media_ingest_jobs_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "document",
+            "perform_analysis": "false",
+            "overwrite_existing": "false",
+            "perform_chunking": "true",
+            "chunking_mode": "manual",
+            "generate_embeddings": "false",
+        },
+        files=[("files", ("F-SOURCE.txt", source, "text/plain"))],
+        headers=auth_headers,
+    )
+    assert response.status_code == 200, response.text  # nosec B101 # pytest regression assertion.
+    jm = JobManager()
+    job = jm.get_job(response.json()["jobs"][0]["id"])
+    try:
+        assert Path(job["payload"]["source"]).read_bytes() == source  # nosec B101 # pytest regression assertion.
+        result = await worker._handle_job(job, jm, worker._ProgressState())
+        assert result["status"] == "Success", result  # nosec B101 # pytest regression assertion.
+        with scoped_context(user_id=int(job["owner_user_id"]), is_admin=False):
+            db = worker._create_db(job["owner_user_id"])
+            try:
+                stored = get_media_by_id(db, result["media_id"])
+                detail = MediaDetailResponse(**get_full_media_details_rich(
+                    db,
+                    media_id=result["media_id"],
+                    include_content=True,
+                    include_versions=True,
+                    include_version_content=True,
+                )).model_dump()
+                assert stored["content"].encode("utf-8") == source  # nosec B101 # pytest regression assertion.
+                assert stored["chunking_status"] == "completed"  # nosec B101 # pytest regression assertion.
+                assert detail["content"]["text"].encode("utf-8") == source  # nosec B101 # pytest regression assertion.
+            finally:
+                db.close_connection()
+    finally:
+        shutil.rmtree(job["payload"]["temp_dir"], ignore_errors=True)
+
+
 def test_submit_media_ingest_jobs_preserves_collection_item_binding(
     media_ingest_jobs_client,
     monkeypatch,
@@ -270,6 +340,48 @@ def test_submit_media_ingest_jobs_sanitizes_upload_staging_failure(
     assert "/private/cache/upload.txt" not in str(logger_stub.warnings)
     assert "staging backend exploded" not in resp.text
     assert "/private/cache/upload.txt" not in resp.text
+
+
+@pytest.mark.parametrize("job_status", ("queued", "completed", "cancelled"))
+def test_get_media_ingest_job_serializes_postgres_timestamps(
+    media_ingest_jobs_client,
+    monkeypatch,
+    job_status,
+):
+    """Real PG timestamps must not turn a valid status read into HTTP500."""
+    from datetime import datetime, timezone
+
+    from tldw_Server_API.app.core.Jobs import manager as jobs_manager
+
+    timestamp = datetime(2026, 10, 14, 13, 0, 0, tzinfo=timezone.utc)
+    dates = {
+        "created_at": timestamp,
+        "started_at": timestamp if job_status != "queued" else None,
+        "completed_at": timestamp if job_status == "completed" else None,
+        "cancelled_at": timestamp if job_status == "cancelled" else None,
+    }
+    row = {
+        "id": 99,
+        "uuid": "postgres-job",
+        "domain": "media_ingest",
+        "job_type": "media_ingest_item",
+        "owner_user_id": "1",
+        "status": job_status,
+        **dates,
+        "result": {"media_id": 321} if job_status == "completed" else None,
+        "payload": {"batch_id": "postgres-batch"},
+    }
+    monkeypatch.setattr(jobs_manager.JobManager, "get_job", lambda self, job_id: row)
+    response = media_ingest_jobs_client.get(
+        "/api/v1/media/ingest/jobs/99",
+        headers={"X-API-KEY": "test-api-key-12345"},
+    )
+    assert response.status_code == 200, response.text  # nosec B101 - Actual endpoint timestamp regression.
+    body = response.json()
+    assert {key: body[key] for key in dates} == {
+        key: value.isoformat() if value else None for key, value in dates.items()
+    }  # nosec B101 - PG serialization and nullable fields.
+    assert (body["owner_user_id"], body["batch_id"], body["result"]) == ("1", "postgres-batch", row["result"])  # nosec B101 - Status identity/result preserved.
 
 
 def test_get_media_ingest_job_includes_result_media_id(

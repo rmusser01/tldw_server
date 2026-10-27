@@ -7,8 +7,10 @@ const deferred = <T,>() => {
   const promise = new Promise<T>(done => { resolve = done })
   return { promise, resolve }
 }
-const lease = (controller = new AbortController()) => ({
-  scopeKey: "owner-A",
+const lease = (controller = new AbortController(), scopeKey = "owner-A") => ({
+  scopeKey,
+  requestScope: { config: { serverUrl: `https://${scopeKey}.example`, authMode: "single-user",
+    expectedSingleUserApiKeyScope: scopeKey }, userId: null },
   scopeSignal: controller.signal,
   scopeInvalidatedSignal: new AbortController().signal,
   release: vi.fn()
@@ -92,5 +94,53 @@ describe("saved loader promotion wait lifecycle", () => {
     expect((await later).name).toBe("AbortError")
     held.resolve()
     await operation
+  })
+})
+
+
+describe("SDK send promotion wait ownership", () => {
+  it("does not join an equal history ID belonging to a different request scope", async () => {
+    const owner = {}, controller = new AbortController(), held = deferred<void>()
+    const operation = trackChatPromotion(owner, "history-A", Promise.resolve(lease(controller)),
+      () => held.promise, callbacks(controller))
+    try {
+      await flush()
+      expect(await waitForChatPromotion(owner, "history-A", lease(new AbortController(), "owner-B"))).toBeUndefined()
+      expect(controller.signal.aborted).toBe(false)
+    } finally { held.resolve(); await operation }
+  })
+
+  it("keeps the original same-scope send blocked until its entire promotion finishes", async () => {
+    const owner = {}, controller = new AbortController(), held = deferred<void>()
+    const operation = trackChatPromotion(owner, "history-A", Promise.resolve(lease(controller)),
+      () => held.promise, callbacks(controller))
+    let settled = false
+    const waiting = waitForChatPromotion(owner, "history-A", lease()).then(() => { settled = true })
+    try {
+      await flush()
+      expect(settled).toBe(false)
+      held.resolve()
+      await operation
+      await waiting
+      expect(settled).toBe(true)
+    } finally { held.resolve(); await operation; await waiting }
+  })
+
+  it.each(["clear", "same-ID replacement"])("refuses the original send's completion after %s", async boundary => {
+    const owner = {}, controller = new AbortController(), held = deferred<void>()
+    const operation = trackChatPromotion(owner, "history-A", Promise.resolve(lease(controller)),
+      () => held.promise, callbacks(controller)).catch(error => error)
+    const waiterController = new AbortController()
+    const waiting = waitForChatPromotion(owner, "history-A", lease(waiterController)).catch(error => error)
+    try {
+      await flush()
+      if (boundary === "clear") clearChatPromotion(owner, "history-A")
+      else await trackChatPromotion(owner, "history-A", Promise.resolve(lease()),
+        async () => undefined, callbacks(new AbortController()))
+      held.resolve()
+      await operation
+      expect(await waiting).toMatchObject({ name: "AbortError" })
+      expect(waiterController.signal.aborted).toBe(false)
+    } finally { held.resolve(); await operation; await waiting }
   })
 })

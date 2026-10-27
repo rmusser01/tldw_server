@@ -1,0 +1,43 @@
+{
+  "baseline": "26ae4fd679ddd43f9f904cd3cca1b1cf8af51e48",
+  "notes": {
+    "files": 122,
+    "passed": 866,
+    "failed": 0,
+    "skipped": 0,
+    "runnerErrors": 0,
+    "changedFixtureFiles": 11,
+    "changedFixturePassed": 64
+  },
+  "knowledgeQA": {
+    "relatedFiles": 18,
+    "passed": 224,
+    "independentScopePassed": 24
+  },
+  "extension": {
+    "runtimeAndAssetTests": 5,
+    "compileExitCode": 0,
+    "buildExitCode": 0
+  },
+  "webUI": {
+    "finalTypecheckExitCode": 0,
+    "fullProductionBuildThisRun": false
+  },
+  "sqlite": {
+    "relevantPassed": 285,
+    "officialUnavailablePostgresSkips": 7,
+    "parentFocusedPassed": 28,
+    "schemaAndSensitiveLoggingPassed": 62,
+    "reviewerAdditionalSensitiveLoggingPassed": 2
+  },
+  "review": {
+    "actionableCodeFindings": 0
+  },
+  "qualifications": [
+    "No repository-wide test/lint-green claim",
+    "No native context-menu attestation",
+    "No spoken VoiceOver or actual Safari/iOS/mobile session",
+    "No human participant sessions",
+    "Public article capture/refresh proposal awaits approval"
+  ]
+}

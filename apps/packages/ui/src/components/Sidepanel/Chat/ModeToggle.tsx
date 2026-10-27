@@ -14,7 +14,7 @@ export const ModeToggle = () => {
   ] as const
 
   return (
-    <div className="flex items-center justify-between gap-3">
+    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
       <span className="text-caption font-medium text-text-muted">
         {t("common:chatSidebar.modeLabel", "Mode")}
       </span>

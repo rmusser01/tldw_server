@@ -110,6 +110,31 @@ Resource Governor keys use the configurable `rg:` namespace. OpenAI lock keys
 use the fixed `tldw:` namespace. Both Redis data sets use automatic TTLs so
 stale state is cleaned up.
 
+### Resource Governor window-expiry rollout
+
+Do not mix older Resource Governor writers that do not refresh window-key TTLs
+with writers that use `ceil(window) + 5` expiry. They share the same window keys:
+an older writer can add a live charge without extending a newer writer's TTL,
+so expiry can erase that charge before its window ends. Different script hashes
+do not isolate the shared counters.
+
+Use a coordinated, quiesced cutover for this transition and for rollback:
+
+1. Stop admissions and drain or stop every API, worker and background process
+   that writes Resource Governor state. Verify that no previous-version writer
+   remains, including autoscaled replicas and retrying jobs.
+2. Keep policies unchanged and wait at least the largest configured request or
+   token window plus five seconds after the last writer stops. Include every
+   policy and scope; the default token window alone is not sufficient. This
+   allows all previously live window charges and refreshed TTLs to age out.
+3. Retain the Redis namespace and data. Start all writers on the chosen version
+   together and verify their versions before resuming admissions. Do not flush
+   keys, split namespaces or disable enforcement to make the transition pass.
+
+A mixed-version rolling update across this boundary is not supported. Policy
+window increases also need a quiesced transition; an existing shorter TTL does
+not become safe merely because the policy now uses a longer window.
+
 ## What remains per-instance
 
 | Component | Reason |
@@ -134,6 +159,7 @@ The process-local safety controls are:
 | `CHAT_STREAM_CLEANUP_DAEMON_MAX_WORKERS` | `4` | Capacity reserved for synchronous late-work cleanup |
 | `CHAT_STREAM_ASYNC_MAX_TASKS` | `256` | Asynchronous provider stream work |
 | `CHAT_STREAM_ASYNC_CLEANUP_MAX_TASKS` | `32` | Capacity reserved for asynchronous late-work cleanup |
+| `CHAT_STREAM_SETTLEMENT_MAX_TASKS` | `256` | Detached writes that save a partial reply after a stream ended early |
 
 Each value must be an integer from `1` through `256`. Invalid or out-of-range
 values use the listed default, and changes require an application restart.

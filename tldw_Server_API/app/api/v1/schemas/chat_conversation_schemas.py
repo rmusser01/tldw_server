@@ -62,6 +62,15 @@ class ConversationListItem(BaseModel):
     source: str | None = Field(None, description="Source of the conversation")
     external_ref: str | None = Field(None, description="External reference ID")
     version: int = Field(1, description="Version number for optimistic locking")
+    matched_in: list[Literal["title", "content"]] | None = Field(
+        None,
+        description="Where the search query matched. Set only by a search that includes message content.",
+    )
+    match_snippet: str | None = Field(
+        None,
+        description="Plain-text excerpt of the earliest live message that matched the search query",
+    )
+    match_message_id: str | None = Field(None, description="ID of the message that match_snippet is taken from")
 
 
 class ConversationListPagination(BaseModel):

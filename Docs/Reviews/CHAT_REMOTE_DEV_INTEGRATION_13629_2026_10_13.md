@@ -1,0 +1,15 @@
+# Remote dev integration and protected Resume quota — TASK-13629
+
+Remote dev79aa6f00a4509919ce78c11cab9b3be40025866a adds LLM quota enforcement and usage reporting. The PR became conflicting, which prevented pull_request workflows from launching; passing license/review-bot checks were not the required gates. The sole explicit merge conflict was the generated API fingerprint. Full shared canonical generation retained2129paths3301schemas and produced hashc8ee398cb33d5d9d6288e77ecb3f6c3072899ad294741296fb47e9c3168461c3. Exact fingerprint/path drift checks pass; rich generated artifacts remain ignored.
+
+Independent overlap review found protected Roleplay Resume returned before the new legacy completion quota guard. It now invokes the existing shared guard after validated ownership/source/Sync preparation and completed-replay handling, before limiter, credentials or provider work. Six actual endpoint controls cover monthly tokens, daily spend and monthly spend, plus completed replay under each exhausted cap. Fresh refusals do no provider or reply persistence work and keep the admitted source state; completed replay remains identical without quota lookup or another provider call.
+
+The new controls reproduced3failed3passed with capped requests incorrectly generating/saving200. The isolated green run passed6assertions but aborted after pytest during native-library teardown (libc++recursive_mutex); that process was not counted as successful. The wider eight-suite run exits0 with194passed and5officialPostgreSQL skips because Postgres is unavailable. It did not reproduce the abort. New controls were formatted with the project mode and the complete test AST remains identical. Whole-file legacy formatting differences predate this integration in all four local-parent files; no unrelated formatting churn was added.
+
+Both normal client source type checks pass. Three overlapping production Python files have0Bandit findings/scan errors; the new test scope also has0 excluding intentional assertions. Combined public-docs/strict source-preservation and shared API artifact suites pass60tests; public/private boundary passes. Independent bounded backend and API reviews are clear after the Resume correction. Normal hooks and restored GitHub admission are recorded in the task.
+
+The local retention-upload task13610 collided with remote Messages usage tracking. It is now TASK13630, using backlog-py canonical parser/frontmatter editing/atomic writing; original body, criteria, checks and other metadata were preserved before the provenance note. Remote TASK13610 and unrelated historical collisions remain unchanged. Its historical review links to the current tracking identity.
+
+ADR required: no new rule; preserve existing H1 admission, ADR067 provider accounting, ADR059 task editing and proposed ADR069 shared API ownership. PostgreSQL physical qualification, remaining UI/UX/H2 work, final fresh-context whole-PR review, final rebase and merge remain open.
+
+PR: https://github.com/rmusser01/tldw_server/pull/3229

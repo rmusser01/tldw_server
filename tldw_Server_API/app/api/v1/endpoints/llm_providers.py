@@ -44,6 +44,7 @@ from tldw_Server_API.app.core.exceptions import (
 from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
 from tldw_Server_API.app.core.http_client import fetch as _http_fetch
 from tldw_Server_API.app.core.Image_Generation.listing import list_image_models_for_catalog
+from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.LLM_Calls.extra_body_compat_catalog import (
     get_model_extra_body_compat,
     get_provider_extra_body_compat,
@@ -187,7 +188,7 @@ MODEL_METADATA: dict[str, dict[str, dict[str, Any]]] = {
         },
     },
     "anthropic": {
-        "claude-sonnet-4.5": {
+        "claude-sonnet-4-5": {
             "context_window": 200_000,
             "max_output_tokens": 64_000,
             "capabilities": {
@@ -205,7 +206,7 @@ MODEL_METADATA: dict[str, dict[str, dict[str, Any]]] = {
             "source_url": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
             "last_verified": None
         },
-        "claude-haiku-4.5": {
+        "claude-haiku-4-5": {
             "context_window": 200_000,
             "max_output_tokens": 64_000,
             "capabilities": {
@@ -223,7 +224,7 @@ MODEL_METADATA: dict[str, dict[str, dict[str, Any]]] = {
             "source_url": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
             "last_verified": None
         },
-        "claude-opus-4.1": {
+        "claude-opus-4-1": {
             "context_window": 200_000,
             "max_output_tokens": 32_000,
             "capabilities": {
@@ -943,7 +944,9 @@ def get_model_metadata(provider: str, model: str) -> dict[str, Any]:
     """Get metadata for a given provider/model with safe fallbacks."""
     provider = (provider or "").lower()
     model = model or ""
-    md = MODEL_METADATA.get(provider, {}).get(model)
+    # The table is keyed by API IDs; a saved dotted Anthropic name (claude-sonnet-4.5) finds its dashed entry.
+    lookup = canonical_anthropic_model_id(model) if provider == "anthropic" else model
+    md = MODEL_METADATA.get(provider, {}).get(lookup)
     base = _default_model_metadata(provider, model)
     if md is None:
         return merge_routing_metadata(base, provider=provider, model=model)
@@ -1060,6 +1063,7 @@ def _discover_llamacpp_vision(
 ) -> dict[str, bool]:
     """Confirm vision only for identities reported by the configured llama.cpp server.
 
+    Compatible servers without /props may explicitly declare vision in /v1/models.
     Keep one short-lived snapshot, including failures, to avoid delaying every
     catalog request when /props is unavailable. Endpoint or credential changes
     invalidate it. This optional capability probe does not change readiness.
@@ -1068,7 +1072,7 @@ def _discover_llamacpp_vision(
     path = parsed.path.rstrip("/")
     for suffix in ("/v1/chat/completions", "/chat/completions", "/completion", "/v1"):
         if path.endswith(suffix):
-            path = path[:-len(suffix)]
+            path = path[: -len(suffix)]
             break
     props_url = parsed._replace(path=f"{path}/props", params="", query="", fragment="").geturl()
     cache_key = hashlib.sha256(json.dumps([props_url, api_key]).encode()).hexdigest()
@@ -1092,6 +1096,7 @@ def _discover_llamacpp_vision(
             configured_endpoint=configured_endpoint,
             sensitive_observability=True,
         )
+        unsupported_props = response.status_code in (404, 405)
         try:
             if response.status_code == 200:
                 payload = response.json()
@@ -1104,6 +1109,32 @@ def _discover_llamacpp_vision(
                             confirmed[identity.strip()] = vision
         finally:
             response.close()
+        if unsupported_props:
+            models_url = parsed._replace(path=f"{path}/v1/models", params="", query="", fragment="").geturl()
+            models_response = _http_fetch(
+                method="GET",
+                url=models_url,
+                headers=headers,
+                timeout=LOCAL_MODEL_DISCOVERY_TIMEOUT,
+                retry=_RetryPolicy(attempts=1),
+                allow_redirects=False,
+                configured_endpoint=configured_endpoint,
+                sensitive_observability=True,
+            )
+            try:
+                if models_response.status_code == 200:
+                    payload = models_response.json()
+                    models = payload.get("data") if isinstance(payload, dict) else None
+                    if isinstance(models, list):
+                        for model in models:
+                            if not isinstance(model, dict):
+                                continue
+                            identity, vision = model.get("id"), model.get("vision")
+                            if isinstance(identity, str) and identity.strip() and isinstance(vision, bool):
+                                identity = identity.strip()
+                                confirmed[identity] = confirmed.get(identity, True) and vision
+            finally:
+                models_response.close()
     except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
         logger.debug("External llama.cpp capability discovery unavailable")
     _LLAMACPP_VISION_CACHE.clear()

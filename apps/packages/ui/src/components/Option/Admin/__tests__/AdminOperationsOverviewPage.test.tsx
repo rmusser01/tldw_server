@@ -26,7 +26,22 @@ vi.mock("@/hooks/useConnectionState", () => ({
   useConnectionState: () => ({ serverUrl: connectionMock.serverUrl })
 }))
 
+// The module-signal probes read the connection store directly (they run
+// outside React) so cached signals are dropped when the target changes.
+// Mocking the store keeps that path in sync with connectionMock above.
+vi.mock("@/store/connection", () => {
+  const store = {
+    state: connectionMock
+  }
+  const useConnectionStore = Object.assign(
+    (selector: (s: typeof store) => unknown) => selector(store),
+    { getState: () => store }
+  )
+  return { useConnectionStore }
+})
+
 import { AdminOperationsOverviewPage } from "../AdminOperationsOverviewPage"
+import { getAdminQueryClient } from "../AdminQueryProvider"
 import { ADMIN_MODULES } from "../admin-modules"
 
 describe("AdminOperationsOverviewPage", () => {
@@ -34,6 +49,9 @@ describe("AdminOperationsOverviewPage", () => {
     vi.clearAllMocks()
     connectionMock.serverUrl = "http://127.0.0.1:8000"
     window.localStorage.clear()
+    // Signals share the admin query cache (B-S4); drop leftovers so each
+    // test exercises its own mocks instead of the previous test's cache.
+    getAdminQueryClient().clear()
     apiMock.getSystemStats.mockResolvedValue({ users: { total: 1 } })
     apiMock.getSecurityAlertStatus.mockResolvedValue({ health: "ok" })
     apiMock.listBackups.mockResolvedValue({ backups: [] })

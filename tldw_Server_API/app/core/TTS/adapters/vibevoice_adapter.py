@@ -30,7 +30,7 @@ from ..tts_exceptions import (
 )
 from ..tts_resource_manager import get_resource_manager
 from ..tts_validation import validate_tts_request
-from ..utils import parse_bool, run_tts_blocking_call
+from ..utils import hold_tts_engine, parse_bool
 
 #
 # Local Imports
@@ -960,7 +960,7 @@ class VibeVoiceAdapter(TTSAdapter):
         )
 
         try:
-            async with self._model_state_lock:
+            async with hold_tts_engine(self._model_state_lock) as run:
                 expected_variant = gen_config.get("model_variant")
                 if expected_variant and expected_variant != self.variant:
                     await self._reload_model_for_variant(str(expected_variant))
@@ -1056,7 +1056,7 @@ class VibeVoiceAdapter(TTSAdapter):
 
                 # Generate with VibeVoice model
                 self._check_cancellation()
-                outputs = await run_tts_blocking_call(_generate_outputs)
+                outputs = await run(_generate_outputs)
 
                 if not outputs.speech_outputs or outputs.speech_outputs[0] is None:
                     logger.error("No audio output generated from VibeVoice")

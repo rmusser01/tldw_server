@@ -39,6 +39,7 @@ import { TestCaseFormModal } from "./TestCaseFormModal"
 import { TestCaseBulkPanel } from "./TestCaseBulkPanel"
 import { TestCaseGenerateModal } from "./TestCaseGenerateModal"
 import { TestCaseRunModal } from "./TestCaseRunModal"
+import { TestRunHistoryDrawer } from "./TestRunHistoryDrawer"
 
 export const TestCasesTab: React.FC = () => {
   const { t } = useTranslation(["settings", "common"])
@@ -51,6 +52,7 @@ export const TestCasesTab: React.FC = () => {
   const [bulkPanelOpen, setBulkPanelOpen] = useState(false)
   const [generateModalOpen, setGenerateModalOpen] = useState(false)
   const [runModalOpen, setRunModalOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   const selectedProjectId = usePromptStudioStore((s) => s.selectedProjectId)
   const selectedTestCaseIds = usePromptStudioStore((s) => s.selectedTestCaseIds)
@@ -60,6 +62,9 @@ export const TestCasesTab: React.FC = () => {
   const setTestCaseModalOpen = usePromptStudioStore((s) => s.setTestCaseModalOpen)
   const editingTestCaseId = usePromptStudioStore((s) => s.editingTestCaseId)
   const setEditingTestCaseId = usePromptStudioStore((s) => s.setEditingTestCaseId)
+  const history = historyOpen && selectedProjectId !== null
+    ? <TestRunHistoryDrawer key={selectedProjectId} projectId={selectedProjectId} onClose={() => setHistoryOpen(false)} />
+    : null
 
   // Fetch test cases
   const { data: testCasesResponse, status: testCasesStatus } = useQuery({
@@ -99,7 +104,7 @@ export const TestCasesTab: React.FC = () => {
     },
     onError: (error: any) => {
       notification.error({
-        message: t("common:error", { defaultValue: "Error" }),
+        message: t("common:error.label", { defaultValue: "Error" }),
         description: error?.message || t("common:unknownError")
       })
     }
@@ -120,7 +125,7 @@ export const TestCasesTab: React.FC = () => {
     },
     onError: (error: any) => {
       notification.error({
-        message: t("common:error", { defaultValue: "Error" }),
+        message: t("common:error.label", { defaultValue: "Error" }),
         description: error?.message || t("common:unknownError")
       })
     }
@@ -257,6 +262,8 @@ export const TestCasesTab: React.FC = () => {
           })}
           onPrimaryAction={handleOpenCreate}
         />
+        <Button type="secondary" onClick={() => setHistoryOpen(true)}>History</Button>
+        {history}
         <TestCaseFormModal
           open={isTestCaseModalOpen}
           testCaseId={editingTestCaseId}
@@ -321,6 +328,7 @@ export const TestCasesTab: React.FC = () => {
               defaultValue: "Generate"
             })}
           </Button>
+          <Button type="secondary" onClick={() => setHistoryOpen(true)}>History</Button>
         </div>
 
         <div className="flex items-center gap-2">
@@ -503,6 +511,7 @@ export const TestCasesTab: React.FC = () => {
       />
 
       {/* Modals */}
+      {history}
       <TestCaseFormModal
         open={isTestCaseModalOpen}
         testCaseId={editingTestCaseId}

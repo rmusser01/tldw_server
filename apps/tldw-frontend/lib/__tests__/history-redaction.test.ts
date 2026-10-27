@@ -1,8 +1,9 @@
 /** @vitest-environment jsdom */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  FLUSH_DEBOUNCE_MS,
   addRequestHistory,
   clearRequestHistory,
   getRequestHistory,
@@ -10,12 +11,24 @@ import {
 
 const KEY = 'tldw-request-history';
 
+// Entries are persisted in one batched flush per FLUSH_DEBOUNCE_MS trailing
+// debounce window (jsdom lacks requestIdleCallback, so the timer fallback
+// fires directly). Advance the window so storage assertions observe the
+// persisted payload.
+const flushHistoryWrites = () => {
+  vi.advanceTimersByTime(FLUSH_DEBOUNCE_MS);
+};
+
 describe('request history redaction', () => {
   beforeEach(() => {
+    vi.useFakeTimers();
     localStorage.clear();
+    // Reset the module-level history cache so tests are isolated.
+    clearRequestHistory();
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     localStorage.clear();
   });
 
@@ -38,6 +51,7 @@ describe('request history redaction', () => {
       },
     });
 
+    flushHistoryWrites();
     const raw = localStorage.getItem(KEY) || '';
     // Distinctive secret values must not appear anywhere in the stored blob.
     expect(raw).not.toContain('Bearer XYZ');
@@ -74,6 +88,7 @@ describe('request history redaction', () => {
       },
     });
 
+    flushHistoryWrites();
     const raw = localStorage.getItem(KEY) || '';
     expect(raw).not.toContain('MIXEDCASE');
     expect(raw).not.toContain('MIXED-KEY');
@@ -89,6 +104,7 @@ describe('request history redaction', () => {
       responseBody: { access_token: 'SECRET-TOKEN-123', token_type: 'bearer' },
     });
 
+    flushHistoryWrites();
     const raw = localStorage.getItem(KEY) || '';
     expect(raw).not.toContain('SECRET-TOKEN-123');
     expect(raw).not.toContain('Bearer XYZ');
@@ -103,6 +119,7 @@ describe('request history redaction', () => {
       responseBody: { access_token: 'REFRESH-ACCESS', refresh_token: 'REFRESH-REFRESH' },
     });
 
+    flushHistoryWrites();
     const raw = localStorage.getItem(KEY) || '';
     expect(raw).not.toContain('REFRESH-ACCESS');
     expect(raw).not.toContain('REFRESH-REFRESH');
@@ -120,6 +137,7 @@ describe('request history redaction', () => {
       },
     });
 
+    flushHistoryWrites();
     const raw = localStorage.getItem(KEY) || '';
     expect(raw).not.toContain('LEAK-1');
     expect(raw).not.toContain('LEAK-2');
@@ -147,6 +165,7 @@ describe('request history redaction', () => {
       responseBody: { data: { api_key: 'RESP-APIK-LEAK' } },
     });
 
+    flushHistoryWrites();
     const raw = localStorage.getItem(KEY) || '';
     for (const leaked of [
       'IDT-LEAK',
@@ -187,6 +206,7 @@ describe('request history redaction', () => {
       },
     });
 
+    flushHistoryWrites();
     const raw = localStorage.getItem(KEY) || '';
     expect(raw).not.toContain('DEEP-LEAK');
     // The truncated subtree is replaced with the redaction placeholder.

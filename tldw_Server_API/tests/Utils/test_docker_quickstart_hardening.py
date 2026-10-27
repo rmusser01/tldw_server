@@ -212,6 +212,15 @@ def test_webui_dockerfile_copies_only_required_workspace_sources():
         "Expected Dockerfile.webui to copy the Bun lockfile explicitly",
     )
     _require(
+        "COPY apps/patches /app/apps/patches" in text,
+        "Expected frozen workspace patches to be present before dependency installation",
+    )
+    _require(
+        text.index("COPY apps/patches /app/apps/patches")
+        < text.index("RUN bun install --frozen-lockfile --cwd /app/apps"),
+        "Expected patched dependencies to be copied before the frozen install layer",
+    )
+    _require(
         "COPY apps/tldw-frontend /app/apps/tldw-frontend" in text,
         "Expected Dockerfile.webui to copy the frontend workspace explicitly",
     )
@@ -226,11 +235,6 @@ def test_webui_dockerfile_copies_only_required_workspace_sources():
     _require(
         "COPY apps/extension/scripts/wxt-prepare.mjs /app/apps/extension/scripts/wxt-prepare.mjs" in text,
         "Expected Dockerfile.webui to copy only the extension prepare shim needed for install scripts",
-    )
-    _require(
-        "COPY apps/packages/voice-assistant-sdk/package.json /app/apps/packages/voice-assistant-sdk/package.json"
-        in text,
-        "Expected Dockerfile.webui to copy the voice assistant package manifest for frozen lockfile workspace resolution",
     )
     _require(
         "pkg.workspaces=" not in text,

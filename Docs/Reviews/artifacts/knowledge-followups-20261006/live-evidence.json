@@ -1,0 +1,170 @@
+{
+  "baseDev": "1fc353c3f67c93ba05102e7b0136ac4acac8f510",
+  "date": "2026-10-06",
+  "configuration": {
+    "generation": "Real local Gemma4-26B-A4B Q4 through custom OpenAI-compatible provider",
+    "retrieval": "SQLite FTS",
+    "embeddings": "Controlled fixtures; not a live vector-retrieval qualification",
+    "topK": 8,
+    "maxGenerationTokens": 384,
+    "applicationCache": false,
+    "reranking": false,
+    "queryExpansion": false,
+    "webFallback": false,
+    "intentRouting": false
+  },
+  "cases": [
+    {
+      "case": "baseline_fact",
+      "query": "Vega baseline sensor calibration days",
+      "expected": "Three calibration days; baseline water use 120 litres per plot per week.",
+      "observedAnswer": "The Vega baseline sensor calibration took three days.",
+      "sourceIds": [
+        "1"
+      ],
+      "sourceTitles": [
+        "Vega greenhouse baseline pilot"
+      ],
+      "requestMilliseconds": 1954,
+      "generationExecuted": true,
+      "exactHardSpanCoverage": 0,
+      "errors": []
+    },
+    {
+      "case": "refined_fact",
+      "query": "Vega refined irrigation water use litres per plot per week",
+      "expected": "Refined water use 90 litres per plot per week.",
+      "observedAnswer": "90 litres per plot per week",
+      "sourceIds": [
+        "2"
+      ],
+      "sourceTitles": [
+        "Vega greenhouse refined irrigation"
+      ],
+      "requestMilliseconds": 174,
+      "generationExecuted": true,
+      "exactHardSpanCoverage": 1,
+      "errors": []
+    },
+    {
+      "case": "comparison",
+      "query": "Compare Vega baseline and refined calibration duration and water use",
+      "expected": "Baseline/refined calibration three/five days and water use 120/90 litres; orchard data excluded.",
+      "observedAnswer": "The baseline sensor calibration took three days, while the refined sensor calibration took five days. In terms of water use, the baseline phase used 120 litres per plot per week, whereas the refined phase used 90 litres per plot per week.",
+      "sourceIds": [
+        "1",
+        "2"
+      ],
+      "sourceTitles": [
+        "Vega greenhouse baseline pilot",
+        "Vega greenhouse refined irrigation"
+      ],
+      "requestMilliseconds": 663,
+      "generationExecuted": true,
+      "exactHardSpanCoverage": 0,
+      "errors": []
+    },
+    {
+      "case": "unknown",
+      "query": "What was the total operating cost of the Vega greenhouse pilot?",
+      "expected": "Operating cost absent; abstain without inventing a cost.",
+      "observedAnswer": "The provided context does not contain information regarding the total operating cost of the Vega greenhouse pilot.",
+      "sourceIds": [
+        "1",
+        "2"
+      ],
+      "sourceTitles": [
+        "Vega greenhouse baseline pilot",
+        "Vega greenhouse refined irrigation"
+      ],
+      "requestMilliseconds": 343,
+      "generationExecuted": true,
+      "exactHardSpanCoverage": 0,
+      "errors": []
+    },
+    {
+      "case": "note_fact",
+      "query": "Vega next review date",
+      "expected": "Next review date 18 November 2026 in the canonical note appendix.",
+      "observedAnswer": "The next review date is 18 November 2026.",
+      "sourceIds": [
+        "b21b8c60-27d4-4acc-9c6d-8beb7ce204b6"
+      ],
+      "sourceTitles": [
+        "Vega research decision log"
+      ],
+      "requestMilliseconds": 229,
+      "generationExecuted": true,
+      "exactHardSpanCoverage": 1,
+      "errors": []
+    }
+  ],
+  "ordinaryNotesQuery": {
+    "query": "Vega next review date",
+    "beforeDocuments": 0,
+    "afterDocuments": 1,
+    "afterMilliseconds": 1886,
+    "answerDate": "18 November 2026"
+  },
+  "liveWebSearch": {
+    "provider": "DuckDuckGo",
+    "status": 200,
+    "actualResults": 3,
+    "requestMilliseconds": 638
+  },
+  "browserProof": {
+    "fullNoteSnapshot": {
+      "mediaId": 4,
+      "title": "Vega research decision log — full note snapshot (v2)",
+      "originalVersion": 2,
+      "fullSnapshotHasPostRetrievalAppendix": true,
+      "originalRetrievedNoteHasPostRetrievalAppendix": false
+    },
+    "saveAndReopen": {
+      "status": 200,
+      "noteId": "e32271d0-bb54-4c0b-a2d4-945136fdf243",
+      "version": 4,
+      "editRetained": true,
+      "hasMarker": true,
+      "importId": "838f054d-b5ce-47cb-9a70-2bfd80f2b03d",
+      "sourceCount": 5,
+      "uiSaveStatus": 200,
+      "uiReopenedEditRetained": true
+    }
+  },
+  "verification": {
+    "affectedFrontendTestsPassed": 152,
+    "affectedFrontendFiles": 6,
+    "affectedApiTestsPassed": 91,
+    "webTypecheck": "passed",
+    "extensionTypecheck": "passed",
+    "webProductionCompile": "passed",
+    "chromeExtensionBuild": "passed",
+    "productionBanditIssues": 0,
+    "newProductionEslintWarnings": 0,
+    "fullFrontendSuite": {
+      "passed": 22995,
+      "failed": 224,
+      "skipped": 20,
+      "runnerErrors": 2,
+      "namedFailuresReproducedOnUnchangedDev": 183,
+      "ownedFixtureFailureFixed": 1
+    },
+    "candidateComparison": {
+      "files": 16,
+      "passed": 322,
+      "failed": 8,
+      "baselineFailuresReproduced": 7,
+      "extraSkillsCasePassedIsolatedOnCandidateAndDev": true
+    }
+  },
+  "limitations": [
+    "No real participant sessions",
+    "No final VoiceOver spoken-navigation qualification",
+    "No actual iOS keyboard qualification",
+    "No final native extension-menu success qualification",
+    "Portable content markers remain editable; independent Notes/Sync provenance is a proposal",
+    "Small curated corpus and single local model; latency values are observations, not percentile estimates",
+    "Broad frontend suite remains failing"
+  ]
+}

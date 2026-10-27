@@ -42,10 +42,11 @@ if (typeof window !== 'undefined') {
 
   // Mock the Dexie database to avoid IndexedDB issues in tests
   vi.doMock('@/db/dexie/schema', () => {
-    const mockTable = {
+    const mockTable = () => ({
       toArray: vi.fn().mockResolvedValue([]),
       get: vi.fn().mockResolvedValue(undefined),
       put: vi.fn().mockResolvedValue(undefined),
+      update: vi.fn().mockResolvedValue(0),
       add: vi.fn().mockResolvedValue(undefined),
       delete: vi.fn().mockResolvedValue(undefined),
       where: vi.fn().mockReturnThis(),
@@ -54,30 +55,30 @@ if (typeof window !== 'undefined') {
       count: vi.fn().mockResolvedValue(0),
       bulkPut: vi.fn().mockResolvedValue(undefined),
       bulkDelete: vi.fn().mockResolvedValue(undefined),
-    };
+    });
 
     return {
       db: {
-        chatHistories: mockTable,
-        messages: mockTable,
-        prompts: mockTable,
-        webshares: mockTable,
-        sessionFiles: mockTable,
-        userSettings: mockTable,
-        customModels: mockTable,
-        modelNickname: mockTable,
-        processedMedia: mockTable,
-        compareStates: mockTable,
-        contentDrafts: mockTable,
-        draftBatches: mockTable,
-        draftAssets: mockTable,
-        folders: mockTable,
-        keywords: mockTable,
-        folderKeywordLinks: mockTable,
-        conversationKeywordLinks: mockTable,
-        audiobookProjects: mockTable,
-        audiobookChapterAssets: mockTable,
-        ttsClips: mockTable,
+        chatHistories: mockTable(),
+        messages: mockTable(),
+        prompts: mockTable(),
+        webshares: mockTable(),
+        sessionFiles: mockTable(),
+        userSettings: mockTable(),
+        customModels: mockTable(),
+        modelNickname: mockTable(),
+        processedMedia: mockTable(),
+        compareStates: mockTable(),
+        contentDrafts: mockTable(),
+        draftBatches: mockTable(),
+        draftAssets: mockTable(),
+        folders: mockTable(),
+        keywords: mockTable(),
+        folderKeywordLinks: mockTable(),
+        conversationKeywordLinks: mockTable(),
+        audiobookProjects: mockTable(),
+        audiobookChapterAssets: mockTable(),
+        ttsClips: mockTable(),
         transaction: vi.fn().mockImplementation(async (_mode, _tables, cb) => cb()),
       },
       PageAssistDexieDB: vi.fn(),
@@ -206,5 +207,17 @@ if (typeof window !== 'undefined') {
 
   afterEach(() => {
     cleanup();
+    // Notes keeps unsaved edits in an offline draft queue when the editor
+    // unmounts (#3102 NS-01); never carry one test's draft into the next.
+    try {
+      const notesQueueKeys: string[] = [];
+      for (let index = 0; index < window.localStorage.length; index += 1) {
+        const key = window.localStorage.key(index);
+        if (key?.startsWith('tldw:notesOfflineDraftQueue:')) notesQueueKeys.push(key);
+      }
+      for (const key of notesQueueKeys) window.localStorage.removeItem(key);
+    } catch {
+      // Storage may be unavailable or replaced by a test.
+    }
   });
 }

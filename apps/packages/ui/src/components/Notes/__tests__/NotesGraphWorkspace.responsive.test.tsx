@@ -75,7 +75,8 @@ describe("NotesGraphWorkspace responsive inspector", () => {
       active_note_count: 1,
       all_notes_note_cap: 20,
       all_notes_eligible: true,
-      suggestions_authorized: false
+      suggestions_authorized: false,
+      manual_link_authorized: false
     }
     const workspaceState = {
       graph,
@@ -89,12 +90,24 @@ describe("NotesGraphWorkspace responsive inspector", () => {
       searchResults: [],
       visibleEdgeTypes: new Set(),
       toggleEdgeType: vi.fn(),
+      semantic: {
+        enabled: false,
+        setEnabled: vi.fn(),
+        threshold: 0.75,
+        setThreshold: vi.fn(),
+        topK: 10,
+        setTopK: vi.fn(),
+        focusRequired: false,
+        reset: vi.fn()
+      },
+      semanticIndex: undefined,
       allNotes: { activeNoteCount: 1, effectiveNoteCap: 20, eligible: true },
       canExpand: false,
       expand: vi.fn(),
       focus: vi.fn(),
       showAllNotes: vi.fn(),
       refresh: vi.fn(),
+      createManualLink: vi.fn(),
       isOffline: false,
       isLoading: false,
       error: null

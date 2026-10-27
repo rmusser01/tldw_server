@@ -14,19 +14,23 @@ export default defineContentScript({
   main() {
     const listener = (message: WebClipperCaptureRequest) => {
       if (message?.type !== CAPTURE_REQUEST_MESSAGE_TYPE) return undefined
+      // Only claim the message (by returning a promise) for capture
+      // requests; unrelated messages must stay unclaimed.
       const requestedType = message.requestedType || "article"
-      const pageExtraction = extractClipPageTextFromDocument(document)
       const explicitSelectionText = String(message.selectionText || "").trim()
-      return Promise.resolve(buildClipDraft({
-        requestedType,
-        pageUrl: window.location.href,
-        pageTitle: document.title || window.location.hostname,
-        extracted: {
-          ...pageExtraction,
-          selectionText:
-            explicitSelectionText || pageExtraction.selectionText || undefined
-        }
-      }))
+      return (async () => {
+        const pageExtraction = await extractClipPageTextFromDocument(document)
+        return buildClipDraft({
+          requestedType,
+          pageUrl: window.location.href,
+          pageTitle: document.title || window.location.hostname,
+          extracted: {
+            ...pageExtraction,
+            selectionText:
+              explicitSelectionText || pageExtraction.selectionText || undefined
+          }
+        })
+      })()
     }
 
     try {

@@ -214,6 +214,39 @@ def test_active_rows_reject_but_stopped_failed_text_is_retained():
         assert projected.retained_context_digest
 
 
+@pytest.mark.parametrize("generation_status", ["complete", "stopped", "interrupted", "length", "error"])
+def test_server_settled_generation_metadata_is_retained(generation_status):
+    generation = {
+        "generation_status": generation_status,
+        "model_id": "gpt-4o-mini",
+        "provider": "openai",
+        "finish_reason": "stop",
+        "usage": {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7},
+    }
+    retained = project_native_fork_messages((row(extra={"sender_role": "assistant", **generation}),))
+    extra = dict(retained[0]["extra_metadata"])
+    assert dict(extra.pop("usage")) == generation["usage"]
+    assert extra == {"sender_role": "assistant", **{k: v for k, v in generation.items() if k != "usage"}}
+    assert project_native_fork_context(
+        neutral(), (row(extra={"sender_role": "assistant", **generation}),), ()
+    ).retained_context_digest
+
+
+@pytest.mark.parametrize(
+    "generation",
+    [
+        {"generation_status": "streaming"},
+        {"model_id": ""},
+        {"provider": {"name": "openai"}},
+        {"usage": {"prompt_tokens": "3"}},
+        {"usage": {"prompt_tokens": 3, "cost_usd": 1}},
+    ],
+)
+def test_invalid_generation_metadata_rejects(generation):
+    with pytest.raises(HistorySelectionError, match="unsupported_native_fork_metadata"):
+        project_native_fork_context(neutral(), (row(extra=generation),), ())
+
+
 def test_incomplete_tool_replay_rejects_and_complete_group_has_inventory():
     call = row(tools=[{"id": "call1", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}])
     with pytest.raises(HistorySelectionError, match="incomplete_tool_replay"):
@@ -874,3 +907,83 @@ def test_unprotected_snapshot_identity_cannot_impersonate_native_child(accepted_
 def test_placeholder_metadata_cannot_hide_retained_text_without_closed_replay(reason):
     with pytest.raises(HistorySelectionError, match="unsupported_native_fork_tool_replay"):
         project_native_fork_context(neutral(), (row(extra={"content_placeholder_reason": reason}),), ())
+
+
+def test_original_empty_tool_result_retains_empty_text_and_closed_inventory():
+    call = row(
+        tools=[
+            {
+                "id": "empty-call",
+                "type": "function",
+                "function": {"name": "lookup", "arguments": "{}"},
+            }
+        ]
+    )
+    result = {
+        **row(
+            "result",
+            role="tool",
+            text="[empty tool result]",
+            extra={
+                "tool_call_id": "empty-call",
+                "content_placeholder_reason": "empty_tool_result",
+            },
+        ),
+        "_message_version": 1,
+    }
+    projected = project_native_fork_context(neutral(), (call, result), ())
+    assert "tool_replay" in projected.required_effects
+    assert project_native_fork_messages((call, result))[1]["message"] == ""
+
+
+@pytest.mark.parametrize("content", ["Edited result", "[empty tool result]"])
+def test_edited_empty_tool_result_is_not_erased(content):
+    call = row(
+        tools=[
+            {
+                "id": "empty-call",
+                "type": "function",
+                "function": {"name": "lookup", "arguments": "{}"},
+            }
+        ]
+    )
+    result = {
+        **row(
+            "result",
+            role="tool",
+            text=content,
+            extra={
+                "tool_call_id": "empty-call",
+                "content_placeholder_reason": "empty_tool_result",
+            },
+        ),
+        "_message_version": 2,
+    }
+    assert project_native_fork_messages((call, result))[1]["message"] == content
+
+
+@pytest.mark.parametrize("version", [None, 0, True, "1"])
+def test_empty_tool_result_requires_a_valid_physical_revision(version):
+    call = row(
+        tools=[
+            {
+                "id": "empty-call",
+                "type": "function",
+                "function": {"name": "lookup", "arguments": "{}"},
+            }
+        ]
+    )
+    result = {
+        **row(
+            "result",
+            role="tool",
+            text="[empty tool result]",
+            extra={
+                "tool_call_id": "empty-call",
+                "content_placeholder_reason": "empty_tool_result",
+            },
+        ),
+        "_message_version": version,
+    }
+    with pytest.raises(HistorySelectionError, match="tool_replay_placeholder"):
+        project_native_fork_messages((call, result))

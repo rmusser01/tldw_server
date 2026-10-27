@@ -43,7 +43,10 @@
       "promptTitle": "System Prompts",
       "promptContent": "Select a system prompt to guide how the AI responds. You can create custom prompts in the Prompts workspace.",
       "newChatTitle": "Start Fresh",
-      "newChatContent": "Click here to start a new conversation. Your previous chats are saved in the sidebar for easy access."
+      "newChatContent": "Click here to start a new conversation. Your previous chats are saved in the sidebar for easy access.",
+      "customizeTitle": "Customize Responses",
+      "customizeContent": "A system prompt guides how the assistant replies. Use chat customization controls to choose one or adjust the response; create reusable prompts in the Prompts workspace.",
+      "newChatContentV2": "Start a new conversation from the sidebar or with the New chat shortcut listed in keyboard help. Saved conversations can be reopened with Find conversations. A Temporary conversation asks before you discard it."
     },
     "tools": {
       "label": "Tools & Attachments",
@@ -180,12 +183,20 @@
       "listContent": "Browse and select notes from the sidebar to load them in the editor.",
       "modeTitle": "Active and Trash Views",
       "modeContent": "Switch between active notes and trash to recover or permanently remove entries.",
-      "filtersTitle": "Sort and Filter",
-      "filtersContent": "Sort by date/title and use notebook/keyword filters to narrow your working set.",
+      "filtersTitle": "Sort notes",
+      "filtersContent": "Sort the list by date or title. Use Filters below it to narrow the list by tag.",
       "editorTitle": "Editor Workspace",
       "editorContent": "Edit note content, references, and metadata in the main editor panel.",
       "saveTitle": "Save and Actions",
-      "saveContent": "Save updates, duplicate notes, export content, and run helper actions from the header."
+      "saveContent": "Save updates, duplicate notes, export content, and run helper actions from the header.",
+      "tagsTitle": "Tags",
+      "tagsContent": "Add tags to organize your notes. Use the filter in the sidebar to find notes by tag.",
+      "connectionsTitle": "Note Connections",
+      "connectionsContent": "See how notes relate to each other. Type [[ in a note to create a link, or add manual connections here.",
+      "organizeTitle": "Saved filters",
+      "organizeContent": "Save tag filters here to reuse them. To group notes by hand, choose the Collection view.",
+      "createTitle": "Create a note",
+      "createContent": "Click + to start a note. To see this tour again, press ? and choose Restart tutorial."
     }
   },
   "flashcards": {
@@ -227,9 +238,9 @@
       "searchTitle": "Search World Books",
       "searchContent": "Search by title, metadata, and content to quickly locate the right world book.",
       "filtersTitle": "Status Filters",
-      "filtersContent": "Filter by enabled/disabled state and attachment status before editing or exporting.",
+      "filtersContent": "Filter by status and attachment before editing or exporting. On smaller screens, open Filters to show these controls.",
       "tableTitle": "World Book Library",
-      "tableContent": "Select a row to manage entries, attachments, and advanced actions for each world book.",
+      "tableContent": "Select a saved world book to manage entries and attachments. If the library is empty, create or import your first world book.",
       "actionsTitle": "Create and Import",
       "actionsContent": "Create a new world book or import an existing JSON bundle to seed your knowledge base."
     }

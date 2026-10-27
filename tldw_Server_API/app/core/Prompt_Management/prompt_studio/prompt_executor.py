@@ -27,7 +27,7 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     provider_result_contains_error,
 )
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
-from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     ensure_app_config,
@@ -189,6 +189,8 @@ class PromptExecutor:
                 }
             }
 
+        except LLMQuotaExceededError:
+            raise  # the user's limit, not a failed execution reported as a provider error
         except Exception as e:
             logger.error(
                 "Prompt execution failed; error_type={}",
@@ -201,6 +203,7 @@ class PromptExecutor:
                 "prompt_id": prompt_id,
                 "inputs": test_inputs,
                 "error": str(e),
+                **({"error_code": e.code} if isinstance(e, StructuredPromptAssemblyError) else {}),
                 "model": model_config.get("model"),
                 "provider": model_config.get("provider"),
                 "execution_time_ms": execution_time,
@@ -556,6 +559,8 @@ class PromptExecutor:
             if on_provider_success is not None:
                 await await_owned_worker(on_provider_success())
             return {"content": content, "tokens": tokens}
+        except LLMQuotaExceededError:
+            raise  # the user's limit, not "Provider returned an error response"
         except Exception as e:
             logger.error(
                 "LLM call failed for {}/{}; error_type={}",
@@ -593,6 +598,16 @@ class PromptExecutor:
         prepared_inputs = self._prepare_prompt_inputs(inputs)
         if prompt.get("prompt_format") == "structured" and prompt.get("prompt_definition"):
             return self._build_structured_prompt_request(prompt, signature, prepared_inputs)
+
+        # Check original tokens before rendering so replacement text stays literal.
+        for match in self._PLACEHOLDER_PATTERN.finditer(prompt.get("user_prompt") or ""):
+            name = next(value for value in match.groupdict().values() if value is not None)
+            if name not in prepared_inputs or not prepared_inputs[name].strip():
+                raise StructuredPromptAssemblyError(
+                    "missing_required_variable",
+                    f"Missing required variable: {name}",
+                    variable_name=name,
+                )
 
         final_prompt = self._build_prompt(prompt, signature, prepared_inputs)
         return {

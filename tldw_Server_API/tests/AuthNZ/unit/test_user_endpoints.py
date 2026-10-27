@@ -62,7 +62,9 @@ class TestUserEndpoints:
         assert data["username"] == test_user["username"]
         assert data["email"] == test_user["email"]
         assert data["role"] == test_user["role"]
-        assert data["storage_quota_mb"] == test_user["storage_quota_mb"]
+        # storage_quota_mb is the enforced limits.storage_quota_mb value, not the legacy
+        # users-table column the fixture seeds; no override is set, so it resolves to null.
+        assert data["storage_quota_mb"] is None
         assert data["storage_used_mb"] == test_user["storage_used_mb"]
 
         app.dependency_overrides.clear()
@@ -363,6 +365,10 @@ async def test_get_storage_quota_failure_log_is_sanitized(monkeypatch):
         async def calculate_user_storage(self, user_id: int, update_database: bool):  # noqa: ARG002
             raise RuntimeError("quota backend exploded at /private/quota.db")
 
+        async def user_quota_status(self, user_id: int):
+            assert user_id == 7
+            return {"quota_mb": 2000, "used_mb": 400}
+
     async def _fake_require_principal_active_verified(_principal):
         return {
             "id": 7,
@@ -381,9 +387,9 @@ async def test_get_storage_quota_failure_log_is_sanitized(monkeypatch):
     )
 
     assert response.user_id == 7
-    assert response.storage_quota_mb == 1000
-    assert response.storage_used_mb == 250
-    assert response.available_mb == 750
+    assert response.storage_quota_mb == 2000
+    assert response.storage_used_mb == 400
+    assert response.available_mb == 1600
     assert logger_stub.errors == ["Failed to get storage quota"]
     assert "quota backend exploded" not in str(logger_stub.errors)
     assert "/private/quota.db" not in str(logger_stub.errors)

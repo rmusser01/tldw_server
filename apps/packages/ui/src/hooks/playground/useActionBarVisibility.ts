@@ -15,6 +15,7 @@ export function useActionBarVisibility({
   const [actionBarVisible, setActionBarVisible] = React.useState(true)
   const [composerHovering, setComposerHovering] = React.useState(false)
   const [composerFocusWithin, setComposerFocusWithin] = React.useState(false)
+  const [composerTextareaExpanded, setComposerTextareaExpanded] = React.useState(false)
 
   const isPinned = composerFocusWithin || externalPinSources
 
@@ -77,7 +78,9 @@ export function useActionBarVisibility({
     scheduleActionBarCollapse()
   }, [scheduleActionBarCollapse])
 
-  const handleComposerFocusCapture = React.useCallback(() => {
+  const handleComposerFocusCapture = React.useCallback((event: React.FocusEvent<HTMLDivElement>) => {
+    if (event.target instanceof HTMLTextAreaElement && event.currentTarget.contains(event.target))
+      setComposerTextareaExpanded(true)
     setComposerFocusWithin(true)
     showActionBar()
   }, [showActionBar])
@@ -87,6 +90,7 @@ export function useActionBarVisibility({
       const next = event.relatedTarget as Node | null
       if (next && event.currentTarget.contains(next)) return
       setComposerFocusWithin(false)
+      setComposerTextareaExpanded(false)
       scheduleActionBarCollapse()
     },
     [scheduleActionBarCollapse]
@@ -99,6 +103,7 @@ export function useActionBarVisibility({
   return {
     actionBarVisible,
     composerFocusWithin,
+    composerTextareaExpanded,
     actionBarVisibilityClass,
     handlers: {
       onMouseEnter: handleComposerMouseEnter,

@@ -1,13 +1,14 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
+import { createInstance } from "i18next"
 import type { WatchlistBriefingProjection } from "@/types/watchlists"
 import {
   blockingFailureAnnouncement,
   transitionAnnouncement
 } from "../watchlists-announcements"
 
-const t = vi.fn((_key: string, fallback: string, values?: Record<string, unknown>) =>
-  fallback.replace(/{{(\w+)}}/g, (_match, token) => String(values?.[token] ?? ""))
-)
+const i18n = createInstance()
+void i18n.init({ lng: "en", resources: {}, initImmediate: false, interpolation: { escapeValue: false } })
+const t = i18n.t
 
 const projection = (
   overrides: Partial<WatchlistBriefingProjection> = {}
@@ -62,16 +63,25 @@ describe("watchlists briefing announcements", () => {
   it("treats a new occurrence as a new identity and localizes stage progress", () => {
     const previous = projection()
     const next = projection({ occurrence_id: 5, run_id: 9 })
-    const localized = vi.fn((key: string, fallback: string, values?: Record<string, unknown>) => {
-      const translations: Record<string, string> = {
-        "watchlists:overview.latest.stages.generateAudio": "Localized audio",
-        "watchlists:overview.latest.status.running": "Localized running"
-      }
-      return (translations[key] || fallback).replace(
-        /{{(\w+)}}/g,
-        (_match, token) => String(values?.[token] ?? "")
-      )
+    const localizedI18n = createInstance()
+    void localizedI18n.init({
+      lng: "en",
+      resources: {
+        en: {
+          watchlists: {
+            overview: {
+              latest: {
+                stages: { generateAudio: "Localized audio" },
+                status: { running: "Localized running" }
+              }
+            }
+          }
+        }
+      },
+      initImmediate: false,
+      interpolation: { escapeValue: false }
     })
+    const localized = localizedI18n.t
 
     expect(transitionAnnouncement(previous, next, localized)).toBe(
       "Purple and Gold Weekly: Localized audio is Localized running."

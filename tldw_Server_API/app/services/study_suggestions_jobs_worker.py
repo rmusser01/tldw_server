@@ -10,6 +10,7 @@ from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user_id
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import owns_chacha_checkouts
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.StudySuggestions import snapshot_service
@@ -39,6 +40,7 @@ async def _get_databases_for_user(user_id: str) -> tuple[Any, Any]:
     return note_db, None
 
 
+@owns_chacha_checkouts
 async def handle_study_suggestions_job(job: dict[str, Any]) -> dict[str, Any]:
     if str(job.get("job_type") or "").strip().lower() != STUDY_SUGGESTIONS_REFRESH_JOB_TYPE:
         raise ValueError("unsupported_study_suggestions_job_type")

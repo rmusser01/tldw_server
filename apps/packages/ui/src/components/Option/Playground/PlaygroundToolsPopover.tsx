@@ -1,27 +1,22 @@
-import React from "react"
+import { Button as TldwButton } from "@/components/Common/Button"
+import type { KnowledgeTab } from "@/components/Knowledge"
+import { Popover, Radio, Switch, Tooltip } from "antd"
 import {
-  Switch,
-  Radio,
-  Tooltip,
-  Popover
-} from "antd"
-import {
+  ArrowRight,
   ChevronDown,
   ChevronRight,
   EraserIcon,
+  FileText,
   GitBranch,
   Globe,
   Headphones,
   ImageIcon,
-  SlidersHorizontal,
-  WandSparkles,
-  FileText,
   Settings2,
-  ArrowRight
+  SlidersHorizontal,
+  WandSparkles
 } from "lucide-react"
+import React from "react"
 import { Link } from "react-router-dom"
-import { Button as TldwButton } from "@/components/Common/Button"
-import type { KnowledgeTab } from "@/components/Knowledge"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -127,8 +122,22 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
       t
     } = props
 
+    const triggerRef = React.useRef<HTMLButtonElement>(null)
+    const handleEscape = (event: React.KeyboardEvent<HTMLElement>) => {
+      if (
+        event.key !== "Escape" ||
+        event.defaultPrevented ||
+        event.nativeEvent.isComposing
+      )
+        return
+      event.preventDefault()
+      event.stopPropagation()
+      onToolsPopoverChange(false)
+      triggerRef.current?.focus()
+    }
+
     const content = (
-      <div className="flex w-72 flex-col gap-2 p-1">
+      <div onKeyDown={handleEscape} className="flex w-72 flex-col gap-2 p-1">
         {/* ATTACHMENTS Section */}
         <div className="flex flex-col gap-2">
           <span className="text-[10px] font-semibold uppercase text-text-muted tracking-wider px-2">
@@ -140,8 +149,7 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
               onToolsPopoverChange(false)
               onOpenImageGenerate()
             }}
-            className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm text-text transition hover:bg-surface2"
-          >
+            className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm text-text transition hover:bg-surface2">
             <span>
               {t("playground:imageGeneration.modalTitle", "Generate image")}
             </span>
@@ -150,8 +158,7 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
           <button
             type="button"
             onClick={() => onOpenKnowledgePanel("context")}
-            className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm text-text transition hover:bg-surface2"
-          >
+            className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm text-text transition hover:bg-surface2">
             <span>
               {t(
                 "playground:attachments.manageContext",
@@ -165,7 +172,9 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
         <div className="border-t border-border my-1" />
 
         <div className="flex items-center justify-between px-2">
-          <span className="text-sm text-text">{t("playground:tools.useOCR", "Use OCR")}</span>
+          <span className="text-sm text-text">
+            {t("playground:tools.useOCR", "Use OCR")}
+          </span>
           <Switch
             size="small"
             checked={useOCR}
@@ -185,10 +194,7 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
               <div className="flex items-center justify-between gap-2 px-2">
                 <span className="flex items-center gap-2 text-sm text-text">
                   <Globe className="h-4 w-4 text-text-subtle" />
-                  {t(
-                    "playground:tools.webSearchEnabled",
-                    "Enable web search"
-                  )}
+                  {t("playground:tools.webSearchEnabled", "Enable web search")}
                 </span>
                 <Switch
                   size="small"
@@ -206,9 +212,7 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
                 <Switch
                   size="small"
                   checked={simpleInternetSearch}
-                  onChange={(checked) =>
-                    onSimpleInternetSearchChange(checked)
-                  }
+                  onChange={(checked) => onSimpleInternetSearchChange(checked)}
                 />
               </div>
               <div className="flex items-center justify-between gap-2 px-2">
@@ -232,8 +236,7 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
                   onToolsPopoverChange(false)
                   onNavigateWebSearchSettings()
                 }}
-                className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm text-text transition hover:bg-surface2"
-              >
+                className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm text-text transition hover:bg-surface2">
                 <span>
                   {t(
                     "playground:tools.webSearchOpenSettings",
@@ -258,11 +261,8 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
         {/* ADVANCED Section (collapsible) */}
         <button
           type="button"
-          onClick={() =>
-            onAdvancedToolsExpandedChange(!advancedToolsExpanded)
-          }
-          className="flex items-center justify-between px-2 py-1 text-[10px] font-semibold uppercase text-text-muted tracking-wider hover:text-text transition"
-        >
+          onClick={() => onAdvancedToolsExpandedChange(!advancedToolsExpanded)}
+          className="flex items-center justify-between px-2 py-1 text-[10px] font-semibold uppercase text-text-muted tracking-wider hover:text-text transition">
           <span>{t("playground:tools.advanced", "Advanced")}</span>
           <ChevronRight
             className={`h-3 w-3 transition-transform ${advancedToolsExpanded ? "rotate-90" : ""}`}
@@ -282,9 +282,7 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
                 <Switch
                   size="small"
                   checked={allowExternalImages}
-                  onChange={(checked) =>
-                    onAllowExternalImagesChange(checked)
-                  }
+                  onChange={(checked) => onAllowExternalImagesChange(checked)}
                 />
               </div>
               <p className="text-[11px] text-text-muted">
@@ -329,9 +327,7 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
                   size="small"
                   checked={showMoodConfidence}
                   disabled={!showMoodBadge}
-                  onChange={(checked) =>
-                    onShowMoodConfidenceChange(checked)
-                  }
+                  onChange={(checked) => onShowMoodConfidenceChange(checked)}
                 />
               </div>
               <p className="text-[11px] text-text-muted">
@@ -348,13 +344,9 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
               <button
                 type="button"
                 onClick={onOpenRawRequest}
-                className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm text-text transition hover:bg-surface2"
-              >
+                className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm text-text transition hover:bg-surface2">
                 <span>
-                  {t(
-                    "playground:tools.rawChatRequest",
-                    "View raw chat JSON"
-                  )}
+                  {t("playground:tools.rawChatRequest", "View raw chat JSON")}
                 </span>
                 <FileText className="h-4 w-4" />
               </button>
@@ -374,13 +366,12 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
                 title={
                   voiceChatAvailable
                     ? voiceChatStatusLabel
-                    : voiceChatUnavailableReason ??
+                    : (voiceChatUnavailableReason ??
                       t(
                         "playground:voiceChat.unavailableTitle",
                         "Voice chat unavailable"
-                      )
-                }
-              >
+                      ))
+                }>
                 <span className="inline-flex w-full">
                   <button
                     type="button"
@@ -392,13 +383,9 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
                         : voiceChatEnabled && voiceChatState !== "idle"
                           ? "bg-surface2 text-primaryStrong"
                           : "text-text hover:bg-surface2"
-                    }`}
-                  >
+                    }`}>
                     <span>
-                      {t(
-                        "playground:tools.voiceSettings",
-                        "Voice settings"
-                      )}
+                      {t("playground:tools.voiceSettings", "Voice settings")}
                     </span>
                     <Headphones className="h-4 w-4" />
                   </button>
@@ -406,11 +393,8 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
               </Tooltip>
               <div
                 className={`flex flex-col gap-2 text-xs ${
-                  !voiceChatAvailable
-                    ? "pointer-events-none opacity-50"
-                    : ""
-                }`}
-              >
+                  !voiceChatAvailable ? "pointer-events-none opacity-50" : ""
+                }`}>
                 {voiceChatSettingsFields}
               </div>
             </div>
@@ -430,11 +414,8 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
               "Compare models"
             ) as string
           }
-          className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm text-text transition hover:bg-surface2"
-        >
-          <span>
-            {t("playground:actions.compareModels", "Compare models")}
-          </span>
+          className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm text-text transition hover:bg-surface2">
+          <span>{t("playground:actions.compareModels", "Compare models")}</span>
           <GitBranch className="h-4 w-4" />
         </Link>
         <button
@@ -442,13 +423,9 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
           onClick={onClearContext}
           disabled={historyLength === 0}
           title={t("tooltip.clearContext") as string}
-          className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm text-danger transition hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:text-text-muted disabled:hover:bg-transparent"
-        >
+          className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm text-danger transition hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:text-text-muted disabled:hover:bg-transparent">
           <span>
-            {t(
-              "playground:actions.clearConversation",
-              "Clear conversation"
-            )}
+            {t("playground:actions.clearConversation", "Clear conversation")}
           </span>
           <EraserIcon className="h-4 w-4" />
         </button>
@@ -462,31 +439,22 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
         content={content}
         classNames={{ root: "playground-more-tools" }}
         open={toolsPopoverOpen}
-        onOpenChange={onToolsPopoverChange}
-      >
+        onOpenChange={onToolsPopoverChange}>
         <TldwButton
+          ref={triggerRef}
+          onKeyDown={toolsPopoverOpen ? handleEscape : undefined}
           variant="outline"
           size="sm"
           shape={isProMode ? "rounded" : "pill"}
           iconOnly={!isProMode}
-          ariaLabel={
-            t("playground:composer.moreTools", "More tools") as string
-          }
-          title={
-            t("playground:composer.moreTools", "More tools") as string
-          }
-          data-testid="tools-button"
-        >
+          ariaLabel={t("playground:composer.moreTools", "More tools") as string}
+          title={t("playground:composer.moreTools", "More tools") as string}
+          data-testid="tools-button">
           {isProMode ? (
-            <span>
-              {t("playground:composer.toolsButton", "+Tools")}
-            </span>
+            <span>{t("playground:composer.toolsButton", "+Tools")}</span>
           ) : (
             <>
-              <SlidersHorizontal
-                className="h-4 w-4"
-                aria-hidden="true"
-              />
+              <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
               <span className="sr-only">
                 {t("playground:composer.moreTools", "More tools")}
               </span>

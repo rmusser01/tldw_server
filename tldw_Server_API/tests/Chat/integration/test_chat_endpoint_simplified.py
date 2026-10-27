@@ -952,6 +952,37 @@ def test_chat_completion_disables_provider_fallback_for_explicit_model(
         provider_manager.get_available_provider.assert_not_called()
 
 
+def test_chat_completion_strict_selection_accepts_a_saved_dotted_anthropic_name(
+    authenticated_client, mock_chacha_db, setup_dependencies, monkeypatch
+):
+    """A conversation saved with claude-sonnet-4.5 is not rejected: the dotted name is an alias of claude-sonnet-4-5 (TASK-13880)."""
+    monkeypatch.setenv("CHAT_ENFORCE_STRICT_MODEL_SELECTION", "1")
+
+    request_data = ChatCompletionRequest(
+        model="claude-sonnet-4.5",
+        api_provider="anthropic",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+    )
+
+    async def fake_execute_non_stream_call(**kwargs):
+        return {
+            "id": "chatcmpl-test",
+            "choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+        }
+
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {}
+
+    with (
+        patch("tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call", side_effect=fake_execute_non_stream_call),
+        patch("tldw_Server_API.app.api.v1.endpoints.chat.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"anthropic": "test-key"}),
+    ):
+        response = authenticated_client.post("/api/v1/chat/completions", json=request_data.model_dump())
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+
+
 def test_chat_completion_revalidates_default_model(authenticated_client, mock_chacha_db, setup_dependencies):
     """Ensure default model selection is revalidated against provider overrides."""
 
@@ -3404,7 +3435,11 @@ def test_chat_closes_runtime_when_rg_refund_fails_after_stream_response_created(
         patch("tldw_Server_API.app.core.config.rg_enabled", return_value=True),
         patch.object(app.state, "rg_governor", governor, create=True),
         patch.object(app.state, "rg_policy_loader", policy_loader, create=True),
-        patch.object(chat_endpoint.sys, "exc_info", return_value=(PendingResponseError, pending_error, None)),
+        patch.object(
+            chat_endpoint,
+            "sys",
+            SimpleNamespace(exc_info=lambda: (PendingResponseError, pending_error, None)),
+        ),
         patch.object(
             chat_endpoint,
             "execute_streaming_call",

@@ -10,13 +10,14 @@ import sqlite3
 import uuid
 import zipfile
 from datetime import datetime, timedelta, timezone
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 from typing import Any
 
 import pytest
 from fastapi import HTTPException, UploadFile
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.main import app
 
 # ---------------------------------------------------------------------------
@@ -277,7 +278,7 @@ async def test_list_bundles_sanitizes_noncritical_failure_log(monkeypatch):
             user_id=None,
             limit=100,
             offset=0,
-            principal=object(),
+            principal=AuthPrincipal(kind="user", user_id=1, roles=["admin"]),
         )
 
     assert exc_info.value.status_code == 500
@@ -313,7 +314,7 @@ async def test_list_bundles_defaults_pagination_aliases(monkeypatch):
         user_id=None,
         limit=1,
         offset=0,
-        principal=object(),
+        principal=AuthPrincipal(kind="user", user_id=1, roles=["admin"]),
     )
 
     assert response.pagination.has_more is True
@@ -334,7 +335,11 @@ async def test_import_bundle_sanitizes_noncritical_failure_log(monkeypatch):
 
     monkeypatch.setattr(admin_bundle_ops.svc, "import_bundle_async", _raise_import_bundle_async)
 
-    upload = UploadFile(file=io.BytesIO(b"not-a-real-bundle"), filename="test.zip")
+    upload_bytes = io.BytesIO()
+    with zipfile.ZipFile(upload_bytes, "w") as archive:
+        archive.writestr("manifest.json", json.dumps({"manifest_version": 1, "datasets": ["authnz"]}))
+    upload_bytes.seek(0)
+    upload = UploadFile(file=upload_bytes, filename="test.zip")
 
     with pytest.raises(HTTPException) as exc_info:
         await admin_bundle_ops.import_bundle(
@@ -377,6 +382,7 @@ async def test_download_bundle_sanitizes_noncritical_failure_log(monkeypatch):
 
     logger_stub = _LoggerStub()
     monkeypatch.setattr(admin_bundle_ops, "logger", logger_stub)
+    monkeypatch.setattr(admin_bundle_ops.svc, "get_bundle_metadata", lambda _: SimpleNamespace(requires_platform_admin=False))
 
     def _raise_get_bundle_path(_bundle_id: str):
         raise RuntimeError("bundle path backend exploded at /private/bundles.db")
@@ -401,6 +407,7 @@ async def test_delete_bundle_sanitizes_noncritical_failure_log(monkeypatch):
 
     logger_stub = _LoggerStub()
     monkeypatch.setattr(admin_bundle_ops, "logger", logger_stub)
+    monkeypatch.setattr(admin_bundle_ops.svc, "get_bundle_metadata", lambda _: SimpleNamespace(requires_platform_admin=False))
 
     def _raise_delete_bundle(_bundle_id: str):
         raise RuntimeError("bundle delete backend exploded at /private/bundles.db")
@@ -1010,20 +1017,15 @@ def test_import_restore_failure_exposes_error_code_and_rollback_failures(
 
     restore_calls = {"count": 0}
 
-    def _fake_restore_sqlite_database_file(
-        *,
-        source_db_path,
-        target_db_path,
-        lock_timeout_seconds,
-    ):
+    def _fake_restore_backup_file(*, dataset, user_id, backup_path):
         restore_calls["count"] += 1
         if restore_calls["count"] == 2:
             raise RuntimeError("restore boom")
 
     monkeypatch.setattr(
         admin_bundle_service,
-        "restore_sqlite_database_file",
-        _fake_restore_sqlite_database_file,
+        "restore_backup_file",
+        _fake_restore_backup_file,
     )
 
     def _fake_resolve_dataset_db_path(dataset, user_id):

@@ -4,6 +4,37 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
+// Pin the notes authority scope like the other Notes stage suites (see stage44).
+// Without it the notes list never loads when this file runs on its own.
+const notesConnectionConfig = {
+  serverUrl: "https://notes.example.test",
+  authMode: "multi-user" as const,
+  accessToken: "test-access-token"
+}
+
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: notesConnectionConfig,
+    loading: false,
+    authorityLoading: false
+  })
+}))
+
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: {
+    getCurrentUser: vi.fn(async () => ({ id: 1, is_active: true }))
+  }
+}))
+
+vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/Notes/hooks/useNotesGraphAuthorityScope")>()
+  return {
+    ...actual,
+    useNotesGraphAuthorityScope: () =>
+      actual.createNotesGraphAuthorityScope(notesConnectionConfig.serverUrl, 1)
+  }
+})
+
 const {
   mockBgRequest,
   mockMessageSuccess,
@@ -15,7 +46,8 @@ const {
   mockGetSetting,
   mockSetSetting,
   mockClearSetting,
-  mockPromptModal
+  mockPromptBulkAddTags,
+  mockShowUndoNotification
 } = vi.hoisted(() => {
   return {
     mockBgRequest: vi.fn(),
@@ -28,14 +60,18 @@ const {
     mockGetSetting: vi.fn(),
     mockSetSetting: vi.fn(),
     mockClearSetting: vi.fn(),
-    mockPromptModal: vi.fn()
+    mockPromptBulkAddTags: vi.fn(),
+    mockShowUndoNotification: vi.fn()
   }
 })
 
-vi.mock("@/components/Notes/notes-manager-utils", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/components/Notes/notes-manager-utils")>()
-  return { ...actual, promptModal: mockPromptModal }
-})
+vi.mock("@/components/Notes/NotesBulkAddTagsPrompt", () => ({
+  promptBulkAddTags: mockPromptBulkAddTags
+}))
+
+vi.mock("@/hooks/useUndoNotification", () => ({
+  useUndoNotification: () => ({ showUndoNotification: mockShowUndoNotification })
+}))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -278,8 +314,8 @@ describe("NotesManagerPage stage 16 bulk actions", () => {
     )
   })
 
-  it("confirms and dispatches bulk keyword assignment patches", async () => {
-    mockPromptModal.mockResolvedValue("research, summary")
+  it("dispatches bulk add-tags patches and offers Undo instead of a danger confirm", async () => {
+    mockPromptBulkAddTags.mockResolvedValue(["research", "summary"])
     renderPage()
     fireEvent.click(await screen.findByTestId("mock-select-n1"))
 
@@ -301,8 +337,11 @@ describe("NotesManagerPage stage 16 bulk actions", () => {
       ([request]) => String(request?.method || "").toUpperCase() === "PATCH"
     )
     expect(patchCall?.[0]?.body?.keywords).toEqual(["research", "summary"])
-    expect(mockConfirmDanger).toHaveBeenCalledWith(
-      expect.objectContaining({ title: "Apply tags to selected notes?" })
-    )
+    await waitFor(() => {
+      expect(mockShowUndoNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Added research, summary to 1 note" })
+      )
+    })
+    expect(mockConfirmDanger).not.toHaveBeenCalled()
   })
 })

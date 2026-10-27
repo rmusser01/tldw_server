@@ -1,3 +1,11 @@
+import { recoverWebCapturePin, WebCaptureNotCurrentError } from "@/utils/research-web-capture";
+import {
+  getResearchWorkspaceOwner,
+  readResearchWebCaptures,
+  retainResearchWebCapturePins,
+} from "@/utils/research-workspace-prefill";
+import { normalizeNoteKeyword } from "@/services/note-keywords";
+import { resolveKnowledgeNoteProvenance, knowledgeNoteHead, retainKnowledgeNoteProvenance, type KnowledgeNoteHead } from "@/utils/knowledge-note-provenance";
 import { bgRequest } from "@/services/background-proxy";
 import { loadServicePromptSnapshot } from "@/services/service-prompts";
 import { requestScopeFields } from "@/services/tldw/domains/service-prompts";
@@ -11,6 +19,7 @@ import { createServicePromptScopeChangedError } from "@/services/tldw/service-pr
 import {
   createEmptyWorkspaceSnapshot,
   createSlug,
+  useWorkspaceStore,
   type WorkspaceState,
 } from "@/store/workspace";
 import { hydrateWorkspaceFromServer } from "@/store/workspace-api";
@@ -211,7 +220,91 @@ export const restoreMigratedResearchWorkspace = async (options: {
             : "processing";
       return { ...source, status, readiness: authoritative.readiness };
     });
-    snapshot.selectedSourceIds = local.selectedSourceIds;
+    const owner = await getResearchWorkspaceOwner(scope.requestScope);
+    const captureRecords = await readResearchWebCaptures(owner, workspaceId);
+    assertCurrent();
+    const displayState = useWorkspaceStore.getState();
+    const previousSnapshot = displayState.workspaceSnapshots[workspaceId];
+    const authoritativeSources = snapshot.sources;
+    snapshot.sources = retainResearchWebCapturePins(
+      authoritativeSources,
+      captureRecords,
+      displayState.workspaceId === workspaceId
+        ? displayState.sources
+        : previousSnapshot?.workspaceId === workspaceId
+          ? previousSnapshot.sources
+          : [],
+      owner,
+    );
+    for (const [index, source] of snapshot.sources.entries()) {
+      if (!source.id.startsWith("web-clipper:")) continue;
+      const checkpoint = captureRecords.some(
+        (record) =>
+          record.pin &&
+          record.pin.clipId === source.webCapture?.clipId &&
+          record.pin.mediaId === source.mediaId &&
+          record.pin.requestedUrl === source.url,
+      );
+      if (checkpoint) continue;
+      try {
+        const pin = await recoverWebCapturePin(
+          context.sources.items[index],
+          {
+            requestScope: scope.requestScope,
+            signal: scope.scopeSignal,
+          },
+          assertCurrent,
+          source.webCapture,
+        );
+        assertCurrent();
+        if (
+          !pin &&
+          (source.statusDetails?.statusReason === "capture_unavailable" ||
+            captureRecords.some(
+              (record) =>
+                record.body?.clip_id === source.id.slice("web-clipper:".length),
+            ))
+        )
+          throw new Error("Known capture history unavailable");
+        if (pin)
+          snapshot.sources[index] = {
+            ...(source.statusDetails?.statusReason === "capture_unavailable"
+              ? authoritativeSources[index]
+              : source),
+            webCapture: pin,
+            captureOwnerScope: owner,
+          };
+      } catch (reason) {
+        assertCurrent();
+        snapshot.sources[index] = {
+          ...source,
+          // Unknown lookup failure blocks this attempt but cannot label an ordinary clip forever.
+          captureOwnerScope:
+            source.captureOwnerScope ??
+            (reason instanceof WebCaptureNotCurrentError &&
+            reason.captureEvidenceKnown
+              ? owner
+              : undefined),
+          status: "error",
+          statusMessage:
+            "Capture evidence is unavailable. Retry or recapture before Ask.",
+          statusDetails: {
+            statusReason: "capture_unavailable",
+            retryEligible: false,
+          },
+        };
+      }
+    }
+    snapshot.selectedSourceIds = local.selectedSourceIds.filter(
+      (id) =>
+        !snapshot.sources.some(
+          (source) =>
+            source.id === id &&
+            ["capture_head_changed", "capture_unavailable"].includes(
+              source.statusDetails?.statusReason ?? "",
+            ),
+        ),
+    );
     snapshot.generatedArtifacts = local.artifacts;
     snapshot.workspaceBanner = {
       ...snapshot.workspaceBanner,
@@ -239,6 +332,64 @@ export const restoreMigratedResearchWorkspace = async (options: {
         version: note.version,
       };
       snapshot.notes = note.content;
+    }
+    // Canonical Quick Notes survive the legacy snapshot tombstone. The marker is
+    // descriptive evidence only; server membership and selection stay authoritative.
+    const found = await bgRequest<{
+      notes?: Array<KnowledgeNoteHead & {
+        id: string;
+        title: string;
+        content: string;
+        keywords?: unknown[];
+        version: number;
+      }>;
+    }>({
+      ...request,
+      path: `/api/v1/notes/search/?tokens=${encodeURIComponent(`workspace:${workspaceId}`)}&limit=100&include_keywords=true`,
+    });
+    assertCurrent();
+    let canonical: NonNullable<typeof found.notes>[number] | undefined;
+    for (const candidate of found.notes || []) {
+      if (typeof candidate.id !== "string") continue;
+      // Search rows may omit metadata or truncate content. Resolve the exact owned head.
+      const full = await bgRequest<NonNullable<typeof found.notes>[number]>({
+        ...request, path: `/api/v1/notes/${encodeURIComponent(candidate.id)}`,
+      });
+      assertCurrent();
+      if (full.id !== candidate.id) throw new Error("Research note identity changed");
+      const belongsToWorkspace = (full.keywords || []).map(normalizeNoteKeyword).includes(`workspace:${workspaceId}`);
+      if (belongsToWorkspace || resolveKnowledgeNoteProvenance(full).provenance?.research?.workspace_id === workspaceId) {
+        canonical = full;
+        break;
+      }
+    }
+    if (canonical) {
+      const provenance = resolveKnowledgeNoteProvenance(canonical).provenance;
+      snapshot.currentNote = {
+        id: canonical.id,
+        title: canonical.title,
+        content: retainKnowledgeNoteProvenance(canonical.content, canonical),
+        ...knowledgeNoteHead(canonical),
+        keywords: (canonical.keywords || [])
+          .map(normalizeNoteKeyword)
+          .filter(
+            (keyword): keyword is string =>
+              keyword !== null &&
+              keyword !== snapshot.workspaceTag &&
+              keyword !== `workspace:${workspaceId}`,
+          ),
+        version: canonical.version,
+        isDirty: false,
+      };
+      snapshot.notes = snapshot.currentNote.content;
+      snapshot.sources = snapshot.sources.map((source) => {
+        const retained = provenance?.research?.workspace_id === workspaceId
+          ? provenance.research.sources.find((item) => item.mediaId === source.mediaId)
+          : undefined;
+        return retained
+          ? { ...source, knowledgeQaEvidence: retained.evidence }
+          : source;
+      });
     }
     assertCurrent();
     storage.setItem(

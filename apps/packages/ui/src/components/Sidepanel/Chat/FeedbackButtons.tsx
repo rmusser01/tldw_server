@@ -1,6 +1,6 @@
 import React from "react"
 import { Tooltip } from "antd"
-import { MoreHorizontal, ThumbsDown, ThumbsUp } from "lucide-react"
+import { MessageSquareText, ThumbsDown, ThumbsUp } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import type { FeedbackThumb } from "@/store/feedback"
 
@@ -51,7 +51,7 @@ export const FeedbackButtons = ({
       )
 
   const isDisabled = disabled || isSubmitting
-  const buttonSizeClass = compact ? "h-5 w-5" : "h-6 w-6"
+  const buttonSizeClass = "h-11 w-11 min-h-[44px] min-w-[44px]"
   const containerClass = compact
     ? "flex flex-wrap items-center gap-2 text-[11px] text-text-muted"
     : "mt-2 flex flex-wrap items-center gap-2 text-caption text-text-muted"
@@ -123,7 +123,8 @@ export const FeedbackButtons = ({
             className={`${baseButton} ${buttonSizeClass} border-border text-text-muted hover:bg-surface2 ${
               isDisabled ? "cursor-not-allowed opacity-50" : ""
             }`}>
-            <MoreHorizontal className="h-3 w-3" />
+            {/* Not an ellipsis: the reply's own "More actions" is the only one. */}
+            <MessageSquareText className="h-3 w-3" />
           </button>
         </Tooltip>
       </div>

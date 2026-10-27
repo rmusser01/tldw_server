@@ -62,6 +62,13 @@ class ChatProvider(ABC):
     name: str = "provider"
     async_chat_is_native: bool = False
 
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Record usage for every call a provider subclass makes (LLM usage accounting spec §2)."""
+        super().__init_subclass__(**kwargs)
+        from tldw_Server_API.app.core.LLM_Calls.usage_accounting import instrument_provider_class
+
+        instrument_provider_class(cls)
+
     def _bind_request_credentials(
         self,
         request: dict[str, Any] | None,
@@ -137,7 +144,7 @@ class ChatProvider(ABC):
 
         status = get_http_status_from_exception(exc)
         log_provider_failure(self.name, exc, phase=phase, status_code=status)
-        error = build_sanitized_chat_error(self.name, status_code=status)
+        error = build_sanitized_chat_error(self.name, status_code=status, upstream=exc)
         if status is not None:
             error.upstream_status_code = status
         if credential_refresh_retry_safe and status == 401:
@@ -219,7 +226,7 @@ class ChatProvider(ABC):
                 phase="normalize_http_error",
                 status_code=status,
             )
-            return build_sanitized_chat_error(self.name, status_code=status)
+            return build_sanitized_chat_error(self.name, status_code=status, upstream=exc)
 
         # Fallback
         log_provider_failure(

@@ -1635,6 +1635,19 @@ async def require_expected_user(
     )
 
 
+async def require_expected_user_if_present(
+    request: Request,
+    expected_user_id: str | None = Header(
+        default=None,
+        alias="X-TLDW-Expected-User-ID",
+        description="Authenticated user ID observed when the request scope was loaded.",
+    ),
+) -> None:
+    """Assert an explicitly captured account without changing legacy auth seams."""
+    if expected_user_id is not None:
+        await require_expected_user(expected_user_id, await get_auth_principal(request))
+
+
 def require_permissions(
     *permissions: str,
     detail: Any | None = None,
@@ -2516,6 +2529,7 @@ def require_token_scope(
       match the request path param `schedule_path_param` when present, or header `schedule_header`.
     - When `require_if_present=True`, missing/invalid credentials fail closed (401).
       API keys are accepted via `X-API-KEY` or Authorization bearer (non-JWT).
+      Headerless single-user cookie sessions use canonical principal validation.
     - If `allow_admin_bypass=True`, admin users skip this enforcement.
     - If the bearer token is not a JWT, enforce API key constraints using that token.
     - If ``defer_count`` is true, validate quota metadata now and let the caller
@@ -2577,7 +2591,15 @@ def require_token_scope(
                     principal = ctx.principal
             except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS:
                 principal = None
-            if principal is None and credentials:
+            if principal is None and (
+                credentials
+                or (
+                    request.headers.get("Authorization") is None
+                    and request.headers.get("X-API-KEY") is None
+                    and getattr(request, "cookies", None)
+                    and request.cookies.get(get_settings().SINGLE_USER_SESSION_COOKIE_NAME)
+                )
+            ):
                 try:
                     resolver = get_auth_principal
                     try:
@@ -2771,11 +2793,9 @@ def require_token_scope(
                 )
                 return None
             if require_if_present:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Authentication required",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
+                # Headerless single-user sessions carry no virtual-key constraints.
+                # Resolve their canonical owner; invalid explicit headers still fail closed.
+                await get_auth_principal(request)
             return None
         if api_key:
             try:

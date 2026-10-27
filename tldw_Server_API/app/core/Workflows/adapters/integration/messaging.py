@@ -19,6 +19,7 @@ from fastapi import HTTPException
 from loguru import logger
 
 from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import owns_chacha_checkouts
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
     ConflictError,
@@ -603,6 +604,9 @@ async def run_kanban_adapter(config: dict[str, Any], context: dict[str, Any]) ->
     tags=["integration", "chatbooks"],
     config_model=ChatbooksConfig,
 )
+# Independent: a request's detached task (engine.continue_run) can run this after the
+# request has closed its operation.
+@owns_chacha_checkouts(independent=True)
 async def run_chatbooks_adapter(config: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """Export and import chatbooks within a workflow step.
 
@@ -818,6 +822,7 @@ async def run_character_chat_adapter(config: dict[str, Any], context: dict[str, 
             post_message_to_conversation,
             start_new_chat_session,
         )
+        from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
         from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
             CharactersRAGDB,
             CharactersRAGDBError as CharacterDBError,
@@ -832,7 +837,12 @@ async def run_character_chat_adapter(config: dict[str, Any], context: dict[str, 
         except (OverflowError, TypeError, ValueError):
             db_path = Path("Databases") / "user_databases" / user_id / "ChaChaNotes.db"
 
-        db = await asyncio.to_thread(CharactersRAGDB, db_path=db_path, client_id="workflow_engine")
+        # Each ChaCha call owns its checkout in an independent operation. A step can run in a
+        # detached engine task that inherited a caller's closed operation, and the "message"
+        # action makes an LLM call between its reads and writes.
+        db = await asyncio.to_thread(
+            chacha_operation(independent=True)(CharactersRAGDB), db_path=db_path, client_id="workflow_engine"
+        )
 
         if action == "start":
             character_id = config.get("character_id")
@@ -842,7 +852,7 @@ async def run_character_chat_adapter(config: dict[str, Any], context: dict[str, 
             custom_title = _render(config.get("title")) if config.get("title") else None
 
             conversation_id, char_data, initial_history, _ = await asyncio.to_thread(
-                start_new_chat_session,
+                chacha_operation(independent=True)(start_new_chat_session),
                 db=db,
                 character_id=int(character_id),
                 user_name=user_name,
@@ -871,7 +881,7 @@ async def run_character_chat_adapter(config: dict[str, Any], context: dict[str, 
                 return {"error": "missing_conversation_id"}
 
             char_data, history, _ = await asyncio.to_thread(
-                load_chat_and_character,
+                chacha_operation(independent=True)(load_chat_and_character),
                 db=db,
                 conversation_id_str=str(conversation_id),
                 user_name=user_name,
@@ -917,7 +927,7 @@ async def run_character_chat_adapter(config: dict[str, Any], context: dict[str, 
             system_prompt = _render(config.get("system_prompt")) if config.get("system_prompt") else None
 
             char_data, history, _ = await asyncio.to_thread(
-                load_chat_and_character,
+                chacha_operation(independent=True)(load_chat_and_character),
                 db=db,
                 conversation_id_str=str(conversation_id),
                 user_name=user_name,
@@ -936,7 +946,7 @@ async def run_character_chat_adapter(config: dict[str, Any], context: dict[str, 
 
             try:
                 current_message_count = await asyncio.to_thread(
-                    db.count_messages_for_conversation,
+                    chacha_operation(independent=True)(db.count_messages_for_conversation),
                     str(conversation_id),
                 )
                 check_message_limit(str(conversation_id), current_message_count + 1)
@@ -967,7 +977,7 @@ async def run_character_chat_adapter(config: dict[str, Any], context: dict[str, 
 
             try:
                 user_message_id = await asyncio.to_thread(
-                    post_message_to_conversation,
+                    chacha_operation(independent=True)(post_message_to_conversation),
                     db=db,
                     conversation_id=str(conversation_id),
                     character_name=char_name,
@@ -999,7 +1009,7 @@ async def run_character_chat_adapter(config: dict[str, Any], context: dict[str, 
 
             try:
                 assistant_message_id = await asyncio.to_thread(
-                    post_message_to_conversation,
+                    chacha_operation(independent=True)(post_message_to_conversation),
                     db=db,
                     conversation_id=str(conversation_id),
                     character_name=char_name,

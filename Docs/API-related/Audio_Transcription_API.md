@@ -506,8 +506,8 @@ The insight payload mirrors granola-style UX:
   - Single-user: pass `?token=<API_KEY>` query, or `X-API-KEY` header, or `Authorization: Bearer <API_KEY>`, or first message `{ "type":"auth", "token":"..." }`.
   - Multi-user: prefer `Authorization: Bearer <JWT>`; first-message JWT also accepted. Virtual API keys via `X-API-KEY` are supported with endpoint/path allowlists and DB-backed quotas.
 - Quotas
-  - Concurrent streams and daily minutes enforced per user; Redis is used when available for cross-process counters; otherwise in-process.
-  - On quota violations, the server emits `{ "type":"error", "error_type":"quota_exceeded", "quota":"daily_minutes|concurrent_streams" }` and closes with code `4003`.
+  - Daily minutes and concurrent streams are per-user usage quotas (`limits.audio_daily_minutes`, `limits.audio_concurrent_streams`), enforced only when `USAGE_QUOTAS_ENABLED` is on and a value is set. Open streams are counted across workers with `RG_BACKEND=redis`; with `memory` (the default) each worker process counts its own.
+  - On a daily-minutes violation, the server emits `{ "type":"error", "error_type":"quota_exceeded", "quota":"daily_minutes" }` and closes with code `4003`. A stream over the concurrent-streams limit is refused when it starts; "Concurrency limits" in `Docs/Operations/Usage_Quotas.md` gives each socket's error frame and close code.
 - Common close codes
   - `4401` Unauthorized (auth missing/invalid)
   - `4403` Forbidden (endpoint/path not allowed or key/JWT quota exceeded)

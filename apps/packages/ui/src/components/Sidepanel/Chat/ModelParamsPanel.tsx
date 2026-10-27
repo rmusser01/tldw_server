@@ -1,4 +1,4 @@
-import { Checkbox, Input, InputNumber, Select, Slider, Tooltip } from "antd"
+import { Checkbox, Input, InputNumber, Select, Tooltip } from "antd"
 import {
   ChevronDown,
   ChevronUp,
@@ -12,6 +12,11 @@ import { classNames } from "@/libs/class-name"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useUiModeStore } from "@/store/ui-mode"
 import { LlamaCppAdvancedControls } from "@/components/Common/Settings/LlamaCppAdvancedControls"
+import { ModelParamSliderField } from "./ModelParamField"
+import {
+  useInheritedSamplingDefaults,
+  useIsSamplingSetHere
+} from "./useInheritedSamplingDefaults"
 
 const { TextArea } = Input
 
@@ -74,7 +79,15 @@ const ModelParamsPanelBase: React.FC<ModelParamsPanelProps> = ({
     (s) => s.setPresencePenalty
   )
   const topK = useStoreChatModelSettings((s) => s.topK)
-  const setTopK = useStoreChatModelSettings((s) => s.setTopK)
+  const updateSetting = useStoreChatModelSettings((s) => s.updateSetting)
+  // Resetting clears this model's value. An unset Temperature, Top P or
+  // penalty is then sent as `inherited` (saved defaults, else ChatTldw's
+  // fallback), and an unset Min P is not sent at all.
+  const resetSetting = (
+    key: "temperature" | "topP" | "frequencyPenalty" | "presencePenalty" | "minP"
+  ) => updateSetting(key, undefined)
+  const inherited = useInheritedSamplingDefaults()
+  const isSetHere = useIsSamplingSetHere()
   const minP = useStoreChatModelSettings((s) => s.minP)
   const setMinP = useStoreChatModelSettings((s) => s.setMinP)
 
@@ -138,8 +151,8 @@ const ModelParamsPanelBase: React.FC<ModelParamsPanelProps> = ({
           <div className="space-y-1">
             <Tooltip
               title={t(
-                "sidepanel:modelParams.providerTooltip",
-                "Override the API provider for this conversation"
+                'sidepanel:modelParams.providerTooltip',
+                'Override the API provider for this conversation. New chats keep this choice with the selected model.'
               )}
             >
               <label className="text-xs text-text-muted cursor-help">
@@ -264,126 +277,77 @@ const ModelParamsPanelBase: React.FC<ModelParamsPanelProps> = ({
 
       {!paramsCollapsed && (
         <div id="model-params-content" className="px-3 pb-3 space-y-3 max-h-64 overflow-y-auto">
-          {/* Temperature */}
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <Tooltip
-                title={t(
-                  "sidepanel:modelParams.temperatureTooltip",
-                  "Controls randomness. Lower = more focused, higher = more creative"
-                )}
-              >
-                <label className="text-xs text-text-muted cursor-help">
-                  {t("sidepanel:modelParams.temperature", "Temperature")}
-                </label>
-              </Tooltip>
-              <span className="text-xs text-text-subtle tabular-nums">
-                {temperature ?? 0.7}
-              </span>
-            </div>
-            <Slider
-              min={0}
-              max={2}
-              step={0.1}
-              value={temperature ?? 0.7}
-              onChange={(value) => setTemperature(value)}
-              className="my-0"
-              tooltip={{ formatter: (v) => v?.toFixed(1) }}
-            />
-          </div>
-
-          {/* Top P */}
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <Tooltip
-                title={t(
-                  "sidepanel:modelParams.topPTooltip",
-                  "Nucleus sampling threshold. Lower = more focused output"
-                )}
-              >
-                <label className="text-xs text-text-muted cursor-help">
-                  {t("sidepanel:modelParams.topP", "Top P")}
-                </label>
-              </Tooltip>
-              <span className="text-xs text-text-subtle tabular-nums">
-                {topP ?? 0.9}
-              </span>
-            </div>
-            <Slider
-              min={0}
-              max={1}
-              step={0.05}
-              value={topP ?? 0.9}
-              onChange={(value) => setTopP(value)}
-              className="my-0"
-              tooltip={{ formatter: (v) => v?.toFixed(2) }}
-            />
-          </div>
-
-          {/* Frequency Penalty */}
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <Tooltip
-                title={t(
-                  "sidepanel:modelParams.frequencyPenaltyTooltip",
-                  "Penalizes repeated tokens based on frequency. Higher = less repetition"
-                )}
-              >
-                <label className="text-xs text-text-muted cursor-help">
-                  {t(
-                    "sidepanel:modelParams.frequencyPenalty",
-                    "Frequency Penalty"
-                  )}
-                </label>
-              </Tooltip>
-              <span className="text-xs text-text-subtle tabular-nums">
-                {frequencyPenalty ?? 0}
-              </span>
-            </div>
-            <Slider
-              min={-2}
-              max={2}
-              step={0.1}
-              value={frequencyPenalty ?? 0}
-              onChange={(value) => setFrequencyPenalty(value)}
-              className="my-0"
-              tooltip={{ formatter: (v) => v?.toFixed(1) }}
-            />
-          </div>
-
-          {/* Presence Penalty */}
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <Tooltip
-                title={t(
-                  "sidepanel:modelParams.presencePenaltyTooltip",
-                  "Penalizes repeated tokens based on presence. Higher = more topic diversity"
-                )}
-              >
-                <label className="text-xs text-text-muted cursor-help">
-                  {t(
-                    "sidepanel:modelParams.presencePenalty",
-                    "Presence Penalty"
-                  )}
-                </label>
-              </Tooltip>
-              <span className="text-xs text-text-subtle tabular-nums">
-                {presencePenalty ?? 0}
-              </span>
-            </div>
-            <Slider
-              min={-2}
-              max={2}
-              step={0.1}
-              value={presencePenalty ?? 0}
-              onChange={(value) => setPresencePenalty(value)}
-              className="my-0"
-              tooltip={{ formatter: (v) => v?.toFixed(1) }}
-            />
-          </div>
+          <ModelParamSliderField
+            label={t("sidepanel:modelParams.temperature", "Temperature")}
+            tooltip={t(
+              "sidepanel:modelParams.temperatureTooltip",
+              "Controls randomness. Lower = more focused, higher = more creative"
+            )}
+            value={temperature}
+            min={0}
+            max={2}
+            step={0.1}
+            precision={1}
+            restingValue={1}
+            onChange={(value) => setTemperature(value)}
+            defaultValue={inherited.temperature}
+            isSetHere={isSetHere("temperature")}
+            onReset={() => resetSetting("temperature")}
+          />
+          <ModelParamSliderField
+            label={t("sidepanel:modelParams.topP", "Top P")}
+            tooltip={t(
+              "sidepanel:modelParams.topPTooltip",
+              "Nucleus sampling threshold. Lower = more focused output"
+            )}
+            value={topP}
+            min={0}
+            max={1}
+            step={0.05}
+            precision={2}
+            restingValue={1}
+            onChange={(value) => setTopP(value)}
+            defaultValue={inherited.topP}
+            isSetHere={isSetHere("topP")}
+            onReset={() => resetSetting("topP")}
+          />
+          <ModelParamSliderField
+            label={t("sidepanel:modelParams.frequencyPenalty", "Frequency Penalty")}
+            tooltip={t(
+              "sidepanel:modelParams.frequencyPenaltyTooltip",
+              "Penalizes repeated tokens based on frequency. Higher = less repetition"
+            )}
+            value={frequencyPenalty}
+            min={-2}
+            max={2}
+            step={0.1}
+            precision={1}
+            restingValue={0}
+            onChange={(value) => setFrequencyPenalty(value)}
+            defaultValue={inherited.frequencyPenalty}
+            isSetHere={isSetHere("frequencyPenalty")}
+            onReset={() => resetSetting("frequencyPenalty")}
+          />
+          <ModelParamSliderField
+            label={t("sidepanel:modelParams.presencePenalty", "Presence Penalty")}
+            tooltip={t(
+              "sidepanel:modelParams.presencePenaltyTooltip",
+              "Penalizes repeated tokens based on presence. Higher = more topic diversity"
+            )}
+            value={presencePenalty}
+            min={-2}
+            max={2}
+            step={0.1}
+            precision={1}
+            restingValue={0}
+            onChange={(value) => setPresencePenalty(value)}
+            defaultValue={inherited.presencePenalty}
+            isSetHere={isSetHere("presencePenalty")}
+            onReset={() => resetSetting("presencePenalty")}
+          />
 
           {/* Top K */}
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center justify-between gap-2" data-param-field>
             <Tooltip
               title={t(
                 "sidepanel:modelParams.topKTooltip",
@@ -399,39 +363,28 @@ const ModelParamsPanelBase: React.FC<ModelParamsPanelProps> = ({
               min={1}
               max={100}
               value={topK}
-              onChange={(value) => setTopK(value ?? 40)}
-              placeholder="40"
+              onChange={(value) => updateSetting("topK", value ?? undefined)}
+              placeholder={t("sidepanel:modelParams.default", "Default")}
               className="w-24"
             />
           </div>
 
-          {/* Min P */}
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <Tooltip
-                title={t(
-                  "sidepanel:modelParams.minPTooltip",
-                  "Minimum probability threshold for token selection"
-                )}
-              >
-                <label className="text-xs text-text-muted cursor-help">
-                  {t("sidepanel:modelParams.minP", "Min P")}
-                </label>
-              </Tooltip>
-              <span className="text-xs text-text-subtle tabular-nums">
-                {minP ?? 0}
-              </span>
-            </div>
-            <Slider
-              min={0}
-              max={1}
-              step={0.05}
-              value={minP ?? 0}
-              onChange={(value) => setMinP(value)}
-              className="my-0"
-              tooltip={{ formatter: (v) => v?.toFixed(2) }}
-            />
-          </div>
+          <ModelParamSliderField
+            label={t("sidepanel:modelParams.minP", "Min P")}
+            tooltip={t(
+              "sidepanel:modelParams.minPTooltip",
+              "Minimum probability threshold for token selection"
+            )}
+            value={minP}
+            min={0}
+            max={1}
+            step={0.05}
+            precision={2}
+            restingValue={0}
+            onChange={(value) => setMinP(value)}
+            isSetHere={isSetHere("minP")}
+            onReset={() => resetSetting("minP")}
+          />
 
           {/* Max Tokens / numPredict */}
           <div className="flex items-center justify-between gap-2">

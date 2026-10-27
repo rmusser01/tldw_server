@@ -1093,6 +1093,9 @@ _CREATE_AUTHNZ_CORE_TABLES = [
     ("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_sessions_access_jti ON sessions(access_jti)", ()),
+    # Admin activity summaries filter sessions by a created_at time window
+    # (admin perf plan A, stage 3); keep it an index range scan.
+    ("CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at)", ()),
     # password_history
     (
         """
@@ -1249,6 +1252,13 @@ _CREATE_AUTHNZ_CORE_TABLES = [
         (),
     ),
     ("CREATE INDEX IF NOT EXISTS idx_org_members_user ON public.org_members(user_id)", ()),
+    # Org-scoped admin joins filter org_members by org_id and join on user_id
+    # (admin perf plan A, stage 3); the composite index covers both.
+    (
+        "CREATE INDEX IF NOT EXISTS idx_org_members_org_user "
+        "ON public.org_members(org_id, user_id)",
+        (),
+    ),
     (
         """
         CREATE TABLE IF NOT EXISTS public.teams (
@@ -3576,6 +3586,11 @@ async def ensure_authnz_core_tables_pg(pool: DatabasePool | None = None) -> bool
         async with db_pool.transaction() as conn:
             for sql, params in _CREATE_AUTHNZ_CORE_TABLES:
                 await conn.execute(sql, *params)
+            from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import (
+                native_quota_schema_statements,
+            )
+            for statement in native_quota_schema_statements(postgres=True):
+                await conn.execute(statement)
             await ensure_postgres_session_last_activity(conn)
             has_legacy_uses = await conn.fetchval(
                 "SELECT EXISTS ("
@@ -4113,6 +4128,53 @@ async def ensure_llm_provider_overrides_pg(pool: DatabasePool | None = None) -> 
     except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(f"Failed to ensure PostgreSQL llm_provider_overrides table: {exc}")
         return False
+
+async def ensure_storage_quota_overrides_backfill_pg(pool: DatabasePool) -> bool:
+    """Copy users.storage_quota_mb into limits.storage_quota_mb overrides once (spec 2 §8).
+
+    A marker row claimed in the same transaction makes it run once, so an override an
+    admin later deletes is never re-created from the stale column.
+    """
+    from tldw_Server_API.app.core.AuthNZ.storage_quota_backfill import (
+        PG_BACKFILL_MARKER,
+        STORAGE_QUOTA_KEY,
+        skip_values,
+    )
+
+    try:
+        async with pool.transaction() as conn:
+            await conn.execute(
+                "CREATE TABLE IF NOT EXISTS authnz_data_backfills ("
+                "name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW())"
+            )
+            claimed = await conn.fetchval(
+                "INSERT INTO authnz_data_backfills (name) VALUES ($1) "
+                "ON CONFLICT (name) DO NOTHING RETURNING name",
+                PG_BACKFILL_MARKER,
+            )
+            if claimed is None:
+                return True
+            status = await conn.execute(
+                """
+                INSERT INTO user_config_overrides (user_id, key, value_json, created_at, updated_at)
+                SELECT id, $1, storage_quota_mb::text, NOW(), NOW()
+                FROM users
+                WHERE storage_quota_mb IS NOT NULL AND NOT (storage_quota_mb = ANY($2::int[]))
+                ON CONFLICT (user_id, key) DO NOTHING
+                """,
+                STORAGE_QUOTA_KEY,
+                skip_values(),
+            )
+        logger.info("Postgres storage quota backfill copied rows ({})", status)
+        return True
+    except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.error(
+            "Postgres storage quota backfill failed ({}): {}; it will retry at the next start",
+            type(exc).__name__,
+            exc,
+        )
+        return False
+
 
 async def ensure_usage_tables_pg(pool: DatabasePool | None = None) -> bool:
     """Ensure usage and LLM usage tables exist for PostgreSQL backends.

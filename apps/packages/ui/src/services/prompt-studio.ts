@@ -1,8 +1,12 @@
-import { type ApiSendResponse, apiSend } from "@/services/api-send"
+import { type ApiSendResponse, apiSend as sendApiRequest } from "@/services/api-send"
 import type { ApiResponseEnvelope } from "@/services/response-envelope"
 import type { StructuredPromptDefinition } from "@/services/structured-prompt-transport"
 import { appendPathQuery, toAllowedPath } from "@/services/tldw/path-utils"
 import type { RecipePersistenceRequestPolicy } from "@/services/tldw/recipe-request-snapshot"
+import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import { deriveScopedUserId } from "@/utils/media-navigation-scope"
 
 export { parseStructuredPromptDefinitionForTransport } from "@/services/structured-prompt-transport"
 export type {
@@ -11,6 +15,10 @@ export type {
   SingleTextRecipeDefinitionV2,
   StructuredPromptDefinition
 } from "@/services/structured-prompt-transport"
+
+// Studio workspaces own their request lifetime; never reuse another workspace's pending GET.
+const apiSend: typeof sendApiRequest = (payload, options) =>
+  sendApiRequest(payload, { ...options, coalesce: false })
 
 // Prompt Studio client – aligns with tldw_server prompt_studio endpoints.
 
@@ -208,6 +216,69 @@ export type TestCase = {
   updated_at?: string
 }
 
+export type SavedTestRun = {
+  id: number
+  project_id: number
+  prompt_id: number
+  test_case_id: number
+  prompt_name?: string | null
+  prompt_version_number?: number | null
+  prompt_system_prompt?: string | null
+  prompt_user_prompt?: string | null
+  prompt_definition?: Record<string, unknown> | null
+  prompt_format?: string | null
+  prompt_schema_version?: number | null
+  prompt_deleted?: boolean | null
+  model_name: string
+  model_params?: { provider?: string; temperature?: number; max_tokens?: number } | null
+  inputs?: Record<string, unknown> | null
+  outputs?: Record<string, unknown> | null
+  expected_outputs?: Record<string, unknown> | null
+  scores?: Record<string, unknown> | null
+  execution_time_ms?: number | null
+  tokens_used?: number | null
+  cost_estimate?: number | null
+  error_message?: string | null
+  created_at?: string | null
+}
+
+export type TestRunReadScope = Readonly<{ userId: number; scopeKey: string }>
+
+const readSavedTestRuns = async <T>(
+  path: string,
+  scope: TestRunReadScope,
+  signal: AbortSignal
+): Promise<ApiSendResponse<T>> => {
+  signal.throwIfAborted()
+  const response = await tldwClient.requestWithCurrentConfig<ApiSendResponse<T>>((config: TldwConfig) => {
+    signal.throwIfAborted()
+    const currentScope = `${buildChatSurfaceScopeKeyFromConfig(config, { userId: scope.userId })}:${config.authSource ?? "manual"}`
+    const principalChanged = config.authMode === "multi-user" && config.authSource !== "cookie-session" &&
+      deriveScopedUserId(config) !== `user:${scope.userId}`
+    if (currentScope !== scope.scopeKey || principalChanged) throw createServicePromptScopeChangedError()
+    return { path: toAllowedPath(path), method: "GET", returnResponse: true,
+      abortSignal: signal, headers: { "X-TLDW-Expected-User-ID": String(scope.userId) } }
+  })
+  signal.throwIfAborted()
+  return response
+}
+
+export async function listTestRuns(
+  projectId: number,
+  page: number,
+  scope: TestRunReadScope,
+  signal: AbortSignal
+) {
+  const query = new URLSearchParams({ project_id: String(projectId), page: String(page), per_page: "20" })
+  return await readSavedTestRuns<ListResponse<SavedTestRun>>(
+    `/api/v1/prompt-studio/test-cases/runs?${query}`, scope, signal)
+}
+
+export async function getTestRun(runId: number, scope: TestRunReadScope, signal: AbortSignal) {
+  return await readSavedTestRuns<StandardResponse<SavedTestRun>>(
+    `/api/v1/prompt-studio/test-cases/runs/${encodeURIComponent(runId)}`, scope, signal)
+}
+
 export type TestCaseCreatePayload = {
   project_id: number
   name?: string | null
@@ -230,6 +301,7 @@ export type TestCaseBulkCreatePayload = {
 }
 
 export type EvaluationConfig = {
+  provider?: string
   model_name?: string
   temperature?: number
   max_tokens?: number
@@ -264,11 +336,11 @@ export type PromptStudioEvaluation = {
   description?: string | null
   status: string
   metrics?: Record<string, any>
-  aggregate_metrics?: Record<string, any>
+  aggregate_metrics?: Record<string, any> | null
   config?: Record<string, any>
-  model_configs?: EvaluationConfig[]
-  test_case_ids?: number[]
-  test_run_ids?: number[]
+  model_configs?: Array<Omit<EvaluationConfig, "api_endpoint" | "api_key_name"> & { api_name?: string; model?: string }> | null
+  test_case_ids?: number[] | null
+  test_run_ids?: number[] | null
   error_message?: string | null
   created_at?: string
   completed_at?: string | null
@@ -350,7 +422,7 @@ export async function listProjects(params?: {
   per_page?: number
   include_deleted?: boolean
   search?: string
-}) {
+}, options?: RecipePersistenceOptions) {
   const query = buildQuery({
     page: params?.page ?? 1,
     per_page: params?.per_page ?? 20,
@@ -359,28 +431,32 @@ export async function listProjects(params?: {
   })
   return await apiSend<ListResponse<Project>>({
     path: appendPathQuery("/api/v1/prompt-studio/projects", query),
-    method: "GET"
+    method: "GET",
+    ...options
   })
 }
 
 export async function createProject(
   payload: ProjectCreatePayload,
-  idempotencyKey?: string | null
+  idempotencyKey?: string | null,
+  options?: RecipePersistenceOptions
 ) {
   return await apiSend<StandardResponse<Project>>({
     path: "/api/v1/prompt-studio/projects/",
     method: "POST",
     body: payload,
-    headers: withIdempotency(idempotencyKey)
+    headers: withIdempotency(idempotencyKey),
+    ...options
   })
 }
 
-export async function getProject(projectId: number) {
+export async function getProject(projectId: number, options?: RecipePersistenceOptions) {
   return await apiSend<StandardResponse<Project>>({
     path: toAllowedPath(
-      `/api/v1/prompt-studio/projects/${encodeURIComponent(projectId)}`
+      `/api/v1/prompt-studio/projects/get/${encodeURIComponent(projectId)}`
     ),
-    method: "GET"
+    method: "GET",
+    ...options
   })
 }
 
@@ -485,11 +561,15 @@ export async function updatePrompt(
 export async function previewPromptDefinition(
   payload: StructuredPromptPreviewRequest
 ) {
-  return await apiSend<StandardResponse<StructuredPromptPreviewResponse>>({
+  const response = await apiSend<StandardResponse<StructuredPromptPreviewResponse>>({
     path: "/api/v1/prompt-studio/prompts/preview",
     method: "POST",
     body: payload
   })
+  if (!response.ok || response.data?.success === false) {
+    throw new Error(response.error || response.data?.error || "Prompt preview failed")
+  }
+  return response
 }
 
 export async function getPromptHistory(promptId: number) {
@@ -777,19 +857,29 @@ export async function generateTestCases(payload: GenerateTestCasesPayload) {
 export type RunTestCasesPayload = {
   prompt_id: number
   test_case_ids: number[]
-  config?: EvaluationConfig
+  provider?: string
+  model?: string
 }
 
 export type TestRunResult = {
+  id?: number
   test_case_id: number
-  output: string
-  passed?: boolean
+  prompt_id?: number
+  inputs?: Record<string, unknown>
+  actual?: Record<string, unknown>
+  expected?: Record<string, unknown>
+  model?: string
+  execution_time_ms?: number
+  tokens_used?: number
+  // Legacy graded responses remain supported; canonical runs are ungraded.
+  output?: string
+  passed?: boolean | null
   execution_time?: number
   error?: string | null
 }
 
 export async function runTestCases(payload: RunTestCasesPayload) {
-  return await apiSend<StandardResponse<TestRunResult[]>>({
+  return await apiSend<{ results: TestRunResult[] } | StandardResponse<TestRunResult[]>>({
     path: "/api/v1/prompt-studio/test-cases/run",
     method: "POST",
     body: payload
@@ -834,17 +924,18 @@ export type Optimization = {
   id: number
   uuid?: string
   project_id: number
-  prompt_id: number
+  initial_prompt_id: number
   name?: string | null
   description?: string | null
   status: OptimizationStatus
-  config: OptimizationConfig
-  model_config?: EvaluationConfig
+  optimizer_type: OptimizationStrategy
+  optimization_config: Partial<OptimizationConfig> & { model_config?: EvaluationConfig }
   test_case_ids?: number[]
-  best_prompt_id?: number | null
-  best_score?: number | null
-  current_iteration?: number
-  total_iterations?: number
+  optimized_prompt_id?: number | null
+  initial_metrics?: Record<string, number> | null
+  final_metrics?: Record<string, number> | null
+  iterations_completed?: number | null
+  max_iterations: number
   error_message?: string | null
   cancel_reason?: string | null
   created_at?: string
@@ -853,12 +944,12 @@ export type Optimization = {
 }
 
 export type OptimizationIteration = {
-  iteration: number
-  prompt_id: number
-  score: number
-  metrics?: Record<string, any>
-  changes?: string
-  timestamp?: string
+  id: number
+  iteration_number: number
+  prompt_variant?: Record<string, unknown> | null
+  metrics?: Record<string, unknown> | null
+  note?: string | null
+  created_at?: string
 }
 
 export type OptimizationCreatePayload = {
@@ -871,31 +962,32 @@ export type OptimizationCreatePayload = {
   test_case_ids?: number[]
 }
 
-export type OptimizationListResponse = {
-  optimizations: Optimization[]
-  total: number
-  limit: number
-  offset: number
+export type OptimizationListResponse = ListResponse<Optimization>
+
+const requireOptimizationResponse = <T extends StandardResponse<unknown>>(
+  response: ApiSendResponse<T>
+) => {
+  if (!response.ok || response.data?.success === false) {
+    throw new Error(response.error || response.data?.error || "Optimization request failed")
+  }
+  return response
 }
 
 export async function listOptimizations(params: {
   project_id: number
-  prompt_id?: number
   status?: OptimizationStatus
-  limit?: number
-  offset?: number
+  page?: number
+  per_page?: number
 }) {
   const query = buildQuery({
-    project_id: params.project_id,
-    prompt_id: params.prompt_id,
-    status: params.status,
-    limit: params.limit ?? 50,
-    offset: params.offset ?? 0
+    page: params.page ?? 1,
+    per_page: params.per_page ?? 50,
+    status: params.status
   })
-  return await apiSend<OptimizationListResponse>({
-    path: appendPathQuery("/api/v1/prompt-studio/optimizations", query),
+  return requireOptimizationResponse(await apiSend<OptimizationListResponse>({
+    path: appendPathQuery(toAllowedPath(`/api/v1/prompt-studio/optimizations/list/${encodeURIComponent(params.project_id)}`), query),
     method: "GET"
-  })
+  }))
 }
 
 export async function createOptimization(payload: OptimizationCreatePayload) {
@@ -907,43 +999,34 @@ export async function createOptimization(payload: OptimizationCreatePayload) {
 }
 
 export async function getOptimization(optimizationId: number) {
-  return await apiSend<StandardResponse<Optimization>>({
+  return requireOptimizationResponse(await apiSend<StandardResponse<Optimization>>({
     path: toAllowedPath(
-      `/api/v1/prompt-studio/optimizations/${encodeURIComponent(optimizationId)}`
+      `/api/v1/prompt-studio/optimizations/get/${encodeURIComponent(optimizationId)}`
     ),
     method: "GET"
-  })
+  }))
 }
 
 export async function cancelOptimization(
   optimizationId: number,
   reason?: string
 ) {
-  return await apiSend<StandardResponse<Optimization>>({
+  return requireOptimizationResponse(await apiSend<StandardResponse<{ message: string }>>({
     path: toAllowedPath(
-      `/api/v1/prompt-studio/optimizations/${encodeURIComponent(optimizationId)}/cancel`
+      `/api/v1/prompt-studio/optimizations/cancel/${encodeURIComponent(optimizationId)}`
     ),
     method: "POST",
-    body: reason ? { reason } : undefined
-  })
-}
-
-export async function deleteOptimization(optimizationId: number) {
-  return await apiSend<{ message: string }>({
-    path: toAllowedPath(
-      `/api/v1/prompt-studio/optimizations/${encodeURIComponent(optimizationId)}`
-    ),
-    method: "DELETE"
-  })
+    body: reason ?? undefined
+  }))
 }
 
 export async function getOptimizationIterations(optimizationId: number) {
-  return await apiSend<StandardResponse<OptimizationIteration[]>>({
-    path: toAllowedPath(
-      `/api/v1/prompt-studio/optimizations/${encodeURIComponent(optimizationId)}/iterations`
-    ),
+  return requireOptimizationResponse(await apiSend<StandardResponse<{ iterations: OptimizationIteration[] }>>({
+    path: appendPathQuery(toAllowedPath(
+      `/api/v1/prompt-studio/optimizations/iterations/${encodeURIComponent(optimizationId)}`
+    ), buildQuery({ page: 1, per_page: 50 })),
     method: "GET"
-  })
+  }))
 }
 
 export type StrategyInfo = {

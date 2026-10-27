@@ -780,7 +780,7 @@
     "message": "Ikke autoriseret til at gemme"
   },
   "mediaPage_spreadMode": {
-    "message": "Sammenlign"
+    "message": "Side om side"
   },
   "mediaPage_listMode": {
     "message": "Fokus"
@@ -789,13 +789,13 @@
     "message": "Stak"
   },
   "mediaPage_spreadModeTooltip": {
-    "message": "Se valgte elementer side om side for sammenligning"
+    "message": "Placer valgte elementer side om side"
   },
   "mediaPage_listModeTooltip": {
     "message": "Se ét element ad gangen med navigation"
   },
   "mediaPage_allModeTooltip": {
-    "message": "Se alle valgte elementer i en rulleliste"
+    "message": "Vis det aktuelle læsevindue i en rulbar stak"
   },
   "mediaPage_copyContentLabel": {
     "message": "Kopiér indhold"
@@ -834,19 +834,19 @@
     "message": "Vælg elementer"
   },
   "mediaPage_firstUseStep1Desc": {
-    "message": "Klik på elementer i venstre panel for at tilføje dem til visningen."
+    "message": "Vælg med afkrydsningsfelter, og vælg Læs valgte. Klik eller Enter forhåndsviser."
   },
   "mediaPage_firstUseStep2": {
     "message": "Vælg en visning"
   },
   "mediaPage_firstUseStep2Desc": {
-    "message": "Brug \"Sammenlign\" for side om side, \"Fokus\" for ét ad gangen, eller \"Stak\" for at se alle."
+    "message": "Side om side er layout; Fokus viser ét element; Stak viser læsevinduet. Sammenlign indhold sammenligner tekst."
   },
   "mediaPage_firstUseStep3": {
     "message": "Naviger"
   },
   "mediaPage_firstUseStep3Desc": {
-    "message": "Brug Forrige/Næste-knapperne eller tastaturet (Tab + Enter) til at gå gennem elementer."
+    "message": "Forrige/Næste eller j/k navigerer i den aktive kontekst. Tab og mellemrum vælger et felt."
   },
   "mediaPage_gotIt": {
     "message": "Forstået"
@@ -1327,5 +1327,11 @@
   },
   "mediaPage_analysisProviderRequired": {
     "message": "Vælg en analyseudbyder, og prøv analysen igen."
+  },
+  "mediaPage_resultsHint": {
+    "message": "Klik eller Enter for forhåndsvisning. Mellemrum i afkrydsningsfelt vælger. Shift+klik vælger et område."
+  },
+  "mediaPage_viewerAll": {
+    "message": "Læsevindue (stak)"
   }
 }

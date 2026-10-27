@@ -38,11 +38,12 @@ async def _persist(
     *,
     service: WebScrapingService | None = None,
     keywords: str = "",
+    user_id: int | None = 7,
 ) -> dict[str, Any]:
     return await (service or WebScrapingService())._store_persistent(
         result={"method": "Individual URLs", "articles": articles},
         keywords=keywords,
-        user_id=7,
+        user_id=user_id,
         perform_chunking=False,
         chunking_mode=None,
         auto_chunking_goal="balanced",
@@ -458,3 +459,52 @@ async def test_enhanced_webscraping_persist_redacts_storage_exception_from_logs(
 
     assert response["errors"] == ["Storage failed for article"]
     assert secret not in "\n".join(records)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend_name", ["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
+@pytest.mark.parametrize("user_id,effective_owner", [(2, 2), (None, 1)])
+async def test_persisted_web_article_is_searchable_only_by_its_effective_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    user_id: int | None,
+    effective_owner: int,
+    backend_name: str,
+    request: pytest.FixtureRequest,
+):
+    from tldw_Server_API.app.core.DB_Management.media_db.api import search_media
+    from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+
+    backend = request.getfixturevalue("pg_restricted_backend") if backend_name == "postgres" else None
+    if backend is not None:
+        @contextmanager
+        def postgres_manager(**kwargs: Any):
+            with managed_media_database(**kwargs, backend=backend) as db:
+                yield db
+        monkeypatch.setattr(svc_mod, "managed_media_database", postgres_manager)
+    _patch_real_db_path(monkeypatch, tmp_path)
+    with scoped_context(user_id=effective_owner):
+        response = await _persist([
+            _article(title="Owned searchable article", content="A05SearchOwnerBoundary article body."),
+        ], user_id=user_id)
+        media_id = response["media_ids"][0]
+        with managed_media_database(
+            client_id=str(effective_owner), db_path=str(tmp_path / "media_test.db"),
+            backend=backend, initialize=False, existing_only=True,
+        ) as db:
+            stored_owner = db.get_media_by_id(media_id)["owner_user_id"]
+            own_rows, own_total = search_media(db, "A05SearchOwnerBoundary", search_fields=["title", "content"])
+    with scoped_context(user_id=effective_owner + 1):
+        with managed_media_database(
+            client_id=str(effective_owner + 1), db_path=str(tmp_path / "media_test.db"),
+            backend=backend, initialize=False, existing_only=True,
+        ) as db:
+            foreign_rows, foreign_total = search_media(db, "A05SearchOwnerBoundary", search_fields=["title", "content"])
+    assert (stored_owner, [row["id"] for row in own_rows], own_total, foreign_rows, foreign_total) == (  # nosec B101 - Real persistence/search owner-isolation regression oracle.
+        effective_owner,
+        [media_id],
+        1,
+        [],
+        0,
+    )

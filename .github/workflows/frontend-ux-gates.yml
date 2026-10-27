@@ -100,6 +100,8 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: apps
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
         run: bun install --frozen-lockfile
 
       - name: Install Playwright Chromium
@@ -262,6 +264,8 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: apps
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
         run: bun install --frozen-lockfile
 
       - name: Build advanced frontend production bundle for smoke gate

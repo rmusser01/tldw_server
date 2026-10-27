@@ -43,7 +43,7 @@ export const useSelectedCharacter = <T = StoredCharacter>(
           selectionMode: selectedCharacterMode
         }
       }
-      await setSelectedAssistant(nextSelection)
+      return await setSelectedAssistant(nextSelection)
     },
     [selectedCharacterMode, setSelectedAssistant]
   )

@@ -33,9 +33,13 @@ vi.mock("@/utils/system-message", () => ({
   systemPromptFormatter: mocks.systemPromptFormatter
 }))
 
-vi.mock("@/utils/actor", () => ({
-  maybeInjectActorMessage: mocks.maybeInjectActorMessage
-}))
+vi.mock("@/utils/actor", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/utils/actor")>()
+  return {
+    ...actual,
+    maybeInjectActorMessage: mocks.maybeInjectActorMessage
+  }
+})
 
 vi.mock("@/services/search", () => ({
   getSearchSettings: vi.fn(async () => ({

@@ -10,10 +10,24 @@ from typing import Any, Literal, Optional, Union
 
 #
 # 3rd-party imports
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    StrictBool,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic_core import InitErrorDetails, PydanticCustomError
 
-from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistorySelectionV1
+from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
+    HISTORY_BRANCH_FIELD_DESCRIPTION,
+    HISTORY_EDIT_FIELD_DESCRIPTION,
+    HistoryEditTargetV1,
+    HistorySelectionV1,
+)
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
     is_safe_extra_header_value,
     is_server_managed_extra_header,
@@ -988,7 +1002,7 @@ class ChatCompletionRequest(BaseModel):
         None, description="ID of the model to use. Specific model compatibility depends on the selected `api_provider`."
     )
     messages: list[ChatCompletionMessageParam] = Field(
-        ..., description="A list of messages comprising the conversation so far.", min_length=1
+        ..., description="A list of current messages. Empty only for an explicit server-settled existing-input selection.", min_length=0
     )
     frequency_penalty: Optional[float] = Field(
         None, ge=-2.0, le=2.0, description="Frequency penalty parameter (provider support varies)."
@@ -1140,6 +1154,9 @@ class ChatCompletionRequest(BaseModel):
     )
     conversation_id: Optional[str] = Field(None, description="Optional ID of the conversation to use for context.")
     tldw_history_selection_v1: HistorySelectionV1 | None = None
+    tldw_history_server_existing_input_v1: HistorySelectionV1 | None = None
+    tldw_history_branch: StrictBool | None = Field(None, description=HISTORY_BRANCH_FIELD_DESCRIPTION)
+    tldw_history_edit_v1: HistoryEditTargetV1 | None = Field(None, description=HISTORY_EDIT_FIELD_DESCRIPTION)
     tldw_continuation: Optional[TLDWContinuationSpec] = Field(
         None,
         description=(
@@ -1220,16 +1237,42 @@ class ChatCompletionRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_history_selection_request(self) -> "ChatCompletionRequest":
-        if self.tldw_history_selection_v1 is not None:
+        existing = self.tldw_history_server_existing_input_v1
+        if existing is not None:
+            if (self.tldw_history_selection_v1 is not None or self.tldw_history_branch is not None
+                    or self.tldw_continuation is not None or self.messages or not self.stream or self.tools):
+                raise ValueError("Existing-input completion requires only its selection, streaming, and no current messages or tools")
+            if (existing.purpose != "send" or existing.cursor.kind != "after_message"
+                    or not existing.messages or existing.cursor.message_id != existing.messages[-1].id):
+                raise ValueError("Existing-input completion requires a selected saved question")
+        elif not self.messages:
+            raise ValueError("At least one current message is required")
+        if self.tldw_history_branch is not None and self.tldw_history_selection_v1 is None:
+            raise ValueError("tldw_history_branch requires tldw_history_selection_v1")
+        if self.tldw_history_edit_v1 is not None:
+            selection = self.tldw_history_selection_v1
+            if (
+                self.tldw_history_branch is not True
+                or selection is None
+                or selection.purpose != "send"
+                or selection.cursor.kind != "before_message"
+                or selection.cursor.message_id != self.tldw_history_edit_v1.message_id
+            ):
+                raise ValueError("Protected Edit requires an explicit branch and matching before-message selection")
+            if [message.role for message in self.messages if message.role != "system"] != ["user"]:
+                raise ValueError("Protected Edit requires one current user input")
+        selection = self.tldw_history_selection_v1 or existing
+        if selection is not None:
             if self.tldw_continuation is not None:
                 raise ValueError("Versioned selection cannot be combined with legacy continuation controls")
             if not self.conversation_id or self.save_to_db is not True:
                 raise ValueError("Versioned completion requires conversation_id and save_to_db=true")
-            if self.conversation_id != self.tldw_history_selection_v1.conversation_id:
+            if self.conversation_id != selection.conversation_id:
                 raise ValueError("Selection conversation mismatch")
-            roles = [message.role for message in self.messages]
-            if not any(role in {"user", "tool"} for role in roles) or any(role not in {"system", "user", "tool"} for role in roles):
-                raise ValueError("Versioned messages must contain only current system/user/tool inputs")
+            if existing is None:
+                roles = [message.role for message in self.messages]
+                if not any(role in {"user", "tool"} for role in roles) or any(role not in {"system", "user", "tool"} for role in roles):
+                    raise ValueError("Versioned messages must contain only current system/user/tool inputs")
         return self
 
     @model_validator(mode="after")

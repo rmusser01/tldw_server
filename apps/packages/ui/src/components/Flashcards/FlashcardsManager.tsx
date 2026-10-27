@@ -480,6 +480,7 @@ export const FlashcardsManager: React.FC = () => {
             label: t("option:flashcards.tabManage", { defaultValue: "Manage" }),
             children: (
               <ManageTab
+                scope={generateHandoff.scope}
                 onNavigateToImport={navigateToImportTask}
                 onNavigateToGenerate={navigateToGenerateTask}
                 onReviewCard={handleReviewCard}

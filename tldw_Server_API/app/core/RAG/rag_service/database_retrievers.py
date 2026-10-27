@@ -3018,8 +3018,7 @@ class NotesDBRetriever(BaseRetriever):
             )
 
         if self.chacha_db is not None and not self.config.tags_filter:
-            docs = self._retrieve_via_chacha(query, notebook_id)
-            return docs
+            return await asyncio.to_thread(self._retrieve_via_chacha, query, notebook_id)
 
         documents = []
 
@@ -3185,7 +3184,7 @@ class NotesDBRetriever(BaseRetriever):
         if self.chacha_db is None:
             return []
         try:
-            results = self.chacha_db.search_notes(query, limit=int(self.config.max_results))
+            results = self.chacha_db.search_notes(query, limit=int(self.config.max_results), match_any=True)
         except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError) as exc:
             logger.error(f"ChaCha notes search failed: {exc}")
             return []
@@ -4503,7 +4502,7 @@ class CharacterCardsRetriever(BaseRetriever):
                 FROM messages m
                 JOIN conversations conv ON m.conversation_id = conv.id
                 LEFT JOIN character_cards cc ON conv.character_id = cc.id
-                WHERE m.deleted = 0 AND m.content LIKE ?
+                WHERE m.deleted = 0 AND conv.deleted = 0 AND m.content LIKE ?
                 ORDER BY m.timestamp DESC
                 LIMIT ?
             """

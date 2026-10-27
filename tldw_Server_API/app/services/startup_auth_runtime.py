@@ -31,6 +31,7 @@ async def initialize_auth_runtime_services(
         handles.db_pool = db_pool
         await _init_resource_governor(app)
         await _warn_if_plan_limits_unenforced()
+        _warn_if_llm_quotas_defeated()
         _validate_auth_rg_startup_guards(app)
         handles.session_manager = await _get_session_manager()
         logger.info("App Startup: Session manager initialized")
@@ -72,6 +73,13 @@ async def _warn_if_plan_limits_unenforced() -> None:
     from tldw_Server_API.app.core.Billing.enforcement import billing_checks_active
 
     await billing_checks_active()
+
+
+def _warn_if_llm_quotas_defeated() -> None:
+    """Log at startup when a setting silently disables the LLM quotas (LLM usage accounting spec §6)."""
+    from tldw_Server_API.app.core.Usage import quota_checks
+
+    quota_checks.warn_if_llm_quotas_defeated()
 
 
 def _validate_auth_rg_startup_guards(app: Any) -> None:

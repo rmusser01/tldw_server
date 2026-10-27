@@ -199,14 +199,12 @@ export const ParameterPresets: React.FC<Props> = ({
     };
   });
 
+  const groupLabel = t("playground:presets.generationStyle", "Generation style");
+
   return (
     <div className={className}>
       <Segmented
-        aria-label={
-          compact
-            ? t("playground:presets.generationStyle", "Generation style")
-            : undefined
-        }
+        aria-label={groupLabel}
         options={options}
         value={currentPreset}
         onChange={handlePresetChange}
@@ -238,8 +236,6 @@ export const ParameterPresetsDropdown: React.FC<Props> = ({
     onChange?.(presetKey);
   };
 
-  const currentPresetData = PRESETS.find((p) => p.key === currentPreset);
-
   return (
     <div className={`flex flex-col gap-2 ${className || ""}`}>
       <div className="text-xs font-medium text-text-muted">
@@ -251,6 +247,7 @@ export const ParameterPresetsDropdown: React.FC<Props> = ({
             key={preset.key}
             type="button"
             onClick={() => handlePresetSelect(preset.key)}
+            aria-pressed={currentPreset === preset.key}
             className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
               currentPreset === preset.key
                 ? "border-primary bg-primary/10 text-primary"

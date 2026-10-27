@@ -2,7 +2,7 @@
 
 import pytest
 
-from tldw_Server_API.app.core.Usage import audio_quota
+from tldw_Server_API.app.core.Usage import audio_quota, concurrency_quota
 
 pytestmark = pytest.mark.unit
 
@@ -18,15 +18,19 @@ def limits(monkeypatch: pytest.MonkeyPatch) -> dict:
 
     monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
     monkeypatch.setattr(audio_quota, "user_quota", _user_quota)
+    monkeypatch.setattr(concurrency_quota, "user_quota", _user_quota)
     return values
 
 
 async def test_limits_come_from_the_resolver(limits: dict) -> None:
     """Daily/monthly minutes and queued-job concurrency are the user's limits.* values."""
-    limits.update({"limits.audio_daily_minutes": 45, "limits.transcription_minutes_per_month": 600, "limits.audio_concurrent_jobs": 3})
+    limits.update({
+        "limits.audio_daily_minutes": 45, "limits.transcription_minutes_per_month": 600,
+        "limits.audio_concurrent_jobs": 3, "limits.audio_concurrent_streams": 2,
+    })
     assert await audio_quota.get_limits_for_user(1) == {
         "daily_minutes": 45, "monthly_minutes": 600, "concurrent_jobs": 3,
-        "concurrent_streams": None, "max_file_size_mb": None,
+        "concurrent_streams": 2, "max_file_size_mb": None,
     }
 
 
@@ -85,15 +89,9 @@ async def test_monthly_minutes_counter_error_fails_open_and_daily_path_still_run
     assert len(added) == 1
 
 
-async def test_synchronous_concurrency_is_unlimited(limits: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    """can_start_job/can_start_stream no longer reserve RG leases (per-user sync concurrency is deferred)."""
-    fetched: list[str] = []
-
-    async def _recording_governor() -> None:
-        """Record any governor fetch."""
-        fetched.append("governor")
-
-    monkeypatch.setattr(audio_quota, "_get_audio_rg_governor", _recording_governor)
+async def test_unset_concurrency_keys_are_unlimited(limits: dict) -> None:
+    """With no limits.audio_concurrent_streams set, streams are admitted; queued-job hooks always admit (TASK-13435)."""
     assert await audio_quota.can_start_job(1) == (True, "OK")
-    assert await audio_quota.can_start_stream(1) == (True, "OK")
-    assert fetched == []
+    for _ in range(3):
+        assert await audio_quota.can_start_stream(1) == (True, "OK")
+    await audio_quota.finish_stream(1)

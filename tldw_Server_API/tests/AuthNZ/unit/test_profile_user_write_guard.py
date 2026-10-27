@@ -1225,3 +1225,38 @@ def test_sqlite_users_bootstrap_autoincrement_is_judged_structurally(monkeypatch
     assert not guard._bootstrap_simple_constraint_is_canonical(
         exp.AutoIncrementColumnConstraint(start=exp.Literal.number(5)), backend="sqlite"
     )
+
+
+@pytest.mark.parametrize("command", ["SAVEPOINT", "RELEASE SAVEPOINT"])
+@pytest.mark.parametrize("identifier", ["1", "a", "10", "deadbeef"])
+def test_guard_accepts_exact_asyncpg_savepoint_commands(command: str, identifier: str) -> None:
+    """Native nested transactions use an isolated hexadecimal driver identifier."""
+    statement = f"{command} __asyncpg_savepoint_{identifier}__;"
+    assert _guard_sql(
+        statement, backend="postgres", connection_identity=object(), operation="execute",
+    ) == statement
+
+
+@pytest.mark.parametrize("backend", ["sqlite", "postgres"])
+@pytest.mark.parametrize("statement", [
+    "SAVEPOINT arbitrary;", "RELEASE SAVEPOINT arbitrary;",
+    "SAVEPOINT __asyncpg_savepoint_0__;", "SAVEPOINT __asyncpg_savepoint_g__;",
+    "SAVEPOINT __asyncpg_statement_1__;", "SAVEPOINT __asyncpg_savepoint_01__;",
+    'SAVEPOINT "__asyncpg_savepoint_1__";', "savepoint __asyncpg_savepoint_1__;",
+    "SAVEPOINT __asyncpg_savepoint_1__; -- comment",
+    "SAVEPOINT __asyncpg_savepoint_1__;;",
+    "SAVEPOINT __asyncpg_savepoint_1__; UPDATE users SET role = 'admin'",
+    "RELEASE SAVEPOINT __asyncpg_savepoint_1__; UPDATE users SET role = 'admin'",
+    "SAVEPOINT __asyncpg_savepoint_1__; COMMIT;",
+])
+def test_guard_rejects_noncanonical_asyncpg_savepoint_commands(backend: str, statement: str) -> None:
+    """The driver exception must not admit aliases, suffixes or managed writes."""
+    with pytest.raises(ProfileUserWriteRejected):
+        _guard_sql(statement, backend=backend, connection_identity=object(), operation="execute")
+
+
+@pytest.mark.parametrize("command", ["SAVEPOINT", "RELEASE SAVEPOINT"])
+def test_guard_rejects_postgres_asyncpg_savepoint_commands_on_sqlite(command: str) -> None:
+    """A PostgreSQL driver command does not enlarge the SQLite SQL language."""
+    with pytest.raises(ProfileUserWriteRejected):
+        _guard_sql(f"{command} __asyncpg_savepoint_a__;", backend="sqlite", connection_identity=object(), operation="execute")

@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import PostgreSQLBackend
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -34,6 +35,7 @@ def pg_decks(pg_database_config):
 
 def _client(db):
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(flashcards.router)
     app.dependency_overrides[flashcards.get_chacha_db_for_user] = lambda: db
     return TestClient(app)

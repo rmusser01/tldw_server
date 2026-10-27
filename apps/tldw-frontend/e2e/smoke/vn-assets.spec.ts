@@ -1,4 +1,5 @@
 import type { Route } from '@playwright/test';
+import { VN_COMMAND_STORAGE_KEY, type VNPendingCommand } from '../../lib/vnGenerationRecovery';
 import { test, expect, seedAuth, SMOKE_LOAD_TIMEOUT } from './smoke.setup';
 import { waitForAppShell, waitForVisualSettle } from '../utils/helpers';
 
@@ -216,6 +217,112 @@ test.describe('VN asset packs smoke', () => {
     });
     await expect(page.getByText('Export job: 700')).toBeVisible();
   });
+
+  test('replays an ambiguous generation request after a browser reload', async ({ page }) => {
+    await seedAuth(page);
+    await page.addInitScript(() => {
+      localStorage.setItem('assistant_setup_dismissed', 'true');
+    });
+    const submittedRequests: Array<VNPendingCommand['request']> = [];
+    let submittedServer: string | undefined;
+    await page.route(/\/api\/v1\/health(?:\/.*)?$/, async (route) => {
+      await fulfillJson(route, 200, {
+        status: 'ok', auth_mode: 'single_user',
+        test_api_key: 'THIS-IS-A-SECURE-KEY-123-LOCAL-TEST',
+      });
+    });
+    await page.route(/\/api\/v1\/users\/me\/profile(?:\?.*)?$/, async (route) => {
+      await fulfillJson(route, 200, { user: { id: 1, is_active: true } });
+    });
+    await page.route(/\/api\/v1\/persona\/profiles(?:\?.*)?$/, async (route) => {
+      await fulfillJson(route, 200, [{ id: 'smoke-profile', name: 'Smoke profile' }]);
+    });
+    await page.route(/\/api\/v1\/vn\/vn-assets(?:\/.*)?$/, async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname.replace('/api/v1/vn/vn-assets', '');
+      if (request.method() === 'GET' && path === '/starter-matrices') {
+        await fulfillJson(route, 200, { matrices: [] });
+      } else if (request.method() === 'GET' && path === '/packs') {
+        await fulfillJson(route, 200, [{
+          id: 1, owner_user_id: 1, title: 'Reload Pack', primary_character_id: 42,
+          status: 'draft',
+        }]);
+      } else if (request.method() === 'GET' && path === '/packs/1/slots') {
+        await fulfillJson(route, 200, [{
+          id: 4, pack_id: 1, asset_type: 'sprite', slot_key: 'neutral',
+          variant_count: 1, status: 'failed', last_error: 'interrupted',
+        }]);
+      } else if (request.method() === 'GET' && path === '/packs/1/items') {
+        await fulfillJson(route, 200, []);
+      } else if (request.method() === 'GET' && path === '/packs/1/generation') {
+        await fulfillJson(route, 200, {
+          status: submittedRequests.length > 1 ? 'queued' : 'failed', batch_id: 51,
+        });
+      } else if (request.method() === 'GET' && path === '/packs/1/readiness') {
+        await fulfillJson(route, 200, {
+          ready: false, status: 'not_ready', warnings: [], errors: [],
+        });
+      } else if (request.method() === 'GET' && path === '/packs/1/generation/preflight') {
+        await fulfillJson(route, 200, {
+          scope: 'api_process_configuration', worker_health: 'unknown',
+          local_workers_enabled: true, warnings: [], slots: [],
+        });
+      } else if (request.method() === 'POST' && path === '/packs/1/generate') {
+        const body = request.postDataJSON() as VNPendingCommand['request'];
+        const url = new URL(request.url());
+        submittedServer = `${url.origin}${url.pathname.replace('/vn/vn-assets/packs/1/generate', '')}`;
+        submittedRequests.push(body);
+        await fulfillJson(route, submittedRequests.length === 1 ? 503 : 202, {
+          status: 'queued', batch_id: 51,
+        });
+      } else {
+        await fulfillJson(route, 404, { detail: `unhandled VN asset route: ${path}` });
+      }
+    });
+
+    await page.goto('/vn-assets');
+    await waitForAppShell(page, SMOKE_LOAD_TIMEOUT);
+    await page.getByRole('button', { name: 'Start generation' }).click();
+    await expect.poll(() => submittedRequests.length).toBe(1);
+    expect(submittedRequests[0]).toEqual({ idempotency_key: expect.any(String) });
+    await expect.poll(() => page.evaluate((key) => {
+      const raw = sessionStorage.getItem(key);
+      return raw === null ? null : JSON.parse(raw);
+    }, VN_COMMAND_STORAGE_KEY)).toEqual({
+      version: 1,
+      scope: { server: submittedServer, principal: '1' },
+      commands: [{ packId: 1, request: submittedRequests[0] }],
+    });
+    expect(await page.evaluate(
+      () => Object.keys(sessionStorage).filter((key) => key.startsWith('vn-assets:pending-generation:'))
+    )).toEqual([]);
+
+    await page.reload();
+
+    const recover = page.getByRole('button', { name: 'Recover pending request' });
+    await expect(recover).toBeEnabled();
+    expect(submittedRequests).toHaveLength(1);
+    expect(await page.evaluate((key) => {
+      const raw = sessionStorage.getItem(key);
+      return raw === null ? null : JSON.parse(raw);
+    }, VN_COMMAND_STORAGE_KEY)).toEqual({
+      version: 1,
+      scope: { server: submittedServer, principal: '1' },
+      commands: [{ packId: 1, request: submittedRequests[0] }],
+    });
+    await recover.click();
+    await expect.poll(() => submittedRequests.length).toBe(2);
+    expect(submittedRequests[1]).toEqual(submittedRequests[0]);
+    await expect(page.getByRole('status', { name: 'Generation status' })).toContainText('queued');
+    await expect.poll(() => page.evaluate(
+      (key) => sessionStorage.getItem(key), VN_COMMAND_STORAGE_KEY
+    )).toBeNull();
+    await page.reload();
+    await waitForAppShell(page, SMOKE_LOAD_TIMEOUT);
+    await expect(page.getByRole('status', { name: 'Generation status' })).toContainText('queued');
+    expect(submittedRequests).toHaveLength(2);
+    expect(await page.evaluate((key) => sessionStorage.getItem(key), VN_COMMAND_STORAGE_KEY)).toBeNull();
+  });
 });
 
 for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
@@ -268,8 +375,10 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     await page.screenshot({ path: testInfo.outputPath('generation-failure.png'), fullPage: true });
     await retry.click();
     await expect.poll(() => requests.length).toBe(1);
-    await expect(retry).toBeEnabled();
-    await retry.click();
+    await expect(retry).toBeDisabled();
+    const recover = page.getByRole('button', { name: 'Recover pending request' });
+    await expect(recover).toBeEnabled();
+    await recover.click();
     await expect.poll(() => requests.length).toBe(2);
     expect(requests[0].idempotency_key).toEqual(expect.any(String));
     expect(requests[1]).toEqual(requests[0]);

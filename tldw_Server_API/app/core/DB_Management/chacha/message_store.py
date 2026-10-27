@@ -11,9 +11,12 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from tldw_Server_API.app.core.Chat.history_selection import (
+    HistoryBranchChangedError,
+    HistoryEditTargetChangedError,
     HistoryFencesV1,
     HistorySelectionError,
     HistorySelectionSnapshotV1,
+    history_branch_leaves,
     resolve_legacy_projection,
     resolve_parent_path,
     snapshot_to_wire,
@@ -63,19 +66,43 @@ class MessageStore:
             raise HistorySelectionError("invalid_owner_key")
         return owner_key if owner_key is not None else f"native-client:{owner_client_id}"
 
-    def _lock_history_owner(self, conn: Any, conversation_id: str, owner_client_id: str) -> None:
-        """Lock only the conversation fence, never existing messages or metadata."""
-        query = (
-            "SELECT id FROM conversations WHERE id = ? AND client_id = ? AND deleted = FALSE FOR UPDATE"
-            if self._db.backend_type == BackendType.POSTGRESQL
-            else "SELECT id FROM conversations WHERE id = ? AND client_id = ? AND deleted = FALSE"
-        )
-        row = conn.execute(
-            query,
-            (conversation_id, owner_client_id),
-        ).fetchone()
-        if row is None:
+    def _lock_history_owner(
+        self, conn: Any, conversation_id: str, owner_client_id: str | None = None, *, include_deleted: bool = False
+    ) -> None:
+        """Serialize the conversation before locking message rows or metadata."""
+        query = "SELECT id FROM conversations WHERE id = ?"
+        if not include_deleted:
+            query += " AND deleted = FALSE"
+        params = (conversation_id,)
+        if owner_client_id is not None:
+            query += " AND client_id = ?"
+            params += (owner_client_id,)
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            query += " FOR UPDATE"
+        if conn.execute(query, params).fetchone() is None:
             raise NotFoundError("Conversation not found.")
+
+    def _lock_message_conversation(self, conn: Any, message_id: str) -> str | None:
+        """Keep legacy deleted-row access while acquiring the shared fence first."""
+        row = conn.execute("SELECT conversation_id FROM messages WHERE id = ?", (message_id,)).fetchone()
+        if row is None:
+            return None
+        conversation_id = str(self._row_value(row, "conversation_id"))
+        self._lock_history_owner(conn, conversation_id, include_deleted=True)
+        return conversation_id
+
+    @staticmethod
+    def _validate_live_message_parent(conn: Any, conversation_id: str, parent_id: str | None) -> None:
+        """A parent must remain live in the same serialized conversation."""
+        if (
+            parent_id is not None
+            and conn.execute(
+                "SELECT id FROM messages WHERE id = ? AND conversation_id = ? AND deleted = FALSE",
+                (parent_id, conversation_id),
+            ).fetchone()
+            is None
+        ):
+            raise InputError("parent_message_unavailable")
 
     def _read_history_snapshot(
         self,
@@ -87,6 +114,7 @@ class MessageStore:
         conn: Any,
         selected_ids: tuple[str, ...] = (),
         include_message_versions: bool = False,
+        edit_precondition: tuple[Mapping[str, Any], str] | None = None,
     ) -> tuple[HistorySelectionSnapshotV1, tuple[dict[str, Any], ...]]:
         """One statement captures all fences, rows, metadata, assets and an optional base.
 
@@ -268,6 +296,21 @@ class MessageStore:
                 contents[node["id"]]["revision"] = node["revision"]
                 contents[node["id"]]["images"] = tuple(contents[node["id"]]["images"])
         manifest = tuple(nodes.values())
+        if edit_precondition is not None:
+            original, selection_digest = edit_precondition
+            target = nodes.get(original["message_id"])
+            if (
+                target is None
+                or target["role"] != "user"
+                or target["settled"] is not True
+                or target["revision"] != original["message_revision"]
+            ):
+                raise HistoryEditTargetChangedError(
+                    conversation_id=conversation_id,
+                    message_id=original["message_id"],
+                    message_revision=original["message_revision"],
+                    selection_digest=selection_digest,
+                )
         status: dict[str, Any] = {"kind": "legacy_review_required"}
         if projection_id is not None:
             if header["projection_json"] is None:
@@ -621,23 +664,34 @@ class MessageStore:
             return {**json.loads(canonical), "projection_digest": digest, "created_at": created_at}
 
     def validate_history_selection(
-        self, conversation_id: str, selection: Mapping[str, Any], *,
-        owner_client_id: str, owner_key: str, conn: Any,
+        self,
+        conversation_id: str,
+        selection: Mapping[str, Any],
+        *,
+        owner_client_id: str,
+        owner_key: str,
+        conn: Any,
+        history_edit: Mapping[str, Any] | None = None,
     ) -> tuple[HistorySelectionSnapshotV1, tuple[dict[str, Any], ...]]:
         """Re-resolve retained membership and context under the caller's owner fence."""
-        from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistorySelectionV1
         from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection
+        from tldw_Server_API.app.core.Chat.history_selection_schemas import HistorySelectionV1
 
         body = HistorySelectionV1.model_validate(selection).model_dump(mode="json")
         if body["owner_key"] != owner_key or body["conversation_id"] != conversation_id:
             raise HistorySelectionError("owner_conversation_mismatch")
         fresh, content = self._read_history_snapshot(
-            conversation_id, owner_client_id=owner_client_id, owner_key=owner_key,
-            projection_id=body["interpretation"].get("projection_id"), conn=conn,
+            conversation_id,
+            owner_client_id=owner_client_id,
+            owner_key=owner_key,
+            projection_id=body["interpretation"].get("projection_id"),
+            conn=conn,
             selected_ids=tuple(row["id"] for row in body["messages"]),
             include_message_versions=True,
+            edit_precondition=(history_edit, body["selection_digest"]) if history_edit is not None else None,
         )
-        result = resolve_history_selection(snapshot_to_wire(fresh), body, body["purpose"], body["request_context_digest"])
+        wire = snapshot_to_wire(fresh)
+        result = resolve_history_selection(wire, body, body["purpose"], body["request_context_digest"])
         if result["status"] != "ready":
             raise HistorySelectionError(result["code"])
         # Fence changes alone are not evidence of a changed retained path or context.
@@ -697,6 +751,58 @@ class MessageStore:
 
         return MessageStore._history_digest(encode(message))
 
+    @staticmethod
+    def _prepare_history_edit(
+        selection: Mapping[str, Any],
+        messages: Sequence[Mapping[str, Any]],
+        history_branch: bool | None,
+        history_edit: Mapping[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Detach strict original intent before the transaction or committed replay."""
+        if history_edit is None:
+            return None
+        from pydantic import ValidationError
+
+        from tldw_Server_API.app.core.Chat.history_selection_schemas import HistoryEditTargetV1
+
+        try:
+            target = HistoryEditTargetV1.model_validate(history_edit).model_dump(mode="json")
+        except ValidationError as exc:
+            raise HistorySelectionError("invalid_history_edit") from exc
+        if (
+            history_branch is not True
+            or selection.get("purpose") != "send"
+            or selection.get("cursor") != {"kind": "before_message", "message_id": target["message_id"]}
+            or len(messages) != 1
+            or messages[0].get("sender") != "user"
+        ):
+            raise HistorySelectionError("invalid_history_edit")
+        return target
+
+    @staticmethod
+    def _require_history_tip(
+        snapshot: HistorySelectionSnapshotV1,
+        parent_id: str | None,
+        history_branch: bool | None,
+    ) -> None:
+        """Refuse a "must extend the latest message" admission whose tip already continued.
+
+        Runs under the owner lock against the validated statement snapshot, so live
+        children are exactly the non-deleted rows committed before this admission.
+        `None` (field absent) keeps the unchecked admission; `True` is an explicit
+        branch. Settlement, which adds replies and regenerated variants, never calls this.
+        """
+        if history_branch is not False:
+            return
+        leaves = history_branch_leaves(snapshot.nodes, snapshot.interpretation_status, parent_id)
+        if leaves:
+            raise HistoryBranchChangedError(
+                conversation_id=snapshot.conversation_id,
+                parent_message_id=parent_id,
+                leaf_ids=leaves,
+                history_version=snapshot.fences.history,
+            )
+
     def append_selected_history_input(
         self,
         conversation_id: str,
@@ -706,8 +812,16 @@ class MessageStore:
         owner_client_id: str,
         owner_key: str,
         conn: Any | None = None,
+        history_branch: bool | None = None,
+        history_edit: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Atomically validate selected history and append one accepted current input."""
+        """Atomically validate selected history and append one accepted current input.
+
+        `history_branch=False` requires the selection's last message to have no live
+        child (see `_require_history_tip`). A replay of an already-admitted message id
+        returns its admission before that check, whatever the flag. Protected Edit
+        retains its original excluded-target precondition in immutable replay intent.
+        """
         body, data = dict(selection), dict(message)
         if (
             body.get("owner_key") != owner_key
@@ -719,7 +833,8 @@ class MessageStore:
             raise HistorySelectionError("invalid_input")
         if data.get("conversation_id", conversation_id) != conversation_id:
             raise HistorySelectionError("owner_conversation_mismatch")
-        intent = self._history_intent_digest(data)
+        target = self._prepare_history_edit(body, [data], history_branch, history_edit)
+        intent = self._history_intent_digest({"message": data, "history_edit": target} if target else data)
         with nullcontext(conn) if conn is not None else self._db.transaction() as active:
             self._lock_history_owner(active, conversation_id, owner_client_id)
             existing = active.execute("SELECT history_admission_json FROM messages WHERE id = ?", (data["id"],)).fetchone()
@@ -740,11 +855,17 @@ class MessageStore:
                 )
                 return authority["admission"]
             fresh, _ = self.validate_history_selection(
-                conversation_id, body, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
+                conversation_id,
+                body,
+                owner_client_id=owner_client_id,
+                owner_key=owner_key,
+                conn=active,
+                history_edit=target,
             )
             parent = body["messages"][-1]["id"] if body["messages"] else None
             if "parent_message_id" in data and data["parent_message_id"] != parent:
                 raise HistorySelectionError("parent_mismatch")
+            self._require_history_tip(fresh, parent, history_branch)
             data.update(conversation_id=conversation_id, parent_message_id=parent, client_id=owner_client_id)
             mid = self.add_message(data, conn=active)
             if data.get("tool_calls") is not None or data.get("extra_metadata") is not None:
@@ -790,8 +911,15 @@ class MessageStore:
         owner_client_id: str,
         owner_key: str,
         conn: Any | None = None,
+        history_branch: bool | None = None,
+        history_edit: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Accept a server-owned current-input chain once, under one owner transaction."""
+        """Accept a server-owned current-input chain once, under one owner transaction.
+
+        `history_branch` has the same meaning as for `append_selected_history_input`;
+        a reused selection still fails first with `selection_already_consumed`.
+        Protected Edit checks the original excluded target before any chain insert.
+        """
         body = dict(selection)
         if not messages or any(message.get("sender") not in {"user", "tool"} for message in messages):
             raise HistorySelectionError("invalid_input")
@@ -801,6 +929,7 @@ class MessageStore:
             or body.get("purpose") != "send"
         ):
             raise HistorySelectionError("owner_conversation_mismatch")
+        target = self._prepare_history_edit(body, messages, history_branch, history_edit)
         with nullcontext(conn) if conn is not None else self._db.transaction() as active:
             self._lock_history_owner(active, conversation_id, owner_client_id)
             consumed = active.execute(
@@ -816,8 +945,13 @@ class MessageStore:
                     and authority.get("admission", {}).get("selection_digest") == body.get("selection_digest")
                 ):
                     raise HistorySelectionError("selection_already_consumed")
-            self.validate_history_selection(
-                conversation_id, body, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
+            fresh, _ = self.validate_history_selection(
+                conversation_id,
+                body,
+                owner_client_id=owner_client_id,
+                owner_key=owner_key,
+                conn=active,
+                history_edit=target,
             )
             scope = dict(
                 active.execute(
@@ -825,6 +959,7 @@ class MessageStore:
                 ).fetchone()
             )
             parent = body["messages"][-1]["id"] if body["messages"] else None
+            self._require_history_tip(fresh, parent, history_branch)
             chain = []
             for message in messages:
                 data = dict(message)
@@ -877,6 +1012,65 @@ class MessageStore:
                 self._write_history_authority(active, item["id"], authority)
             return admission
 
+    def reuse_selected_history_admission(
+        self,
+        conversation_id: str,
+        selection: Mapping[str, Any],
+        reply_id: str,
+        *,
+        owner_client_id: str,
+        owner_key: str,
+        conn: Any | None = None,
+    ) -> dict[str, Any]:
+        """Reuse a protected user behind the selected reply without rewriting its authority."""
+        from pydantic import ValidationError
+
+        from tldw_Server_API.app.core.Chat.history_selection_schemas import HistoryAdmissionV1
+
+        body = dict(selection)
+        if (
+            body.get("owner_key") != owner_key
+            or body.get("conversation_id") != conversation_id
+            or body.get("purpose") != "send"
+        ):
+            raise HistorySelectionError("owner_conversation_mismatch")
+        if body.get("interpretation", {}).get("kind") != "parent_graph_v1":
+            raise HistorySelectionError("unsupported_history_regeneration")
+        with nullcontext(conn) if conn is not None else self._db.transaction() as active:
+            self._lock_history_owner(active, conversation_id, owner_client_id)
+            fresh, _ = self.validate_history_selection(
+                conversation_id, body, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
+            )
+            path = body["messages"]
+            if len(path) < 2 or path[-1]["id"] != reply_id:
+                raise HistorySelectionError("invalid_regeneration_target")
+            nodes = {node["id"]: node for node in fresh.nodes}
+            target, user = nodes[reply_id], nodes[path[-2]["id"]]
+            if target["role"] != "assistant" or user["role"] != "user" or target["parent_id"] != user["id"]:
+                raise HistorySelectionError("unsupported_history_regeneration")
+            row = active.execute(
+                "SELECT history_admission_json FROM messages WHERE id = ? AND conversation_id = ? AND deleted = FALSE",
+                (user["id"], conversation_id),
+            ).fetchone()
+            if row is None:
+                raise HistorySelectionError("stale_parent")
+            try:
+                authority = json.loads(row["history_admission_json"] or "null")
+            except (TypeError, ValueError) as exc:
+                raise HistorySelectionError("invalid_admission") from exc
+            if not isinstance(authority, dict) or not isinstance(authority.get("admission"), dict):
+                raise HistorySelectionError("unsupported_history_regeneration")
+            try:
+                admission = HistoryAdmissionV1.model_validate(authority["admission"]).model_dump(mode="json")
+            except ValidationError as exc:
+                raise HistorySelectionError("invalid_admission") from exc
+            if admission["input_message_id"] != user["id"]:
+                raise HistorySelectionError("invalid_admission")
+            self._validate_history_parent(
+                conversation_id, admission, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
+            )
+            return admission
+
     def _validate_history_parent(
         self,
         conversation_id: str,
@@ -896,17 +1090,41 @@ class MessageStore:
         ).fetchone()
         if row is None or str(row["version"]) != reference["input_message_revision"]:
             raise HistorySelectionError("stale_parent")
-        authority = json.loads(row["history_admission_json"] or "null")
-        if not isinstance(authority, dict) or any(
-            authority.get("admission", {}).get(key) != value for key, value in reference.items()
+        try:
+            authority = json.loads(row["history_admission_json"] or "null")
+        except (TypeError, ValueError) as exc:
+            raise HistorySelectionError("invalid_admission") from exc
+        if (
+            not isinstance(authority, dict)
+            or authority.get("version") != 1
+            or not isinstance(authority.get("admission"), dict)
+            or not isinstance(authority.get("input_state_digest"), str)
+            or not authority["input_state_digest"]
+            or not isinstance(authority.get("scope"), dict)
+            or set(authority["scope"]) != {"scope_type", "workspace_id"}
+            or not isinstance(authority.get("interpretation"), dict)
+            or not isinstance(authority["interpretation"].get("kind"), str)
+            or authority["interpretation"].get("kind") not in {"parent_graph_v1", "legacy_linear_v1"}
+            or any(authority["admission"].get(key) != value for key, value in reference.items())
+        ):
+            raise HistorySelectionError("invalid_admission")
+        chain = authority.get("input_chain", [])
+        if not isinstance(chain, list) or any(
+            not isinstance(item, dict)
+            or any(not isinstance(item.get(key), str) or not item[key] for key in ("id", "version", "state"))
+            for item in chain
         ):
             raise HistorySelectionError("invalid_admission")
         state = self._history_message_state(
-            conversation_id, reference["input_message_id"], owner_client_id=owner_client_id, owner_key=owner_key, conn=conn
+            conversation_id,
+            reference["input_message_id"],
+            owner_client_id=owner_client_id,
+            owner_key=owner_key,
+            conn=conn,
         )
         if state != authority["input_state_digest"]:
             raise HistorySelectionError("stale_parent")
-        for item in authority.get("input_chain", []):
+        for item in chain:
             version = conn.execute(
                 "SELECT version FROM messages WHERE id = ? AND conversation_id = ? AND deleted = FALSE",
                 (item["id"], conversation_id),
@@ -919,11 +1137,51 @@ class MessageStore:
             if state != item["state"]:
                 raise HistorySelectionError("stale_parent")
         scope = dict(
-            conn.execute("SELECT scope_type, workspace_id FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+            conn.execute(
+                "SELECT scope_type, workspace_id FROM conversations WHERE id = ?", (conversation_id,)
+            ).fetchone()
         )
         if scope != authority["scope"]:
             raise HistorySelectionError("stale_scope")
         return authority
+
+    def validate_history_admission(
+        self,
+        conversation_id: str,
+        reference: Mapping[str, Any],
+        *,
+        snapshot: HistorySelectionSnapshotV1,
+        owner_client_id: str,
+        owner_key: str,
+        conn: Any | None = None,
+    ) -> dict[str, Any]:
+        """Bind an unchanged accepted input to this full capture under its owner fence."""
+        from tldw_Server_API.app.core.Chat.history_selection_schemas import HistoryAdmissionReferenceV1
+
+        binding = HistoryAdmissionReferenceV1.model_validate(reference).model_dump(mode="json")
+        namespace = self._history_owner_key(owner_client_id, owner_key)
+        if snapshot.owner_key != namespace or snapshot.conversation_id != conversation_id:
+            raise HistorySelectionError("owner_conversation_mismatch")
+        transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+        with transaction as active:
+            self._lock_history_owner(active, conversation_id, owner_client_id)
+            self._validate_history_parent(
+                conversation_id, binding, owner_client_id=owner_client_id, owner_key=namespace, conn=active
+            )
+            fresh, _ = self._read_history_snapshot(
+                conversation_id, owner_client_id=owner_client_id, owner_key=namespace,
+                projection_id=snapshot.interpretation_status.get("projection_id"), conn=active,
+            )
+            # A row-first writer or metadata ABA must never label a different capture as validated.
+            if (
+                snapshot.source_digest != fresh.source_digest or snapshot.fences != fresh.fences
+                or snapshot.storage_context_digest != fresh.storage_context_digest
+            ):
+                raise HistorySelectionError("stale_source")
+            question = next((node for node in fresh.nodes if node["id"] == binding["input_message_id"]), None)
+            if question is None or question["role"] != "user":
+                raise HistorySelectionError("stale_parent")
+            return {"admission": binding, "input_revision": question["revision"]}
 
     def settle_history_admission(
         self,
@@ -936,7 +1194,7 @@ class MessageStore:
         conn: Any | None = None,
     ) -> str:
         """Settle an assistant/tool result against its immutable accepted input."""
-        from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistoryAdmissionReferenceV1
+        from tldw_Server_API.app.core.Chat.history_selection_schemas import HistoryAdmissionReferenceV1
 
         binding = HistoryAdmissionReferenceV1.model_validate(reference).model_dump(mode="json")
         data = dict(message)
@@ -997,6 +1255,96 @@ class MessageStore:
             self._write_history_authority(active, mid, result_authority)
             return mid
 
+    def settle_selected_existing_input(
+        self,
+        conversation_id: str,
+        selection: Mapping[str, Any],
+        message: Mapping[str, Any],
+        *,
+        owner_client_id: str,
+        owner_key: str,
+        conn: Any | None = None,
+        require_unanswered: bool = False,
+    ) -> str:
+        """Add one alternative answer to an owner-selected existing user question."""
+        from tldw_Server_API.app.core.Chat.history_selection_schemas import HistorySelectionV1
+
+        body = HistorySelectionV1.model_validate(selection).model_dump(mode="json")
+        data = dict(message)
+        if (body["owner_key"] != owner_key or body["conversation_id"] != conversation_id
+                or body["purpose"] != "send"):
+            raise HistorySelectionError("owner_conversation_mismatch")
+        if (body["cursor"]["kind"] != "after_message" or not body["messages"]
+                or body["cursor"]["message_id"] != body["messages"][-1]["id"]):
+            raise HistorySelectionError("invalid_selection")
+        question_id = body["messages"][-1]["id"]
+        if not data.get("id") or data.get("sender") != "assistant":
+            raise HistorySelectionError("invalid_settlement")
+        if data.get("conversation_id", conversation_id) != conversation_id:
+            raise HistorySelectionError("owner_conversation_mismatch")
+        if "parent_message_id" in data and data["parent_message_id"] != question_id:
+            raise HistorySelectionError("parent_mismatch")
+        intent = self._history_intent_digest(data)
+        with nullcontext(conn) if conn is not None else self._db.transaction() as active:
+            self._lock_history_owner(active, conversation_id, owner_client_id)
+            scope = dict(active.execute(
+                "SELECT scope_type, workspace_id FROM conversations WHERE id = ?", (conversation_id,)
+            ).fetchone())
+            existing = active.execute(
+                "SELECT conversation_id, history_admission_json, deleted, version FROM messages WHERE id = ?",
+                (data["id"],),
+            ).fetchone()
+            if existing is not None:
+                try:
+                    saved = json.loads(existing["history_admission_json"] or "null")
+                except (TypeError, ValueError):
+                    raise HistorySelectionError("message_id_conflict") from None
+                if (existing["conversation_id"] != conversation_id or existing["deleted"]
+                        or existing["version"] != 1 or not isinstance(saved, dict)
+                        or saved.get("selected_existing_input") != body
+                        or saved.get("intent_digest") != intent or saved.get("scope") != scope):
+                    raise HistorySelectionError("message_id_conflict")
+                fresh, _ = self._read_history_snapshot(
+                    conversation_id, owner_client_id=owner_client_id, owner_key=owner_key,
+                    projection_id=None, conn=active, selected_ids=(question_id,),
+                )
+                question = next((row for row in snapshot_to_wire(fresh)["nodes"] if row["id"] == question_id), None)
+                if (question is None or question["role"] != "user"
+                        or question["revision"] != body["messages"][-1]["revision"]):
+                    raise HistorySelectionError("stale_parent")
+                if self._history_message_state(
+                    conversation_id, data["id"], owner_client_id=owner_client_id,
+                    owner_key=owner_key, conn=active,
+                ) != saved.get("result_state_digest"):
+                    raise HistorySelectionError("message_id_conflict")
+                return data["id"]
+            fresh, content = self.validate_history_selection(
+                conversation_id, body, owner_client_id=owner_client_id,
+                owner_key=owner_key, conn=active,
+            )
+            if require_unanswered:
+                from tldw_Server_API.app.core.Chat.history_context import selected_unanswered_text_question
+                selected_unanswered_text_question(fresh, content, body)
+            question = next((row for row in fresh.nodes if row["id"] == question_id), None)
+            if question is None or question["role"] != "user":
+                raise HistorySelectionError("invalid_selection")
+            data.update(conversation_id=conversation_id, parent_message_id=question_id,
+                        client_id=owner_client_id)
+            mid = self.add_message(data, conn=active)
+            if data.get("tool_calls") is not None or data.get("extra_metadata") is not None:
+                self._add_message_metadata_with_conn(mid, data.get("tool_calls"), data.get("extra_metadata"), active)
+            authority = {
+                "version": 1, "interpretation": body["interpretation"], "settled": True,
+                "selected_existing_input": body, "intent_digest": intent, "scope": scope,
+            }
+            self._write_history_authority(active, mid, authority)
+            authority["result_state_digest"] = self._history_message_state(
+                conversation_id, mid, owner_client_id=owner_client_id,
+                owner_key=owner_key, conn=active,
+            )
+            self._write_history_authority(active, mid, authority)
+            return mid
+
     def _next_message_order_timestamp(self) -> str:
         """Return a millisecond ISO timestamp that is monotonic for message inserts."""
         with self._message_order_lock:
@@ -1041,7 +1389,7 @@ class MessageStore:
             )
 
     def lock_message_for_edit(self, message_id: str, *, conn: Any) -> None:
-        """Lock a live PostgreSQL message before its conversation is locked."""
+        """Lock a live PostgreSQL message after its conversation fence."""
         if self._db.backend_type != BackendType.POSTGRESQL:
             return
         row = conn.execute(
@@ -1058,7 +1406,7 @@ class MessageStore:
             )
 
     def lock_message_metadata_for_edit(self, message_id: str, *, conn: Any) -> None:
-        """Ensure and lock message metadata before the conversation row."""
+        """Ensure and lock metadata after its conversation and message."""
         if self._db.backend_type != BackendType.POSTGRESQL:
             return
         conn.execute(
@@ -1203,14 +1551,15 @@ class MessageStore:
         try:
             transaction = nullcontext(conn) if conn is not None else self._db.transaction()
             with transaction as transaction_conn:
-                conv_cursor = transaction_conn.execute(
-                    "SELECT 1 FROM conversations WHERE id = ? AND deleted = FALSE",
-                    (msg_data['conversation_id'],),
-                )
-                if not conv_cursor.fetchone():
+                try:
+                    self._lock_history_owner(transaction_conn, msg_data["conversation_id"])
+                except NotFoundError as exc:
                     raise InputError(  # noqa: TRY003, TRY301
                         f"Cannot add message: Conversation ID '{msg_data['conversation_id']}' not found or deleted."
-                    )
+                    ) from exc
+                self._validate_live_message_parent(
+                    transaction_conn, msg_data["conversation_id"], msg_data.get("parent_message_id")
+                )
                 transaction_conn.execute(query, params)
                 if normalized_images:
                     self._insert_message_images(msg_id, normalized_images, conn=transaction_conn)
@@ -1314,6 +1663,7 @@ class MessageStore:
                     return self._db.execute_query(query, params)
                 return transaction_conn.execute(query, params)
 
+            self._lock_message_conversation(transaction_conn, message_id)
             message_cursor = _execute(
                 "SELECT conversation_id FROM messages WHERE id = ? AND deleted = FALSE",
                 (message_id,),
@@ -1801,8 +2151,13 @@ class MessageStore:
         sync_client_id: str,
         object_revision: int,
         object_hash: str,
+        owner_client_id: str | None = None,
     ) -> bool:
-        """Soft-delete all projections for a stable message from an accepted Sync v2 tombstone."""
+        """Soft-delete all projections for a stable message from an accepted Sync v2 tombstone.
+
+        ``owner_client_id`` limits the projections to chats that owner holds; see
+        ``get_messages_by_sync_stable_id``.
+        """
 
         normalized_stable_id = str(stable_message_id).strip()
         if not normalized_stable_id:
@@ -1810,7 +2165,9 @@ class MessageStore:
         if object_revision < 1:
             raise InputError("object_revision must be greater than zero.")  # noqa: TRY003
 
-        existing_versions = self.get_messages_by_sync_stable_id(normalized_stable_id, include_deleted=True)
+        existing_versions = self.get_messages_by_sync_stable_id(
+            normalized_stable_id, include_deleted=True, owner_client_id=owner_client_id
+        )
         matched_versions = [
             version
             for version in existing_versions
@@ -1841,6 +2198,8 @@ class MessageStore:
             if not bool(version["deleted"])
         }
         with self._db.transaction() as conn:
+            for conversation_id in sorted({str(version["conversation_id"]) for version in existing_versions}):
+                self._lock_history_owner(conn, conversation_id, include_deleted=True)
             for version in existing_versions:
                 if bool(version["deleted"]):
                     continue
@@ -1880,16 +2239,115 @@ class MessageStore:
                 self._advance_history_version(conn, affected_conversation_id)
         return True
 
+    def tombstone_unsynced_message_from_sync(
+        self,
+        *,
+        stable_message_id: str,
+        sync_client_id: str,
+        object_revision: int,
+        object_hash: str,
+    ) -> str:
+        """Make a message the Sync dataset holds no state for absent, and report what that took.
+
+        A device can tombstone a message this server never received through
+        Sync. The end state it asks for is "gone", so there is nothing to
+        conflict with: either no row carries the id, or the only rows are copies
+        kept outside Sync, which the delete now reaches too.
+
+        Rows that carry Sync history of their own are left alone. They were
+        projected from an object state this dataset does not have, so this
+        tombstone is not theirs to apply.
+
+        Only chats owned by ``sync_client_id`` are looked at. The lookup is by
+        message id, and on PostgreSQL one database holds every owner's messages;
+        with no Sync state to tie the id to this owner, the chat's owner is the
+        only thing that does.
+
+        Args:
+            stable_message_id: The message id the tombstone names.
+            sync_client_id: The projection's client id: the owner whose chats are
+                searched, and the id stamped on deleted rows.
+            object_revision: The tombstone's revision.
+            object_hash: The tombstone's payload hash, recorded on deleted rows so
+                a replay of the same tombstone recognises its own work.
+
+        Returns:
+            ``"absent"`` when no row carries the id and nothing changed,
+            ``"deleted"`` when the rows found are now soft-deleted, or
+            ``"foreign"`` when a row belongs to other Sync history and nothing changed.
+        """
+        normalized_stable_id = str(stable_message_id).strip()
+        if not normalized_stable_id:
+            raise InputError("stable_message_id cannot be empty.")  # noqa: TRY003
+
+        owner = str(sync_client_id)
+        existing_versions = self.get_messages_by_sync_stable_id(
+            normalized_stable_id, include_deleted=True, owner_client_id=owner
+        )
+        if not existing_versions:
+            return "absent"
+        for version in existing_versions:
+            sync_meta = ((version.get("metadata") or {}).get("extra") or {}).get("sync_v2") or {}
+            recorded_hash = sync_meta.get("payload_hash")
+            applied_by_this_tombstone = bool(sync_meta.get("tombstoned")) and recorded_hash == object_hash
+            if recorded_hash and not applied_by_this_tombstone:
+                return "foreign"
+        self.tombstone_message_from_sync(
+            stable_message_id=normalized_stable_id,
+            sync_client_id=sync_client_id,
+            object_revision=object_revision,
+            object_hash=object_hash,
+            owner_client_id=owner,
+        )
+        return "deleted"
+
+    def unsynced_message_is_foreign(self, *, stable_message_id: str, sync_client_id: str, object_hash: str) -> bool:
+        """Return whether a row with the id belongs to other Sync history.
+
+        Read-only twin of the ``"foreign"`` outcome of
+        :meth:`tombstone_unsynced_message_from_sync`, so a device's tombstone of
+        such a row is refused at push time instead of blocking the dataset.
+
+        Args:
+            stable_message_id: The message id the tombstone names.
+            sync_client_id: The owner whose chats are searched.
+            object_hash: The tombstone's payload hash; a row this very tombstone
+                already deleted is not foreign.
+
+        Returns:
+            ``True`` when a row carries Sync history of its own.
+        """
+
+        normalized_stable_id = str(stable_message_id).strip()
+        if not normalized_stable_id:
+            return False
+        for version in self.get_messages_by_sync_stable_id(
+            normalized_stable_id, include_deleted=True, owner_client_id=str(sync_client_id)
+        ):
+            sync_meta = ((version.get("metadata") or {}).get("extra") or {}).get("sync_v2") or {}
+            recorded_hash = sync_meta.get("payload_hash")
+            applied_by_this_tombstone = bool(sync_meta.get("tombstoned")) and recorded_hash == object_hash
+            if recorded_hash and not applied_by_this_tombstone:
+                return True
+        return False
+
     def get_messages_by_sync_stable_id(
         self,
         stable_message_id: str,
         *,
         include_deleted: bool = False,
+        owner_client_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Fetch message projections associated with a Sync v2 stable message ID."""
+        """Fetch message projections associated with a Sync v2 stable message ID.
+
+        With ``owner_client_id``, only messages in chats that owner holds are
+        returned. A caller that has no Sync state tying the id to an owner must
+        pass it: the match is by id, across every chat the connection can read.
+        """
 
         self._db._ensure_message_metadata_table()
         deleted_clause = "" if include_deleted else "AND m.deleted = FALSE AND c.deleted = FALSE"
+        owner_clause = "" if owner_client_id is None else "AND c.client_id = ?"
         query = (
             "SELECT m.id, m.conversation_id, m.parent_message_id, m.sender, m.content, "
             "m.image_data, m.image_mime_type, m.timestamp, m.ranking, m.last_modified, "
@@ -1897,10 +2355,14 @@ class MessageStore:
             "FROM messages m "
             "LEFT JOIN message_metadata mm ON mm.message_id = m.id "
             "JOIN conversations c ON c.id = m.conversation_id "
-            f"WHERE 1 = 1 {deleted_clause} "  # nosec B608
+            f"WHERE 1 = 1 {deleted_clause} {owner_clause} "  # nosec B608
             "ORDER BY m.timestamp ASC, m.last_modified ASC, m.id ASC"
         )
-        cursor = self._db.execute_query(query)
+        cursor = (
+            self._db.execute_query(query)
+            if owner_client_id is None
+            else self._db.execute_query(query, (str(owner_client_id),))
+        )
         rows = cursor.fetchall()
         columns = [col[0] for col in cursor.description] if cursor.description else []
         results: list[dict[str, Any]] = []
@@ -2264,7 +2726,6 @@ class MessageStore:
         except (sqlite3.Error, BackendDatabaseError) as exc:
             raise CharactersRAGDBError("Failed to persist retry instruction block.") from exc  # noqa: TRY003
 
-
     def get_retry_message_context(self, conversation_id: str) -> tuple[list[str], list[dict[str, Any]]]:
         """Read the non-system tail and latest instruction block without attachment blobs.
 
@@ -2446,6 +2907,11 @@ class MessageStore:
         try:
             transaction = nullcontext(conn) if conn is not None else self._db.transaction()
             with transaction as transaction_conn:
+                conversation_id = self._lock_message_conversation(transaction_conn, message_id)
+                if conversation_id is not None and "parent_message_id" in update_data:
+                    self._validate_live_message_parent(
+                        transaction_conn, conversation_id, update_data["parent_message_id"]
+                    )
                 current_db_version = self._db._get_current_db_version(
                     transaction_conn,
                     "messages",
@@ -2459,10 +2925,6 @@ class MessageStore:
                         entity="messages", entity_id=message_id
                     )
 
-                conversation_row = transaction_conn.execute(
-                    "SELECT conversation_id FROM messages WHERE id = ?",
-                    (message_id,),
-                ).fetchone()
                 cursor = transaction_conn.execute(query, final_params_for_execute)
 
                 if cursor.rowcount == 0:
@@ -2482,7 +2944,7 @@ class MessageStore:
 
                 self._advance_history_version(
                     transaction_conn,
-                    str(self._row_value(conversation_row, "conversation_id")),
+                    conversation_id,
                 )
                 logger.info(
                     f"Updated message ID {message_id} from version {expected_version} to version {next_version_val}. Fields updated: {fields_to_update_sql if fields_to_update_sql else 'None'}")
@@ -2509,6 +2971,8 @@ class MessageStore:
         message_id: str,
         expected_version: int,
         *,
+        require_leaf: bool = False,
+        expected_revision: str | None = None,
         conn: Any | None = None,
     ) -> bool | None:
         """
@@ -2523,6 +2987,8 @@ class MessageStore:
         Args:
             message_id: The UUID of the message to soft-delete.
             expected_version: The client's expected version of the record.
+            require_leaf: Refuse deletion while a live message references this parent.
+            expected_revision: Require the exact H1 content, metadata and asset state.
 
         Returns:
             True if the soft-delete was successful or if the message was already soft-deleted.
@@ -2540,6 +3006,7 @@ class MessageStore:
         try:
             transaction = nullcontext(conn) if conn is not None else self._db.transaction()
             with transaction as transaction_conn:
+                conversation_id = self._lock_message_conversation(transaction_conn, message_id)
                 try:
                     current_db_version = self._db._get_current_db_version(
                         transaction_conn,
@@ -2564,10 +3031,29 @@ class MessageStore:
                         entity="messages", entity_id=message_id
                     )
 
-                conversation_row = transaction_conn.execute(
-                    "SELECT conversation_id FROM messages WHERE id = ?",
-                    (message_id,),
-                ).fetchone()
+                if expected_revision is not None:
+                    owner = transaction_conn.execute(
+                        "SELECT client_id FROM conversations WHERE id = ?", (conversation_id,)
+                    ).fetchone()
+                    current, _ = self._read_history_snapshot(
+                        conversation_id,
+                        owner_client_id=str(self._row_value(owner, "client_id")),
+                        owner_key="native-delete-cas",
+                        projection_id=None,
+                        conn=transaction_conn,
+                    )
+                    target = next((node for node in current.nodes if node["id"] == message_id), None)
+                    if target is None or target["revision"] != expected_revision:
+                        raise ConflictError("message_changed", entity="messages", entity_id=message_id)
+                if (
+                    require_leaf
+                    and transaction_conn.execute(
+                        "SELECT id FROM messages WHERE parent_message_id = ? AND deleted = FALSE LIMIT 1",
+                        (message_id,),
+                    ).fetchone()
+                    is not None
+                ):
+                    raise ConflictError("message_has_descendants", entity="messages", entity_id=message_id)
                 cursor = transaction_conn.execute(query, params)
 
                 if cursor.rowcount == 0:
@@ -2590,7 +3076,7 @@ class MessageStore:
 
                 self._advance_history_version(
                     transaction_conn,
-                    str(self._row_value(conversation_row, "conversation_id")),
+                    conversation_id,
                 )
                 logger.info(
                     f"Soft-deleted message ID {message_id} (was v{expected_version}), new version {next_version_val}.")
@@ -2751,6 +3237,9 @@ class MessageStore:
             ),
         )
         if advance_history:
+            if metadata_message_id is not None:
+                # Undo must not restore an opaque revision within one timestamp tick.
+                conn.execute("UPDATE messages SET version = version + 1 WHERE id = ?", (message_id,))
             conversation_id = str(self._row_value(row, "conversation_id"))
             self._advance_history_version(conn, conversation_id)
         return True
@@ -2772,6 +3261,8 @@ class MessageStore:
             self._db._ensure_message_metadata_table()
             transaction = nullcontext(conn) if conn is not None else self._db.transaction()
             with transaction as transaction_conn:
+                if self._lock_message_conversation(transaction_conn, message_id) is None:
+                    return False
                 return self._add_message_metadata_with_conn(
                     message_id,
                     tool_calls,
@@ -2874,12 +3365,6 @@ class MessageStore:
     ) -> dict[str, Any] | None:
         """Read metadata under the row lock used by PostgreSQL merge writers."""
         if self._db.backend_type == BackendType.POSTGRESQL:
-            conn.execute(
-                "INSERT INTO message_metadata(message_id, last_modified) "
-                "SELECT id, CURRENT_TIMESTAMP FROM messages WHERE id = ? "
-                "ON CONFLICT(message_id) DO NOTHING",
-                (message_id,),
-            )
             query = (
                 "SELECT tool_calls_json, extra_json, last_modified "
                 "FROM message_metadata WHERE message_id = ? FOR UPDATE"
@@ -2892,9 +3377,8 @@ class MessageStore:
 
         row = conn.execute(query, (message_id,)).fetchone()
         if row is None:
-            # SQLite merge writers retain the existing create-on-first-write
-            # behavior; the downstream message join still rejects missing IDs.
-            return {} if self._db.backend_type == BackendType.SQLITE else None
+            # The conversation lock serializes first writes on both backends.
+            return {}
         tool_calls = self._row_value(row, "tool_calls_json")
         extra = self._row_value(row, "extra_json", 1)
         return {
@@ -2928,6 +3412,8 @@ class MessageStore:
             self._db._ensure_message_metadata_table()
             transaction = nullcontext(conn) if conn is not None else self._db.transaction()
             with transaction as transaction_conn:
+                if self._lock_message_conversation(transaction_conn, message_id) is None:
+                    return False
                 current = self._get_message_metadata_for_merge(message_id, transaction_conn)
                 if current is None:
                     return False

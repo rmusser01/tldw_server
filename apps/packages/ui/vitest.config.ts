@@ -20,6 +20,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     maxWorkers: 2,
+    // Match the required package shards for real AntD interaction suites.
+    testTimeout: 15_000,
     restoreMocks: true,
     setupFiles: ["./vitest.setup.ts"],
     include: [

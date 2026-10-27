@@ -1,9 +1,11 @@
 import React from "react"
+import { captureChatDraftSource, confirmTemporaryChatDiscard } from "./chat-draft-transition"
 import { useNavigate } from "react-router-dom"
 import { Modal } from "antd"
 import { shallow } from "zustand/shallow"
 import { useStorage } from "@plasmohq/storage/hook"
 import { useChatBaseState } from "@/hooks/chat/useChatBaseState"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { focusTextArea } from "@/hooks/utils/messageHelpers"
 import { useStoreMessageOption } from "@/store/option"
 import { useStoreMessage } from "@/store"
@@ -33,6 +35,9 @@ type ResettableChatBase = {
 
 export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
   const navigate = useNavigate()
+  const historySelection = useHistorySelectionContext()
+  const resetHistorySelection = historySelection?.reset
+  const captureSelectionFence = historySelection?.fence
   const currentChatModelSettings = useStoreChatModelSettings()
   const [defaultInternetSearchOn] = useStorage("defaultInternetSearchOn", false)
 
@@ -90,9 +95,17 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
     shallow
   )
 
-  return React.useCallback(() => {
+  return React.useCallback((options?: { discardTemporaryConfirmed: true } | React.SyntheticEvent) => {
+    const source = captureChatDraftSource(captureSelectionFence?.())
     const destination = resolveClearChatPath()
-    if (!requestSettingsNavigation(destination)) return false
+    if (!requestSettingsNavigation(destination) || !source.isCurrent()) return false
+    const confirmed = options &&
+      "discardTemporaryConfirmed" in options &&
+      options.discardTemporaryConfirmed === true
+    if (!confirmed && !confirmTemporaryChatDiscard()) return false
+    if (!source.isCurrent()) return false
+    useStoreMessageOption.getState().startNewChatDraft()
+    resetHistorySelection?.()
     const current = useStoreMessageOption.getState()
     dispatchChatRouteReplacement({
       serverChatId: current.serverChatId,
@@ -119,7 +132,7 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
     setServerChatVersion(null)
     setContextFiles([])
     updatePageTitle()
-    currentChatModelSettings.reset()
+    currentChatModelSettings.reset(useStoreChatModelSettings.getState().apiProvider)
     if (defaultInternetSearchOn) {
       setWebSearch(true)
     }
@@ -151,9 +164,11 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
   }, [
     clearQueuedMessages,
     clearReplyTarget,
+    captureSelectionFence,
     currentChatModelSettings,
     defaultInternetSearchOn,
     navigate,
+    resetHistorySelection,
     resolveClearChatPath,
     setActionInfo,
     setCompareMode,

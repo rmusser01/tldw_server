@@ -1,3 +1,8 @@
+import type {
+  KnowledgeNoteHead,
+  KnowledgeNoteEvidence,
+  KnowledgeNoteProvenance
+} from "@/utils/knowledge-note-provenance"
 /**
  * Workspace Types
  * Types for the NotebookLM-style three-pane research interface
@@ -67,9 +72,23 @@ export interface WorkspaceSourceStatusDetails {
   job?: WorkspaceSourceJobStatus | null
 }
 
+export interface WebArticleCapturePin {
+  clipId: string
+  requestedUrl: string
+  capturedAt: string
+  contentSha256: string
+  refreshOf: string | null
+  mediaId: number
+  versionNumber: number
+  versionUuid: string
+}
+
 export interface WorkspaceSource {
+  webCapture?: WebArticleCapturePin
+  captureOwnerScope?: string
   id: string
   mediaId: number // Server-side media ID
+  knowledgeQaEvidence?: KnowledgeNoteEvidence
   title: string
   type: WorkspaceSourceType
   status?: WorkspaceSourceStatus
@@ -617,13 +636,15 @@ export const DEFAULT_AUDIO_SETTINGS: AudioGenerationSettings = {
 // Workspace Note Types (for Quick Notes feature)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface WorkspaceNote {
-  id?: number // undefined = new note, number = existing note
-  title: string
-  content: string
-  keywords: string[]
-  version?: number // For optimistic locking on updates
-  isDirty: boolean // Has unsaved changes
+export interface WorkspaceNote extends KnowledgeNoteHead {
+  pendingNoteWriteKey?: string;
+  pendingKnowledgeProvenance?: KnowledgeNoteProvenance;
+  id?: string | number; // Canonical Notes UUID or legacy workspace note ID
+  title: string;
+  content: string;
+  keywords: string[];
+  version?: number; // For optimistic locking on updates
+  isDirty: boolean; // Has unsaved changes
 }
 
 export const DEFAULT_WORKSPACE_NOTE: WorkspaceNote = {

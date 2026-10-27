@@ -176,8 +176,8 @@ it("freezes one owner for an entire outbox batch despite a connection change bet
   })
   await act(() =>
     result.current.runBatchSync([
-      { promptId: "one", direction: "push", preferredProjectId: 42 },
-      { promptId: "two", direction: "push", preferredProjectId: 42 }
+      { promptId: "one", promptName: "one", direction: "push", preferredProjectId: 42 },
+      { promptId: "two", promptName: "two", direction: "push", preferredProjectId: 42 }
     ])
   )
   expect(mocks.owner).toHaveBeenCalledTimes(1)
@@ -187,8 +187,8 @@ it("freezes one owner for an entire outbox batch despite a connection change bet
   ])
   expect(result.current.batchSyncState.failed.map((item) => item.task)).toEqual(
     [
-      { promptId: "one", direction: "push", preferredProjectId: 42 },
-      { promptId: "two", direction: "push", preferredProjectId: 42 }
+      { promptId: "one", promptName: "one", direction: "push", preferredProjectId: 42 },
+      { promptId: "two", promptName: "two", direction: "push", preferredProjectId: 42 }
     ]
   )
 })

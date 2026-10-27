@@ -1,7 +1,28 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope";
+import { readSurfaceOfflineDraftQueue, retainSurfaceOfflineDraft, type OfflineDraftEntry } from "@/components/Notes/notes-manager-utils"
+vi.mock("@plasmohq/storage", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
+import React from "react"
+import { MemoryRouter } from "react-router-dom"
+import {
+  act,
+  fireEvent,
+  render as renderBare,
+  screen,
+  waitFor,
+} from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ExportDialog } from "../ExportDialog"
-import type { RagResult } from "../types"
+import type { RagResult, ScopeSnapshot } from "../types"
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string, options?: { defaultValue?: string }) =>
+      options?.defaultValue ?? key,
+  }),
+}))
+
+const render = (element: React.ReactElement) =>
+  renderBare(element, { wrapper: MemoryRouter })
 
 const {
   messageOpenMock,
@@ -19,6 +40,13 @@ const {
   revokeShareLinkMock: vi.fn(),
 }))
 const state = {
+  notesAuthorityScope: "export-alice",
+  notesAuthorityId: deriveConnectionAuthorityId({
+    serverUrl: "https://shared.example/server-a",
+    authMode: "multi-user",
+    authSource: "cookie-session",
+    accessToken: "original-token",
+  }),
   messages: [] as Array<{ role: string; content: string }>,
   currentThreadId: "thread-1" as string | null,
   results: [] as RagResult[],
@@ -39,6 +67,7 @@ const state = {
     | "unknown_origin"
     | null,
   query: "What does this source say?",
+  resultQuery: undefined as string | null | undefined,
   settings: {
     sources: ["media_db", "notes"],
     include_media_ids: [42],
@@ -48,34 +77,48 @@ const state = {
     generation_model: "gpt-4o-mini",
     enable_web_fallback: false,
   },
+  lastSearchScope: null as ScopeSnapshot | null,
   preset: "balanced",
   searchDetails: null as null | {
-    expandedQueries?: string[]
-    rerankingEnabled?: boolean
-    rerankingStrategy?: string
-    averageRelevance?: number | null
-    webFallbackTriggered?: boolean
-    webFallbackEngine?: string | null
+    expandedQueries?: string[];
+    rerankingEnabled?: boolean;
+    rerankingStrategy?: string;
+    averageRelevance?: number | null;
+    webFallbackTriggered?: boolean;
+    webFallbackEngine?: string | null;
   },
-}
+};
 
-vi.mock("../KnowledgeQAProvider", () => ({
-  useKnowledgeQA: () => ({
-    isAuthorityCurrent: () => true,
-    client: { createNote: createNoteMock, exportChatbook: exportChatbookMock, downloadChatbookExport: downloadChatbookExportMock, createConversationShareLink: createShareLinkMock, revokeConversationShareLink: revokeShareLinkMock },
-    messages: state.messages,
-    currentThreadId: state.currentThreadId,
-    results: state.results,
-    citations: state.citations,
-    answer: state.answer,
-    answerTrustState: state.answerTrustState,
-    answerEvidenceOrigin: state.answerEvidenceOrigin,
-    query: state.query,
-    settings: state.settings,
-    preset: state.preset,
-    searchDetails: state.searchDetails,
-  })
-}))
+vi.mock("../KnowledgeQAProvider", () => {
+  const client = {
+    createNote: createNoteMock,
+    exportChatbook: exportChatbookMock,
+    downloadChatbookExport: downloadChatbookExportMock,
+    createConversationShareLink: createShareLinkMock,
+    revokeConversationShareLink: revokeShareLinkMock,
+  };
+  return {
+    useKnowledgeQA: () => ({
+      isAuthorityCurrent: () => true,
+      notesAuthorityScope: state.notesAuthorityScope,
+      notesAuthorityId: state.notesAuthorityId,
+      client,
+      messages: state.messages,
+      currentThreadId: state.currentThreadId,
+      results: state.results,
+      citations: state.citations,
+      answer: state.answer,
+      answerTrustState: state.answerTrustState,
+      answerEvidenceOrigin: state.answerEvidenceOrigin,
+      query: state.query,
+      resultQuery: state.resultQuery,
+      settings: state.settings,
+      lastSearchScope: state.lastSearchScope,
+      preset: state.preset,
+      searchDetails: state.searchDetails,
+    }),
+  };
+});
 
 vi.mock("@/hooks/useAntdMessage", () => ({
   useAntdMessage: () => ({
@@ -93,49 +136,72 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   },
 }))
 
-describe("ExportDialog accessibility", () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    createNoteMock.mockResolvedValue({ id: 1 })
-    exportChatbookMock.mockResolvedValue({
-      success: true,
-      job_id: "job-1",
-      download_url: "/api/v1/chatbooks/download/job-1",
-    })
-    downloadChatbookExportMock.mockResolvedValue({
-      blob: new Blob(["chatbook-content"], { type: "application/zip" }),
-      filename: "knowledge.chatbook.zip",
-    })
-    createShareLinkMock.mockResolvedValue({
-      share_id: "share-1",
-      token: "token-1",
-      share_path: "/knowledge/shared/token-1",
-      created_at: "2026-02-19T10:00:00.000Z",
-      expires_at: "2026-02-20T10:00:00.000Z",
-      permission: "view",
-    })
-    revokeShareLinkMock.mockResolvedValue({ success: true, share_id: "share-1" })
-    state.messages = []
-    state.currentThreadId = "thread-1"
-    state.results = []
-    state.citations = []
-    state.answer = "Test answer"
-    state.answerTrustState = "cited_answer"
-    state.answerEvidenceOrigin = "local_library"
-    state.query = "What does this source say?"
-    state.settings = {
-      sources: ["media_db", "notes"],
-      include_media_ids: [42],
-      include_note_ids: ["note-a"],
-      top_k: 12,
-      generation_provider: "openai",
-      generation_model: "gpt-4o-mini",
-      enable_web_fallback: false,
-    }
-    state.preset = "balanced"
-    state.searchDetails = null
-  })
+beforeEach(() => {
+  vi.clearAllMocks();
+  window.localStorage.clear();
+  state.notesAuthorityScope = "export-alice";
+  state.notesAuthorityId = deriveConnectionAuthorityId({
+    serverUrl: "https://shared.example/server-a",
+    authMode: "multi-user",
+    authSource: "cookie-session",
+    accessToken: "original-token",
+  });
+  createNoteMock.mockResolvedValue({ id: 1 });
+  exportChatbookMock.mockResolvedValue({
+    success: true,
+    job_id: "job-1",
+    download_url: "/api/v1/chatbooks/download/job-1",
+  });
+  downloadChatbookExportMock.mockResolvedValue({
+    blob: new Blob(["chatbook-content"], { type: "application/zip" }),
+    filename: "knowledge.chatbook.zip",
+  });
+  createShareLinkMock.mockResolvedValue({
+    share_id: "share-1",
+    token: "token-1",
+    share_path: "/knowledge/shared/token-1",
+    created_at: "2026-02-19T10:00:00.000Z",
+    expires_at: "2026-02-20T10:00:00.000Z",
+    permission: "view",
+  });
+  revokeShareLinkMock.mockResolvedValue({ success: true, share_id: "share-1" });
+  state.messages = [];
+  state.currentThreadId = "thread-1";
+  state.results = [];
+  state.citations = [];
+  state.answer = "Test answer";
+  state.answerTrustState = "cited_answer";
+  state.answerEvidenceOrigin = "local_library";
+  state.query = "What does this source say?";
+  state.resultQuery = undefined;
+  state.settings = {
+    sources: ["media_db", "notes"],
+    include_media_ids: [42],
+    include_note_ids: ["note-a"],
+    top_k: 12,
+    generation_provider: "openai",
+    generation_model: "gpt-4o-mini",
+    enable_web_fallback: false,
+  };
+  state.preset = "balanced";
+  state.searchDetails = null;
+  state.lastSearchScope = null;
+});
 
+describe("ExportDialog accessibility", () => {
+  it("persists provenance in canonical content when NoteResponse drops metadata", async () => {
+    createNoteMock.mockImplementation(async (content, fields) => ({ id: "canonical-export", title: fields.title, content, conversation_id: fields.conversation_id, version: 1 }))
+    render(<ExportDialog open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+    await waitFor(() => expect(createNoteMock).toHaveBeenCalled())
+    expect(createNoteMock.mock.calls[0][0]).toContain("<!-- tldw-knowledge:v1:")
+    expect(createNoteMock.mock.calls[0][1].conversation_id).toBe("thread-1")
+    expect(createNoteMock.mock.calls[0][1]).toMatchObject({
+      expected_provenance_version: 0,
+      knowledge_provenance: { origin: "knowledge_qa", question: state.query, scope: { include_media_ids: [42], include_note_ids: ["note-a"] } },
+    })
+    expect(await screen.findByRole("link", { name: "Open saved note" })).toHaveAttribute("href", "/notes?source_ref_id=canonical-export")
+  })
   it("exposes modal dialog semantics", () => {
     render(<ExportDialog open onClose={vi.fn()} />)
 
@@ -459,6 +525,9 @@ describe("ExportDialog accessibility", () => {
 
     await waitFor(() => expect(createNoteMock).toHaveBeenCalledTimes(1))
 
+    expect(
+      await screen.findByRole("link", { name: "Open saved note" }),
+    ).toHaveAttribute("href", "/notes?source_ref_id=1")
     const [noteContent, noteMetadata] = createNoteMock.mock.calls[0]
     expect(noteContent).toContain("# Knowledge QA Export")
     expect(noteContent).toContain("## Bibliography")
@@ -882,3 +951,287 @@ describe("ExportDialog accessibility", () => {
     expect(screen.queryByRole("button", { name: "Copied" })).not.toBeInTheDocument()
   })
 })
+
+it("retries Save to Notes with the exact portable body and request identity", async () => {
+  createNoteMock.mockRejectedValueOnce(new Error("Lost response")).mockResolvedValueOnce({ id: "saved" })
+  render(<ExportDialog open onClose={vi.fn()} />)
+  fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+  await waitFor(() => expect(messageOpenMock).toHaveBeenCalledWith(expect.objectContaining({ type: "error" })))
+  fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+  await screen.findByRole("link", { name: "Open saved note" })
+  expect(createNoteMock.mock.calls[1]).toEqual(createNoteMock.mock.calls[0])
+  expect(createNoteMock.mock.calls[0][2].idempotencyKey).toBeTruthy()
+})
+
+it("retains the searched scope after the controls change", async () => {
+  state.lastSearchScope = { preset: "balanced", sources: ["notes"], includeNoteIds: ["original"], includeMediaIds: [], collectionId: 7, keywordFilter: "original-topic", webFallback: false }
+  render(<ExportDialog open onClose={vi.fn()} />)
+  fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+  await waitFor(() => expect(createNoteMock).toHaveBeenCalled())
+  expect(createNoteMock.mock.calls.at(-1)![1].knowledge_provenance.scope).toEqual({ sources: ["notes"], include_note_ids: ["original"], include_media_ids: [], collection_id: 7, keyword_filter: "original-topic", enable_web_fallback: false })
+  state.lastSearchScope = null
+})
+
+it.each(['Question one', null])('saves the answered question after editing the search input without searching (question=%s)', async resultQuery => {
+  createNoteMock.mockClear().mockResolvedValue({ id: 'saved' })
+  state.resultQuery = resultQuery
+  state.query = 'Question two, not searched'
+  render(<ExportDialog open onClose={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Save to Notes' }))
+  await waitFor(() => expect(createNoteMock).toHaveBeenCalled())
+  expect(createNoteMock.mock.calls.at(-1)?.[1]).toMatchObject({ knowledge_provenance: { question: resultQuery ?? '' } })
+  state.resultQuery = undefined
+})
+
+it.each([422, 409])('handles a rejected direct save without losing uncertain identity (status=%s)', async status => {
+  messageOpenMock.mockClear()
+  createNoteMock.mockReset()
+  state.query = 'Original question'
+  state.resultQuery = 'Original question'
+  state.answer = 'Original answer'
+  state.answerTrustState = 'cited_answer'
+  const policy = { error_code: 'notes_provenance_encryption_unsupported', message: 'Knowledge provenance could not be saved; refresh its state and retry.' }
+  createNoteMock.mockRejectedValueOnce(Object.assign(new Error('rejected'), { status, details: { detail: status === 409 ? policy : 'invalid input' } })).mockResolvedValue({ id: 'saved' })
+  const view = render(<ExportDialog open onClose={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Save to Notes' }))
+  await waitFor(() => expect(messageOpenMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' })))
+  state.answer = 'Corrected answer'
+  view.rerender(<ExportDialog open onClose={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Save to Notes' }))
+  await screen.findByRole('link', { name: 'Open saved note' })
+  const [first, second] = createNoteMock.mock.calls
+  if (status === 422) {
+    expect(second[0]).toContain('Corrected answer')
+    expect(second[2].idempotencyKey).not.toBe(first[2].idempotencyKey)
+  } else expect(second).toEqual(first)
+  state.resultQuery = undefined
+})
+
+
+it.each([429, 401])('retains a lost-ack direct save through pre-receipt HTTP %s', async status => {
+  messageOpenMock.mockClear()
+  createNoteMock.mockReset()
+  state.resultQuery = 'Original question'
+  state.answer = 'Original answer'
+  state.answerTrustState = 'cited_answer'
+  createNoteMock.mockRejectedValueOnce(new Error('Lost acknowledgment'))
+    .mockRejectedValueOnce(Object.assign(new Error('Temporarily unavailable'), { status }))
+    .mockResolvedValue({ id: 'saved' })
+  const view = render(<ExportDialog open onClose={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Save to Notes' }))
+  await waitFor(() => expect(createNoteMock).toHaveBeenCalledTimes(1))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save to Notes' })).not.toBeDisabled())
+  fireEvent.click(screen.getByRole('button', { name: 'Save to Notes' }))
+  await waitFor(() => expect(createNoteMock).toHaveBeenCalledTimes(2))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save to Notes' })).not.toBeDisabled())
+  state.answer = 'Later unsaved answer'
+  view.rerender(<ExportDialog open onClose={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Save to Notes' }))
+  await screen.findByRole('link', { name: 'Open saved note' })
+  expect(createNoteMock.mock.calls[2]).toEqual(createNoteMock.mock.calls[0])
+  expect(createNoteMock.mock.calls[0][1].knowledge_provenance.question).toBe('Original question')
+  state.resultQuery = undefined
+})
+
+function CloseableExport() {
+  const [open, setOpen] = React.useState(true)
+  return open ? <ExportDialog open onClose={() => setOpen(false)} /> :
+    <button onClick={() => setOpen(true)}>Reopen export</button>
+}
+
+it("reconciles a committed export after real Close and allows a later deliberate export", async () => {
+  const notes = new Map<string, Record<string, unknown>>()
+  const receipts = new Map<string, Record<string, unknown>>()
+  createNoteMock.mockImplementation(async (content, fields, options) => {
+    if (receipts.has(options.idempotencyKey)) return receipts.get(options.idempotencyKey)
+    const id = fields.id || crypto.randomUUID()
+    const saved = { ...fields, content, id, version: 1 }
+    notes.set(id, saved)
+    receipts.set(options.idempotencyKey, saved)
+    if (notes.size === 1) throw new Error("Committed, response dropped")
+    return saved
+  })
+  render(<CloseableExport />)
+  fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+  await waitFor(() => expect(messageOpenMock).toHaveBeenCalled())
+  fireEvent.click(screen.getByRole("button", { name: "Close export dialog" }))
+  state.answer = "Newer displayed answer"
+  fireEvent.click(screen.getByRole("button", { name: "Reopen export" }))
+  fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+  await screen.findByRole("link", { name: "Open saved note" })
+  expect(notes.size).toBe(1)
+  expect(createNoteMock.mock.calls[1]).toEqual(createNoteMock.mock.calls[0])
+  expect(createNoteMock.mock.calls[0][1].id).toMatch(/^[a-f0-9-]{36}$/)
+  fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+  await waitFor(() => expect(notes.size).toBe(2))
+  expect(createNoteMock.mock.calls[2][0]).toContain("Newer displayed answer")
+})
+
+it.each(["write", "readback"])("does not dispatch export when persistent retention fails at %s", async (failure) => {
+  render(<ExportDialog open onClose={vi.fn()} />)
+  const prototype = Object.getPrototypeOf(window.localStorage) as Storage
+  const originalSet = prototype.setItem
+  const originalGet = prototype.getItem
+  let written = false
+  const write = vi.spyOn(prototype, "setItem").mockImplementation(function (key, value) {
+    if (key.startsWith("tldw:notesOfflineDraftQueue:v1")) {
+      if (failure === "write") throw new Error("Storage full")
+      written = true
+    }
+    return originalSet.call(this, key, value)
+  })
+  const read = vi.spyOn(prototype, "getItem").mockImplementation(function (key) {
+    if (key.startsWith("tldw:notesOfflineDraftQueue:v1") && written) return null
+    return originalGet.call(this, key)
+  })
+  fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+  await waitFor(() => expect(messageOpenMock).toHaveBeenCalled())
+  expect(createNoteMock).not.toHaveBeenCalled()
+  read.mockRestore()
+  write.mockRestore()
+})
+
+it("does not move an uncertain export into another owner after Close", async () => {
+  createNoteMock.mockRejectedValueOnce(new Error("Response lost")).mockResolvedValue({ id: "bob-note" })
+  render(<CloseableExport />)
+  fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+  await waitFor(() => expect(messageOpenMock).toHaveBeenCalled())
+  const oldQueue = await readSurfaceOfflineDraftQueue("export-alice")
+  fireEvent.click(screen.getByRole("button", { name: "Close export dialog" }))
+  state.notesAuthorityScope = "export-bob"
+  state.answer = "Bob answer"
+  fireEvent.click(screen.getByRole("button", { name: "Reopen export" }))
+  fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+  await screen.findByRole("link", { name: "Open saved note" })
+  expect(createNoteMock.mock.calls[1][2].idempotencyKey).not.toBe(createNoteMock.mock.calls[0][2].idempotencyKey)
+  expect(createNoteMock.mock.calls[1][0]).toContain("Bob answer")
+  expect(await readSurfaceOfflineDraftQueue("export-alice")).toEqual(oldQueue)
+})
+
+it("refuses to select another operation when two unresolved exports belong to the same owned thread", async () => {
+  const entry: OfflineDraftEntry = { key: 'surface:knowledge-export:"thread-1":0463b785-f3ba-4b66-a656-a77986e0fe9e',
+    noteId: null, baseVersion: null, title: 'Original', content: 'Original body', keywords: [], metadata: null,
+    backlinkConversationId: 'thread-1', backlinkMessageId: null, updatedAt: '2026-10-08T00:00:00Z', syncState: 'queued', lastError: null,
+    pendingWrite: { key: 'original-key', expectedVersion: null, body: { content: 'Original body', id: '80d02e84-b04c-45be-9c65-9bf54cfc9d3a' } } }
+  await retainSurfaceOfflineDraft('export-alice', entry)
+  await retainSurfaceOfflineDraft('export-alice', { ...entry, key: 'surface:knowledge-export:"thread-1":ecfd16eb-9091-4aad-92d2-697894654fed',
+    pendingWrite: { ...entry.pendingWrite!, key: 'different-key', body: { content: 'Different body', id: '8dd8608b-8470-4d1b-b2fc-8be311c68f62' } } })
+  render(<ExportDialog open onClose={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Save to Notes' }))
+  await waitFor(() => expect(messageOpenMock).toHaveBeenCalled())
+  expect(createNoteMock).not.toHaveBeenCalled()
+  expect(messageOpenMock.mock.calls[0][0].content).toContain('Multiple unresolved exports')
+})
+
+
+it("retries the acknowledged export after retirement fails and accepts a new deliberate export only after cleanup", async () => {
+  const notes = new Map<string, Record<string, unknown>>()
+  const receipts = new Map<string, Record<string, unknown>>()
+  createNoteMock.mockImplementation(async (content, fields, options) => {
+    if (receipts.has(options.idempotencyKey)) return receipts.get(options.idempotencyKey)
+    const id = fields.id || crypto.randomUUID()
+    const saved = { ...fields, content, id, version: 1 }
+    notes.set(id, saved)
+    receipts.set(options.idempotencyKey, saved)
+    return saved
+  })
+  const prototype = Object.getPrototypeOf(window.localStorage) as Storage
+  const originalRemove = prototype.removeItem
+  const remove = vi.spyOn(prototype, "removeItem").mockImplementation(function (key) {
+    if (key.startsWith("tldw:notesOfflineDraftQueue:v1")) throw new Error("Storage blocked")
+    return originalRemove.call(this, key)
+  })
+  render(<CloseableExport />)
+  fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+  await screen.findByRole("link", { name: "Open saved note" })
+  await waitFor(() => expect(screen.getByRole("button", { name: "Save to Notes" }).hasAttribute("disabled")).toBe(false))
+  expect(Object.keys(await readSurfaceOfflineDraftQueue("export-alice"))).toHaveLength(1)
+  fireEvent.click(screen.getByRole("button", { name: "Close export dialog" }))
+  remove.mockRestore()
+  state.answer = "Newer answer after acknowledgment"
+  fireEvent.click(screen.getByRole("button", { name: "Reopen export" }))
+  fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+  await screen.findByRole("link", { name: "Open saved note" })
+  await waitFor(() => expect(screen.getByRole("button", { name: "Save to Notes" }).hasAttribute("disabled")).toBe(false))
+  expect(createNoteMock.mock.calls[1]).toEqual(createNoteMock.mock.calls[0])
+  expect(notes.size).toBe(1)
+  expect(await readSurfaceOfflineDraftQueue("export-alice")).toEqual({})
+  fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+  await waitFor(() => expect(notes.size).toBe(2))
+  expect(createNoteMock.mock.calls[2][0]).toContain("Newer answer after acknowledgment")
+})
+
+
+it.each(["base-path", "org", "auth-source", "credential"])(
+  "refuses retained Export adoption after a same-owner %s authority change",
+  async (change) => {
+    createNoteMock.mockRejectedValueOnce(
+      new Error("Committed, response dropped"),
+    );
+    render(<CloseableExport />);
+    fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }));
+    await waitFor(() => expect(messageOpenMock).toHaveBeenCalledTimes(1));
+    const retained = await readSurfaceOfflineDraftQueue("export-alice");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close export dialog" }),
+    );
+    state.notesAuthorityId = deriveConnectionAuthorityId({
+      serverUrl:
+        change === "base-path"
+          ? "https://shared.example/server-b"
+          : "https://shared.example/server-a",
+      authMode: "multi-user",
+      authSource: change === "auth-source" ? "manual" : "cookie-session",
+      orgId: change === "org" ? 2 : undefined,
+      accessToken: change === "credential" ? "other-token" : "original-token",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Reopen export" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }));
+    await waitFor(() =>
+      expect(
+        createNoteMock.mock.calls.length > 1 ||
+          messageOpenMock.mock.calls.length > 1,
+      ).toBe(true),
+    );
+    expect(createNoteMock).toHaveBeenCalledTimes(1);
+    expect(await readSurfaceOfflineDraftQueue("export-alice")).toEqual(
+      retained,
+    );
+  },
+);
+
+it("reuses the captured credential-free authority through a same-principal JWT refresh after Close", async () => {
+  const token = (iat: number) =>
+    `${btoa("{}")}.${btoa(JSON.stringify({ sub: "alice", iat }))}.signature`;
+  const config = {
+    serverUrl: "https://shared.example/server-a",
+    authMode: "multi-user" as const,
+    authSource: "manual" as const,
+    orgId: 1,
+    accessToken: token(1),
+  };
+  state.notesAuthorityId = deriveConnectionAuthorityId(config);
+  createNoteMock
+    .mockRejectedValueOnce(new Error("Committed, response dropped"))
+    .mockResolvedValue({ id: "accepted-original" });
+  render(<CloseableExport />);
+  fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }));
+  await waitFor(() => expect(messageOpenMock).toHaveBeenCalledTimes(1));
+  const retained = await readSurfaceOfflineDraftQueue("export-alice");
+  const serialized = JSON.stringify(retained);
+  expect(serialized.includes(token(1))).toBe(false);
+  expect(Object.values(retained)[0].pendingWrite?.authorityId).toBe(
+    state.notesAuthorityId,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Close export dialog" }));
+  const refreshedAuthority = deriveConnectionAuthorityId({
+    ...config,
+    accessToken: token(2),
+  });
+  expect(refreshedAuthority).toBe(state.notesAuthorityId);
+  state.notesAuthorityId = refreshedAuthority;
+  fireEvent.click(screen.getByRole("button", { name: "Reopen export" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }));
+  await screen.findByRole("link", { name: "Open saved note" });
+  expect(createNoteMock.mock.calls[1]).toEqual(createNoteMock.mock.calls[0]);
+});

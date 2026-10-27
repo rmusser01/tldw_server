@@ -55,6 +55,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.API_Deps.Watchlists_DB_Deps import get_watchlists_db_for_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
@@ -70,7 +71,7 @@ from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
-from tldw_Server_API.app.core.exceptions import TemplateValidationError
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, TemplateValidationError
 from tldw_Server_API.app.core.Personalization.companion_activity import (
     build_watchlist_source_bulk_import_activity,
     record_companion_activity_events_bulk,
@@ -2438,7 +2439,7 @@ async def check_sources_now(
                 try:
                     refreshed = db.get_source(source_id)
                     status_value = str(getattr(refreshed, "status", "") or "").lower()
-                    if status_value in {"error", "deferred", "forum_disabled"}:
+                    if status_value.startswith(("error", "partial:")) or status_value in {"deferred", "forum_disabled"}:
                         active_results[source_id] = SourceCheckNowItem(
                             source_id=source_id,
                             status="error",
@@ -7192,13 +7193,14 @@ async def create_output(
                 status_code=400,
                 detail="llm_provider_required: set llm_provider in request or job output_prefs.llm.provider",
             )
+        # Usage quotas (LLM usage accounting spec §4a), before any summary call and before the output is written.
+        await enforce_llm_quota(current_user.id)
         items_for_summary = [
             {
                 "id": getattr(it, "id", None),
                 "title": getattr(it, "title", None),
                 "summary": getattr(it, "summary", None),
                 "content": getattr(it, "summary", None) or getattr(it, "title", ""),
-                "metadata_json": getattr(it, "metadata_json", None),
             }
             for it in items
         ]
@@ -7208,12 +7210,13 @@ async def create_output(
                 api_name=llm_provider,
                 model_override=payload.llm_model,
                 custom_prompt=payload.summarize_prompt,
-                db=db,
             )
             for entry in items_for_summary:
                 item_id = entry.get("id")
                 if item_id is not None and entry.get("llm_summary"):
                     llm_summaries[int(item_id)] = entry["llm_summary"]
+        except LLMQuotaExceededError:
+            raise  # a 402, not a non-critical summarization failure
         except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
             logger.warning(f"Watchlists output summarization failed (non-critical): {exc}")
 

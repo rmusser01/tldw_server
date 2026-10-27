@@ -3,10 +3,10 @@ from __future__ import annotations
 import asyncio
 import re
 import types
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
 from dataclasses import dataclass
-from typing import Any, Literal, TypedDict
+from typing import Any, Final, Literal, TypedDict
 
 from loguru import logger
 
@@ -59,7 +59,7 @@ PipelineCallable = Callable[..., Awaitable[Any]]
 GenerationCallable = Callable[..., Awaitable[Any]]
 _PUBLIC_STREAM_ERROR_MESSAGE = "Search failed due to an internal error."
 _PUBLIC_STREAM_COMPLETE_MESSAGE = "Search completed."
-_RAG_STREAM_SCHEMA_VERSION = 1
+_RAG_STREAM_SCHEMA_VERSION: Final[Literal[1]] = 1
 _RAG_REPLAY_CERTIFICATION_CODE = "stream_transport_unavailable"
 _RAG_TERMINAL_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _MAX_TERMINAL_MESSAGE_LENGTH = 240
@@ -354,7 +354,7 @@ def _public_source_status(raw: Any) -> dict[str, dict[str, Any]] | None:
             continue
         safe = {"status": status, "count": count}
         reason = entry.get("reason")
-        if reason in ("no_retriever_configured", "retrieval_failed", "no_matching_entries"):
+        if reason in ("no_retriever_configured", "retrieval_failed", "no_matching_entries", "security_filtered"):
             safe["reason"] = reason
         filtered_count = entry.get("filtered_artifact_count")
         if type(filtered_count) is int and filtered_count >= 0:
@@ -437,7 +437,7 @@ async def _retrieve_with_progress_events(
     standard_pipeline: PipelineCallable,
     pipeline_kwargs: dict[str, Any],
     payload: dict[str, Any],
-) -> AsyncIterator[RAGStreamEvent | _PrefetchedEvidence]:
+) -> AsyncGenerator[RAGStreamEvent | _PrefetchedEvidence, None]:
     progress_queue: asyncio.Queue[Any] = asyncio.Queue()
     done_marker = object()
     error_marker = object()
@@ -499,7 +499,7 @@ def _prefetch_documents(
     standard_pipeline: PipelineCallable,
     pipeline_kwargs: dict[str, Any],
     payload: dict[str, Any],
-) -> AsyncIterator[RAGStreamEvent | _PrefetchedEvidence]:
+) -> AsyncGenerator[RAGStreamEvent | _PrefetchedEvidence, None]:
     return _retrieve_with_progress_events(
         resolved_request=resolved_request,
         retrieval_plan=retrieval_plan,
@@ -630,7 +630,7 @@ def _context_events(
             "Synthesize final answer",
         ]
     }
-    events = [
+    events: list[RAGStreamEvent] = [
         {
             "type": "contexts",
             "contexts": top_contexts,
@@ -732,7 +732,7 @@ async def stream_rag_events(
     standard_pipeline: PipelineCallable = unified_rag_pipeline,
     agentic_pipeline: PipelineCallable = agentic_rag_pipeline,
     extra_context: dict[str, Any] | None = None,
-) -> AsyncIterator[RAGStreamEvent]:
+) -> AsyncGenerator[RAGStreamEvent | RAGTerminalEvent, None]:
     context = dict(extra_context or {})
     payload = dict(resolved_request.payload or {})
     request_defaults = dict(context.get("request_defaults") or {})

@@ -286,7 +286,7 @@ export function findBalancedArrayLiteralEnd(src, arrStart) {
   return -1
 }
 
-function extractClientPathsFromTypeScript(src) {
+function extractClientPathsFromTypeScript(src, typeName = 'ClientPath') {
   let ts
   try {
     ts = require('typescript')
@@ -303,14 +303,23 @@ function extractClientPathsFromTypeScript(src) {
   )
 
   for (const statement of sourceFile.statements) {
-    if (!ts.isTypeAliasDeclaration(statement) || statement.name?.text !== 'ClientPath') continue
-    if (!ts.isUnionTypeNode(statement.type)) return []
-
+    if (
+      !ts.isTypeAliasDeclaration(statement) ||
+      statement.name?.text !== typeName
+    )
+      continue
+    const types = ts.isUnionTypeNode(statement.type)
+      ? statement.type.types
+      : [statement.type]
     const paths = []
-    for (const typeNode of statement.type.types) {
-      const node = ts.isParenthesizedTypeNode(typeNode) ? typeNode.type : typeNode
+    for (const typeNode of types) {
+      const node = ts.isParenthesizedTypeNode(typeNode)
+        ? typeNode.type
+        : typeNode
       if (ts.isLiteralTypeNode(node) && ts.isStringLiteral(node.literal)) {
         paths.push(node.literal.text)
+      } else {
+        return []
       }
     }
     return paths
@@ -422,19 +431,49 @@ function loadMediaAddProperties(json) {
   return new Set(Object.keys(properties))
 }
 
-function extractClientPaths() {
+export function extractClientPaths(specJson) {
   if (!fs.existsSync(guardFile)) {
     console.error(`openapi-guard.ts not found at ${guardFile}`)
     process.exit(1)
   }
   const src = fs.readFileSync(guardFile, 'utf8')
+
+  // Generated artifacts can be stale even when ClientPath derives from ApiPath.
+  if (
+    /export\s+type\s+ClientPath\s*=\s*ApiPath\b/.test(src) &&
+    /from\s+["']@tldw\/api-types["']/.test(src)
+  ) {
+    const generated = fs.readFileSync(
+      require.resolve('@tldw/api-types/paths'),
+      'utf8'
+    )
+    const paths = [
+      ...new Set(extractClientPathsFromTypeScript(generated, 'ApiPath'))
+    ]
+    if (paths.length === 0) {
+      throw new Error('Generated API path union is empty or unreadable')
+    }
+    const generatedPaths = new Set(paths.map(normalizePath))
+    const omitted = [...loadSpecPaths(specJson)].filter(
+      (p) => !generatedPaths.has(p)
+    )
+    if (omitted.length > 0) {
+      throw new Error(
+        `Generated API path union omits backend routes: ${omitted.join(', ')}`
+      )
+    }
+    return paths
+  }
+
   const astPaths = extractClientPathsFromTypeScript(src)
   if (astPaths.length > 0) return [...new Set(astPaths)]
 
   const startRegex = /export\s+type\s+ClientPath\s*=\s*/m
   const startMatch = startRegex.exec(src)
   if (!startMatch) {
-    console.error('Could not locate "export type ClientPath" in openapi-guard.ts')
+    console.error(
+      'Could not locate "export type ClientPath" in openapi-guard.ts'
+    )
     process.exit(1)
   }
 
@@ -515,7 +554,7 @@ function extractFallbackFieldNames() {
 
 function verifyClientPaths(specJson, sourceLabel) {
   const specPaths = loadSpecPaths(specJson)
-  const clientPaths = extractClientPaths()
+  const clientPaths = extractClientPaths(specJson)
 
   const missing = []
   for (const p of clientPaths) {

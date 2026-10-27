@@ -55,6 +55,7 @@ type SetupResult = {
   serverName: string
   discovered: boolean
   readiness: McpHubServerReadiness | null
+  discoveryError?: string
 }
 
 type ManagedServerDraft = McpHubExternalServerCreateInput & {
@@ -728,10 +729,12 @@ export const ExternalServersTab = ({
       name: serverNameValue.trim(),
       transport: "stdio",
       config: {
-        command: stdioCommandValue.trim(),
-        args: parseArgs(stdioArgsValue),
-        ...(stdioCwdValue.trim() ? { cwd: stdioCwdValue.trim() } : {}),
-        ...(Object.keys(env).length > 0 ? { env } : {})
+        stdio: {
+          command: stdioCommandValue.trim(),
+          args: parseArgs(stdioArgsValue),
+          ...(stdioCwdValue.trim() ? { cwd: stdioCwdValue.trim() } : {}),
+          ...(Object.keys(env).length > 0 ? { env } : {})
+        }
       },
       owner_scope_type: ownerScopeType,
       enabled: enabledValue
@@ -826,16 +829,22 @@ export const ExternalServersTab = ({
         })
       }
       let readinessResult: McpHubServerReadiness | null = null
+      let discoveryError: string | undefined
       if (discover) {
-        readinessResult = await refreshExternalServerReadinessDiscovery(savedServer.id)
+        try {
+          readinessResult = await refreshExternalServerReadinessDiscovery(savedServer.id)
+        } catch (err) {
+          discoveryError = getErrorMessage(err)
+        }
       }
       const result = editingServerId
         ? null
         : {
             serverId: savedServer.id,
             serverName: savedServer.name,
-            discovered: discover,
-            readiness: readinessResult
+            discovered: Boolean(readinessResult),
+            readiness: readinessResult,
+            discoveryError
           }
       resetServerForm({ keepResult: Boolean(result) })
       await loadServers()
@@ -844,6 +853,9 @@ export const ExternalServersTab = ({
         setSetupResult(result)
       }
       setSuccessMessage(editingServerId ? "Server updated" : result ? null : "Server created")
+      if (discoveryError) {
+        setErrorMessage(`${savedServer.name} saved, but tool discovery failed: ${discoveryError}`)
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error"
       setErrorMessage(editingServerId ? `Failed to update external server: ${msg}` : `Failed to create external server: ${msg}`)
@@ -921,11 +933,14 @@ export const ExternalServersTab = ({
       setSetupResult({
         ...setupResult,
         discovered: true,
-        readiness: readinessResult
+        readiness: readinessResult,
+        discoveryError: undefined
       })
       setSuccessMessage("Tool discovery refreshed")
     } catch (err) {
-      setErrorMessage(`Failed to refresh tool discovery: ${getErrorMessage(err)}`)
+      const discoveryError = getErrorMessage(err)
+      setSetupResult({ ...setupResult, discoveryError })
+      setErrorMessage(`Failed to refresh tool discovery: ${discoveryError}`)
     } finally {
       setRowActionLoadingKey(null)
     }
@@ -1184,12 +1199,18 @@ export const ExternalServersTab = ({
 
       {setupResult ? (
         <StatePanel
-          state={setupResult.discovered ? "ready" : "setup_required"}
+          state={setupResult.discoveryError
+            ? "degraded"
+            : setupResult.readiness
+              ? DESIGN_STATE_BY_READINESS_DISPLAY[setupResult.readiness.display_state]
+              : "setup_required"}
           title={`${setupResult.serverName} saved`}
           message={
-            setupResult.discovered
-              ? setupResult.readiness?.message || "Tool discovery ran for this server."
-              : "Tool discovery has not run for this server yet."
+            setupResult.discoveryError
+              ? `Tool discovery failed: ${setupResult.discoveryError}. This server remains saved.`
+              : setupResult.discovered
+                ? setupResult.readiness?.message || "Tool discovery ran for this server."
+                : "Tool discovery has not run for this server yet."
           }
           primaryAction={
             onOpenToolCatalog
@@ -1200,7 +1221,8 @@ export const ExternalServersTab = ({
               : undefined
           }
           secondaryActions={
-            setupResult.discovered
+            setupResult.discovered && !setupResult.discoveryError &&
+              !setupResult.readiness?.allowed_actions.includes("refresh_discovery")
               ? []
               : [
                   {
@@ -1223,10 +1245,13 @@ export const ExternalServersTab = ({
                 </Typography.Text>
                 <Space wrap>
                   <Button onClick={() => setSetupMode("stdio")}>Local stdio</Button>
-                  <Button onClick={() => setSetupMode("http")}>HTTP/SSE</Button>
+                  <Button disabled>HTTP/SSE</Button>
                   <Button onClick={() => setSetupMode("import")}>Import config</Button>
                   <Button onClick={() => setSetupMode("advanced")}>Advanced/manual</Button>
                 </Space>
+                <Typography.Text type="secondary">
+                  HTTP/SSE is unavailable. This runtime supports stdio and WebSocket; use Advanced/manual for WebSocket.
+                </Typography.Text>
               </>
             ) : null}
 
@@ -1345,7 +1370,7 @@ export const ExternalServersTab = ({
                     value={importConfigText}
                     onChange={(event) => setImportConfigText(event.target.value)}
                     rows={8}
-                    placeholder='{"server_id":"docs-http","name":"Docs HTTP","transport":"sse","config":{"url":"https://example.test/mcp"}}'
+                    placeholder='{"server_id":"docs-ws","name":"Docs WebSocket","transport":"websocket","config":{"websocket":{"url":"wss://example.test/mcp"}}}'
                   />
                 </Space>
                 {importPreview?.draft ? (

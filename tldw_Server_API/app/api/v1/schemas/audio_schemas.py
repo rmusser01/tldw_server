@@ -329,11 +329,23 @@ class StreamingLimitsResponse(BaseModel):
         default=None,
         description="Minutes remaining today, or null if unknown/unbounded.",
     )
-    active_streams: int = Field(
-        ..., description="Number of currently active streams."
+    used_month_minutes: Optional[float] = Field(
+        default=None, description="Minutes already used this calendar month (UTC)."
+    )
+    remaining_month_minutes: Optional[float] = Field(
+        default=None,
+        description="Minutes remaining this month, or null if there is no monthly limit.",
+    )
+    active_streams: Optional[int] = Field(
+        default=None,
+        description="Always null: the count of the user's open streams is not reported.",
     )
     can_start_stream: bool = Field(
-        ..., description="Whether another stream can be started."
+        ...,
+        description=(
+            "Always true. Not a live check: this endpoint does not report open streams, so a stream "
+            "over the user's limit is refused when it starts."
+        ),
     )
     legacy_can_start_stream: bool = Field(
         ...,

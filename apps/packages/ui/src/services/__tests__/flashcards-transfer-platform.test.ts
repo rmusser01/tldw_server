@@ -81,7 +81,7 @@ describe("private Flashcards producer platform boundary", () => {
     const ready = deferred<void>()
     mocks.initialize.mockReturnValueOnce(ready.promise)
     const acquire = vi.fn(() => intent)
-    const navigate = vi.fn(() => expect(transferKeys()).toHaveLength(1))
+    const navigate = vi.fn((_url: string) => expect(transferKeys()).toHaveLength(1))
     const pending = transferFlashcardsSource(acquire, { navigate })
     expect(acquire).not.toHaveBeenCalled()
     expect(navigate).not.toHaveBeenCalled()
@@ -116,9 +116,13 @@ describe("private Flashcards producer platform boundary", () => {
     window.localStorage.setItem("tldwConfig", original)
     window.dispatchEvent(new StorageEvent("storage", { key: "tldwConfig", oldValue: other, newValue: original }))
     ready.resolve()
-    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    await expect(pending).rejects.toMatchObject({
+      status: 412,
+      details: { detail: { code: "request_config_scope_changed" } }
+    })
     expect(acquire).not.toHaveBeenCalled()
     expect(navigate).not.toHaveBeenCalled()
+    expect(transferKeys()).toHaveLength(0)
   })
 
   it("reserves a real WebUI target during the click and navigates only after storage", async () => {

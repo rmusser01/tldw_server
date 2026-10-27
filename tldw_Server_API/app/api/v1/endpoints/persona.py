@@ -46,6 +46,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     User,
     check_rate_limit,
     get_request_user,
+    require_expected_user,
     verify_jwt_and_fetch_user,
 )
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
@@ -163,6 +164,8 @@ from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
     cookie_websocket_rejection_code,
     resolve_single_user_cookie_websocket,
 )
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
+from tldw_Server_API.app.core.Notes_Graph.semantic_publication import run_quiescent_operation
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -3900,6 +3903,7 @@ async def get_persona_profile(
     response_model=PersonaProfileResponse,
     tags=["persona"],
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_expected_user)],
 )
 async def update_persona_profile(
     persona_id: str,
@@ -7287,7 +7291,7 @@ async def update_persona_live_voice_session_analytics(
     response_model=VoiceCommandListResponse,
     tags=["persona"],
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(check_rate_limit)],
+    dependencies=[Depends(check_rate_limit), Depends(require_expected_user)],
 )
 async def list_persona_voice_commands(
     persona_id: str,
@@ -7700,7 +7704,7 @@ async def dry_run_persona_voice_command(
     response_model=list[PersonaConnectionResponse],
     tags=["persona"],
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(check_rate_limit)],
+    dependencies=[Depends(check_rate_limit), Depends(require_expected_user)],
 )
 async def list_persona_connections(
     persona_id: str,
@@ -8273,6 +8277,8 @@ async def persona_stream(
     voice_connection_id = str(uuid.uuid4())
     owned_turn_tasks: set[asyncio.Task] = set()
     turn_locks: dict[str, asyncio.Lock] = {}
+    # One per session: held across each read-then-save of the session's preferences.
+    preference_locks: dict[str, asyncio.Lock] = {}
     owned_control_tasks: set[asyncio.Task] = set()
     persona_voice_prepare_tasks: set[asyncio.Task[None]] = set()
     persona_voice_initialization_pending = threading.Event()
@@ -8741,7 +8747,7 @@ async def persona_stream(
                     )
                 logger.debug("Persona Live TTS unavailable; error_type={}", type(exc).__name__)
                 _mark_persona_live_processing_progress(session_id)
-                _upsert_persona_live_session_summary_safe(
+                await _upsert_persona_live_session_summary_safe(
                     session_id=session_id,
                     voice_runtime=updated_voice_runtime,
                     text_only_tts_increment=1,
@@ -8875,7 +8881,7 @@ async def persona_stream(
 
         async def _get_saved_wake_phrases_for_session(session_id: str) -> list[str]:
             runtime_context = await asyncio.to_thread(
-                _load_persona_policy_rules_for_session,
+                chacha_operation(independent=True)(_load_persona_policy_rules_for_session),
                 persona_scope_db,
                 session_id=session_id,
                 user_id=authenticated_user_id,
@@ -8886,7 +8892,7 @@ async def persona_stream(
             if not runtime_persona_id or persona_scope_db is None:
                 return []
             profile = await asyncio.to_thread(
-                persona_scope_db.get_persona_profile,
+                chacha_operation(independent=True)(persona_scope_db.get_persona_profile),
                 runtime_persona_id,
                 user_id=authenticated_user_id,
                 include_deleted=False,
@@ -8962,7 +8968,7 @@ async def persona_stream(
                 if not persona_live_voice_registry.is_preparing(**key, token=token):
                     return
                 context = await asyncio.to_thread(
-                    _load_persona_policy_rules_for_session, persona_scope_db,
+                    chacha_operation(independent=True)(_load_persona_policy_rules_for_session), persona_scope_db,
                     session_id=session_id, user_id=authenticated_user_id,
                 )
                 if not context.get("session_exists") or context.get("session_terminal"):
@@ -9012,11 +9018,12 @@ async def persona_stream(
                 return str(transcriber.get_full_transcript() or "").strip()
             return ""
 
-        def _resolve_persona_live_event_persona_id(session_id: str) -> str | None:
+        async def _resolve_persona_live_event_persona_id(session_id: str) -> str | None:
             if persona_scope_db is None or not authenticated_user_id:
                 return None
             try:
-                runtime_context = _load_persona_policy_rules_for_session(
+                runtime_context = await asyncio.to_thread(
+                    chacha_operation(independent=True)(_load_persona_policy_rules_for_session),
                     persona_scope_db,
                     session_id=session_id,
                     user_id=authenticated_user_id,
@@ -9063,7 +9070,7 @@ async def persona_stream(
                 ),
             }
 
-        def _upsert_persona_live_session_summary_safe(
+        async def _upsert_persona_live_session_summary_safe(
             *,
             session_id: str,
             voice_runtime: dict[str, Any] | None = None,
@@ -9071,6 +9078,7 @@ async def persona_stream(
             manual_mode_required_increment: int = 0,
             text_only_tts_increment: int = 0,
             finalize: bool = False,
+            persona_id: str | None = None,
         ) -> None:
             if persona_scope_db is None or not authenticated_user_id:
                 return
@@ -9078,7 +9086,7 @@ async def persona_stream(
                 user_id_int = int(str(authenticated_user_id))
             except (TypeError, ValueError):
                 return
-            persona_id_value = _resolve_persona_live_event_persona_id(session_id)
+            persona_id_value = persona_id or await _resolve_persona_live_event_persona_id(session_id)
             if not persona_id_value:
                 return
             snapshot = (
@@ -9088,7 +9096,8 @@ async def persona_stream(
             )
             persona_live_summary_sessions_seen.add(session_id)
             try:
-                persona_scope_db.upsert_persona_live_voice_session_summary(
+                await run_quiescent_operation(asyncio.to_thread(
+                    chacha_operation(independent=True)(persona_scope_db.upsert_persona_live_voice_session_summary),
                     user_id=user_id_int,
                     persona_id=persona_id_value,
                     session_id=session_id,
@@ -9101,7 +9110,7 @@ async def persona_stream(
                     manual_mode_required_increment=manual_mode_required_increment,
                     text_only_tts_increment=text_only_tts_increment,
                     finalize=finalize,
-                )
+                ))
             except Exception as exc:
                 logger.debug(
                     "persona live session summary update skipped for session {}: {}",
@@ -9109,11 +9118,12 @@ async def persona_stream(
                     exc,
                 )
 
-        def _record_persona_live_voice_event_safe(
+        async def _record_persona_live_voice_event_safe(
             *,
             session_id: str,
             event_type: str,
             commit_source: str | None = None,
+            persona_id: str | None = None,
         ) -> None:
             if persona_scope_db is None or not authenticated_user_id:
                 return
@@ -9121,18 +9131,19 @@ async def persona_stream(
                 user_id_int = int(str(authenticated_user_id))
             except (TypeError, ValueError):
                 return
-            persona_id_value = _resolve_persona_live_event_persona_id(session_id)
+            persona_id_value = persona_id or await _resolve_persona_live_event_persona_id(session_id)
             if not persona_id_value:
                 return
             try:
-                record_persona_live_voice_event(
+                await run_quiescent_operation(asyncio.to_thread(
+                    chacha_operation(independent=True)(record_persona_live_voice_event),
                     persona_scope_db,
                     user_id=user_id_int,
                     persona_id=persona_id_value,
                     session_id=session_id,
                     event_type=event_type,
                     commit_source=commit_source,
-                )
+                ))
             except Exception as exc:
                 logger.debug(
                     "persona live analytics event skipped for session {}: {}",
@@ -9150,6 +9161,16 @@ async def persona_stream(
             if bool(state.get("manual_mode_notice_sent")):
                 return
             state["manual_mode_notice_sent"] = True
+            # Write first, then notify: a client may close on the notice (TASK-13896).
+            await _record_persona_live_voice_event_safe(
+                session_id=session_id,
+                event_type="manual_mode_required",
+            )
+            await _upsert_persona_live_session_summary_safe(
+                session_id=session_id,
+                voice_runtime=state.get("voice_runtime") if isinstance(state, dict) else None,
+                manual_mode_required_increment=1,
+            )
             await _emit_notice(
                 session_id=session_id,
                 client_message_id=state.get("client_message_id"),
@@ -9157,15 +9178,6 @@ async def persona_stream(
                 reason_code="VOICE_MANUAL_MODE_REQUIRED",
                 message="Server VAD unavailable for this live session. Use Send now to commit heard speech manually.",
                 details=str(state.get("manual_mode_reason") or "vad_unavailable"),
-            )
-            _record_persona_live_voice_event_safe(
-                session_id=session_id,
-                event_type="manual_mode_required",
-            )
-            _upsert_persona_live_session_summary_safe(
-                session_id=session_id,
-                voice_runtime=state.get("voice_runtime") if isinstance(state, dict) else None,
-                manual_mode_required_increment=1,
             )
 
         async def _commit_persona_live_turn(
@@ -9230,6 +9242,24 @@ async def persona_stream(
             state["current_utterance_committed"] = True
             state["current_commit_source"] = commit_source
             state["committed_transcript"] = cleaned_transcript
+            # Write first, then notify: a client may close on the notice (TASK-13896).
+            # One persona-id read serves both writes, so the notice waits on three worker calls, not four.
+            # None (no handle, a failed read, or no persona id) skips both writes, as each helper did on dev,
+            # without retrying the read.
+            commit_persona_id = await _resolve_persona_live_event_persona_id(session_id)
+            if commit_persona_id:
+                await _record_persona_live_voice_event_safe(
+                    session_id=session_id,
+                    event_type="commit",
+                    commit_source=commit_source,
+                    persona_id=commit_persona_id,
+                )
+                await _upsert_persona_live_session_summary_safe(
+                    session_id=session_id,
+                    voice_runtime=voice_runtime if isinstance(voice_runtime, dict) else None,
+                    commit_source=commit_source,
+                    persona_id=commit_persona_id,
+                )
             await _emit_notice(
                 session_id=session_id,
                 level="info",
@@ -9238,16 +9268,6 @@ async def persona_stream(
                 message="Voice turn committed.",
                 commit_source=commit_source,
                 transcript=cleaned_transcript,
-            )
-            _record_persona_live_voice_event_safe(
-                session_id=session_id,
-                event_type="commit",
-                commit_source=commit_source,
-            )
-            _upsert_persona_live_session_summary_safe(
-                session_id=session_id,
-                voice_runtime=voice_runtime if isinstance(voice_runtime, dict) else None,
-                commit_source=commit_source,
             )
             if wake_state and wake_state.get("wake_behavior") in {
                 "one_shot",
@@ -9414,7 +9434,8 @@ async def persona_stream(
                 allowed_tools_effective.append(str(resolved_name))
             if allowed_tools_effective:
                 audit_metadata["allowed_tools"] = allowed_tools_effective
-            scope_metadata = _load_persona_scope_metadata_for_session(
+            scope_metadata = await asyncio.to_thread(
+                chacha_operation(independent=True)(_load_persona_scope_metadata_for_session),
                 persona_scope_db,
                 session_id=session_id,
                 user_id=authenticated_user_id,
@@ -9947,132 +9968,137 @@ async def persona_stream(
                     ignored_fields=forbidden_client_fields,
                 )
 
-            runtime_context = _load_persona_policy_rules_for_session(
-                persona_scope_db,
-                session_id=session_id,
-                user_id=authenticated_user_id,
-            )
-            if bool(runtime_context.get("session_terminal", False)):
-                await _emit_notice(
+            # Read-then-save of the session's preferences, atomic against confirm_plan's (TASK-13896).
+            # Lock order: turn_lock, then this lock; nothing awaited under it takes another lock.
+            async with preference_locks.setdefault(session_id, asyncio.Lock()):
+                runtime_context = await asyncio.to_thread(
+                    chacha_operation(independent=True)(_load_persona_policy_rules_for_session),
+                    persona_scope_db,
                     session_id=session_id,
-                    level="error",
-                    message="Persona session is stopped.",
-                    reason_code="SESSION_TERMINAL",
+                    user_id=authenticated_user_id,
                 )
-                return
-            runtime_persona_id = str(runtime_context.get("persona_id") or _DEFAULT_PERSONA_ID).strip() or _DEFAULT_PERSONA_ID
-            runtime_mode = _bounded_label(
-                runtime_context.get("runtime_mode"),
-                allowed=_PERSONA_RUNTIME_MODES,
-                fallback="session_scoped",
-            )
-            runtime_scope_snapshot_id = str(runtime_context.get("scope_snapshot_id") or "").strip() or None
-            persona_policy_rules = normalize_policy_rules(runtime_context.get("policy_rules"))
-            session_exists = bool(runtime_context.get("session_exists", False))
-            _increment_persona_metric(
-                "persona_ws_runtime_mode_total",
-                {"mode": runtime_mode, "session_exists": "true" if session_exists else "false"},
-            )
-            _ = session_manager.create(
-                user_id=connection_user_id,
-                persona_id=runtime_persona_id,
-                resume_session_id=session_id,
-            )
-            _mark_live_control_stream_connected(session_id)
-            existing_preferences, activity_surface = _get_session_preferences_with_activity_surface(
-                session_manager=session_manager,
-                session_id=session_id,
-                user_id=connection_user_id,
-                persisted_preferences=runtime_context.get("preferences"),
-                persisted_activity_surface=runtime_context.get("activity_surface"),
-            )
-            configured_top_k = _get_persona_memory_top_k()
-            default_use_memory = _coerce_bool(
-                existing_preferences.get("use_memory_context"),
-                default=True,
-            )
-            requested_use_memory_context = _coerce_bool(
-                msg.get("use_memory_context"),
-                default=default_use_memory,
-            )
-            use_memory_context = requested_use_memory_context
-            default_use_companion_context = _coerce_bool(
-                existing_preferences.get("use_companion_context"),
-                default=True,
-            )
-            requested_use_companion_context = _coerce_bool(
-                msg.get("use_companion_context"),
-                default=default_use_companion_context,
-            )
-            use_companion_context = requested_use_companion_context
-            runtime_persona_state_context_default = _coerce_bool(
-                runtime_context.get("persona_state_context_default"),
-                default=True,
-            )
-            default_use_persona_state_context = _coerce_bool(
-                existing_preferences.get("use_persona_state_context"),
-                default=runtime_persona_state_context_default,
-            )
-            requested_use_persona_state_context = _coerce_bool(
-                msg.get("use_persona_state_context"),
-                default=default_use_persona_state_context,
-            )
-            state_context_override = "use_persona_state_context" in msg
-            use_persona_state_context = requested_use_persona_state_context
-            memory_allowed_by_mode = _memory_mode_allows_personalization_retrieval(
-                runtime_mode,
-                session_exists=session_exists,
-            )
-            if not memory_allowed_by_mode:
-                use_memory_context = False
-            state_context_allowed_by_mode = runtime_mode == "persistent_scoped"
-            if not state_context_allowed_by_mode:
-                use_persona_state_context = False
-            pref_top_k_raw = existing_preferences.get("memory_top_k", configured_top_k)
-            try:
-                pref_top_k = int(pref_top_k_raw)
-            except (TypeError, ValueError):
-                pref_top_k = configured_top_k
-            requested_top_k_raw = msg.get("memory_top_k", pref_top_k)
-            try:
-                memory_top_k = int(requested_top_k_raw)
-            except (TypeError, ValueError):
-                memory_top_k = pref_top_k
-            memory_top_k = max(1, min(memory_top_k, configured_top_k))
-            if "session_policy_rules" in msg:
-                session_policy_rules = normalize_policy_rules(msg.get("session_policy_rules"))
-            else:
-                session_policy_rules = _session_policy_rules_from_preferences(existing_preferences)
-            preferences_patch: dict[str, Any] = {
-                "use_memory_context": use_memory_context,
-                "use_companion_context": use_companion_context,
-                "use_persona_state_context": use_persona_state_context,
-                "memory_top_k": memory_top_k,
-            }
-            if "session_policy_rules" in msg:
-                preferences_patch["session_policy_rules"] = session_policy_rules
-            with contextlib.suppress(Exception):
-                session_manager.update_preferences(
+                if bool(runtime_context.get("session_terminal", False)):
+                    await _emit_notice(
+                        session_id=session_id,
+                        level="error",
+                        message="Persona session is stopped.",
+                        reason_code="SESSION_TERMINAL",
+                    )
+                    return
+                runtime_persona_id = str(runtime_context.get("persona_id") or _DEFAULT_PERSONA_ID).strip() or _DEFAULT_PERSONA_ID
+                runtime_mode = _bounded_label(
+                    runtime_context.get("runtime_mode"),
+                    allowed=_PERSONA_RUNTIME_MODES,
+                    fallback="session_scoped",
+                )
+                runtime_scope_snapshot_id = str(runtime_context.get("scope_snapshot_id") or "").strip() or None
+                persona_policy_rules = normalize_policy_rules(runtime_context.get("policy_rules"))
+                session_exists = bool(runtime_context.get("session_exists", False))
+                _increment_persona_metric(
+                    "persona_ws_runtime_mode_total",
+                    {"mode": runtime_mode, "session_exists": "true" if session_exists else "false"},
+                )
+                _ = session_manager.create(
+                    user_id=connection_user_id,
+                    persona_id=runtime_persona_id,
+                    resume_session_id=session_id,
+                )
+                _mark_live_control_stream_connected(session_id)
+                existing_preferences, activity_surface = _get_session_preferences_with_activity_surface(
+                    session_manager=session_manager,
                     session_id=session_id,
                     user_id=connection_user_id,
-                    preferences=preferences_patch,
+                    persisted_preferences=runtime_context.get("preferences"),
+                    persisted_activity_surface=runtime_context.get("activity_surface"),
                 )
-            with contextlib.suppress(Exception):
-                session_manager.update_preferences(
+                configured_top_k = _get_persona_memory_top_k()
+                default_use_memory = _coerce_bool(
+                    existing_preferences.get("use_memory_context"),
+                    default=True,
+                )
+                requested_use_memory_context = _coerce_bool(
+                    msg.get("use_memory_context"),
+                    default=default_use_memory,
+                )
+                use_memory_context = requested_use_memory_context
+                default_use_companion_context = _coerce_bool(
+                    existing_preferences.get("use_companion_context"),
+                    default=True,
+                )
+                requested_use_companion_context = _coerce_bool(
+                    msg.get("use_companion_context"),
+                    default=default_use_companion_context,
+                )
+                use_companion_context = requested_use_companion_context
+                runtime_persona_state_context_default = _coerce_bool(
+                    runtime_context.get("persona_state_context_default"),
+                    default=True,
+                )
+                default_use_persona_state_context = _coerce_bool(
+                    existing_preferences.get("use_persona_state_context"),
+                    default=runtime_persona_state_context_default,
+                )
+                requested_use_persona_state_context = _coerce_bool(
+                    msg.get("use_persona_state_context"),
+                    default=default_use_persona_state_context,
+                )
+                state_context_override = "use_persona_state_context" in msg
+                use_persona_state_context = requested_use_persona_state_context
+                memory_allowed_by_mode = _memory_mode_allows_personalization_retrieval(
+                    runtime_mode,
+                    session_exists=session_exists,
+                )
+                if not memory_allowed_by_mode:
+                    use_memory_context = False
+                state_context_allowed_by_mode = runtime_mode == "persistent_scoped"
+                if not state_context_allowed_by_mode:
+                    use_persona_state_context = False
+                pref_top_k_raw = existing_preferences.get("memory_top_k", configured_top_k)
+                try:
+                    pref_top_k = int(pref_top_k_raw)
+                except (TypeError, ValueError):
+                    pref_top_k = configured_top_k
+                requested_top_k_raw = msg.get("memory_top_k", pref_top_k)
+                try:
+                    memory_top_k = int(requested_top_k_raw)
+                except (TypeError, ValueError):
+                    memory_top_k = pref_top_k
+                memory_top_k = max(1, min(memory_top_k, configured_top_k))
+                if "session_policy_rules" in msg:
+                    session_policy_rules = normalize_policy_rules(msg.get("session_policy_rules"))
+                else:
+                    session_policy_rules = _session_policy_rules_from_preferences(existing_preferences)
+                preferences_patch: dict[str, Any] = {
+                    "use_memory_context": use_memory_context,
+                    "use_companion_context": use_companion_context,
+                    "use_persona_state_context": use_persona_state_context,
+                    "memory_top_k": memory_top_k,
+                }
+                if "session_policy_rules" in msg:
+                    preferences_patch["session_policy_rules"] = session_policy_rules
+                with contextlib.suppress(Exception):
+                    session_manager.update_preferences(
+                        session_id=session_id,
+                        user_id=connection_user_id,
+                        preferences=preferences_patch,
+                    )
+                with contextlib.suppress(Exception):
+                    session_manager.update_preferences(
+                        session_id=session_id,
+                        user_id=connection_user_id,
+                        preferences={
+                            "last_input_source": source,
+                            "last_turn_type": turn_type,
+                        },
+                    )
+                _ = await run_quiescent_operation(asyncio.to_thread(
+                    chacha_operation(independent=True)(_persist_persona_session_preferences),
+                    persona_scope_db,
                     session_id=session_id,
-                    user_id=connection_user_id,
-                    preferences={
-                        "last_input_source": source,
-                        "last_turn_type": turn_type,
-                    },
-                )
-            _ = _persist_persona_session_preferences(
-                persona_scope_db,
-                session_id=session_id,
-                user_id=authenticated_user_id,
-                base_preferences=runtime_context.get("persisted_preferences"),
-                patch_preferences=preferences_patch,
-            )
+                    user_id=authenticated_user_id,
+                    base_preferences=runtime_context.get("persisted_preferences"),
+                    patch_preferences=preferences_patch,
+                ))
             persona_turn_classifier = classify_persona_turn(normalized_text)
             persona_exemplar_context = await resolve_persona_exemplar_runtime_context(
                 persona_scope_db=persona_scope_db,
@@ -10135,7 +10161,8 @@ async def persona_stream(
                 )
             persona_state_hints: dict[str, str] = {}
             if use_persona_state_context and state_context_allowed_by_mode:
-                persona_state_hints = _load_persona_state_hints_for_runtime(
+                persona_state_hints = await asyncio.to_thread(
+                    chacha_operation(independent=True)(_load_persona_state_hints_for_runtime),
                     persona_scope_db,
                     user_id=authenticated_user_id,
                     persona_id=runtime_persona_id,
@@ -10258,7 +10285,7 @@ async def persona_stream(
                     return
                 _ensure_current_turn(session_id)
                 current_context = await asyncio.to_thread(
-                    _load_persona_policy_rules_for_session, persona_scope_db,
+                    chacha_operation(independent=True)(_load_persona_policy_rules_for_session), persona_scope_db,
                     session_id=session_id, user_id=authenticated_user_id,
                 )
                 if not current_context.get("session_exists") or current_context.get("session_terminal"):
@@ -10539,7 +10566,7 @@ async def persona_stream(
                 session_id = _normalize_ws_identifier(msg.get("session_id"), fallback="")
                 client_message_id = _bounded_client_message_id(msg.get("client_message_id"))
                 runtime_context = await asyncio.to_thread(
-                    _load_persona_policy_rules_for_session, persona_scope_db,
+                    chacha_operation(independent=True)(_load_persona_policy_rules_for_session), persona_scope_db,
                     session_id=session_id, user_id=authenticated_user_id,
                 )
                 if not session_id or not runtime_context.get("session_exists") or runtime_context.get("session_terminal"):
@@ -10608,7 +10635,8 @@ async def persona_stream(
                         message="Invalid session_id normalized to a safe identifier.",
                         reason_code="SESSION_ID_NORMALIZED",
                     )
-                runtime_context = _load_persona_policy_rules_for_session(
+                runtime_context = await asyncio.to_thread(
+                    chacha_operation(independent=True)(_load_persona_policy_rules_for_session),
                     persona_scope_db,
                     session_id=session_id,
                     user_id=authenticated_user_id,
@@ -10638,7 +10666,7 @@ async def persona_stream(
                     user_id=connection_user_id,
                     preferences={"voice_runtime": voice_runtime},
                 )
-                _upsert_persona_live_session_summary_safe(
+                await _upsert_persona_live_session_summary_safe(
                     session_id=session_id,
                     voice_runtime=voice_runtime,
                 )
@@ -10756,7 +10784,7 @@ async def persona_stream(
                     )
                     continue
                 runtime_context = await asyncio.to_thread(
-                    _load_persona_policy_rules_for_session, persona_scope_db,
+                    chacha_operation(independent=True)(_load_persona_policy_rules_for_session), persona_scope_db,
                     session_id=session_id,
                     user_id=authenticated_user_id,
                 )
@@ -10825,7 +10853,8 @@ async def persona_stream(
                         message="Start voice to prepare the selected speech services before recording.",
                     )
                     continue
-                runtime_context = _load_persona_policy_rules_for_session(
+                runtime_context = await asyncio.to_thread(
+                    chacha_operation(independent=True)(_load_persona_policy_rules_for_session),
                     persona_scope_db,
                     session_id=session_id,
                     user_id=authenticated_user_id,
@@ -11066,60 +11095,65 @@ async def persona_stream(
                 max_tool_steps = _get_persona_max_tool_steps()
                 approved_step_indices = sorted(set(approved_step_indices))[:max_tool_steps]
 
-                runtime_context = _load_persona_policy_rules_for_session(
-                    persona_scope_db,
-                    session_id=session_id,
-                    user_id=authenticated_user_id,
-                )
-                try:
-                    pending_plan = session_manager.consume_plan_for_confirmation(
-                        session_id=session_id,
-                        plan_id=plan_id,
-                        user_id=connection_user_id,
-                        session_exists=bool(runtime_context.get("session_exists")),
-                        session_terminal=bool(runtime_context.get("session_terminal", False)),
-                    )
-                except PlanConfirmationError as exc:
-                    await _emit_notice(
-                        session_id=session_id,
-                        level="error",
-                        message=str(exc),
-                        reason_code=exc.reason_code,
-                    )
-                    continue
-
-                runtime_persona_id = str(runtime_context.get("persona_id") or _DEFAULT_PERSONA_ID).strip() or _DEFAULT_PERSONA_ID
-                runtime_mode = _bounded_label(
-                    runtime_context.get("runtime_mode"),
-                    allowed=_PERSONA_RUNTIME_MODES,
-                    fallback="session_scoped",
-                )
-                runtime_scope_snapshot_id = str(runtime_context.get("scope_snapshot_id") or "").strip() or None
-                persona_policy_rules = normalize_policy_rules(runtime_context.get("policy_rules"))
-                current_preferences, activity_surface = _get_session_preferences_with_activity_surface(
-                    session_manager=session_manager,
-                    session_id=session_id,
-                    user_id=connection_user_id,
-                    persisted_preferences=runtime_context.get("preferences"),
-                    persisted_activity_surface=runtime_context.get("activity_surface"),
-                )
-                if "session_policy_rules" in msg:
-                    session_policy_rules = normalize_policy_rules(msg.get("session_policy_rules"))
-                    with contextlib.suppress(Exception):
-                        session_manager.update_preferences(
-                            session_id=session_id,
-                            user_id=connection_user_id,
-                            preferences={"session_policy_rules": session_policy_rules},
-                        )
-                    _ = _persist_persona_session_preferences(
+                # The session's preferences are read here and saved below in separate worker calls;
+                # the lock keeps a turn's read-then-save from interleaving with this one (TASK-13896).
+                async with preference_locks.setdefault(session_id, asyncio.Lock()):
+                    runtime_context = await asyncio.to_thread(
+                        chacha_operation(independent=True)(_load_persona_policy_rules_for_session),
                         persona_scope_db,
                         session_id=session_id,
                         user_id=authenticated_user_id,
-                        base_preferences=runtime_context.get("persisted_preferences"),
-                        patch_preferences={"session_policy_rules": session_policy_rules},
                     )
-                else:
-                    session_policy_rules = _session_policy_rules_from_preferences(current_preferences)
+                    try:
+                        pending_plan = session_manager.consume_plan_for_confirmation(
+                            session_id=session_id,
+                            plan_id=plan_id,
+                            user_id=connection_user_id,
+                            session_exists=bool(runtime_context.get("session_exists")),
+                            session_terminal=bool(runtime_context.get("session_terminal", False)),
+                        )
+                    except PlanConfirmationError as exc:
+                        await _emit_notice(
+                            session_id=session_id,
+                            level="error",
+                            message=str(exc),
+                            reason_code=exc.reason_code,
+                        )
+                        continue
+
+                    runtime_persona_id = str(runtime_context.get("persona_id") or _DEFAULT_PERSONA_ID).strip() or _DEFAULT_PERSONA_ID
+                    runtime_mode = _bounded_label(
+                        runtime_context.get("runtime_mode"),
+                        allowed=_PERSONA_RUNTIME_MODES,
+                        fallback="session_scoped",
+                    )
+                    runtime_scope_snapshot_id = str(runtime_context.get("scope_snapshot_id") or "").strip() or None
+                    persona_policy_rules = normalize_policy_rules(runtime_context.get("policy_rules"))
+                    current_preferences, activity_surface = _get_session_preferences_with_activity_surface(
+                        session_manager=session_manager,
+                        session_id=session_id,
+                        user_id=connection_user_id,
+                        persisted_preferences=runtime_context.get("preferences"),
+                        persisted_activity_surface=runtime_context.get("activity_surface"),
+                    )
+                    if "session_policy_rules" in msg:
+                        session_policy_rules = normalize_policy_rules(msg.get("session_policy_rules"))
+                        with contextlib.suppress(Exception):
+                            session_manager.update_preferences(
+                                session_id=session_id,
+                                user_id=connection_user_id,
+                                preferences={"session_policy_rules": session_policy_rules},
+                            )
+                        _ = await run_quiescent_operation(asyncio.to_thread(
+                            chacha_operation(independent=True)(_persist_persona_session_preferences),
+                            persona_scope_db,
+                            session_id=session_id,
+                            user_id=authenticated_user_id,
+                            base_preferences=runtime_context.get("persisted_preferences"),
+                            patch_preferences={"session_policy_rules": session_policy_rules},
+                        ))
+                    else:
+                        session_policy_rules = _session_policy_rules_from_preferences(current_preferences)
 
                 executed_steps = 0
                 for step in pending_plan.steps:
@@ -11288,7 +11322,8 @@ async def persona_stream(
                 why = str(pending_retry.get("why") or "").strip() or None
                 description = str(pending_retry.get("description") or "").strip() or None
 
-                runtime_context = _load_persona_policy_rules_for_session(
+                runtime_context = await asyncio.to_thread(
+                    chacha_operation(independent=True)(_load_persona_policy_rules_for_session),
                     persona_scope_db,
                     session_id=session_id,
                     user_id=authenticated_user_id,
@@ -11363,7 +11398,8 @@ async def persona_stream(
                 )
             else:
                 session_id = _normalize_ws_identifier(msg.get("session_id"), fallback=default_session_id)
-                runtime_context = _load_persona_policy_rules_for_session(
+                runtime_context = await asyncio.to_thread(
+                    chacha_operation(independent=True)(_load_persona_policy_rules_for_session),
                     persona_scope_db,
                     session_id=session_id,
                     user_id=authenticated_user_id,
@@ -11416,10 +11452,6 @@ async def persona_stream(
         from anyio import CancelScope
 
         with CancelScope(shield=True):
-            for session_id in list(persona_live_summary_sessions_seen):
-                _upsert_persona_live_session_summary_safe(
-                    session_id=session_id, voice_runtime=None, finalize=True,
-                )
             for session_id in list(observed_live_control_session_ids):
                 if live_control_stream_user_id:
                     persona_live_voice_registry.clear(user_id=live_control_stream_user_id, session_id=session_id, connection_id=voice_connection_id)
@@ -11431,6 +11463,11 @@ async def persona_stream(
                 task.cancel()
             if cleanup_tasks:
                 await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+            # Finalize last: the owned turn tasks, which also write summaries, are done.
+            for session_id in list(persona_live_summary_sessions_seen):
+                await _upsert_persona_live_session_summary_safe(
+                    session_id=session_id, voice_runtime=None, finalize=True,
+                )
             if auth_watchdog_stop is not None:
                 auth_watchdog_stop.set()
             if auth_watchdog_task is not None:

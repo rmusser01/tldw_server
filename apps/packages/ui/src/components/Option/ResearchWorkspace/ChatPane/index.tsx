@@ -1,8 +1,16 @@
+import { isChatSubmitSuccess } from "@/hooks/chat/chat-action-utils"
+import { sha256Text } from "@/store/workspace-migration"
+import { appendCapturedNoteProvenance } from "@/utils/knowledge-note-provenance"
+import { loadServicePromptSnapshot } from "@/services/service-prompts"
+import {
+  assertWebCaptureHeadCurrent,
+  WebCaptureNotCurrentError
+} from "@/utils/research-web-capture"
+import type { ScopedRequestOptions } from "@/services/tldw/TldwApiClient"
 import React from "react"
 import { useTranslation } from "react-i18next"
 import {
   AlertCircle,
-  ChevronDown,
   FileText,
   Send,
   MessageSquarePlus,
@@ -20,9 +28,9 @@ import {
 } from "lucide-react"
 import { Modal, Tag, Tooltip, Input, Slider, Switch, Button, message } from "antd"
 import type { InputRef } from "antd"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import {
   DEGRADED_STATE_LABEL,
-  READY_STATE_LABEL,
   getDesignSystemState
 } from "@/design-system"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -34,9 +42,22 @@ import {
 import { useWorkspaceStore } from "@/store/workspace"
 import { useStoreMessageOption } from "@/store/option"
 import type { Message } from "@/store/option"
+import { generateID } from "@/db/dexie/helpers"
+import {
+  buildRetrievalDiagnostics,
+  extractCitationMediaId,
+  isRecord,
+  normalizeConfidenceScore,
+  normalizeText,
+  extractStringCandidate,
+  toFiniteNumber,
+  toPositiveInt,
+  type RetrievalDiagnostics
+} from "./retrieval-diagnostics"
 import type { WorkspaceCapabilitiesResponse } from "@/services/tldw/domains/workspace-api"
 import { useMessageOption } from "@/hooks/useMessageOption"
 import { useSmartScroll } from "@/hooks/useSmartScroll"
+import { ScrollToLatestButton } from "@/components/Common/ScrollToLatestButton"
 import { useMobile } from "@/hooks/useMediaQuery"
 import { useModelSelector } from "@/hooks/playground"
 import { useConnectionStore } from "@/store/connection"
@@ -89,17 +110,31 @@ import { WORKSPACE_TASK_SOURCE_CONTEXT_LIMIT } from "../workspace-task-prefill"
 const { TextArea } = Input
 const VISIBLE_SOURCE_TAG_COUNT = 5
 
-type RetrievalDiagnostics = {
-  chunkCount: number | null
-  sourceCount: number | null
-  sourceLabels: string[]
-  averageRelevanceScore: number | null
-  faithfulnessScore: number | null
-  promptTokens: number | null
-  completionTokens: number | null
-  totalTokens: number | null
-  costUsd: number | null
-  confidenceLevel: "high" | "medium" | "low" | null
+// Stage 3 (WP-04): windowed transcript rendering. Below this row count the
+// transcript keeps plain flow layout (matching the web Playground's
+// VirtualChatTimeline enable gate); above it only the visible window plus
+// overscan mounts.
+const CHAT_VIRTUALIZATION_MIN_MESSAGES = 100
+
+// Stable row identity for messages that reach the transcript without id or
+// serverMessageId (older persisted sessions): the fallback is keyed by
+// message object identity, so a given object resolves to one id for its
+// lifetime. Replaces the former index-templated React-key fallback (WP-04),
+// which re-keyed every row after any splice and defeated reconciliation.
+const transientMessageIdFallbacks = new WeakMap<object, string>()
+const stableMessageId = (
+  message: Pick<Message, "id" | "serverMessageId">
+): string => {
+  const direct = message.id?.trim()
+  if (direct) return direct
+  const server = message.serverMessageId?.trim()
+  if (server) return `server:${server}`
+  let fallback = transientMessageIdFallbacks.get(message)
+  if (!fallback) {
+    fallback = `transient:${generateID()}`
+    transientMessageIdFallbacks.set(message, fallback)
+  }
+  return fallback
 }
 
 type ChatModePreference = "normal" | "rag"
@@ -311,43 +346,6 @@ const getSourceTagColor = (
   return "blue"
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null
-
-const toPositiveInt = (value: unknown): number | null => {
-  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
-    return value
-  }
-  if (typeof value === "string") {
-    const parsed = Number.parseInt(value, 10)
-    if (Number.isInteger(parsed) && parsed > 0) {
-      return parsed
-    }
-  }
-  return null
-}
-
-const toFiniteNumber = (value: unknown): number | null => {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value
-  }
-  if (typeof value === "string" && value.trim().length > 0) {
-    const parsed = Number.parseFloat(value)
-    if (Number.isFinite(parsed)) {
-      return parsed
-    }
-  }
-  return null
-}
-
-const normalizeText = (value: unknown): string =>
-  typeof value === "string" ? value.trim().toLowerCase() : ""
-
-const extractStringCandidate = (value: unknown): string => {
-  if (typeof value !== "string") return ""
-  return value.trim()
-}
-
 const extractSourceFullText = (detail: unknown): string => {
   if (!isRecord(detail)) return ""
   const content = isRecord(detail.content) ? detail.content : null
@@ -372,31 +370,6 @@ const extractSourceFullText = (detail: unknown): string => {
   }
 
   return ""
-}
-
-const extractCitationMediaId = (citation: unknown): number | null => {
-  if (!isRecord(citation)) return null
-  const metadata = isRecord(citation.metadata) ? citation.metadata : null
-  const includeMediaIds = Array.isArray(metadata?.include_media_ids)
-    ? metadata?.include_media_ids
-    : []
-  const mediaCandidates: unknown[] = [
-    citation.mediaId,
-    citation.media_id,
-    citation.mediaID,
-    metadata?.mediaId,
-    metadata?.media_id,
-    metadata?.mediaID,
-    ...includeMediaIds
-  ]
-
-  for (const candidate of mediaCandidates) {
-    const mediaId = toPositiveInt(candidate)
-    if (mediaId !== null) {
-      return mediaId
-    }
-  }
-  return null
 }
 
 const findSourceIdFromCitation = (
@@ -455,284 +428,6 @@ const findSourceIdFromCitation = (
   }
 
   return null
-}
-
-const extractSourceScore = (source: unknown): number | null => {
-  if (!isRecord(source)) return null
-  const metadata = isRecord(source.metadata) ? source.metadata : null
-  const scoreCandidates: unknown[] = [
-    source.score,
-    source.relevance,
-    source.relevance_score,
-    source.similarity,
-    source.rerank_score,
-    metadata?.score,
-    metadata?.relevance,
-    metadata?.relevance_score,
-    metadata?.similarity,
-    metadata?.rerank_score
-  ]
-
-  for (const candidate of scoreCandidates) {
-    const parsed = toFiniteNumber(candidate)
-    if (parsed !== null) {
-      return parsed
-    }
-  }
-  return null
-}
-
-const extractSourceLabel = (source: unknown): string | null => {
-  if (!isRecord(source)) return null
-  const metadata = isRecord(source.metadata) ? source.metadata : null
-  const candidates: unknown[] = [
-    source.name,
-    source.title,
-    source.source,
-    source.url,
-    metadata?.title,
-    metadata?.source,
-    metadata?.url
-  ]
-
-  for (const candidate of candidates) {
-    const normalized = extractStringCandidate(candidate)
-    if (normalized.length > 0) {
-      return normalized
-    }
-  }
-
-  return null
-}
-
-const normalizeConfidenceScore = (score: number | null): number | null => {
-  if (score === null || !Number.isFinite(score)) {
-    return null
-  }
-  if (score > 1 && score <= 100) {
-    return score / 100
-  }
-  if (score < 0) {
-    return 0
-  }
-  if (score > 1) {
-    return 1
-  }
-  return score
-}
-
-const getConfidenceLevel = (
-  score: number | null
-): RetrievalDiagnostics["confidenceLevel"] => {
-  const normalized = normalizeConfidenceScore(score)
-  if (normalized === null) {
-    return null
-  }
-  if (normalized >= 0.8) {
-    return "high"
-  }
-  if (normalized >= 0.55) {
-    return "medium"
-  }
-  return "low"
-}
-
-const getNumericField = (
-  generationInfo: unknown,
-  paths: Array<string[]>
-): number | null => {
-  if (!isRecord(generationInfo)) return null
-
-  for (const path of paths) {
-    let current: unknown = generationInfo
-    for (const key of path) {
-      if (!isRecord(current)) {
-        current = undefined
-        break
-      }
-      current = current[key]
-    }
-    const parsed = toFiniteNumber(current)
-    if (parsed !== null) {
-      return parsed
-    }
-  }
-
-  return null
-}
-
-const buildRetrievalDiagnostics = (
-  messageSources: unknown[] | undefined,
-  generationInfo: unknown
-): RetrievalDiagnostics | null => {
-  const sources = Array.isArray(messageSources) ? messageSources : []
-
-  const chunkCountFromGeneration = getNumericField(generationInfo, [
-    ["retrieval", "chunks_retrieved"],
-    ["retrieval", "chunk_count"],
-    ["retrieval", "chunks"],
-    ["chunks_retrieved"],
-    ["chunk_count"],
-    ["retrieved_chunks"],
-    ["context_chunks"]
-  ])
-
-  const sourceCountFromGeneration = getNumericField(generationInfo, [
-    ["retrieval", "source_count"],
-    ["retrieval", "sources_used"],
-    ["source_count"],
-    ["sources_used"]
-  ])
-
-  const avgScoreFromGeneration = getNumericField(generationInfo, [
-    ["retrieval", "avg_relevance_score"],
-    ["retrieval", "average_relevance_score"],
-    ["avg_relevance_score"],
-    ["average_relevance_score"],
-    ["relevance_score"]
-  ])
-  const faithfulnessScore = getNumericField(generationInfo, [
-    ["faithfulness", "score"],
-    ["faithfulness", "faithfulness_score"],
-    ["faithfulness", "overall_score"],
-    ["faithfulness_score"],
-    ["claim_verification", "faithfulness_score"],
-    ["retrieval", "faithfulness_score"],
-    ["confidence"],
-    ["confidence_score"]
-  ])
-  const promptTokensFromGeneration = getNumericField(generationInfo, [
-    ["usage", "prompt_tokens"],
-    ["usage", "input_tokens"],
-    ["prompt_tokens"],
-    ["input_tokens"],
-    ["prompt_eval_count"]
-  ])
-  const completionTokensFromGeneration = getNumericField(generationInfo, [
-    ["usage", "completion_tokens"],
-    ["usage", "output_tokens"],
-    ["completion_tokens"],
-    ["output_tokens"],
-    ["eval_count"]
-  ])
-  const totalTokensFromGeneration = getNumericField(generationInfo, [
-    ["usage", "total_tokens"],
-    ["total_tokens"],
-    ["total_token_count"]
-  ])
-  const costUsdFromGeneration = getNumericField(generationInfo, [
-    ["usage", "total_cost_usd"],
-    ["usage", "estimated_cost_usd"],
-    ["usage", "cost_usd"],
-    ["pricing", "total_cost_usd"],
-    ["pricing", "estimated_cost_usd"],
-    ["pricing", "cost_usd"],
-    ["total_cost_usd"],
-    ["estimated_cost_usd"],
-    ["cost_usd"],
-    ["total_cost"],
-    ["estimated_cost"]
-  ])
-
-  const uniqueSourceKeys = new Set<string>()
-  const uniqueSourceLabels = new Set<string>()
-  for (const source of sources) {
-    if (!isRecord(source)) continue
-    const sourceLabel = extractSourceLabel(source)
-    if (sourceLabel) {
-      uniqueSourceLabels.add(sourceLabel)
-    }
-
-    const mediaId = extractCitationMediaId(source)
-    if (mediaId !== null) {
-      uniqueSourceKeys.add(`media:${mediaId}`)
-    } else {
-      const metadata = isRecord(source.metadata) ? source.metadata : null
-      const label = normalizeText(
-        source.name || source.url || metadata?.source || metadata?.title
-      )
-      if (label) {
-        uniqueSourceKeys.add(`label:${label}`)
-      }
-    }
-  }
-
-  const sourceScores = sources
-    .map((source) => extractSourceScore(source))
-    .filter((score): score is number => score !== null)
-
-  const averageScoreFromSources =
-    sourceScores.length > 0
-      ? sourceScores.reduce((sum, score) => sum + score, 0) /
-        sourceScores.length
-      : null
-
-  const diagnostics: RetrievalDiagnostics = {
-    chunkCount:
-      chunkCountFromGeneration !== null
-        ? Math.max(0, Math.round(chunkCountFromGeneration))
-        : sources.length > 0
-          ? sources.length
-          : null,
-    sourceCount:
-      sourceCountFromGeneration !== null
-        ? Math.max(0, Math.round(sourceCountFromGeneration))
-        : uniqueSourceKeys.size > 0
-          ? uniqueSourceKeys.size
-          : null,
-    sourceLabels: Array.from(uniqueSourceLabels),
-    averageRelevanceScore:
-      avgScoreFromGeneration !== null
-        ? avgScoreFromGeneration
-        : averageScoreFromSources,
-    faithfulnessScore,
-    promptTokens:
-      promptTokensFromGeneration !== null
-        ? Math.max(0, Math.round(promptTokensFromGeneration))
-        : null,
-    completionTokens:
-      completionTokensFromGeneration !== null
-        ? Math.max(0, Math.round(completionTokensFromGeneration))
-        : null,
-    totalTokens:
-      totalTokensFromGeneration !== null
-        ? Math.max(0, Math.round(totalTokensFromGeneration))
-        : promptTokensFromGeneration !== null ||
-            completionTokensFromGeneration !== null
-          ? Math.max(
-              0,
-              Math.round(
-                (promptTokensFromGeneration || 0) +
-                  (completionTokensFromGeneration || 0)
-              )
-            )
-          : null,
-    costUsd:
-      costUsdFromGeneration !== null && costUsdFromGeneration >= 0
-        ? costUsdFromGeneration
-        : null,
-    confidenceLevel: getConfidenceLevel(
-      faithfulnessScore !== null
-        ? faithfulnessScore
-        : avgScoreFromGeneration !== null
-          ? avgScoreFromGeneration
-          : averageScoreFromSources
-    )
-  }
-
-  if (
-    diagnostics.chunkCount === null &&
-    diagnostics.sourceCount === null &&
-    diagnostics.averageRelevanceScore === null &&
-    diagnostics.faithfulnessScore === null &&
-    diagnostics.sourceLabels.length === 0 &&
-    diagnostics.totalTokens === null &&
-    diagnostics.costUsd === null
-  ) {
-    return null
-  }
-
-  return diagnostics
 }
 
 /**
@@ -1550,8 +1245,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace)
 
   // Model settings for model badge (UX-009)
-  const selectedModel = useStoreMessageOption((s) => s.selectedModel)
-  const setSelectedModel = useStoreMessageOption((s) => s.setSelectedModel)
   const chatScope = React.useMemo<ChatScope | undefined>(
     () =>
       workspaceId
@@ -1565,6 +1258,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   // Message option hook
   const {
+    selectedModel,
+    setSelectedModel,
     messages,
     setMessages,
     history,
@@ -1582,7 +1277,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     historyId,
     setHistoryId,
     serverChatId,
-    setServerChatId
+    setServerChatId,
+    selectedModelIsLoading
   } = useMessageOption({ scope: chatScope, hydrateServerChat: true })
 
   // RAG state from store
@@ -1689,8 +1385,88 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   )
 
   // Smart scroll for chat messages
-  const { containerRef, isAutoScrollToBottom, autoScrollToBottom } =
-    useSmartScroll(messages, streaming, 120)
+  const {
+    containerRef,
+    isAutoScrollToBottom,
+    autoScrollToBottom,
+    hasUnseenMessages
+  } = useSmartScroll(messages, streaming, 120)
+
+  // Stage 3 (WP-04): windowed transcript rendering. Copies the proven
+  // Sidepanel/Chat/body.tsx useVirtualizer wiring (overscan 3,
+  // measureElement, stable getItemKey) onto the smart-scroll container, gated
+  // by the same >100-row threshold the web Playground's VirtualChatTimeline
+  // uses so short conversations keep plain flow layout. Stream
+  // stick-to-bottom behavior is preserved by useSmartScroll above (its
+  // messages-effect pins the container to the bottom during streaming, which
+  // slides the virtual window to the end index where the streaming row
+  // mounts).
+  const chatVirtualizationEnabled =
+    messages.length > CHAT_VIRTUALIZATION_MIN_MESSAGES
+  const chatRowVirtualizer = useVirtualizer({
+    count: messages.length,
+    enabled: chatVirtualizationEnabled,
+    getScrollElement: () => containerRef.current,
+    getItemKey: (index) => stableMessageId(messages[index]),
+    estimateSize: () => 120,
+    overscan: 3,
+    measureElement: (el) => el?.getBoundingClientRect().height || 120
+  })
+  const chatVirtualRows = chatVirtualizationEnabled
+    ? chatRowVirtualizer.getVirtualItems()
+    : null
+  // Flow-layout rows for the non-virtualized path share the virtual row
+  // shape so the transcript body below has a single render loop.
+  const chatRenderRows: Array<{
+    index: number
+    key: React.Key
+    start: number
+  }> =
+    chatVirtualRows ??
+    messages.map((message, index) => ({
+      index,
+      key: stableMessageId(message),
+      start: 0
+    }))
+
+  // Per-message retrieval diagnostics cache (WP-04): buildRetrievalDiagnostics
+  // walks every source object per bot row. Memoizing by message id and
+  // sources/generationInfo identity keeps streaming flushes (which replace
+  // only the last message object, Stage 1) from recomputing diagnostics for
+  // every older bot row. Cleared when the workspace session changes (see the
+  // conversationInstanceId effect below).
+  const retrievalDiagnosticsCacheRef = React.useRef(
+    new Map<
+      string,
+      {
+        sources: unknown
+        generationInfo: unknown
+        diagnostics: RetrievalDiagnostics | null
+      }
+    >()
+  )
+  const getRowRetrievalDiagnostics = React.useCallback((message: Message) => {
+    if (!message.isBot) return null
+    const key = stableMessageId(message)
+    const cached = retrievalDiagnosticsCacheRef.current.get(key)
+    if (
+      cached &&
+      cached.sources === message.sources &&
+      cached.generationInfo === message.generationInfo
+    ) {
+      return cached.diagnostics
+    }
+    const diagnostics = buildRetrievalDiagnostics(
+      message.sources,
+      message.generationInfo
+    )
+    retrievalDiagnosticsCacheRef.current.set(key, {
+      sources: message.sources,
+      generationInfo: message.generationInfo,
+      diagnostics
+    })
+    return diagnostics
+  }, [])
 
   const sourceScopeSources = useSelectedSourceScopeSources()
   const queryableSelectedSources = React.useMemo(
@@ -2201,9 +1977,33 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     setStreaming
   ])
 
+  // Chat search focus targets may point at a row outside the virtualized
+  // window (WP-04): scroll its index into range first. The range change
+  // re-mounts the row and re-runs this effect (chatFocusTargetInRange flips),
+  // which then reveals and highlights the mounted element as before.
+  const chatFocusTargetIndex = React.useMemo(() => {
+    const messageId = chatFocusTarget?.messageId
+    if (!messageId) return -1
+    return messages.findIndex(
+      (message, index) =>
+        getWorkspaceChatSearchMessageId(message, index) === messageId
+    )
+  }, [chatFocusTarget?.messageId, messages])
+  const chatFocusTargetInRange =
+    !chatVirtualizationEnabled ||
+    (chatVirtualRows?.some((row) => row.index === chatFocusTargetIndex) ??
+      false)
+
   React.useEffect(() => {
     const targetMessageId = chatFocusTarget?.messageId
     if (!targetMessageId) return
+
+    if (chatFocusTargetIndex >= 0 && !chatFocusTargetInRange) {
+      chatRowVirtualizer.scrollToIndex(chatFocusTargetIndex, {
+        align: "center"
+      })
+      return
+    }
 
     const targetElement = chatMessageItemRefs.current[targetMessageId]
     if (!targetElement) {
@@ -2226,12 +2026,150 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       window.clearTimeout(revealTimer)
       window.clearTimeout(highlightTimer)
     }
-  }, [chatFocusTarget, clearChatFocusTarget])
+  }, [
+    chatFocusTarget,
+    chatFocusTargetIndex,
+    chatFocusTargetInRange,
+    chatRowVirtualizer,
+    clearChatFocusTarget
+  ])
+
+  const captureRequests = React.useRef(new Set<AbortController>())
+  React.useEffect(
+    () => () => {
+      for (const controller of captureRequests.current) controller.abort()
+      captureRequests.current.clear()
+    },
+    [workspaceId, workspaceChatReferenceId]
+  )
+
+  const withCurrentCaptureHeads = async (
+    action: (
+      options?: ScopedRequestOptions,
+      assertCurrent?: () => void,
+      controller?: AbortController
+    ) => Promise<boolean>
+  ): Promise<boolean> => {
+    const captures = queryableSelectedSources.filter((source) => source.webCapture)
+    if (!captures.length) return action()
+    const controller = new AbortController()
+    captureRequests.current.add(controller)
+    let scope: Awaited<ReturnType<typeof loadServicePromptSnapshot>> | undefined
+    const initial = useWorkspaceStore.getState()
+    const effectiveSelection = (
+      state: ReturnType<typeof useWorkspaceStore.getState>
+    ) => {
+      const ids = new Set([
+        ...state.selectedSourceIds,
+        ...collectSelectedFolderSourceIds(
+          state.selectedSourceFolderIds ?? [],
+          state.sourceFolders ?? [],
+          state.sourceFolderMemberships ?? []
+        )
+      ])
+      return JSON.stringify(
+        state.sources
+          .filter((source) => ids.has(source.id) && isQueryableWorkspaceSource(source, statusGuardrailsEnabled))
+          .map((source) => source.id)
+      )
+    }
+    const initialEffectiveSelection = effectiveSelection(initial)
+    const retire = () => controller.abort()
+    const selection = JSON.stringify([
+      initial.selectedSourceIds,
+      initial.selectedSourceFolderIds
+    ])
+    const assertCurrent = () => {
+      const current = useWorkspaceStore.getState()
+      if (
+        controller.signal.aborted ||
+        scope?.scopeSignal.aborted ||
+        scope?.scopeInvalidatedSignal.aborted ||
+        effectiveSelection(current) !== initialEffectiveSelection ||
+        current.workspaceId !== workspaceId ||
+        current.workspaceChatReferenceId !== initial.workspaceChatReferenceId ||
+        JSON.stringify([
+          current.selectedSourceIds,
+          current.selectedSourceFolderIds
+        ]) !== selection ||
+        captures.some(
+          (source) =>
+            !current.sources.some(
+              (item) =>
+                item.id === source.id &&
+                item.mediaId === source.mediaId &&
+                item.webCapture === source.webCapture
+            )
+        )
+      )
+        throw new Error(
+          "Research source selection or account changed. Retry your question."
+        )
+    }
+    const stop = useWorkspaceStore.subscribe(() => {
+      try {
+        assertCurrent()
+      } catch {
+        controller.abort()
+      }
+    })
+    try {
+      scope = await loadServicePromptSnapshot([], { signal: controller.signal })
+      scope.scopeSignal.addEventListener("abort", retire, { once: true })
+      assertCurrent()
+      const options = {
+        requestScope: scope.requestScope,
+        signal: scope.scopeSignal
+      }
+      for (const source of captures) {
+        await assertWebCaptureHeadCurrent(source, workspaceId!, options)
+        assertCurrent()
+      }
+      return await action(options, assertCurrent, controller)
+    } catch (reason) {
+      if (reason instanceof WebCaptureNotCurrentError) {
+        try {
+          assertCurrent()
+        } catch {
+          return false
+        }
+        const source = captures.find((item) => item.id === reason.sourceId)
+        if (source) {
+          // Publish while current, before the error setter retires selection.
+          setSubmitError("Snapshot changed outside refresh")
+          useWorkspaceStore
+            .getState()
+            .setSourceStatusById(
+              source.id,
+              "error",
+              "Snapshot changed outside refresh",
+              undefined,
+              { statusReason: "capture_head_changed", retryEligible: false }
+            )
+          return false
+        }
+      }
+      if (!controller.signal.aborted)
+        setSubmitError(
+          reason instanceof Error
+            ? reason.message
+            : "Snapshot changed outside refresh"
+        )
+      return false
+    } finally {
+      scope?.scopeSignal.removeEventListener("abort", retire)
+      scope?.release()
+      stop()
+      captureRequests.current.delete(controller)
+    }
+  }
 
   const buildFullSourceContextPrompt = React.useCallback(
     async (
       message: string,
-      responsePresetInstruction?: string | null
+      responsePresetInstruction?: string | null,
+      options?: ScopedRequestOptions,
+      assertCurrent: () => void = () => {}
     ): Promise<string> => {
       const messageWithResponsePreset = responsePresetInstruction
         ? `${responsePresetInstruction}\n\nUser question: ${message}`
@@ -2246,11 +2184,41 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       try {
         const detailResults = await Promise.allSettled(
           queryableSelectedSources.map(async (source) => {
+            if (source.webCapture) {
+              if (!options) throw new Error("Capture scope unavailable")
+              await assertWebCaptureHeadCurrent(source, workspaceId!, options)
+              assertCurrent()
+              const version = await tldwClient.getMediaDocumentVersion(
+                source.mediaId,
+                source.webCapture.versionNumber,
+                options
+              )
+              assertCurrent()
+              if (
+                version.uuid !== source.webCapture.versionUuid ||
+                version.version_number !== source.webCapture.versionNumber ||
+                typeof version.content !== "string"
+              )
+                throw new WebCaptureNotCurrentError(
+                  "Snapshot changed outside refresh",
+                  source.id
+                )
+              const digest = await sha256Text(version.content)
+              assertCurrent()
+              if (digest !== source.webCapture.contentSha256)
+                throw new WebCaptureNotCurrentError(
+                  "Snapshot changed outside refresh",
+                  source.id
+                )
+              return { source, fullText: version.content }
+            }
             const detail = await tldwClient.getMediaDetails(source.mediaId, {
               include_content: true,
               include_versions: false,
-              include_version_content: false
+              include_version_content: false,
+              ...options
             })
+            assertCurrent()
             const fullText = extractSourceFullText(detail)
             return {
               source,
@@ -2259,6 +2227,13 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           })
         )
 
+        assertCurrent()
+        const captureFailure = detailResults.find(
+          (result, index) =>
+            result.status === "rejected" &&
+            queryableSelectedSources[index].webCapture
+        )
+        if (captureFailure?.status === "rejected") throw captureFailure.reason
         const resolvedSourceContexts: Array<{
           source: WorkspaceSource
           fullText: string
@@ -2324,7 +2299,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           "",
           `${t("playground:chat.fullSourceContextQuestionLabel", "User question")}: ${message}`
         ].join("\n")
-      } catch {
+      } catch (reason) {
+        assertCurrent()
+        if (queryableSelectedSources.some((source) => source.webCapture))
+          throw reason
         messageApi.warning(
           t(
             "playground:chat.fullSourceContextFailed",
@@ -2336,7 +2314,13 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         setPreparingSourceContext(false)
       }
     },
-    [includeFullSourceContents, messageApi, queryableSelectedSources, t]
+    [
+      includeFullSourceContents,
+      messageApi,
+      queryableSelectedSources,
+      t,
+      workspaceId
+    ]
   )
 
   const buildResponsePresetInstruction = React.useCallback(() => {
@@ -2427,40 +2411,61 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     }
 
     setSubmitError(null)
-    try {
-      const responsePresetInstruction = buildResponsePresetInstruction()
-      const preparedMessage = await buildFullSourceContextPrompt(
-        message,
-        responsePresetInstruction
-      )
-      const submitResult = await onSubmit({ message: preparedMessage, image: "" })
-      if (
-        submitResult &&
-        typeof submitResult === "object" &&
-        "status" in submitResult &&
-        (submitResult as { status?: unknown }).status !== "submitted"
-      ) {
-        return false
-      }
-      const activeScope = temporarySourceScopeRef.current
-      if (activeScope) {
-        const selectedIds = selectedSourceIdsRef.current
-        const isStillScopedToDroppedSource =
-          selectedIds.length === 1 && selectedIds[0] === activeScope.sourceId
-        if (isStillScopedToDroppedSource) {
-          restoreTemporaryScope("auto", activeScope)
+    return withCurrentCaptureHeads(
+      async (options, assertCurrent = () => {}, controller) => {
+        try {
+          const responsePresetInstruction = buildResponsePresetInstruction()
+          const preparedMessage = await buildFullSourceContextPrompt(
+            message,
+            responsePresetInstruction,
+            options,
+            assertCurrent
+          )
+          if (options) {
+            for (const source of queryableSelectedSources.filter(
+              (item) => item.webCapture
+            )) {
+              await assertWebCaptureHeadCurrent(source, workspaceId!, options)
+              assertCurrent()
+            }
+          }
+          assertCurrent()
+          const submitResult = await onSubmit({
+            message: preparedMessage,
+            image: "",
+            ...(controller ? { controller, assertCurrent } : {})
+          })
+          if (
+            submitResult &&
+            typeof submitResult === "object" &&
+            "status" in submitResult &&
+            (submitResult as { status?: unknown }).status !== "submitted"
+          ) {
+            return false
+          }
+          const activeScope = temporarySourceScopeRef.current
+          if (activeScope) {
+            const selectedIds = selectedSourceIdsRef.current
+            const isStillScopedToDroppedSource =
+              selectedIds.length === 1 &&
+              selectedIds[0] === activeScope.sourceId
+            if (isStillScopedToDroppedSource) {
+              restoreTemporaryScope("auto", activeScope)
+            }
+          }
+          return true
+        } catch (reason) {
+          if (options) throw reason
+          setSubmitError(
+            t(
+              "playground:chat.connectionError",
+              "Unable to reach server. Please check your connection and retry."
+            )
+          )
+          return false
         }
       }
-      return true
-    } catch {
-      setSubmitError(
-        t(
-          "playground:chat.connectionError",
-          "Unable to reach server. Please check your connection and retry."
-        )
-      )
-      return false
-    }
+    )
   }
 
   React.useEffect(() => {
@@ -2666,7 +2671,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         (_entry, index) => index !== messageIndex
       )
 
-      await deleteMessage(messageIndex)
+      const accepted = await deleteMessage(messageIndex)
+      if (accepted === false) return false
+      // A canonical server tombstone cannot be undone by restoring browser rows.
+      if (previousServerChatId) return true
 
       const undoHandle = scheduleWorkspaceUndoAction({
         apply: () => {
@@ -2933,10 +2941,24 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       isBot: boolean
       message: string
       name?: string
+      sources?: unknown[]
     }) => {
       const snippet = String(msg.message || "").trim()
       if (!snippet) return
+      const citedMediaIds = new Set(
+        (msg.sources || []).map(extractCitationMediaId)
+      )
+      const citedCaptures = sources.filter(
+        (source) => source.webCapture && citedMediaIds.has(source.mediaId)
+      )
+      const provenance = citedCaptures.length
+        ? appendCapturedNoteProvenance(
+            useWorkspaceStore.getState().currentNote,
+            citedCaptures
+          )
+        : null
       captureToCurrentNote({
+        ...(provenance ? { provenance } : {}),
         title: buildCapturedMessageTitle(
           msg.isBot,
           snippet,
@@ -2947,7 +2969,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         mode: "append"
       })
     },
-    [captureToCurrentNote, t]
+    [captureToCurrentNote, sources, t]
   )
 
   // Share conversation handler (UX-044)
@@ -3068,7 +3090,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       currentModel: selectedModel,
       models: composerModels,
       preferredModelIds: favoriteModels,
-      isCurrentModelHydrating: false,
+      isCurrentModelHydrating: selectedModelIsLoading,
       arePreferencesHydrating: favoriteModelsIsLoading
     })
     if (nextModel && typeof setSelectedModel === "function") {
@@ -3079,6 +3101,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     favoriteModels,
     favoriteModelsIsLoading,
     selectedModel,
+    selectedModelIsLoading,
     setSelectedModel
   ])
 
@@ -3097,16 +3120,19 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         getDesignSystemState("degraded")?.label ?? DEGRADED_STATE_LABEL
       )
     }
-    return t(
-      "playground:composer.providerStatusReady",
-      getDesignSystemState("ready")?.label ?? READY_STATE_LABEL
-    )
+    return t("playground:composer.serverStatusConnected", "Server connected")
   }, [connectionUxState, isConnectionReady, t])
   const connectionStatusWarning =
     !isConnectionReady || connectionUxState === "connected_degraded"
 
   // Conversation instance ID (use workspace ID or fallback)
   const conversationInstanceId = workspaceSessionId
+  // The per-message diagnostics cache is conversation-scoped: clear it when
+  // the workspace session changes so ids from a previous conversation cannot
+  // pin stale entries.
+  React.useEffect(() => {
+    retrievalDiagnosticsCacheRef.current.clear()
+  }, [conversationInstanceId])
   const hasConnectionFailure =
     connectionState.phase === ConnectionPhase.ERROR &&
     !connectionState.isChecking
@@ -3174,15 +3200,22 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       {/* Context indicator */}
       <ChatContextIndicator statusGuardrailsEnabled={statusGuardrailsEnabled} />
 
-      {/* Connection banner */}
+      {/* Context indicator */}
       {showConnectionBanner && (
         <div className="border-b border-error/30 bg-error/5 px-4 py-2">
           <div className={`mx-auto flex w-full ${contentMaxWidthClass} items-center justify-between gap-3`}>
             <div className="flex min-w-0 items-center gap-2 text-sm text-error">
               <AlertCircle className="h-4 w-4 shrink-0" />
               <span className="truncate">
-                {t("playground:chat.connectionBanner", "Unable to reach server")}
-                : {connectionDescription}
+                {submitError === "Snapshot changed outside refresh"
+                  ? t(
+                      "playground:sources.snapshotChanged",
+                      "Snapshot changed outside refresh",
+                    )
+                  : `${t(
+                      "playground:chat.connectionBanner",
+                      "Unable to reach server",
+                    )}: ${connectionDescription}`}
               </span>
             </div>
             <button
@@ -3199,7 +3232,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         </div>
       )}
 
-      {/* Chat controls */}
+      {/* Context indicator */}
       <div className="border-b border-border bg-surface px-4 py-2">
         <div className={`mx-auto flex w-full ${contentMaxWidthClass} items-center justify-end gap-1.5`}>
           <Tooltip
@@ -3327,7 +3360,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         </div>
       )}
 
-      {/* Chat messages area */}
+      {/* Context indicator */}
       <div className="relative flex min-h-0 flex-1 flex-col">
         <div
           ref={containerRef}
@@ -3339,10 +3372,23 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         >
           <div className={`mx-auto w-full ${contentMaxWidthClass} pb-6`}>
             {hasMessages ? (
-              <div className="space-y-4 py-4">
-                {messages.map((msg, idx) => {
+              <div className="py-4">
+                <div
+                  style={
+                    chatVirtualRows
+                      ? {
+                          height: chatRowVirtualizer.getTotalSize(),
+                          width: "100%",
+                          position: "relative"
+                        }
+                      : undefined
+                  }
+                >
+                {chatRenderRows.map((virtualRow) => {
+                  const idx = virtualRow.index
+                  const msg = messages[idx]
                   const diagnostics = msg.isBot
-                    ? buildRetrievalDiagnostics(msg.sources, msg.generationInfo)
+                    ? getRowRetrievalDiagnostics(msg)
                     : null
                   const chatSearchMessageId = getWorkspaceChatSearchMessageId(
                     msg,
@@ -3353,15 +3399,35 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
                   return (
                     <div
-                      key={msg.id || `msg-${idx}`}
-                      data-chat-message-id={chatSearchMessageId}
-                      ref={(element) => {
-                        chatMessageItemRefs.current[chatSearchMessageId] = element
-                      }}
-                      className={`space-y-2 rounded-md transition ${
-                        isHighlighted ? "ring-2 ring-primary/40 bg-primary/5 p-1.5" : ""
-                      }`}
+                      key={virtualRow.key}
+                      ref={
+                        chatVirtualRows
+                          ? chatRowVirtualizer.measureElement
+                          : undefined
+                      }
+                      data-index={idx}
+                      style={
+                        chatVirtualRows
+                          ? {
+                              position: "absolute",
+                              top: 0,
+                              left: 0,
+                              transform: `translateY(${virtualRow.start}px)`,
+                              width: "100%"
+                            }
+                          : undefined
+                      }
+                      className="pb-4"
                     >
+                      <div
+                        data-chat-message-id={chatSearchMessageId}
+                        ref={(element) => {
+                          chatMessageItemRefs.current[chatSearchMessageId] = element
+                        }}
+                        className={`space-y-2 rounded-md transition ${
+                          isHighlighted ? "ring-2 ring-primary/40 bg-primary/5 p-1.5" : ""
+                        }`}
+                      >
                       <PlaygroundMessage
                         isBot={msg.isBot}
                         message={msg.message}
@@ -3412,18 +3478,57 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                           handleSaveMessageToNotes({
                             isBot: msg.isBot,
                             message: msg.message,
-                            name: msg.name
+                            name: msg.name,
+                            sources: msg.sources
                           })
                         }
                         onRegenerate={
                           msg.isBot && idx === messages.length - 1
-                            ? () => regenerateLastMessage()
+                            ? () =>
+                                void withCurrentCaptureHeads(
+                                  async (_options, assertCurrent, controller) => {
+                                    assertCurrent?.()
+                                    await regenerateLastMessage({
+                                      controller,
+                                      assertCurrent
+                                    })
+                                    return true
+                                  }
+                                )
                             : () => {}
                         }
                         onDeleteMessage={() => handleDeleteMessageWithUndo(idx)}
                         suppressDeleteSuccessToast
-                        onEditFormSubmit={(value: string, isSend: boolean) => {
-                          editMessage(idx, value, !msg.isBot, isSend)
+                        onEditFormSubmit={(
+                          value: string,
+                          isSend: boolean,
+                          editIsCurrent?: () => boolean,
+                          editOriginIsCurrent?: () => boolean
+                        ) => {
+                          if (isSend)
+                            return withCurrentCaptureHeads(
+                              async (_options, assertCurrent) => {
+                                assertCurrent?.()
+                                return isChatSubmitSuccess(
+                                  await editMessage(
+                                    idx,
+                                    value,
+                                    !msg.isBot,
+                                    isSend,
+                                    editIsCurrent,
+                                    editOriginIsCurrent
+                                  )
+                                )
+                              }
+                            )
+                          return editMessage(
+                            idx,
+                            value,
+                            !msg.isBot,
+                            isSend,
+                            editIsCurrent,
+                            editOriginIsCurrent
+                          )
                         }}
                         hideEditAndRegenerate={!msg.isBot && idx !== messages.length - 1}
                         hideContinue={true}
@@ -3434,9 +3539,11 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                           <RetrievalDiagnosticsPanel diagnostics={diagnostics} />
                         </div>
                       )}
+                      </div>
                     </div>
                   )
                 })}
+                </div>
               </div>
             ) : (
               <div className="flex min-h-full flex-col justify-end">
@@ -3458,30 +3565,18 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           </div>
         </div>
 
-        {/* Scroll to bottom button */}
+        {/* Horizontally scrollable source tags */}
         {!isAutoScrollToBottom && hasMessages && (
-          <div className="pointer-events-none absolute bottom-24 left-0 right-0 flex justify-center">
-            <button
-              onClick={() => autoScrollToBottom()}
-              aria-label={t(
-                "playground:composer.scrollToLatest",
-                "Scroll to latest messages"
-              )}
-              title={
-                t(
-                  "playground:composer.scrollToLatest",
-                  "Scroll to latest messages"
-                ) as string
-              }
-              className="pointer-events-auto rounded-full border border-border bg-surface p-2 text-text-subtle shadow-card transition-colors hover:bg-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            >
-              <ChevronDown className="size-4 text-text-subtle" aria-hidden="true" />
-            </button>
-          </div>
+          <ScrollToLatestButton
+            onClick={() => autoScrollToBottom()}
+            replyInProgress={streaming}
+            hasUnseenMessages={hasUnseenMessages}
+            className="absolute bottom-24 right-4"
+          />
         )}
       </div>
 
-      {/* Chat input */}
+      {/* Context indicator */}
       <div
         data-testid="chat-drop-zone"
         data-drop-active={dropZoneActive ? "true" : "false"}

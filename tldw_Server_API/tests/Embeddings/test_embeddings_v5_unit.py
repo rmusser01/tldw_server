@@ -1181,9 +1181,11 @@ def test_adapter_builder_selects_endpoint_atomically_with_stable_precedence(
 @pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["huggingface", "google"])
+@pytest.mark.parametrize("native_flag", [None, "0", "false"])
 async def test_disabled_embedding_native_adapter_falls_back_to_legacy(
     monkeypatch,
     provider,
+    native_flag,
 ):
     """Opt-in adapters that are disabled remain a clean legacy fallback signal."""
     import tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced as mod
@@ -1204,8 +1206,23 @@ async def test_disabled_embedding_native_adapter_falls_back_to_legacy(
             return adapters[selected]
 
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
-    monkeypatch.delenv("LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE", raising=False)
-    monkeypatch.delenv("LLM_EMBEDDINGS_NATIVE_HTTP_HUGGINGFACE", raising=False)
+    for flag in (
+        "LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE",
+        "LLM_EMBEDDINGS_NATIVE_HTTP_HUGGINGFACE",
+    ):
+        if native_flag is None:
+            monkeypatch.delenv(flag, raising=False)
+        else:
+            monkeypatch.setenv(flag, native_flag)
+    native_client = MagicMock(side_effect=AssertionError("Unexpected native HTTP dispatch"))
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter.create_client",
+        native_client,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.LLM_Calls.providers.huggingface_embeddings_adapter.create_client",
+        native_client,
+    )
     monkeypatch.setattr(mod, "get_embeddings_registry", lambda: _Registry())
     credentials = mod.ResolvedByokCredentials(
         provider=provider,
@@ -1228,6 +1245,7 @@ async def test_disabled_embedding_native_adapter_falls_back_to_legacy(
         dimensions=None,
         credentials=credentials,
     ) is None
+    native_client.assert_not_called()
 
 
 @pytest.mark.unit

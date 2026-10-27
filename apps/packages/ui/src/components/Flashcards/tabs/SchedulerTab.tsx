@@ -15,6 +15,7 @@ import { DeckStudyDefaultsFields } from "../components/DeckStudyDefaultsFields"
 import type { Deck } from "@/services/flashcards"
 import type { SchedulerSettingsDraft } from "../utils/scheduler-settings"
 import { createSchedulerDraft, formatSchedulerSummary } from "../utils/scheduler-settings"
+import { extractFlashcardsErrorStatus } from "../utils/error-taxonomy"
 
 const { Text, Title } = Typography
 
@@ -35,13 +36,6 @@ const matchesDeckQuery = (deck: Deck, query: string): boolean => {
   const haystack = `${deck.name} ${deck.description ?? ""}`.trim().toLowerCase()
   return haystack.includes(normalizedQuery)
 }
-
-const isVersionConflict = (error: unknown): boolean =>
-  typeof error === "object" &&
-  error !== null &&
-  "response" in error &&
-  typeof (error as { response?: { status?: unknown } }).response?.status === "number" &&
-  (error as { response?: { status?: number } }).response?.status === 409
 
 const cloneDraft = (draft: SchedulerSettingsDraft): SchedulerSettingsDraft => ({
   scheduler_type: draft.scheduler_type,
@@ -294,7 +288,7 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({
       })
       syncDraftFromDeck(updatedDeck, "saved")
     } catch (error: unknown) {
-      if (isVersionConflict(error)) {
+      if (extractFlashcardsErrorStatus(error) === 409) {
         const pendingDraft = cloneDraft(schedulerDraft.draft)
         const pendingReviewPromptSide = reviewPromptSide
 

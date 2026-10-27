@@ -1012,7 +1012,7 @@ test.describe("KnowledgeQA Workflow", () => {
       await assertNoCriticalErrors(diagnostics)
     })
 
-    test("should start new search with Cmd+K", async ({
+    test("should clear the question using the explicit search controls", async ({
       authedPage,
       serverInfo,
       diagnostics

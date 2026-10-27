@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendType, CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendType, CharactersRAGDB, InputError
 from tldw_Server_API.app.core.DB_Management.chacha.conversation_store import ConversationStore
 
 
@@ -25,6 +25,7 @@ _DELEGATED_CONVERSATION_METHODS = {
     "add_conversation",
     "upsert_conversation_from_sync",
     "tombstone_conversation_from_sync",
+    "tombstone_unsynced_conversation_from_sync",
     "get_conversation_by_id",
     "get_conversation_by_source_ref",
     "conversation_title_exists",
@@ -123,6 +124,65 @@ def test_conversation_store_sync_helpers_upsert_and_tombstone_include_deleted(db
     assert deleted is not None
     assert bool(deleted["deleted"]) is True
     assert deleted["version"] == 3
+
+
+def _tombstone_unsynced(db, conversation_id):
+    return db.tombstone_unsynced_conversation_from_sync(
+        conversation_id=conversation_id,
+        sync_client_id="conversation-store-user",
+        object_revision=1,
+        object_hash="sha256:tombstone",
+    )
+
+
+def test_unsynced_tombstone_of_a_chat_that_does_not_exist_changes_nothing(db):
+    db.add_conversation({"id": "neighbour", "character_id": None, "title": "Stays"})
+
+    assert _tombstone_unsynced(db, "never-existed") == "absent"
+
+    assert db.get_conversation_by_id("never-existed", include_deleted=True) is None
+    assert db.get_conversation_by_id("neighbour") is not None
+
+
+def test_unsynced_tombstone_deletes_a_chat_kept_outside_sync_and_replays(db):
+    db.add_conversation({"id": "outside-sync", "character_id": None, "title": "Copy"})
+    db.add_conversation({"id": "neighbour", "character_id": None, "title": "Stays"})
+
+    assert _tombstone_unsynced(db, "outside-sync") == "deleted"
+
+    assert db.get_conversation_by_id("outside-sync") is None
+    row = db.get_conversation_by_id("outside-sync", include_deleted=True)
+    assert (bool(row["deleted"]), row["version"], row["client_id"]) == (True, 1, "conversation-store-user")
+    assert db.get_conversation_by_id("neighbour") is not None
+    # A replay finds the chat already deleted and leaves it as it is.
+    assert _tombstone_unsynced(db, "outside-sync") == "deleted"
+
+
+def test_unsynced_tombstone_only_reaches_chats_the_projection_owner_holds(db):
+    with db.transaction() as conn:
+        conn.execute(
+            "INSERT INTO conversations (id, root_id, title, client_id) VALUES (?, ?, ?, ?)",
+            ("their-chat", "their-chat", "Theirs", "another-owner"),
+        )
+
+    assert _tombstone_unsynced(db, "their-chat") == "absent"
+
+    assert bool(db.get_conversation_by_id("their-chat", include_deleted=True)["deleted"]) is False
+
+
+def test_unsynced_tombstone_leaves_a_native_chat_sync_cannot_carry(db):
+    db.add_conversation({"id": "native-chat", "character_id": None, "title": "Native"})
+    with db.transaction() as conn:
+        conn.execute("UPDATE conversations SET native_bundle_json = ? WHERE id = ?", ("{}", "native-chat"))
+
+    assert _tombstone_unsynced(db, "native-chat") == "foreign"
+
+    assert db.get_conversation_by_id("native-chat") is not None
+
+
+def test_unsynced_tombstone_requires_a_chat_id(db):
+    with pytest.raises(InputError):
+        _tombstone_unsynced(db, "  ")
 
 
 def test_conversation_store_roundtrip_preserves_scope_and_settings(db):
@@ -332,6 +392,49 @@ def test_conversation_store_title_exists_uses_postgres_placeholders():
     assert "deleted = FALSE" in fake_db.backend.query
     assert "?" not in fake_db.backend.query
     assert fake_db.backend.params == ("Existing title", "postgres-client")
+
+
+@pytest.mark.parametrize(
+    ("assistant_kind", "assistant_id", "character_id", "expected"),
+    [
+        ("persona", "sync-v2", None, True),
+        ("Persona", " sync-v2 ", None, True),
+        ("persona", "sync-v2-custom", None, False),
+        ("persona", "SYNC-V2", None, False),
+        ("persona", "persona-gardener", None, False),
+        ("character", "sync-v2", None, False),
+        ("persona", "sync-v2", 1, False),
+        (None, None, None, False),
+    ],
+)
+def test_retired_sync_placeholder_is_only_the_exact_identity(db, assistant_kind, assistant_id, character_id, expected):
+    """Kind and id are read the way they would be stored; anything else is someone's real identity."""
+    assert (
+        db.conversation_store.is_retired_sync_placeholder_assistant(
+            assistant_kind=assistant_kind, assistant_id=assistant_id, character_id=character_id
+        )
+        is expected
+    )
+
+
+@pytest.mark.parametrize("deleted", [False, True])
+def test_retired_sync_placeholder_is_not_claimed_when_the_owner_has_that_persona(db, deleted):
+    db.create_persona_profile({"id": "sync-v2", "user_id": db.owner_user_id, "name": "Really mine", "deleted": deleted})
+
+    assert (
+        db.conversation_store.is_retired_sync_placeholder_assistant(
+            assistant_kind="persona", assistant_id="sync-v2", character_id=None
+        )
+        is False
+    )
+
+
+def test_retired_sync_placeholder_ignores_another_owners_persona(db):
+    db.create_persona_profile({"id": "sync-v2", "user_id": "another-owner", "name": "Theirs"})
+
+    assert db.conversation_store.is_retired_sync_placeholder_assistant(
+        assistant_kind="persona", assistant_id="sync-v2", character_id=None
+    )
 
 
 def test_conversation_store_preserves_assistant_identity_updates(db):

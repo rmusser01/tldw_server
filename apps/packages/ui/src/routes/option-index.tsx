@@ -126,6 +126,8 @@ const OptionIndex = () => {
     state: firstRunState,
     metadata: firstRunMetadata,
     loading: setupLoading,
+    connectionConfigured: setupConnectionConfigured,
+    connectionChecking: setupConnectionChecking,
     adoptState: adoptFirstRunState
   } = useSetupOnboarding()
   const [didHydrate, setDidHydrate] = React.useState(false)
@@ -278,8 +280,13 @@ const OptionIndex = () => {
   // route (#2871); a true first run (no connection) still gets the wizard.
   const wizardRequired = isSetupStatusRequiringWizard(setupStatus)
   const connectionReady = phase === ConnectionPhase.CONNECTED
+  const setupBannerRequired =
+    wizardRequired &&
+    !(firstRunMetadata?.auth_mode === "multi_user" &&
+      firstRunMetadata.setup_completed &&
+      !firstRunMetadata.setup_required)
 
-  if (wizardRequired && !connectionReady) {
+  if ((wizardRequired || (setupConnectionConfigured === false && !setupConnectionChecking)) && !connectionReady) {
     return (
       <OptionLayout hideHeader hideSidebar>
         <React.Suspense fallback={<PageAssistLoader />}>
@@ -355,7 +362,7 @@ const OptionIndex = () => {
           {handoffError}
         </p>
       ) : null}
-      {wizardRequired && connectionReady && !setupBannerDismissed ? (
+      {setupBannerRequired && connectionReady && !setupBannerDismissed ? (
         <div
           role="status"
           data-testid="resume-setup-banner"

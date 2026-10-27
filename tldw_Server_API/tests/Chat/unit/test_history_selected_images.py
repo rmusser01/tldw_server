@@ -154,3 +154,40 @@ async def test_native_preparation_rejects_unsupported_options_before_processing(
         ]}, "conv", processor)
     assert failure.value.status_code == 422
     processor.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_selected_invalid_placeholder_refuses_before_admission(selected_history):
+    build, db = selected_history
+    with pytest.raises(HTTPException) as failure:
+        await build(
+            image_item(
+                message="failure display",
+                images=[],
+                extra_metadata={"content_placeholder_reason": "invalid_content"},
+            )
+        )
+    assert failure.value.status_code == 409
+    db.append_selected_history_inputs.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_selected_unbacked_function_placeholder_refuses_before_admission(
+    selected_history,
+):
+    build, db = selected_history
+    with pytest.raises(HTTPException) as failure:
+        await build(
+            image_item(
+                message="[function_call]",
+                images=[],
+                extra_metadata={
+                    "sender_role": "tool",
+                    "tool_call_id": "call",
+                    "content_placeholder_reason": "function_call",
+                },
+            ),
+            role="tool",
+        )
+    assert failure.value.status_code == 409
+    db.append_selected_history_inputs.assert_not_called()

@@ -1,4 +1,8 @@
 import i18n from "i18next"
+import { getPrompt } from "@/services/application"
+import { humanMessageFormatter } from "@/utils/human-message"
+import { ChatTldw } from "@/models/ChatTldw"
+import { WEB_CLIPPER_ANALYZE_MESSAGE_TYPE } from "@/services/web-clipper/analyze-handoff"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { chatRagMethods } from "../domains/chat-rag"
 import { TldwChatService } from "../TldwChat"
@@ -35,6 +39,30 @@ describe("ordinary chat unavailable-model recovery through browser transport", (
   })
 
   afterEach(() => { vi.unstubAllGlobals() })
+
+  it("sends the composed Clipper analysis through the real preset adapter and SSE transport", async () => {
+    storage.set("copilotCustomPrompt", "An unrelated custom preset")
+    const clip = "Analyze captured Vega page. Inspection: 24 November 2026."
+    const requests: Record<string, unknown>[] = []
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      requests.push(JSON.parse(String(init.body)))
+      return new Response('data: {"choices":[{"delta":{"content":"24 November 2026"}}]}\n\ndata: [DONE]\n\n', {
+        status: 200, headers: { "content-type": "text/event-stream" }
+      })
+    }))
+    const template = await getPrompt(WEB_CLIPPER_ANALYZE_MESSAGE_TYPE)
+    const human = await humanMessageFormatter({
+      content: [{ type: "text", text: template.replace("{text}", clip) }],
+      model: "tldw:test-model", useOCR: false
+    })
+    const adapter = new ChatTldw({ model: "test-model", apiProvider: "llamacpp" })
+    let answer = ""
+    for await (const chunk of await adapter.stream([human])) answer += chunk
+    expect(answer).toBe("24 November 2026")
+    expect(requests).toMatchObject([{ model: "test-model", api_provider: "llamacpp", messages: [{ role: "user", content: clip }] }])
+    expect(await getPrompt("custom")).toBe("An unrelated custom preset")
+    expect(await getPrompt("unknown-action")).toBe("")
+  })
 
   it("renders actionable HTTP400 guidance and preserves request identity when retried", async () => {
     // Keep service wrapping, direct HTTP error parsing, SSE parsing and the
@@ -74,4 +102,31 @@ describe("ordinary chat unavailable-model recovery through browser transport", (
     })
     expect(requests[1].body.conversation_id).toBe("saved-chat")
   })
+
+  it("makes an oversized-image HTTP413 actionable through the real wrapped stream error", async () => {
+    const requests: Record<string, unknown>[] = []
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      requests.push(JSON.parse(String(init.body)))
+      return new Response(JSON.stringify({ detail: "Image at index 1 in message 0 too large (maximum 3145728 bytes)." }), {
+        status: 413, headers: { "content-type": "application/json" }
+      })
+    }))
+    let error: unknown
+    const content = [{ type: "text" as const, text: "Exact image question" },
+      { type: "image_url" as const, image_url: { url: "data:image/png;base64,synthetic-unit-input" } }]
+    try {
+      for await (const _token of new TldwChatService().streamMessage([{ role: "user", content }], {
+        model: "test-vision", apiProvider: "llama.cpp", clientMessageId: "one-image-question"
+      })) { /* consume real service/parser; only remote response is replaced */ }
+    } catch (caught) { error = caught }
+    expect(error).toMatchObject({ message: "Stream completion failed", cause: { status: 413 } })
+    expect(decodeChatErrorPayload(buildAssistantErrorContent("", error))).toMatchObject({
+      summary: "Your message is too large.",
+      hint: "Use a smaller image or shorten your message, then try again.",
+      detail: "Image at index 1 in message 0 too large (maximum 3145728 bytes)."
+    })
+    expect(requests).toHaveLength(1)
+    expect(requests[0].messages).toEqual([{ role: "user", content }])
+  })
+
 })

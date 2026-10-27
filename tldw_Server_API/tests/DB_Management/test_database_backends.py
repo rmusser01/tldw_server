@@ -9,12 +9,14 @@ import pytest
 import tempfile
 import os
 import threading
+import sqlite3
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from tldw_Server_API.app.core.DB_Management.backends import factory as factory_mod
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseBackend,
+    ConnectionPool,
     DatabaseConfig,
     BackendType,
     BackendFeatures,
@@ -46,6 +48,58 @@ class TestDatabaseBackends:
     def sqlite_config(self, temp_db_path):
         """Create SQLite configuration."""
         return DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=temp_db_path, client_id="test_client")
+
+    def test_sqlite_native_metadata_and_last_insert_id(self, sqlite_config):
+        from tldw_Server_API.app.core.DB_Management.media_db.runtime.rows import (
+            BackendCursorAdapter,
+        )
+
+        class _MetadataConnection(sqlite3.Connection):
+            last_cursor: sqlite3.Cursor | None = None
+
+            def cursor(self, factory=sqlite3.Cursor):
+                self.last_cursor = super().cursor(factory)
+                return self.last_cursor
+
+        backend = SQLiteBackend(sqlite_config)
+        connection = sqlite3.connect(":memory:", factory=_MetadataConnection, isolation_level=None)
+        assert isinstance(connection, _MetadataConnection)
+        connection.row_factory = sqlite3.Row
+        try:
+            assert backend.get_last_insert_id(connection=connection) == 0
+            backend.execute(
+                "CREATE TABLE adapter_contract (id INTEGER PRIMARY KEY, label TEXT)",
+                connection=connection,
+            )
+            inserted = backend.execute(
+                "INSERT INTO adapter_contract (label) VALUES (?)",
+                ("kept",),
+                connection=connection,
+            )
+            assert inserted.description is None
+            assert backend.get_last_insert_id(connection=connection) == inserted.lastrowid
+            result = backend.execute(
+                "SELECT label, id FROM adapter_contract",
+                connection=connection,
+            )
+            assert connection.last_cursor is not None
+            assert result.description is connection.last_cursor.description
+            assert isinstance(result.description, tuple)
+            assert [entry[0] for entry in result.description] == ["label", "id"]
+            assert all(len(entry) == 7 for entry in result.description)
+            adapter = BackendCursorAdapter(result)
+            assert adapter.description is result.description
+            row = adapter.fetchone()
+            assert row[0] == row["label"] == "kept"
+            assert row[1] == row["id"] == inserted.lastrowid
+            batch = backend.execute_many(
+                "INSERT INTO adapter_contract (label) VALUES (?)",
+                [("batch",)],
+                connection=connection,
+            )
+            assert batch.description is None
+        finally:
+            backend.disconnect(connection)
 
     def test_sqlite_backend_creation(self, sqlite_config):
         """Test that SQLite backend can be created."""
@@ -165,7 +219,7 @@ class TestDatabaseBackends:
         )
 
         backend = SQLiteBackend(sqlite_config)
-        results = [None, None]
+        results: list[ConnectionPool | None] = [None, None]
         errors: list[BaseException] = []
 
         def _get_pool(slot: int) -> None:
@@ -311,7 +365,8 @@ class TestDatabaseBackends:
 
     def test_backend_factory_invalid_type(self):
         """Test that factory raises error for invalid backend type."""
-        config = DatabaseConfig(backend_type="invalid_type", client_id="test")  # Invalid
+        config = DatabaseConfig(backend_type=BackendType.SQLITE, client_id="test")
+        object.__setattr__(config, "backend_type", "invalid_type")
 
         with pytest.raises(ValueError):
             BackendFactory.create_backend(config)
@@ -404,25 +459,23 @@ class TestDatabaseBackends:
         """SQLite transactions should take the write lock up front."""
         backend = SQLiteBackend(sqlite_config)
 
-        class _RecordingConnection:
-            def __init__(self):
-                self.in_transaction = False
+        class _RecordingConnection(sqlite3.Connection):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
                 self.statements: list[str] = []
 
-            def execute(self, sql):
+            def execute(self, sql, *args, **kwargs):
                 self.statements.append(sql)
-                normalized = sql.strip().upper()
-                if normalized.startswith("BEGIN"):
-                    self.in_transaction = True
-                elif normalized in {"COMMIT", "ROLLBACK"}:
-                    self.in_transaction = False
+                return super().execute(sql, *args, **kwargs)
 
-        conn = _RecordingConnection()
-
-        with backend.transaction(connection=conn):
-            pass
-
-        assert conn.statements[0] == "BEGIN IMMEDIATE"
+        conn = sqlite3.connect(":memory:", factory=_RecordingConnection)
+        assert isinstance(conn, _RecordingConnection)
+        try:
+            with backend.transaction(connection=conn):
+                pass
+            assert conn.statements[0] == "BEGIN IMMEDIATE"
+        finally:
+            conn.close()
 
 
 class TestPostgreSQLBackend:
@@ -438,6 +491,33 @@ class TestPostgreSQLBackend:
         # Attach a client_id for parity with other backends/tests
         pg_database_config.client_id = "test_pg"
         return pg_database_config
+
+    def test_postgresql_native_column_metadata_roundtrip(self, pg_config):
+        import psycopg
+        from psycopg.rows import dict_row
+
+        from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import (
+            PostgreSQLBackend,
+        )
+        from tldw_Server_API.app.core.DB_Management.media_db.runtime.rows import (
+            BackendCursorAdapter,
+        )
+
+        backend = PostgreSQLBackend(pg_config)
+        connection = backend.connect()
+        try:
+            assert connection.row_factory is dict_row
+            result = backend.execute("SELECT 7 AS native_value", connection=connection)
+            assert isinstance(result.description, list)
+            assert isinstance(result.description[0], psycopg.Column)
+            assert result.description[0][0] == "native_value"
+            adapter = BackendCursorAdapter(result)
+            assert adapter.description is result.description
+            assert adapter.description[0] is result.description[0]
+            row = adapter.fetchone()
+            assert row[0] == row["native_value"] == 7
+        finally:
+            backend.disconnect(connection)
 
     def test_postgresql_backend_creation(self, pg_config):
         """Test PostgreSQL backend creation."""
@@ -561,3 +641,73 @@ class TestPostgreSQLBackend:
             assert res.rows
         finally:
             backend.execute(f"DROP TABLE IF EXISTS {source_table}")
+
+
+@pytest.mark.parametrize("external", [False, True], ids=["owned-checkout", "external-checkout"])
+@pytest.mark.parametrize("cleanup_fails", [False, True], ids=["returned", "cleanup-propagates"])
+def test_postgresql_execute_failure_preserves_redaction_and_checkout_ownership(external, cleanup_fails):
+    from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import (
+        PostgreSQLBackend,
+    )
+
+    connection = MagicMock()
+    connection.cursor.return_value.execute.side_effect = RuntimeError("private source value")
+    pool = MagicMock()
+    pool.get_connection.return_value = connection
+    if cleanup_fails:
+        pool.return_connection.side_effect = ValueError("cleanup failure")
+    backend = PostgreSQLBackend(DatabaseConfig(backend_type=BackendType.POSTGRESQL))
+    backend._pool = pool
+    expected = ValueError if cleanup_fails and not external else DatabaseError
+    with pytest.raises(expected) as raised:
+        backend.execute("SELECT private_source", connection=connection if external else None)
+    if expected is DatabaseError:
+        assert str(raised.value) == "PostgreSQL query execution failed"
+        assert raised.value.__cause__ is None
+        assert raised.value.__context__ is None
+    else:
+        assert str(raised.value) == "cleanup failure"
+    if external:
+        pool.return_connection.assert_not_called()
+        connection.rollback.assert_not_called()
+    else:
+        pool.return_connection.assert_called_once_with(connection)
+        connection.rollback.assert_called_once_with()
+
+
+def test_sqlite_last_insert_id_preserves_empty_optional_scalar(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.DB_Management.backends.base import QueryResult
+
+    backend = SQLiteBackend(DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=str(tmp_path / "empty.db")))
+    monkeypatch.setattr(backend, "execute", lambda *_args, **_kwargs: QueryResult(rows=[], rowcount=0))
+    assert backend.get_last_insert_id() is None
+
+
+def test_chacha_cursor_wrapper_retains_native_metadata_in_operation(tmp_path):
+    from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (
+        chacha_operation,
+    )
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+        BackendCursorWrapper,
+        CharactersRAGDB,
+    )
+
+    db = CharactersRAGDB(tmp_path / "metadata-owner.db", client_id="metadata-owner")
+    try:
+        with chacha_operation(independent=True):
+            wrapper = BackendCursorWrapper(db, db.get_connection(), db.backend)
+            wrapper.execute("SELECT 7 AS native_value")
+            assert isinstance(wrapper.description, tuple)
+            assert wrapper._result is not None
+            assert wrapper.description is wrapper._result.description
+            assert wrapper._adapter is not None
+            assert wrapper._adapter.description is wrapper.description
+            assert wrapper.fetchone() == {"native_value": 7}
+            wrapper.execute("CREATE TEMP TABLE wrapper_contract (value INTEGER)")
+            assert wrapper.description is None
+            wrapper.executemany("INSERT INTO wrapper_contract VALUES (?)", [(1,), (2,)])
+            assert wrapper._result is not None
+            assert wrapper.description is wrapper._result.description is None
+            assert wrapper._adapter.description is None
+    finally:
+        db.close_all_connections()

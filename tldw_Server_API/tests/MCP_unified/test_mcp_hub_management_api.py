@@ -1826,22 +1826,25 @@ async def test_mcp_hub_refresh_rejects_non_operational_visible_servers_without_e
 
 @pytest.mark.unit
 async def test_mcp_hub_refresh_executor_initializes_server_before_module_lookup(monkeypatch) -> None:
-    class _RefreshModule:
-        async def execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-            return {"tool_name": tool_name, "arguments": arguments}
+    manager = _FakeExternalFederationManager({
+        "server_id": "docs", "reconciled_servers": 1, "refreshed_servers": 1,
+        "total_servers": 1, "virtual_tools": 1, "errors": {},
+    })
 
-        async def execute_with_circuit_breaker(self, operation: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    class _RefreshModule(_FakeExternalFederationModule):
+        async def execute_with_circuit_breaker(self, operation: Any, *args: Any, **kwargs: Any) -> Any:
             return await operation(*args, **kwargs)
 
-    class _ModuleRegistry:
+    class _ModuleRegistry(_FakeModuleRegistry):
         def __init__(self, server: "_McpServer") -> None:
+            super().__init__(_RefreshModule(manager))
             self.server = server
             self.lookup_before_initialize = False
 
         async def find_module_for_tool(self, tool_name: str) -> _RefreshModule:
             assert tool_name == "external.tools.refresh"
             self.lookup_before_initialize = not self.server.initialized
-            return _RefreshModule()
+            return self.module
 
     class _McpServer:
         def __init__(self) -> None:
@@ -1860,7 +1863,9 @@ async def test_mcp_hub_refresh_executor_initializes_server_before_module_lookup(
 
     assert server.initialize_calls == 1
     assert server.module_registry.lookup_before_initialize is False
-    assert result["arguments"] == {"server_id": "docs"}
+    assert result["server_id"] == "docs"  # nosec B101 - pytest behavioral oracle, not a runtime guard.
+    assert manager.calls == ["docs"]  # nosec B101 - pytest behavioral oracle, not a runtime guard.
+    assert server.module_registry.refresh_calls == ["external_federation"]  # nosec B101 - pytest behavioral oracle, not a runtime guard.
 
 
 @pytest.mark.unit

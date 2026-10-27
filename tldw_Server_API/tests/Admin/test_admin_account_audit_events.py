@@ -753,14 +753,16 @@ async def test_emit_admin_account_audit_event_raises_when_required_flush_fails(m
 
 @pytest.mark.asyncio
 async def test_required_admin_audit_is_persisted_before_return(monkeypatch) -> None:
-    flush_calls: list[bool] = []
+    order: list[str] = []
+    logged_events: list[dict] = []
 
     class _AuditService:
-        async def log_event(self, **_kwargs) -> None:
-            return None
+        async def log_event(self, **kwargs) -> None:
+            logged_events.append(kwargs)
+            order.append("log_event")
 
         async def flush(self, *, raise_on_failure: bool) -> None:
-            flush_calls.append(raise_on_failure)
+            order.append(f"flush:{raise_on_failure}")
 
     async def _fake_get_service(_actor_id):
         return _AuditService()
@@ -783,9 +785,76 @@ async def test_required_admin_audit_is_persisted_before_return(monkeypatch) -> N
             action="admin.impersonation.token.create",
             raise_on_failure=True,
         )
-        assert flush_calls == [True]
+        # The event must reach the audit service with the emitted fields and
+        # be persisted (log_event) before the mandatory flush runs.
+        assert order == ["log_event", "flush:True"]
+        assert len(logged_events) == 1
+        event = logged_events[0]
+        assert event["event_type"] == AuditEventType.AUTH_TOKEN_CREATED
+        assert event["resource_id"] == "42"
+        assert event["action"] == "admin.impersonation.token.create"
+        assert event["metadata"]["actor_id"] == 7
+        assert event["metadata"]["target_user_id"] == 42
     finally:
         await finish_after_commit_scope(token, committed=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("committed", [True, False])
+async def test_deferred_admin_audit_keeps_entry_time_metadata(
+    monkeypatch, committed: bool
+) -> None:
+    events: list[dict[str, object]] = []
+
+    class _AuditService:
+        async def log_event(self, **kwargs) -> None:
+            events.append(kwargs["metadata"])
+
+        async def flush(self, *, raise_on_failure: bool) -> None:
+            assert raise_on_failure is False
+
+    async def _fake_get_service(_actor_id):
+        return _AuditService()
+
+    monkeypatch.setattr(
+        admin_audit_service,
+        "get_or_create_audit_service_for_user_id_optional",
+        _fake_get_service,
+    )
+    metadata = {"reason": "Original support request", "requested_role": "viewer"}
+    token = begin_after_commit_scope()
+    try:
+        await admin_audit_service.emit_admin_account_audit_event(
+            actor_id=7,
+            target_user_id=42,
+            event_type=AuditEventType.USER_UPDATED,
+            category=AuditEventCategory.AUTHORIZATION,
+            resource_type="user_account",
+            resource_id="42",
+            action="admin.user.update",
+            metadata=metadata,
+        )
+        assert events == []
+        metadata.clear()
+        metadata["reason"] = "A later unrelated request"
+    finally:
+        await finish_after_commit_scope(token, committed=committed)
+
+    assert events == (
+        [
+            {
+                "actor_id": 7,
+                "target_user_id": 42,
+                "resource_type": "user_account",
+                "resource_id": "42",
+                "action": "admin.user.update",
+                "reason": "Original support request",
+                "requested_role": "viewer",
+            }
+        ]
+        if committed
+        else []
+    )
 
 
 async def _false_async() -> bool:

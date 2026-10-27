@@ -566,26 +566,18 @@ def test_query_system_logs_keeps_entries_with_different_events(
 @pytest.mark.unit
 def test_log_file_lock_uses_runtime_timeout_from_env(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    request: pytest.FixtureRequest,
 ) -> None:
-    log_path = tmp_path / "system_logs.jsonl"
-    lock_path = log_path.with_suffix(log_path.suffix + ".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path.write_text("locked", encoding="utf-8")
-
-    monkeypatch.setenv("SYSTEM_LOG_FILE_ENABLED", "true")
-    monkeypatch.setenv("SYSTEM_LOG_FILE_PATH", str(log_path))
     monkeypatch.setenv("SYSTEM_LOG_FILE_LOCK_TIMEOUT", "0.2")
+    log_buffer, _lock_path = request.getfixturevalue("fallback_log_lock")
 
-    log_buffer = _reload_log_buffer()
-    monkeypatch.setattr(log_buffer, "_HAS_FCNTL", False)
-
-    started = time.monotonic()
-    with pytest.raises(RuntimeError, match="Failed to acquire system log lock"):
-        with log_buffer._log_file_lock():
-            pass
-    elapsed = time.monotonic() - started
-    assert elapsed < 0.5
+    with log_buffer._log_file_lock():
+        started = time.monotonic()
+        with pytest.raises(RuntimeError, match="Failed to acquire system log lock"):
+            with log_buffer._log_file_lock():
+                pass
+        elapsed = time.monotonic() - started
+        assert elapsed < 0.5
 
 
 @pytest.fixture

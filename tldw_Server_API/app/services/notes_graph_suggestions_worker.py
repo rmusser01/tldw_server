@@ -12,6 +12,7 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user_id,
 )
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import current_operation_is_open
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.Notes_Graph.suggestion_jobs import (
@@ -64,6 +65,10 @@ async def _open_owner_database(owner_user_id: str) -> Any:
 
 
 def _close_database(db: Any) -> None:
+    if current_operation_is_open():
+        # The operation returns the checkout when it closes; closing here would retire
+        # its state, and the job's next step on this handle would fail.
+        return
     if hasattr(db, "release_context_connection"):
         db.release_context_connection()
     elif hasattr(db, "close_connection"):

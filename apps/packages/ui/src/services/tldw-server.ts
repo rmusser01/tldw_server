@@ -1,3 +1,5 @@
+import { getChatModelsCacheGeneration, invalidateChatModels } from "@/services/chat-models-invalidation"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { tldwClient, tldwModels } from "./tldw"
 import { isActiveCookieSessionConfig } from "./tldw/TldwApiClient"
 import { setNoOfRetrievedDocs, setTotalFilePerKB } from "./app"
@@ -95,6 +97,7 @@ export const isTldwServerRunning = async () => {
 
 const mapTldwModelToUi = (model: any) => ({
   id: model.id,
+  is_server_default: model.isServerDefault,
   name: `tldw:${model.id}`,
   model: `tldw:${model.id}`,
   provider: String(model.provider || "unknown").toLowerCase(),
@@ -126,6 +129,8 @@ const mapTldwModelToUi = (model: any) => ({
       : undefined,
   chat_provider:
     typeof model.chatProvider === "string" ? model.chatProvider : undefined,
+  provider_health:
+    typeof model.providerHealth === "string" ? model.providerHealth : undefined,
   details: {
     provider: model.provider,
     capabilities: model.capabilities,
@@ -163,7 +168,7 @@ const CHAT_MODELS_INVALIDATION_HISTORY_LIMIT = 64
 let chatModelsCache: { value: any[]; expiresAt: number } | null = null
 let chatModelsInFlight: Promise<any[]> | null = null
 let chatModelsInFlightCookieSession: boolean | null = null
-let chatModelsCacheGeneration = 0
+let chatModelsInFlightFresh: boolean | null = null
 
 type ChatModelsCacheListenerState = {
   requestInvalidation: () => void
@@ -242,10 +247,11 @@ const dedupeChatModelsByModel = (models: any[]) => {
 }
 
 export const clearChatModelsCache = () => {
-  chatModelsCacheGeneration += 1
   chatModelsCache = null
   chatModelsInFlight = null
   chatModelsInFlightCookieSession = null
+  chatModelsInFlightFresh = null
+  invalidateChatModels()
 }
 
 let chatModelsLastInvalidationToken: string | null = null
@@ -295,14 +301,7 @@ if (typeof window !== "undefined") {
     void tldwModels.clearCache()
   }
   if (!listenerState.listenersAdded) {
-    window.addEventListener("tldw:config-updated", () => {
-      listenerState.requestInvalidation()
-    })
-    window.addEventListener("storage", (event) => {
-      if (!event.key || event.key === "tldwConfig") {
-        listenerState.requestInvalidation()
-      }
-    })
+    watchChatAccountChanges(() => listenerState.requestInvalidation())
     listenerState.listenersAdded = true
   }
 }
@@ -328,34 +327,58 @@ export const getAllModels = async ({ returnEmpty = false }: { returnEmpty?: bool
   }
 }
 
+/**
+ * Every chat model the server's catalog lists, including models whose provider
+ * is not set up (they keep their catalog-only flags). Backs the model picker's
+ * "All models" scope (CC-06); sending still uses fetchChatModels.
+ */
+export const fetchChatModelCatalog = async () => {
+  const models = await tldwModels.getModels()
+  return dedupeChatModelsByModel(
+    models.filter((model) => model.type === "chat").map(mapTldwModelToUi)
+  )
+}
+
 export const fetchChatModels = async ({
   returnEmpty = false,
   forceRefresh = false,
   refreshOpenRouter = false,
-  allowNetwork = true
+  allowNetwork = true,
+  requireFresh = false
 }: {
   returnEmpty?: boolean
   forceRefresh?: boolean
   refreshOpenRouter?: boolean
   allowNetwork?: boolean
+  requireFresh?: boolean
 } = {}) => {
-  const fetchGeneration = chatModelsCacheGeneration
+  const fetchGeneration = getChatModelsCacheGeneration()
   const cookieSession = isActiveCookieSessionConfig(
     await tldwClient.getConfig().catch(() => null)
   )
+  // Config resolution can retire this caller before shared request admission.
+  if (fetchGeneration !== getChatModelsCacheGeneration()) {
+    return await fetchChatModels({
+      returnEmpty,
+      forceRefresh,
+      refreshOpenRouter,
+      allowNetwork,
+      requireFresh
+    })
+  }
   const now = Date.now()
-  if (!cookieSession && !forceRefresh && chatModelsCache && chatModelsCache.expiresAt > now) {
+  if (!requireFresh && !cookieSession && !forceRefresh && chatModelsCache && chatModelsCache.expiresAt > now) {
     return chatModelsCache.value
   }
-  if (!forceRefresh && !allowNetwork) {
+  if (!requireFresh && !forceRefresh && !allowNetwork) {
     if (cookieSession) return []
 
     const cachedChatModels = await tldwModels.getCachedChatModels()
     const resolved = dedupeChatModelsByModel(cachedChatModels.map(mapTldwModelToUi))
-    if (fetchGeneration !== chatModelsCacheGeneration) {
+    if (fetchGeneration !== getChatModelsCacheGeneration()) {
       return []
     }
-    if (fetchGeneration === chatModelsCacheGeneration) {
+    if (fetchGeneration === getChatModelsCacheGeneration()) {
       chatModelsCache = resolved.length > 0 ? {
         value: resolved,
         expiresAt: Date.now() + CHAT_MODELS_CACHE_TTL_MS
@@ -363,7 +386,7 @@ export const fetchChatModels = async ({
     }
     return resolved
   }
-  if (!forceRefresh && chatModelsInFlight && chatModelsInFlightCookieSession === cookieSession) {
+  if (!forceRefresh && chatModelsInFlight && chatModelsInFlightCookieSession === cookieSession && chatModelsInFlightFresh === requireFresh) {
     return await chatModelsInFlight
   }
 
@@ -372,7 +395,8 @@ export const fetchChatModels = async ({
     fetchPromise = (async () => {
       // Primary: tldw_server aggregated models
       const chatModels = await tldwModels.getChatModels(forceRefresh, {
-        refreshOpenRouter: refreshOpenRouter || forceRefresh
+        refreshOpenRouter: refreshOpenRouter || forceRefresh,
+        ...(requireFresh ? { requireFresh: true, throwOnError: true } : {})
       })
       const tldw = chatModels.map(mapTldwModelToUi)
 
@@ -387,19 +411,20 @@ export const fetchChatModels = async ({
       }
 
       const resolved = dedupeChatModelsByModel(combined)
-      if (fetchGeneration !== chatModelsCacheGeneration) {
+      if (fetchGeneration !== getChatModelsCacheGeneration()) {
         const currentFetch = chatModelsInFlight
-        if (currentFetch && currentFetch !== fetchPromise && chatModelsInFlightCookieSession === cookieSession) {
+        if (currentFetch && currentFetch !== fetchPromise && chatModelsInFlightCookieSession === cookieSession && chatModelsInFlightFresh === requireFresh) {
           return await currentFetch
         }
-        if (!cookieSession && chatModelsCache && chatModelsCache.expiresAt > Date.now()) {
+        // Join only an actual newer refresh; never recurse into another discovery during an outage.
+        if (!requireFresh && !cookieSession && chatModelsCache && chatModelsCache.expiresAt > Date.now()) {
           return chatModelsCache.value
         }
         return []
       }
       if (
         !cookieSession &&
-        fetchGeneration === chatModelsCacheGeneration
+        fetchGeneration === getChatModelsCacheGeneration()
       ) {
         chatModelsCache = resolved.length > 0 ? {
           value: resolved,
@@ -411,19 +436,22 @@ export const fetchChatModels = async ({
 
     chatModelsInFlight = fetchPromise
     chatModelsInFlightCookieSession = cookieSession
+    chatModelsInFlightFresh = requireFresh
     return await fetchPromise
   } catch (e) {
-    if (fetchGeneration !== chatModelsCacheGeneration) {
+    if (fetchGeneration !== getChatModelsCacheGeneration()) {
       const currentFetch = chatModelsInFlight
-      if (currentFetch && currentFetch !== fetchPromise && chatModelsInFlightCookieSession === cookieSession) {
+      if (currentFetch && currentFetch !== fetchPromise && chatModelsInFlightCookieSession === cookieSession && chatModelsInFlightFresh === requireFresh) {
         return await currentFetch
       }
+      if (requireFresh) throw e
       if (!cookieSession && chatModelsCache && chatModelsCache.expiresAt > Date.now()) {
         return chatModelsCache.value
       }
       return []
     }
     chatModelsCache = null
+    if (requireFresh) throw e
     console.error("Failed to fetch chat models:", e)
     if (returnEmpty) return []
     throw e

@@ -135,7 +135,7 @@ class MockRunnerClient:
                 return True
         return False
 
-    async def prompt(self, session_id: str, prompt: List[Dict]) -> Dict[str, Any]:
+    async def prompt(self, session_id: str, prompt: List[Dict], *, on_native_text=None) -> Dict[str, Any]:
         self.prompt_calls.append((session_id, prompt))
         return {"stopReason": "end", "detail": "ok"}
 
@@ -741,7 +741,9 @@ class TestACPWebSocketMessages:
             def __init__(self) -> None:
                 self.calls: list[tuple[str, List[Dict], Dict[str, Any]]] = []
 
-            async def record_prompt(self, session_id: str, prompt: List[Dict], result: Dict[str, Any]):
+            async def record_prompt(self, session_id: str, prompt: List[Dict], result: Dict[str, Any], *, assistant_text=None):
+                if assistant_text is not None:
+                    raise AssertionError("This legacy fixture emits no native text")
                 self.calls.append((session_id, prompt, result))
                 return None
 
@@ -1021,7 +1023,7 @@ class TestACPRunnerClientPermissions:
         assert client._determine_permission_tier("fs.chmod") == "batch"
 
     @pytest.mark.asyncio
-    async def test_permission_request_message_includes_runtime_policy_metadata(self):
+    async def test_permission_request_message_includes_runtime_policy_metadata(self, admitted_permission_prompt):
         mock_config = MagicMock()
         mock_config.command = "echo"
         mock_config.args = []
@@ -1073,6 +1075,7 @@ class TestACPRunnerClientPermissions:
 
         client._broadcast_to_session = _fake_broadcast  # type: ignore[method-assign]
 
+        await admitted_permission_prompt(client, session_id)
         response = await client._handle_request(
             ACPMessage(
                 jsonrpc="2.0",

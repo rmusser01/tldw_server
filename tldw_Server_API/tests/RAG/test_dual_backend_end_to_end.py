@@ -147,7 +147,7 @@ async def test_dual_backend_hybrid_merge_with_controlled_vector_results(
 ) -> None:
     """Hybrid MERGE logic over a real FTS backend + a controlled vector input.
 
-    Scope note (audits/2026-07-04-test-suite-audit-round2.md, RA1): the real
+    Scope note (Docs/Audit/2026-07-04-test-suite-audit-round2.md, RA1): the real
     DB and FTS retrieval path IS exercised here (both backends via
     ``dual_backend_env``). The vector-similarity layer is deliberately
     controlled — exercising real ChromaDB similarity is a separate concern —

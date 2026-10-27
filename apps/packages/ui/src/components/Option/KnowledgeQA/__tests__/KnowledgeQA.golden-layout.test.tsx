@@ -107,6 +107,7 @@ vi.mock("@/hooks/useConnectionState", () => ({
 vi.mock("@/hooks/useMediaQuery", () => ({
   useMobile: () => false,
   useDesktop: () => true,
+  useMediaQuery: () => false,
 }))
 
 vi.mock("../hooks/useLayoutMode", () => ({

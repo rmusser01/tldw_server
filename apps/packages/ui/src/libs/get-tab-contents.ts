@@ -1,8 +1,4 @@
 import { ChatDocuments } from "@/models/ChatTypes"
-import { isAmazonURL, parseAmazonWebsite } from "@/parser/amazon"
-import { defaultExtractContent } from "@/parser/default"
-import { isTwitterProfile, isTwitterTimeline, parseTweetProfile, parseTwitterTimeline } from "@/parser/twitter"
-import { isWikipedia, parseWikipedia } from "@/parser/wiki"
 import { getMaxContextSize } from "@/services/kb"
 
 const formatDocumentHeader = (title: string, url: string) => {
@@ -56,15 +52,37 @@ export const getTabContents = async (documents: ChatDocuments) => {
             const header = formatDocumentHeader(doc.title, doc.url)
             let extractedContent = ""
 
-            if (isWikipedia(doc.url)) {
-                extractedContent = parseWikipedia(content.html)
-            } else if (isAmazonURL(doc.url)) {
-                extractedContent = parseAmazonWebsite(content.html)
-            } else if (isTwitterProfile(doc.url)) {
-                extractedContent = parseTweetProfile(content.html)
-            } else if (isTwitterTimeline(doc.url)) {
-                extractedContent = parseTwitterTimeline(content.html)
-            } else {
+            // The specialized parsers each drag cheerio into their module;
+            // load them only when the URL could actually match so ordinary
+            // documents never pull them into the eager sidepanel chunk.
+            if (/wikipedia\.org\/wiki\//.test(doc.url)) {
+                const { isWikipedia, parseWikipedia } = await import("@/parser/wiki")
+                if (isWikipedia(doc.url)) {
+                    extractedContent = parseWikipedia(content.html)
+                }
+            } else if (/amazon\.[a-z]{2,}/i.test(doc.url)) {
+                const { isAmazonURL, parseAmazonWebsite } = await import("@/parser/amazon")
+                if (isAmazonURL(doc.url)) {
+                    extractedContent = parseAmazonWebsite(content.html)
+                }
+            } else if (/twitter\.com|x\.com/.test(doc.url)) {
+                const {
+                    isTwitterProfile,
+                    isTwitterTimeline,
+                    parseTweetProfile,
+                    parseTwitterTimeline
+                } = await import("@/parser/twitter")
+                if (isTwitterProfile(doc.url)) {
+                    extractedContent = parseTweetProfile(content.html)
+                } else if (isTwitterTimeline(doc.url)) {
+                    extractedContent = parseTwitterTimeline(content.html)
+                }
+            }
+
+            if (!extractedContent) {
+                // Loaded lazily so cheerio/Readability/Turndown stay out of
+                // the eagerly loaded sidepanel chunk.
+                const { defaultExtractContent } = await import("@/parser/default")
                 extractedContent = defaultExtractContent(content.html)
             }
 

@@ -51,7 +51,7 @@ describe("resolveContextReadiness", () => {
       })
     ).toMatchObject({
       readiness: "ready",
-      label: "Ready via registry",
+      label: "Preview: Ready via registry",
       tone: "ready"
     })
 
@@ -78,7 +78,7 @@ describe("resolveContextReadiness", () => {
       })
     ).toMatchObject({
       readiness: "ready",
-      label: "Ready after registry update",
+      label: "Preview: Ready after registry update",
       tone: "ready"
     })
 
@@ -91,6 +91,15 @@ describe("resolveContextReadiness", () => {
       readiness: "blocked",
       label: "Blocked after registry update",
       tone: "blocked"
+    })
+  })
+  it("does not claim context readiness without a composition preview", () => {
+    expect(
+      resolveContextReadiness({ composition: null, status: "idle" })
+    ).toMatchObject({
+      readiness: "partial",
+      label: "Not previewed",
+      tone: "partial"
     })
   })
 })

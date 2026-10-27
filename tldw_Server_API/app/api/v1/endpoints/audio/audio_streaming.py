@@ -106,6 +106,7 @@ from tldw_Server_API.app.core.config import (
     load_comprehensive_config,
     resolve_default_transcription_model_setting,
 )
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     ConflictError,
@@ -159,7 +160,6 @@ from tldw_Server_API.app.core.TTS.tts_request_resolution import (
 )
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 from tldw_Server_API.app.core.Usage.audio_quota import (
-    active_streams_count,
     add_daily_minutes,
     bytes_to_seconds,
     can_start_stream,
@@ -170,9 +170,11 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     finish_stream,
     get_daily_minutes_used,
     get_limits_for_user,
+    get_monthly_minutes_used,
     get_user_tier,
     heartbeat_stream,
     increment_jobs_started,
+    monthly_minutes_exhausted,
 )
 from tldw_Server_API.app.services.app_lifecycle import assert_may_start_work
 
@@ -331,8 +333,9 @@ def _audio_shim_attr(name: str):
         "consume_daily_minutes": consume_daily_minutes,
         "bytes_to_seconds": bytes_to_seconds,
         "heartbeat_stream": heartbeat_stream,
-        "active_streams_count": active_streams_count,
         "get_daily_minutes_used": get_daily_minutes_used,
+        "get_monthly_minutes_used": get_monthly_minutes_used,
+        "monthly_minutes_exhausted": monthly_minutes_exhausted,
         "get_user_tier": get_user_tier,
         "get_limits_for_user": get_limits_for_user,
         "increment_jobs_started": increment_jobs_started,
@@ -1125,16 +1128,22 @@ async def _heartbeat_stream(user_id: int):
     return await _audio_shim_attr("heartbeat_stream")(user_id)
 
 
-async def _active_streams_count(user_id: int):
-    return await _audio_shim_attr("active_streams_count")(user_id)
-
-
 async def _get_daily_minutes_used(user_id: int):
     return await _audio_shim_attr("get_daily_minutes_used")(user_id)
 
 
+async def _get_monthly_minutes_used(user_id: int):
+    return await _audio_shim_attr("get_monthly_minutes_used")(user_id)
+
+
 async def _get_user_tier(user_id: int):
     return await _audio_shim_attr("get_user_tier")(user_id)
+
+
+async def _minutes_quota_name(user_id: int, minutes_requested: float) -> str:
+    """Quota name for a refused minutes request: monthly when the month limit is what it would pass."""
+    monthly = await _audio_shim_attr("monthly_minutes_exhausted")(user_id, minutes_requested)
+    return "monthly_minutes" if monthly else "daily_minutes"
 
 
 async def _get_limits_for_user(user_id: int):
@@ -1470,14 +1479,6 @@ async def websocket_transcribe(
             emit_stt_session_start_total(provider=stt_metrics_provider)
             stt_session_started = True
 
-        ok_stream, msg_stream = await _can_start_stream(user_id_for_usage)
-        if not ok_stream:
-            if _outer_stream:
-                await _outer_stream.send_json({"type": "error", "message": msg_stream})
-            await websocket.close()
-            return
-        acquired_stream = True
-
         query_params = getattr(websocket, "query_params", {}) or {}
         persistence_enabled = _coerce_bool(
             query_params.get("persist_transcript", query_params.get("persist")),
@@ -1739,10 +1740,10 @@ async def websocket_transcribe(
                         increment_counter("audio_failopen_cap_exhausted_total", labels={"reason": "db_check"})
                     except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as m_err:
                         logger.debug(f"metrics increment failed (audio_failopen_cap_db_check): error={m_err}")
-                    raise _QuotaExceeded("daily_minutes") from None
+                    raise _QuotaExceeded(await _minutes_quota_name(user_id_for_usage, minutes_chunk)) from None
             if not allow:
                 # Raise structured signal to outer scope
-                raise _QuotaExceeded("daily_minutes")
+                raise _QuotaExceeded(await _minutes_quota_name(user_id_for_usage, minutes_chunk))
             used_minutes += minutes_chunk
             # Billing: accumulate fractional minutes; flush to cache when >= 1
             nonlocal _billing_minutes_accumulator
@@ -1782,6 +1783,14 @@ async def websocket_transcribe(
             except EXPECTED_REDIS_EXC as _hb_e:
                 logger.debug(f"Heartbeat failed for user_id={user_id_for_usage}: {_hb_e}")
 
+        # Take the stream slot only here: the finally below is what gives it back (TASK-13435).
+        ok_stream, msg_stream = await _can_start_stream(user_id_for_usage)
+        if not ok_stream:
+            if _outer_stream:
+                await _outer_stream.send_json({"type": "error", "message": msg_stream})
+            await websocket.close()
+            return
+        acquired_stream = True
         try:
             await handle_unified_websocket(
                 policy_websocket,
@@ -1803,10 +1812,11 @@ async def websocket_transcribe(
             )
             try:
                 if _outer_stream:
+                    _period = qe.quota.removesuffix("_minutes")
                     await _outer_stream.send_json(
                         _audio_ws_quota_error_payload(
                             quota=qe.quota,
-                            message="Streaming transcription quota exceeded (daily minutes)",
+                            message=f"Streaming transcription quota exceeded ({_period} minutes)",
                             request_id=request_id,
                         )
                     )
@@ -2402,61 +2412,64 @@ async def websocket_audio_chat_stream(
             if persistence_ready and persistence_db is not None and persistence_session_id:
                 return persistence_db, persistence_session_id
             try:
-                if persistence_db is None:
-                    persistence_db = await _shim_get_chacha_db_for_user_id(
-                        int(user_id_for_usage),
-                        client_id=str(user_id_for_usage),
-                    )
-                loop = asyncio.get_running_loop()
-                character_card, character_db_id = await _shim_get_or_create_character_context(
-                    persistence_db,
-                    None,
-                    loop,
-                )
-                if not character_db_id:
-                    raise ValueError("Unable to resolve character context for WS persistence")
-                character_name = "Helpful AI Assistant"
-                if isinstance(character_card, dict) and character_card.get("name"):
-                    character_name = str(character_card.get("name"))
-
-                persistence_session_id, conversation_created = await _shim_get_or_create_conversation(
-                    persistence_db,
-                    persistence_session_id,
-                    int(character_db_id),
-                    character_name,
-                    str(user_id_for_usage),
-                    loop,
-                )
-                session_id = persistence_session_id
-
-                if session_id and not any(
-                    msg.get("role") == "system" and msg.get("content") == f"session:{session_id}"
-                    for msg in chat_history
-                ):
-                    chat_history.insert(0, {"role": "system", "content": f"session:{session_id}"})
-
-                action_hint = _action_hint()
-                settings_payload = {
-                    "audio_chat_ws": {
-                        "session_id": persistence_session_id,
-                        "action_hint": action_hint,
-                        "metadata": metadata or {},
-                    }
-                }
-                try:
-                    await loop.run_in_executor(
+                # A WebSocket runs outside the HTTP operation middleware. Own this step's
+                # checkouts so they go back to the pool when it ends.
+                with chacha_operation(independent=True):
+                    if persistence_db is None:
+                        persistence_db = await _shim_get_chacha_db_for_user_id(
+                            int(user_id_for_usage),
+                            client_id=str(user_id_for_usage),
+                        )
+                    loop = asyncio.get_running_loop()
+                    character_card, character_db_id = await _shim_get_or_create_character_context(
+                        persistence_db,
                         None,
-                        partial(
-                            _persist_audio_chat_settings,
-                            persistence_db,
-                            persistence_session_id,
-                            settings_payload,
-                            conversation_created=conversation_created,
-                        ),
+                        loop,
                     )
-                except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as settings_exc:
-                    logger.debug(f"audio.chat.stream conversation_settings upsert failed: {settings_exc}")
+                    if not character_db_id:
+                        raise ValueError("Unable to resolve character context for WS persistence")
+                    character_name = "Helpful AI Assistant"
+                    if isinstance(character_card, dict) and character_card.get("name"):
+                        character_name = str(character_card.get("name"))
 
+                    persistence_session_id, conversation_created = await _shim_get_or_create_conversation(
+                        persistence_db,
+                        persistence_session_id,
+                        int(character_db_id),
+                        character_name,
+                        str(user_id_for_usage),
+                        loop,
+                    )
+                    session_id = persistence_session_id
+
+                    if session_id and not any(
+                        msg.get("role") == "system" and msg.get("content") == f"session:{session_id}"
+                        for msg in chat_history
+                    ):
+                        chat_history.insert(0, {"role": "system", "content": f"session:{session_id}"})
+
+                    action_hint = _action_hint()
+                    settings_payload = {
+                        "audio_chat_ws": {
+                            "session_id": persistence_session_id,
+                            "action_hint": action_hint,
+                            "metadata": metadata or {},
+                        }
+                    }
+                    try:
+                        await asyncio.to_thread(
+                            partial(
+                                _persist_audio_chat_settings,
+                                persistence_db,
+                                persistence_session_id,
+                                settings_payload,
+                                conversation_created=conversation_created,
+                            ),
+                        )
+                    except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as settings_exc:
+                        logger.debug(f"audio.chat.stream conversation_settings upsert failed: {settings_exc}")
+
+                # The step's checkouts are back: a slow client cannot hold one through the send.
                 if _outer_stream and not persistence_announced:
                     await _outer_stream.send_json({"type": "session", "session_id": persistence_session_id})
                     persistence_announced = True
@@ -2482,6 +2495,7 @@ async def websocket_audio_chat_stream(
                 return
             chat_db, conversation_id = context
 
+            @chacha_operation(independent=True)
             def _persist_sync() -> None:
                 chat_db.add_message(
                     {
@@ -4521,9 +4535,11 @@ async def streaming_limits(
             - tier (str): The user's tier name (e.g., "free").
             - limits (dict): The resolved limit values (e.g., daily_minutes, concurrent_streams, concurrent_jobs, max_file_size_mb).
             - used_today_minutes (float): Minutes already used today (0.0 if unavailable).
-            - remaining_minutes (float|None): Minutes remaining today (0.0 if none left, `None` if unknown/unbounded).
-            - active_streams (int): Number of currently active streams (0 if unavailable).
-            - _can_start_stream (bool): Whether the user may start another stream given current active streams and concurrent_streams limit.
+            - remaining_minutes (float|None): Minutes remaining today (0.0 if none left, `None` when there is no daily limit).
+            - used_month_minutes / remaining_month_minutes (float|None): Monthly usage and remainder (`None` remainder when no monthly limit).
+            - active_streams (None): The count of the user's open streams is not reported.
+            - _can_start_stream (bool): Always True. It is not a live check: this endpoint does not
+              report open streams, so a stream over `limits.audio_concurrent_streams` is refused when it starts.
     """
     # Correlate logs with request_id if available
     rid = ensure_request_id(request) if request is not None else None
@@ -4533,12 +4549,13 @@ async def streaming_limits(
         get_ps_logger(request_id=rid, ps_component="endpoint", ps_job_kind="audio").warning(
             "Failed to get limits for user %s, falling back to defaults: %s", current_user.id, e
         )
-        # Fallback to default free limits
+        # Lookups fail open: report every limit as unlimited.
         limits = {
-            "daily_minutes": 30.0,
-            "concurrent_streams": 1,
-            "concurrent_jobs": 1,
-            "max_file_size_mb": 25,
+            "daily_minutes": None,
+            "monthly_minutes": None,
+            "concurrent_streams": None,
+            "concurrent_jobs": None,
+            "max_file_size_mb": None,
         }
     try:
         used_minutes = await _get_daily_minutes_used(current_user.id)
@@ -4559,12 +4576,23 @@ async def streaming_limits(
             )
             remaining_minutes = None
     try:
-        active_streams = await _active_streams_count(current_user.id)
-    except EXPECTED_REDIS_EXC as e:
+        used_month = await _get_monthly_minutes_used(current_user.id)
+    except EXPECTED_DB_EXC as e:
         get_ps_logger(request_id=rid, ps_component="endpoint", ps_job_kind="audio").warning(
-            "Failed to get active streams for user %s, falling back to 0: %s", current_user.id, e
+            "Failed to get monthly minutes for user %s, falling back to 0: %s", current_user.id, e
         )
-        active_streams = 0
+        used_month = 0.0
+    monthly_limit = limits.get("monthly_minutes")
+    if monthly_limit is None:
+        remaining_month = None
+    else:
+        try:
+            remaining_month = max(0.0, float(monthly_limit) - float(used_month))
+        except (ValueError, TypeError) as e:
+            get_ps_logger(request_id=rid, ps_component="endpoint", ps_job_kind="audio").warning(
+                "Could not calculate remaining monthly minutes for user %s: %s", current_user.id, e
+            )
+            remaining_month = None
     try:
         tier = await _get_user_tier(current_user.id)
     except EXPECTED_DB_EXC as e:
@@ -4572,21 +4600,17 @@ async def streaming_limits(
             "Failed to get tier for user %s, falling back to 'free': %s", current_user.id, e
         )
         tier = "free"
-    try:
-        max_streams = int(limits.get("concurrent_streams") or 0)
-    except (ValueError, TypeError) as e:
-        get_ps_logger(request_id=rid, ps_component="endpoint", ps_job_kind="audio").warning(
-            "Could not parse concurrent_streams limit for user %s: %s", current_user.id, e
-        )
-        max_streams = 0
-    can_start = (max_streams == 0) or (active_streams < max_streams)
+    # Not a live check: this endpoint does not report open streams; a stream over the limit is refused when it starts.
+    can_start = True
     return {
         "user_id": current_user.id,
         "tier": tier,
         "limits": limits,
         "used_today_minutes": used_minutes,
         "remaining_minutes": remaining_minutes,
-        "active_streams": active_streams,
+        "used_month_minutes": used_month,
+        "remaining_month_minutes": remaining_month,
+        "active_streams": None,
         "can_start_stream": can_start,
         "_can_start_stream": can_start,
     }

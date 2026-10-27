@@ -1,13 +1,21 @@
 import {
   act,
   fireEvent,
-  render,
+  render as renderUI,
   screen,
   waitFor,
   within
 } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ResearchWorkspace } from "../index"
+
+// Match the router context provided by both deployed shells.
+const render: typeof renderUI = (ui, options) =>
+  renderUI(ui, {
+    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>,
+    ...options
+  })
 import { RESEARCH_WORKSPACE_LAST_MOBILE_TAB_STORAGE_KEY } from "../research-workspace-route-state"
 import {
   WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY,
@@ -185,9 +193,15 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
-vi.mock("@/utils/research-workspace-prefill", () => ({
-  consumeResearchWorkspacePrefill: vi.fn().mockResolvedValue(null),
-  buildKnowledgeQaSeedNote: vi.fn().mockReturnValue("")
+vi.mock("@/utils/use-research-workspace-prefill", () => ({
+  useResearchWorkspacePrefill: () => ({
+    attached: 0,
+    pending: 0,
+    failed: 0,
+    importing: false,
+    error: null,
+    retry: vi.fn(),
+  }),
 }))
 
 vi.mock("../WorkspaceHeader", () => ({
@@ -919,14 +933,22 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
       "/research-workspace?source_workspace_id=workspace-1&source_artifact_id=gap-artifact&source_artifact_template=corpus_gap_finder&source_artifact_title=Corpus%20Gap%20Finder&research_run_id=research-run-7"
     )
 
-    render(<ResearchWorkspace />)
+    const { rerender } = render(<ResearchWorkspace />)
 
     fireEvent.click(screen.getByRole("button", { name: /import bundle/i }))
 
     await waitFor(() => {
       expect(mockGetResearchBundle).toHaveBeenCalledWith("research-run-7")
     })
+    expect(
+      screen.getByRole("button", { name: "Importing", exact: true })
+    ).toBeDisabled()
+
     testState.workspaceId = "workspace-2"
+    rerender(<ResearchWorkspace />)
+    expect(
+      screen.queryByTestId("workspace-deep-research-return-handoff")
+    ).not.toBeInTheDocument()
 
     await act(async () => {
       resolveBundle(createCompletedDeepResearchBundle())
@@ -935,8 +957,8 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
 
     expect(testState.addArtifact).not.toHaveBeenCalled()
     expect(
-      screen.getByTestId("workspace-deep-research-return-handoff")
-    ).not.toHaveTextContent("Bundle imported")
+      screen.queryByTestId("workspace-deep-research-return-handoff")
+    ).not.toBeInTheDocument()
   })
 
   it("cancels a bundle import after the Research Workspace unmounts", async () => {

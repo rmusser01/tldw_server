@@ -5,7 +5,8 @@ import { db } from "./schema"
 import { generateID } from "./helpers"
 import { runChatPersistenceTransaction } from "./chat-persistence-transaction"
 import type { Message } from "./types"
-import type { HistoryOperationOptions } from "./history-selection"
+import type { ChatScope } from "@/types/chat-scope"
+import { assertNoPendingLocalSettingsWrite, type HistoryOperationOptions } from "./history-selection"
 
 /** Full verified target/owner identity; never stores bearer tokens or API keys. */
 export const serverChatMirrorOwnerKey = (snapshot: Pick<ServicePromptSnapshot, "requestScope">): string => {
@@ -18,28 +19,96 @@ export const serverChatMirrorOwnerKey = (snapshot: Pick<ServicePromptSnapshot, "
   ])
 }
 
+type MirrorBinding = { chatId: string; ownerKey: string; scope?: ChatScope }
+const mirrorBindingKey = ({ chatId, ownerKey, scope }: MirrorBinding) => JSON.stringify([ownerKey, chatId, scope?.type ?? "global", scope?.type === "workspace" ? scope.workspaceId : null])
+// Cache provenance only; callers must retain their original server ownership guards.
+const acknowledgedMirrorIds = new Map<string, string>()
+export const hasAcknowledgedServerChatMirror = ({ historyId, ...binding }: MirrorBinding & { historyId: string | null }) => historyId !== null && acknowledgedMirrorIds.get(mirrorBindingKey(binding)) === historyId
+
 export const linkServerChatMirror = async ({
-  chatId, title, ownerKey, currentHistoryId, legacyHistoryId, signal, validate_lease
+  chatId, title, ownerKey, currentHistoryId, legacyHistoryId, scope, signal, validate_lease
 }: {
   chatId: string; title: string; ownerKey: string
-  currentHistoryId?: string | null; legacyHistoryId?: string | null
-} & HistoryOperationOptions): Promise<string> => runChatPersistenceTransaction(signal, async () => {
-  const candidates = await db.chatHistories.where("server_chat_id").equals(chatId).toArray()
-  const owned = candidates.find(history => history.server_scope_key === ownerKey)
-  const current = currentHistoryId ? await db.chatHistories.get(currentHistoryId) : undefined
-  const canLinkCurrent = current && (!current.server_chat_id || current.server_chat_id === chatId) &&
-    (current.server_scope_key === ownerKey ||
-      (!current.server_scope_key && current.id === legacyHistoryId))
-  const history = owned || (canLinkCurrent ? current : undefined)
-  if (history) {
-    await db.chatHistories.update(history.id, { title, server_chat_id: chatId, server_scope_key: ownerKey })
-    return history.id
-  }
-  const id = generateID()
-  await db.chatHistories.add({ id, title, createdAt: Date.now(), is_rag: false,
-    message_source: "server", server_chat_id: chatId, server_scope_key: ownerKey })
-  return id
-}, undefined, validate_lease)
+  currentHistoryId?: string | null; legacyHistoryId?: string | null; scope?: ChatScope
+} & HistoryOperationOptions): Promise<string> => {
+  const namespace = { server_scope_type: scope?.type ?? "global" as const,
+    server_workspace_id: scope?.type === "workspace" ? scope.workspaceId : undefined }
+  const receiptKey = mirrorBindingKey({ chatId, ownerKey, scope })
+  const localId = await runChatPersistenceTransaction(signal, async () => {
+    const candidates = await db.chatHistories.where("server_chat_id").equals(chatId).toArray()
+    const sameNamespace = (history: import("./types").HistoryInfo) =>
+      !history.server_scope_type || (history.server_scope_type === namespace.server_scope_type &&
+        (history.server_workspace_id ?? undefined) === namespace.server_workspace_id)
+    const owned = candidates.find(history => history.server_scope_key === ownerKey && sameNamespace(history))
+    const current = currentHistoryId ? await db.chatHistories.get(currentHistoryId) : undefined
+    const canLinkCurrent = current && sameNamespace(current) && (!current.server_chat_id || current.server_chat_id === chatId) &&
+      (current.server_scope_key === ownerKey ||
+        (!current.server_scope_key && current.id === legacyHistoryId))
+    const history = owned || (canLinkCurrent ? current : undefined)
+    if (history) {
+      await db.chatHistories.update(history.id, { title, server_chat_id: chatId, server_scope_key: ownerKey, ...namespace })
+      return history.id
+    }
+    const id = generateID()
+    await db.chatHistories.add({ id, title, createdAt: Date.now(), is_rag: false,
+      message_source: "server", server_chat_id: chatId, server_scope_key: ownerKey, ...namespace })
+    return id
+  }, undefined, validate_lease)
+  acknowledgedMirrorIds.set(receiptKey, localId)
+  return localId
+}
+
+/**
+ * Delete this owner's local copies of a server chat once the chat itself is
+ * deleted (moved to Trash), so local history search stops offering it. Another
+ * owner's copy is left alone. Returns the ids of the removed histories.
+ */
+export const removeServerChatMirror = async ({
+  chatId,
+  ownerKey,
+  scope,
+  signal,
+  validate_lease
+}: {
+  chatId: string
+  ownerKey: string
+  scope?: ChatScope
+} & HistoryOperationOptions): Promise<string[]> =>
+  db.transaction(
+    "rw",
+    [db.chatHistories, db.messages, db.compareStates],
+    async () => {
+      const assertCurrent = () => {
+        if (signal?.aborted || validate_lease?.() === false)
+          throw createServicePromptScopeChangedError()
+      }
+      assertCurrent()
+      const owned = (
+        await db.chatHistories.where("server_chat_id").equals(chatId).toArray()
+      ).filter(
+        (history) =>
+          history.server_scope_key === ownerKey &&
+          (scope?.type === "workspace"
+            ? history.server_scope_type === "workspace" &&
+              history.server_workspace_id === scope.workspaceId
+            : (!history.server_scope_type ||
+                history.server_scope_type === "global") &&
+              !history.server_workspace_id)
+      )
+      assertCurrent()
+      owned.forEach(assertNoPendingLocalSettingsWrite)
+      for (const history of owned) {
+        assertCurrent()
+        await db.chatHistories.delete(history.id)
+        assertCurrent()
+        await db.messages.where("history_id").equals(history.id).delete()
+        assertCurrent()
+        await db.compareStates.delete(history.id)
+        assertCurrent()
+      }
+      return owned.map((history) => history.id)
+    }
+  )
 
 /** Persist a receipt only onto the captured source row; edits are never replaced. */
 export const acknowledgePromotedChatMessage = async ({
@@ -233,22 +302,62 @@ export const reconcileServerChatMirror = async ({
 
 /** Apply a successful canonical delete to only its already-acknowledged local mirror. */
 export const removeAcknowledgedServerMirrorMessage = async ({
-  historyId, chatId, localMessageId, serverMessageId
+  historyId,
+  chatId,
+  localMessageId,
+  serverMessageId,
+  ownerKey,
+  scope,
+  signal,
+  validate_lease
 }: {
-  historyId: string; chatId: string; localMessageId: string; serverMessageId: string
-}): Promise<void> => runChatPersistenceTransaction(undefined, async () => {
-  const history = await db.chatHistories.get(historyId)
-  if (history?.server_chat_id !== chatId || !history.server_scope_key)
-    throw createServicePromptScopeChangedError()
-  const row = await db.messages.get(localMessageId)
-  if (!row) return
-  if (row.history_id !== historyId || row.serverMessageId !== serverMessageId)
-    throw createServicePromptScopeChangedError()
-  const rows = await db.messages.where("history_id").equals(historyId).toArray()
-  if (rows.filter(candidate => candidate.serverMessageId === serverMessageId).length !== 1)
-    throw createServicePromptScopeChangedError()
-  await db.messages.delete(localMessageId)
-})
+  historyId: string
+  chatId: string
+  localMessageId?: string
+  serverMessageId: string
+  ownerKey?: string
+  scope?: ChatScope
+} & HistoryOperationOptions): Promise<void> =>
+  runChatPersistenceTransaction(
+    signal,
+    async () => {
+      const history = await db.chatHistories.get(historyId)
+      if (
+        history?.server_chat_id !== chatId ||
+        !history.server_scope_key ||
+        (ownerKey !== undefined && history.server_scope_key !== ownerKey) ||
+        (scope?.type === "workspace"
+          ? history.server_scope_type !== "workspace" ||
+            history.server_workspace_id !== scope.workspaceId
+          : scope &&
+            ((history.server_scope_type &&
+              history.server_scope_type !== "global") ||
+              history.server_workspace_id))
+      )
+        throw createServicePromptScopeChangedError()
+      const rows = await db.messages
+        .where("history_id")
+        .equals(historyId)
+        .toArray()
+      const matches = rows.filter(
+        (candidate) => candidate.serverMessageId === serverMessageId
+      )
+      if (!matches.length && !localMessageId) return
+      const row = localMessageId
+        ? await db.messages.get(localMessageId)
+        : matches[0]
+      if (!row) return
+      if (
+        row.history_id !== historyId ||
+        row.serverMessageId !== serverMessageId ||
+        matches.length !== 1
+      )
+        throw createServicePromptScopeChangedError()
+      await db.messages.delete(row.id)
+    },
+    undefined,
+    validate_lease
+  )
 
 /** H1 translates a clicked local mirror ID before native capture. No text/position inference. */
 export const resolveServerMirrorCursor = async ({

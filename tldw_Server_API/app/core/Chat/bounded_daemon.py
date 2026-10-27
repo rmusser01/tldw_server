@@ -11,7 +11,12 @@ import threading
 from collections.abc import Awaitable, Callable, Iterator
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
-from typing import Any
+from typing import Any, TypeVar
+
+from tldw_Server_API.app.core.Usage.llm_call_context import (
+    capture_llm_call_state,
+    run_with_llm_call_state,
+)
 
 
 class DaemonCapacityError(RuntimeError):
@@ -36,12 +41,15 @@ async def _drain_owned_task(task: asyncio.Future[Any]) -> tuple[bool, Any]:
     return True, task.result()
 
 
+_WorkerResult = TypeVar("_WorkerResult")
+
+
 async def await_owned_worker(
-    awaitable: Awaitable[Any],
+    awaitable: Awaitable[_WorkerResult],
     *,
     on_cancel_success: Callable[[], Awaitable[None] | None] | None = None,
-    on_cancel_result: Callable[[Any], Awaitable[None] | None] | None = None,
-) -> Any:
+    on_cancel_result: Callable[[_WorkerResult], Awaitable[None] | None] | None = None,
+) -> _WorkerResult:
     """Keep owned work alive through caller cancellation, then re-raise it.
 
     This is for work whose surrounding async scope owns resources used by a
@@ -128,11 +136,13 @@ class BoundedDaemonPool:
     ) -> threading.Thread:
         """Start *target* as a daemon or fail closed without invoking it."""
 
+        # Only the LLM call state crosses into the thread; no other context does.
+        llm_state = capture_llm_call_state()
         self._acquire_capacity(exhaustion_message)
 
         def guarded_target() -> None:
             try:
-                target()
+                run_with_llm_call_state(llm_state, target)
             finally:
                 self._release_capacity()
                 if released_event is not None:
@@ -291,7 +301,7 @@ async def await_bounded_daemon_with_timeout(
 
     released = released_event or threading.Event()
     try:
-        pool.start(invoke, name=name, released_event=released)
+        pool.start(invoke, name=name, released_event=released, exhaustion_message=f"{name} capacity is exhausted")
     except BaseException:
         released.set()
         raise

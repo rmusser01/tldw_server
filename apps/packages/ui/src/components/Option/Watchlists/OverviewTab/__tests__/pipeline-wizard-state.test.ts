@@ -51,7 +51,8 @@ describe("watchlists pipeline wizard state", () => {
       editorial: {},
       selection: {},
       next_run_at: null,
-      recovery: {}
+      recovery: {},
+      timezone: "UTC"
     })
     const getBriefing = vi.fn()
       .mockResolvedValueOnce(projection("running"))
@@ -83,7 +84,8 @@ describe("watchlists pipeline wizard state", () => {
       editorial: {},
       selection: {},
       next_run_at: null,
-      recovery: {}
+      recovery: {},
+      timezone: "UTC"
     }
     const getBriefing = vi.fn().mockResolvedValue(projection)
     const polling = waitForPipelineWizardBriefing(
@@ -111,7 +113,8 @@ describe("watchlists pipeline wizard state", () => {
       editorial: {},
       selection: {},
       next_run_at: null,
-      recovery: {}
+      recovery: {},
+      timezone: "UTC"
     }
     const getBriefing = vi.fn().mockResolvedValue(projection)
 
@@ -136,7 +139,8 @@ describe("watchlists pipeline wizard state", () => {
       editorial: {},
       selection: {},
       next_run_at: null,
-      recovery: {}
+      recovery: {},
+      timezone: "UTC"
     }
 
     expect(getPipelineWizardBriefingStatus(projection)).toBe("ready")
@@ -179,7 +183,8 @@ describe("watchlists pipeline wizard state", () => {
       editorial: {},
       selection: {},
       next_run_at: null,
-      recovery: {}
+      recovery: {},
+      timezone: "UTC"
     }
 
     expect(getPipelineWizardBriefingOutcome(projection)).toEqual({

@@ -16,6 +16,9 @@ export type ServerChatHistoryItem = ServerChatSummary & {
 const SERVER_CHAT_FETCH_LIMIT = 200
 const SERVER_CHAT_FETCH_MAX_PAGES = 50
 const SERVER_CHAT_SEARCH_LIMIT = 50
+// Find a chat by what was said in it, not only by its title. Servers that
+// predate content search ignore the parameter and search titles as before.
+const SERVER_CHAT_SEARCH_FIELDS = "title,content"
 export const SERVER_CHAT_HISTORY_OVERVIEW_PAGE_SIZE = 25
 
 type FetchServerChatsPage = (params: {
@@ -91,6 +94,11 @@ export const filterServerChatHistoryItems = (
   }
 
   return items.filter((item) => {
+    // The server already matched this chat on its messages; the text is not in
+    // the row, so a title check here would wrongly drop it.
+    if (item.matched_in?.includes("content")) {
+      return true
+    }
     const haystack = `${item.title || ""} ${item.topic_label || ""} ${item.state || ""}`.toLowerCase()
     return haystack.includes(normalizedQuery)
   })
@@ -98,10 +106,12 @@ export const filterServerChatHistoryItems = (
 
 export const deriveServerChatHistoryViewState = ({
   previousData,
+  total,
   error
 }: {
-  previousData: ServerChatHistoryItem[]
-  error: unknown
+  total: number;
+  previousData: ServerChatHistoryItem[];
+  error: unknown;
 }): {
   data: ServerChatHistoryItem[]
   total: number
@@ -110,7 +120,7 @@ export const deriveServerChatHistoryViewState = ({
   isShowingStaleData: boolean
 } => ({
   data: previousData,
-  total: previousData.length,
+  total,
   sidebarRefreshState: "recoverable-error",
   hasUsableData: previousData.length > 0,
   isShowingStaleData: previousData.length > 0
@@ -178,6 +188,7 @@ type UseServerChatHistoryOptions = {
     isCurrent: () => boolean
   }
   enabled?: boolean
+  characterId?: number
   includeDeleted?: boolean
   deletedOnly?: boolean
   scope?: ChatScope
@@ -227,6 +238,7 @@ export const useServerChatHistory = (
   const ownerCurrent = !owner || owner.isCurrent()
   const filterMode = options?.filterMode ?? (deletedOnly ? "trash" : "all")
   const characterScope = getCharacterScopeForFilterMode(filterMode)
+  const characterId = options?.characterId
   const overviewPage = Math.max(1, Math.trunc(options?.page ?? 1))
   const overviewLimit = Math.max(
     1,
@@ -279,6 +291,7 @@ export const useServerChatHistory = (
             : overviewLimit
           : null,
         filterMode,
+        ...(characterId != null ? { characterId } : {}),
         ...(owner ? { ownerKey: owner.key } : {}),
         scope
       }
@@ -296,12 +309,14 @@ export const useServerChatHistory = (
           const response = await tldwClient.searchConversationsWithMeta(
             {
               query: normalizedQuery,
+              search_in: SERVER_CHAT_SEARCH_FIELDS,
               limit: searchLimit,
               offset: (searchPage - 1) * searchLimit,
               order_by: "recency",
               ...(includeDeleted || deletedOnly ? { include_deleted: true } : {}),
               ...(deletedOnly ? { deleted_only: true } : {}),
-              ...(characterScope ? { character_scope: characterScope } : {})
+              ...(characterScope ? { character_scope: characterScope } : {}),
+              ...(characterId != null ? { character_id: characterId } : {})
             },
             { signal, scope, ...(owner ? { requestScope: owner.requestScope } : {}) }
           )
@@ -321,6 +336,7 @@ export const useServerChatHistory = (
               ordering: "-updated_at",
               include_message_counts: false,
               ...(characterScope ? { character_scope: characterScope } : {}),
+              ...(characterId != null ? { character_id: characterId } : {}),
               ...(includeDeleted ? { include_deleted: true } : {}),
               ...(deletedOnly ? { deleted_only: true } : {})
             },
@@ -342,6 +358,7 @@ export const useServerChatHistory = (
                 ordering: "-updated_at",
                 include_message_counts: false,
                 ...(characterScope ? { character_scope: characterScope } : {}),
+                ...(characterId != null ? { character_id: characterId } : {}),
                 ...(includeDeleted ? { include_deleted: true } : {}),
                 ...(deletedOnly ? { deleted_only: true } : {})
               },
@@ -374,7 +391,7 @@ export const useServerChatHistory = (
     },
     staleTime: 60_000,
     gcTime: 5 * 60_000,
-    refetchOnMount: false,
+    refetchOnMount: (cached) => cached.state.isInvalidated,
     retry: (failureCount, error) =>
       !isRecoverableServerChatHistoryError(error) && failureCount < 1
   })
@@ -409,6 +426,7 @@ export const useServerChatHistory = (
       if (isRecoverableServerChatHistoryError(query.error)) {
         return deriveServerChatHistoryViewState({
           previousData: filteredData,
+          total: resolvedTotal,
           error: query.error
         })
       }
