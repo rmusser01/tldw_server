@@ -789,9 +789,17 @@ def test_unlisted_model_names_the_model_provider_and_fix(monkeypatch):
 
 def test_stream_error_event_for_an_unlisted_model_keeps_the_nonstream_answer():
     """The sanitized stream error (its SSE event and its status) says model_not_available (re-review M2)."""
-    from tldw_Server_API.app.core.Chat.streaming_utils import sanitized_provider_stream_exception
+    from tldw_Server_API.app.core.Chat.streaming_utils import (
+        provider_stream_error_payload,
+        sanitized_provider_stream_exception,
+    )
     from tldw_Server_API.app.core.exceptions import ChatModelNotAvailableError
 
+    expected = ChatModelNotAvailableError.message_for("openai", "gpt-gone")
     error = sanitized_provider_stream_exception(ChatModelNotAvailableError("openai", "gpt-gone"))
     assert (error.code, error.status_code) == ("model_not_available", 400)
-    assert error.message == ChatModelNotAvailableError.message_for("openai", "gpt-gone")
+    assert error.message == expected
+    # Re-normalizing the sanitized error for the SSE event keeps the request-built message.
+    assert provider_stream_error_payload(error)["error"] == {
+        "code": "model_not_available", "type": "model_not_available", "message": expected,
+    }

@@ -501,9 +501,11 @@ def normalize_provider_stream_error(value: Any) -> Optional[NormalizedProviderSt
     if code not in PROVIDER_STREAM_ERROR_MESSAGES:
         code = "provider_unavailable"
     message = PROVIDER_STREAM_ERROR_MESSAGES[code]
-    if code == "model_not_available" and isinstance(candidate, ChatModelNotAvailableError):
+    if code == "model_not_available" and isinstance(
+        candidate, (ChatModelNotAvailableError, SanitizedProviderStreamError),
+    ):
         # Built from the request's own provider and model, never upstream text: the same answer as non-stream.
-        message = str(candidate)
+        message = str(candidate.message)
     replay_certified = bool(
         isinstance(value, ChatAPIError)
         and getattr(value, "upstream_dispatched", None) is False
