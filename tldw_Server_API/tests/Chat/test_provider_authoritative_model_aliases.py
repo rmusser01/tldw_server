@@ -16,7 +16,7 @@ from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallP
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 from tldw_Server_API.tests.Chat.test_provider_authoritative_model_selection import RecordingAdapter
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.provider_inventory]
 
 
 @pytest.fixture
@@ -202,16 +202,16 @@ async def test_native_messages_uses_same_authoritative_alias_membership(
 ) -> None:
     boundary.alias_status = lookup_status
     boundary.resolved = resolved
-    credentials = SimpleNamespace(api_key=boundary.key, credentials_resolved=True, app_config={})
+    credentials: Any = SimpleNamespace(api_key=boundary.key, credentials_resolved=True, app_config={})
 
-    async def resolve(provider: str, *, model: str) -> SimpleNamespace:
+    async def resolve(provider: str, *, model: str) -> Any:
         """Return the same synthetic credential used by catalog and alias HTTP."""
         assert provider == "anthropic"
         assert model == "claude-current-alias"
         return credentials
 
     monkeypatch.setattr(messages, "provider_auth_is_resolved", lambda *_args, **_kwargs: True)
-    runtime = SimpleNamespace(resolve=resolve)
+    runtime: Any = SimpleNamespace(resolve=resolve)
     if expected_status is None:
         assert await messages._resolve_messages_credentials(
             runtime, "anthropic", "claude-current-alias", operation=operation,

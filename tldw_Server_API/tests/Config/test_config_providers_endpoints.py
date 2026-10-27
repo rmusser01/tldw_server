@@ -10,7 +10,7 @@ import threading
 import types
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -676,6 +676,7 @@ class TestListConfiguredProviders:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.provider_inventory
 class TestValidateProviderKey:
     @pytest.fixture(autouse=True)
     def _clear_rate_limit_state(self):
@@ -1470,7 +1471,7 @@ class TestValidateProviderKey:
         assert http_calls[0]["headers"]["Authorization"] == f"Bearer {caller_key}"
         assert "sk-server-key-must-not-dispatch" not in repr(http_calls)
         if provider == "openai":
-            discovery = chat_service.discover_provider_models
+            discovery = cast(MagicMock, chat_service.discover_provider_models)
             discovery.assert_called_once()
             assert discovery.call_args.args == (provider, caller_key)
             assert discovery.call_args.kwargs["base_url"] == endpoint
@@ -1685,13 +1686,13 @@ class TestValidateProviderKey:
         if expected_valid:
             assert len(http_calls) == 1
             assert http_calls[0]["url"].startswith(api_base_url)
-            discovery = chat_service.discover_provider_models
+            discovery = cast(MagicMock, chat_service.discover_provider_models)
             discovery.assert_called_once()
             assert discovery.call_args.args == ("openai", "sk-openai-precedence-candidate")
             assert discovery.call_args.kwargs["base_url"] == api_base_url
         else:
             assert http_calls == []
-            chat_service.discover_provider_models.assert_not_called()
+            cast(MagicMock, chat_service.discover_provider_models).assert_not_called()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

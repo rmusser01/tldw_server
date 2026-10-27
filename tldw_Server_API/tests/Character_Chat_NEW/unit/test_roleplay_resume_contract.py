@@ -1164,11 +1164,9 @@ def test_unrepresentable_provider_behavior_refuses_before_input(resume_db, provi
 
     db, _ = resume_db
     if model is None:
-        from tldw_Server_API.app.core.Chat.chat_service import (
-            known_models_for_provider_cached,
-        )
+        from tldw_Server_API.app.core.Usage.pricing_catalog import list_provider_models
 
-        model = known_models_for_provider_cached(provider)[0]
+        model = list_provider_models(provider)[0]
     card = db.add_character_card({"name": "Provider Control Ava"})
     cid = create_character_conversation(
         db,
@@ -1205,9 +1203,7 @@ def test_unrepresentable_provider_behavior_refuses_before_input(resume_db, provi
 )
 def test_vendor_history_tool_mapping_is_admitted_only_when_representable(resume_db, provider, legacy, accepted):
     from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import RoleplayResumeConflictError
-    from tldw_Server_API.app.core.Chat.chat_service import (
-        known_models_for_provider_cached,
-    )
+    from tldw_Server_API.app.core.Usage.pricing_catalog import list_provider_models
 
     db, _ = resume_db
     card = db.add_character_card({"name": "Tool Vendor Ava"})
@@ -1238,7 +1234,7 @@ def test_vendor_history_tool_mapping_is_admitted_only_when_representable(resume_
         db,
         conversation_data={"character_id": card, "title": "Vendor tool history"},
         provider=provider,
-        model=known_models_for_provider_cached(provider)[0],
+        model=list_provider_models(provider)[0],
         initial_messages=[
             {"id": "tool-question", "sender": "user", "content": "Search the archive."},
             {
@@ -1400,9 +1396,7 @@ def test_character_creation_metadata_failure_rolls_back_initial_messages(resume_
 @pytest.mark.parametrize("damage", [None, "blank-name", "scalar-arguments", "image-result"])
 def test_anthropic_tool_history_must_retain_its_actual_provider_shape(resume_db, damage):
     from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import RoleplayResumeConflictError
-    from tldw_Server_API.app.core.Chat.chat_service import (
-        known_models_for_provider_cached,
-    )
+    from tldw_Server_API.app.core.Usage.pricing_catalog import list_provider_models
 
     db, _ = resume_db
     card = db.add_character_card({"name": "Anthropic Shape Ava"})
@@ -1429,7 +1423,7 @@ def test_anthropic_tool_history_must_retain_its_actual_provider_shape(resume_db,
         db,
         conversation_data={"character_id": card, "title": "Anthropic shape"},
         provider="anthropic",
-        model=known_models_for_provider_cached("anthropic")[0],
+        model=list_provider_models("anthropic")[0],
         initial_messages=[
             {
                 "id": "shape-question",

@@ -972,6 +972,16 @@ def test_chat_completion_strict_selection_accepts_a_saved_dotted_anthropic_name(
 
     provider_manager = MagicMock()
     provider_manager.circuit_breakers = {}
+    # Strict selection asks Anthropic's live list (TASK-13460), which holds only the dashed ID.
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    monkeypatch.setattr(
+        chat_service, "resolve_provider_models_base_url", lambda *_args, **_kwargs: "https://api.anthropic.com/v1",
+    )
+    monkeypatch.setattr(
+        chat_service, "discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready", ("claude-sonnet-4-5",)),
+    )
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call", side_effect=fake_execute_non_stream_call),

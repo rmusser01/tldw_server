@@ -29,6 +29,8 @@ from tldw_Server_API.app.core.LLM_Calls.providers import openai_adapter, openrou
 from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 
+pytestmark = pytest.mark.provider_inventory
+
 
 class RecordingAdapter(OpenAIAdapter):
     async_chat_is_native = True

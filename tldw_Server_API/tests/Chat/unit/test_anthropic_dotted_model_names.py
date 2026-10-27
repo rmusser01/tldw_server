@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from tldw_Server_API.app.core.Chat import chat_service
+from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.Usage.pricing_catalog import reset_pricing_catalog
 
 pytestmark = pytest.mark.unit
@@ -23,31 +25,75 @@ def _fresh_catalogs(monkeypatch: pytest.MonkeyPatch):
     chat_service.invalidate_model_alias_caches()
 
 
+_LISTED = ("claude-sonnet-4-5", "claude-haiku-4-5", "claude-opus-4-1", "claude-opus-4-5")
+
+
+@pytest.fixture
+def anthropic_inventory(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Anthropic's live list holds only dashed IDs; an alias lookup of any other name is a 404 (TASK-13460)."""
+    from tldw_Server_API.app.core.LLM_Calls import provider_model_inventory
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    lookups: list[str] = []
+
+    def lookup(**kwargs: Any) -> Any:
+        lookups.append(kwargs["url"].rsplit("/", 1)[-1])
+        return SimpleNamespace(status_code=404, json=lambda: {}, close=lambda: None)
+
+    monkeypatch.setattr(chat_service, "resolve_provider_models_base_url", lambda *_a, **_k: "https://api.anthropic.com/v1")
+    monkeypatch.setattr(chat_service, "discover_provider_models", lambda *_a, **_k: ModelDiscoveryResult("ready", _LISTED))
+    monkeypatch.setattr(provider_model_inventory, "_http_fetch", lookup)
+    return lookups
+
+
+def _known_with_credentials(name: str) -> bool | None:
+    return chat_service.is_model_known_for_provider(
+        "anthropic", name, api_key="sk-dotted", app_config={}, credentials_resolved=True,
+    )
+
+
+@pytest.mark.parametrize("name", [n for n in _DOTTED if n == n.lower()])
+def test_a_saved_dotted_name_stays_known_for_anthropic(anthropic_inventory: list[str], name: str) -> None:
+    assert _known_with_credentials(name) is True
+    assert anthropic_inventory == []  # matched as the listed dashed ID, no alias lookup
+
+
 @pytest.mark.parametrize("name", _DOTTED)
-def test_a_saved_dotted_name_stays_known_for_anthropic(name: str) -> None:
-    assert chat_service.is_model_known_for_provider("anthropic", name) is True
+def test_without_credentials_a_dotted_name_is_deferred_not_rejected(name: str) -> None:
+    assert chat_service.is_model_known_for_provider("anthropic", name) is None
 
 
-def test_an_unknown_dotted_name_is_still_unknown() -> None:
-    assert chat_service.is_model_known_for_provider("anthropic", "claude-nonesuch-9.9") is False
+def test_an_unknown_dotted_name_is_still_unknown(anthropic_inventory: list[str]) -> None:
+    assert _known_with_credentials("claude-nonesuch-9.9") is False
+    assert _known_with_credentials("claude-sonnet-9.9") is False
+    # Anthropic is asked for the dashed spelling of a Claude family name, and other names as written.
+    assert anthropic_inventory == ["claude-nonesuch-9.9", "claude-sonnet-9-9"]
 
 
 @pytest.mark.parametrize("name", _DOTTED)
-def test_a_dotted_name_with_no_provider_still_routes_to_anthropic(name: str) -> None:
-    provider, _debug = chat_service.infer_provider_from_model_catalog(provider="openai", model=name, provider_explicit=False)
+def test_a_dotted_name_with_no_provider_is_inferred_like_its_dashed_id(name: str) -> None:
+    """Neither spelling switches a commercial default to another vendor from the static catalog (TASK-13460)."""
+    dotted, dotted_debug = chat_service.infer_provider_from_model_catalog(provider="openai", model=name, provider_explicit=False)
+    dashed, _ = chat_service.infer_provider_from_model_catalog(
+        provider="openai", model=canonical_anthropic_model_id(name), provider_explicit=False,
+    )
 
-    assert provider == "anthropic"
+    assert dotted == dashed == "openai"
+    assert dotted_debug["reason"] == "commercial_inventory_requires_credentials"
 
 
-def test_strict_model_selection_does_not_reject_a_dotted_anthropic_name(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_strict_model_selection_does_not_reject_a_dotted_anthropic_name(
+    monkeypatch: pytest.MonkeyPatch, anthropic_inventory: list[str],
+) -> None:
     from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 
     monkeypatch.setenv("CHAT_ENFORCE_STRICT_MODEL_SELECTION", "1")
+    credentials = {"api_key": "sk-dotted", "app_config": {}, "credentials_resolved": True}
 
     assert chat_endpoint._should_enforce_strict_model_selection() is True
-    assert chat_endpoint._validate_explicit_model_availability("anthropic", "claude-sonnet-4.5") is None
+    assert chat_endpoint._validate_explicit_model_availability("anthropic", "claude-sonnet-4.5", **credentials) is None
     # The gate still rejects a name that is neither an ID nor a dotted alias of one.
-    rejected = chat_endpoint._validate_explicit_model_availability("anthropic", "claude-nonesuch-9.9")
+    rejected = chat_endpoint._validate_explicit_model_availability("anthropic", "claude-nonesuch-9.9", **credentials)
     assert rejected is not None and rejected["error_code"] == "model_not_available"
 
 

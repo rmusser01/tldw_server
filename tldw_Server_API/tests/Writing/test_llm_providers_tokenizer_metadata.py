@@ -1,4 +1,5 @@
 import configparser
+from typing import Any
 
 import pytest
 
@@ -17,7 +18,7 @@ def inventory_endpoint_for_tokenizer_fixtures(monkeypatch):
                         None if provider in {"bedrock", "zai", "minimax"} else "https://fixture.example.invalid/v1")
 
 
-def _reported_models(provider, *_args, **_kwargs):
+def _reported_models(provider: str, *_args: Any, **_kwargs: Any) -> ModelDiscoveryResult:
     config = _fake_config()
     value = config.get("API", f"{provider}_model", fallback="")
     return ModelDiscoveryResult("ready", tuple(model.strip() for model in value.split(",") if model.strip()))

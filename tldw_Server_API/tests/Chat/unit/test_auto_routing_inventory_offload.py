@@ -36,14 +36,17 @@ async def test_auto_routing_discovery_runs_off_event_loop(
     monkeypatch.setattr(module, "get_configured_providers", listing)
     monkeypatch.setattr(module, "resolve_routing_policy", stop)
     request = SimpleNamespace(model="auto", routing=None)
+    # Duck-typed fakes: only the discovery offload runs before resolve_routing_policy stops it.
+    resolve_chat: Any = chat._resolve_auto_chat_routing_decision
+    resolve_character: Any = character_chat_sessions._resolve_auto_character_chat_routing_decision
     with pytest.raises(StopAfterDiscovery):
         if surface == "chat":
-            await chat._resolve_auto_chat_routing_decision(
+            await resolve_chat(
                 request, request=None, sticky_store=None, current_user=None,
                 request_id=None, credential_runtime=None,
             )
         else:
-            await character_chat_sessions._resolve_auto_character_chat_routing_decision(
+            await resolve_character(
                 chat_id="synthetic", body=request, raw_provider=None,
                 formatted_messages=[], sticky_store=None, current_user=None,
                 credential_runtime=None,

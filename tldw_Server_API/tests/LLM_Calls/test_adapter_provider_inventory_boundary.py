@@ -11,6 +11,8 @@ from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallP
 from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 
+pytestmark = pytest.mark.provider_inventory
+
 
 @pytest.mark.unit
 @pytest.mark.parametrize("method", ["chat", "stream"])
@@ -76,14 +78,15 @@ def test_direct_adapter_discovery_consumes_call_policy_deadline(monkeypatch: pyt
 
     adapter = OpenAIAdapter()
     monkeypatch.setattr(adapter, "http_fetcher", fetch)
+    policy = ProviderCallPolicy(maximum_timeout_seconds=10,
+        required_endpoint_scope=ConfiguredEndpointScope.from_url("https://provider.example.invalid/v1"))
     request = {"model": "current-model", "api_key": "synthetic-key", "app_config": {},
                "base_url": "https://provider.example.invalid/v1",
                "messages": [{"role": "user", "content": "synthetic"}],
-               "call_policy": ProviderCallPolicy(maximum_timeout_seconds=10,
-                   required_endpoint_scope=ConfiguredEndpointScope.from_url("https://provider.example.invalid/v1"))}
+               "call_policy": policy}
     adapter.chat(request)
     assert calls[0]["timeout"] == 8
-    assert request["call_policy"].maximum_timeout_seconds == 10
+    assert policy.maximum_timeout_seconds == 10
 
 
 def _record_generation_requests(monkeypatch: pytest.MonkeyPatch, calls: list[dict[str, Any]]) -> None:
@@ -121,7 +124,7 @@ def test_legacy_functional_adapter_freezes_actual_config_and_key(
         return SimpleNamespace(status="ready", models=("current-model",))
 
     monkeypatch.setattr(chat_service, "discover_provider_models", discover)
-    generation = []
+    generation: list[dict[str, Any]] = []
     _record_generation_requests(monkeypatch, generation)
     adapter = getattr(module, "CohereAdapter" if provider == "cohere" else "MoonshotAdapter")()
     adapter.chat({"app_config": app_config, "messages": [{"role": "user", "content": "synthetic"}]})
@@ -142,7 +145,7 @@ def test_legacy_cohere_nested_api_uses_same_inventory_endpoint(monkeypatch: pyte
         return SimpleNamespace(status="ready", models=("current-model",))
 
     monkeypatch.setattr(chat_service, "discover_provider_models", discover)
-    generation = []
+    generation: list[dict[str, Any]] = []
     _record_generation_requests(monkeypatch, generation)
     config = {"API": {"cohere": {"api_key": "nested-key", "model": "current-model",
                                 "api_base_url": "https://nested.example.invalid"}}}
