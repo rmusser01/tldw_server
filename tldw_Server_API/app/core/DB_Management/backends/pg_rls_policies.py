@@ -611,6 +611,36 @@ def build_chacha_rls_sql() -> list[str]:
     for table in ("writing_sessions", "writing_templates", "writing_themes"):
         add_tenant_policy(table, "client_id = current_setting('app.current_user_id', true)")
 
+    # Study tables (decks, flashcards, study packs). Every row carries its
+    # owner's client_id. Guarded because version migrations replay this set
+    # before the post-migration steps create the newer study tables, and a
+    # CREATE POLICY on a missing relation aborts the whole transaction.
+    study_owner = "client_id = current_setting('app.current_user_id', true)"
+    for table in (
+        "decks",
+        "flashcards",
+        "flashcard_reviews",
+        "flashcard_review_sessions",
+        "flashcard_assets",
+        "flashcard_templates",
+        "deck_shares",
+        "study_packs",
+        "study_pack_cards",
+        "flashcard_citations",
+    ):
+        add(f"""
+            DO $study_rls$
+            BEGIN
+              IF to_regclass('{table}') IS NULL THEN RETURN; END IF;
+              ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;
+              ALTER TABLE {table} FORCE ROW LEVEL SECURITY;
+              DROP POLICY IF EXISTS {table}_tenant_isolation ON {table};
+              CREATE POLICY {table}_tenant_isolation ON {table}
+                USING ({study_owner}) WITH CHECK ({study_owner});
+            END
+            $study_rls$;
+        """)
+
     # Notes
     add("ALTER TABLE IF EXISTS notes ENABLE ROW LEVEL SECURITY;")
     add("ALTER TABLE IF EXISTS notes FORCE ROW LEVEL SECURITY;")
