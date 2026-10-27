@@ -610,3 +610,130 @@ At HEAD there are zero unresolved Critical/Important review findings.
   `tsc --noEmit` → 0 errors.
 - The W0 streaming benches (Families A/B) belong to W1's remediation scope
   and are skipped here per the batch brief.
+
+## Batch W3 (TASK-13523) — 2026-10-26
+
+Storage/indexing and data-structures batch: chat-search token side table
+(WP-23), O(n) server-chat mirror reconcile (WP-24), Dexie query-shape fixes
+(WP-25..29), folder diff-sync + bounded API caches (WP-30/31), Map/Set
+mechanical sweep (WP-32/35). Branch
+`codex/webui-perf-w3-storage-indexing`, range `617094d014..d4dd609462`
+(7 commits; base = dev incl. W1+W2). Every number below is from an actual
+run at HEAD `d4dd609462` on 2026-10-26 (same machine/environment as the
+frozen tables; the W0/W1/W2 sections above are untouched).
+
+### Family re-runs at HEAD (W3 owns no bench; the three existing ones must be untouched and green)
+
+- **Family A — streaming bench (W1's).** Untouched, green, post-W1 shape.
+  3 invocations: count metrics bit-identical — seedMessages 200,
+  chunksStreamed 500, storeSubscriberNotifications **3**,
+  messageUpdateNotifications **2**, transcriptArrayMapClones **1**,
+  finalAssistantChars 4890; streamPhaseMs 2.67 / 3.8 / 3.58 (informational).
+  W3 touched no streaming/render code (all three counts sit at W1's landed
+  values; the frozen 502/501/501 numbers were already stale at W1's branch
+  point per W1's drift note).
+- **Family C1 — workspace-persist bench (W0's).** Untouched, green, numbers
+  bit-identical to W2's appended record: 22 `JSON.stringify` calls /
+  1,915,228 B / 2 `setItem` calls / 121,600 B across all 3 in-process runs;
+  durations 9.61 / 8.03 / 10.7 ms (informational). W3 touched no persistence
+  chain (W2's scope).
+- **Family C2 — history bench (W2's).** Untouched, green, numbers
+  bit-identical to W2's appended record: 1 setItem attempted/landed, 0 quota
+  errors, 115,651 B, 50 final entries, 2,313 B/request, amplification 1.0×
+  across all 3 in-process runs; durations 2.13 / 1.8 / 2.08 ms.
+
+### Per-stage attribution (ledger verdicts, quoted)
+
+| Stage | Commit(s) | Verdict at overlap check → what this branch landed | Pre-landed at branch point |
+|---|---|---|---|
+| S1 — chat-search token index + Set dedupe (WP-23) | `04ba6911c1` + fix `472615bb53` | **All-new** (content search was a full-table `messages.toArray()`; merge was O(n²) `findIndex`): `searchTokens` side table (schema v17 additive + streaming backfill upgrade), pure tokenizer whose word definition guarantees a candidate superset, token-prefiltered candidate-only search, Set-based merge, indexing wired into all **seven** message write paths (incl. `restoreChat` in the fix round). Deviations, both forced by repo reality: memory-dexie harness instead of the plan's fake-indexeddb (not shipped, no new deps allowed), and a non-empty v17 upgrade (the plan's "empty upgrade" applied to pure index adds; a new table over pre-existing data needs the backfill). | `messages.history_id` index since v1 (plan's "add if absent" already satisfied); title-search path |
+| S2 — server-chat mirror reconcile O(n) (WP-24) | `4f0cbb30ba` | **All-new** (every plan anchor live at HEAD: `some`/`filter` scans, per-message get/put/add, final re-read): Map/Set indexes in both `recover*` helpers, one `bulkGet` + one `messages.bulkPut` + one `searchTokens.bulkPut`, final re-read replaced by constructed PK-sorted rows; plus the beyond-plan `hasServerGreeting` hoist. Golden honesty **proven empirically**: characterization captured against a base checkout with `CAPTURE_GOLDEN=1` (old code emits the embedded bytes exactly), then held byte-identical across the refactor. | none (Stage-1 token wiring only) |
+| S3 — query-shape fixes (WP-25..29) | `692dcdb207` | Five items, per-item verdicts: (1) prompts `deletedAt` **PARTIAL** — index existed since v9 but all five query sites were JS scans; rewritten on `where('deletedAt')` ranges after proving Dexie `equals(null)` throws and IndexedDB never indexes null (only the trashed side is indexable; non-deleted family stays output-proportional JS filter); (2) metadata **GAP** — schema v18 `[history_id+createdAt]` compound index (empty upgrade; no counters/backfill/staleness by construction), index-only `count()` + two-seek newest with tie semantics exactly pinned; (3) pagination **PARTIAL** — keyset variant existed **dead** at HEAD; Sidebar switched to it; rewritten as pure `[createdAt+id]` range keyset — **the dead `fastForward` predicate was provably buggy (skip/stall on same-timestamp rows); deleting it is a correctness win** — plus exact one-row-probe `hasMore` and id-based search continuation; offset variant retained (scoped `LocalChatList` contract, not caller-free); (4) nickname cache **GAP**; (5) drafts quota **GAP** — `each()` streaming. | `deletedAt` index spec (v9); dead keyset variant; `history_id`-based metadata scan shape |
+| S4 — folder diff-sync + cache bounds (WP-30/31) | `37d2e37c1e` + fix `51fe1e7dc9` | (1) folder sync **GAP** — clear-and-rewrite of all 4 tables still live; replaced by upsert-only diffs by `last_modified`/composite key with the **deletion-safety fallback** (no marker distinguishes acknowledged local creations from server deletions → per-table clear-and-rewrite when rows vanished remotely, full-rewrite when the diff is unresolvable; end state byte-identical, only write volume changes; zero writes + no transaction when nothing changed). (2) API caches **PARTIAL** — interim TASK-13450 (`f31df6bac0`, 2026-10-05) pre-landed `BoundedTtlCache` with 32-entry + 8 MiB FIFO caps, per-entry timers, read-path sweep; this branch added the plan's 100-entry cap, one module-level 60 s sweep (disarm-on-empty/re-arm-on-set), O(1) per-key expiry in `get()`, and the ~5-per-chat query-shape group cap; TASK-13450's 8 MiB byte budget and oversize/expired rejection retained as stricter secondary bounds. Fix round: the vacuous 50-vs-≤100 cap assertion replaced by a structurally non-vacuous 150-loop/exact-100 pin (proven by a temporary `MAX_ENTRIES=Infinity` flip failing exactly that test). | `BoundedTtlCache` itself incl. 8 MiB budget, recency-on-reset (TASK-13450) |
+| S5 — Map/Set mechanical sweep (WP-32/35) | `d4dd609462` | **Four GAP conversions** (Kanban `BoardView` `.find`-per-id ×2, `useMediaSearch` `includes`-in-loop ×3 via one Set snapshot, `importSessionFilesV2` merge Set, nickname `importDataV2` `bulkPut`) + **six sweep sites** (branch.ts node Map, Chatbooks jobs Map, four membership-only `includes`→Set in folder.tsx), all within the ~8 cap; the sweep validated the leave-and-list ruling by spot-checking one hazard as real (`mediaResultKey` composite-key class). | `research.tsx` `textToStringList` Set dedupe **ALREADY-DONE** — W1 landed it |
+
+### What W3 proved, and how (honest framing)
+
+**No new benchmarks exist for W3's paths, and none were run.** W3's wins are
+**complexity-class changes pinned by mechanism tests, not wall-clock
+deltas**. The benches above exist only to prove W3 broke nothing measured.
+The actual evidence, per stage:
+
+- **S1:** a no-materialization spy test — the search path fails the suite if
+  `messages.toArray`/`filter`/`each` (whole-table shapes) are ever called;
+  only `where('history_id')` candidate reads over the token-prefiltered set
+  are legal.
+- **S2:** golden **byte-identity** — a pre-refactor capture (old code,
+  `CAPTURE_GOLDEN=1`, base checkout) held byte-identical across the O(n)
+  rewrite, including row order, `localIds`, and the token side table; plus a
+  spy pinning exactly one `bulkGet` / one `messages.bulkPut` / one
+  `searchTokens.bulkPut` and zero per-message `put`/`add`.
+- **S3:** index-shape mechanism tests that **throw** if the queries regress —
+  `Table.toArray`/`filter` and `where('history_id').anyOf` are banned
+  (spy-throws) in the prompts-trash and metadata suites; the keyset suite
+  pins no-dup/no-skip across inserts incl. exact next-30.
+- **S4:** a zero-write no-change spy (no `bulkPut`, no `clear`, **no
+  `transaction`** when nothing changed) and LRU bound pins (150-loop
+  exact-100 + oldest-evicted keys; per-group cap; sweep disarm/re-arm).
+- **S5:** the capped sweep's site list — each converted site is a
+  primary-key Map or membership-only Set with the equivalence argument
+  recorded; six hazard candidates deliberately left and listed.
+
+### Documented gaps / follow-ups
+
+- **Hooks-suite fakes need `searchTokens` + PK-scan ordering — the standing
+  seam item.** Five hooks suites (780 tests) fail at HEAD; per-suite counts
+  are exactly the standing itemization recorded since Stage 2:
+  `normalChatMode.history-selection` 90, `useMessage.history-selection` 12,
+  `useChatActions.saved-normal` 7, `temporary-fork-ownership` 5,
+  `character.integration` 4 — **118 total** (the "117" in earlier stage
+  prose undercounted its own itemization; 118 is the counted number, and
+  118 names were re-extracted at final HEAD, matching the standing
+  per-suite counts exactly). Root cause, re-proved at final HEAD in the W2
+  batch-final pattern (temporary worktree at the base commit sharing this
+  branch's node_modules): the same five suites are **780/780 green at the
+  pre-W3 base `617094d014`** — the reds are branch-caused by the schema's
+  evolution (their hand-rolled fakes lack the Stage-1 `searchTokens` table
+  and PK-scan ordering), not by any regression in the suites' behavior.
+  Seam-hardening (teaching the fakes the new tables/APIs) is the open
+  follow-up; it was ruled out of scope per stage to keep the perf diffs
+  clean.
+- **Stale tokens accumulate on deletes by design** (delete-side): exact
+  verification rejects them; a compaction pass can be added if unbounded
+  growth ever matters. Edit-side staleness self-corrects via re-indexing.
+- **Real-IDB v16→v17 migration untestable in this harness** (no
+  fake-indexeddb; jsdom has no IndexedDB): the v17 declaration, backfill
+  logic, and streamed-chunk writes are pinned against the scripted-tx and
+  memory-dexie harnesses; an actual browser-profile migration smoke remains
+  open.
+- **Six Map/Set sweep candidates left unconverted with per-site hazards**
+  (duplicate-id / composite-key / find-first-vs-Map-last semantics):
+  `MediaCollectionManager.tsx`, `useMediaSelection.ts` ×2,
+  `trustState.ts`, `workspace-server-restore.ts`, `useBlocklist.ts` —
+  listed in the Stage 5 record; each needs a uniqueness proof before
+  conversion.
+- **`getHistoryMetadata` (singular) is caller-less** — rewritten alongside
+  the metadata family (shares the helper); dead-code sweep candidate.
+- **Nickname `importDataV2` invalidation is not in a `finally`** (rare
+  partial-write staleness, self-healing on next successful read) — Stage 3
+  deferred minor.
+- **`invalidateChatMessagesCache` `startsWith` over-invalidation
+  (pre-existing)** — prefix-chat-id collisions ("1" vs "12"); the new
+  `groupOf` parses groups correctly but fixing the prefix scan is a behavior
+  change that was out of scope.
+
+### Verification runs at final HEAD (2026-10-26, `d4dd609462`)
+
+- Family A / C1 / C2 benches: green, untouched, numbers quoted above.
+- Full `src/db` suite (`apps/packages/ui`): **34 files, 525/525 green**.
+- The five excluded hooks suites: 118 failed | 662 passed (780), per-suite
+  counts identical to the standing itemization (see the seam item above for
+  the base-green proof). All other verification at each stage (caller
+  suites, folder/cache suites, characterization suites) is recorded in the
+  stage reports and the TASK-13523 backlog notes.
+- Typecheck: `cd apps/tldw-frontend && bun run typecheck` → **exit 0**.
+- Whitespace: `git diff --check` clean over both the W3 range
+  (`617094d014..HEAD`, 42 files) and `origin/dev..HEAD` (origin/dev has
+  moved past the W3 base; the range check is clean).
+- Bandit: N/A — TypeScript-only batch, no Python touched (per program
+  precedent).
