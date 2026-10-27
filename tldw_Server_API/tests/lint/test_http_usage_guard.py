@@ -282,6 +282,18 @@ SCOPE_ALLOWLIST: dict[str, str] = {
         "scope from the operator-configured MCP streamable-HTTP origin (allow_private_network) via "
         "mcp_http_egress_scope."
     ),
+    "tldw_Server_API/app/core/Audio_Studio/providers/ace_step.py": (
+        "scope from the operator's AUDIO_STUDIO_EXTERNAL_ENDPOINT_ALLOWLIST origin; a legacy redirect hop "
+        "is scoped only after it matches an allowlisted origin exactly."
+    ),
+    "tldw_Server_API/app/core/Ingestion_Media_Processing/OCR/runtime_support.py": (
+        "scope from the operator-configured OCR host/port, OCR profile or CHATLLM_OCR_HEALTHCHECK_URL."
+    ),
+    "tldw_Server_API/app/core/TTS/adapters/audio_cpp_client.py": (
+        "scope from operator config (a loopback base_url, or providers.audio_cpp.extra_params."
+        "allow_private_network), or an admin BYOK base_url when audio_cpp is in "
+        "BYOK_ALLOWED_BASE_URL_PROVIDERS."
+    ),
 }
 
 
