@@ -37,6 +37,7 @@ import {
   Tooltip,
   message
 } from "antd"
+import { SidepanelPersistenceSwitch } from "./SidepanelPersistenceSwitch"
 import { useWebUI } from "~/store/webui"
 import { defaultEmbeddingModelForRag } from "~/services/tldw-server"
 import {
@@ -95,10 +96,15 @@ import { useTabMentions, type TabInfo } from "~/hooks/useTabMentions"
 import { useDeferredComposerInput } from "@/hooks/playground"
 import { KnowledgePanel } from "@/components/Knowledge"
 import { ChatQueuePanel } from "@/components/Common/ChatQueuePanel"
-import { ModelSelect } from "@/components/Common/ModelSelect"
+import { ModelSelect, type ModelSelectHandle } from "@/components/Common/ModelSelect"
+import { useSidepanelStartupModel } from "./hooks/useSidepanelStartupModel"
 import { ConnectionStatusIndicator } from "@/components/Sidepanel/Chat/ConnectionStatusIndicator"
 import { ControlRow } from "@/components/Sidepanel/Chat/ControlRow"
 import { SidepanelComposerControlArea } from "@/components/Sidepanel/Chat/SidepanelComposerControlArea"
+import {
+  SidepanelResponseStatus,
+  resolveSidepanelPrimaryAction
+} from "@/components/Sidepanel/Chat/sidepanel-response-status"
 import { PromptAssistComposerAction } from "@/components/Chat/composer/PromptAssistComposerAction"
 import { ContextChips } from "@/components/Sidepanel/Chat/ContextChips"
 import { SlashCommandMenu } from "@/components/Sidepanel/Chat/SlashCommandMenu"
@@ -189,6 +195,7 @@ import { CharacterControlsSheet } from "@/components/Sidepanel/Chat/CharacterCon
 import { getSidepanelOverlayResumeMarkerKey } from "@/utils/sidepanel-overlay-resume"
 import type { SidepanelChatWebUiHandoffOverrides } from "@/services/tldw/sidepanel-chat-webui-handoff"
 import { readVisiblePageContextForHandoff } from "./sidepanel-chat-handoff-context"
+import { isChatWithPageActive } from "./page-chat-mode"
 import {
   DEFAULT_DOCUMENT_PROCESSING_MODE,
   documentProcessingSelectionKey,
@@ -293,6 +300,9 @@ export const SidepanelForm = ({
     connectionReadyRef.current = isConnectionReady
   }, [isConnectionReady])
   const { data: chatModels, isFetching: chatModelsLoading } = useChatModelCatalog(isConnectionReady)
+  useSidepanelStartupModel({ enabled: isConnectionReady, models: chatModels })
+  // Opens the model picker (Casual chip or Pro control row) when a send is blocked by the model (XS-02).
+  const modelPickerRef = React.useRef<ModelSelectHandle>(null)
   const voiceChatModelOptions = React.useMemo(() => {
     const options = [
       {
@@ -1303,7 +1313,7 @@ export const SidepanelForm = ({
           }
         ]
       : []),
-    ...(pageContextActive
+    ...(isChatWithPageActive(chatMode)
       ? [
           {
             id: "page-context",
@@ -2260,6 +2270,7 @@ export const SidepanelForm = ({
         const normalizedSelectedModel = normalizeChatModelId(selectedModel)
         if (!normalizedSelectedModel) {
           form.setFieldError("message", t("formError.noModel"))
+          modelPickerRef.current?.openAndFocus()
           return
         }
         const unavailableModel = findUnavailableChatModel(
@@ -2275,6 +2286,7 @@ export const SidepanelForm = ({
               "Selected model is not available on this server. Refresh models or choose a different model."
             )
           )
+          modelPickerRef.current?.openAndFocus()
           return
         }
       }
@@ -3400,6 +3412,7 @@ export const SidepanelForm = ({
         const normalizedSelectedModel = normalizeChatModelId(selectedModel)
         if (!normalizedSelectedModel) {
           form.setFieldError("message", t("formError.noModel"))
+          modelPickerRef.current?.openAndFocus()
           return
         }
         const unavailableModel = findUnavailableChatModel(
@@ -3415,6 +3428,7 @@ export const SidepanelForm = ({
               "Selected model is not available on this server. Refresh models or choose a different model."
             )
           )
+          modelPickerRef.current?.openAndFocus()
           return
         }
       }
@@ -3462,18 +3476,17 @@ export const SidepanelForm = ({
     [form, submitCurrentRequest]
   )
 
-  const shouldQueuePrimaryAction = isSending && isConnectionReady
-  const primaryActionLabel = shouldQueuePrimaryAction
-    ? t("common:queue", "Queue")
-    : t("common:send", "Send")
-  const primaryActionTitle = personaSubmitDisabledReason ?? (!isConnectionReady
-    ? t("playground:composer.connectionRequired", "Connect to your tldw server before sending. Your draft has not been queued.") as string
-    : shouldQueuePrimaryAction
-      ? t("playground:composer.queue.primaryWhileBusy", "Queue this request to run after the current response.") as string
-      : sendButtonTitle)
-  const primaryActionAriaLabel = shouldQueuePrimaryAction
-    ? (t("playground:composer.queue.primaryAria", "Queue request") as string)
-    : (t("playground:composer.submitAria", "Send message") as string)
+  const primaryAction = resolveSidepanelPrimaryAction({
+    isSending,
+    isConnectionReady,
+    sendTitle: sendButtonTitle,
+    disabledReason: personaSubmitDisabledReason,
+    t: (key, fallback, options) => String(t(key, fallback, options))
+  })
+  const shouldQueuePrimaryAction = primaryAction.queuesAfterReply
+  const primaryActionLabel = primaryAction.label
+  const primaryActionTitle = primaryAction.title
+  const primaryActionAriaLabel = primaryAction.ariaLabel
   const v5DocumentProcessingFacet = React.useMemo(() => {
     if (contextFiles.length === 0) return null
 
@@ -3874,14 +3887,23 @@ export const SidepanelForm = ({
                         </div>
                       )
 
+                      const composerResponseStatusNode = (
+                        <SidepanelResponseStatus
+                          isSending={isSending}
+                          messages={messages}
+                          selectedModel={selectedModel}
+                          models={chatModels}
+                          className="px-2 py-1"
+                        />
+                      )
+
                       const composerInlineMessagesNode = (
                         <>
                           {personaSubmitDisabledReason && <p role="status" className="px-2 py-1 text-sm text-text-muted">{personaSubmitDisabledReason}</p>}
                           {isConnectionReady && !isProMode && <ModelSelect
+                            ref={modelPickerRef}
                             iconClassName="size-4"
                             showSelectedName
-                            showPicker={Boolean(!normalizeChatModelId(selectedModel) ||
-                              findUnavailableChatModel([selectedModel], availableChatModelIds))}
                           />}
                           {form.errors.message && (
                             <div
@@ -3961,20 +3983,15 @@ export const SidepanelForm = ({
                       const composerControlAreaNode = (
                         <div className="mt-2 flex min-w-0 flex-col gap-2">
                       <Tooltip title={persistenceTooltip}>
-                        <div className="flex items-center gap-2">
-                          <Switch
-                            size="small"
-                            checked={!temporaryChat}
-                            disabled={temporaryChatLocked || isFireFoxPrivateMode}
-                            onChange={(checked) =>
-                              handleToggleTemporaryChat(!checked)
-                            }
-                            aria-label={persistenceControlLabel}
-                          />
-                          <span className="text-xs text-text whitespace-nowrap">
-                            {temporaryChatToggleLabel}
-                          </span>
-                        </div>
+                        <SidepanelPersistenceSwitch
+                          checked={!temporaryChat}
+                          disabled={temporaryChatLocked || isFireFoxPrivateMode}
+                          onChange={(checked) =>
+                            handleToggleTemporaryChat(!checked)
+                          }
+                          ariaLabel={persistenceControlLabel}
+                          label={temporaryChatToggleLabel}
+                        />
                       </Tooltip>
                       <div className="flex w-full min-w-0 flex-row flex-wrap items-center justify-between gap-1.5">
                       {isProMode ? (
@@ -4036,6 +4053,7 @@ export const SidepanelForm = ({
                               onOpenChatInWebUi={
                                 openChatInWebUiWithDocumentHandoff
                               }
+                              modelPickerRef={modelPickerRef}
                             />
                           )}
                           <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
@@ -4048,7 +4066,7 @@ export const SidepanelForm = ({
                               className="flex min-w-0 flex-wrap items-center gap-2">
                               {/* L15: gap-2 provides visual separation */}
                               <>
-                                {!streaming ? (
+                                {!primaryAction.showStop ? (
                                   <>
                                     <Tooltip
                                       title={t("playground:actions.upload", "Attach image")}
@@ -4540,7 +4558,7 @@ export const SidepanelForm = ({
                             )}
                           </div>
                           <div className="flex items-end gap-2">
-                            {streaming && (
+                            {primaryAction.showStop && (
                               <div className="flex flex-col items-center gap-1">
                                 <Tooltip title={t("tooltip.stopStreaming")}>
                                   <button
@@ -4594,7 +4612,12 @@ export const SidepanelForm = ({
                       )
 
                       if (nextgenComposerEnabled) {
-                        const sharedNoticesSlot = composerInlineMessagesNode
+                        const sharedNoticesSlot = (
+                          <>
+                            {composerInlineMessagesNode}
+                            {composerResponseStatusNode}
+                          </>
+                        )
 
                         // Compact brief for V3 in the sidepanel — same idea
                         // as Playground's, trimmed to the data Sidepanel
@@ -4707,7 +4730,7 @@ export const SidepanelForm = ({
                           "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-text-muted transition-colors hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
                         const v5InlineSlot = (
                           <>
-                            {!streaming ? (
+                            {!primaryAction.showStop ? (
                               <>
                                 <Tooltip
                                   title={t(
@@ -4969,6 +4992,7 @@ export const SidepanelForm = ({
                         <>
                           {composerTextareaShellNode}
                           {composerInlineMessagesNode}
+                          {composerResponseStatusNode}
                           {composerControlAreaNode}
                         </>
                       )

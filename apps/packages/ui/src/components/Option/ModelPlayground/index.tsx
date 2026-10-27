@@ -9,7 +9,7 @@ import { ParametersSidebar } from "./ParametersSidebar"
 import { DebugPanel } from "./DebugPanel"
 import { useMessageOption } from "@/hooks/useMessageOption"
 import { useSmartScroll } from "@/hooks/useSmartScroll"
-import { ChevronDown } from "lucide-react"
+import { ScrollToLatestButton } from "@/components/Common/ScrollToLatestButton"
 import {
   MODEL_PLAYGROUND_DEBUG_KEY,
   MODEL_PLAYGROUND_SIDEBAR_KEY
@@ -35,8 +35,12 @@ export const ModelPlayground: React.FC = () => {
     hydrateServerChat: true,
     forceCompareEnabled: true
   })
-  const { containerRef, isAutoScrollToBottom, autoScrollToBottom } =
-    useSmartScroll(messages, streaming, 120)
+  const {
+    containerRef,
+    isAutoScrollToBottom,
+    autoScrollToBottom,
+    hasUnseenMessages
+  } = useSmartScroll(messages, streaming, 120)
 
   const handleGoToChat = () => {
     navigate("/")
@@ -122,25 +126,13 @@ export const ModelPlayground: React.FC = () => {
             </div>
           </div>
           {/* Scroll to bottom button */}
-          {!isAutoScrollToBottom && (
-            <div className="pointer-events-none absolute bottom-24 left-0 right-0 flex justify-center">
-              <button
-                onClick={() => autoScrollToBottom()}
-                aria-label={t(
-                  "playground:composer.scrollToLatest",
-                  "Scroll to latest messages"
-                )}
-                title={
-                  t(
-                    "playground:composer.scrollToLatest",
-                    "Scroll to latest messages"
-                  ) as string
-                }
-                className="pointer-events-auto rounded-full border border-border bg-surface p-2 text-text-subtle shadow-card transition-colors hover:bg-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-              >
-                <ChevronDown className="size-4 text-text-subtle" aria-hidden="true" />
-              </button>
-            </div>
+          {!isAutoScrollToBottom && messages.length > 0 && (
+            <ScrollToLatestButton
+              onClick={() => autoScrollToBottom()}
+              replyInProgress={streaming}
+              hasUnseenMessages={hasUnseenMessages}
+              className="absolute bottom-24 right-4"
+            />
           )}
         </div>
 

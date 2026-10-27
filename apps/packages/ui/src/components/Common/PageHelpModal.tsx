@@ -23,6 +23,7 @@ import {
 import { useShortcutConfig, formatShortcut } from "@/hooks/keyboard/useShortcutConfig"
 import { isMac } from "@/hooks/keyboard/useKeyboardShortcuts"
 import { useStartTutorial } from "@/hooks/useStartTutorial"
+import { FEATURE_FLAGS, useFeatureFlag } from "@/hooks/useFeatureFlags"
 import { useHelpModal, useTutorialStore } from "@/store/tutorials"
 import {
   getTutorialsForRoute,
@@ -241,6 +242,8 @@ export function PageHelpModal({
   const { t } = useTranslation(["common", "tutorials"])
   const location = useLocation()
   const { shortcuts } = useShortcutConfig()
+  // Compare stays hidden until it is verified (owner decision D4).
+  const [compareEnabled] = useFeatureFlag(FEATURE_FLAGS.COMPARE_MODE)
 
   // Get tutorials for current route
   const availableTutorials = useMemo(
@@ -312,8 +315,8 @@ export function PageHelpModal({
             ? [
                 {
                   label: t(
-                    "common:shortcuts.toggleChatModeRag",
-                    "Switch normal / RAG chat mode"
+                    "common:shortcuts.toggleChatWithPage",
+                    "Toggle chat with current page"
                   ),
                   keys: formatShortcut(shortcuts.toggleChatMode)
                 },
@@ -351,13 +354,17 @@ export function PageHelpModal({
                   ),
                   keys: "Alt + Shift + A"
                 },
-                {
-                  label: t(
-                    "common:shortcuts.toggleCompare",
-                    "Toggle compare mode (when enabled)"
-                  ),
-                  keys: "Alt + Shift + C"
-                },
+                ...(compareEnabled
+                  ? [
+                      {
+                        label: t(
+                          "common:shortcuts.toggleCompare",
+                          "Toggle compare mode (when enabled)"
+                        ),
+                        keys: "Alt + Shift + C"
+                      }
+                    ]
+                  : []),
                 {
                   label: t(
                     "common:shortcuts.toggleModes",
@@ -463,7 +470,8 @@ export function PageHelpModal({
       scope,
       modeNavigationEnabled,
       sidebarToggleEnabled,
-      quickChatEnabled
+      quickChatEnabled,
+      compareEnabled
     ]
   )
 
@@ -599,8 +607,17 @@ export function PageHelpModal({
           </button>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-4">
+        {/* Content: a focusable, labelled region so keyboard users can
+            scroll a list that has no focusable items of its own (AX-18). */}
+        <div
+          role="region"
+          aria-label={
+            activeTab === "tutorials"
+              ? t("common:help.tutorialList", "Tutorial list")
+              : t("common:help.shortcutList", "Shortcut list")
+          }
+          tabIndex={0}
+          className="flex-1 overflow-y-auto p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus">
           {activeTab === "tutorials" ? (
             <TutorialList
               tutorials={availableTutorials}

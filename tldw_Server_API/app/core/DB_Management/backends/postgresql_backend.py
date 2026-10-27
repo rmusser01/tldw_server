@@ -5,15 +5,13 @@ This module provides a concrete implementation of the DatabaseBackend
 interface for PostgreSQL databases, enabling the application to use
 PostgreSQL as an alternative to SQLite.
 
-Note: This implementation requires psycopg (v3) to be installed:
-    pip install "psycopg[binary]"
-    # optional pooling extras:
-    pip install psycopg-pool
+Note: This implementation requires psycopg (v3) and psycopg-pool, both
+core dependencies:
+    pip install "psycopg[binary]" psycopg-pool
 """
 
 import contextlib
 import os
-import threading
 import time
 from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager, suppress
@@ -52,7 +50,7 @@ try:
     from psycopg.rows import dict_row
     try:
         import psycopg_pool
-    except ImportError:  # pool is optional
+    except ImportError:  # core dependency; PostgreSQLConnectionPool refuses to start without it
         psycopg_pool = None
     PSYCOPG2_AVAILABLE = True  # Legacy name used by tests to simulate missing driver
 except ImportError:
@@ -165,10 +163,11 @@ def _reset_pooled_connection(conn: Any) -> None:
 
 
 class PostgreSQLConnectionPool(ConnectionPool):
-    """PostgreSQL connection pool using psycopg (v3).
+    """PostgreSQL connection pool backed by psycopg_pool.
 
-    Uses psycopg_pool when available; otherwise falls back to a simple
-    on-demand pool creating connections up to pool_size.
+    Every checkout is re-scoped to the current tenant, and a checkout whose
+    scope cannot be set is discarded rather than handed out. Check-in runs
+    ``_reset_pooled_connection`` so no session state outlives its borrower.
     """
 
     _apply_scope_settings: Callable[[Any], None]
@@ -177,105 +176,57 @@ class PostgreSQLConnectionPool(ConnectionPool):
         if not PSYCOPG2_AVAILABLE:
             # Keep message for backward-compatible tests
             raise DatabaseError("psycopg2 is not installed. Install with: pip install psycopg[binary]")
+        if psycopg_pool is None:
+            raise DatabaseError("psycopg-pool is not installed. Install with: pip install psycopg-pool")
 
         self.config = config
         self._closed = False
-        self._connections: list[Any] = []
-        self._free: list[Any] = []
-        self._max = max(1, int(config.pool_size or 10))
-        self._fallback_lock = threading.Lock()
-        self._managed_connecting = 0
-
         self._dsn = config.postgres_connection_string()
-        self._use_psycopg_pool = psycopg_pool is not None
-        if self._use_psycopg_pool:
-            # Create a psycopg_pool.ConnectionPool with sane production defaults
-            max_size = max(1, int(self.config.pool_size or 10))
-            timeout = float(self.config.pool_timeout or 30.0)
-            recycle = int(self.config.pool_recycle or 3600)
-            try:
-                self._pool = psycopg_pool.ConnectionPool(
-                    self._dsn,
-                    min_size=1,
-                    max_size=max_size,
-                    timeout=timeout,
-                    max_lifetime=recycle,
-                    max_idle=recycle,
-                    open=True,
-                    # Ensure JSON is parsed into Python objects consistently
-                    configure=lambda conn: setattr(conn, 'row_factory', dict_row),
-                    # Clear tenant GUCs on check-in so one request's identity
-                    # cannot be inherited by the next borrower.
-                    reset=_reset_pooled_connection,
-                )
-            except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
-                # Fallback to defaults if parameters unsupported. The reset hook
-                # is not optional -- it is what stops tenant GUCs leaking between
-                # requests -- so it is kept on this path too.
-                self._pool = psycopg_pool.ConnectionPool(
-                    self._dsn, open=True, reset=_reset_pooled_connection
-                )
-        else:
-            self._pool = None
-
-    def _new_connection(self) -> Any:
-        conn = psycopg.connect(self._dsn, row_factory=dict_row)
-        return conn
+        # Create a psycopg_pool.ConnectionPool with sane production defaults
+        max_size = max(1, int(self.config.pool_size or 10))
+        timeout = float(self.config.pool_timeout or 30.0)
+        recycle = int(self.config.pool_recycle or 3600)
+        try:
+            self._pool = psycopg_pool.ConnectionPool(
+                self._dsn,
+                min_size=1,
+                max_size=max_size,
+                timeout=timeout,
+                max_lifetime=recycle,
+                max_idle=recycle,
+                open=True,
+                # Ensure JSON is parsed into Python objects consistently
+                configure=lambda conn: setattr(conn, 'row_factory', dict_row),
+                # Clear tenant GUCs on check-in so one request's identity
+                # cannot be inherited by the next borrower.
+                reset=_reset_pooled_connection,
+            )
+        except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
+            # Fallback to defaults if parameters unsupported. The reset hook
+            # is not optional -- it is what stops tenant GUCs leaking between
+            # requests -- so it is kept on this path too.
+            self._pool = psycopg_pool.ConnectionPool(
+                self._dsn, open=True, reset=_reset_pooled_connection
+            )
+        pool_class = type(self._pool)
+        logger.info(
+            "PostgreSQL connection pool active: {}.{}",
+            pool_class.__module__,
+            pool_class.__qualname__,
+        )
 
     def get_connection(self) -> Any:
-        if self._use_psycopg_pool:
-            if self._closed:
-                raise DatabaseError("Connection pool is closed")
-            # Standardize on getconn/putconn for clarity
-            conn = self._pool.getconn()
-            if hasattr(conn, 'row_factory'):
-                conn.row_factory = dict_row
-            try:
-                self._apply_scope_settings(conn)
-            except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as scope_exc:
-                logger.bind(exception_type=type(scope_exc).__name__).debug(
-                    "Scope config failed for pooled connection"
-                )
-            return conn
-        # Fallback minimal pool
-        managed_slot = False
-        with self._fallback_lock:
-            if self._closed:
-                raise DatabaseError("Connection pool is closed")
-            if self._free:
-                conn = self._free.pop()
-            else:
-                conn = None
-                if len(self._connections) + self._managed_connecting < self._max:
-                    self._managed_connecting += 1
-                    managed_slot = True
-
-        if conn is None:
-            try:
-                conn = self._new_connection()
-            except BaseException:  # noqa: BLE001 - always release the reserved slot
-                if managed_slot:
-                    with self._fallback_lock:
-                        self._managed_connecting -= 1
-                raise
-
-            with self._fallback_lock:
-                if managed_slot:
-                    self._managed_connecting -= 1
-                    if not self._closed:
-                        self._connections.append(conn)
-                pool_closed = self._closed
-            if pool_closed:
-                with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
-                    conn.close()
-                raise DatabaseError("Connection pool is closed")
-
+        if self._closed:
+            raise DatabaseError("Connection pool is closed")
+        conn = self._pool.getconn()
+        if hasattr(conn, 'row_factory'):
+            conn.row_factory = dict_row
         try:
             self._apply_scope_settings(conn)
-        except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as scope_exc:
-            logger.bind(exception_type=type(scope_exc).__name__).debug(
-                "Scope config failed for fallback connection"
-            )
+        except BaseException:
+            # The checkout may still carry the previous borrower's tenant GUCs.
+            self.discard_connection(conn)
+            raise
         return conn
 
     def return_connection(self, connection: Any) -> None:
@@ -283,70 +234,17 @@ class PostgreSQLConnectionPool(ConnectionPool):
             with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                 connection.close()
             return
-        if self._use_psycopg_pool:
-            # Always return via putconn
-            try:
-                self._pool.putconn(connection)
-            except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
-                with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
-                    connection.close()
-            return
-        # Minimal pool:
-        # - keep only managed connections in the reusable free list
-        # - close overflow/fallback connections immediately to avoid growth
-        with self._fallback_lock:
-            if self._closed:
-                is_managed = False
-            elif any(conn is connection for conn in self._free):
-                return
-            else:
-                is_managed = any(
-                    conn is connection for conn in self._connections
-                )
-
-        if not is_managed:
+        try:
+            self._pool.putconn(connection)
+        except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
             with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                 connection.close()
-            return
-
-        status = getattr(
-            getattr(connection, "info", None),
-            "transaction_status",
-            None,
-        )
-        status_name = str(getattr(status, "name", status) or "").upper()
-        if status_name in {"INTRANS", "INERROR"}:
-            try:
-                connection.rollback()
-            except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
-                self.discard_connection(connection)
-                return
-            status = getattr(
-                getattr(connection, "info", None),
-                "transaction_status",
-                None,
-            )
-            status_name = str(getattr(status, "name", status) or "").upper()
-        if bool(getattr(connection, "closed", False)) or status_name != "IDLE":
-            self.discard_connection(connection)
-            return
-
-        with self._fallback_lock:
-            if not self._closed:
-                if any(conn is connection for conn in self._free):
-                    return
-                if any(conn is connection for conn in self._connections):
-                    self._free.append(connection)
-                    return
-
-        with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
-            connection.close()
 
     def invalidate_connection(self, connection: Any) -> None:
         """Discard a failed checkout while preserving pool capacity bookkeeping.
 
         Delegates to ``discard_connection()``: psycopg receives the closed
-        checkout through ``putconn``; fallback tracking and free lists drop it.
+        checkout through ``putconn``.
 
         Args:
             connection: Checkout owned by the caller from this pool, or None
@@ -367,26 +265,14 @@ class PostgreSQLConnectionPool(ConnectionPool):
 
         if connection is None:
             return
-        if self._use_psycopg_pool:
-            # psycopg_pool must receive every checkout back for bookkeeping.
-            # A closed connection is recognized as broken and replaced.
-            try:
-                with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
-                    connection.close()
-            finally:
-                with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
-                    self._pool.putconn(connection)
-            return
-
-        with self._fallback_lock:
-            self._free[:] = [
-                conn for conn in self._free if conn is not connection
-            ]
-            self._connections[:] = [
-                conn for conn in self._connections if conn is not connection
-            ]
-        with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
-            connection.close()
+        # psycopg_pool must receive every checkout back for bookkeeping.
+        # A closed connection is recognized as broken and replaced.
+        try:
+            with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                connection.close()
+        finally:
+            with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                self._pool.putconn(connection)
 
     @contextmanager
     def connection(self) -> Generator[Any, None, None]:
@@ -397,25 +283,9 @@ class PostgreSQLConnectionPool(ConnectionPool):
             self.return_connection(conn)
 
     def close_all(self) -> None:
-        if self._use_psycopg_pool:
-            self._closed = True
-            with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
-                self._pool.close()
-            return
-        # Borrowers may be inside libpq on another thread; their return closes them.
-        with self._fallback_lock:
-            self._closed = True
-            connections = list(self._free)
-            self._connections.clear()
-            self._free.clear()
-        seen_ids: set[int] = set()
-        for conn in connections:
-            conn_id = id(conn)
-            if conn_id in seen_ids:
-                continue
-            seen_ids.add(conn_id)
-            with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
-                conn.close()
+        self._closed = True
+        with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+            self._pool.close()
 
     def get_stats(self) -> dict[str, Any]:
         return {"closed": self._closed, "backend": "postgresql"}
@@ -452,13 +322,21 @@ class PostgreSQLBackend(DatabaseBackend):
 
     # Public API for callers to reapply scope safely
     def apply_scope(self, connection: Optional[Any] = None) -> None:
+        """Re-apply the current scope; on failure discard the connection and raise.
+
+        The caller must not reuse or return a connection this raised for.
+        """
+        if connection is None:
+            return
         try:
-            if connection is not None:
-                self._apply_scope_settings(connection)
-        except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as exc:
-            logger.bind(exception_type=type(exc).__name__).debug(
-                "apply_scope: unable to apply scope settings"
-            )
+            self._apply_scope_settings(connection)
+        except BaseException:
+            if self._pool is not None:
+                self._pool.invalidate_connection(connection)
+            else:
+                with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                    connection.close()
+            raise
 
     def apply_and_verify_scope(
         self,
@@ -568,6 +446,8 @@ class PostgreSQLBackend(DatabaseBackend):
 
         Avoid rolling back active transactions unless necessary; if setting
         parameters fails due to a bad transaction state, rollback and retry once.
+        A second failure raises ``DatabaseError``: the connection may still hold
+        another account's session GUCs, so the caller must discard it.
         """
         try:
             scope = get_scope()
@@ -643,35 +523,18 @@ class PostgreSQLBackend(DatabaseBackend):
             for sql_stmt, params in statements:
                 cur.execute(sql_stmt, params)
 
-        cursor_factory = getattr(connection, "cursor", None)
-
-        # First attempt: try to set configs without touching transaction state
-        try:
+        def _apply_once() -> None:
+            cursor_factory = getattr(connection, "cursor", None)
             if cursor_factory:
                 with cursor_factory() as cur:
                     _run_with_cursor(cur)
             else:
-                # Fallback if connection supports execute directly
-                if session_role:
-                    escaped_role = session_role.replace('"', '""')
-                    try:
-                        connection.execute(f'SET SESSION AUTHORIZATION "{escaped_role}"')
-                    except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
-                        connection.execute(f'SET ROLE "{escaped_role}"')
-                else:
-                    try:
-                        connection.execute("RESET SESSION AUTHORIZATION")
-                    except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
-                        connection.execute("RESET ROLE")
-                with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
-                    connection.execute("SET row_security = on")
-                for sql_stmt, params in statements:
-                    try:
-                        connection.execute(sql_stmt, params)
-                    except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as cfg_exc:
-                        logger.bind(exception_type=type(cfg_exc).__name__).debug(
-                            "Unable to apply scope settings via execute"
-                        )
+                # Connections without cursors expose the same execute() API.
+                _run_with_cursor(connection)
+
+        # First attempt: try to set configs without touching transaction state
+        try:
+            _apply_once()
         except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
             # If we failed (e.g., transaction aborted), rollback and try once more
             try:
@@ -681,34 +544,14 @@ class PostgreSQLBackend(DatabaseBackend):
                     "Rollback while configuring scope failed"
                 )
             try:
-                if cursor_factory:
-                    with cursor_factory() as cur:
-                        _run_with_cursor(cur)
-                else:
-                    if session_role:
-                        escaped_role = session_role.replace('"', '""')
-                        try:
-                            connection.execute(f'SET SESSION AUTHORIZATION "{escaped_role}"')
-                        except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
-                            connection.execute(f'SET ROLE "{escaped_role}"')
-                    else:
-                        try:
-                            connection.execute("RESET SESSION AUTHORIZATION")
-                        except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
-                            connection.execute("RESET ROLE")
-                    with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
-                        connection.execute("SET row_security = on")
-                    for sql_stmt, params in statements:
-                        try:
-                            connection.execute(sql_stmt, params)
-                        except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as cfg_exc:
-                            logger.bind(exception_type=type(cfg_exc).__name__).debug(
-                                "Unable to apply scope settings via execute after rollback"
-                            )
+                _apply_once()
             except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as final_exc:
-                logger.bind(exception_type=type(final_exc).__name__).debug(
-                    "Failed to configure session scope settings"
+                # Session GUCs outlive transactions, so this connection may still
+                # carry the previous borrower's tenant. Callers must discard it.
+                logger.bind(exception_type=type(final_exc).__name__).warning(
+                    "Failed to configure PostgreSQL session scope settings"
                 )
+                raise DatabaseError("PostgreSQL session scope could not be applied") from final_exc
 
     def _tx_depth(self, connection: Any) -> int:
         return self._managed_tx_depths.get(id(connection), 0)
@@ -928,8 +771,10 @@ class PostgreSQLBackend(DatabaseBackend):
         conn = psycopg.connect(dsn, row_factory=dict_row)
         try:
             self._apply_scope_settings(conn)
-        except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as scope_exc:
-            logger.debug(f"Scope config failed for direct connection: {scope_exc}")
+        except BaseException:
+            with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                conn.close()
+            raise
         return conn
 
     def disconnect(self, connection: Any) -> None:

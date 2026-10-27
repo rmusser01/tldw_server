@@ -11,6 +11,7 @@ import math
 import os
 import re
 import secrets
+import threading
 from collections import deque
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
@@ -2312,13 +2313,16 @@ class MCPServer:
 
 # Singleton instance management
 _server: Optional[MCPServer] = None
+_server_lock = threading.Lock()
 
 
 def get_mcp_server() -> MCPServer:
     """Get or create MCP server singleton"""
     global _server
     if _server is None:
-        _server = MCPServer()
+        with _server_lock:
+            if _server is None:
+                _server = MCPServer()
     return _server
 
 

@@ -425,6 +425,11 @@ def test_postgres_workspace_snapshot_setup_failure_stops_before_table_queries(
     assert str(exc_info.value) == "source_snapshot_unavailable"
 
     assert table_queries == []
+    if failure_mode == "scope_apply":
+        # The pool discards a checkout it cannot scope (TASK-13950.3), so
+        # nothing is handed out or returned for reuse.
+        assert (acquired_connections, returned_connections) == ([], [])
+        return
     assert len(acquired_connections) == 1
     snapshot_connection = acquired_connections[0]
     assert snapshot_connection is not caller_connection

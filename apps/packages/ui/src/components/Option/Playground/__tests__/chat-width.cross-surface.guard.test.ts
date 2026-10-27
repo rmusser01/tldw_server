@@ -16,6 +16,9 @@ describe("chat width cross-surface guard", () => {
     const userMessageSource = readSource(
       "../../../Common/Playground/PlaygroundUserMessage.tsx"
     )
+    const turnPresentationSource = readSource(
+      "../../../Common/Playground/turn-presentation.ts"
+    )
     const humanMessageSource = readSource("../../../Common/Playground/HumanMessge.tsx")
     const sidepanelFormSource = readSource("../../../Sidepanel/Chat/form.tsx")
     const sidepanelRouteSource = readSource("../../../../routes/sidepanel-chat.tsx")
@@ -47,7 +50,14 @@ describe("chat width cross-surface guard", () => {
     expect(userMessageSource).toContain(
       "prose max-w-none dark:prose-invert break-words"
     )
+    // The user bubble's width classes come from userBubbleWidthClass()
+    // (turn-presentation.ts), so count the inset across both modules.
     expect(userMessageSource).toContain("max-w-[calc(100%-1.75rem)]")
+    expect(userMessageSource).toContain("userBubbleWidthClass(")
+    const userBubbleInsetMatches = (
+      userMessageSource + turnPresentationSource
+    ).match(/max-w-\[calc\(100%-1\.75rem\)\]/g)
+    expect(userBubbleInsetMatches?.length ?? 0).toBeGreaterThanOrEqual(2)
     expect(humanMessageSource).toContain("max-w-none")
     expect(sidepanelFormSource).toContain("max-w-[64rem]")
     expect(sidepanelRouteSource).toContain("w-full max-w-5xl")

@@ -111,6 +111,17 @@ const trackedLoadingNode = nodes.find((node): node is ts.JsxAttribute =>
 if (!trackedLoadingNode?.initializer || !ts.isJsxExpression(trackedLoadingNode.initializer) || !trackedLoadingNode.initializer.expression)
   throw new Error("Missing actual compact tracked picker loading binding")
 const trackedLoadingExpression = trackedLoadingNode.initializer.expression.getText(ast)
+// XS-02: in Pro mode the model chip lives in ControlRow. Read which ref the
+// form hands it, so the harness can mount the chip on that same ref.
+const controlRowModelPickerRef = nodes
+  .filter((node): node is ts.JsxSelfClosingElement =>
+    ts.isJsxSelfClosingElement(node) && node.tagName.getText(ast) === "ControlRow")
+  .flatMap((node) => node.attributes.properties)
+  .find((attr): attr is ts.JsxAttribute =>
+    ts.isJsxAttribute(attr) && attr.name.getText(ast) === "modelPickerRef")
+  ?.initializer?.getText(ast)
+  .replace(/^\{|\}$/g, "")
+  .trim()
 const compiled = ts.transpileModule(
   `
   return function useSidebarValidation(scope) {
@@ -125,6 +136,7 @@ const compiled = ts.transpileModule(
     const fetchChatModels = mocks.fetchChatModels;
     const ${catalogQuery.getText(ast)};
     const availableChatModelIds = ${initializer("availableChatModelIds")};
+    const modelPickerRef = ${initializer("modelPickerRef")};
     const contextFiles = [], selectedDocuments = [];
     const streaming = false, sendWhenEnter = true, greetingStarting = false;
     const connectionReadyRef = { current: isConnectionReady }, connectionGenerationRef = { current: 0 };
@@ -137,7 +149,7 @@ const compiled = ts.transpileModule(
     ${effects}
     const submit = ${initializer("submitCurrentRequest")};
     const inline = ${initializer("composerInlineMessagesNode")};
-    return { submit, inline, catalogReady: ${catalogDataName} !== undefined, trackedSelectionLoading: ${trackedLoadingExpression} };
+    return { submit, inline, modelPickerRef, catalogReady: ${catalogDataName} !== undefined, trackedSelectionLoading: ${trackedLoadingExpression} };
   }
 `,
   { compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 } }
@@ -183,6 +195,7 @@ const useSidebarValidation = new Function(
 }) => {
   submit: (message: string, image: string) => Promise<void>
   inline: React.ReactNode
+  modelPickerRef: React.RefObject<React.ComponentRef<typeof ModelSelect>>
   catalogReady: boolean
   trackedSelectionLoading: boolean
 }
@@ -215,7 +228,7 @@ function Harness({
   const [controlsOpen, setControlsOpen] = React.useState(false);
   const [selectedModel, setSelectedModel] = React.useState(model)
   mocks.useMessage.mockReturnValue({ selectedModel, setSelectedModel: async (next: string) => { setSelectedModel(next); return true } })
-  const { submit, inline, catalogReady, trackedSelectionLoading } = useSidebarValidation({
+  const { submit, inline, modelPickerRef, catalogReady, trackedSelectionLoading } = useSidebarValidation({
     form,
     selectedModel,
     isSending: busy,
@@ -243,6 +256,11 @@ function Harness({
       </output>
       <output data-testid="tracked-selection-loading">{String(trackedSelectionLoading)}</output>
       {inline}
+      {pro && controlRowModelPickerRef === "modelPickerRef" && (
+        <div data-testid="pro-control-row">
+          <ModelSelect ref={modelPickerRef} showSelectedName />
+        </div>
+      )}
     </>
   )
 }
@@ -303,7 +321,7 @@ describe("sidebar model validation", () => {
     await waitFor(() => expect(screen.getByText(/Tracked persona chat is unavailable here/)).toBeVisible())
     expect(mocks.send).not.toHaveBeenCalled()
     expect(mocks.queue).not.toHaveBeenCalled()
-    expect(screen.getByRole("textbox")).toHaveValue("keep my draft")
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("keep my draft")
   })
 
   it.each([{ protectedHistory: false, personaMode: "tracked" as const }, { protectedHistory: true, personaMode: "overlay" as const }])(
@@ -334,7 +352,7 @@ describe("sidebar model validation", () => {
       )
       view.rerender(<Harness model={model} />)
       expect(screen.getByRole("alert")).toBeVisible()
-      expect(screen.getByRole("textbox")).toHaveValue("keep my draft")
+      expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("keep my draft")
       expect(mocks.send).not.toHaveBeenCalled()
       expect(mocks.queue).not.toHaveBeenCalled()
     }
@@ -358,14 +376,14 @@ describe("sidebar model validation", () => {
       renderHarness(<Harness model={model} />)
       await waitForCatalog()
       fireEvent.click(screen.getByText("Send"))
-      fireEvent.click(screen.getByTestId("chat-model-select"))
+      // XS-02: the blocked Send opens the picker itself.
       fireEvent.click(
         await screen.findByRole("menuitem", { name: /ready-model/ })
       )
       await waitFor(() =>
         expect(screen.queryByRole("alert")).not.toBeInTheDocument()
       )
-      expect(screen.getByRole("textbox")).toHaveValue("keep my draft")
+      expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("keep my draft")
       fireEvent.click(screen.getByText("Send"))
       await waitFor(() =>
         expect(mocks.send).toHaveBeenCalledWith("keep my draft", "", undefined)
@@ -377,7 +395,7 @@ describe("sidebar model validation", () => {
     renderHarness(<Harness />)
     fireEvent.click(screen.getByText("Send"))
     await screen.findByRole("alert")
-    fireEvent.change(screen.getByRole("textbox"), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
       target: { value: "edited draft" }
     })
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
@@ -390,7 +408,7 @@ describe("sidebar model validation", () => {
     fireEvent.click(screen.getByText("Send"))
     fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }))
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
-    expect(screen.getByRole("textbox")).toHaveValue("keep my draft")
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("keep my draft")
   })
 
   it("validates image-only input in Pro mode", async () => {
@@ -433,14 +451,69 @@ describe("sidebar model validation", () => {
     expect(screen.getByLabelText("Message")).toHaveValue("keep my draft")
   })
 
-  it("sends with an available model and keeps the Casual picker out of the way", async () => {
+  it("XS-02: sends with an available model and keeps showing which model it uses", async () => {
     renderHarness(<Harness model="ready-model" />)
     await waitForCatalog()
     fireEvent.click(screen.getByText("Send"))
     await waitFor(() =>
       expect(mocks.send).toHaveBeenCalledWith("keep my draft", "", undefined)
     )
-    expect(screen.queryByTestId("chat-model-select")).not.toBeInTheDocument()
+    expect(await screen.findByTestId("chat-model-select")).toHaveTextContent("ready-model")
+  })
+
+  it("XS-02: an empty model chip is named by its visible 'Choose model' text", async () => {
+    renderHarness(<Harness model="" />)
+    await waitForCatalog()
+    const chip = await screen.findByTestId("chat-model-select")
+    expect(chip).toHaveTextContent("Choose model")
+    expect(chip).toHaveAccessibleName("Choose model")
+  })
+
+  it.each(["", "removed-model"])(
+    "XS-02: opens the Casual model picker when Send is blocked by the model %j",
+    async (model) => {
+      renderHarness(<Harness model={model} />)
+      await waitForCatalog()
+      await screen.findByTestId("chat-model-select")
+      fireEvent.click(screen.getByText("Send"))
+      await screen.findByRole("alert")
+      const search = await screen.findByPlaceholderText("Search models")
+      // Keyboard users land in the picker's search, and stay there.
+      await waitFor(() => expect(search).toHaveFocus())
+      await act(() => new Promise((resolve) => setTimeout(resolve, 100)))
+      expect(search).toHaveFocus()
+      expect(await screen.findByRole("menuitem", { name: /ready-model/ })).toBeInTheDocument()
+      expect(mocks.send).not.toHaveBeenCalled()
+    }
+  )
+
+  it("XS-02: opens the Pro control row's model picker when Send is blocked by the model", async () => {
+    renderHarness(<Harness model="" pro />)
+    await waitForCatalog()
+    const row = await screen.findByTestId("pro-control-row")
+    expect(row).toContainElement(screen.getByTestId("chat-model-select"))
+    fireEvent.click(screen.getByText("Send"))
+    await screen.findByRole("alert")
+    const search = await screen.findByPlaceholderText("Search models")
+    await waitFor(() => expect(search).toHaveFocus())
+    expect(mocks.send).not.toHaveBeenCalled()
+  })
+
+  it("XS-02: Escape in the picker's search closes it and returns focus to the model chip", async () => {
+    renderHarness(<Harness model="" />)
+    await waitForCatalog()
+    const chip = await screen.findByTestId("chat-model-select")
+    fireEvent.click(screen.getByText("Send"))
+    const search = await screen.findByPlaceholderText("Search models")
+    await waitFor(() => expect(search).toHaveFocus())
+    fireEvent.keyDown(search, { key: "Escape", code: "Escape", keyCode: 27 })
+    await waitFor(() => expect(chip).toHaveFocus())
+    // The popup starts its close animation (jsdom never finishes it).
+    await waitFor(() =>
+      expect(search.closest(".ant-dropdown")?.className).toMatch(
+        /ant-dropdown-hidden|-leave/
+      )
+    )
   })
 
   it.each([{ busy: true }])(

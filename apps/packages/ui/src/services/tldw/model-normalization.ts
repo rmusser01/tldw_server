@@ -166,7 +166,8 @@ export function normalizeTldwModels(
         inheritedAvailability?.readiness_message,
       chat_provider:
         toNonEmptyProviderString(m.chat_provider) ??
-        inheritedAvailability?.chat_provider
+        inheritedAvailability?.chat_provider,
+      provider_health: inheritedAvailability?.health
     }
   })
 }

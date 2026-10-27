@@ -12,6 +12,7 @@ and this project adheres to Some kind of Versioning
 
 ### Changed
 
+- **PostgreSQL connection pooling:** PostgreSQL deployments, including the production Docker image, now always use the bounded `psycopg_pool` pool (`pg_pool_size` defaults to 20; a checkout waits 30 s, then raises `PoolTimeout`). The unbounded fallback pool used when psycopg-pool was missing is removed, and psycopg-pool is now a core dependency. A connection whose tenant scope cannot be applied is discarded and the request fails, instead of proceeding with another account's session settings (TASK-13950.3).
 
 ### Fixed
 

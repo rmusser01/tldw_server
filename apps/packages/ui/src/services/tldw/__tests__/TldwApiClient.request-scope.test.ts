@@ -314,6 +314,8 @@ describe("TldwApiClient captured request scope", () => {
       body: { ...body, stream: true },
       abortSignal: undefined,
       streamIdleTimeoutMs: undefined,
+      // A chat stream that ends without [DONE] was cut off (CM-03).
+      expectDoneSentinel: true,
       ...expectedScopeFields
     })
     expect(mocks.bgStream.mock.calls[0]?.[0].body).not.toHaveProperty(
