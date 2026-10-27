@@ -99,7 +99,7 @@ The chain to the owner's moderation priority is `.9 -> .13 -> .27`. Start `.9` i
 | #3298 (UX remediation wave 3, 471 files) | PlaygroundForm.tsx, Sidepanel/Chat/form.tsx, useChatActions.ts, sidepanel-chat.tsx | `.29` and the `.10` size baseline land after it merges |
 | #3299 | ChaChaNotes_DB.py and three chacha stores | `.22` and `.23` start after it merges; `.8` baselines re-measure after |
 | #3187, #3191, #3180 | byok_runtime.py, provider_readiness aliases, llm_providers/config_info catalogs, chat_service, providers/base.py | `.13` and `.31` rebase onto them; `.31` re-seeds its drift allowlist after they merge |
-| #2855 | Admin_Webhooks/delivery.py, admin_webhooks_repository.py | `.16`'s webhooks slice waits for it |
+| #2855 | Admin_Webhooks/delivery.py, admin_webhooks_repository.py | `.16`'s webhooks slice lands without it (ruling 2026-10-26); `delivery.py` keeps the re-export, and #2855's rebase resolves one hunk |
 | #2630 | audio WebSocket auth frames | `.7` adopts its frame protocol in the shared resolver |
 | #3071 | owner-fenced chat history | `.23` checks its file list before starting |
 
@@ -279,8 +279,9 @@ These eleven tasks have no dependencies on each other and can run in parallel. E
 | `.13` LLM gateway | L | 4: (a) import-isolation test plus ratchet; (b) Chat_Deps codemod (36 statements in 22 files) and the other 10 `LLM_Calls -> Chat` statements; (c) gateway module plus re-exports, the API_KEYS hook moved to a fixture, and the 42 + 13 patch targets retargeted; (d) policy hooks plus ADR-025 | `LLM_Calls -> Chat` reaches 0 at (b) |
 | `.14` schema defaults | S | 1 | After `.13` is Done (frontmatter dependency) |
 | `.15` schemas -> core models | M | 1 per context, Evaluations first | Add an OpenAPI snapshot diff test before the first move |
-| `.16` DB_Management logic | M | 4: kanban, resume store, webhooks, Sync contracts | Webhooks slice after #2855 |
+| `.16` DB_Management logic | M | 4: kanban, resume store, Sync contracts, webhooks | Kanban first; the others need only it. Webhooks does not wait for #2855 (ruling 2026-10-26) |
 | `.17` Provider_Credentials | M | 2 | Security path: run `tests/AuthNZ` in both shards; LLM_Calls imports the new package directly so `LLM_Calls -> AuthNZ` reaches 0 |
+| `.67` remaining DB_Management imports | M | Several, one per domain | After `.16`. It empties the DB-loading-import ratchet `.16` seeds (30 pairs, 37 statements measured 2026-10-26) |
 
 **Phase exit check:** run the `.9` contract. Its baseline has no foundation-upward, `LLM_Calls -> Chat/AuthNZ`, `core -> api.schemas` or `DB_Management -> domain-logic` entries. Record both SCC measures and the baseline size in TASK-13950's notes.
 
@@ -354,6 +355,7 @@ These eleven tasks have no dependencies on each other and can run in parallel. E
 | `.64` ratchet contract helpers | #3331-#3337 | One run-text parser, visible `--tighten`, macOS shard memory, guard docs |
 | `.65` setup route behind a same-host proxy | #3347 reviews | Bare `proxy_pass` or spoofed `X-Forwarded-For` looks local; pre-setup SSRF with the private opt-in |
 | `.66` stale Collections FTS on memoized instances | #3342 merge review | `_fts_supports_direct_delete` never refreshed; updates leave old text indexed |
+| `.67` remaining DB_Management imports | `.16` plan | Four named cuts leave 30 pairs of DB-loading imports; frozen by `.16`'s ratchet, emptied here |
 
 Execution order note: Phase 0 ran 0.1, 0.4, 0.2, 0.5, 0.3, 0.6, 0.7, 0.10, 0.8, 0.11, 0.9. `.11` and `.9` follow `.8` because they reuse `tests/lint/_ast_cache.py`, which `.8` creates.
 
