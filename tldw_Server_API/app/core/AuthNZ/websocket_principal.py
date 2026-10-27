@@ -23,12 +23,20 @@ shipped clients still send ``?token=`` / ``?api_key=`` call
 ``resolve_ws_principal_or_deprecated_query`` instead, which hands that credential to
 ``verify_ws_credential``, so it is verified exactly as the header it stands for; a route with
 another deprecated channel reads it itself and does the same.
-First-message-frame auth arrives with the audio slice of TASK-13950.7, with its consumer.
+
+Routes whose browser clients authenticate with their first message, ``{"type": "auth", "token":
+...}`` (the audio streams and the voice assistant), call ``resolve_ws_principal_first_frame``:
+the socket has to be accepted before a frame can be read, so it is a separate function rather
+than a flag on ``resolve_ws_principal``, which is called before accept.
 """
 
 from __future__ import annotations
 
-from fastapi import HTTPException, WebSocket, WebSocketException, status
+import asyncio
+import json
+from collections.abc import Awaitable, Callable
+
+from fastapi import HTTPException, WebSocket, WebSocketDisconnect, WebSocketException, status
 from loguru import logger
 from starlette.requests import Request
 
@@ -42,6 +50,8 @@ from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
 
 WS_UNAUTHENTICATED = 4401
 WS_FORBIDDEN = 4403
+WS_EXPECTED_AUTH_FRAME = 4400
+FIRST_FRAME_TIMEOUT_S = 10.0
 _BEARER_SUBPROTOCOL = "bearer"
 # Logged once per connection that authenticates through a deprecated channel; names the channel
 # and path, never the credential.
@@ -135,6 +145,72 @@ async def resolve_ws_principal_or_deprecated_query(
                 logger.warning(DEPRECATED_WS_CHANNEL, f"query {' and '.join(names)}", websocket.url.path)
             return await verify_ws_credential(websocket, token=token, api_key=api_key, required_scope=required_scope)
     return await resolve_ws_principal(websocket, required_scope=required_scope)
+
+
+async def resolve_ws_principal_first_frame(
+    websocket: WebSocket,
+    *,
+    required_scope: str | None = None,
+    timeout: float = FIRST_FRAME_TIMEOUT_S,
+    cookie_may_send_data_first: bool = False,
+    tokenless_frame: Callable[..., Awaitable[AuthPrincipal]] = resolve_ws_principal,
+) -> AuthPrincipal:
+    """Return the caller of a route whose clients authenticate with their first message,
+    ``{"type": "auth", "token": <JWT or API key>}``; call it before ``accept()``.
+
+    The single-user cookie is checked before accept, behind its Origin check. The socket is then
+    accepted, because a frame cannot be read otherwise, and exactly one frame is read within
+    ``timeout`` seconds. Nothing after it is read, so no data frame is processed before the caller
+    is known. The frame's token is verified alone by ``verify_ws_credential``; it is never logged.
+
+    Args:
+        websocket: The connection, not yet accepted.
+        required_scope: API-key scope the route needs, as for ``resolve_ws_principal``.
+        timeout: How long to wait for the frame.
+        cookie_may_send_data_first: The route's cookie clients may skip the auth frame and send data
+            first (the audio streams). With a cookie, a frame that is not auth is then left unread in
+            ``websocket.state.ws_unread_frame`` for the route, and a silent client keeps the cookie.
+        tokenless_frame: Resolves an auth frame without a token, after the cookie: by default the
+            handshake (``resolve_ws_principal``); voice passes the deprecated query shim.
+
+    Raises:
+        WebSocketException: the cookie check's own code before accept; after it, 4400 when the first
+            frame is not an auth frame, 4401 when the token is missing, refused or revoked or no frame
+            arrives in time, and ``resolve_ws_principal``'s other codes.
+        WebSocketDisconnect: the client left before sending a frame.
+    """
+    cookie: AuthPrincipal | None = None
+    if await resolve_single_user_cookie_websocket(websocket) is not None:
+        cookie = websocket.state.auth_principal
+    cookie_code = cookie_websocket_rejection_code(websocket)
+    if cookie_code is not None:
+        raise WebSocketException(code=cookie_code, reason="cookie_auth_rejected")
+    await websocket.accept(subprotocol=auth_subprotocol(websocket))
+    data_first_ok = cookie if cookie_may_send_data_first else None  # the cookie, where data may come first
+    try:
+        message = await asyncio.wait_for(websocket.receive(), timeout)
+    except asyncio.TimeoutError:
+        if data_first_ok is not None:
+            return data_first_ok
+        raise WebSocketException(code=WS_UNAUTHENTICATED, reason="authentication_timeout") from None
+    if message["type"] == "websocket.disconnect":
+        raise WebSocketDisconnect(message.get("code", 1000))
+    raw = message.get("text")
+    try:
+        frame = json.loads(raw) if raw is not None else None
+    except ValueError:
+        frame = None
+    if not isinstance(frame, dict) or frame.get("type") != "auth":
+        if data_first_ok is not None and raw is not None:
+            websocket.state.ws_unread_frame = raw
+            return data_first_ok
+        raise WebSocketException(code=WS_EXPECTED_AUTH_FRAME, reason="expected_auth_frame")
+    token = frame.get("token")
+    if token:
+        return await verify_ws_credential(websocket, token=str(token), required_scope=required_scope)
+    if cookie is not None:
+        return cookie
+    return await tokenless_frame(websocket, required_scope=required_scope)
 
 
 async def verify_ws_credential(

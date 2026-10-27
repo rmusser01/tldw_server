@@ -7,11 +7,13 @@ cheaply: API-key scope, and a failing credential store.
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException, WebSocket, WebSocketException
+from starlette.types import Message
 
 from tldw_Server_API.app.core.AuthNZ import websocket_principal
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -321,3 +323,223 @@ async def test_verify_ws_credential_verifies_only_the_credential_it_is_given(mon
     assert (by_frame.user_id, by_subprotocol.user_id) == (7, 7)
     assert seen == [("Bearer frame-token", None), ("Bearer a.b.c", "header-key")]
     assert frame.state.ws_credential_headers == {"authorization": "Bearer frame-token"}  # what persona would forward
+
+
+# First-message-frame auth: resolve_ws_principal_first_frame (audio streams, voice assistant).
+
+_COOKIE = AuthPrincipal(kind="user", user_id=1, token_type="single_user_session", subject="single_user")
+
+
+def _frame_socket(*frames: object, headers: list[tuple[bytes, bytes]] | None = None) -> tuple[WebSocket, list[Message]]:
+    """A socket whose client connects, then sends ``frames`` (text, or a dict sent as JSON), then waits.
+
+    Returns the socket and the messages the server sent, so a test can see whether it accepted."""
+    import asyncio
+    import json
+
+    inbox: list[Message] = [{"type": "websocket.connect"}]
+    for frame in frames:
+        inbox.append({"type": "websocket.receive", "text": frame if isinstance(frame, str) else json.dumps(frame)})
+    sent: list[Message] = []
+
+    async def receive() -> Message:
+        if inbox:
+            return inbox.pop(0)
+        await asyncio.Event().wait()  # the client says nothing more
+        raise AssertionError("unreachable")
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    scope = {
+        "type": "websocket",
+        "path": "/ws",
+        "headers": headers or [],
+        "query_string": b"",
+        "client": ("127.0.0.1", 50000),
+    }
+    socket = WebSocket(scope, receive=receive, send=send)
+    socket.scope["_inbox"] = inbox  # what the server left unread
+    return socket, sent
+
+
+def _cookie(monkeypatch: pytest.MonkeyPatch, principal: AuthPrincipal | None) -> None:
+    """Stand in for the cookie resolver: a session (Origin already checked), or none."""
+
+    async def resolve(websocket, **_kwargs):
+        if principal is None:
+            return None
+        websocket.state.auth_principal = principal
+        return object()
+
+    monkeypatch.setattr(websocket_principal, "resolve_single_user_cookie_websocket", resolve)
+
+
+def _frame_verifier(monkeypatch: pytest.MonkeyPatch, principal: AuthPrincipal = _ACCESS) -> list[str | None]:
+    seen: list[str | None] = []
+
+    async def verifier(request):
+        seen.append(request.headers.get("authorization"))
+        if request.headers.get("authorization") == "Bearer revoked":
+            raise HTTPException(status_code=401, detail="Could not validate credentials")
+        return principal
+
+    monkeypatch.setattr(websocket_principal, "get_auth_principal", verifier)
+    return seen
+
+
+def _accepted(sent: list[Message]) -> bool:
+    return any(message["type"] == "websocket.accept" for message in sent)
+
+
+@pytest.mark.asyncio
+async def test_first_frame_token_is_verified_alone_and_nothing_after_it_is_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    _cookie(monkeypatch, None)
+    seen = _frame_verifier(monkeypatch)
+    websocket, sent = _frame_socket({"type": "auth", "token": "a.b.c"}, {"type": "config"})
+
+    principal = await websocket_principal.resolve_ws_principal_first_frame(websocket, required_scope="read")
+
+    assert principal is _ACCESS
+    assert seen == ["Bearer a.b.c"]
+    assert _accepted(sent)  # a frame cannot be read otherwise
+    assert websocket.scope["_inbox"] == [{"type": "websocket.receive", "text": '{"type": "config"}'}]
+
+
+@pytest.mark.parametrize("first", [{"type": "config"}, {"type": "audio", "data": "AAAA"}, "not json", ["auth"]])
+@pytest.mark.asyncio
+async def test_a_first_frame_that_is_not_auth_is_refused_4400_unprocessed(
+    monkeypatch: pytest.MonkeyPatch, first: object
+) -> None:
+    _cookie(monkeypatch, None)
+    seen = _frame_verifier(monkeypatch)
+    websocket, _sent = _frame_socket(first, {"type": "auth", "token": "a.b.c"})
+
+    with pytest.raises(WebSocketException) as refused:
+        await websocket_principal.resolve_ws_principal_first_frame(websocket)
+
+    assert (refused.value.code, refused.value.reason) == (4400, "expected_auth_frame")
+    assert seen == []  # the auth frame behind it is never read
+    assert len(websocket.scope["_inbox"]) == 1
+    assert not hasattr(websocket.state, "ws_unread_frame")
+
+
+@pytest.mark.asyncio
+async def test_a_revoked_frame_token_is_refused_4401(monkeypatch: pytest.MonkeyPatch) -> None:
+    _cookie(monkeypatch, None)
+    _frame_verifier(monkeypatch)
+    websocket, _sent = _frame_socket({"type": "auth", "token": "revoked"})
+
+    with pytest.raises(WebSocketException) as refused:
+        await websocket_principal.resolve_ws_principal_first_frame(websocket)
+
+    assert (refused.value.code, refused.value.reason) == (4401, "invalid_token")
+
+
+@pytest.mark.asyncio
+async def test_no_frame_in_time_is_refused_4401(monkeypatch: pytest.MonkeyPatch) -> None:
+    _cookie(monkeypatch, None)
+    websocket, _sent = _frame_socket()
+
+    with pytest.raises(WebSocketException) as refused:
+        await websocket_principal.resolve_ws_principal_first_frame(websocket, timeout=0.05)
+
+    assert (refused.value.code, refused.value.reason) == (4401, "authentication_timeout")
+
+
+@pytest.mark.asyncio
+async def test_a_tokenless_auth_frame_falls_back_to_the_handshake(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With nothing else presented it is refused; the route may pass its own fallback (voice: the
+    deprecated query shim)."""
+    _cookie(monkeypatch, None)
+    _frame_verifier(monkeypatch)
+    refused_socket, _sent = _frame_socket({"type": "auth"})
+    fallback_socket, _sent = _frame_socket({"type": "auth"})
+    fallback_calls: list[str | None] = []
+
+    async def fallback(websocket, *, required_scope=None):
+        fallback_calls.append(required_scope)
+        return _ACCESS
+
+    with pytest.raises(WebSocketException) as refused:
+        await websocket_principal.resolve_ws_principal_first_frame(refused_socket)
+    principal = await websocket_principal.resolve_ws_principal_first_frame(
+        fallback_socket, required_scope="read", tokenless_frame=fallback
+    )
+
+    assert (refused.value.code, refused.value.reason) == (4401, "authentication_required")
+    assert (principal, fallback_calls) == (_ACCESS, ["read"])
+
+
+@pytest.mark.asyncio
+async def test_the_cookie_answers_a_tokenless_frame_and_a_token_overrides_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    _cookie(monkeypatch, _COOKIE)
+    seen = _frame_verifier(monkeypatch)
+    tokenless, _sent = _frame_socket({"type": "auth"})
+    token, _sent = _frame_socket({"type": "auth", "token": "a.b.c"})
+    revoked, _sent = _frame_socket({"type": "auth", "token": "revoked"})
+
+    assert await websocket_principal.resolve_ws_principal_first_frame(tokenless) is _COOKIE
+    assert await websocket_principal.resolve_ws_principal_first_frame(token) is _ACCESS
+    with pytest.raises(WebSocketException) as refused:  # a refused token is not rescued by the cookie
+        await websocket_principal.resolve_ws_principal_first_frame(revoked)
+
+    assert refused.value.code == 4401
+    assert seen == ["Bearer a.b.c", "Bearer revoked"]
+
+
+@pytest.mark.asyncio
+async def test_data_first_after_a_cookie_is_kept_unread_only_where_the_route_allows_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Audio's cookie clients may send their config first; the route reads it from ``ws_unread_frame``."""
+    _cookie(monkeypatch, _COOKIE)
+    allowed, _sent = _frame_socket('{"type": "config"}')
+    strict, _sent = _frame_socket('{"type": "config"}')
+    silent, _sent = _frame_socket()
+
+    principal = await websocket_principal.resolve_ws_principal_first_frame(allowed, cookie_may_send_data_first=True)
+    kept_by_cookie = await websocket_principal.resolve_ws_principal_first_frame(
+        silent, timeout=0.05, cookie_may_send_data_first=True
+    )
+    with pytest.raises(WebSocketException) as refused:
+        await websocket_principal.resolve_ws_principal_first_frame(strict)
+
+    assert (principal, allowed.state.ws_unread_frame) == (_COOKIE, '{"type": "config"}')
+    assert kept_by_cookie is _COOKIE
+    assert refused.value.code == 4400
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_cookie_refuses_before_accept(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def cross_site(websocket, **_kwargs):
+        websocket.state.single_user_cookie_websocket_close_code = 4403
+        return None
+
+    monkeypatch.setattr(websocket_principal, "resolve_single_user_cookie_websocket", cross_site)
+    websocket, sent = _frame_socket({"type": "auth"})
+
+    with pytest.raises(WebSocketException) as refused:
+        await websocket_principal.resolve_ws_principal_first_frame(websocket)
+
+    assert (refused.value.code, refused.value.reason) == (4403, "cookie_auth_rejected")
+    assert not _accepted(sent)
+
+
+@pytest.mark.asyncio
+async def test_the_frame_credential_is_never_logged(monkeypatch: pytest.MonkeyPatch) -> None:
+    from loguru import logger
+
+    _cookie(monkeypatch, None)
+    _frame_verifier(monkeypatch)
+    logged: list[str] = []
+    sink = logger.add(lambda message: logged.append(message.record["message"]), level="TRACE")
+    try:
+        for frame in ({"type": "auth", "token": "revoked"}, {"type": "auth", "token": "a.b.c"}):
+            websocket, _sent = _frame_socket(frame)
+            with contextlib.suppress(WebSocketException):
+                await websocket_principal.resolve_ws_principal_first_frame(websocket)
+    finally:
+        logger.remove(sink)
+
+    assert not [message for message in logged if "revoked" in message or "a.b.c" in message]
