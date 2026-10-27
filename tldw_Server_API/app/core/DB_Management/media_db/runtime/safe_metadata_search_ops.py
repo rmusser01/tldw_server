@@ -8,6 +8,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
+from tldw_Server_API.app.core.DB_Management.media_db.repositories.keywords_repository import KeywordsRepository
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
@@ -114,43 +115,12 @@ def search_by_safe_metadata(
             clauses.append(f"LOWER(m.type) IN ({media_type_placeholders})")
             params.extend(normalized_media_types)
 
-        cleaned_must_have = [
-            str(keyword).strip().lower()
-            for keyword in (must_have_keywords or [])
-            if str(keyword).strip()
-        ]
-        if cleaned_must_have:
-            kw_mh_placeholders = ",".join("?" * len(cleaned_must_have))
-            clauses.append(
-                """
-            (SELECT COUNT(DISTINCT k_mh.id)
-             FROM MediaKeywords mk_mh
-             JOIN Keywords k_mh ON mk_mh.keyword_id = k_mh.id
-             WHERE mk_mh.media_id = m.id AND k_mh.deleted = 0 AND LOWER(k_mh.keyword) IN ({kw_mh_placeholders})
-            ) = ?
-        """.format_map(locals())  # nosec B608
+        if must_have_keywords or must_not_have_keywords:
+            keyword_clauses, keyword_params = KeywordsRepository(self).filter_clauses(
+                must_have_keywords, must_not_have_keywords
             )
-            params.extend(cleaned_must_have)
-            params.append(len(cleaned_must_have))
-
-        cleaned_must_not_have = [
-            str(keyword).strip().lower()
-            for keyword in (must_not_have_keywords or [])
-            if str(keyword).strip()
-        ]
-        if cleaned_must_not_have:
-            kw_mnh_placeholders = ",".join("?" * len(cleaned_must_not_have))
-            clauses.append(
-                """
-            NOT EXISTS (
-                SELECT 1
-                FROM MediaKeywords mk_mnh
-                JOIN Keywords k_mnh ON mk_mnh.keyword_id = k_mnh.id
-                WHERE mk_mnh.media_id = m.id AND k_mnh.deleted = 0 AND LOWER(k_mnh.keyword) IN ({kw_mnh_placeholders})
-            )
-        """.format_map(locals())  # nosec B608
-            )
-            params.extend(cleaned_must_not_have)
+            clauses.extend(keyword_clauses)
+            params.extend(keyword_params)
 
         normalized_date_start = (date_start or "").strip()
         if normalized_date_start:

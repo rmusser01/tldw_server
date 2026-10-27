@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Email.email_ingestion_m
     record_email_dedupe,
     track_email_persistence,
 )
+from tldw_Server_API.app.core.Utils.keyword_identity import dedupe_keywords
 
 
 def _load_legacy_media_support():
@@ -93,7 +94,7 @@ class MediaRepository:
 
         title = title or "Untitled"
         media_type = media_type or "unknown"
-        keywords_norm = [k.strip().lower() for k in keywords or [] if k and k.strip()]
+        keywords_norm = dedupe_keywords(keywords or [])
 
         valid_visibilities = ("personal", "team", "org")
         requested_visibility = visibility if visibility else None

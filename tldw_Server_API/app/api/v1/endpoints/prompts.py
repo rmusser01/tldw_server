@@ -12,7 +12,7 @@ import re
 import traceback
 from collections.abc import Mapping
 from dataclasses import asdict
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, cast
 
 #
 # 3rd-party imports
@@ -100,6 +100,7 @@ from tldw_Server_API.app.core.Prompt_Management.structured_prompts.single_text_r
     render_single_text_recipe_template,
 )
 from tldw_Server_API.app.core.testing import env_flag_enabled
+from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 
 from .llm_providers import get_configured_providers
 
@@ -209,7 +210,7 @@ def _inline_local_openapi_refs(schema: dict[str, Any]) -> dict[str, Any]:
                 return expand({**referenced, **siblings})
         return {key: expand(item) for key, item in value.items()}
 
-    return expand(schema)
+    return cast(dict[str, Any], expand(schema))
 
 
 def _extract_template_variables(template: str) -> list[str]:
@@ -384,8 +385,8 @@ def _get_single_user_api_key() -> Optional[str]:
     except _PROMPTS_LOOKUP_EXCEPTIONS:
         key = None
     if key:
-        return key
-    return settings.get("SINGLE_USER_API_KEY")
+        return cast(Optional[str], key)
+    return cast(Optional[str], settings.get("SINGLE_USER_API_KEY"))
 
 
 async def _resolve_prompts_auth_user(
@@ -605,7 +606,7 @@ def _prompt_improvement_error_response(
         except (TypeError, ValueError):
             retry_after_seconds = None
     error = schemas.PromptImproveErrorResponse(
-        code=public_code,
+        code=cast(schemas.PromptImproveErrorCode, public_code),
         message=_PROMPT_IMPROVEMENT_ERROR_MESSAGES[public_code],
         retryable=should_retry,
         retry_after_seconds=retry_after_seconds,
@@ -1070,11 +1071,9 @@ async def create_keyword(
             logger.error(f"db.add_keyword failed to return ID/UUID for '{keyword_data.keyword_text}' after pre-check.")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create or retrieve keyword.")
 
-        # Fetch the full details of the (potentially newly created or undeleted) keyword for the response.
-        # To do this properly, we might need a get_keyword_by_id or get_keyword_by_uuid
-        # For now, constructing from what we have. Prompts_DB.add_keyword normalizes.
-        # API contract: return normalized, lowercased keyword text while DB preserves original casing
-        final_keyword_text = db._normalize_keyword(keyword_data.keyword_text).lower()
+        # Return the stored display casing (the first-seen casing; TASK-13950.5).
+        stored = db.get_active_keyword_by_text(keyword_data.keyword_text)
+        final_keyword_text = stored["keyword"] if stored else db._normalize_keyword(keyword_data.keyword_text)
 
         return schemas.KeywordResponse(
             id=kw_id,
@@ -1099,13 +1098,8 @@ async def list_all_keywords(
     db: PromptsDatabase = Depends(get_prompts_db_for_user)
 ):
     try:
-        # API contract: return lowercased normalized keyword strings
-        try:
-            kws = db.fetch_all_keywords(include_deleted=False)
-            return [db._normalize_keyword(k).lower() for k in kws]
-        except (AttributeError, TypeError):
-            # Fallback if normalization method is unavailable
-            return db.fetch_all_keywords(include_deleted=False)
+        # Stored display casing (TASK-13950.5).
+        return db.fetch_all_keywords(include_deleted=False)
     except DatabaseError as e:
         logger.error(f"Database error listing keywords: {e}", exc_info=True)
         raise map_db_error_to_http(e, default_detail="Database error.") from e
@@ -1555,9 +1549,9 @@ async def bulk_update_prompt_keywords(
 
     def _normalize_for_compare(value: str) -> str:
         try:
-            return db._normalize_keyword(value).casefold()
+            return normalize_keyword_identity(db._normalize_keyword(value))
         except (AttributeError, TypeError, ValueError):
-            return str(value).strip().casefold()
+            return normalize_keyword_identity(str(value))
 
     remove_set = {
         _normalize_for_compare(k)
