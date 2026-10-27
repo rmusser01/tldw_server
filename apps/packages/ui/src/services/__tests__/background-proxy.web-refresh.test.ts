@@ -851,6 +851,52 @@ describe("background proxy web token refresh", () => {
     vi.unstubAllGlobals()
   })
 
+  it.each(["openapi", "probe"] as const)(
+    "S03 capability discovery preserves real transport invalidation during %s", async phase => {
+      const original = {
+        serverUrl: "https://api.example.com", authMode: "single-user", authSource: "manual",
+        credentialSource: "manual", apiKeyPersistence: "device", apiKeyServerOrigin: "https://api.example.com",
+        apiKey: "original-fixture-key"
+      }
+      mocks.store.tldwConfig = original
+      let release!: () => void
+      const held = new Promise<void>(resolve => { release = resolve })
+      let entered = false
+      let signal: AbortSignal | null | undefined
+      const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = new URL(String(input)).pathname
+        if ((phase === "openapi" && path === "/openapi.json") || (phase === "probe" && path === "/api/v1/ingestion-sources/capabilities")) {
+          signal = init?.signal
+          entered = true
+          await held
+        }
+        return Response.json(path === "/openapi.json"
+          ? { paths: { "/api/v1/ingestion-sources": {} } }
+          : path === "/api/v1/ingestion-sources/capabilities" ? { can_create_local_directory: true } : {})
+      })
+      vi.stubGlobal("fetch", fetchSpy)
+      const { getServerCapabilities } = await import("@/services/tldw/server-capabilities")
+      const pending = getServerCapabilities().then(value => ({ value }), error => ({ error }))
+      try {
+        await vi.waitFor(() => expect(entered).toBe(true))
+        const { tldwAuth } = await import("@/services/tldw/TldwAuth")
+        await tldwAuth.logout()
+        expect(signal?.aborted).toBe(true)
+        release()
+        expect(await pending).toMatchObject({ error: { status: 412, details: { detail: { code: "request_config_scope_changed" } } } })
+        const probes = () => fetchSpy.mock.calls.filter(([input]) => new URL(String(input)).pathname === "/api/v1/ingestion-sources/capabilities").length
+        expect(probes()).toBe(phase === "probe" ? 1 : 0)
+        expect(mocks.storageSet.mock.calls.filter(([key]) => String(key).startsWith("__tldwServerCapabilitiesCache"))).toHaveLength(0)
+        const fresh = await getServerCapabilities()
+        expect(fresh.canCreateLocalDirectoryIngestionSource).toBeNull()
+        expect(probes()).toBe(phase === "probe" ? 1 : 0)
+      } finally {
+        release()
+        await pending
+      }
+    }
+  )
+
   it("refreshes the access token and retries after a 401 in the browser direct path", async () => {
     let refreshHits = 0
     const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

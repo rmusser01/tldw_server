@@ -31,6 +31,8 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     (mocks.isActiveCookieSessionConfig as (...args: unknown[]) => unknown)(...args)
 }))
 
+vi.mock("wxt/browser", () => ({ browser: {} }))
+
 vi.mock("@/services/background-proxy", () => ({
   bgRequest: (...args: unknown[]) =>
     (mocks.bgRequest as (...args: unknown[]) => unknown)(...args)
@@ -565,6 +567,99 @@ describe("server capabilities docs-info merge", () => {
     }
   )
 
+  it.each(["config", "openapi", "probe"] as const)(
+    "S03 capability discovery retires across Logout during %s", async phase => {
+      const original = { serverUrl: "https://original.test", authMode: "single-user", apiKey: "original-fixture-key" }
+      let release!: () => void
+      const held = new Promise<void>(resolve => { release = resolve })
+      let entered = false
+      let probeSignal: AbortSignal | undefined
+      const spec = { paths: { "/api/v1/ingestion-sources": {} } }
+      mocks.getConfig.mockImplementation(async () => {
+        if (phase === "config") { entered = true; await held }
+        return original
+      })
+      mocks.getOpenAPISpec.mockImplementation(async () => {
+        if (phase === "openapi") { entered = true; await held }
+        return spec
+      })
+      mocks.bgRequest.mockImplementation(async (request: { path: string; abortSignal?: AbortSignal }) => {
+        if (isIngestionSourceCapabilitiesRequest(request)) {
+          probeSignal = request.abortSignal
+          if (phase === "probe") { entered = true; await held }
+          return { can_create_local_directory: true }
+        }
+        return {}
+      })
+      const { getServerCapabilities } = await importCapabilitiesModule()
+      const pending = getServerCapabilities().then(value => ({ value }), error => ({ error }))
+      try {
+        await vi.waitFor(() => expect(entered).toBe(true))
+        mocks.getConfig.mockResolvedValue({ serverUrl: original.serverUrl, authMode: "single-user" })
+        window.dispatchEvent(new Event("tldw:auth-credentials-changed"))
+        if (phase === "probe") expect(probeSignal?.aborted).toBe(true)
+        release()
+        expect(await pending).toMatchObject({ error: { status: 412, details: { detail: { code: "request_config_scope_changed" } } } })
+        expect(mocks.bgRequest.mock.calls.filter(([request]) => isIngestionSourceCapabilitiesRequest(request))).toHaveLength(phase === "probe" ? 1 : 0)
+        expect(mocks.storageSet).not.toHaveBeenCalled()
+        const fresh = await getServerCapabilities()
+        expect(fresh.canCreateLocalDirectoryIngestionSource).toBeNull()
+        expect(mocks.bgRequest.mock.calls.filter(([request]) => isIngestionSourceCapabilitiesRequest(request))).toHaveLength(phase === "probe" ? 1 : 0)
+      } finally {
+        release()
+        await pending
+      }
+    }
+  )
+
+  it("S03 capability discovery keeps fresh coalesced work separate after account ABA", async () => {
+    const original = { serverUrl: "https://original.test", authMode: "single-user", apiKey: "original-fixture-key" }
+    mocks.getConfig.mockResolvedValue(original)
+    let releaseOld!: () => void, releaseFresh!: () => void
+    const oldGate = new Promise<void>(resolve => { releaseOld = resolve })
+    const freshGate = new Promise<void>(resolve => { releaseFresh = resolve })
+    mocks.getOpenAPISpec.mockImplementation(async () => {
+      await (mocks.getOpenAPISpec.mock.calls.length === 1 ? oldGate : freshGate)
+      return { paths: { "/api/v1/chat/completions": {} } }
+    })
+    mocks.bgRequest.mockResolvedValue({})
+    const { getServerCapabilities, getServerCapabilitiesCacheDiagnostics } = await importCapabilitiesModule()
+    const request = () => getServerCapabilities().then(value => ({ value }), error => ({ error }))
+    const old = request()
+    let fresh: ReturnType<typeof request> | undefined, joined: ReturnType<typeof request> | undefined
+    let joinedAfterOld: ReturnType<typeof request> | undefined
+    try {
+      await vi.waitFor(() => expect(mocks.getOpenAPISpec).toHaveBeenCalledTimes(1))
+      window.dispatchEvent(new Event("tldw:auth-credentials-changed"))
+      fresh = request()
+      await vi.waitFor(() => expect(mocks.getOpenAPISpec).toHaveBeenCalledTimes(2))
+      joined = request()
+      await vi.waitFor(() => expect(getServerCapabilitiesCacheDiagnostics().inFlightHits).toBe(1))
+      releaseOld()
+      expect(await old).toMatchObject({ error: { status: 412 } })
+      joinedAfterOld = request()
+      await vi.waitFor(() => expect(getServerCapabilitiesCacheDiagnostics().inFlightHits).toBe(2))
+      expect(getServerCapabilitiesCacheDiagnostics().inFlightRequests).toBe(1)
+      releaseFresh()
+      for (const pending of [fresh, joined, joinedAfterOld]) expect(await pending).toMatchObject({ value: { hasChat: true } })
+      expect(mocks.getOpenAPISpec).toHaveBeenCalledTimes(2)
+    } finally {
+      releaseOld(); releaseFresh()
+      await Promise.all([old, fresh, joined, joinedAfterOld])
+    }
+  })
+
+  it("S03 capability discovery fences the owning return after cache dispatch", async () => {
+    mocks.getOpenAPISpec.mockResolvedValue({ paths: { "/api/v1/chat/completions": {} } })
+    mocks.bgRequest.mockResolvedValue({})
+    mocks.storageSet.mockImplementation(async () => {
+      queueMicrotask(() => window.dispatchEvent(new Event("tldw:auth-credentials-changed")))
+    })
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    await expect(getServerCapabilities()).rejects.toMatchObject({ status: 412 })
+    expect(mocks.storageSet).toHaveBeenCalledTimes(1)
+  })
+
   it("pins generic capability reads to the same connection as their cache key", async () => {
     const original = {
       serverUrl: "https://original.test",
@@ -583,7 +678,8 @@ describe("server capabilities docs-info merge", () => {
     const { getServerCapabilities } = await importCapabilitiesModule()
     await getServerCapabilities()
     expect(mocks.getOpenAPISpec).toHaveBeenCalledWith({
-      configSnapshot: original
+      configSnapshot: original,
+      signal: expect.any(AbortSignal)
     })
     expect(mocks.bgRequest).toHaveBeenCalledWith(
       expect.objectContaining({
