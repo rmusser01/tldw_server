@@ -642,6 +642,7 @@ export const presentationsMethods = {
       claimsVerificationProvider?: string
       claimsVerificationModel?: string
       temperature?: number
+      maxTokens?: number
       signal?: AbortSignal
     }
   ): Promise<{
@@ -679,6 +680,7 @@ export const presentationsMethods = {
       body.claims_verification_model = options.claimsVerificationModel
     }
     if (options?.temperature != null) body.temperature = options.temperature
+    if (options?.maxTokens != null) body.max_tokens = options.maxTokens
     return await this.request<any>({
       path: "/api/v1/slides/generate/from-media",
       method: "POST",
