@@ -124,6 +124,16 @@ describe("PlaygroundComposerNotices first-run banner", () => {
     expect(screen.getByRole("link", { name: "Open settings" })).toHaveAttribute("href", "/settings/tldw");
   });
 
+  // CC-03 (#3101): no false "offline" while the first server check runs.
+  it("announces Connecting… instead of the offline notice while the first check runs", () => {
+    mockNoFirstRunBanner();
+    renderNotices({ isConnectionReady: false, connectionPending: true });
+    expect(screen.queryByTestId("playground-composer-disconnected-notice")).not.toBeInTheDocument();
+    expect(screen.getByTestId("playground-composer-connecting-status")).toHaveTextContent(
+      "Connecting to your tldw server\u2026"
+    );
+  });
+
   it("names the startup template launcher for assistive technology", () => {
     mockNoFirstRunBanner()
     renderNotices({ isProMode: true })

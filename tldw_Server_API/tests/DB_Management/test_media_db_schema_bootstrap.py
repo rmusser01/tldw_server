@@ -1647,6 +1647,8 @@ def test_ensure_sqlite_document_workspace_schema_migrates_old_tables_idempotentl
                 updated_at TEXT NOT NULL,
                 deleted INTEGER NOT NULL DEFAULT 0
             );
+            INSERT INTO document_annotations (id, media_id, user_id, location, text, created_at, updated_at)
+            VALUES ('ann_old_1', 1, '1', 'p1', 'a', 't', 't'), ('ann_old_2', 1, '1', 'p2', 'b', 't', 't');
             """
         )
 
@@ -1660,6 +1662,14 @@ def test_ensure_sqlite_document_workspace_schema_migrates_old_tables_idempotentl
         assert progress_columns.count("percentage") == 1
         assert annotation_columns.count("chapter_title") == 1
         assert annotation_columns.count("percentage") == 1
+        assert annotation_columns.count("client_id") == 1
+
+        # Existing rows keep a NULL client_id; the unique index still admits them.
+        unique_indexes = {
+            row["name"] for row in conn.execute("PRAGMA index_list(document_annotations)") if row["unique"]
+        }
+        assert "idx_annotations_client_id" in unique_indexes
+        assert [row["client_id"] for row in conn.execute("SELECT client_id FROM document_annotations")] == [None, None]
     finally:
         conn.close()
 
@@ -1690,6 +1700,12 @@ def test_ensure_postgres_document_workspace_schema_executes_expected_ddl() -> No
     assert "alter table document_reading_progress add column if not exists percentage double precision" in joined
     assert "alter table document_annotations add column if not exists chapter_title text" in joined
     assert "alter table document_annotations add column if not exists percentage double precision" in joined
+    add_client_id = "alter table document_annotations add column if not exists client_id text"
+    client_id_index = (
+        "create unique index if not exists idx_annotations_client_id "
+        "on document_annotations(user_id, media_id, client_id)"
+    )
+    assert joined.index(add_client_id) < joined.index(client_id_index)
 
 
 @pytest.mark.unit

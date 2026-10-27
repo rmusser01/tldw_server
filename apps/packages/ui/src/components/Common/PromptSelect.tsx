@@ -1201,7 +1201,9 @@ const PromptSelectForOwner: React.FC<Props & { expectedOwnerId: string | null }>
         )}
         placement={"topLeft"}
         trigger={["click"]}>
-        <Tooltip title={triggerAriaLabel}>
+        {/* Hover help sits where the upward menu opens; hide it while the
+            menu is open so it never covers a menu item. */}
+        <Tooltip title={triggerAriaLabel} open={dropdownOpen ? false : undefined}>
           <IconButton
             ariaLabel={triggerAriaLabel}
             hasPopup="menu"

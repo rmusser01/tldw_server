@@ -22,6 +22,7 @@ import { BuddyManagementButton } from "@/components/Common/PersonaBuddy/BuddyMan
 import { PromptSelect } from "@/components/Common/PromptSelect";
 import { PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY } from "@/utils/output-formatting-guide";
 import type { ComposerToolbarRolePlayActions } from "./ComposerToolbarOverflow";
+import { composerShortcutHint } from "./composer-shortcut-hint";
 import {
   ParameterPresets,
   ParameterPresetsDropdown,
@@ -40,6 +41,8 @@ export type ComposerToolbarProps = {
   isMobile: boolean;
   isConnectionReady: boolean;
   isSending: boolean;
+  /** '@' tab mentions work here (CC-11); the footer hint names them only then. */
+  mentionsAvailable?: boolean;
   optionsExpanded?: boolean;
   optionsLoading?: boolean;
   optionsUnavailable?: boolean;
@@ -147,6 +150,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     isMobile,
     isProMode,
     isConnectionReady,
+    mentionsAvailable = false,
     optionsExpanded = false,
     optionsLoading = false,
     optionsUnavailable = false,
@@ -781,7 +785,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
                 >
                   {t("playground:presets.generationStyle", "Generation style")}
                 </button>
-                {isProMode && <ParameterPresets compact />}
+                {isProMode && <ParameterPresets compact={isMobile} />}
                 {compareControl}
               </div>
               <div className="flex flex-wrap items-center gap-1">
@@ -895,7 +899,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
             />
           </button>
           <span className="text-xs text-text-muted sm:px-2">
-            {t("playground:composer.shortcutHint", "/ commands · @ mentions")}
+            {composerShortcutHint(t, mentionsAvailable)}
           </span>
         </div>
         <div

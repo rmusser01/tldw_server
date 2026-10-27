@@ -1,10 +1,14 @@
 import { validateNativeCharacterConfiguration } from "@/hooks/chat/native-character-preflight"
 import { useStoreChatModelSettings } from "@/store/model"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ModelSelect } from "../ModelSelect"
+import {
+  recordChatModelSendOutcome,
+  resetChatModelSendOutcomes
+} from "@/utils/chat-model-readiness"
 
 type MenuItem = {
   key: string
@@ -46,7 +50,8 @@ vi.mock("@tanstack/react-query", async (original) => {
     useQuery: () => ({
       data: discovery.failed ? undefined : [
         { model: "tldw:Gemma:Q4", provider: "openai", nickname: "Hosted Gemma" },
-        { model: "tldw:Gemma:Q4", provider: "local-llm", nickname: "Local Gemma" }
+        { model: "tldw:Gemma:Q4", provider: "local-llm", nickname: "Local Gemma" },
+        { model: "tldw:llama3.2:3b", provider: "ollama", provider_health: "unreachable" }
       ],
       isLoading: false,
       isSuccess: !discovery.failed,
@@ -81,6 +86,13 @@ vi.mock("antd", () => ({
         {menu.selectedKeys.join(",")}
       </output>
       {menu.items
+        .filter((item: MenuItem) => item.children)
+        .map((item: MenuItem) => (
+          <div data-testid="menu-group" key={`group-${item.key}`}>
+            {item.label}
+          </div>
+        ))}
+      {menu.items
         .flatMap((item: MenuItem) => item.children ?? [item])
         .map((item: MenuItem) => (
           <div role="menuitem" key={item.key} onClick={item.onClick}>
@@ -97,6 +109,7 @@ describe("compact explicit model selection", () => {
     discovery.failed = false
     discovery.retry.mockClear()
     useStoreChatModelSettings.getState().reset()
+    resetChatModelSendOutcomes()
   })
   it("offers a keyboard accessible Retry when discovery fails", () => {
     discovery.failed = true
@@ -129,5 +142,61 @@ describe("compact explicit model selection", () => {
       ["local:Gemma:Q4"],
       ["local:Gemma:Q4"]
     ])
+  })
+
+  it("XS-02: rows name the model first and the provider second", () => {
+    render(<ModelSelect showSelectedName />)
+    const hosted = screen.getByRole("menuitem", { name: /hosted gemma/i })
+    expect(hosted.textContent ?? "").toMatch(/^Hosted Gemma/)
+    expect(hosted).toHaveTextContent("OpenAI")
+    expect(hosted.textContent).not.toContain(" - ")
+  })
+
+  it("XS-02: groups a local provider under its own name, not 'Custom'", () => {
+    render(<ModelSelect showSelectedName />)
+    const groups = screen.getAllByTestId("menu-group").map((group) => group.textContent)
+    expect(groups).toContain("Local · Ollama")
+    expect(groups).not.toContain("Custom")
+  })
+
+  it("XS-02: the chip names the selected model without the internal prefix", () => {
+    render(<ModelSelect showSelectedName />)
+    const chip = screen.getByTestId("chat-model-select")
+    expect(chip).toHaveTextContent("Gemma:Q4")
+    expect(chip.textContent).not.toContain("tldw:")
+    expect(chip).toHaveAccessibleName(expect.stringContaining("Gemma:Q4"))
+  })
+
+  it("XS-02: the chip says when the selected model's provider is unreachable", () => {
+    render(<ModelSelect showSelectedName />)
+    fireEvent.click(screen.getByRole("menuitem", { name: /llama3\.2:3b/i }))
+
+    expect(screen.getByTestId("chat-model-readiness")).toHaveAttribute(
+      "data-model-readiness",
+      "unreachable"
+    )
+    expect(screen.getByTestId("chat-model-select")).toHaveAccessibleName(
+      expect.stringContaining("Unreachable")
+    )
+  })
+
+  it("XS-02: the chip shows a model that answered as working, and an unproven one as not checked", () => {
+    render(<ModelSelect showSelectedName />)
+    fireEvent.click(screen.getByRole("menuitem", { name: /hosted gemma/i }))
+
+    expect(screen.getByTestId("chat-model-readiness")).toHaveAttribute(
+      "data-model-readiness",
+      "not_checked"
+    )
+    act(() => {
+      recordChatModelSendOutcome("openai", "Gemma:Q4", "working")
+    })
+    expect(screen.getByTestId("chat-model-readiness")).toHaveAttribute(
+      "data-model-readiness",
+      "working"
+    )
+    expect(screen.getByTestId("chat-model-select")).toHaveAccessibleName(
+      expect.stringContaining("Working")
+    )
   })
 })

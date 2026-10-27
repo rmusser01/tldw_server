@@ -274,6 +274,16 @@ describe("ControlRow system prompt override ownership", () => {
     expect(screen.getByTestId("chat-model-select")).toHaveFocus()
   })
 
+  it("XS-02: lets a blocked Pro-mode Send open this row's model picker", () => {
+    const modelPickerRef = React.createRef<{ openAndFocus: () => void }>()
+    render(<ControlRow {...defaultProps()} modelPickerRef={modelPickerRef} />)
+
+    modelPickerRef.current?.openAndFocus()
+
+    expect(mocks.openModelSelect).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId("chat-model-select")).toHaveFocus()
+  })
+
   it("synchronizes the selected route and isolates edits from global and stale scopes", () => {
     const { rerender } = render(<ControlRow {...defaultProps()} />)
 

@@ -1,8 +1,6 @@
 import { programmingLanguages } from "@/utils/language-extension"
 import { Tooltip } from "antd"
 import {
-  CopyCheckIcon,
-  CopyIcon,
   DownloadIcon,
   EyeIcon,
   CodeIcon,
@@ -17,6 +15,7 @@ import DOMPurify from "dompurify"
 import { useUiModeStore } from "@/store/ui-mode"
 import { useArtifactsStore } from "@/store/artifacts"
 import { normalizeLanguage, resolveTheme, safeLanguage } from "@/utils/code-theme"
+import { CodeCopyButton } from "./CodeCopyButton"
 
 interface Props {
   language: string
@@ -55,14 +54,12 @@ export const CodeBlock: FC<Props> = ({
   blockIndex,
   enableArtifactAction = true
 }) => {
-  const [isBtnPressed, setIsBtnPressed] = useState(false)
   const [previewValue, setPreviewValue] = useState(value)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewHeight, setPreviewHeight] = useState(PREVIEW_MAX_HEIGHT)
   const [isPreviewConstrained, setIsPreviewConstrained] = useState(true)
   const [previewToken, setPreviewToken] = useState(() => generatePreviewToken())
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const copyTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const previewFrameRef = useRef<HTMLIFrameElement | null>(null)
   const normalizedLanguage = normalizeLanguage(language)
   const lines = value ? value.split(/\r?\n/) : []
@@ -133,31 +130,6 @@ export const CodeBlock: FC<Props> = ({
     if (typeof stored === "boolean") return stored
     return isLong
   })
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(value)
-      setIsBtnPressed(true)
-      if (copyTimeoutRef.current) {
-        clearTimeout(copyTimeoutRef.current)
-      }
-      copyTimeoutRef.current = setTimeout(() => {
-        setIsBtnPressed(false)
-        copyTimeoutRef.current = null
-      }, 4000)
-    } catch {
-      // Clipboard write failed - optionally show error feedback
-    }
-  }
-
-  useEffect(() => {
-    return () => {
-      if (copyTimeoutRef.current) {
-        clearTimeout(copyTimeoutRef.current)
-        copyTimeoutRef.current = null
-      }
-    }
-  }, [])
-
   const isPreviewable = ["html", "svg", "xml"].includes(
     normalizedLanguage
   )
@@ -485,18 +457,7 @@ export const CodeBlock: FC<Props> = ({
                   <DownloadIcon className="size-4" />
                 </button>
               </Tooltip>
-              <Tooltip title={copyLabel}>
-                <button
-                  onClick={handleCopy}
-                  aria-label={copyLabel}
-                  className="flex gap-1.5 items-center rounded bg-none p-1 text-xs text-text-muted hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
-                  {!isBtnPressed ? (
-                    <CopyIcon className="size-4" />
-                  ) : (
-                    <CopyCheckIcon className="size-4 text-success" />
-                  )}
-                </button>
-              </Tooltip>
+              <CodeCopyButton value={value} label={copyLabel} />
             </div>
           </div>
 

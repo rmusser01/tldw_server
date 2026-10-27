@@ -170,8 +170,12 @@ vi.mock("@/components/Common/Playground/Message", () => ({
 }))
 
 const getCardElements = async (modelKey: "model-a" | "model-b") => {
+  // The compare cluster is a lazy chunk; its first cold import can outlast
+  // findBy's 1s default on a loaded machine.
   const identity = await screen.findByTestId(
-    `compare-model-identity-cluster-1-${modelKey}`
+    `compare-model-identity-cluster-1-${modelKey}`,
+    {},
+    { timeout: 5_000 }
   )
   const card = identity.closest('[role="article"]') as HTMLElement | null
   if (!card) {

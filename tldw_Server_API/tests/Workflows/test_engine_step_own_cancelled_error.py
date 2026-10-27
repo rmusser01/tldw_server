@@ -34,7 +34,7 @@ _PLAIN = {"id": "s", "type": "summarize", "config": {"n": 0}}
 class PoolTimeout(psycopg.OperationalError):
     """psycopg_pool.PoolTimeout's shape: the PostgreSQL pool raises it unwrapped from getconn() when it is exhausted.
 
-    A stand-in, because psycopg_pool comes only with the db_postgres extra, which the macOS and Windows jobs lack.
+    A stand-in that pins the shape (a psycopg.OperationalError subclass) rather than psycopg_pool's import path.
     """
 
 

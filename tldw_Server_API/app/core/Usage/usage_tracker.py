@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip
 from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.Metrics import increment_counter
 
 from .llm_usage_normalizer import normalize_llm_usage
@@ -247,6 +248,10 @@ ANTHROPIC_US_ONLY_MULTIPLIER = 1.1
 _ANTHROPIC_STANDARD_PRICED_GEO = re.compile(
     r"^claude-(?:(?:opus|sonnet|haiku)-4(?:-[0-5])?(?:-\d{8})?$|[0-3](?:[-.]|$)|instant)"
 )
+# Anthropic's Batch API: "a 50 percent discount on both input and output tokens", and the cache multipliers "stack
+# with other pricing modifiers, including the Batch API discount and data residency" (same page). Every row of its
+# batch table is half the list row, so one multiplier on every category, applied when usage.service_tier is "batch".
+ANTHROPIC_BATCH_MULTIPLIER = 0.5
 
 
 def compute_costs(
@@ -261,6 +266,8 @@ def compute_costs(
     cache_write_1h_input_tokens: int = 0,
     speed: str | None = None,
     inference_geo: str | None = None,
+    service_tier: str | None = None,
+    reported_cost_usd: float | None = None,
 ) -> tuple[float, float, float, bool]:
     """
     Compute (prompt_cost, completion_cost, total_cost, estimated)
@@ -272,11 +279,17 @@ def compute_costs(
     ``speed="fast"`` and ``inference_geo="us"`` (Anthropic; US-only on Claude
     4.6 and later models only) multiply every
     category by 2 and 1.1.
+    ``service_tier`` is the tier the provider reports: an entry's
+    ``service_tiers`` rates for it apply (OpenAI), Anthropic's ``batch`` halves
+    every category, and any other tier costs the standard rates.
+    ``reported_cost_usd`` (OpenRouter's own bill) is the total cost, split
+    between prompt and completion in the catalog's proportions.
     """
     catalog = get_pricing_catalog()
     prompt_total = max(0, int(prompt_tokens or 0))
+    tier = (service_tier or "").strip().lower()
     # The whole prompt, cache tokens included (ADR-075), picks a long-prompt price tier.
-    rates, est = catalog.get_rate_details(provider, model, prompt_tokens=prompt_total)
+    rates, est = catalog.get_rate_details(provider, model, prompt_tokens=prompt_total, service_tier=tier)
     in_per_1k = rates["prompt"]
     out_per_1k = rates["completion"]
     completion_total = max(0, int(completion_tokens or 0))
@@ -308,8 +321,16 @@ def compute_costs(
         canonical_anthropic_model_id((model or "").strip().lower())
     ):
         multiplier *= ANTHROPIC_US_ONLY_MULTIPLIER
+    if tier == "batch" and canonical_provider_name(provider or "") == "anthropic":
+        multiplier *= ANTHROPIC_BATCH_MULTIPLIER
     prompt_cost *= multiplier
     completion_cost = (completion_total / 1000.0) * out_per_1k * multiplier
+    if reported_cost_usd is not None:
+        # The provider's own bill wins; the catalog only splits it between prompt and completion.
+        catalog_total = prompt_cost + completion_cost
+        prompt_share = prompt_cost / catalog_total if catalog_total > 0 else 1.0
+        total = float(reported_cost_usd)
+        return total * prompt_share, total * (1.0 - prompt_share), total, False
     total_cost = prompt_cost + completion_cost
     return prompt_cost, completion_cost, total_cost, est
 
@@ -388,6 +409,8 @@ async def log_llm_usage(
             cache_write_1h_input_tokens=normalized_usage.cache_write_1h_input_tokens,
             speed=normalized_usage.speed,
             inference_geo=normalized_usage.inference_geo,
+            service_tier=normalized_usage.service_tier,
+            reported_cost_usd=normalized_usage.reported_cost_usd,
         )
         if estimated is None:
             estimated = est_flag or normalized_usage.estimate_source != "provider_usage"

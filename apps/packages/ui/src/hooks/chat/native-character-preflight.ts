@@ -258,22 +258,48 @@ export const nativeCharacterPreflightMessage = (
 };
 
 
+/** Plain copy for a saved-reply action that keeps the saved exchange (Regenerate or native Continue). */
+const savedReplyActionCopy = {
+  regenerate: {
+    settings: "Conversation settings could not be verified. No new reply was requested. Reload this saved chat or try again; your original exchange and draft are kept.",
+    context: "The server refused regeneration because this saved chat uses unsupported context. Review the saved setup or start a compatible chat; your original exchange and draft are kept.",
+    changed: "The saved message or conversation changed. Your original exchange and draft are kept. Reload the intended chat before regenerating again.",
+    scope: "The server or signed-in account changed. Your original exchange and draft are kept. Return to the intended server and account and reload this chat.",
+    unsupported: "This reply or its active setup does not support regeneration yet. Your original exchange and draft are kept. Review conversation and response settings or start a compatible saved chat.",
+    failed: "We could not confirm the new reply. Your original exchange and draft are kept. Reload this chat and review recovery before regenerating again."
+  },
+  continue: {
+    settings: "Conversation settings could not be verified, so the reply was not continued. Reload this saved chat or try again; your original exchange and draft are kept.",
+    context: "The server could not continue this reply because this saved chat uses unsupported context. Review the saved setup or start a compatible chat; your original exchange and draft are kept.",
+    changed: "The saved message or conversation changed. Your original exchange and draft are kept. Reload the chat before continuing the reply.",
+    scope: "The server or signed-in account changed. Your original exchange and draft are kept. Return to the intended server and account and reload this chat.",
+    unsupported: "This reply can't be continued here. Your original exchange and draft are kept. To keep going, use New Branch on this reply or send a follow-up message.",
+    failed: "We could not confirm the continued reply. Your original exchange and draft are kept. Reload this chat and check for the saved reply before trying again."
+  }
+} as const;
+
 /** Regeneration keeps the saved exchange; an uncertain transport never certifies rollback. */
-export const nativeRegenerationFeedback = (error: unknown, t: (key: string, fallback: string) => string): string => {
-  if (error instanceof NativeHistorySettingsReadError) return t("common:regenerateMessage.settings",
-    "Conversation settings could not be verified. No new reply was requested. Reload this saved chat or try again; your original exchange and draft are kept.");
-  if (error instanceof NativeHistoryContextRefusal) return t("common:regenerateMessage.context",
-    "The server refused regeneration because this saved chat uses unsupported context. Review the saved setup or start a compatible chat; your original exchange and draft are kept.");
+export const nativeRegenerationFeedback = (
+  error: unknown,
+  t: (key: string, fallback: string) => string,
+  action: "regenerate" | "continue" = "regenerate"
+): string => {
+  const copy = savedReplyActionCopy[action];
+  const namespace = action === "continue" ? "common:continueMessage" : "common:regenerateMessage";
+  const say = (key: keyof typeof copy) => t(`${namespace}.${key}`, copy[key]);
+  if (error instanceof NativeHistorySettingsReadError) return say("settings");
+  if (error instanceof NativeHistoryContextRefusal) return say("context");
   const value = error && typeof error === "object" ? error as { message?: unknown; details?: unknown; code?: unknown; reason?: unknown } : {};
   const detail = getStructuredApiErrorDetail(value.details);
   const code = [value.code, value.reason, detail?.code, detail?.error_code, value.message].find(v => typeof v === "string") as string | undefined;
   if (["message_changed", "version_conflict", "stale_snapshot", "stale_projection", "stale_selection"].includes(code ?? ""))
-    return t("common:regenerateMessage.changed", "The saved message or conversation changed. Your original exchange and draft are kept. Reload the intended chat before regenerating again.");
+    return say("changed");
   if (["request_config_scope_changed", "owner_lease_expired", "owner_conversation_mismatch"].includes(code ?? ""))
-    return t("common:regenerateMessage.scope", "The server or signed-in account changed. Your original exchange and draft are kept. Return to the intended server and account and reload this chat.");
-  if (code === "unsupported_history_regeneration" || code === "unsupported_history_action_context" ||
+    return say("scope");
+  if (code === "unsupported_history_regeneration" || code === "unsupported_history_continuation" ||
+      code === "unsupported_history_action_context" ||
       code === "native_history_requires_server_owner" || code?.startsWith("native_history_setting_unsupported:") ||
       /^native_history_.*unsupported$/.test(code ?? ""))
-    return t("common:regenerateMessage.unsupported", "This reply or its active setup does not support regeneration yet. Your original exchange and draft are kept. Review conversation and response settings or start a compatible saved chat.");
-  return t("common:regenerateMessage.failed", "We could not confirm the new reply. Your original exchange and draft are kept. Reload this chat and review recovery before regenerating again.");
+    return say("unsupported");
+  return say("failed");
 };

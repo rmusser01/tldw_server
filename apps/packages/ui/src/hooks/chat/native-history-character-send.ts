@@ -56,6 +56,7 @@ import { prepareChatCompletionRequest } from "@/services/tldw/TldwChat"
 import { requireServerSettingsResponse } from "@/services/chat-settings"
 import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistoryEditRefusal, NativeHistorySettingsReadError, NativeHistoryRoleplaySendError, validateNativeCharacterConfiguration } from "./native-character-preflight"
 import { extractStreamTransportInterruption } from "@/utils/extract-token-from-chunk"
+import { isSavedReplyActionRefusal, rememberSavedReplyRefusal } from "./saved-reply-actions"
 import { consumeStreamingChunk } from "@/utils/streaming-chunks"
 
 import type { ChatSettingsRecord } from "@/types/chat-session-settings"
@@ -637,7 +638,8 @@ export const sendNativeHistoryCharacter = async (
         apiProvider: provider,
         saveToDb: true,
         conversationId: owner.conversation_id,
-        regenerateFromMessageId: regenerate?.message_id,
+        regenerateFromMessageId: regenerate?.action === "continue" ? undefined : regenerate?.message_id,
+        continueFromMessageId: regenerate?.action === "continue" ? regenerate.message_id : undefined,
         temperature: usesSavedSampler("temperature") ? undefined : settings.temperature,
         maxTokens: settings.numPredict,
         topP: usesSavedSampler("top_p") ? undefined : settings.topP,
@@ -898,6 +900,15 @@ export const sendNativeHistoryCharacter = async (
           }
         }
         throw refusal
+      }
+
+      if (regenerate && dispatched && !streamStarted && !admission && !resultId && content === "" &&
+          isSavedReplyActionRefusal(error)) {
+        // CM-01: the server refused before admitting or generating anything, so
+        // there is nothing to recover; the reply's actions now say why.
+        rememberSavedReplyRefusal(regenerate)
+        await dismissHistoryTurnRecovery(scope, view, operationId)
+        throw error
       }
 
       if (dispatched) {

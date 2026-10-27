@@ -225,6 +225,7 @@ _BASE_SUPPORTED_PROVIDER_NAMES_LIST: list[str] = [
     "aphrodite",
     "moonshot",
     "zai",
+    "mlx",
 ]
 
 ALL_SUPPORTED_PROVIDER_NAMES_LIST: list[str] = [

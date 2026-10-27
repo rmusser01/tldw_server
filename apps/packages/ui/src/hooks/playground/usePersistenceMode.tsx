@@ -37,6 +37,7 @@ import { useServerChatSaveStatus } from "@/hooks/chat/useServerChatSaveStatus"
 import {
   resolveChatPersistenceKind
 } from "@/utils/chat-persistence-status"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 
 export type UsePersistenceModeParams = {
   temporaryChat: boolean
@@ -78,7 +79,7 @@ export function usePersistenceMode({
     try {
       const card = document.getElementById("server-connection-card")
       if (card) {
-        card.scrollIntoView({ block: "nearest", behavior: "smooth" })
+        card.scrollIntoView({ block: "nearest", behavior: smoothScrollBehavior() })
         ;(card as HTMLElement).focus()
         return
       }
