@@ -45,25 +45,6 @@ class _FakeResponse:
         return self._json_data
 
 
-class _FakeClient:
-    def __init__(self, json_data: dict, capture: dict | None = None):
-        self._json_data = json_data
-        self._capture = capture
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-    def post(self, url, headers=None, json=None):
-        if self._capture is not None:
-            self._capture["url"] = url
-            self._capture["headers"] = headers
-            self._capture["json"] = json
-        return _FakeResponse(self._json_data)
-
-
 class _AsyncFakeClient:
     def __init__(self, json_data: dict, capture: dict | None = None):
         self._json_data = json_data
@@ -232,11 +213,8 @@ def test_messages_count_tokens_anthropic(client_user_only, monkeypatch):
     monkeypatch.setattr(chat_service, "discover_provider_models", lambda *args, **kwargs: SimpleNamespace(
         status="ready", models=("claude-3-sonnet-20240229",),
     ))
-    monkeypatch.setattr(
-        messages_endpoint,
-        "http_client_factory",
-        lambda *a, **k: _FakeClient({"input_tokens": 3}),
-    )
+    # count_tokens posts through async_http_client_factory; the sync
+    # http_client_factory alias is not on this path.
     monkeypatch.setattr(
         messages_endpoint,
         "async_http_client_factory",

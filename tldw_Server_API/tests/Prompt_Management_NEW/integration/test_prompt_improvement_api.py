@@ -1319,17 +1319,22 @@ async def test_dispatch_provider_snapshot_runs_off_loop_once(
         assert kwargs["default_provider"] == "openai"
         return SimpleNamespace(provider="openai", model="gpt-test", was_auto=True)
 
-    provider_call = AsyncMock(return_value={"choices": [{"message": {"content": "ok"}}]})
+    async def touch_last_used() -> None:
+        """Accept the post-call credential touch."""
+
+    async def resolve_credentials(_provider: str, **_kwargs: Any) -> SimpleNamespace:
+        """Serve one BYOK credential without the credential store."""
+        return SimpleNamespace(api_key="test-key", app_config=None, touch_last_used=touch_last_used)
+
+    provider_calls: list[dict[str, Any]] = []
+
+    async def provider_call(**kwargs: Any) -> dict[str, Any]:
+        """Record the generation request the routed snapshot produced."""
+        provider_calls.append(kwargs)
+        return {"choices": [{"message": {"content": "ok"}}]}
+
     monkeypatch.setattr(dispatch, "resolve_chat_route", resolve_route)
-    monkeypatch.setattr(
-        dispatch,
-        "resolve_byok_credentials",
-        AsyncMock(
-            return_value=SimpleNamespace(
-                api_key="test-key", app_config=None, touch_last_used=AsyncMock(),
-            )
-        ),
-    )
+    monkeypatch.setattr(dispatch, "resolve_byok_credentials", resolve_credentials)
     monkeypatch.setattr(dispatch, "perform_chat_api_call_async", provider_call)
 
     result = await dispatch.dispatch_prompt_improvement(
@@ -1346,7 +1351,9 @@ async def test_dispatch_provider_snapshot_runs_off_loop_once(
     assert result.text == "ok"
     assert len(getter_threads) == 1
     assert getter_threads[0] != loop_thread
-    provider_call.assert_awaited_once()
+    assert [(call["api_endpoint"], call["model"], call["api_key"]) for call in provider_calls] == [
+        ("openai", "gpt-test", "test-key")
+    ]
 
 
 @pytest.mark.asyncio
