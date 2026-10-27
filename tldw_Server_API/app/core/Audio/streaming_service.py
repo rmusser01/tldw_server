@@ -367,17 +367,19 @@ async def _stream_tts_to_websocket(
             if producer_task in pending:
                 await _cancel_task(producer_task, "producer")
     finally:
-        cleanup_cancelled = False
+        # Re-raise the caught cancellation itself: a new bare CancelledError is not the host's
+        # (anyio's cancel scope does not recognise it) and escapes it (TASK-13950.7).
+        cleanup_cancelled: Optional[asyncio.CancelledError] = None
         for task, task_name in ((producer_task, "producer"), (consumer_task, "consumer")):
             try:
                 await _cancel_task(task, task_name)
-            except asyncio.CancelledError:
-                cleanup_cancelled = True
+            except asyncio.CancelledError as cancelled:
+                cleanup_cancelled = cleanup_cancelled or cancelled
                 logger.debug(f"{route} parent cancellation while cleaning up {task_name} task")
             except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as cleanup_exc:
                 logger.debug(f"{route} cleanup for {task_name} task failed: error={cleanup_exc}")
-        if cleanup_cancelled:
-            raise asyncio.CancelledError
+        if cleanup_cancelled is not None:
+            raise cleanup_cancelled
 
 
 async def _audio_ws_authenticate_impl(

@@ -3322,7 +3322,9 @@ async def websocket_audio_chat_stream(
                 if overlap_session is None:
                     await _stream_tts(assistant_text, eos_detected_at)
             finally:
-                cleanup_cancelled = False
+                # Re-raise the caught cancellation itself: a new bare CancelledError is not the host's
+                # (anyio's cancel scope does not recognise it) and escapes it (TASK-13950.7).
+                cleanup_cancelled: Optional[asyncio.CancelledError] = None
 
                 async def _close_overlap_tts_resources() -> None:
                     finish_failed = False
@@ -3345,8 +3347,8 @@ async def websocket_audio_chat_stream(
 
                 try:
                     await await_owned_worker(_close_overlap_tts_resources())
-                except asyncio.CancelledError:
-                    cleanup_cancelled = True
+                except asyncio.CancelledError as cancelled:
+                    cleanup_cancelled = cancelled
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as cleanup_exc:
                     logger.debug(
                         "audio.chat.stream TTS cleanup failed error_type={}",
@@ -3357,8 +3359,8 @@ async def websocket_audio_chat_stream(
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
                     logger.debug(f"audio.chat.stream transcriber.reset() failed in finalize_turn: {exc}")
                 processing_turn = False
-                if cleanup_cancelled:
-                    raise asyncio.CancelledError
+                if cleanup_cancelled is not None:
+                    raise cleanup_cancelled
 
         async def _start_turn(
             commit_at: Optional[float],
@@ -4404,7 +4406,9 @@ async def websocket_tts_realtime(
         with contextlib.suppress(_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS):
             await _send_error("internal_error", "Internal error", close=True)
     finally:
-        cleanup_cancelled = False
+        # Re-raise the caught cancellation itself: a new bare CancelledError is not the host's
+        # (anyio's cancel scope does not recognise it) and escapes it (TASK-13950.7).
+        cleanup_cancelled: Optional[asyncio.CancelledError] = None
 
         async def _close_realtime_tts_resources() -> None:
             try:
@@ -4422,8 +4426,8 @@ async def websocket_tts_realtime(
 
         try:
             await await_owned_worker(_close_realtime_tts_resources())
-        except asyncio.CancelledError:
-            cleanup_cancelled = True
+        except asyncio.CancelledError as cancelled:
+            cleanup_cancelled = cancelled
         except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as cleanup_exc:
             logger.debug(
                 "audio.stream.tts.realtime cleanup failed error_type={}",
@@ -4448,8 +4452,8 @@ async def websocket_tts_realtime(
                     "audio.stream.tts.realtime websocket close failed after _outer_stream.done error: "
                     f"outer_error={outer_exc}, close_error={close_exc}"
                 )
-        if cleanup_cancelled:
-            raise asyncio.CancelledError
+        if cleanup_cancelled is not None:
+            raise cleanup_cancelled
 
 
 @router.get(

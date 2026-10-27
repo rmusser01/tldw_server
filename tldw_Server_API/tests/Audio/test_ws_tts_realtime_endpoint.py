@@ -536,3 +536,56 @@ async def test_websocket_tts_realtime_keeps_two_user_snapshots_across_interrupt(
     assert len(runtimes) == 2
     assert all(runtime.marked == runtime.handles for runtime in runtimes)
     assert all(runtime.closed for runtime in runtimes)
+
+
+@pytest.mark.unit
+def test_a_cancelled_cleanup_reraises_the_hosts_own_cancellation(monkeypatch: pytest.MonkeyPatch):
+    """A host (the TestClient's teardown, a server's shutdown) cancels the handler through its cancel
+    scope. The route caught that cancellation during cleanup and raised a new, bare CancelledError
+    afterwards, which the scope does not recognise as its own, so it escaped the host as
+    concurrent.futures.CancelledError: the auth matrix's teardown flake (TASK-13950.7)."""
+    import time
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from starlette.testclient import WebSocketTestSession
+
+    async def _auth_stub(*_args, **_kwargs):
+        return True, 1
+
+    async def _can_start_stream_stub(_user_id):
+        return True, None
+
+    async def _finish_stream_stub(_user_id):  # returns without suspending, as a fast quota store does
+        return None
+
+    close = WebSocketTestSession.close
+
+    def _slow_close(self: WebSocketTestSession, code: int = 1000, reason: str | None = None) -> None:
+        close(self, code, reason)
+        time.sleep(0.2)  # the route handles the disconnect, then the cancel lands in its cleanup
+
+    owned_worker = audio_streaming_module.await_owned_worker
+    cancelled_in_cleanup: list[bool] = []
+
+    async def _slow_owned_worker(awaitable, **kwargs):
+        try:
+            await asyncio.sleep(0.5)  # the host's cancellation lands in cleanup
+        except asyncio.CancelledError:
+            cancelled_in_cleanup.append(True)
+            awaitable.close()
+            raise
+        return await owned_worker(awaitable, **kwargs)
+
+    monkeypatch.setattr(audio, "_audio_ws_authenticate", _auth_stub)
+    monkeypatch.setattr(audio, "can_start_stream", _can_start_stream_stub)
+    monkeypatch.setattr(audio, "finish_stream", _finish_stream_stub)
+    monkeypatch.setattr(audio_streaming_module, "await_owned_worker", _slow_owned_worker)
+    monkeypatch.setattr(WebSocketTestSession, "close", _slow_close)
+    app = FastAPI()
+    app.include_router(audio_streaming_module.ws_router, prefix="/api/v1/audio")
+
+    with TestClient(app) as client, client.websocket_connect("/api/v1/audio/stream/tts/realtime"):
+        pass  # leaving disconnects, then cancels the handler mid-cleanup
+
+    assert cancelled_in_cleanup == [True]  # the cancellation did land in cleanup, and left quietly
