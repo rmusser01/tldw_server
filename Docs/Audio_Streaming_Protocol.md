@@ -17,17 +17,18 @@ WebSocket authentication (audio streams)
   (the server echoes `bearer`). A refused one closes before accept with `4401`.
 - Without one, the server accepts the socket only to read one auth frame, `{"type": "auth", "token": "<JWT or API key>"}`,
   within 5 seconds, and reads nothing after it until the caller is known:
-  - a first frame that is not an auth frame closes `4400`, unread;
+  - a first frame that is not an auth frame closes `4400`, unread (one over 4 KiB is never parsed);
   - a missing, refused or revoked token, or no frame in time, closes `4401`;
   - each refusal sends `{"type": "error", "message": "..."}` first; the message never contains the credential.
 - The single-user WebUI session cookie (trusted Origin only) also authenticates. Its clients may skip the auth frame and
-  send their `config` frame first; it is then processed as the first post-auth message. An auth frame with a token
-  still overrides the cookie, and a refused one is not rescued by it.
+  send their `config` frame first; it is then processed as the first post-auth message. An auth frame without a token
+  keeps the cookie; one with a token still overrides it, and a refused one is not rescued by it.
 - A scoped JWT's or a multi-user API key's limits still apply: allowed endpoints (`audio.stream.transcribe`,
   `audio.stream.tts`, `audio.stream.tts.realtime`, `audio.chat.stream`) and path prefixes close `4403`; a call quota
   closes `4003` (or `1008` with `AUDIO_WS_QUOTA_CLOSE_1008=1`).
 - Deprecated: `?token=<JWT or key>` is read only with `AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH=1`, logs a deprecation warning,
-  and is verified like `Authorization: Bearer`. URLs end up in access logs; send the auth frame instead.
+  and is verified like `Authorization: Bearer`. URLs end up in access logs; send the auth frame instead. `?api_key=` is
+  never read.
 
 The unified endpoint uses strict audio protocol v1: the first post-auth message
 must be a config frame with `protocol_version: 1`, `mode: "dictate"` or

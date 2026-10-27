@@ -396,7 +396,7 @@ failopen_cap_minutes = 5.0
   - Otherwise the first message: `{ "type": "auth", "token": "<JWT or API key>" }` within 5 seconds. Any other first message closes `4400` unread; a missing, refused or revoked token closes `4401`.
   - Single-user WebUI sessions authenticate with their cookie and may send `config` first.
   - Multi-user API keys and scoped JWTs can be limited to endpoints (must include `audio.stream.transcribe`) and path prefixes (`4403`); quotas may be enforced per key or token.
-  - Deprecated: `?token=` is read only with `AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH=1`, with a warning in the server log.
+  - Deprecated: `?token=` is read only with `AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH=1`, with a warning in the server log; `?api_key=` is never read.
 - Protocol:
   - First post-auth message must be config: `{ "type": "config", "protocol_version": 1, "mode": "dictate|captions", "audio_format": "pcm16", "sample_rate": 16000, "channels": 1, "language": "en", "model_variant": "standard|onnx|mlx" }`
   - Send audio chunks as JSON PCM16 frames: `{ "type": "audio", "data": "<base64 pcm16 little-endian mono 16khz>" }`
