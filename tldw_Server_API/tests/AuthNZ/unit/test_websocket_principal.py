@@ -617,7 +617,12 @@ async def test_an_oversized_first_frame_is_refused_4400_unparsed(monkeypatch: py
     oversized = json.dumps({"type": "auth", "token": "a." + "b" * websocket_principal.AUTH_FRAME_MAX_CHARS + ".c"})
     websocket, _sent = _frame_socket(oversized)
     parsed: list[str] = []
-    monkeypatch.setattr(websocket_principal.json, "loads", lambda raw: parsed.append(raw) or {})
+
+    def loads(raw: str) -> dict[str, object]:
+        parsed.append(raw)
+        return {}
+
+    monkeypatch.setattr(websocket_principal.json, "loads", loads)
 
     with pytest.raises(WebSocketException) as refused:
         await websocket_principal.resolve_ws_principal_first_frame(websocket)

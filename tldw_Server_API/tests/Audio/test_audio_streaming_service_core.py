@@ -1,6 +1,7 @@
 import asyncio
 import json
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from fastapi import HTTPException
@@ -394,7 +395,7 @@ async def test_stream_tts_cleanup_reraises_the_cancellation_it_caught():
     )
     stream_task = asyncio.create_task(
         streaming_service._stream_tts_to_websocket(
-            websocket=SimpleNamespace(),
+            websocket=cast(Any, SimpleNamespace()),
             speech_req=SimpleNamespace(model="test-model"),
             tts_service=SlowCancelTTSService(),
             provider="test-provider",
@@ -442,7 +443,7 @@ def test_audio_websocket_cleanups_never_raise_a_new_bare_cancellation():
     seeded = "raise asyncio.CancelledError\nraise CancelledError('x')\nraise caught\nraise\n"
     assert _new_cancellations(seeded) == [1, 2]
     for module in (audio_streaming, streaming_service):
-        assert _new_cancellations(Path(module.__file__).read_text(encoding="utf-8")) == [], module.__name__
+        assert _new_cancellations(Path(str(module.__file__)).read_text(encoding="utf-8")) == [], module.__name__
 
 
 @pytest.mark.asyncio
