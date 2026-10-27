@@ -223,7 +223,8 @@ def inventory_endpoint_scope(
     """
     if base_url is None or endpoint_provenance in _CALLER_ENDPOINT_PROVENANCE:
         return None
-    if _safe_base_url(base_url) != resolve_provider_models_base_url(provider):
+    safe_base = _safe_base_url(base_url)
+    if safe_base is None or safe_base != resolve_provider_models_base_url(provider):
         return None
     try:
         return ConfiguredEndpointScope.from_url(base_url)

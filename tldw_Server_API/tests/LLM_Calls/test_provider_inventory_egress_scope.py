@@ -110,3 +110,14 @@ def test_byok_private_gateway_is_refused_exactly_when_generation_refuses(
     assert generation_refuses is block_private
     assert discovery_refuses is generation_refuses
     assert gateway.hits == ([] if block_private else ["/v1/models"])
+
+
+def test_an_unsafe_base_never_gets_a_scope_even_when_the_server_base_is_unsafe_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two unusable bases must not compare equal and hand the raw input an exact-origin scope."""
+    from tldw_Server_API.app.core.LLM_Calls import provider_model_inventory
+
+    monkeypatch.setattr(provider_model_inventory, "resolve_provider_models_base_url", lambda _provider: None)
+
+    assert provider_model_inventory.inventory_endpoint_scope("openai", "http://127.0.0.1:4000/v1?next=1") is None
