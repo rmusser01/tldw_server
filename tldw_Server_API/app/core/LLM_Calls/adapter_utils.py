@@ -9,7 +9,7 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCallCredentials,
     is_runtime_issued_provider_call_credentials,
 )
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+from tldw_Server_API.app.core.exceptions import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.custom_openai_providers import (

@@ -7,7 +7,7 @@ import time
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import (
+from tldw_Server_API.app.core.exceptions import (
     ChatAPIError,
     ChatAuthenticationError,
     ChatBadRequestError,

@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
+from tldw_Server_API.app.core.exceptions import ChatBadRequestError
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_number,
     custom_openai_section_name,

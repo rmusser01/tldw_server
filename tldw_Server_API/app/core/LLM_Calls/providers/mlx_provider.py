@@ -28,7 +28,7 @@ from tldw_Server_API.app.core.Chat.bounded_daemon import (
     DaemonCapacityError,
     run_bounded_daemon_with_timeout,
 )
-from tldw_Server_API.app.core.Chat.Chat_Deps import (
+from tldw_Server_API.app.core.exceptions import (
     ChatBadRequestError,
     ChatProviderError,
     ChatRateLimitError,

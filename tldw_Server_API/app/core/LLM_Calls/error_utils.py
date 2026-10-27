@@ -9,7 +9,7 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import (
+from tldw_Server_API.app.core.exceptions import (
     ChatAPIError,
     ChatAuthenticationError,
     ChatBadRequestError,

@@ -109,7 +109,7 @@ class GoogleEmbeddingsAdapter(EmbeddingsProvider):
             try:
                 model_path = encode_google_model_path(model)
             except ValueError:
-                from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
+                from tldw_Server_API.app.core.exceptions import ChatBadRequestError
 
                 raise ChatBadRequestError(
                     provider=self.name,
@@ -219,7 +219,7 @@ class GoogleEmbeddingsAdapter(EmbeddingsProvider):
                         data = resp.json()
                         return self._normalize(data, multi=False)
             except Exception:
-                from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
+                from tldw_Server_API.app.core.exceptions import ChatProviderError
 
                 provider_error = ChatProviderError(
                     provider=self.name,

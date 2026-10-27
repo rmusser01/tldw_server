@@ -20,7 +20,7 @@ from typing import Any, NoReturn
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+from tldw_Server_API.app.core.exceptions import ChatAPIError
 
 
 def raise_if_in_band_provider_error(

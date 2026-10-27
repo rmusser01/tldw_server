@@ -25,7 +25,7 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
     ProviderCallCredentials,
 )
-from tldw_Server_API.app.core.Chat.Chat_Deps import (
+from tldw_Server_API.app.core.exceptions import (
     ChatAPIError,
     ChatAuthenticationError,
     ChatBadRequestError,

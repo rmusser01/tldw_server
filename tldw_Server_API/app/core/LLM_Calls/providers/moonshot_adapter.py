@@ -4,7 +4,7 @@ import contextlib
 from collections.abc import Iterable
 from typing import Any
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+from tldw_Server_API.app.core.exceptions import ChatConfigurationError
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
