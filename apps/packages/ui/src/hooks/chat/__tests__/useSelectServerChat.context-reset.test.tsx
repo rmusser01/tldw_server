@@ -187,7 +187,7 @@ describe("useSelectServerChat context reset", () => {
     expect(window.confirm).toHaveBeenCalledOnce();
     expect(chatBaseState.value.setMessages).toHaveBeenCalledOnce();
     expect(optionState.value.setServerChatId).toHaveBeenCalledWith("next-saved");
-    expect(navigateMock).toHaveBeenCalledWith("/chat");
+    expect(navigateMock).toHaveBeenCalledWith("/chat?chat=next-saved");
   });
 
 });

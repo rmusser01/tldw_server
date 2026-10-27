@@ -2,7 +2,7 @@ import { SidePanelBody } from "@/components/Sidepanel/Chat/body"
 import { PlaygroundChat } from "@/components/Option/Playground/PlaygroundChat"
 // @vitest-environment jsdom
 import React from "react"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PlaygroundMessage } from "../Message"
@@ -508,6 +508,106 @@ describe("PlaygroundMessage error recovery integration", () => {
 
     await user.click(screen.getByRole("button", { name: "Continue from partial" }))
     expect(onContinue).toHaveBeenCalledTimes(1)
+  })
+
+  it("CM-03 marks a reply cut off at the output limit and offers Continue and Retry", async () => {
+    const user = userEvent.setup()
+    const onRegenerate = vi.fn()
+    const onContinue = vi.fn()
+
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        onRegenerate={onRegenerate}
+        onContinue={onContinue}
+        generationInfo={{ finish_reason: "length" }}
+      />
+    )
+
+    const status = screen.getByRole("status", { name: "Output limit reached" })
+    expect(status).toHaveTextContent("this reply may be cut off")
+    expect(screen.queryByRole("button", { name: "Try provider fallback" })).not.toBeInTheDocument()
+
+    await user.click(within(status).getByRole("button", { name: "Continue from partial" }))
+    expect(onContinue).toHaveBeenCalledTimes(1)
+    await user.click(within(status).getByRole("button", { name: "Retry same model" }))
+    expect(onRegenerate).toHaveBeenCalledTimes(1)
+  })
+
+  it("CM-03 keeps the output-limit marker on an older reply but offers its actions only on the last one", () => {
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        currentMessageIndex={0}
+        totalMessages={3}
+        generationInfo={{ finish_reason: "length" }}
+      />
+    )
+
+    expect(screen.getByRole("status", { name: "Output limit reached" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Continue from partial" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Retry same model" })).not.toBeInTheDocument()
+  })
+
+  it("CM-03 disables Continue and Retry with the reason when the reply cannot be regenerated", () => {
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        regenerateDisabledReason="This saved reply can't be regenerated here."
+        generationInfo={{ finish_reason: "length" }}
+      />
+    )
+
+    const status = screen.getByRole("status", { name: "Output limit reached" })
+    expect(within(status).getByRole("button", { name: "Retry same model" })).toBeDisabled()
+    expect(within(status).getByRole("button", { name: "Continue from partial" })).toBeDisabled()
+  })
+
+  it.each([
+    ["a complete reply", { isBot: true, generationInfo: { finish_reason: "stop" } }],
+    ["a user message", { isBot: false, role: "user" as const, generationInfo: { finish_reason: "length" } }],
+    ["a saved reply with its own status", { generationInfo: { finish_reason: "length" }, metadataExtra: { generation_status: "complete" } }]
+  ])("CM-03 does not mark %s as cut off", (_label, props) => {
+    render(<PlaygroundMessage {...baseProps} {...props} />)
+    expect(screen.queryByText("Output limit reached")).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ["length", "Output limit reached"],
+    ["interrupted", "Interrupted"]
+  ])("CM-03 offers Continue and Retry on a saved %s reply whose actions run on the server", async (status, label) => {
+    const user = userEvent.setup()
+    const onRegenerate = vi.fn()
+    const onContinue = vi.fn()
+
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        onRegenerate={onRegenerate}
+        onContinue={onContinue}
+        savedStatusActions
+        metadataExtra={{ generation_status: status }}
+      />
+    )
+
+    const notice = screen.getByRole("status", { name: label })
+    expect(notice).toHaveTextContent("The saved content is kept.")
+    await user.click(within(notice).getByRole("button", { name: "Continue from partial" }))
+    expect(onContinue).toHaveBeenCalledTimes(1)
+    await user.click(within(notice).getByRole("button", { name: "Retry same model" }))
+    expect(onRegenerate).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ["stopped", "Stopped", { metadataExtra: { generation_status: "stopped" } }],
+    ["failed", "Generation failed", { metadataExtra: { generation_status: "error" } }],
+    ["older", "Output limit reached", { metadataExtra: { generation_status: "length" }, currentMessageIndex: 0, totalMessages: 3 }],
+    ["busy", "Output limit reached", { metadataExtra: { generation_status: "length" }, isProcessing: true }]
+  ])("CM-03 keeps a %s saved reply's status passive", (_label, statusLabel, props) => {
+    render(<PlaygroundMessage {...baseProps} savedStatusActions {...props} />)
+    expect(screen.getByRole("status", { name: statusLabel })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Retry same model" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Continue from partial" })).not.toBeInTheDocument()
   })
 
   it("renders recovery for completed assistant turns with no visible text", async () => {
@@ -1950,6 +2050,65 @@ describe("preserved reply before recovery", () => {
     ).toBeNull()
   })
 })
+
+// CM-10 (#3101): a reply reloaded from the server is named after the model
+// that wrote it rather than "Assistant", and user turns are tinted apart
+// from replies.
+describe("PlaygroundMessage turn identity", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    decodeChatErrorPayloadMock.mockReturnValue(null)
+  })
+
+  const primaryTinted = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll<HTMLElement>("[style]")).filter(
+      (element) => element.style.backgroundImage.includes("--color-primary")
+    )
+
+  it("names a reloaded reply after its saved model instead of 'Assistant'", () => {
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        metadataExtra={{ model_id: "saved-model", generation_status: "complete" }}
+      />
+    )
+
+    expect(screen.queryByText("Assistant")).not.toBeInTheDocument()
+    expect(screen.getAllByText("saved-model").length).toBeGreaterThan(0)
+  })
+
+  it("keeps a named assistant (character or persona) over the saved model", () => {
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        name="Ada"
+        modelName="Ada"
+        metadataExtra={{ model_id: "saved-model", generation_status: "complete" }}
+      />
+    )
+
+    expect(screen.getByText("Ada")).toBeInTheDocument()
+  })
+
+  it("tints a flat user card but not the reply card", () => {
+    storedPreferences.set("userChatBubble", false)
+    const user = render(
+      <PlaygroundMessage
+        {...baseProps}
+        isBot={false}
+        role="user"
+        name="You"
+        message="User question"
+      />
+    )
+    expect(primaryTinted(user.container)).toHaveLength(1)
+    user.unmount()
+
+    const reply = render(<PlaygroundMessage {...baseProps} />)
+    expect(primaryTinted(reply.container)).toHaveLength(0)
+  })
+})
+
 it("keeps nested reasoning tail out of the rendered final answer", async () => {
   render(
     <PlaygroundMessage

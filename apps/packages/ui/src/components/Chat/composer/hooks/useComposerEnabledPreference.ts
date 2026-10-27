@@ -1,5 +1,9 @@
 import React from "react"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import {
+  forgetPendingComposerProfileRead,
+  readComposerProfilePreferences,
+} from "./composer-profile-read"
 
 export const COMPOSER_ENABLED_PREFERENCE_KEY = "tldw:nextgenComposerEnabled"
 
@@ -70,9 +74,7 @@ export function useComposerEnabledPreference(
     const hydrateVersion = localChangeVersionRef.current
     const hydrate = async () => {
       try {
-        const profile = await tldwClient.getCurrentUserProfile({
-          sections: "preferences",
-        })
+        const profile = await readComposerProfilePreferences()
         if (cancelled) return
         if (localChangeVersionRef.current !== hydrateVersion) return
         const serverValue = profile?.preferences?.[COMPOSER_ENABLED_PROFILE_KEY]
@@ -126,6 +128,7 @@ export function useComposerEnabledPreference(
         }
       }
       if (disableServerSync) return
+      forgetPendingComposerProfileRead()
       void tldwClient
         .updateCurrentUserProfile({
           updates: [{ key: COMPOSER_ENABLED_PROFILE_KEY, value: next }],

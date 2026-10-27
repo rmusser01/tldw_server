@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import React from "react"
-import { render, screen, act } from "@testing-library/react"
+import { fireEvent, render, screen, act, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 
 import { PlaygroundChat } from "../PlaygroundChat"
+import { useStoreMessageOption } from "@/store/option"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
 
 const queryState = vi.hoisted(() => ({
   chatModels: [] as any[],
@@ -222,6 +224,49 @@ describe("PlaygroundChat selected server chat load state", () => {
 
     expect(screen.getByText("Failed to load conversation.")).toBeInTheDocument()
     expect(screen.queryByTestId("playground-empty")).not.toBeInTheDocument()
+  })
+
+  it("explains a failed chat load in plain words, with Retry and the raw request detail tucked away (CS-06)", () => {
+    const rawError =
+      "Internal Server Error (GET /api/v1/chats/d64f6a52-aaaa/messages?scope_type=global&include_deleted=false&limit=200&offset=0)"
+    useMessageOptionState.value = {
+      ...useMessageOptionState.value,
+      serverChatId: "chat-1",
+      serverChatLoadState: "failed",
+      serverChatLoadError: rawError
+    }
+    useStoreMessageOption.setState({
+      serverChatId: "chat-1",
+      serverChatLoadState: "failed",
+      serverChatLoadError: rawError
+    })
+    usePlaygroundSessionStore.setState({ serverChatSelectionIntent: null })
+    const openSidebar = vi.fn()
+    window.addEventListener("tldw:open-chat-sidebar", openSidebar)
+
+    render(
+      <MemoryRouter>
+        <PlaygroundChat />
+      </MemoryRouter>
+    )
+
+    const panel = screen.getByRole("alert")
+    expect(panel).toHaveTextContent("Couldn't load this conversation.")
+    expect(panel).toHaveTextContent("Your messages are safe on the server.")
+    const details = within(panel).getByText("Technical details").closest("details")
+    expect(details).not.toHaveAttribute("open")
+    expect(within(details as HTMLElement).getByText(rawError)).toHaveClass("break-all")
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Open another chat" }))
+    expect(openSidebar).toHaveBeenCalledTimes(1)
+    window.removeEventListener("tldw:open-chat-sidebar", openSidebar)
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Retry" }))
+    expect(
+      usePlaygroundSessionStore.getState().serverChatSelectionIntent?.chatId
+    ).toBe("chat-1")
+    expect(useStoreMessageOption.getState().serverChatLoadState).toBe("loading")
+    expect(useStoreMessageOption.getState().serverChatLoadError).toBeNull()
   })
 
   it("does not show the no-provider setup banner when usable chat models are present", () => {

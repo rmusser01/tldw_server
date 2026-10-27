@@ -1,7 +1,7 @@
 # D7: native history for Sync v2 owners
 
 - **Date:** 2026-10-04
-- **Status:** §3 is implemented on `feat/chat-sync-v2-native-history`. §5.2 and §5.3 are fixed on `fix/sync-v2-unenrolled-delete` (#3181, #3182). The migration in §5.3 and the tombstone rule in §5.4 are on `fix/sync-v2-placeholder-and-device-tombstone`. §5.1 is open and waits for §4.2. §4 is proposed; §6 records what the owner has decided and what is still open.
+- **Status:** §3 is implemented on `feat/chat-sync-v2-native-history`. §5.2 and §5.3 are fixed on `fix/sync-v2-unenrolled-delete` (#3181, #3182). The migration in §5.3 and the tombstone rule in §5.4 are on `fix/sync-v2-placeholder-and-device-tombstone`. The owner's decisions Q7 and Q8 of 2026-10-19 (the §5.4 rule for chats and notes, and the id-only tombstone of a direct delete in §5.2) are on `fix/sync-v2-satisfied-tombstones-all`. §5.1 is open and waits for §4.2. §4 is proposed; §6 records what the owner has decided and what is still open.
 - **Tracking:** epic #3101 · E2 #3126 · D7 design PR #3165, §8 Q4 ("Sync v2 users are in scope")
 - **Builds on:** P3 (PR #3174, client-supplied chat id). Independent of P1 (#3171) and P2; see §8 for the merge.
 - **Code base:** `origin/feat/chat-idempotent-create-p3 @ a96114f238`. Line numbers are on that commit.
@@ -225,7 +225,7 @@ So two devices can take turns in one conversation, but each hand-over from the d
 
 ## 5. Defects found on the base branch
 
-These existed before this change. §5.2 and §5.3 are fixed on `fix/sync-v2-unenrolled-delete` (#3181, #3182); the migration in §5.3 and §5.4 are fixed on `fix/sync-v2-placeholder-and-device-tombstone`. §5.1 is open, for the reason given there.
+These existed before this change. §5.2 and §5.3 are fixed on `fix/sync-v2-unenrolled-delete` (#3181, #3182); the migration in §5.3 and §5.4 are fixed on `fix/sync-v2-placeholder-and-device-tombstone`. Q7 and Q8 (§6) extend §5.4 and §5.2 on `fix/sync-v2-satisfied-tombstones-all`. §5.1 is open, for the reason given there.
 
 ### 5.1 An unversioned completion save publishes nothing (open, #3182)
 
@@ -252,12 +252,12 @@ Rows this applied to: any chat that predates the profile (§4.3), the rows from 
 
 | The dataset holds | The delete |
 |---|---|
-| No current head and no object state for the row | Direct: the same soft delete as without a profile. Nothing is appended. |
+| No current head and no object state for the row | Direct: the same soft delete as without a profile. Then a tombstone that carries only the id is published (Q8, below). |
 | Anything else | A tombstone through the log, as before. |
 
 - **Message delete.** One row.
-- **Chat delete.** The chat and its live messages are checked in one pass. Unpublished messages are deleted directly, in one transaction. Published messages are tombstoned in order. The chat goes last: by a tombstone if it is published, directly if it is not.
-- **A chat with both kinds of row.** Only the published rows produce envelopes. If an unresolved conflict blocks the dataset and any row needs a tombstone, the request is refused before anything is deleted.
+- **Chat delete.** The chat and its live messages are checked in one pass. Unpublished messages are deleted directly, in one transaction, and then published by id. Published messages are tombstoned in order. The chat goes last: by a tombstone if it is published, directly and then by id if it is not.
+- **A chat with both kinds of row.** Only the published rows produce ordinary tombstones; the others are published by id. If an unresolved conflict blocks the dataset and any row needs a tombstone, the request is refused before anything is deleted.
 - **A row whose envelope is accepted but not applied** counts as published, because a pull delivers pending envelopes. Its delete is refused by the head check at insert and appends nothing.
 - **The chat row of a published chat** is not touched by a direct message delete. Without a profile a message delete also bumps the chat's version; with one, only the log changes a published chat.
 - **A client-private dataset** cannot be written by the server front end, so the delete is refused there as before (409).
@@ -273,18 +273,28 @@ Rows this applied to: any chat that predates the profile (§4.3), the rows from 
 | While another conflict blocks the dataset | Works. Nothing is appended. | Refused. |
 | A device that holds a copy by another route | Not told. See route 2 below. | Told, by the tombstone. |
 
-Since §5.4 there is a third option. A tombstone for such a row is now applied instead of rejected, so the server could publish a tombstone alone, which carries the id and no content, for a message it deletes directly. That would also reach a device holding a copy by route 2. It was not done: it reverses the decision above for rows nobody else has, adds one envelope per message of a chat that predates the profile, and the chat's own tombstone is still refused when appended (§5.4). It is a question for the owner (§6).
+Since §5.4 there is a third option: a tombstone for such a row is applied instead of rejected, so the server can publish a tombstone alone, which carries the id and no content. It was first left out, because it adds envelopes for rows nobody else has, and it went to the owner (§6).
+
+**The id-only tombstone (owner decision Q8, 2026-10-19).** After a direct delete, the server publishes a tombstone of each row it deleted. It reaches a device that holds a copy by route 2 below, without putting the deleted content in the log. The payload is the one an ordinary tombstone of the row carries: for a message the id, `deleted`, the chat id and the owner; for a chat the id, `deleted` and the owner.
+
+- **How it is recorded.** As an applied capture records a create (§3.1): one first-revision envelope from `server-origin` with no base, accepted and already `applied`, and object state with `deleted = true`. No materializer runs; the row is already deleted. It goes to the owner's default personal dataset, like every server-origin write, and names the owner in its routing metadata.
+- **What a device does with it** is the rule in §5.4. A device that never had the row applies it as a no-op: it records the object as tombstoned and changes nothing else. A device that keeps a copy outside Sync deletes it. A device that later pushes its own copy of the id meets the tombstone as the object's head, so that push is a push conflict, which blocks nothing, and the device pulls the delete.
+- **Cost.** One envelope per row deleted this way. A chat that predates the profile costs one per live message and one for the chat. Each is recorded in the same Sync transaction, under the dataset fence, as the check that allowed its direct delete.
+- **Idempotent.** A second delete of the row finds the tombstone as its head, so the row counts as published and nothing is published twice. The route answers 404 before that anyway: the row is already deleted.
+- **It never blocks.** While an unresolved conflict blocks the dataset, the row is still deleted directly and nothing is published: the dataset accepts no new history then. If the Sync transaction fails after the direct delete, the row stays deleted, nothing is published, the failure is logged and the request succeeds. In both cases the delete behaves as it did before Q8, and a device that keeps a copy is not told. A durable record of such rows is §4.2.
+- **Not for a row another dataset of the owner holds** (route 3 below). That row has Sync history there, and a device that holds it there would read a tombstone in the default dataset as not its own to apply (§5.4) and record a conflict. It is deleted directly, as before, and nothing is published.
+- **Notes** are not deleted directly: the note route always deletes through the log. A note Sync never saw is covered by Q7 instead (see "Notes" at the end of this section).
 
 **Can a device hold a copy of such a row?** Three routes were checked.
 
 1. *Through this dataset.* Only if an envelope for the row exists. A pull also delivers envelopes that are accepted but not applied, which is why the rule asks for no current head and not only for no object state.
-2. *Under the same id, without Sync.* Yes. `append_message_from_sync` (`api/core/DB_Management/chacha/message_store.py`) adopts a stored row that has no Sync metadata when a device pushes the same id with the same content, so a device can enrol a row the server already has. If the server deleted that row directly first, the device's later push is applied and the other devices receive the message, while the server row stays deleted and object state says it is live. Nothing conflicts and the dataset is not blocked. The same already happens to any row deleted before the profile existed, because the adoption does not look at `deleted`. Pinned by `test_a_device_that_publishes_its_own_copy_of_a_directly_deleted_row_does_not_block_the_dataset`. What a first sync should do with rows deleted on one side belongs to §4.3.
-3. *Through another dataset of the same user.* This one is from reading the code; it was not run. Server-origin writes go to the default personal dataset only, and the check is against that dataset. A row that a device pushed into another dataset is deleted on the server with no tombstone there. Before the fix its delete blocked the default dataset. Workspace chats were already deleted directly.
+2. *Under the same id, without Sync.* Yes. `append_message_from_sync` (`api/core/DB_Management/chacha/message_store.py`) adopts a stored row that has no Sync metadata when a device pushes the same id with the same content, so a device can enrol a row the server already has. Before Q8, if the server deleted that row directly first, the device's later push was applied and the other devices received the message, while the server row stayed deleted and object state said it was live. Now the id-only tombstone is the object's head, so that push is a push conflict, which blocks nothing, and the device pulls the delete (`test_a_device_that_later_publishes_its_own_copy_of_a_directly_deleted_row_is_told_it_was_deleted`). A row deleted before the profile existed is still adopted, because the adoption does not look at `deleted`. What a first sync should do with rows deleted on one side belongs to §4.3.
+3. *Through another dataset of the same user.* This one is from reading the code; it was not run. Server-origin writes go to the default personal dataset only, and the check is against that dataset. A row that a device pushed into another dataset is deleted on the server with no tombstone there. Before the fix its delete blocked the default dataset. Since Q8 nothing is published for it either (above). Workspace chats were already deleted directly.
 
 **A dataset that is already blocked** by this defect recovers on the next server-origin write (a send, a chat create or rename, a delete, a note write) and on the next push from any device. `SyncV2Service.settle_stranded_tombstones` resolves the stranded conflict with `skip` when all of these hold.
 
-- The conflict is `chat.message` / `message_base_conflict` with reason `missing_server_message`.
-- Its envelope is a tombstone from `server-origin` with no base, accepted, with `apply_status = conflict`.
+- The conflict is `chat.message` / `message_base_conflict` with reason `missing_server_message`, or, since Q7, `chat.conversation` or `notes.note` / `whole_object_conflict` with reason `missing_server_object`.
+- Its envelope is a tombstone from `server-origin`, accepted, with `apply_status = conflict`. A message tombstone also has no base.
 - The object still has no object state.
 
 `skip` marks the envelope `superseded` (`sync_conflict_skipped`), restores the object's head and dismisses the conflict with the note `server_origin_tombstone_of_object_without_sync_history`. Nothing is lost by it:
@@ -300,7 +310,7 @@ A conflict can still be cleared by hand:
 1. `GET /api/v1/sync/conflicts?dataset_id=…&status=unresolved`
 2. `POST /api/v1/sync/conflicts/resolve` with `{"dataset_id": …, "device_id": …, "resolutions": [{"conflict_id": …, "action": "skip"}]}`
 
-**Not changed.** Verified with a probe: a server-origin `notes.note` tombstone for a note with no object state is refused at insert ("tombstones require base metadata"). Nothing is blocked, but such a note cannot be deleted through the API while the profile is active. Whether notes that predate the profile are enrolled when it is created was not checked. See §5.4 for the same contract on the device side.
+**Notes (changed by Q7).** A server-origin `notes.note` tombstone for a note with no object state used to be refused at insert ("tombstones require base metadata"), so such a note could not be deleted through the API while the profile was active. The store now accepts it and the notes materializer applies it as satisfied (§5.4). So the note route's delete soft-deletes the row, with what an ordinary Sync delete does to a note, and its tombstone, which carries no content (`deleted_at`, `reason`), reaches the other devices. That is Q8 for notes, through the log instead of a direct delete. Because it goes through the log, an unresolved conflict that blocks the dataset still refuses it, as it refuses every note write. Whether notes that predate the profile are enrolled when it is created was not checked.
 
 ### 5.3 A Sync upsert stored a plain chat as persona `sync-v2` (fixed, #3182)
 
@@ -361,12 +371,12 @@ The client-managed turn sends no conversation id to `/chat/completions`, so it n
 | Nothing | Applied as a no-op. |
 | A row with no Sync history (a copy kept outside Sync) in a chat this owner holds | The row is soft-deleted, and the tombstone is applied. |
 | Object state | Unchanged: the base must match, otherwise it is a conflict. |
-| A row that carries Sync history, but no object state in this dataset | Still a conflict (`missing_server_message`). The row was projected from other Sync history and is not this tombstone's to delete. |
+| A row that carries Sync history, but no object state in this dataset | Refused at push as a conflict that blocks nothing (`message_base_conflict`, reason `held_by_other_sync_history`; owner decision of 2026-10-23, PR #3299). The row was projected from other Sync history and is not this tombstone's to delete. Before, it was applied as a projection conflict (`missing_server_message`) that blocked the dataset; the materializer keeps that as a fallback for a row that turns foreign between push and apply. |
 
 - The envelope is accepted with `apply_status = applied`. No conflict is recorded and the dataset is not blocked.
 - Object state records the message as tombstoned: the envelope's revision, hash and cursor, `deleted = true`.
 - Only chats the projection's owner holds are searched. The lookup is by message id, and on PostgreSQL one database holds every owner's messages; with no object state tying the id to this owner, the chat's owner is the only thing that does.
-- The rule does not depend on where the tombstone came from. The server's delete routes do not produce one for such a row (§5.2).
+- The rule does not depend on where the tombstone came from. Since Q8 the server publishes one, already applied, for a row it deletes directly (§5.2).
 - The rule is for a tombstone with no base, which is what a device sends for a message it never synced. One that names a base while the dataset has no head for the message claims server history that does not exist. The head check refuses it at push as `stale_base_state`, as before. That is a push conflict, so nothing is blocked, and the same delete sent without a base is applied.
 
 **Convergence.** Every replica that applies the tombstone under this rule ends at "gone", whatever it started with.
@@ -385,21 +395,44 @@ The two "third device" rows that hold a copy are tested with a second projection
 
 **A dataset that is already blocked** by a device's tombstone recovers on the next push from any device and on the next server-origin write. `SyncV2Service.settle_stranded_tombstones` applies the stranded tombstone under the rule above, so the delete the device asked for is honoured and delivered, not discarded. Its conflict record is closed as `resolved` with the action `apply_on_retry`. A device that pushes its stranded tombstone again also gets it applied. The server's own stranded tombstone is still resolved with `skip` (§5.2), and every other conflict is left for review.
 
-**Conversations and notes: not changed.** Verified with probes at the service level, for a device that pushes a tombstone of a chat or a note the server does not have:
+**Conversations and notes (owner decision Q7, 2026-10-19).** The same rule now applies to a device's tombstone of a chat or a note the dataset holds no state for. Before, such a tombstone did not block the dataset, but it did not help either: the delete never reached the other devices, and the device got an error for a state that already held.
 
-| The tombstone | Today |
+| The tombstone | Before Q7 |
 |---|---|
-| Has no base | `push` raises `SyncStoreError` ("tombstones require base metadata") from the store contract. The whole call fails, including the envelopes after it in the batch. |
+| Has no base | `push` raised `SyncStoreError` ("tombstones require base metadata") from the store contract. The whole call failed, including the envelopes after it in the batch. |
 | Has a base | A push conflict (`stale_base_state`): the head check finds no head. |
 
-Neither blocks the dataset, which is why this was less urgent than messages. Under the owner's reasoning both are still unhelpful: the delete never reaches the other devices, and the device gets an error for a state that already holds. The recommendation is the same rule. It was left out because it is four changes that only work together:
+What changed, together:
 
-1. `_validate_envelope_contract` (`api/core/DB_Management/Sync_DB.py`): accept a tombstone without a base for `chat.conversation` and `notes.note`.
-2. `_require_expected_current_head`: accept a tombstone that carries a base when the object has no head. This check is shared by every domain.
-3. `ChatConversationMaterializer`: with no object state, a tombstone that carries a base is a `missing_server_object` conflict, which blocks the dataset, and one without a base raises ("Conversation not found for Sync v2 tombstone.") and leaves a *failed* envelope, which holds up every later projection in the dataset. Both need the no-op.
-4. `NotesMaterializer`: the same two paths ("Note not found for Sync v2 tombstone."), and the note's attachments, links and tasks need checking against a tombstoned state that no upsert preceded.
+1. **The store contract** (`_validate_envelope_contract`, `api/core/DB_Management/Sync_DB.py`). A `chat.conversation` or `notes.note` tombstone may come without a base. `notes.provenance` keeps the rule: it is deleted with its note, from the note's own head. A partial base and an update without a base are still refused.
+2. **The head check** (`_require_expected_current_head`) is not changed, so the three domains follow one rule. It already accepts a tombstone without a base when the object has no head, and refuses one when the object has a head. A tombstone that names a base the dataset never issued is still a push conflict (`stale_base_state`), as for messages: it claims history that does not exist, nothing is blocked, and the same delete sent without a base is applied. The earlier draft of this list proposed accepting it; matching messages was preferred.
+3. **`ChatConversationMaterializer` and `NotesMaterializer`** (`materializers/satisfied_tombstone.py` holds the shared part). With no object state, a tombstone is applied as satisfied, with or without a base: a base can only name history that never reached a projection here, such as an upsert a reviewer skipped. Object state records the object as tombstoned. A copy the owner keeps outside Sync is soft-deleted:
+   - a chat by `tombstone_unsynced_conversation_from_sync`: the chat row only, as for any Sync chat tombstone; its messages are hidden with it and are deleted by their own tombstones;
+   - a note by `tombstone_unsynced_note_from_sync`, with what an ordinary Sync delete does to a note: provenance, clipper sidecars, graph and Studio state.
 
-Doing 1 and 2 without 3 and 4 would turn an error that blocks nothing into one that blocks the dataset. Separately, a contract violation in one envelope should become a rejection of that envelope instead of raising out of `push`.
+   The lookup is by id and by owner (`client_id`), as for messages. On PostgreSQL that keeps out every other owner's rows, whether or not the role bypasses row-level security; under the forced tenant policy the same calls work and see only the owner's rows. On SQLite, where each owner has a database of their own, a row written under another `client_id` label is not reached either. Messages behave the same.
+4. **What is refused.** A push conflict that blocks nothing (`whole_object_conflict`, reason `held_by_other_sync_history`; owner decision of 2026-10-23, PR #3299). The device is told, the object stays, and later writes are not held up behind it. Messages with other Sync history are refused the same way. This applies to:
+   - a row another live dataset of the owner holds a head or object state for. Chats and notes keep no Sync metadata on the row, so the owner's other datasets are asked instead. The server's own tombstone is exempt: it comes from the owner deleting that very row through the API;
+   - a chat Sync cannot carry (a native bundle or a pending projection). Sync never deletes one.
+
+   The push checks this read-only (`foreign_device_tombstone` on each materializer, `is_foreign_device_tombstone` in `materializers/satisfied_tombstone.py`). The materializers keep the old projection conflict (`missing_server_object`) only as a fallback for an object that turns foreign between push and apply. A conflict of that kind recorded before this change is still left for review.
+5. **Records that point at a note** were checked against a note known only by such a tombstone, which the server may hold no row for. A `notes.link` to it waits, as it did while the note was unknown (`_never_live_here` in `domain_adapters/notes_link.py`); the server's own tombstone had a row to delete, so a link can still name that note. A task or a task activity is a push conflict (the parent is deleted), a folder or keyword link is rejected (the dependency is deleted), and provenance needs a live parent, as before. Attachments do not read the note's head.
+
+The guarantees are those of messages:
+
+| | A chat or a note the dataset never held |
+|---|---|
+| The push | Accepted and `applied`. No conflict, and the dataset is not blocked. The envelopes after it in the batch go through. |
+| Object state | Tombstoned: the envelope's revision, hash and cursor, `deleted = true`. |
+| The server's copy | A copy this owner keeps outside Sync is soft-deleted. Another owner's row is never reached. |
+| Other devices | A pull delivers the tombstone. A replica that never had the object applies it as a no-op; one that kept a copy deletes it. |
+| A later create of the id | Refused by the head check as a push conflict, which blocks nothing. The device pulls the delete. |
+| The same push again | An idempotent replay: the same envelope, still applied. |
+| Real conflicts | A tombstone whose base disagrees with an object the dataset holds, and one without a base for an object the dataset holds, are still push conflicts. |
+
+**A dataset that is already blocked** by such a tombstone (`whole_object_conflict` / `missing_server_object`, the tombstone accepted with `apply_status = conflict`, the object still without state) recovers on the same triggers as for messages: the next push from any device, the device's push of the same tombstone, and the next server-origin write. A device's tombstone is applied and its conflict closed as `resolved` with `apply_on_retry`. The server's own is resolved with `skip`. One the rule still refuses (a row another dataset holds) is left for review, as is every other conflict. A *failed* tombstone of such an object, which the old materializers left when no row carried the id, is applied by `repair` (`failed_only`).
+
+Still open: a contract violation in one envelope raises out of `push` and fails the whole call. It should become a rejection of that envelope.
 
 ---
 
@@ -411,8 +444,16 @@ Doing 1 and 2 without 3 and 4 would turn an error that blocks nothing into one t
 4. **§5.1.** Decided: wait. The unversioned completion save is not refused now; it waits for the outbox (§4.2).
 5. **§5.3.** Decided: migrate. Shipped (§5.3).
 6. **§5.4, messages.** Decided: a device's tombstone of a message the server does not have is not rejected and must not block. Shipped (§5.4).
-7. **§5.4, conversations and notes.** Apply the same rule to a device's tombstone of a chat or a note the server does not have? It needs the four changes listed in §5.4.
-8. **§5.2.** Should the server's own delete of a message Sync never saw now publish a tombstone alone? It would reach a device that holds a copy outside Sync, at the cost of one envelope per such message.
+7. **§5.4, conversations and notes.** Decided (2026-10-19): yes, the same rule as for messages. Shipped (§5.4).
+8. **§5.2.** Decided (2026-10-19): yes, the server's direct delete of a row Sync never saw also publishes a tombstone that carries only the id, at one envelope per row. Shipped (§5.2) for messages and chats. A device that never had the row applies it as a no-op. A note is deleted through the log and is covered by Q7.
+9. **§5.4, objects other Sync history holds.** Decided (2026-10-23, code review of PR #3299): a device's tombstone of a chat, note or message that another dataset of the owner holds, of a native chat, or of a workspace chat is refused at push as a conflict that blocks nothing, instead of a projection conflict that blocks the dataset. Shipped (§5.4, item 4).
+
+**Review notes, not changed (2026-10-23).**
+
+- *Row version.* A tombstone of a row kept outside Sync stores the tombstone's revision as the row's `version`. That can lower a local optimistic-lock counter (a note edited to version 5 becomes version 1). Messages (#3198) do the same; a later local edit of a deleted row is refused anyway.
+- *Note route and other datasets.* The note route's delete always captures a server-origin tombstone, which is exempt from the "held by another dataset" check, while §5.2 publishes nothing for a chat or message another dataset holds. A note held only by another dataset is therefore deleted and its tombstone published into the default dataset. Bring the note route under the same rule if that case becomes real.
+- *Two deletes from the same base.* A device that deletes a held object from a base another delete already replaced gets a `stale_base_state` push conflict that blocks nothing but is left unresolved for review. Settling a tombstone whose head is already a tombstone would close it.
+- *Older devices.* No Sync v2 client lives in this repository. Before release, confirm that clients treat a pulled tombstone of an id they never had as a no-op; §5.2 sends one per directly deleted row.
 
 ## 7. Tests
 
@@ -423,8 +464,11 @@ Doing 1 and 2 without 3 and 4 would turn an error that blocks nothing into one t
 - `tldw_Server_API/tests/ChaChaNotesDB/test_chacha_conversation_store.py`: which identity counts as the retired placeholder.
 - `tldw_Server_API/tests/Sync/test_sync_v2_satisfied_tombstone.py` (§5.4): a device's tombstone of a message the server never had is applied with tombstoned object state and no conflict; later writes succeed; a replayed push; the server's copy outside Sync is deleted; a third device receives the tombstone; a replica that never had the message and one that kept a copy both end at "gone"; a later append of the same id is refused without blocking; a tombstone that disagrees with a held message, one that names a base the dataset never issued, a row with other Sync history and another owner's message are left alone; recovery of a blocked dataset from a server write, a push, a re-push and a versioned write, and the conflicts it must leave.
 - `tldw_Server_API/tests/ChaChaNotesDB/test_chacha_message_store.py`: the store method behind the rule (absent, deleted, replayed, other Sync history, another owner).
-- `tldw_Server_API/tests/Sync/test_sync_v2_unenrolled_delete.py` (§5.2): the delete routes and the helper. A message and a chat Sync never saw are deleted with no envelope, and later writes still succeed; a row whose capture was lost; chats with both kinds of row, in both directions; a published delete still tombstones and reaches a second device; a row with a pending envelope is not deleted directly; a blocked dataset (direct delete still works, a needed tombstone refuses the whole request); stale versions; what follows a direct delete (a retried admission, a device that publishes its own copy); recovery of a dataset blocked by the old behaviour, from an ordinary write, a retried delete and a versioned write, and the conflicts it must leave alone; and the same deletes with no profile.
-- `tldw_Server_API/tests/Sync/test_sync_v2_unenrolled_delete_postgres_contract.py`: the delete routes and the device tombstone rule with the chat database on PostgreSQL and with the Sync store on PostgreSQL, and a tombstone that names another owner's message in the shared database.
+- `tldw_Server_API/tests/Sync/test_sync_v2_satisfied_tombstone_objects.py` (§5.4, Q7), for a chat and a note: the store contract (a tombstone without a base is accepted; a partial base, an update without a base and a provenance tombstone without a base are still refused); a device's tombstone of an object the server never had is applied with tombstoned object state and no conflict, and no longer fails the rest of the push; later writes succeed; a replayed push; a copy outside Sync is deleted, and one already deleted stays deleted; a third device receives the tombstone; a replica that never had the object and one that kept a copy both end at "gone"; a later create of the id is a push conflict that blocks nothing; a base that disagrees with a held object, a tombstone without a base of a held object and a base the dataset never issued are still conflicts; another owner's row, a row another dataset of the owner holds and a native chat are left alone; the note route deletes a note Sync never saw and publishes its tombstone; recovery of a blocked dataset from a server write, a push and a re-push, the server's own stranded tombstone skipped, and the conflicts recovery must leave; a failed tombstone applied by repair.
+- `tldw_Server_API/tests/ChaChaNotesDB/test_chacha_conversation_store.py` and `test_chacha_note_store.py`: the store methods behind the rule (absent, deleted, replayed, already deleted, another owner, an empty id; a native chat is left alone).
+- `tldw_Server_API/tests/Sync/test_sync_v2_notes_link_materializer.py`: a link to a note known only by a device's tombstone without a base waits; one to a note the server deleted that way is accepted.
+- `tldw_Server_API/tests/Sync/test_sync_v2_unenrolled_delete.py` (§5.2): the delete routes and the helper. A message and a chat Sync never saw are deleted directly and published by id (Q8: the id-only payloads, the messages before the chat, tombstoned object state), and later writes still succeed; nothing is published while another conflict blocks the dataset, or for a row another dataset of the owner holds; a device that never had the row applies its tombstone as a no-op, one that kept a copy deletes it, and one that later pushes its own copy gets a push conflict; a second delete publishes nothing twice; the helper publishes only what it deleted, keeps a committed delete when publication fails, and refuses a tombstone that is not a delete; a row whose capture was lost; chats with both kinds of row, in both directions; a published delete still tombstones and reaches a second device; a row with a pending envelope is not deleted directly; a blocked dataset (direct delete still works, a needed tombstone refuses the whole request); stale versions; what follows a direct delete (a retried admission); recovery of a dataset blocked by the old behaviour, from an ordinary write, a retried delete and a versioned write, and the conflicts it must leave alone; and the same deletes with no profile.
+- `tldw_Server_API/tests/Sync/test_sync_v2_unenrolled_delete_postgres_contract.py`: the delete routes (with their id-only tombstones, and a blocked dataset that publishes nothing) and the device tombstone rule for a message, a chat and a note, with the chat database on PostgreSQL and with the Sync store on PostgreSQL; a tombstone that names another owner's message, chat or note in the shared database; and the chat and note store methods run as a role that does not bypass the forced row-level security policy.
 - `tldw_Server_API/tests/Chat_NEW/integration/test_history_selection_api.py`: the Sync owner now captures; the server-settled completion is still refused before any write.
 
 ## 8. Merge notes
@@ -434,3 +478,4 @@ Doing 1 and 2 without 3 and 4 would turn an error that blocks nothing into one t
 - **`sync_client_chat_id_unsupported`** no longer exists. P4 needs no special case for Sync v2 owners.
 - **`fix/sync-v2-unenrolled-delete`** (§5.2, §5.3) is based on `feat/chat-sync-v2-native-history`. It changes `character_messages.delete_message`, `character_chat_sessions.delete_chat_session`, `server_origin.py` and the conversation materializer. No route, schema or docstring changed, so the OpenAPI fingerprint and the privilege snapshot are the same.
 - **`fix/sync-v2-placeholder-and-device-tombstone`** (§5.3 migration, §5.4) is based on the P3 stack (`feat/chat-idempotent-create-p3`). It takes the next ChaChaNotes schema versions, SQLite v76 and PostgreSQL v80; another branch that adds a migration must renumber. `SyncV2Service` gains `recover_stranded_tombstones` and `settle_stranded_tombstones`; `push` calls the first before its loop, which costs one conflict lookup per push when nothing is blocked. No route, schema or docstring changed, so the OpenAPI fingerprint and the privilege snapshot are the same.
+- **`fix/sync-v2-satisfied-tombstones-all`** (Q7, Q8) is based on `dev`. It adds no ChaChaNotes or Sync schema migration. No route, schema or docstring of a route changed: the OpenAPI fingerprint was regenerated and is unchanged, and the privilege snapshot tests pass. `delete_unenrolled_server_origin_objects` gains `tombstones` and `source`; `SyncDatabase.list_datasets_for_user` gains `connection`; `CharactersRAGDB` gains `tombstone_unsynced_conversation_from_sync` and `tombstone_unsynced_note_from_sync`.

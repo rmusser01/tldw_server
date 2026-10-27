@@ -1,6 +1,6 @@
 import React from "react"
-import { describe, expect, it, vi } from "vitest"
-import { act, render, screen } from "@testing-library/react"
+import { beforeAll, describe, expect, it, vi } from "vitest"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { PageHelpModalHost } from "../PageHelpModalHost"
 
@@ -55,6 +55,12 @@ vi.mock("@/hooks/keyboard/useKeyboardShortcuts", () => ({
 }))
 
 describe("PageHelpModal focus styling", () => {
+  // The host lazy-loads the modal; warm the chunk so the first test does not
+  // race the default findBy timeout on a cold transform.
+  beforeAll(async () => {
+    await import("../PageHelpModal")
+  }, 30_000)
+
   it("applies focus-visible classes to the close button in modal context", async () => {
     render(
       <MemoryRouter initialEntries={["/chat"]}>
@@ -83,5 +89,31 @@ describe("PageHelpModal focus styling", () => {
 
     expect(await screen.findByText("Go to Sources")).toBeVisible()
     expect(screen.getByText("Alt + 2")).toBeVisible()
+  })
+  // AX-18 (#3122): the shortcut list scrolls inside the dialog, so keyboard
+  // users need to be able to focus it to scroll it.
+  it("lets keyboard users reach and scroll the shortcut list", async () => {
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <PageHelpModalHost />
+      </MemoryRouter>
+    )
+    act(() =>
+      window.dispatchEvent(new CustomEvent("tldw:open-shortcuts-modal"))
+    )
+
+    const list = await screen.findByRole("region", { name: "Shortcut list" })
+    expect(list).toHaveAttribute("tabindex", "0")
+    expect(list.className).toContain("focus-visible:ring-2")
+
+    const dialog = screen.getByRole("dialog")
+    const closeButton = screen.getByRole("button", { name: "Close" })
+    closeButton.focus()
+    const reached: Element[] = []
+    for (let step = 0; step < 6; step += 1) {
+      fireEvent.keyDown(dialog, { key: "Tab" })
+      reached.push(document.activeElement as Element)
+    }
+    expect(reached).toContain(list)
   })
 })

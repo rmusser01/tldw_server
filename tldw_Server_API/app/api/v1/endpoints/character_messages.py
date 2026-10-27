@@ -1388,15 +1388,34 @@ async def delete_message(
             )
         if sync_service is not None:
             try:
+                conversation_id = str(message.get("conversation_id") or "")
+                tombstone_payload: dict[str, object] = {
+                    "id": message_id,
+                    "deleted": True,
+                    "conversation_id": conversation_id,
+                    "client_id": str(current_user.id),
+                    "owner_user_id": str(current_user.id),
+                }
                 # A message Sync never saw (it predates the profile, or was saved by a path
-                # that publishes nothing) is deleted directly, as without a profile. It was
-                # never in the log, so there is nothing to retract there (#3181).
+                # that publishes nothing) is deleted directly, as without a profile (#3181),
+                # and then published by id, so a device that kept a copy outside Sync
+                # deletes it too (Q8).
                 published = await run_in_threadpool(
                     delete_unenrolled_server_origin_objects,
                     sync_service,
                     user_id=str(current_user.id),
                     objects=[("chat.message", message_id)],
                     delete=lambda _unpublished: delete_directly(),
+                    tombstones=[
+                        AppliedServerOriginObject(
+                            domain="chat.message",
+                            operation="tombstone",
+                            object_id=message_id,
+                            parent_id=conversation_id,
+                            payload=tombstone_payload,
+                        )
+                    ],
+                    source="server_api",
                 )
                 if published:
                     capture_server_origin_mutation(
@@ -1405,14 +1424,8 @@ async def delete_message(
                         domain="chat.message",
                         operation="tombstone",
                         object_id=message_id,
-                        parent_id=str(message.get("conversation_id") or ""),
-                        payload={
-                            "id": message_id,
-                            "deleted": True,
-                            "conversation_id": str(message.get("conversation_id") or ""),
-                            "client_id": str(current_user.id),
-                            "owner_user_id": str(current_user.id),
-                        },
+                        parent_id=conversation_id,
+                        payload=tombstone_payload,
                         source="server_api",
                     )
             except HTTPException:

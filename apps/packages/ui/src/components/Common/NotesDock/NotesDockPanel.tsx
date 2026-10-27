@@ -23,6 +23,7 @@ import type { AllowedPath } from "@/services/tldw/openapi-guard"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { classNames } from "@/libs/class-name"
 import { useNavigate } from "react-router-dom"
+import { buildNotePath } from "@/routes/hooks/useNotesRouteAddress"
 import { getQueryClient } from "@/services/query-client"
 import TaskChecklistPreview, {
   type TaskChecklistTogglePayload
@@ -329,6 +330,9 @@ export const NotesDockPanel: React.FC = () => {
     () => notes.find((note) => note.localId === activeNoteId) ?? null,
     [notes, activeNoteId]
   )
+  // The Notes page opens a saved dock note by its address (XP-05).
+  const activeNotePagePath =
+    activeNote?.id != null ? buildNotePath(String(activeNote.id)) : "/notes"
 
   useEffect(() => {
     activeServerNoteIdRef.current = activeNote?.id != null ? String(activeNote.id) : null
@@ -1149,7 +1153,7 @@ export const NotesDockPanel: React.FC = () => {
               <div className="border-t border-border px-3 py-2">
                 <button
                   type="button"
-                  onClick={() => navigate("/notes")}
+                  onClick={() => navigate(activeNotePagePath)}
                   className="text-xs text-primary hover:text-primaryStrong"
                 >
                   {t("option:notesDock.openNotes", "Open Notes page")}
@@ -1243,7 +1247,7 @@ export const NotesDockPanel: React.FC = () => {
               testId="notes-dock-task-activity-notice"
               compact
               dismissingEventId={dismissingTaskActivityId}
-              onInspect={() => navigate("/notes")}
+              onInspect={() => navigate(activeNotePagePath)}
               onDismiss={(eventId) => void dismissTaskActivity(eventId)}
             />
             {hasIncompleteTaskReconciliation && (

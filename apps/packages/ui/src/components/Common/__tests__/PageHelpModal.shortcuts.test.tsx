@@ -269,7 +269,7 @@ describe("PageHelpModal shortcuts", () => {
     for (const text of [
       "Start new chat",
       "Toggle sidebar",
-      "Switch normal / RAG chat mode",
+      "Toggle chat with current page",
       "Toggle web search",
       "Fork from the focused message"
     ])
@@ -332,7 +332,7 @@ describe("PageHelpModal shortcuts", () => {
       fireEvent.keyDown(trigger, { key: "?", shiftKey: true })
       const help = await screen.findByRole("dialog", { name: "Page Help" })
       expect(
-        within(help).getByText("Switch normal / RAG chat mode")
+        within(help).getByText("Toggle chat with current page")
       ).toBeVisible()
       expect(
         within(help).queryByText("Quick chat helper")

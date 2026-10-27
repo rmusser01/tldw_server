@@ -17,6 +17,7 @@ import {
   projectTokenBudget
 } from "../usage-metrics"
 import { useComposerSubmit } from "@/components/Chat/composer/hooks/useComposerSubmit"
+import { executeSlashCommand } from "@/hooks/playground/useSlashCommands"
 import type { ComposerDraftOwnership } from "@/components/Chat/composer/hooks/useComposerText"
 import {
   isChatSubmitSuccess,
@@ -385,6 +386,8 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       if (intent.handled && !intent.invalidImageCommand) {
         if (!draftOwnership.normalizeMessage(intent.message)) return
       }
+      // Resolving is pure (it also runs per keystroke); a command runs only on submit.
+      executeSlashCommand(intent)
       if (intent.invalidImageCommand) {
         notificationApi.error({
           message: t("error", { defaultValue: "Error" }),

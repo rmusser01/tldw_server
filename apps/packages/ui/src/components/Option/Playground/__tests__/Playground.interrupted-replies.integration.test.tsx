@@ -210,7 +210,11 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
         ]),
       HARNESS_WAIT
     )
-    expect(await screen.findByText("Explain reloads", {}, HARNESS_WAIT)).toBeInTheDocument()
+    // The reopened chat's title ("Explain reloads") also names the session in
+    // the context rail (XP-05), so look for the question in the transcript.
+    expect(
+      await within(screen.getByRole("log", { name: "Chat messages" })).findByText("Explain reloads", {}, HARNESS_WAIT)
+    ).toBeInTheDocument()
     const notice = await interruptionNotice("Interrupted")
     expect(within(notice).getByRole("button", { name: /retry/i })).toBeInTheDocument()
     expect(screen.queryByText("Turn needs review")).not.toBeInTheDocument()

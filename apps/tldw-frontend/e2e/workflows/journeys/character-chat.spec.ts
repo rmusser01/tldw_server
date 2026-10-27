@@ -135,7 +135,9 @@ test.describe("Create Character -> Chat journey", () => {
       await waitForConnection(page)
       await chat.waitForReady()
       await expect.poll(async () => (await chat.getMessages()).filter(row => row.role === "assistant").map(row => row.content)).toEqual([answer])
-      await expect(page).toHaveURL(/\/chat$/)
+      // The handoff is consumed; a saved chat may now carry its own address (XP-05).
+      await expect(page).toHaveURL(/\/chat(?:\?chat=[^&#]+)?$/)
+      await expect(page).not.toHaveURL(/historySelection=/)
       await page.reload({ waitUntil: "domcontentloaded" })
       await waitForConnection(page)
       await chat.waitForReady()

@@ -25,6 +25,11 @@ export type NativeHistoryEditResend = {
 export type NativeHistoryRegenerate = NativeHistoryEditResend & {
   input_message_id: string
   input_message_revision: string
+  /**
+   * Native Continue (CM-01) reuses the same saved admission as Regenerate, but
+   * the server keeps the reply in context and saves it plus its continuation.
+   */
+  action?: "continue"
 }
 
 /** A local selected input branches without changing its original transcript. */

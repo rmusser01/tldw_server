@@ -65,6 +65,39 @@ describe("model normalization helpers", () => {
     ])
   })
 
+  it("CC-01: carries the provider's observed health onto its models", async () => {
+    const client = {
+      getModelsMetadata: vi.fn(async () => ({
+        models: [
+          { id: "gemma3:1b", provider: "ollama", type: "chat" },
+          { id: "mock-gpt-4o", provider: "custom_openai_api", type: "chat" },
+          { id: "gpt-4o", provider: "openai", type: "chat" }
+        ]
+      })),
+      getProviders: vi.fn(async () => ({
+        providers: [
+          {
+            name: "ollama",
+            health: { status: "unhealthy", success_count: 0, consecutive_failures: 4 }
+          },
+          {
+            name: "custom-openai-api",
+            health: { status: "healthy", success_count: 2, consecutive_failures: 0 }
+          },
+          { name: "openai", health: { status: "unknown", success_count: 0 } }
+        ]
+      }))
+    }
+
+    const models = await getNormalizedTldwModels(client)
+
+    expect(models.map((model) => [model.id, model.provider_health])).toEqual([
+      ["gemma3:1b", "unreachable"],
+      ["mock-gpt-4o", "working"],
+      ["gpt-4o", "unknown"]
+    ])
+  })
+
   it("treats array-valued modalities as invalid metadata records", () => {
     const models = normalizeTldwModels({
       models: [

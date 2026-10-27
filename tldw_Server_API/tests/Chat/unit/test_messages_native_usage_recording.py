@@ -353,3 +353,34 @@ async def test_a_native_reply_is_costed_with_its_fast_mode_and_us_only_multiplie
     # Opus 5 per 1K: input $0.005, cache read $0.0005, 5-minute write $0.00625, output $0.025.
     assert row["prompt_cost_usd"] == pytest.approx((3 * 0.005 + 60000 * 0.0005 + 2000 * 0.00625) / 1000 * factor)
     assert row["completion_cost_usd"] == pytest.approx(100 * 0.025 / 1000 * factor)
+
+
+@pytest.mark.parametrize(("service_tier", "factor"), [("batch", 0.5), ("standard", 1.0), ("priority", 1.0)])
+async def test_a_native_reply_is_costed_at_the_service_tier_its_usage_reports(
+    costed_rows, monkeypatch, service_tier, factor
+) -> None:
+    """Batch is 50% off every token category; Priority Tier has no token price of its own (TASK-13936)."""
+    usage = {**CACHED_USAGE, "output_tokens": 100, "service_tier": service_tier}
+    monkeypatch.setattr(messages_endpoint, "_native_post_json", _native_reply(usage))
+    with scoped_context(user_id=5):
+        response = await _call("anthropic/claude-opus-5", stream=False)
+    assert response.status_code == 200
+    await llm_accounting.drain_accounting()
+    (row,) = costed_rows
+    # Opus 5 per 1K: input $0.005, cache read $0.0005, 5-minute write $0.00625, output $0.025.
+    assert row["prompt_cost_usd"] == pytest.approx((3 * 0.005 + 60000 * 0.0005 + 2000 * 0.00625) / 1000 * factor)
+    assert row["completion_cost_usd"] == pytest.approx(100 * 0.025 / 1000 * factor)
+
+
+async def test_a_streamed_batch_reply_is_costed_at_half_price(costed_rows, monkeypatch) -> None:
+    """message_start carries service_tier; message_delta does not, and the merge keeps it."""
+    start = {**CACHED_USAGE, "output_tokens": 1, "service_tier": "batch"}
+    frames = _frames(start, {"output_tokens": 100})
+    monkeypatch.setattr(messages_endpoint, "_prepare_native_stream_iterator", _native_stream(frames))
+    with scoped_context(user_id=5):
+        response = await _call("anthropic/claude-opus-5", stream=True)
+        [item async for item in response.body_iterator]
+    await llm_accounting.drain_accounting()
+    (row,) = costed_rows
+    assert row["prompt_cost_usd"] == pytest.approx((3 * 0.005 + 60000 * 0.0005 + 2000 * 0.00625) / 1000 * 0.5)
+    assert row["completion_cost_usd"] == pytest.approx(100 * 0.025 / 1000 * 0.5)

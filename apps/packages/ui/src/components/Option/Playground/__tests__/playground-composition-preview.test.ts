@@ -131,14 +131,14 @@ describe("playground composition preview summary", () => {
     );
 
     expect(summary.overallState).toBe("ready");
-    expect(summary.settingsScopeLabel).toBe("openai:gpt-4.1-mini");
+    expect(summary.settingsScopeLabel).toBe("gpt-4.1-mini (OpenAI)");
     expect(
       summary.entries.map((entry) => [entry.kind, entry.state, entry.title]),
     ).toEqual([
       ["prompt", "active", "Research brief"],
       ["assistant", "active", "Research Persona"],
-      ["model", "active", "openai:gpt-4.1-mini"],
-      ["settings", "active", "openai:gpt-4.1-mini"],
+      ["model", "active", "gpt-4.1-mini (OpenAI)"],
+      ["settings", "active", "gpt-4.1-mini (OpenAI)"],
       ["context", "active", "1 selected source"],
       ["tools", "active", "MCP tools"],
     ]);
@@ -163,6 +163,23 @@ describe("playground composition preview summary", () => {
     });
   });
 
+  it("CC-06: names the model and its provider without raw provider keys", () => {
+    const summary = buildPlaygroundCompositionPreviewSummary(
+      baseInput({
+        providerRoute: {
+          selectedProvider: "custom-openai-api",
+          selectedModel: "mock-gpt-4o",
+          providerRouteLabel: "custom-openai-api:mock-gpt-4o",
+        },
+      }),
+    );
+
+    const model = summary.entries.find((entry) => entry.kind === "model");
+    expect(model?.title).toBe("mock-gpt-4o (Custom OpenAI API)");
+    expect(model?.detail ?? "").not.toMatch(/custom[-_]openai[-_]api/);
+    expect(summary.settingsScopeLabel).toBe("mock-gpt-4o (Custom OpenAI API)");
+  });
+
   it("marks a selected model unavailable when readiness rejects the route", () => {
     const summary = buildPlaygroundCompositionPreviewSummary(
       baseInput({
@@ -181,7 +198,7 @@ describe("playground composition preview summary", () => {
       summary.entries.find((entry) => entry.kind === "model"),
     ).toMatchObject({
       state: "unavailable",
-      title: "tldw:gpt-4o",
+      title: "gpt-4o",
       detail: "Choose a chat model before chatting as Ada",
     });
   });
@@ -205,7 +222,7 @@ describe("playground composition preview summary", () => {
       summary.entries.find((entry) => entry.kind === "model"),
     ).toMatchObject({
       state: "unavailable",
-      title: "openai:gpt-4o",
+      title: "gpt-4o (OpenAI)",
       detail: "Configure the selected model provider before chatting as Ada",
     });
   });
@@ -228,7 +245,7 @@ describe("playground composition preview summary", () => {
       summary.entries.find((entry) => entry.kind === "model"),
     ).toMatchObject({
       state: "loading",
-      title: "openai:gpt-4o",
+      title: "gpt-4o (OpenAI)",
       detail: "Checking chat model readiness",
     });
   });
@@ -278,7 +295,7 @@ describe("playground composition preview summary", () => {
       summary.entries.find((entry) => entry.kind === "model"),
     ).toMatchObject({
       state: "unavailable",
-      title: "openai:gpt-4o",
+      title: "gpt-4o (OpenAI)",
       detail: "Character chat is preparing",
     });
   });

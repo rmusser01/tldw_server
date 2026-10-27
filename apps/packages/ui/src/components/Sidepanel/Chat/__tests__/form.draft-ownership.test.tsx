@@ -16,7 +16,8 @@ describe("Sidepanel Form draft ownership", () => {
     try {
       expect(screen.getByTestId("chat-input")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
-      expect(screen.queryByRole("button", { name: "Queue request" })).not.toBeInTheDocument();
+      // XS-10: while a reply is pending the primary action sends after it.
+      expect(screen.queryByRole("button", { name: "Send after this reply" })).not.toBeInTheDocument();
     } finally {
       await fixture.cleanup();
     }
@@ -42,7 +43,7 @@ describe("Sidepanel Form draft ownership", () => {
       );
       fireEvent.click(screen.getByRole("button", { name: "Send message" }));
       await waitFor(() => expect(fixture.provider).toHaveBeenCalledTimes(1));
-      expect(screen.getByRole("button", { name: "Queue request" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Send after this reply" })).toBeInTheDocument();
       expect(screen.getByTestId("chat-input")).toHaveValue("");
       let outcomes: PromiseSettledResult<void>[] = [];
       await act(async () => {

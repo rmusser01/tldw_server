@@ -6,7 +6,9 @@
  * baselined rule, is a regression. A baselined rule that disappeared, or has
  * fewer nodes, fails until the baseline is updated. See README.md.
  *
- * Runs in the light colour scheme (Playwright's default) at 1280x720.
+ * Runs in the app's default theme at 1280x720. With no stored preference the
+ * app starts dark (THEME_SETTING and the _document bootstrap), whatever
+ * Playwright's colour scheme, so these scans cover the dark theme.
  */
 import { readFileSync } from "node:fs"
 import path from "node:path"

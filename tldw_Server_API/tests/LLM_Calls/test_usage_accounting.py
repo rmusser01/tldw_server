@@ -639,3 +639,30 @@ def test_a_null_prompt_tokens_counts_the_same_streamed_and_not() -> None:
     seen.feed("data: " + json.dumps({"usage": usage}) + "\n\n")
     assert seen.usage is not None
     assert usage_accounting._usage_tokens(usage) == usage_accounting._usage_tokens(seen.usage) == (12, 2)
+
+
+class _TieredProvider(_FakeProvider):
+    """An OpenAI-shaped provider that reports its service tier beside the usage block, not in it."""
+
+    name = "fake-tiered"
+
+    def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        """Return a completion that ran on the flex tier."""
+        return {"choices": [{"message": {"content": "hello"}}], "service_tier": "flex", "usage": dict(USAGE)}
+
+    def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+        """Yield chunks that each name the tier; the last one carries usage."""
+        yield 'data: {"service_tier":"flex","choices":[{"delta":{"content":"hel"}}]}\n\n'
+        yield 'data: {"service_tier":"flex","choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2}}\n\n'
+        yield "data: [DONE]\n\n"
+
+
+async def test_the_service_tier_a_response_reports_is_recorded_with_its_usage(rows) -> None:
+    """OpenAI reports the tier beside usage; the row's usage carries it, the response is unchanged (TASK-13936)."""
+    with llm_call_context(user_id=7):
+        response = _TieredProvider().chat(REQUEST)
+        list(_TieredProvider().stream(REQUEST))
+    chat_row, stream_row = await _settled(rows)
+    assert chat_row["usage_metadata"] == {**USAGE, "service_tier": "flex"}
+    assert stream_row["usage_metadata"] == {"prompt_tokens": 5, "completion_tokens": 2, "service_tier": "flex"}
+    assert response["usage"] == USAGE
