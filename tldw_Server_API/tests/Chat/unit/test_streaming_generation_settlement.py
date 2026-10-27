@@ -107,6 +107,39 @@ async def test_complete_reply_passes_finish_reason_and_provider_usage_to_save():
     ]
 
 
+async def test_complete_reply_passes_the_whole_provider_usage_block_to_a_save_that_takes_it():
+    """The usage record needs the tier, cache counts and cost; generation metadata keeps the counts (TASK-13951)."""
+    handler = StreamingResponseHandler("conv", "model")
+    saves: list[dict[str, Any]] = []
+
+    async def save(text, tool_calls=None, function_call=None, *, generation=None, provider_usage=None):
+        saves.append({"generation": generation, "provider_usage": provider_usage})
+        return "saved-complete"
+
+    usage = {
+        "prompt_tokens": 5,
+        "completion_tokens": 2,
+        "total_tokens": 7,
+        "prompt_tokens_details": {"cached_tokens": 4},
+        "cost": 0.0001,
+    }
+
+    async def provider() -> AsyncIterator[str]:
+        # OpenAI with stream_options.include_usage: usage is null until a last chunk with empty choices.
+        yield _sse({"service_tier": "flex", "usage": None, "choices": [{"index": 0, "delta": {"content": "Hi"}}]})
+        stop = {"index": 0, "delta": {}, "finish_reason": "stop"}
+        yield _sse({"service_tier": "flex", "usage": None, "choices": [stop]})
+        yield _sse({"service_tier": "flex", "choices": [], "usage": usage})
+        yield "data: [DONE]\n\n"
+
+    async for _frame in handler.safe_stream_generator(provider(), save_callback=save):
+        pass
+
+    (saved,) = saves
+    assert saved["provider_usage"] == {**usage, "service_tier": "flex"}
+    assert saved["generation"]["usage"] == {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}
+
+
 async def test_length_finish_reason_settles_as_length():
     handler = StreamingResponseHandler("conv", "model")
     recorder = Recorder()
