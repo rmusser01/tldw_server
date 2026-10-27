@@ -227,3 +227,36 @@ def test_listing_discovers_slow_failing_providers_concurrently_and_briefly_cache
 
     catalog.get_configured_providers()
     assert len(fetches) == len(providers)
+
+
+@pytest.mark.unit
+def test_providers_without_a_model_list_show_their_configured_models(inventory, monkeypatch):
+    """Bedrock, Z.AI and MiniMax list config models plus pricing extras, as dev does, without discovery (I1)."""
+    parser = ConfigParser()
+    parser.read_dict({"API": {
+        "anthropic_api_key": "synthetic-key",
+        "bedrock_api_key": "synthetic-key", "bedrock_model": "anthropic.claude-configured",
+        "zai_api_key": "synthetic-key", "zai_model": "glm-configured",
+        "minimax_api_key": "synthetic-key", "minimax_model": "minimax-configured",
+    }})
+    monkeypatch.setattr(catalog, "load_comprehensive_config", lambda: parser)
+    pricing = {
+        "bedrock": ["anthropic.claude-configured", "anthropic.claude-pricing", "amazon.titan-embed-text"],
+        "zai": ["glm-pricing"],
+        "minimax": [],
+    }
+    monkeypatch.setattr(catalog, "list_provider_models", lambda provider: pricing.get(provider, []), raising=False)
+    providers = {p["name"]: p for p in catalog.get_configured_providers()["providers"]}
+
+    assert providers["bedrock"]["models"] == ["anthropic.claude-configured", "anthropic.claude-pricing"]
+    assert providers["zai"]["models"] == ["glm-configured", "glm-pricing"]
+    assert providers["minimax"]["models"] == ["minimax-configured"]
+    for name in ("bedrock", "zai", "minimax"):
+        assert providers[name]["model_inventory_source"] == "configured"
+        assert providers[name]["is_configured"] is True
+    for name in ("bedrock", "zai"):  # readiness no longer waits on a listing they do not have
+        assert providers[name]["provider_enabled"] is not False, providers[name]["readiness_reason_code"]
+    # MiniMax has no chat adapter (on dev either), so it is listed but not chat-enabled.
+    assert providers["minimax"]["readiness_reason_code"] == "unsupported_chat_provider"
+    assert providers["anthropic"]["model_inventory_source"] == "provider"
+    assert [call.args[0] for call in inventory.call_args_list] == ["anthropic"]

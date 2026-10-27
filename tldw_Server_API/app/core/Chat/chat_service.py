@@ -194,6 +194,7 @@ from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provi
 from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import (
     CLOUD_MODEL_PROVIDERS,
     discover_provider_models,
+    has_model_listing,
     resolve_provider_model_selection,
     resolve_provider_models_base_url,
 )
@@ -961,7 +962,7 @@ def known_models_for_provider_cached(
     provider_key = canonical_provider_name(normalize_catalog_provider_for_chat(provider))
     if not provider_key:
         return ()
-    if provider_key in CLOUD_MODEL_PROVIDERS:
+    if has_model_listing(provider_key):
         # A context-free prevalidator cannot select the requesting tenant's key.
         if not api_key:
             return ()
@@ -1009,6 +1010,8 @@ def is_model_known_for_provider(
     model_key = (model or "").strip()
     if not provider_key or not model_key:
         return None
+    if provider_key in CLOUD_MODEL_PROVIDERS and not has_model_listing(provider_key):
+        return None  # no listing: the provider itself rejects a bad model
     if provider_key in CLOUD_MODEL_PROVIDERS:
         if api_key is None and not credentials_resolved:
             return None
@@ -2655,8 +2658,8 @@ def _validate_provider_model_selection(
     provider: str, request: dict[str, Any], *, refreshable_oauth: bool | None = None,
 ) -> None:
     """Authorize current IDs, confirmed aliases and explicit router fallback IDs."""
-    if provider not in CLOUD_MODEL_PROVIDERS:
-        return
+    if not has_model_listing(provider):
+        return  # no listing: the provider itself rejects a bad model
     if refreshable_oauth is None:
         credentials = request.get(PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY)
         refreshable_oauth = getattr(credentials, "auth_source", None) == "oauth"
@@ -2745,7 +2748,7 @@ def perform_chat_api_call(**kwargs: Any) -> Any:
             call_started = time.monotonic()
             _validate_audited_call_policy_transport(registry, provider, request)
             _validate_provider_model_selection(provider, request)
-            if provider in CLOUD_MODEL_PROVIDERS:
+            if has_model_listing(provider):
                 _call_policy_after_model_discovery(provider, request, call_started)
             if request.get("stream"):
                 return _map_sync_stream_egress_errors(
@@ -2781,7 +2784,7 @@ async def perform_chat_api_call_async(**kwargs: Any) -> Any:
             strict_policy = _validate_audited_call_policy_transport(
                 registry, provider, request
             )
-            if provider in CLOUD_MODEL_PROVIDERS:
+            if has_model_listing(provider):
                 await await_bounded_sync_call(
                     partial(_validate_provider_model_selection, provider, request),
                     pool=SYNC_ADAPTER_CALL_POOL,

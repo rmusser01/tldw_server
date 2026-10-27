@@ -3,7 +3,8 @@
 Qwen uses its documented native model-list API on the generation origin.
 Hugging Face discovery is limited to the global chat router, not Hub listings or
 model-specific inference routes. Bedrock control-plane discovery is not yet
-implemented; Z.AI and MiniMax lack a verified listing contract in this module.
+implemented; Z.AI and MiniMax lack a verified listing contract in this module, so
+those providers defer to the provider (see has_model_listing).
 """
 
 from __future__ import annotations
@@ -67,6 +68,17 @@ _SUPPORTED = frozenset(
         "together",
     }
 )
+
+
+def has_model_listing(provider: str | None) -> bool:
+    """Whether a cloud provider has a supported model listing.
+
+    A cloud provider without one (today Bedrock, Z.AI and MiniMax) skips the inventory check: its requests go to
+    the provider unchanged, whose own 404 rejects a bad model. A provider with a listing fails closed.
+    """
+    return (provider or "").strip().lower() in _SUPPORTED
+
+
 _ENDPOINT_ADAPTERS = {
     "openai": ("openai_adapter", "OpenAIAdapter"),
     "anthropic": ("anthropic_adapter", "AnthropicAdapter"),

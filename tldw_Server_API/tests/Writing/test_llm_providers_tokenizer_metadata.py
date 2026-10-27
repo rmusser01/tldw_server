@@ -313,7 +313,12 @@ def test_llm_providers_real_resolver_exact_for_discovered_cloud_models(monkeypat
     assert cohere_tok["kind"] == "provider-native"
     assert cohere_tok["detokenize"] is True
 
-    assert providers["bedrock"]["models"] == []
+    # Bedrock has no model listing, so it defers to the provider and lists its configured model (I1).
+    bedrock_model = providers["bedrock"]["models"][0]
+    bedrock_tok = providers["bedrock"]["tokenizers"][bedrock_model]
+    assert bedrock_tok["count_accuracy"] == "exact"
+    assert bedrock_tok["kind"] == "provider-native-count"
+    assert bedrock_tok["detokenize"] is False
 
     groq_model = providers["groq"]["models"][0]
     groq_tok = providers["groq"]["tokenizers"][groq_model]

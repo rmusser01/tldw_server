@@ -154,3 +154,18 @@ def test_legacy_cohere_nested_api_uses_same_inventory_endpoint(monkeypatch: pyte
     assert generation[0]["url"] == "https://nested.example.invalid/v1/chat"
     assert generation[0]["headers"]["Authorization"] == "Bearer nested-key"
     assert "cohere_api" not in config
+
+
+@pytest.mark.parametrize("provider", ["bedrock", "zai", "minimax"])
+def test_adapter_boundary_defers_for_providers_without_a_model_list(monkeypatch, provider):
+    """Direct adapter callers of a provider with no model listing skip the check too (I1)."""
+    from tldw_Server_API.app.core.LLM_Calls.providers.base import ChatProvider
+
+    def no_discovery(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("discovery for a provider without a model list")
+
+    monkeypatch.setattr(chat_service, "discover_provider_models", no_discovery)
+    request: dict[str, Any] = {"model": "provider-side-model", "api_key": "synthetic-key", "app_config": {}}
+    fake_adapter: Any = SimpleNamespace(name=provider)
+    ChatProvider._validate_model_inventory(fake_adapter, request)
+    assert request["model"] == "provider-side-model"

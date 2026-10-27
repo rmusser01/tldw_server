@@ -185,9 +185,14 @@ def provider_readiness(
                 "before generating."
             )
 
+    # Only a provider with a model listing has its readiness decided by that listing; one without a listing
+    # (Bedrock, Z.AI, MiniMax) defers to the provider, as before the inventory change.
+    from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import has_model_listing
+
+    listed_inventory = provider_info.get("type") == "commercial" and has_model_listing(provider_name)
     should_reduce_discovery = (
         provider_enabled
-        and (provider_info.get("type") == "commercial" or (
+        and (listed_inventory or (
             provider_info.get("type") == "local"
             and endpoint_url is not None
             and (endpoint_probe_enabled or not has_explicit_models)
@@ -197,11 +202,11 @@ def provider_readiness(
         result = discovery_result or ModelDiscoveryResult("unreachable")
         display_name = provider_info.get("display_name") or provider_name
         if result.status == "ready" and not result.models and (
-            provider_info.get("type") == "commercial" or not has_explicit_models
+            listed_inventory or not has_explicit_models
         ):
             reason_code = "no_models_reported"
             message = f"{display_name} did not report any models."
-            if provider_info.get("type") == "commercial":
+            if listed_inventory:
                 provider_enabled = False
                 availability = "unavailable"
         elif result.status == "auth_failed":
@@ -217,7 +222,7 @@ def provider_readiness(
         elif result.status == "unsupported":
             reason_code = "model_discovery_unavailable"
             message = f"{display_name} does not expose a supported model discovery response."
-            if provider_info.get("type") == "commercial":
+            if listed_inventory:
                 provider_enabled = False
                 availability = "unavailable"
         elif result.status == "unreachable":

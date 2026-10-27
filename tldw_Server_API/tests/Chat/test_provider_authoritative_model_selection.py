@@ -715,10 +715,32 @@ def test_invalid_explicit_inventory_endpoint_is_rejected_before_discovery(bounda
     assert boundary.adapter.calls == []
 
 
-def test_bedrock_without_inventory_is_configuration_failure(boundary):
-    with pytest.raises(ChatConfigurationError):
-        chat_service.perform_chat_api_call(**args(api_provider="bedrock", model="retired-model"))
+@pytest.mark.parametrize("provider", ["bedrock", "zai", "minimax"])
+@pytest.mark.parametrize("async_call", [False, True])
+def test_providers_without_a_model_list_defer_to_the_provider(boundary, provider, async_call):
+    """No listing contract: the request reaches the provider unchanged, whose own 404 rejects a bad model (I1)."""
+    fields = args(api_provider=provider, model="provider-side-model")
+    if async_call:
+        asyncio.run(chat_service.perform_chat_api_call_async(**fields))
+    else:
+        chat_service.perform_chat_api_call(**fields)
     assert boundary.discovery == []
+    assert [call[1]["model"] for call in boundary.adapter.calls] == ["provider-side-model"]
+
+
+@pytest.mark.parametrize("provider", ["bedrock", "zai", "minimax"])
+def test_strict_precheck_defers_for_providers_without_a_model_list(boundary, provider):
+    assert chat_service.is_model_known_for_provider(
+        provider, "provider-side-model", api_key="fake-request-key", app_config={}, credentials_resolved=True,
+    ) is None
+    assert boundary.discovery == []
+
+
+def test_listed_provider_still_rejects_an_unlisted_model(boundary):
+    """Only providers with no listing defer; a listed one keeps failing closed (I1)."""
+    with pytest.raises(ChatBadRequestError):
+        chat_service.perform_chat_api_call(**args(api_provider="openai", model="provider-side-model"))
+    assert len(boundary.discovery) == 1
     assert boundary.adapter.calls == []
 
 

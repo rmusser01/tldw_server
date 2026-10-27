@@ -67,6 +67,7 @@ from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import (
     discover_provider_models,
+    has_model_listing,
     resolve_provider_models_base_url,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
@@ -98,6 +99,7 @@ from tldw_Server_API.app.core.Security.egress import (
     URLPolicyResult,
     evaluate_url_policy,
 )
+from tldw_Server_API.app.core.Usage.pricing_catalog import list_provider_models
 
 #######################################################################################################################
 #
@@ -1599,6 +1601,8 @@ def _resolve_commercial_listing(
         api_key_value = valid_provider_api_key(fallback.api_key)
     if not api_key_value:
         return None, False, None
+    if not has_model_listing(provider_name):
+        return api_key_value, True, None  # no listing: the configured models are shown, as before
     fallback_config = fallback.app_config if fallback is not None else static.app_config
     base_url = resolve_provider_models_base_url(
         provider_name, dict(fallback_config) if fallback_config is not None else None, credentials_resolved=True,
@@ -1609,6 +1613,16 @@ def _resolve_commercial_listing(
         provider_name, api_key_value, base_url=base_url,
         force_refresh=refresh_openrouter and provider_name == "openrouter",
     )
+
+
+def _with_pricing_models(provider_name: str, models: list[str]) -> list[str]:
+    """Configured models, then the pricing catalog's chat models: dev's listing for a provider with no model list."""
+    try:
+        pricing_models = [m for m in list_provider_models(provider_name) if 'embed' not in m.lower()]
+    except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
+        pricing_models = []
+    seen = {m.strip() for m in models}
+    return models + [m for m in pricing_models if m not in seen]
 
 
 def _resolve_commercial_listings(
@@ -2061,11 +2075,14 @@ def get_configured_providers(
                     )
 
             discovery_result: ModelDiscoveryResult | None = commercial_discovery
-            if provider_info['type'] == 'commercial':
+            listed_inventory = provider_info['type'] == 'commercial' and has_model_listing(provider_name)
+            if listed_inventory:
                 models = (
                     list(discovery_result.models)
                     if discovery_result is not None and discovery_result.status == "ready" else []
                 )
+            elif provider_info['type'] == 'commercial':
+                models = _with_pricing_models(provider_name, models)
             should_discover = (
                 provider_info['type'] == 'local'
                 and is_configured
@@ -2138,7 +2155,7 @@ def get_configured_providers(
                             **model_info["modalities"],
                             "input": [*inputs, "image"] if vision else inputs,
                         }
-            if not include_deprecated and provider_info['type'] != 'commercial':
+            if not include_deprecated and not listed_inventory:
                 # Filter out deprecated models by default
                 filtered = [mi for mi in models_info if not mi.get('deprecated', False)]
                 models_info = filtered
@@ -2208,7 +2225,7 @@ def get_configured_providers(
                 'name': provider_name,
                 'display_name': provider_info['display_name'],
                 'models': models,
-                'model_inventory_source': 'provider' if provider_info['type'] == 'commercial' else 'configured',
+                'model_inventory_source': 'provider' if listed_inventory else 'configured',
                 # New: detailed metadata per model
                 'models_info': models_info,
                 'type': provider_info['type'],

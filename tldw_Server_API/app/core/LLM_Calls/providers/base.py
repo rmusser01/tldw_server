@@ -98,12 +98,10 @@ class ChatProvider(ABC):
             _call_policy_after_model_discovery,
             _validate_provider_model_selection,
         )
-        from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import (
-            CLOUD_MODEL_PROVIDERS,
-        )
+        from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import has_model_listing
 
-        if self.name not in CLOUD_MODEL_PROVIDERS:
-            return
+        if not has_model_listing(self.name):
+            return  # local, or a cloud provider with no listing: the provider itself rejects a bad model
         if self.name in {"cohere", "moonshot"}:
             from importlib import import_module
 

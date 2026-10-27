@@ -70,9 +70,15 @@ these IDs and fuzzy date-stripped aliases. This can display and call retired mod
 
 Discovery currently covers OpenAI, Anthropic, Cohere, DeepSeek, Google, Groq,
 Mistral, Moonshot, OpenRouter, Qwen, Novita, Poe, Together and Hugging Face's
-global chat router. Bedrock control-plane discovery is not implemented;
-Z.AI and MiniMax listing contracts are not verified. These providers and legacy
-Hugging Face model-specific routes are unavailable, not seeded with static IDs.
+global chat router. Bedrock control-plane discovery is not implemented, and
+Z.AI and MiniMax listing contracts are not verified. Providers without a model
+list defer to the provider (owner decision, merge review I1): the dispatcher,
+adapter boundary and strict pre-check skip the inventory check, the request goes
+to the provider unchanged and the provider's own 404 rejects a bad model; the
+provider listing shows their configured models plus pricing extras, as before.
+A provider that has a listing still fails closed, including a misconfigured one
+whose discovery is `unsupported`. Legacy Hugging Face model-specific routes stay
+unavailable (Hugging Face has a listing; those routes are not it).
 
 ## Implementation Plan
 
