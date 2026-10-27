@@ -37,6 +37,11 @@ from typing import Any, Callable
 from cachetools import LRUCache
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+    ProviderOverridePolicyError,
+    capture_provider_override_call_snapshot,
+)
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import resolve_user_id_value
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
@@ -1133,11 +1138,17 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
         timeout = _LLM_TIMEOUT_SECONDS if _LLM_TIMEOUT_SECONDS > 0 else None
 
         def _call_llm():
-            adapter = _get_adapter(provider)
             app_config = load_and_log_configs() or {}
-            model_to_use = _resolve_model(provider, model, app_config)
+            try:
+                override = capture_provider_override_call_snapshot(provider)
+                model_to_use = _resolve_model(override.provider, model, app_config)
+                override.enforce(model_to_use, require_model=True)
+            except ByokResolutionError as exc:
+                code = exc.policy_code if isinstance(exc, ProviderOverridePolicyError) else exc.code
+                raise DataTablesJobError(code, retryable=code == "credential_store_unavailable") from None
             if model_to_use is None:
                 raise ChatConfigurationError(provider=provider, message="Model is required for provider.")
+            adapter = _get_adapter(provider)
             return adapter.chat(
                 {
                     "messages": messages_payload,

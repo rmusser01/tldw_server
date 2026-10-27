@@ -11,7 +11,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDa
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("healthy_no_override_tts_credential_snapshot")]
 
 
 class _StubAdapter:
@@ -231,7 +231,7 @@ async def test_data_tables_regenerate_uses_snapshot(monkeypatch, tmp_path, data_
 
 
 @contextmanager
-def _s03_publication_case(monkeypatch, tmp_path, data_tables_app_factory):
+def _s03_publication_case(monkeypatch, tmp_path, data_tables_app_factory, *, acquire=True, generation_payload=None):
     """Seed saved content through Media abstractions and acquire its real regeneration."""
     media_path = _configure_worker_paths(tmp_path, monkeypatch)
     db = MediaDatabase(db_path=str(media_path), client_id="test_client")
@@ -260,14 +260,12 @@ def _s03_publication_case(monkeypatch, tmp_path, data_tables_app_factory):
             },
         )
         with TestClient(app) as client:
-            response = client.post(f"/api/v1/data-tables/{table['uuid']}/regenerate", json={})
+            response = client.post(f"/api/v1/data-tables/{table['uuid']}/regenerate", json=generation_payload or {})
             assert response.status_code == 202, response.text  # nosec B101 # pytest API oracle.
         jm = JobManager(Path(jobs_path))
-        job = jm.acquire_next_job(
-            domain="data_tables",
-            queue="default",
-            lease_seconds=60,
-            worker_id="s03-publication-test",
+        job = (
+            jm.acquire_next_job(domain="data_tables", queue="default", lease_seconds=60, worker_id="s03-publication-test")
+            if acquire else jm.get_job(response.json()["job_id"])
         )
         assert job and job["id"] == response.json()["job_id"]  # nosec B101 # acquired identity oracle.
         yield db, jm, job, app, original
@@ -825,7 +823,7 @@ async def test_local_provider_alias_without_key_completes_generation(monkeypatch
 
     monkeypatch.setattr(jobs_worker, "_get_adapter", lambda _provider: LocalAdapter())
     monkeypatch.setattr(jobs_worker, "resolve_provider_api_key", lambda *_args, **_kwargs: ("", {}))
-    monkeypatch.setattr(jobs_worker, "DEFAULT_LLM_PROVIDER", "llamacpp")
+    monkeypatch.setattr(jobs_worker, "get_default_provider", lambda: "llamacpp")
     monkeypatch.setattr(jobs_worker, "load_and_log_configs", lambda: {"llama_api": {"model": "local-test-model"}})
     try:
         with TestClient(app) as client:
@@ -882,3 +880,105 @@ async def test_local_provider_alias_without_key_completes_generation(monkeypatch
             db.close_connection()
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("policy", "selected", "configured", "status", "code"),
+    [
+        ("disabled", None, "allowed-model", "failed", "provider_disabled"),
+        ("explicit_denied", "denied-model", "allowed-model", "failed", "model_not_allowed"),
+        ("default_denied", None, "denied-model", "failed", "model_not_allowed"),
+        ("unknown_model", None, None, "failed", "model_not_allowed"),
+        ("unhealthy", None, "allowed-model", "queued", "credential_store_unavailable"),
+        ("allowed_default", None, "allowed-model", "completed", None),
+        ("allowed_explicit", "allowed-model", "denied-model", "completed", None),
+    ],
+)
+async def test_regeneration_enforces_real_provider_policy_before_dispatch(
+    monkeypatch, tmp_path, data_tables_app_factory, policy, selected, configured, status, code
+):
+    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides as overrides
+
+    monkeypatch.delenv("DEFAULT_MODEL_LLAMA_CPP", raising=False)
+    real_model = jobs_worker._resolve_model
+    real_key_policy = jobs_worker.provider_requires_api_key
+    with _s03_publication_case(
+        monkeypatch,
+        tmp_path,
+        data_tables_app_factory,
+        acquire=False,
+        generation_payload={"model": selected} if selected else {},
+    ) as case:
+        db, manager, queued, _app, original = case
+        table_id = queued["payload"]["table_id"]
+        sources = db.list_data_table_sources(table_id)
+        calls = []
+
+        class Adapter:
+            def chat(self, request, **_kwargs):
+                calls.append((request["model"], request["api_key"]))
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "columns": [{"name": "Fact", "type": "text"}],
+                                        "rows": [["Replacement"]],
+                                    }
+                                )
+                            }
+                        }
+                    ]
+                }
+
+        monkeypatch.setattr(jobs_worker, "_get_adapter", lambda _provider: Adapter())
+        monkeypatch.setattr(jobs_worker, "_resolve_model", real_model)
+        monkeypatch.setattr(jobs_worker, "provider_requires_api_key", real_key_policy)
+        monkeypatch.setattr(jobs_worker, "get_default_provider", lambda: "llamacpp")
+        monkeypatch.setattr(jobs_worker, "load_and_log_configs", lambda: {"llama_api": {"model": configured}})
+        overrides.set_llm_provider_overrides_cache_for_tests(
+            {
+                "llama.cpp": overrides.LLMProviderOverride(
+                    provider="llama.cpp",
+                    is_enabled=policy != "disabled",
+                    allowed_models=["allowed-model"],
+                )
+            },
+            healthy=policy != "unhealthy",
+        )
+        sdk = WorkerSDK(
+            manager,
+            WorkerConfig(
+                domain="data_tables",
+                queue="default",
+                worker_id="s03-policy-test",
+                lease_seconds=5,
+                renew_threshold_seconds=1,
+                renew_jitter_seconds=0,
+                bind_completion_token=True,
+            ),
+        )
+
+        async def handle(job):
+            try:
+                return await jobs_worker._handle_job(job, manager)
+            finally:
+                sdk.stop()
+
+        async def completed(job, _result):
+            jobs_worker.publish_completed_generation(manager, job["id"], expected_uuid=job["uuid"])
+
+        await asyncio.wait_for(sdk.run(handler=handle, on_completed=completed), timeout=2)
+        final = manager.get_job(queued["id"])
+        assert final["status"] == status, final.get("error_message")  # nosec B101 -- real SDK terminal/retry state.
+        if code:
+            assert code in final["error_message"]  # nosec B101 -- bounded policy failure retained by Jobs.
+            assert calls == []  # nosec B101 -- denied/unhealthy configuration never dispatches.
+            assert _s03_content(db, table_id) == original and db.list_data_table_sources(table_id) == sources  # nosec B101 -- all saved identities/content survive denial.
+            assert db.get_data_table(table_id)["status"] == ("queued" if policy == "unhealthy" else "failed")  # nosec B101 -- ordinary failed/retry table state.
+        else:
+            assert calls == [("allowed-model", "")]  # nosec B101 -- exact allowed default/explicit keyless dispatch.
+            assert db.get_data_table(table_id)["status"] == "ready"  # nosec B101 -- actual callback publication.
+            assert list(json.loads(db.list_data_table_rows(table_id)[0]["row_json"]).values()) == ["Replacement"]  # nosec B101 -- real saved replacement.
