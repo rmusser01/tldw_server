@@ -836,6 +836,14 @@ def test_first_frame_routes_never_read_a_query_api_key(
     assert not [message for message in _deprecations(warned) if "api_key" in message], warned
 
 
+@pytest.mark.parametrize("route", ["/api/v1/audio/realtime", "/v1/realtime"])
+def test_realtime_speech_echoes_the_bearer_subprotocol(env: SimpleNamespace, route: str) -> None:
+    """Realtime verifies a ``bearer, <token>`` subprotocol credential, so it must echo the marker: a browser
+    fails a handshake that echoes nothing (and after a scoped credential's quota was charged)."""
+    assert _accepted_subprotocol(env.client, ROUTES[route][0], subprotocols=["bearer", env.valid]) == "bearer"
+    assert _outcome(env.client, ROUTES[route][0], subprotocols=["bearer", env.revoked]) == "close 4401"
+
+
 def _voice_auth(client: TestClient, url: str = ROUTES[VOICE][0], **frame: object) -> str:
     return _outcome(client, url, frame={"type": "auth", **frame}, timeout=ADMITTED_AFTER_S)
 
