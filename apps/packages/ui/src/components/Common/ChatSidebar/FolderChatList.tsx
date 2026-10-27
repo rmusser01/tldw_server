@@ -240,7 +240,7 @@ export function FolderChatList({ className, onConversationSelected, owner,
           if (!hasFreshSnapshot() || readOnlyNow.current || useStoreMessageOption.getState().temporaryChat) return
           createDialog.current = {}; createRequest.current = null; setIsCreating(false)
           setNewFolderModalOpen(true)
-        }} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-text-subtle hover:bg-surface hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-focus)] disabled:opacity-50">
+        }} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-text-subtle hover:bg-surface hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:opacity-50">
           <FolderPlus className="size-3.5" /><span>{t("common:newFolder")}</span>
         </button>
       </div>

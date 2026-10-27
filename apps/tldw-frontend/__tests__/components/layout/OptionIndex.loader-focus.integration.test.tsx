@@ -78,7 +78,13 @@ vi.mock("@/store/quick-chat", () => ({
 vi.mock("@/hooks/useMigration", () => ({ useMigration: () => ({ isLoading: false }) }))
 vi.mock("@/hooks/useStorageMigrations", () => ({ useStorageMigrations: () => undefined }))
 vi.mock("@/hooks/useLayoutEffectsOwner", () => ({ useLayoutEffectsOwner: () => false }))
-vi.mock("@/hooks/useFeatureFlags", () => ({ useChatSidebar: () => [false] }))
+vi.mock("@/hooks/useFeatureFlags", async (importOriginal) => ({
+  // Spread the real module so shared help/empty-state components that read
+  // other flags (for example COMPARE_MODE) keep working; every flag reads off.
+  ...(await importOriginal<typeof import("@/hooks/useFeatureFlags")>()),
+  useFeatureFlag: () => [false, () => undefined, true],
+  useChatSidebar: () => [false]
+}))
 vi.mock("@/hooks/useMediaQuery", () => ({ useMobile: () => false }))
 vi.mock("@/hooks/useSetting", () => ({ useSetting: () => [""] }))
 vi.mock("@/hooks/useServerOnline", () => ({ useServerOnline: () => undefined }))

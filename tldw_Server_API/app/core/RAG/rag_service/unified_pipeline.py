@@ -62,6 +62,9 @@ from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
 )
 from tldw_Server_API.app.core.RAG.exceptions import RAGConfigurationError
 from tldw_Server_API.app.core.testing import (
+    is_production_like_env as _shared_is_production_like_env,
+)
+from tldw_Server_API.app.core.testing import (
     is_test_mode as _shared_is_test_mode,
 )
 from tldw_Server_API.app.core.testing import (
@@ -3816,7 +3819,7 @@ async def unified_rag_pipeline(
         try:
             import os as _os
 
-            _prod_env = _shared_is_truthy(_os.getenv("tldw_production", "false"))
+            _prod_env = _shared_is_production_like_env()
             _strict_env = _shared_is_truthy(_os.getenv("RAG_GUARDRAILS_STRICT", "false"))
             if _prod_env or _strict_env:
                 if not enable_numeric_fidelity:

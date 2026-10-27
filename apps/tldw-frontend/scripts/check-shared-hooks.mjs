@@ -1,32 +1,76 @@
-import { readdirSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ESLint } from 'eslint'
 
 const frontendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const scopes = ['packages/ui/src', 'tldw-frontend/pages']
+// Vendored, minified assets; eslint.config.mjs ignores the same directory.
+const vendored = ['packages/ui/src/public']
 const hookRules = ['react-hooks/purity', 'react-hooks/static-components', 'react-hooks/use-memo']
+const sizeRules = ['max-lines', 'max-lines-per-function']
+// An inline disable of these rules must say why ("-- <reason>"): it is a reviewed exception.
+const reasonedRules = [...hookRules, ...sizeRules, 'no-restricted-imports', 'no-restricted-syntax']
+// The suppressions file may never freeze these: hook errors get fixed, and a frozen file's
+// size ceiling is raised only by a reviewed "bump:" in eslint.config.mjs.
+const unfreezable = [...hookRules, ...sizeRules]
+// Written by `bun run lint:ui --suppress-all` (ESLint 9 bulk suppressions), keyed by
+// file path relative to apps/ and rule id.
+const suppressionsName = 'tldw-frontend/eslint-suppressions.packages-ui.json'
+const pruneHint = 'run `bun run lint:ui --prune-suppressions` from apps/tldw-frontend and commit the file'
+const renameHint = `if you moved or renamed this file, move its entry in ${suppressionsName} (or run \`bun run lint:ui --suppress-all\` and review the diff)`
+const frozenHint =
+  'this file is frozen (TASK-13950.10): move code out into a new module instead of growing it, or raise its ceiling in eslint.config.mjs with a "bump: <reason>" comment on that line'
 
-function sourceFiles(directory) {
+function sourceFiles(directory, appsRoot) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const entryPath = path.join(directory, entry.name)
-    if (entry.isDirectory()) return sourceFiles(entryPath)
+    if (entry.isDirectory()) {
+      const relative = path.relative(appsRoot, entryPath).split(path.sep).join('/')
+      return vendored.includes(relative) ? [] : sourceFiles(entryPath, appsRoot)
+    }
     return /\.(?:[cm]?js|jsx|tsx?)$/.test(entry.name) ? [entryPath] : []
   })
 }
 
-// General frontend lint remains a separate required step. This gate extends the
-// three enabled compiler rules to every source file in both declared UI scopes.
+function loadSuppressions(filePath) {
+  try {
+    return JSON.parse(readFileSync(filePath, 'utf8'))
+  } catch (error) {
+    if (error.code === 'ENOENT') return {}
+    throw error
+  }
+}
+
+function fixHint({ ruleId, message }) {
+  if (sizeRules.includes(ruleId)) return frozenHint
+  if (message.includes('eslint-disable-next-line')) return undefined // the rule message says it
+  return `fix it, or if it must stay, disable that line with "// eslint-disable-next-line ${ruleId} -- <reason>"`
+}
+
+// Every ESLint error in both scopes fails unless the suppressions file freezes it. This
+// mirrors ESLint's own applySuppressions: a file's errors for one rule pass while their
+// count is at most the frozen count, and a frozen count above the current one is stale.
+// Unlike ESLint, the three hook rules and parser errors are never suppressible, and an
+// entry for a file that is no longer linted is stale too.
+// Limitation of per-rule counts: no-restricted-syntax holds three ratchets in one count per
+// file (an API path cast to any, an /api/v1/ literal in a component, an import() across a
+// boundary) and no-restricted-imports two, so fixing one kind in a file leaves room for
+// one new error of another kind in that file. A file's total for the rule never grows.
 export async function checkSharedHooks({
   appsRoot = path.dirname(frontendRoot),
-  configFile = path.join(frontendRoot, 'eslint.config.mjs')
+  configFile = path.join(frontendRoot, 'eslint.config.mjs'),
+  suppressionsFile = path.join(appsRoot, suppressionsName)
 } = {}) {
   const files = scopes.flatMap((scope) => {
-    const found = sourceFiles(path.join(appsRoot, scope))
+    const found = sourceFiles(path.join(appsRoot, scope), appsRoot)
     if (!found.length) throw new Error(`No source files in required scope: ${scope}`)
     return found
   })
-  const eslint = new ESLint({ cwd: appsRoot, overrideConfigFile: configFile })
+  // ESLint's lint workers need worker_threads SHARE_ENV, which Bun lacks, so CI runs this
+  // under node; under bun it lints on one thread.
+  const concurrency = process.versions.bun ? 'off' : 'auto'
+  const eslint = new ESLint({ cwd: appsRoot, overrideConfigFile: configFile, concurrency })
   const failures = []
   for (const filePath of files) {
     const config = await eslint.calculateConfigForFile(filePath)
@@ -40,9 +84,15 @@ export async function checkSharedHooks({
       }
     }
   }
-  const results = await eslint.lintFiles(files)
-  let otherErrorCount = 0
-  for (const result of results) {
+  const suppressions = loadSuppressions(suppressionsFile)
+  const linted = new Set()
+  const unfrozen = []
+  let suppressedCount = 0
+  for (const result of await eslint.lintFiles(files)) {
+    const key = path.relative(appsRoot, result.filePath).split(path.sep).join('/')
+    linted.add(key)
+    const frozen = suppressions[key] ?? {}
+    const errors = {}
     for (const message of result.messages) {
       if (
         message.fatal ||
@@ -51,12 +101,57 @@ export async function checkSharedHooks({
         hookRules.includes(message.ruleId)
       ) {
         failures.push({ filePath: result.filePath, ...message })
-      } else if (message.severity === 2) {
-        otherErrorCount += 1
+      } else if (message.ruleId && message.severity === 2) {
+        ;(errors[message.ruleId] ??= []).push(message)
+      }
+    }
+    for (const message of result.suppressedMessages) {
+      if (
+        reasonedRules.includes(message.ruleId) &&
+        !message.suppressions.some((suppression) => suppression.justification?.trim())
+      ) {
+        failures.push({
+          filePath: result.filePath,
+          ...message,
+          message: `${message.ruleId} is disabled without a reason: end the eslint-disable comment with "-- <reason>" so the exception can be reviewed`
+        })
+      }
+    }
+    for (const [ruleId, messages] of Object.entries(errors)) {
+      const limit = unfreezable.includes(ruleId) ? 0 : (frozen[ruleId]?.count ?? 0)
+      if (messages.length <= limit) {
+        suppressedCount += messages.length
+        continue
+      }
+      for (const message of messages) {
+        const failure = { filePath: result.filePath, ...message, hint: fixHint(message) }
+        if (!suppressions[key]) unfrozen.push(failure)
+        failures.push(failure)
+      }
+    }
+    for (const [ruleId, { count }] of Object.entries(frozen)) {
+      const found = errors[ruleId]?.length ?? 0
+      if (hookRules.includes(ruleId)) {
+        failures.push({ filePath: result.filePath, ruleId, message: `${suppressionsName} must not freeze hook rules; fix the hook error instead` })
+      } else if (unfreezable.includes(ruleId)) {
+        failures.push({ filePath: result.filePath, ruleId, message: `${suppressionsName} must not freeze ${ruleId}: delete this entry; a frozen file's size ceiling is raised only with a "bump: <reason>" comment in eslint.config.mjs` })
+      } else if (found < count) {
+        failures.push({ filePath: result.filePath, ruleId, message: `Stale suppression: ${found} errors left of ${count} frozen; ${pruneHint}` })
       }
     }
   }
-  return { fileCount: files.length, failures, otherErrorCount }
+  const gone = Object.keys(suppressions).filter((key) => !linted.has(key))
+  for (const key of gone) {
+    failures.push({
+      filePath: path.join(appsRoot, key),
+      message: `Stale suppression: file is gone or no longer linted; ${pruneHint} (prune keeps the entry of a file that still exists but is ignored: delete that one from ${suppressionsName} by hand)`
+    })
+  }
+  // A frozen file that moved shows up as a gone entry plus "new" errors in a file with none.
+  for (const failure of gone.length ? unfrozen : []) {
+    failure.hint = [failure.hint, renameHint].filter(Boolean).join('; ')
+  }
+  return { fileCount: files.length, failures, suppressedCount }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -64,11 +159,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const result = await checkSharedHooks()
     for (const failure of result.failures) {
       console.error(
-        `${failure.filePath}:${failure.line ?? 0}:${failure.column ?? 0} ${failure.ruleId ?? 'ESLint'}: ${failure.message}`
+        `${failure.filePath}:${failure.line ?? 0}:${failure.column ?? 0} ${failure.ruleId ?? 'ESLint'}: ${failure.message}${failure.hint ? ` (to fix: ${failure.hint})` : ''}`
       )
     }
     console.log(
-      `Shared hook gate: ${result.fileCount} files in ${scopes.join(' and ')}; ${result.failures.length} failures; ${result.otherErrorCount} other ESLint errors outside this three-rule gate.`
+      `Shared UI lint: ${result.fileCount} files in ${scopes.join(' and ')}; ${result.failures.length} failures; ${result.suppressedCount} pre-existing errors frozen in ${suppressionsName}.`
     )
     process.exitCode = result.failures.length ? 1 : 0
   } catch (error) {

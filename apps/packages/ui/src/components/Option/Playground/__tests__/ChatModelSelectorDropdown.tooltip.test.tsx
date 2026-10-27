@@ -111,7 +111,7 @@ describe("Chat model picker accessibility", () => {
     const search = await screen.findByRole("textbox", { name: "Search models" })
     await waitFor(() => expect(search).toHaveFocus())
     await user.tab({ shift: true })
-    expect(screen.getByRole("button", { name: "Search all models" })).toHaveFocus()
+    expect(screen.getByRole("radio", { name: "Ready to use" })).toHaveFocus()
     await user.tab()
     expect(search).toHaveFocus()
     await user.tab()

@@ -127,28 +127,16 @@ def pg_http(request, pg_database_config, tmp_path, monkeypatch):
 
     # Delegate all transaction cleanup. Observe only after reset/rollback, while
     # the checkout is still unavailable to a different operation. The observer
-    # must not borrow from this pool (the fallback publication holds its lock).
+    # must not borrow from this pool.
     pool = backend.get_pool()
-    if pool._use_psycopg_pool:
-        original_publish = pool._pool._add_to_pool
+    original_publish = pool._pool._add_to_pool
 
-        def publish(raw):
-            """Observe native psycopg reset, then delegate checkout publication."""
-            capture_handback(raw)
-            return original_publish(raw)
+    def publish(raw):
+        """Observe native psycopg reset, then delegate checkout publication."""
+        capture_handback(raw)
+        return original_publish(raw)
 
-        monkeypatch.setattr(pool._pool, "_add_to_pool", publish)
-    else:
-
-        class ObservedFreeList(list):
-            """Observe fallback handback after native rollback, before reuse."""
-
-            def append(self, raw):
-                """Snapshot the still-private checkout before publishing it."""
-                capture_handback(raw)
-                super().append(raw)
-
-        monkeypatch.setattr(pool, "_free", ObservedFreeList(pool._free))
+    monkeypatch.setattr(pool._pool, "_add_to_pool", publish)
     observe_database(db)
     real_create_and_prepare = deps._create_and_prepare_db
 

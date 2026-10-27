@@ -251,6 +251,94 @@ describe("NotesManagerPage stage 23 responsive mobile layout", () => {
     }
   })
 
+  it("fills the viewport frame with no top band or window-sized panels (NO-01)", async () => {
+    renderPage()
+    const frame = screen.getByTestId("notes-page-frame")
+    // mt-16 left an ~80px empty band under the app header.
+    expect(frame.className).not.toContain("mt-16")
+    expect(frame.className).toContain("h-full")
+    expect(frame.className).toContain("min-h-0")
+    // Panels stretch to the frame instead of innerHeight-120px.
+    const toggle = screen.getByTestId("notes-desktop-sidebar-toggle")
+    expect(toggle.style.height).toBe("")
+    expect(toggle.style.minHeight).toBe("")
+    expect(screen.getByTestId("notes-list-region").style.height).toBe("")
+  })
+
+  // NO-01 frames /notes to the viewport, so the editor body has a definite
+  // height. A full-height split grid would clamp to it on narrow screens and
+  // its stacked editor and preview would spill under the word-count footer.
+  it("lets the stacked split view grow below lg and fills the height only side by side", async () => {
+    renderPage()
+    fireEvent.click(await screen.findByRole("button", { name: "Split" }))
+
+    const grid = await screen.findByTestId("notes-split-grid")
+    expect(grid.className.split(/\s+/)).not.toContain("h-full")
+    expect(grid.className).toContain("lg:h-full")
+  })
+
+  // AX-15 (#3124): the list toggles must say whether the list is shown and
+  // which region they control, not only flip a chevron.
+  it("tells assistive technology whether the notes list is shown", async () => {
+    const { rerender } = renderPage()
+
+    const desktopToggle = screen.getByTestId("notes-desktop-sidebar-toggle")
+    expect(desktopToggle).toHaveAttribute("aria-controls", "notes-list-region")
+    expect(desktopToggle).toHaveAttribute("aria-expanded", "true")
+
+    fireEvent.click(desktopToggle)
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-desktop-sidebar-toggle")).toHaveAttribute(
+        "aria-expanded",
+        "false"
+      )
+    })
+
+    setViewportWidth(375)
+    rerender(
+      <QueryClientProvider
+        client={
+          new QueryClient({
+            defaultOptions: {
+              queries: { retry: false },
+              mutations: { retry: false }
+            }
+          })
+        }
+      >
+        <NotesManagerPage />
+      </QueryClientProvider>
+    )
+
+    const browse = await screen.findByTestId("notes-mobile-open-list-button")
+    expect(browse).toHaveAttribute("aria-controls", "notes-list-region")
+    expect(browse).toHaveAttribute("aria-expanded", "false")
+
+    fireEvent.click(browse)
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-mobile-open-list-button")).toHaveAttribute(
+        "aria-expanded",
+        "true"
+      )
+    })
+  })
+
+  // AX-15 (#3124): the app sidebar's toggle is also called "Expand sidebar",
+  // so the notes toggle names the notes sidebar to stay distinct.
+  it("names the notes sidebar toggle apart from the app sidebar toggle", async () => {
+    renderPage()
+
+    const desktopToggle = screen.getByTestId("notes-desktop-sidebar-toggle")
+    expect(desktopToggle).toHaveAccessibleName("Collapse notes sidebar")
+
+    fireEvent.click(desktopToggle)
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-desktop-sidebar-toggle")).toHaveAccessibleName(
+        "Expand notes sidebar"
+      )
+    })
+  })
+
   it("restores desktop sidebar collapse state after returning from mobile", async () => {
     const { rerender } = renderPage()
     const listRegion = screen.getByTestId("notes-list-region")
@@ -356,8 +444,8 @@ describe("NotesManagerPage stage 23 responsive mobile layout", () => {
     setViewportWidth(375)
     renderPage()
 
-    fireEvent.click(screen.getByTestId("notes-editor-empty-create"))
-
+    // The blank editor is already a draft (NO-04): no create click needed.
+    expect(screen.queryByTestId("notes-editor-empty-create")).not.toBeInTheDocument()
     const titleInput = await screen.findByRole("textbox", { name: "Note title" })
     expect(screen.getByTestId("notes-title-row")).toHaveClass("flex-wrap")
     expect(titleInput).toHaveClass("!min-w-full")

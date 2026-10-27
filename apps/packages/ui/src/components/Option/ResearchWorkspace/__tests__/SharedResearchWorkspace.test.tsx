@@ -375,8 +375,8 @@ describe("SharedResearchWorkspace recipient surface", () => {
     renderWorkspace()
 
     await waitFor(() =>
-      expect(screen.getByTestId("model-selector")).toHaveTextContent(
-        "Anthropic / claude-shared"
+      expect(screen.getByTestId("model-selector")).toHaveAccessibleName(
+        expect.stringContaining("claude-shared (Anthropic)")
       )
     )
     expect(fetchChatModels).toHaveBeenCalledWith({ returnEmpty: true })
@@ -434,8 +434,8 @@ describe("SharedResearchWorkspace recipient surface", () => {
     renderWorkspace()
 
     await waitFor(() =>
-      expect(screen.getByTestId("model-selector")).toHaveTextContent(
-        "local / Qwen2.5-0.5B-Instruct"
+      expect(screen.getByTestId("model-selector")).toHaveAccessibleName(
+        expect.stringContaining("Qwen2.5-0.5B-Instruct (local)")
       )
     )
     fireEvent.change(screen.getByLabelText("Ask about shared sources"), {
@@ -472,8 +472,8 @@ describe("SharedResearchWorkspace recipient surface", () => {
     ])
     renderWorkspace()
     await waitFor(() =>
-      expect(screen.getByTestId("model-selector")).toHaveTextContent(
-        "OpenAI / Vendor/model"
+      expect(screen.getByTestId("model-selector")).toHaveAccessibleName(
+        expect.stringContaining("Vendor/model (OpenAI)")
       )
     )
     fireEvent.change(screen.getByLabelText("Ask about shared sources"), {

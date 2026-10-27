@@ -208,7 +208,7 @@ describe("StudyPackCreateDrawer accepted job lifecycle", () => {
       expect(
         screen.getByDisplayValue("Citrine study pack"),
       ).toBeInTheDocument();
-      expect(screen.getByText("media · 42")).toBeInTheDocument();
+      expect(screen.getByTestId("study-pack-source-0")).toHaveTextContent("Citrine source");
     },
   );
 
@@ -366,7 +366,7 @@ describe("StudyPackCreateDrawer accepted job lifecycle", () => {
     await waitFor(() => expect(message.error).toHaveBeenCalledTimes(1));
     expect(button()).toBeEnabled();
     expect(screen.getByDisplayValue("Citrine study pack")).toBeInTheDocument();
-    expect(screen.getByText("media · 42")).toBeInTheDocument();
+    expect(screen.getByTestId("study-pack-source-0")).toHaveTextContent("Citrine source");
     expect(getStudyPackJob).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
   });

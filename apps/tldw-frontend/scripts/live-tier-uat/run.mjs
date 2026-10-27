@@ -568,8 +568,8 @@ const deferred43Patches = [
     ]
   },
   {
-    "sha256": "ba8315311db5df7dc9c5b42abc4a58a7293a6746b6e274c3360e56fefa53feee",
-    "candidateHash": "e4551fee267bc900c8c85e2bcf88141cfc1d1afe5efe9adb395cc89abd589c9a",
+    "sha256": "9d7166cae8f58368d20f1ff2810491fac3816e7cfc892948ac2d5f591b7d8ed0",
+    "candidateHash": "7649bfefc4da364f95e7979e2f94ce67e7144821705764af5ca0a5be3d9d9a83",
     "edits": [
       {
         "from": "      case 'export-print':",

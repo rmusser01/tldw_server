@@ -275,6 +275,27 @@ export const isConfiguredUsableModel = (
   return true
 }
 
+/**
+ * The "All models" list (CC-06): the models that are ready to use, followed by
+ * every other model in the server's catalog. A model in both keeps its
+ * ready-to-use entry.
+ */
+export const mergeCatalogModels = (
+  readyModels: ModelSelectorDescriptor[] | null | undefined,
+  catalogModels: ModelSelectorDescriptor[] | null | undefined
+): ModelSelectorDescriptor[] => {
+  const ready = Array.isArray(readyModels) ? readyModels : []
+  const seen = new Set(ready.map((model) => getCanonicalModelKey(model)))
+  const extras = (Array.isArray(catalogModels) ? catalogModels : []).filter((model) => {
+    if (!getModelId(model)) return false
+    const key = getCanonicalModelKey(model)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+  return extras.length > 0 ? [...ready, ...extras] : ready
+}
+
 export const filterModelsForScope = (
   models: ModelSelectorDescriptor[] | null | undefined,
   scope: ModelListScope

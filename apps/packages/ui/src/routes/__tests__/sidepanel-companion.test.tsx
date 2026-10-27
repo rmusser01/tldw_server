@@ -110,6 +110,17 @@ describe("SidepanelCompanion", () => {
     expect(screen.getByTestId("sidepanel-header")).toHaveTextContent("Companion")
   })
 
+  it("XS-17: pins a way back to chat above the Companion dashboard", async () => {
+    renderRoute()
+
+    const shell = await screen.findByTestId("companion-home-shell")
+    const chatLink = screen.getByRole("link", { name: "Open chat" })
+    expect(chatLink).toHaveAttribute("href", "/?view=chat")
+    expect(
+      chatLink.compareDocumentPosition(shell) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
   it("records the pending selection capture when the companion route opens", async () => {
     window.sessionStorage.setItem(
       "tldw:companion:pendingCapture",
