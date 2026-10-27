@@ -189,6 +189,13 @@ def test_new_and_stale_entries_fail_with_the_fix(tmp_path: Path) -> None:
     assert stale.startswith("core.DB_Management.a -> core.X.y: stale, the edge is gone. Delete the line")
 
 
+def test_a_fallen_but_nonzero_count_is_stale_and_asks_to_lower_it(tmp_path: Path) -> None:
+    pair = ("core.DB_Management.store", "core.Foo.logic")
+    baseline = {pair: (3, ""), ("core.DB_Management.store", "core.Bar.leaf"): (1, "")}
+    (stale,) = violations(measure(_tree(tmp_path)), baseline)
+    assert stale.startswith(f"{pair[0]} -> {pair[1]}: stale, baseline 3 but 1 measured. Lower it to 1"), stale
+
+
 def test_db_management_imports_of_db_loading_modules_only_fall() -> None:
     problems = violations(measure(), load(BASELINE))
     assert not problems, f"{len(problems)} problem(s):\n" + "\n".join(problems)
