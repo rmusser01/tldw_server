@@ -873,7 +873,7 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
   return (
     <section className="space-y-4">
       <header className="rounded-xl border border-slate-200 bg-white p-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold text-slate-900">Presentation Studio</h1>
             <p className="mt-1 text-sm text-slate-600">
@@ -882,15 +882,30 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
             </p>
           </div>
           <div className="min-w-[240px] flex-1 sm:max-w-sm">
-            <VisualStylePicker
-              label="Choose visual style"
-              value={encodeVisualStyleValue(visualStyleId, visualStyleScope)}
-              styles={styleOptions}
-              onChange={handleDetailStyleChange}
-              disabled={stylesLoading}
-              loading={stylesLoading}
-              description="Updates deck appearance defaults and future generated slides. Existing slide content stays unchanged."
-            />
+            <p className="mb-2 text-sm text-slate-600">
+              Visual style: {visualStyleName || "Default"}
+            </p>
+            <details className="rounded-lg border border-slate-200 p-3">
+              <summary className="cursor-pointer text-sm font-medium text-slate-900">
+                Visual style settings
+              </summary>
+              <div className="mt-4 space-y-4">
+                <VisualStylePicker
+                  label="Choose visual style"
+                  value={encodeVisualStyleValue(visualStyleId, visualStyleScope)}
+                  styles={styleOptions}
+                  onChange={handleDetailStyleChange}
+                  disabled={stylesLoading}
+                  loading={stylesLoading}
+                  description="Updates deck appearance defaults and future generated slides. Existing slide content stays unchanged."
+                />
+                <VisualStyleManager
+                  selectedCustomStyle={selectedCustomStyle}
+                  refreshVisualStyles={refreshVisualStyles}
+                  onStyleSelected={applySelectedStyle}
+                />
+              </div>
+            </details>
           </div>
           <PresentationExportMenu
             key={detailContextKey}
@@ -900,12 +915,6 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
           />
         </div>
       </header>
-
-      <VisualStyleManager
-        selectedCustomStyle={selectedCustomStyle}
-        refreshVisualStyles={refreshVisualStyles}
-        onStyleSelected={applySelectedStyle}
-      />
 
       <ProjectWorkspace canRender={Boolean(capabilities?.hasPresentationRender)} />
     </section>

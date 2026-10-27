@@ -269,6 +269,21 @@ describe("PresentationStudioPage", () => {
     expect(downloadMock).not.toHaveBeenCalled()
   })
 
+  it("keeps saved-deck style settings collapsed while the editor remains available", async () => {
+    const record = structuredRecord("presentation-layout", "Saved deck")
+    clientMocks.getPresentation.mockResolvedValue({ record, etag: 'W/"v1"' })
+    render(<PresentationStudioPage mode="detail" projectId={record.id} />)
+    expect(await screen.findByLabelText("Slide title")).toBeVisible()
+    expect(screen.getByRole("button", { name: "Export saved presentation" })).toBeVisible()
+    const search = await screen.findByLabelText("Search visual styles")
+    expect(search).not.toBeVisible()
+    const settings = screen.getByText("Visual style settings", { exact: true })
+    fireEvent.click(settings)
+    expect(screen.getByLabelText("Search visual styles")).toBeVisible()
+    fireEvent.click(settings)
+    expect(screen.getByLabelText("Search visual styles")).not.toBeVisible()
+  })
+
   it("keeps input focus inside the editor and autosaves the real draft", async () => {
     const record = structuredRecord("presentation-focus", "Focus deck")
     clientMocks.getPresentation.mockResolvedValue({ record, etag: 'W/"v1"' })
@@ -882,6 +897,7 @@ describe("PresentationStudioPage", () => {
     render(<PresentationStudioPage mode="detail" projectId="presentation-style" />)
 
     await screen.findByText("Timeline")
+    fireEvent.click(screen.getByText("Visual style settings", { exact: true }))
     fireEvent.click(screen.getByRole("button", { name: /Timeline/ }))
 
     const state = usePresentationStudioStore.getState()
@@ -1066,6 +1082,7 @@ describe("PresentationStudioPage", () => {
 
     render(<PresentationStudioPage mode="detail" projectId="presentation-custom-style" />)
 
+    fireEvent.click(await screen.findByText("Visual style settings", { exact: true }))
     fireEvent.click(await screen.findByTestId("presentation-studio-edit-custom-style"))
     fireEvent.change(screen.getByLabelText("Custom style name"), {
       target: { value: "CGPSC Rapid Review" }
