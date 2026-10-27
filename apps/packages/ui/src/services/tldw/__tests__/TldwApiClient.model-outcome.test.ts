@@ -63,6 +63,7 @@ afterEach(() => {
 
 describe("chat model send outcomes recorded at the transport (CC-01)", () => {
   it("marks the model unreachable when a character-chat stream gets a 502", async () => {
+    // eslint-disable-next-line require-yield -- the mocked stream fails before its first chunk
     mocks.bgStream.mockImplementation(async function* () {
       throw httpError(502)
     })
@@ -103,6 +104,7 @@ describe("chat model send outcomes recorded at the transport (CC-01)", () => {
   })
 
   it("records a direct streamChatCompletion send (native-history path)", async () => {
+    // eslint-disable-next-line require-yield -- the mocked stream fails before its first chunk
     mocks.bgStream.mockImplementationOnce(async function* () {
       throw httpError(502)
     })
@@ -125,12 +127,14 @@ describe("chat model send outcomes recorded at the transport (CC-01)", () => {
   })
 
   it("does not treat a validation error or an abort as evidence either way", async () => {
+    // eslint-disable-next-line require-yield -- the mocked stream fails before its first chunk
     mocks.bgStream.mockImplementationOnce(async function* () {
       throw httpError(422)
     })
     await expect(
       consume(new TldwApiClient().streamCharacterChatCompletion("chat-1", characterPayload))
     ).rejects.toThrow()
+    // eslint-disable-next-line require-yield -- the mocked stream fails before its first chunk
     mocks.bgStream.mockImplementationOnce(async function* () {
       throw new DOMException("The operation was aborted.", "AbortError")
     })
