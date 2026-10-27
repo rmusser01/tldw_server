@@ -58,7 +58,7 @@ def boundary(monkeypatch: pytest.MonkeyPatch) -> Boundary:
     )
     monkeypatch.setattr(
         provider,
-        "_AsyncClient",
+        "create_async_client",
         lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(send), **kwargs),
     )
     return posts, discoveries
@@ -229,7 +229,7 @@ def alias_boundary(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureReque
 
     monkeypatch.setattr(inventory, "_http_fetch", fetch)
     monkeypatch.setattr(
-        provider, "_AsyncClient",
+        provider, "create_async_client",
         lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(send), **kwargs),
     )
     return state

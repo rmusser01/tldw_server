@@ -773,7 +773,9 @@ async def test_current_configuration_is_rechecked_immediately_before_request(
         current_config_loader=load_config,
     )
 
-    assert order == ["config", "config", "config", "network"]  # the last is the request hook's
+    # Commercial targets load four times: the attempt, the request, the reload after model
+    # discovery (#3191) and, last, the request hook's final recheck (#3347).
+    assert order == ["config", "config", "config", "config", "network"]
 
 
 @pytest.mark.asyncio
@@ -904,8 +906,9 @@ async def test_dispatch_does_not_yield_after_final_recheck_before_transport(
     def load_config() -> SlidesStandaloneHtmlConfig:
         nonlocal loader_calls
         loader_calls += 1
-        # The last recheck is the request hook's; the flip is scheduled there and must not run first.
-        if loader_calls == 3:
+        # The last recheck (the 4th: after #3191's post-discovery reload) is the request hook's;
+        # the flip is scheduled there and must not run first.
+        if loader_calls == 4:
             asyncio.get_running_loop().call_soon(flip_config)
         return config
 
@@ -923,7 +926,7 @@ async def test_dispatch_does_not_yield_after_final_recheck_before_transport(
     await asyncio.wait_for(config_flipped.wait(), timeout=2)
 
     assert result == DOCUMENT.encode()
-    assert loader_calls == 3
+    assert loader_calls == 4
     assert order == ["network", "config-flipped"]
 
 
@@ -940,7 +943,8 @@ async def test_kill_switch_at_the_final_recheck_sends_nothing_and_is_not_wrapped
     def load_config() -> SlidesStandaloneHtmlConfig:
         nonlocal loader_calls
         loader_calls += 1
-        return config if loader_calls < 3 else killed
+        # The 4th load is the request hook's final recheck (the 3rd is #3191's post-discovery reload).
+        return config if loader_calls < 4 else killed
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
@@ -950,7 +954,7 @@ async def test_kill_switch_at_the_final_recheck_sends_nothing_and_is_not_wrapped
         await _call(provider_module, config, httpx.MockTransport(handler), current_config_loader=load_config)
 
     assert exc_info.value.code == "standalone_html_egress_disabled"
-    assert loader_calls == 3
+    assert loader_calls == 4
     assert seen == []
 
 
@@ -962,7 +966,7 @@ async def test_fresh_attempt_snapshot_solely_controls_overall_timeout(
     target = _target("openai_official_chat_v1")
     initial = _config(target, overall_timeout=0.01)
     fresh = _config(target, overall_timeout=1.0)
-    snapshots = iter((initial, fresh, fresh))
+    snapshots = iter((initial, fresh, fresh, fresh))
     loader_calls = 0
     network_calls = 0
 
@@ -1000,7 +1004,7 @@ async def test_fresh_attempt_snapshot_solely_controls_overall_timeout(
     )
 
     assert result == DOCUMENT.encode()
-    assert loader_calls == 3
+    assert loader_calls == 4
     assert network_calls == 1
 
 
