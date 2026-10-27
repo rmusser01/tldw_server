@@ -1061,14 +1061,19 @@ async def _existing_input_validation_request(
 
 
 def _admitted_native_provider_error_response(
-    admission: dict[str, Any], error_code: str,
+    admission: dict[str, Any], error_code: str, message: str | None = None,
 ) -> StreamingResponse:
-    """Keep an accepted input identifiable when provider preparation fails."""
+    """Keep an accepted input identifiable when provider preparation fails.
+
+    ``message`` replaces the allow-listed copy only for ``model_not_available``, whose text is built from the
+    request's own provider and model.
+    """
     code = error_code if error_code in _PROVIDER_CREDENTIAL_MESSAGES else "provider_configuration_invalid"
+    public_message = message if code == "model_not_available" and message else _PROVIDER_CREDENTIAL_MESSAGES[code]
     # Freeze only server-owned metadata and allow-listed public error copy.
     frames = (
         {"tldw_history_admission_v1": admission},
-        {"error": {"code": code, "message": _PROVIDER_CREDENTIAL_MESSAGES[code]}},
+        {"error": {"code": code, "message": public_message}},
     )
     encoded = tuple("data: " + json.dumps(frame) + "\n\n" for frame in frames)
 
@@ -1086,10 +1091,18 @@ def _provider_credential_http_exception(exc: BaseException) -> HTTPException:
     return _provider_credential_http_exception_for_code(code)
 
 
-def _provider_credential_http_exception_for_code(code: str) -> HTTPException:
-    """Build a bounded downstream-provider response for an allow-listed code."""
+def _provider_credential_http_exception_for_code(code: str, message: str | None = None) -> HTTPException:
+    """Build a bounded downstream-provider response for an allow-listed code.
+
+    ``message`` is used only for ``model_not_available``, whose text names the request's own model and provider.
+    """
     if code not in _PROVIDER_CREDENTIAL_MESSAGES:
         code = "provider_configuration_invalid"
+    if code == "model_not_available":
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error_code": code, "message": message or _PROVIDER_CREDENTIAL_MESSAGES[code]},
+        )
     if code in {"provider_disabled", "model_not_allowed"}:
         return HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -1271,6 +1284,8 @@ def _record_provider_stream_error(
         and error.output_emitted is False
         and getattr(error, "credential_refresh_retry_safe", None) is True
     )
+    if error.code == "model_not_available":
+        error_state["model_not_available_message"] = error.message
 
 
 def _sanitize_provider_stream_call(
@@ -5858,7 +5873,9 @@ async def create_chat_completion(
 
                         if oauth_retry_state["attempted"]:
                             _record_openai_oauth_retry("retry_auth_failed")
-                        raise _provider_credential_http_exception_for_code(stream_error_code)
+                        raise _provider_credential_http_exception_for_code(
+                            stream_error_code, stream_error_state.get("model_not_available_message"),
+                        )
 
                     if persona_debug_requested and persona_debug_meta and persona_debug_meta.get("debug_id"):
                         try:
@@ -6088,6 +6105,13 @@ async def create_chat_completion(
                 raise_detached_error(_provider_credential_http_exception(credential_error))
 
             except ChatModelNotAvailableError as unavailable:
+                if request_data.stream and history_admission is not None:
+                    native_stream_failure = _provider_credential_http_exception_for_code(
+                        "model_not_available", str(unavailable),
+                    )
+                    return _admitted_native_provider_error_response(
+                        history_admission, "model_not_available", str(unavailable),
+                    )
                 raise_detached_error(
                     HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,

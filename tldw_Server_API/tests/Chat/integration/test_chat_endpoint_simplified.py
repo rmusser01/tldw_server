@@ -6938,6 +6938,26 @@ def test_unlisted_model_rejection_names_model_provider_and_fix(
     assert generation_keys == []
 
 
+@pytest.mark.provider_inventory
+def test_streaming_unlisted_model_rejection_matches_the_nonstream_answer(
+    authenticated_client, mock_chacha_db, setup_dependencies,
+):
+    """A non-strict stream for an unlisted model gets the same 400 model_not_available, not 502 (re-review M2)."""
+    from tldw_Server_API.app.core.exceptions import ChatModelNotAvailableError
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    response, _runtime_type, generation_keys = _real_openai_inventory_call(
+        authenticated_client, stream=True, auth_source=None,
+        discover=lambda *_a, **_k: ModelDiscoveryResult("ready", ("gpt-other",)),
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST, response.text
+    detail = response.json()["detail"]
+    assert detail["error_code"] == "model_not_available"
+    assert detail["message"] == ChatModelNotAvailableError.message_for("openai", "gpt-4o-mini")
+    assert generation_keys == []
+
+
 @pytest.mark.asyncio
 async def test_real_openai_nonstream_upstream_status_is_concurrency_isolated(monkeypatch):
     import httpx

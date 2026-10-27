@@ -32,6 +32,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatConfigurationError,
     SanitizedProviderStreamError,
 )
+from tldw_Server_API.app.core.exceptions import ChatModelNotAvailableError
 from tldw_Server_API.app.core.Chat.generation_metadata import (
     GENERATION_STATUS_COMPLETE,
     GENERATION_STATUS_INTERRUPTED,
@@ -359,6 +360,7 @@ PROVIDER_STREAM_ERROR_MESSAGES = {
     "provider_disabled": "The selected provider is disabled by administrator policy.",
     "model_not_allowed": "The selected model is not allowed for this provider.",
     "provider_configuration_invalid": "The selected provider configuration is invalid.",
+    "model_not_available": "The selected model is not available for this provider.",
     "provider_model_inventory_unavailable": (
         "The provider's model list could not be checked right now, so the model could not be confirmed. "
         "Try again shortly."
@@ -370,6 +372,7 @@ PROVIDER_STREAM_ERROR_MESSAGES = {
     ),
 }
 _PROVIDER_STREAM_ERROR_STATUS = {
+    "model_not_available": 400,
     "provider_authentication_failed": 502,
     "provider_unavailable": 502,
     "provider_output_limit": 502,
@@ -497,6 +500,10 @@ def normalize_provider_stream_error(value: Any) -> Optional[NormalizedProviderSt
 
     if code not in PROVIDER_STREAM_ERROR_MESSAGES:
         code = "provider_unavailable"
+    message = PROVIDER_STREAM_ERROR_MESSAGES[code]
+    if code == "model_not_available" and isinstance(candidate, ChatModelNotAvailableError):
+        # Built from the request's own provider and model, never upstream text: the same answer as non-stream.
+        message = str(candidate)
     replay_certified = bool(
         isinstance(value, ChatAPIError)
         and getattr(value, "upstream_dispatched", None) is False
@@ -509,7 +516,7 @@ def normalize_provider_stream_error(value: Any) -> Optional[NormalizedProviderSt
     )
     return NormalizedProviderStreamError(
         code=code,
-        message=PROVIDER_STREAM_ERROR_MESSAGES[code],
+        message=message,
         status_code=_PROVIDER_STREAM_ERROR_STATUS.get(code, 503),
         replay_certified=replay_certified,
         credential_refresh_retry_certified=credential_refresh_retry_certified,
