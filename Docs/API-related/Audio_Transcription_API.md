@@ -391,10 +391,12 @@ failopen_cap_minutes = 5.0
 ### WebSocket API (Real-time)
 
 - Endpoint: `ws://localhost:8000/api/v1/audio/stream/transcribe`
-- Authentication:
-  - Single-user: `?token=<SINGLE_USER_API_KEY>` in the query OR first message `{ "type": "auth", "token": "<SINGLE_USER_API_KEY>" }`
-  - Multi-user JWT: `Authorization: Bearer <JWT>` on the upgrade request, or first message `{ "type": "auth", "token": "<JWT>" }`.
-  - Multi-user API Keys: `X-API-KEY` header supported; keys can be scoped to endpoints (must include `audio.stream.transcribe`) and optionally path-prefixed allowlists. Quotas may be enforced per key.
+- Authentication (the core WebSocket resolver, so revocation and key rules match HTTP):
+  - On the upgrade request: `Authorization: Bearer <JWT or API key>`, `X-API-KEY: <key>`, or the browser subprotocol `bearer, <JWT or key>`. A refused credential closes `4401` before the socket is accepted.
+  - Otherwise the first message: `{ "type": "auth", "token": "<JWT or API key>" }` within 5 seconds. Any other first message closes `4400` unread; a missing, refused or revoked token closes `4401`.
+  - Single-user WebUI sessions authenticate with their cookie and may send `config` first.
+  - Multi-user API keys and scoped JWTs can be limited to endpoints (must include `audio.stream.transcribe`) and path prefixes (`4403`); quotas may be enforced per key or token.
+  - Deprecated: `?token=` is read only with `AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH=1`, with a warning in the server log.
 - Protocol:
   - First post-auth message must be config: `{ "type": "config", "protocol_version": 1, "mode": "dictate|captions", "audio_format": "pcm16", "sample_rate": 16000, "channels": 1, "language": "en", "model_variant": "standard|onnx|mlx" }`
   - Send audio chunks as JSON PCM16 frames: `{ "type": "audio", "data": "<base64 pcm16 little-endian mono 16khz>" }`
@@ -503,16 +505,17 @@ The insight payload mirrors granola-style UX:
 ### Auth & Close Codes
 
 - Auth modes
-  - Single-user: pass `?token=<API_KEY>` query, or `X-API-KEY` header, or `Authorization: Bearer <API_KEY>`, or first message `{ "type":"auth", "token":"..." }`.
-  - Multi-user: prefer `Authorization: Bearer <JWT>`; first-message JWT also accepted. Virtual API keys via `X-API-KEY` are supported with endpoint/path allowlists and DB-backed quotas.
+  - Single-user: `X-API-KEY` header, `Authorization: Bearer <API_KEY>`, the `bearer, <API_KEY>` subprotocol, or first message `{ "type":"auth", "token":"..." }`; `?token=<API_KEY>` only with `AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH=1` (deprecated).
+  - Multi-user: `Authorization: Bearer <JWT>` (or the subprotocol), or a first-message JWT or API key. Virtual API keys via `X-API-KEY` are supported with endpoint/path allowlists and DB-backed quotas.
 - Quotas
   - Daily minutes and concurrent streams are per-user usage quotas (`limits.audio_daily_minutes`, `limits.audio_concurrent_streams`), enforced only when `USAGE_QUOTAS_ENABLED` is on and a value is set. Open streams are counted across workers with `RG_BACKEND=redis`; with `memory` (the default) each worker process counts its own.
   - On a daily-minutes violation, the server emits `{ "type":"error", "error_type":"quota_exceeded", "quota":"daily_minutes" }` and closes with code `4003`. A stream over the concurrent-streams limit is refused when it starts; "Concurrency limits" in `Docs/Operations/Usage_Quotas.md` gives each socket's error frame and close code.
 - Common close codes
-  - `4401` Unauthorized (auth missing/invalid)
-  - `4403` Forbidden (endpoint/path not allowed or key/JWT quota exceeded)
-  - `4003` Application quota violation (daily minutes / concurrent streams)
-  - `1008` Policy violation (e.g., IP not on allowlist)
+  - `4400` First message is not `{ "type": "auth", ... }` when the upgrade carried no credential
+  - `4401` Unauthorized (auth missing/invalid/revoked, or no auth message within 5 seconds; also a single-user key from outside `SINGLE_USER_ALLOWED_IPS`)
+  - `4403` Forbidden (endpoint/path not allowed for the key or token)
+  - `4003` Application quota violation (daily minutes / concurrent streams, or a key's or token's call quota)
+  - `1008` Policy violation (quota close code when `AUDIO_WS_QUOTA_CLOSE_1008=1`)
   - `1011` Internal error (e.g., no models available, or fallback failed when explicitly enabled)
   - `4400` Unsupported protocol version on WS surfaces that do not accept the requested version
 
