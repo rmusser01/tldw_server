@@ -57,8 +57,11 @@ def _subprotocol_token(websocket: WebSocket) -> str | None:
 
 
 def auth_subprotocol(websocket: WebSocket) -> str | None:
-    """The subprotocol to accept with: the ``bearer`` marker, never the credential after it."""
-    return _BEARER_SUBPROTOCOL if _subprotocol_token(websocket) else None
+    """The subprotocol to accept with: the client's own ``bearer`` marker, spelled as offered (a
+    browser compares the echo exactly), never the credential after it."""
+    if not _subprotocol_token(websocket):
+        return None
+    return websocket.headers["sec-websocket-protocol"].split(",", 1)[0].strip()
 
 
 def has_ws_credential(websocket: WebSocket) -> bool:
@@ -95,7 +98,9 @@ async def resolve_ws_principal(
     """
     token = _subprotocol_token(websocket)
     if token and not _extract_bearer_token(websocket):
-        return await verify_ws_credential(websocket, token=token, required_scope=required_scope)
+        # The browser's Authorization header: it rides with X-API-KEY as the two HTTP headers do.
+        api_key = websocket.headers.get("x-api-key")
+        return await verify_ws_credential(websocket, token=token, api_key=api_key, required_scope=required_scope)
     if not has_ws_credential(websocket):
         cookie = await resolve_single_user_cookie_websocket(websocket, ignore_signed_url_token=ignore_signed_url_token)
         if cookie is not None:
@@ -114,18 +119,20 @@ async def resolve_ws_principal_or_deprecated_query(
     required_scope: str | None = None,
 ) -> AuthPrincipal:
     """``resolve_ws_principal``, plus the DEPRECATED ``?token=`` / ``?api_key=`` channels that
-    shipped clients still send (ACP, prompt-studio and watchlists; TASK-13950.7).
+    shipped clients still send (ACP, prompt-studio, watchlists and persona; TASK-13950.7).
 
     The query is read only when no resolver channel competes (``has_ws_credential``), so a header
-    or bearer-subprotocol credential always wins. It logs ``DEPRECATED_WS_CHANNEL`` once and is
-    verified by ``verify_ws_credential``. Delete it once those clients send the bearer subprotocol.
+    or bearer-subprotocol credential always wins. It logs ``DEPRECATED_WS_CHANNEL`` once per connection
+    and is verified by ``verify_ws_credential``. Delete it once those clients send the bearer subprotocol.
     """
     if not has_ws_credential(websocket):
         token = websocket.query_params.get("token") or None
         api_key = websocket.query_params.get("api_key") or None
         names = [name for name, value in (("token", token), ("api_key", api_key)) if value]
         if names:
-            logger.warning(DEPRECATED_WS_CHANNEL, f"query {' and '.join(names)}", websocket.url.path)
+            if not getattr(websocket.state, "ws_deprecation_logged", False):  # persona re-verifies its caller
+                websocket.state.ws_deprecation_logged = True
+                logger.warning(DEPRECATED_WS_CHANNEL, f"query {' and '.join(names)}", websocket.url.path)
             return await verify_ws_credential(websocket, token=token, api_key=api_key, required_scope=required_scope)
     return await resolve_ws_principal(websocket, required_scope=required_scope)
 
@@ -137,13 +144,14 @@ async def verify_ws_credential(
     api_key: str | None = None,
     required_scope: str | None = None,
 ) -> AuthPrincipal:
-    """Verify a credential found elsewhere in the handshake as ``Authorization: Bearer`` or
-    ``X-API-KEY``, on the same path as ``resolve_ws_principal``.
+    """Verify a credential found elsewhere (the bearer subprotocol, a deprecated query channel, a
+    first-message frame) as ``Authorization: Bearer`` or ``X-API-KEY``, on the same path as
+    ``resolve_ws_principal``.
 
-    ``resolve_ws_principal`` uses it for the bearer subprotocol, and a route for a deprecated
-    channel; call it when no ``Authorization: Bearer`` header competes (a route shim: when
-    ``has_ws_credential`` is False). An ``Authorization`` header of another scheme (a proxy's
-    Basic auth) is replaced by the token, so the verifier sees the token.
+    Only the credentials given are verified: the handshake's own ``Authorization`` (a proxy's
+    Basic auth, say) and ``X-API-KEY`` are dropped, so a first-frame token stands alone and is
+    not rescued by HTTP's fall-back to a handshake key. A route shim calls it when
+    ``has_ws_credential`` is False.
 
     Raises ``WebSocketException`` as ``resolve_ws_principal`` does, and 4401 when given no
     credential: the handshake's own headers are never verified here, or a bare cookie would
@@ -151,11 +159,8 @@ async def verify_ws_credential(
     """
     if not token and not api_key:
         raise WebSocketException(code=WS_UNAUTHENTICATED, reason="authentication_required")
-    replaced: set[bytes] = {b"authorization"} if token else set()
-    if api_key:
-        replaced.add(b"x-api-key")
     handshake = websocket.scope.get("headers") or []
-    headers = [(name, value) for name, value in handshake if name not in replaced]
+    headers = [(name, value) for name, value in handshake if name not in (b"authorization", b"x-api-key")]
     try:
         if token:
             headers.append((b"authorization", f"Bearer {token}".encode("latin-1")))
@@ -177,10 +182,17 @@ async def _verify(
             raise WebSocketException(code=status.WS_1011_INTERNAL_ERROR, reason="auth_unavailable") from None
         code = WS_FORBIDDEN if exc.status_code == status.HTTP_403_FORBIDDEN else WS_UNAUTHENTICATED
         raise WebSocketException(code=code, reason="invalid_token") from None
-    if (
-        required_scope
-        and principal.api_key_id is not None
-        and not has_scope(normalize_scope(getattr(request.state, "_api_key_scope", None)), required_scope)
-    ):
+    key_scopes = normalize_scope(getattr(request.state, "_api_key_scope", None))
+    if required_scope and principal.api_key_id is not None and not has_scope(key_scopes, required_scope):
         raise WebSocketException(code=WS_FORBIDDEN, reason="insufficient_scope")
+    # What HTTP verified, for a route that checks a key's scopes per action or forwards its caller to
+    # an internal HTTP call (persona): a scoped key's scopes, and the credential that won (the JWT, or
+    # the key) as the one header that carries it, never a loser beside it. In process; never log it.
+    websocket.state.ws_api_key_scopes = sorted(key_scopes) if principal.api_key_id is not None else None
+    bearer = _extract_bearer_token(request) or ""
+    websocket.state.ws_credential_headers = (
+        {"x-api-key": request.headers.get("x-api-key") or bearer}
+        if principal.token_type == "api_key"
+        else {"authorization": f"Bearer {bearer}"}
+    )
     return principal

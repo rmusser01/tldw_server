@@ -97,7 +97,7 @@ def test_first_party_websocket_auth_files_use_shared_cookie_resolver():
             # A whole word, so the deprecated query shim's longer name cannot satisfy it.
             assert re.search(r"\bresolve_ws_principal\b", source), relative_path
             assert "resolve_single_user_cookie_websocket" not in source, relative_path  # the resolver owns it
-        elif relative_path.endswith(("endpoints/agent_client_protocol.py", "endpoints/watchlists.py")):
+        elif relative_path.endswith(("endpoints/agent_client_protocol.py", "endpoints/watchlists.py", "endpoints/persona.py")):
             # resolve_ws_principal behind the deprecated query shim (pinned in
             # tests/lint/test_auth_token_parsing_ratchet.py; TASK-13950.61 removes it).
             assert re.search(r"\bresolve_ws_principal_or_deprecated_query\b", source), relative_path

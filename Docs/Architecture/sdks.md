@@ -17,8 +17,8 @@ This document maps the client-side packages: the voice-assistant SDKs (with thei
 
 ## Voice-assistant session (dataflow — both language SDKs)
 
-1. Client opens a WebSocket to `/api/v1/voice/assistant` and sends `AUTH`; the server also honors `?token=` on the URL (both SDKs send both — note the query-string form is a log-leak surface).
-2. Server auth: a two-dot JWT verifies against the JWT service with a session-blacklist check; anything else is an API key (single-user fixed id + IP allowlist, or multi-user validation with read scope); 10 s auth timeout → close 4401; a non-AUTH first message → close 4400.
+1. Client opens a WebSocket to `/api/v1/voice/assistant` and sends `AUTH`; the server reads `?token=` on the URL only when the `AUTH` frame has no token, and logs it as deprecated (both SDKs send both — the query-string form is a log-leak surface).
+2. Server auth: the token goes through the shared WebSocket verifier (`core/AuthNZ/websocket_principal.verify_ws_credential`), so JWT revocation, the API key's `read` scope, and the single-user key and IP allowlist follow HTTP; 10 s auth timeout → close 4401; a non-AUTH first message → close 4400.
 3. A voice session is created with per-user ChaChaNotes persistence (client id `voice_assistant`) — **DB init failure is non-fatal**; the session continues without persistence.
 4. `CONFIG` (STT model/language, TTS format/voice, sample rate) — the server nulls provider/model hints and re-resolves via its own defaults, so SDK TTS defaults (`kokoro`/`af_heart`) are advisory only.
 5. Base64 `AUDIO` frames then `COMMIT`; the server emits `TRANSCRIPTION` → `INTENT` → `ACTION_START`/`ACTION_RESULT` → `TTS_CHUNK*` → `TTS_END`; workflow subscription available. Both SDKs auto-reconnect (5 attempts).

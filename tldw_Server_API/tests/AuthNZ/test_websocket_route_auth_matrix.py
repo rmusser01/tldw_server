@@ -14,11 +14,12 @@ and checks its route list against the ratchet's ``WS`` baseline lines:
   parameter, and, for first-frame routes, in the auth frame.
 - A valid AuthNZ access token must get past authentication on every route (the control
   column), so a refusal above means something.
-- ACP, prompt-studio and watchlists still take the query ``token``/``api_key`` that shipped
-  clients send (ACP and prompt-studio also the ``x-api-key`` subprotocol), through a
+- ACP, prompt-studio, watchlists and persona still take the query ``token``/``api_key`` that
+  shipped clients send (ACP and prompt-studio also the ``x-api-key`` subprotocol), through a
   deprecated shim that hands them to the resolver's own verification. Their section below
   proves the shim admits, refuses and warns like the resolver, and that the retired
   channels are refused. Sandbox had no such client, so its query credentials are retired.
+  Voice reads a deprecated ``?token=`` only when its auth frame carries none.
 
 The revoked token is a real AuthNZ access token whose jti is on the token blacklist, the
 check HTTP auth runs in verify_jwt_and_fetch_user. Known gaps are strict xfails naming
@@ -99,18 +100,20 @@ ADMITTED_AFTER_S = 1.0
 MAX_FRAMES = 8
 SANDBOX = "/api/v1/sandbox/runs/{run_id}/stream"
 WATCHLISTS = "/api/v1/watchlists/runs/{run_id}/stream"
+PERSONA = "/api/v1/persona/stream"
+VOICE = "/api/v1/voice/assistant"
 # Routes whose deprecated credential shim (websocket_principal.resolve_ws_principal_or_deprecated_query)
 # reads the query, and for ACP and prompt-studio (agent_client_protocol._authenticate_ws) the
 # x-api-key subprotocol too; and of those, the ones that accept once authenticated, with the
 # API-key scope each needs. The watchlists URL names run 1, which the fixture seeds.
-SHIM_ROUTES = {path for path in ROUTES if path.startswith(("/api/v1/acp/", "/api/v1/prompt-studio/", WATCHLISTS))}
-SHIM_ACCEPTING = {"/api/v1/acp/multiplex": "write", "/api/v1/prompt-studio/ws": "read", WATCHLISTS: "read"}
+SHIM_ROUTES = {path for path in ROUTES if path.startswith(("/api/v1/acp/", "/api/v1/prompt-studio/", WATCHLISTS, PERSONA))}
+SHIM_ACCEPTING = {"/api/v1/acp/multiplex": "write", "/api/v1/prompt-studio/ws": "read", WATCHLISTS: "read", PERSONA: "read"}
 QUERY_CHANNELS = ("query token", "query api_key")
 DEPRECATED_CHANNELS = (*QUERY_CHANNELS, "x-api-key subprotocol")
 SHIM_CASES = [
     (route, channel)
     for route in SHIM_ACCEPTING
-    for channel in (QUERY_CHANNELS if route == WATCHLISTS else DEPRECATED_CHANNELS)
+    for channel in (QUERY_CHANNELS if route in {WATCHLISTS, PERSONA} else DEPRECATED_CHANNELS)
 ]
 DEPRECATION_MARK = "Deprecated WebSocket credential channel"
 
@@ -515,7 +518,7 @@ def test_rejects_a_revoked_jwt_in_the_query(env: SimpleNamespace, route: str) ->
         else:
             # An auth frame without a token makes a route fall back to the query token.
             assert _outcome(env.client, url, frame={"type": "auth"}) in FIRST_FRAME_REFUSED
-    if route in SHIM_ROUTES:
+    if route in SHIM_ROUTES | {VOICE}:
         # Refused because the shim verified the token, not because it ignored it.
         assert [message for message in _deprecations(warned) if "query token" in message], warned
         assert not [message for message in warned if env.revoked in message]
@@ -554,6 +557,26 @@ def test_workflows_ws_accepts_an_authnz_access_token_and_rejects_it_revoked(env:
     with env.client.websocket_connect(url, headers={"X-API-KEY": env.api_key}) as ws:  # multi-user key
         assert ws.receive_json()["type"] == "snapshot"
     assert _outcome(env.client, url, headers={"Authorization": f"Bearer {env.revoked}"}) == "close 4401"
+
+
+def test_bearer_subprotocol_rides_with_the_handshake_api_key_as_http_headers_do(env: SimpleNamespace) -> None:
+    """The bearer subprotocol stands in for ``Authorization``, so beside an ``X-API-KEY`` it resolves as
+    the two HTTP headers do: the JWT first, the key when the JWT is refused with 401. (A first-frame
+    token stands alone; see test_voice_frame_token_is_not_rescued_by_a_handshake_api_key.)"""
+    env.workflows_db.create_run(
+        run_id="matrix-run-subprotocol-key",
+        tenant_id="default",
+        user_id=str(env.user_id),
+        inputs={},
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot={"name": "ws-auth-matrix", "version": 1, "steps": []},
+    )
+    url = "/api/v1/workflows/ws?run_id=matrix-run-subprotocol-key"
+    revoked = ["bearer", env.revoked]
+
+    assert _outcome(env.client, url, subprotocols=revoked) == "close 4401"
+    assert _accepted_subprotocol(env.client, url, headers={"X-API-KEY": env.api_key}, subprotocols=revoked) == "bearer"
 
 
 def _deprecated_request(env: SimpleNamespace, route: str, channel: str, *, valid: bool) -> tuple[str, dict[str, object]]:
@@ -702,18 +725,87 @@ def test_sandbox_retired_its_query_credentials(env: SimpleNamespace) -> None:
     assert _deprecations(warned) == []
 
 
-@pytest.mark.parametrize("route", [SANDBOX, WATCHLISTS])
+@pytest.mark.parametrize("route", [SANDBOX, WATCHLISTS, PERSONA])
 def test_browser_bearer_subprotocol_and_single_user_key(
     env: SimpleNamespace, route: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Browsers cannot set WebSocket headers. Before the core resolver these routes ignored the
-    bearer subprotocol, so a browser could only reach them through a query credential; the
-    single-user key in ``X-API-KEY`` already worked and still does."""
+    """Browsers cannot set WebSocket headers. Before the core resolver sandbox and watchlists ignored
+    the bearer subprotocol, so a browser could only reach them through a query credential; the
+    single-user key in ``X-API-KEY`` already worked there and still does. Persona read the
+    subprotocol but refused the single-user key on every channel: it checked the key with the
+    multi-user API-key manager."""
     url = ROUTES[route][0]
     assert _accepted_subprotocol(env.client, url, subprotocols=["bearer", env.valid]) == "bearer"
     _single_user(monkeypatch)
     assert _accepted_subprotocol(env.client, url, headers={"X-API-KEY": SINGLE_USER_KEY}) is None
     assert _accepted_subprotocol(env.client, url, subprotocols=["bearer", SINGLE_USER_KEY]) == "bearer"
+    assert _accepted_subprotocol(env.client, url, headers={"Authorization": f"Bearer {SINGLE_USER_KEY}"}) is None
+
+
+def test_persona_refuses_an_mcp_issued_token(env: SimpleNamespace) -> None:
+    """Persona fell back to the MCP JWT manager when AuthNZ refused a token, a second token family
+    with no AuthNZ revocation check (as workflows did). No client sent one, so it is gone."""
+    from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
+
+    mcp_token = get_jwt_manager().create_access_token(subject=str(env.user_id))
+    assert get_jwt_manager().verify_token(mcp_token).sub == str(env.user_id)  # a token MCP itself accepts
+    url = ROUTES[PERSONA][0]
+    assert _outcome(env.client, url, headers={"Authorization": f"Bearer {mcp_token}"}) == "close 4401"
+    assert _outcome(env.client, url, subprotocols=["bearer", mcp_token]) == "close 4401"
+
+
+def _voice_auth(client: TestClient, url: str = ROUTES[VOICE][0], **frame: object) -> str:
+    return _outcome(client, url, frame={"type": "auth", **frame}, timeout=ADMITTED_AFTER_S)
+
+
+def test_voice_reads_a_deprecated_query_token_only_without_a_frame_token(env: SimpleNamespace) -> None:
+    """The voice SDKs send the token in the auth frame and in ``?token=``; the frame wins, and the
+    query is read, with a warning, only when the frame carries no token."""
+    url = ROUTES[VOICE][0]
+    with _warnings() as warned:
+        assert _voice_auth(env.client, _with_query(url, "token", env.valid)) == "answered auth_ok"
+    deprecations = _deprecations(warned)
+    assert len(deprecations) == 1 and "query token" in deprecations[0], warned
+    assert not [message for message in warned if env.valid in message]
+    with _warnings() as warned:
+        assert _voice_auth(env.client, _with_query(url, "token", env.revoked), token=env.valid) == "answered auth_ok"
+        assert _voice_auth(env.client, _with_query(url, "token", env.valid), token=env.revoked) == "closed 4401"
+    assert _deprecations(warned) == []
+
+
+def test_voice_frame_token_is_not_rescued_by_a_handshake_api_key(env: SimpleNamespace) -> None:
+    """The auth frame's token decides alone: a valid ``X-API-KEY`` on the upgrade must not turn a
+    revoked frame JWT into ``auth_ok`` through HTTP's key fallback."""
+    url = ROUTES[VOICE][0]
+    assert _outcome(env.client, url, headers={"X-API-KEY": env.api_key}, frame={"type": "auth", "token": env.revoked}) == (
+        "closed 4401"
+    )
+    assert _outcome(env.client, url, headers={"X-API-KEY": env.api_key}, frame={"type": "auth", "token": env.valid}) == (
+        "answered auth_ok"
+    )
+
+
+def test_voice_auth_frame_takes_the_single_user_key_and_keeps_its_ip_allowlist(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _single_user(monkeypatch, SINGLE_USER_ALLOWED_IPS="10.1.2.3")
+    outside, inside = TestClient(env.app, client=("10.9.9.9", 50000)), TestClient(env.app, client=("10.1.2.3", 50000))
+    try:
+        assert _voice_auth(inside, token=SINGLE_USER_KEY) == "answered auth_ok"
+        assert _voice_auth(inside, token=f"{SINGLE_USER_KEY}-wrong") == "closed 4401"
+        assert _voice_auth(outside, token=SINGLE_USER_KEY) == "closed 4401"
+    finally:
+        outside.close()
+        inside.close()
+
+
+def test_voice_auth_frame_is_not_shadowed_by_a_proxy_basic_authorization(env: SimpleNamespace) -> None:
+    """The frame's token is verified as ``Authorization: Bearer``, replacing a proxy's Basic header."""
+    url = ROUTES[VOICE][0]
+    assert _outcome(env.client, url, headers=BASIC_PROXY_AUTH, frame={"type": "auth", "token": env.valid}) == (
+        "answered auth_ok"
+    )
+    assert _outcome(env.client, url, headers=BASIC_PROXY_AUTH, frame={"type": "auth"}) == "closed 4401"
 
 
 def _track_sandbox_run(owner_id: int) -> str:

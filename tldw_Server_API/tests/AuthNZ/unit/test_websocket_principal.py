@@ -206,3 +206,118 @@ async def test_a_signed_url_token_hides_the_cookie_only_when_the_route_says_it_i
         with pytest.raises(WebSocketException) as refused:
             await websocket_principal.resolve_ws_principal(websocket)
         assert refused.value.code == 4401
+
+
+@pytest.mark.parametrize(
+    ("offered", "echoed"),
+    [
+        (b"bearer, t", "bearer"),
+        (b"Bearer, t", "Bearer"),  # a browser compares the echo exactly
+        (b"bearer", None),  # no credential follows the marker
+        (b"x-api-key, k", None),
+    ],
+)
+def test_auth_subprotocol_echoes_the_offered_marker_verbatim(offered: bytes, echoed: str | None) -> None:
+    assert websocket_principal.auth_subprotocol(_websocket([(b"sec-websocket-protocol", offered)])) == echoed
+
+
+_ACCESS = AuthPrincipal(kind="user", user_id=7, token_type="access")
+_SCOPED_KEY = AuthPrincipal(kind="api_key", user_id=7, api_key_id=3, token_type="api_key")
+_SINGLE_USER_KEY = AuthPrincipal(kind="user", user_id=1, token_type="api_key", subject="single_user")
+
+
+@pytest.mark.parametrize(
+    ("headers", "principal", "forwarded", "scopes"),
+    [
+        # HTTP took the JWT, so the key beside it is not the caller's credential.
+        ([(b"authorization", b"Bearer a.b.c"), (b"x-api-key", b"other")], _ACCESS, {"authorization": "Bearer a.b.c"}, None),
+        ([(b"sec-websocket-protocol", b"bearer, a.b.c")], _ACCESS, {"authorization": "Bearer a.b.c"}, None),
+        # HTTP took the X-API-KEY over a refused bearer.
+        ([(b"authorization", b"Bearer stale"), (b"x-api-key", b"key")], _SCOPED_KEY, {"x-api-key": "key"}, ["read", "write"]),
+        # A non-JWT bearer is an API key; only a scoped (multi-user) key has scopes to check.
+        ([(b"authorization", b"Bearer key")], _SINGLE_USER_KEY, {"x-api-key": "key"}, None),
+    ],
+)
+@pytest.mark.asyncio
+async def test_the_verified_credential_and_a_scoped_keys_scopes_are_recorded(
+    monkeypatch: pytest.MonkeyPatch,
+    headers: list[tuple[bytes, bytes]],
+    principal: AuthPrincipal,
+    forwarded: dict[str, str],
+    scopes: list[str] | None,
+) -> None:
+    """Persona forwards its caller to an internal chat call and checks a key's scopes per tool, so it
+    needs what HTTP verified: exactly the winning credential, never a loser beside it."""
+
+    async def verifier(request):
+        request.state._api_key_scope = '["write", "read"]'
+        return principal
+
+    monkeypatch.setattr(websocket_principal, "get_auth_principal", verifier)
+    websocket = _websocket(headers)
+
+    assert await websocket_principal.resolve_ws_principal(websocket) is principal
+    assert websocket.state.ws_credential_headers == forwarded
+    assert websocket.state.ws_api_key_scopes == scopes
+
+
+@pytest.mark.asyncio
+async def test_a_refused_credential_records_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def refuse(request):
+        raise HTTPException(status_code=401, detail="Could not validate credentials")
+
+    monkeypatch.setattr(websocket_principal, "get_auth_principal", refuse)
+    websocket = _websocket([(b"authorization", b"Bearer a.b.c")])
+
+    with pytest.raises(WebSocketException):
+        await websocket_principal.resolve_ws_principal(websocket)
+
+    assert not hasattr(websocket.state, "ws_credential_headers")
+
+
+@pytest.mark.asyncio
+async def test_the_query_shim_warns_once_per_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Persona re-verifies its caller every few seconds; the deprecation is still one line per socket."""
+    from loguru import logger
+
+    async def verifier(request):
+        return _ACCESS
+
+    monkeypatch.setattr(websocket_principal, "get_auth_principal", verifier)
+    websocket = _websocket([])
+    websocket.scope["query_string"] = b"token=a.b.c"
+    warned: list[str] = []
+    sink = logger.add(lambda message: warned.append(message.record["message"]), level="WARNING")
+    try:
+        for _ in range(3):
+            await websocket_principal.resolve_ws_principal_or_deprecated_query(websocket)
+    finally:
+        logger.remove(sink)
+
+    assert len([message for message in warned if "Deprecated WebSocket credential channel" in message]) == 1
+    assert not [message for message in warned if "a.b.c" in message]
+
+
+@pytest.mark.asyncio
+async def test_verify_ws_credential_verifies_only_the_credential_it_is_given(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A first-frame route's token stands alone: the handshake's own X-API-KEY must not rescue it when
+    HTTP refuses the token with 401. The bearer subprotocol still rides with X-API-KEY, as the two
+    HTTP headers do."""
+    seen: list[tuple[str | None, str | None]] = []
+
+    async def verifier(request):
+        seen.append((request.headers.get("authorization"), request.headers.get("x-api-key")))
+        return _ACCESS
+
+    monkeypatch.setattr(websocket_principal, "get_auth_principal", verifier)
+    handshake = [(b"authorization", b"Bearer header-token"), (b"x-api-key", b"header-key")]
+
+    frame = _websocket(handshake)
+    by_frame = await websocket_principal.verify_ws_credential(frame, token="frame-token")
+    by_subprotocol = await websocket_principal.resolve_ws_principal(
+        _websocket([(b"sec-websocket-protocol", b"bearer, a.b.c"), (b"x-api-key", b"header-key")])
+    )
+
+    assert (by_frame.user_id, by_subprotocol.user_id) == (7, 7)
+    assert seen == [("Bearer frame-token", None), ("Bearer a.b.c", "header-key")]
+    assert frame.state.ws_credential_headers == {"authorization": "Bearer frame-token"}  # what persona would forward
