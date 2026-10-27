@@ -1603,10 +1603,10 @@ async def get_presentation(
         raise _map_presentation_service_error(exc) from exc
     response.headers["ETag"] = _format_etag(row.version, row.content_kind)
     response.headers["Last-Modified"] = row.last_modified
+    response.headers["Cache-Control"] = "private, no-store"
+    merge_auth_vary_header(response.headers)
     if row.content_kind == STANDALONE_HTML:
-        response.headers["Cache-Control"] = "private, no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
-        merge_auth_vary_header(response.headers)
     return _build_presentation_response(row, additive=STANDALONE_HTML in accepted)
 
 

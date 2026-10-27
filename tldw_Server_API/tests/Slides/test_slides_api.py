@@ -311,6 +311,26 @@ def _create_presentation(slides_client: TestClient):
     return response
 
 
+@pytest.mark.parametrize("negotiated", [False, True])
+def test_structured_presentation_detail_disables_private_cache_reuse(slides_client, negotiated):
+    created = _create_presentation(slides_client).json()
+    headers = {slides_ep.CONTENT_KIND_HEADER: "structured_slides,standalone_html"} if negotiated else {}
+    response = slides_client.get(f"/api/v1/slides/presentations/{created['id']}", headers=headers)
+    vary = {token.strip().lower() for token in response.headers.get("vary", "").split(",")}
+
+    assert {  # nosec B101 -- pytest assertion for the authenticated presentation response contract.
+        "status": response.status_code,
+        "cache_control": response.headers.get("cache-control"),
+        "auth_vary": {"authorization", "x-api-key", "cookie"} <= vary,
+        "etag": response.headers.get("etag"),
+    } == {
+        "status": 200,
+        "cache_control": "private, no-store",
+        "auth_vary": True,
+        "etag": f'W/"v{created["version"]}"',
+    }
+
+
 def _presentation_update_payload() -> dict:
     return {
         "title": "Deck Updated",
