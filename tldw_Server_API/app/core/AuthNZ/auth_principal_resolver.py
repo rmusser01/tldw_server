@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from fastapi import HTTPException, Request, status
 from loguru import logger
+from starlette.requests import HTTPConnection
 
 from tldw_Server_API.app.core.AuthNZ import User_DB_Handling
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
@@ -73,8 +74,8 @@ _PLATFORM_ADMIN_ROLES = PLATFORM_ADMIN_ROLES
 _ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 
-def _extract_bearer_token(request: Request) -> Optional[str]:
-    """Extract Bearer token from Authorization header."""
+def _extract_bearer_token(request: HTTPConnection) -> Optional[str]:
+    """Extract Bearer token from Authorization header (of a request or a WebSocket handshake)."""
     try:
         auth_header = request.headers.get("Authorization")
         if not auth_header:

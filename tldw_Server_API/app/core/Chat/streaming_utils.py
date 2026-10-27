@@ -32,6 +32,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatConfigurationError,
     SanitizedProviderStreamError,
 )
+from tldw_Server_API.app.core.exceptions import ChatModelNotAvailableError
 from tldw_Server_API.app.core.Chat.generation_metadata import (
     GENERATION_STATUS_COMPLETE,
     GENERATION_STATUS_INTERRUPTED,
@@ -41,6 +42,7 @@ from tldw_Server_API.app.core.Chat.generation_metadata import (
 )
 from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.LLM_Calls.sse import SSE_CONTROL_FIELD_PREFIXES, is_done_line, sse_data, sse_done, sse_event
+from tldw_Server_API.app.core.LLM_Calls.usage_accounting import _StreamUsage
 from tldw_Server_API.app.core.testing import is_truthy
 
 #######################################################################################################################
@@ -358,6 +360,11 @@ PROVIDER_STREAM_ERROR_MESSAGES = {
     "provider_disabled": "The selected provider is disabled by administrator policy.",
     "model_not_allowed": "The selected model is not allowed for this provider.",
     "provider_configuration_invalid": "The selected provider configuration is invalid.",
+    "model_not_available": "The selected model is not available for this provider.",
+    "provider_model_inventory_unavailable": (
+        "The provider's model list could not be checked right now, so the model could not be confirmed. "
+        "Try again shortly."
+    ),
     "provider_unavailable": "The chat service provider is currently unavailable.",
     "provider_output_limit": (
         "The model reached its output token limit before producing a final answer. "
@@ -365,6 +372,7 @@ PROVIDER_STREAM_ERROR_MESSAGES = {
     ),
 }
 _PROVIDER_STREAM_ERROR_STATUS = {
+    "model_not_available": 400,
     "provider_authentication_failed": 502,
     "provider_unavailable": 502,
     "provider_output_limit": 502,
@@ -492,6 +500,12 @@ def normalize_provider_stream_error(value: Any) -> Optional[NormalizedProviderSt
 
     if code not in PROVIDER_STREAM_ERROR_MESSAGES:
         code = "provider_unavailable"
+    message = PROVIDER_STREAM_ERROR_MESSAGES[code]
+    if code == "model_not_available" and isinstance(
+        candidate, (ChatModelNotAvailableError, SanitizedProviderStreamError),
+    ):
+        # Built from the request's own provider and model, never upstream text: the same answer as non-stream.
+        message = str(candidate.message)
     replay_certified = bool(
         isinstance(value, ChatAPIError)
         and getattr(value, "upstream_dispatched", None) is False
@@ -504,7 +518,7 @@ def normalize_provider_stream_error(value: Any) -> Optional[NormalizedProviderSt
     )
     return NormalizedProviderStreamError(
         code=code,
-        message=PROVIDER_STREAM_ERROR_MESSAGES[code],
+        message=message,
         status_code=_PROVIDER_STREAM_ERROR_STATUS.get(code, 503),
         replay_certified=replay_certified,
         credential_refresh_retry_certified=credential_refresh_retry_certified,
@@ -1307,6 +1321,24 @@ STREAM_SETTLEMENT_TASK_MAX_ACTIVE = daemon_capacity_from_env(
 )
 
 
+def is_empty_choices_usage_chunk(chunk: Any) -> bool:
+    """Whether ``chunk`` is OpenAI's stream usage chunk: empty ``choices`` and a usage block (TASK-13951).
+
+    OpenAI sends it only to a client that asks (``stream_options.include_usage``), so a stream forwarder sends
+    it on only then. ``chunk`` is a parsed payload, or the text of one SSE line (``data: {...}``) or bare JSON.
+    Anything else, malformed or non-JSON text included, is not one. Never raises.
+    """
+    if isinstance(chunk, (str, bytes, bytearray)):
+        try:
+            text = (chunk.decode("utf-8") if isinstance(chunk, (bytes, bytearray)) else chunk).strip()
+            if text[:5].lower() == "data:":
+                text = text[5:]
+            chunk = json.loads(text)
+        except (ValueError, RecursionError):
+            return False
+    return isinstance(chunk, dict) and chunk.get("choices") == [] and chunk.get("usage") is not None
+
+
 def _accepts_keyword(callback: Any, name: str) -> bool:
     """Return whether ``callback`` can take ``name`` as a keyword argument."""
 
@@ -1431,6 +1463,12 @@ class StreamingResponseHandler:
         # as opposed to a local policy, size or transform failure.
         self.finish_reason: Optional[str] = None
         self.usage: Optional[dict[str, int]] = None
+        # The provider's whole usage block (tier, cache counts, cost), read as the
+        # provider-level recorder reads it; it goes to the usage record, not to metadata.
+        self.stream_usage = _StreamUsage()
+        # OpenAI sends a usage chunk with empty choices only to a client that asks
+        # (stream_options.include_usage); the chat pipeline sets False when its client did not.
+        self.forward_usage_chunk = True
         self.stop_requested = False
         self.provider_interrupted = False
         self._settlement_started = False
@@ -1819,7 +1857,8 @@ class StreamingResponseHandler:
             stream: The stream to process (sync or async iterator)
             save_callback: Optional callback to save the full response. When it
                 accepts a ``generation`` keyword it also receives
-                ``generation_snapshot()``.
+                ``generation_snapshot()``. When it accepts ``provider_usage`` and
+                the provider sent a usage block, it receives that whole block.
             finalize_callback: Optional callback invoked on error/cancel to finalize state
             on_first_output: Optional callback invoked once after the first valid provider output
             partial_save_callback: Optional ``callback(text, *, generation)`` that
@@ -1964,6 +2003,7 @@ class StreamingResponseHandler:
                         return outputs, True
                     if isinstance(data, dict) and data.get("usage") is not None:
                         self._record_usage(data.get("usage"))
+                    self.stream_usage.feed_event(data)
                     if isinstance(data, dict):
                         choices = data.get("choices")
                         if isinstance(choices, list) and choices:
@@ -2076,6 +2116,10 @@ class StreamingResponseHandler:
                             self.update_activity()
                             return outputs, False
                     if isinstance(data, dict):
+                        if not self.forward_usage_chunk and is_empty_choices_usage_chunk(data):
+                            # A usage chunk the client did not ask for: read above for the usage record, not sent.
+                            self.update_activity()
+                            return outputs, False
                         self._attach_stream_metadata(data)
                     elif data not in (None, "", [], {}):
                         self.semantic_output_seen = True
@@ -2447,6 +2491,8 @@ class StreamingResponseHandler:
                         if _accepts_keyword(save_callback, "generation")
                         else {}
                     )
+                    if self.stream_usage.usage and _accepts_keyword(save_callback, "provider_usage"):
+                        generation_kwargs["provider_usage"] = dict(self.stream_usage.usage)
                     try:
                         # Support flexible callback signatures (text only or extended)
                         maybe_result = None
@@ -2587,6 +2633,7 @@ async def create_streaming_response_with_timeout(
     history_persistence_ack: bool = False,
     user_message_id: Optional[str] = None,
     partial_save_callback: Optional[Callable[..., Any]] = None,
+    forward_usage_chunk: bool = True,
 ) -> AsyncIterator[str]:
     """
     Create a streaming response with timeout and error handling.
@@ -2606,6 +2653,8 @@ async def create_streaming_response_with_timeout(
         history_persistence_ack: Reserve native owner fields and emit saved IDs independently of optional metadata
         partial_save_callback: Optional ``callback(text, *, generation)`` that keeps an
             unfinished reply; see ``StreamingResponseHandler.safe_stream_generator``
+        forward_usage_chunk: False keeps a usage chunk with empty ``choices`` from the client
+            (it is still read for the usage record)
 
     Yields:
         SSE formatted messages
@@ -2620,6 +2669,7 @@ async def create_streaming_response_with_timeout(
     handler.system_message_id = system_message_id
     handler.history_persistence_ack = history_persistence_ack
     handler.user_message_id = user_message_id
+    handler.forward_usage_chunk = forward_usage_chunk
     if isinstance(continuation_metadata, dict) and continuation_metadata:
         handler.continuation_metadata = dict(continuation_metadata)
 

@@ -85,7 +85,7 @@ def test_sources_crud_and_tags(client_with_user):
     assert r.status_code == 200, r.text
     src = r.json()
     sid = src["id"]
-    assert set(src.get("tags", [])) == {"news", "tech"}
+    assert set(src.get("tags", [])) == {"News", "Tech"}  # first-seen display casing
 
     # List sources filtered by tag
     r = c.get("/api/v1/watchlists/sources", params={"tags": ["tech"]})
@@ -108,7 +108,7 @@ def test_sources_crud_and_tags(client_with_user):
     r = c.patch(f"/api/v1/watchlists/sources/{sid}", json={"tags": ["updates", "tech"]})
     assert r.status_code == 200
     up = r.json()
-    assert set(up.get("tags", [])) == {"updates", "tech"}
+    assert set(up.get("tags", [])) == {"updates", "Tech"}  # "tech" reuses the stored "Tech"
 
     # Update source: replace group membership
     r = c.patch(f"/api/v1/watchlists/sources/{sid}", json={"group_ids": [group_b["id"]]})
@@ -131,7 +131,7 @@ def test_sources_crud_and_tags(client_with_user):
     assert tags_payload["has_more"] == pagination["has_more"]
     assert tags_payload["next_offset"] == pagination["next_offset"]
     names = {t["name"] for t in tags}
-    assert {"news", "tech", "updates"}.issubset(names)
+    assert {"News", "Tech", "updates"}.issubset(names)
 
     # Delete source
     r = c.delete(f"/api/v1/watchlists/sources/{sid}")
@@ -150,7 +150,7 @@ def test_sources_crud_and_tags(client_with_user):
     assert r.status_code == 200, r.text
     restored = r.json()
     assert int(restored["id"]) == sid
-    assert set(restored.get("tags", [])) == {"updates", "tech"}
+    assert set(restored.get("tags", [])) == {"updates", "Tech"}
     assert restored.get("group_ids") == [group_b["id"]]
 
 
@@ -843,9 +843,12 @@ def test_forum_sources_feature_flag(client_with_user, monkeypatch):
 
 
 def test_watchlists_run_stream_ws(client_with_user, tmp_path):
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import create_access_token
+    """The socket authenticates itself through the core resolver, not get_request_user. A browser
+    sends the single-user key in the bearer subprotocol, which must be echoed (TASK-13950.7)."""
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 
-    db = WatchlistsDatabase.for_user(555)
+    settings = get_settings()
+    db = WatchlistsDatabase.for_user(settings.SINGLE_USER_FIXED_ID)
     job = db.create_job(
         name="Job",
         description=None,
@@ -863,8 +866,10 @@ def test_watchlists_run_stream_ws(client_with_user, tmp_path):
     log_path.write_text("first line\n", encoding="utf-8")
     db.update_run(run.id, stats_json=json.dumps({"items_found": 1}), log_path=str(log_path))
 
-    token = create_access_token(555, "wluser", "admin")
-    with client_with_user.websocket_connect(f"/api/v1/watchlists/runs/{run.id}/stream?token={token}") as ws:
+    with client_with_user.websocket_connect(
+        f"/api/v1/watchlists/runs/{run.id}/stream", subprotocols=["bearer", settings.SINGLE_USER_API_KEY]
+    ) as ws:
+        assert ws.accepted_subprotocol == "bearer"
         message = ws.receive_json()
         assert message["type"] == "snapshot"
         assert message["run"]["id"] == run.id

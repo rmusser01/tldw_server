@@ -7,6 +7,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 
+from tldw_Server_API.app.core.testing import runtime_environment
+
 WEBHOOK_KEYS_ENV = "TLDW_ADMIN_WEBHOOK_KEYS_JSON"
 WEBHOOK_PRIMARY_KEY_ID_ENV = "TLDW_ADMIN_WEBHOOK_PRIMARY_KEY_ID"
 
@@ -26,8 +28,6 @@ class WebhookRouteSelection(str, Enum):
     LEGACY = "legacy"
 
 
-_PRODUCTION_NAMES = frozenset({"prod", "production"})
-_TRUTHY_VALUES = frozenset({"1", "true", "yes", "y", "on"})
 _DECIMAL_PATTERN = re.compile(r"^[0-9]+$")
 
 
@@ -60,15 +60,7 @@ def _parse_bounded_positive_int(
 
 def is_production_environment_mapping(environ: Mapping[str, str]) -> bool:
     """Return whether a pure environment mapping denotes production."""
-    if any(
-        environ.get(name, "").strip().lower() in _TRUTHY_VALUES
-        for name in ("tldw_production", "TLDW_PRODUCTION")
-    ):
-        return True
-    return any(
-        environ.get(name, "").strip().lower() in _PRODUCTION_NAMES
-        for name in ("ENV", "APP_ENV", "TLDW_ENV", "ENVIRONMENT")
-    )
+    return runtime_environment(environ).is_production
 
 
 @dataclass(frozen=True)

@@ -256,6 +256,7 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     await_bounded_owned_operation,
     invoke_owned_stream_close,
     invoke_stream_close_bounded,
+    is_empty_choices_usage_chunk,
     normalize_provider_stream_error,
     provider_stream_error_payload,
     sanitized_provider_stream_exception,
@@ -1253,7 +1254,7 @@ async def _resolve_auto_character_chat_routing_decision(
     """Resolve `model='auto'` into a canonical provider/model pair for character chat."""
     provider_overrides = get_llm_provider_overrides_snapshot()
     provider_listing = apply_llm_provider_overrides_to_listing(
-        get_configured_providers(),
+        await asyncio.to_thread(get_configured_providers),
         overrides=provider_overrides,
     )
     default_provider = str(
@@ -7735,6 +7736,10 @@ async def character_chat_completion(
                         await stream.done()
                         return False
 
+                    if is_empty_choices_usage_chunk(line):
+                        # OpenAI's usage chunk, which this request cannot ask for: not sent (TASK-13951).
+                        return True
+
                     if _character_stream_line_has_semantic_output(line):
                         stream_success_state["successful"] = True
 
@@ -7848,6 +7853,9 @@ async def character_chat_completion(
                             done_sent = True
                             yield sse_done()
                             break
+                        if is_empty_choices_usage_chunk(line):
+                            # OpenAI's usage chunk, which this request cannot ask for: not sent (TASK-13951).
+                            continue
                         if _character_stream_line_has_semantic_output(line):
                             stream_success_state["successful"] = True
                         yield ensure_sse_line(line)

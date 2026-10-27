@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import importlib
+import re
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
@@ -29,6 +30,8 @@ FIRST_PARTY_WEBSOCKET_AUTH_FILES = (
     # Realtime speech routes (9d6104995e) authenticate via the shared audio
     # handshake in streaming_service, which owns the cookie resolver.
     "tldw_Server_API/app/core/Audio/Realtime/auth.py",
+    # The core WebSocket resolver (TASK-13950.7) owns it for migrated routes.
+    "tldw_Server_API/app/core/AuthNZ/websocket_principal.py",
 )
 
 EXPECTED_WEBSOCKET_HANDLERS = {
@@ -90,6 +93,18 @@ def test_first_party_websocket_auth_files_use_shared_cookie_resolver():
             assert "get_meetings_db_for_websocket" in source, relative_path
         elif relative_path.endswith("Audio/Realtime/auth.py"):
             assert "_audio_ws_authenticate" in source, relative_path
+        elif relative_path.endswith(("endpoints/workflows.py", "endpoints/sandbox.py")):
+            # A whole word, so the deprecated query shim's longer name cannot satisfy it.
+            assert re.search(r"\bresolve_ws_principal\b", source), relative_path
+            assert "resolve_single_user_cookie_websocket" not in source, relative_path  # the resolver owns it
+        elif relative_path.endswith(("endpoints/agent_client_protocol.py", "endpoints/watchlists.py", "endpoints/persona.py")):
+            # resolve_ws_principal behind the deprecated query shim (pinned in
+            # tests/lint/test_auth_token_parsing_ratchet.py; TASK-13950.61 removes it).
+            assert re.search(r"\bresolve_ws_principal_or_deprecated_query\b", source), relative_path
+            assert "resolve_single_user_cookie_websocket" not in source, relative_path
+        elif relative_path.endswith(("endpoints/acp_multiplex.py", "prompt_studio/prompt_studio_websocket.py")):
+            # ACP's _authenticate_ws: resolve_ws_principal behind the deprecated credential shim.
+            assert "_authenticate_ws" in source, relative_path
         else:
             assert "resolve_single_user_cookie_websocket" in source, relative_path
 

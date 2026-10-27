@@ -39,7 +39,7 @@ Base prefix: `/api/v1/workflows`
   - `GET /runs/{run_id}/steps` → Step history for the run, including latest failure and attempt counts per step.
   - `GET /runs/{run_id}/steps/{step_id}/attempts` → Attempt-level retry timeline for a logical step execution.
   - `GET /runs/{run_id}/events?since=&types=&limit=&cursor=` → Ordered event stream (HTTP polling). Supports server-side filtering by `types` (comma-separated). Returns `Next-Cursor` header when a full page is returned. When `cursor` is present, `since` is ignored.
-  - `WS /ws?run_id=...&token=...` → Live event stream (JWT required; run owner only)
+  - `WS /ws?run_id=...` → Live event stream (run owner only). Authenticate with `Authorization: Bearer <AuthNZ access token>`, `X-API-KEY`, the `bearer, <token>` subprotocol, or the single-user session cookie; the `token` query parameter is no longer read.
   - `POST /runs/{run_id}/pause|resume|cancel|retry` → Control actions
 - Human in the loop
   - `POST /runs/{run_id}/steps/{step_id}/approve|reject` → Approve/reject with optional edits
@@ -177,12 +177,12 @@ The following additional step types are available and surfaced via `/step-types`
   - Partial indexes on statuses: `status='running'`, `status='queued'`, `status='succeeded'`, and `status='failed'` for faster active/queue/history queries (PostgreSQL and modern SQLite).
   - JSON payloads: PostgreSQL stores `workflow_events.payload_json` as `JSONB` with a GIN index; SQLite stores JSON as `TEXT`.
 - Pooling & contention:
-  - PostgreSQL uses `psycopg_pool` when available (min/max size, timeouts, max lifetime/idle) with `dict_row` rows; falls back to a minimal pool if not installed.
+  - PostgreSQL uses `psycopg_pool` (a core dependency; min/max size, timeouts, max lifetime/idle) with `dict_row` rows and a reset on check-in that clears tenant session state.
   - SQLite applies `PRAGMA busy_timeout=5000`, `wal_autocheckpoint=1000`; hot write paths include exponential backoff on `database is locked`.
 
 ## Security Model
 
-- AuthNZ: All HTTP endpoints use standard API auth; WS requires a JWT and enforces run-owner equality (subject must match `run.user_id`).
+- AuthNZ: All HTTP endpoints use standard API auth. WS resolves its caller with `core/AuthNZ/websocket_principal.resolve_ws_principal` (the HTTP resolver, revocation included) and enforces run-owner equality (the caller must match `run.user_id`).
 - Tenant Isolation: Read operations enforce tenant boundaries, and HTTP reads now enforce run-owner or admin (consistent with WS).
 - Rate Limits: Ad-hoc runs and run-saved endpoints are rate-limited via RG policies.
   - When `TEST_MODE=true` is set, endpoint rate limits and restrictive RG policies are disabled. Stress tests (`TLDW_WORKFLOW_STRESS=1`) re-enable rate limits to validate throttling behavior.

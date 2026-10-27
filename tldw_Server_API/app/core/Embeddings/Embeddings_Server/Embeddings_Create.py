@@ -134,7 +134,12 @@ from tldw_Server_API.app.core.Embeddings.vector_validation import (
 from tldw_Server_API.app.core.exceptions import InvalidStoragePathError, NetworkError, RetryExhaustedError
 from tldw_Server_API.app.core.LLM_Calls.chat_calls import get_openai_embeddings_batch
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram  # Keep your existing metrics
-from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
+from tldw_Server_API.app.core.testing import (
+    env_flag_enabled,
+    is_explicit_pytest_runtime,
+    is_production_like_env,
+    is_test_mode,
+)
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
@@ -982,12 +987,9 @@ def _rg_emb_server_async_lock() -> asyncio.Lock:
 
 
 def _should_enforce_rg_in_production() -> bool:
-    env = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or os.getenv("ENV") or "dev").lower()
-    if env not in {"prod", "production"}:
+    if not is_production_like_env():
         return False
-    test_mode = is_test_mode()
-    pytest_active = bool(os.getenv("PYTEST_CURRENT_TEST"))
-    return not (test_mode or pytest_active)
+    return not (is_test_mode() or is_explicit_pytest_runtime())
 
 
 def _assert_rg_enabled_in_production() -> None:

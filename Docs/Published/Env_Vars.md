@@ -11,6 +11,8 @@ Note: Secrets should be set via environment or `.env`. `config.txt` is supported
 
 ## Core Server
 - `tldw_production`: Enable production guards (`true|false`). Masks API key in logs and enforces DB/secret checks.
+  - The runtime is also production-like when `TLDW_PRODUCTION` is truthy, or when `ENVIRONMENT`, `APP_ENV`, `DEPLOYMENT_ENV`, `FASTAPI_ENV`, `TLDW_ENV` or `ENV` is `prod`, `production` or `live` (any case). Every production guard reads this one detector (`core/testing.runtime_environment()`).
+  - A production-like runtime refuses to start while a test seam is set: `TEST_MODE`, `TESTING`, `TLDW_TEST_MODE`, `TLDW_ALLOW_TEST_FALLBACK_KEYS`, `SINGLE_USER_TEST_API_KEY`, `E2E_TEST_BASE_URL`, `MINIMAL_TEST_APP`, `JWT_SECRET_TEST_KEY`, `ENABLE_ADMIN_E2E_TEST_MODE`, `EVALUATIONS_TEST_DB_PATH`, `JOBS_TEST_NOW_EPOCH` or any `RG_TEST_*`.
 - `ENABLE_OPENAPI`: Show OpenAPI/Swagger UI when `true`. Defaults to hidden in production unless explicitly enabled.
 - `ALLOWED_ORIGINS`: Optional browser-origin allowlist. Comma-separated or JSON array.
   - Local self-hosting already permits common `localhost` and `127.0.0.1` browser origins by default.
@@ -703,7 +705,7 @@ Operator notes:
   - `OTEL_SERVICE_NAME`: Logical service name (default `tldw_server`).
   - `OTEL_SERVICE_VERSION`: Service version string (default `1.0.0`).
   - `OTEL_SERVICE_NAMESPACE`: Namespace grouping (default `production`).
-  - `DEPLOYMENT_ENV`: Deployment environment label (default `development`).
+  - `DEPLOYMENT_ENV`: Deployment environment label (default `development`). `prod`, `production` or `live` also turns on the production guards (see `tldw_production`).
 
 - Exporters and enablement
   - `ENABLE_METRICS`: Enable metrics pipeline (`true|false`, default `true`).
@@ -736,7 +738,7 @@ Notes
 | `OTEL_SERVICE_NAME`             | `tldw_server`       | Logical service name |
 | `OTEL_SERVICE_VERSION`          | `1.0.0`             | Freeform version string |
 | `OTEL_SERVICE_NAMESPACE`        | `production`        | Logical namespace/group |
-| `DEPLOYMENT_ENV`                | `development`       | Environment label |
+| `DEPLOYMENT_ENV`                | `development`       | Environment label; `production` also enables production guards |
 | `ENABLE_METRICS`                | `true`              | Enable metrics pipeline |
 | `ENABLE_TRACING`                | `true`              | Enable tracing pipeline |
 | `ENABLE_OTEL_LOGGING`           | `false`             | Enable OTEL logging integration |

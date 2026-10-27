@@ -16,10 +16,10 @@ import json
 import os
 import sqlite3
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from collections.abc import Callable
 from typing import Any, Optional, Union
 
 import numpy as np
@@ -36,7 +36,7 @@ from tldw_Server_API.app.core.Evaluations.identity import canonical_evaluations_
 from tldw_Server_API.app.core.Evaluations.scoring import normalize_judge_score
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
-
+from tldw_Server_API.app.core.testing import is_production_like_env
 
 # Evaluations SQLite connections wait this long for a lock before failing.
 _SQLITE_BUSY_TIMEOUT_MS = 10_000
@@ -182,10 +182,10 @@ class EvaluationManager:
             error_msg = f"CRITICAL: Failed to apply database migrations to {self.db_path}: {e}"
             logger.critical(error_msg)
 
-            # Check if we're in a production environment
-            env = os.getenv('ENVIRONMENT', 'development').lower()
+            # Production (runtime_environment) or an ENVIRONMENT=staging tier
+            staging = os.getenv("ENVIRONMENT", "").strip().lower() == "staging"
 
-            if env in ['production', 'staging']:
+            if is_production_like_env() or staging:
                 # Fail loudly in production/staging
                 raise RuntimeError(error_msg) from e
             else:

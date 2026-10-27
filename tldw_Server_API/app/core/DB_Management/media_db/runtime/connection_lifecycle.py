@@ -5,11 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
-    MEDIA_NONCRITICAL_EXCEPTIONS,
-)
-
-_MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
 
 
 def _get_txn_conn(self: Any):
@@ -80,8 +75,10 @@ def get_connection(self: Any):
         self._set_persistent_conn(conn)
     try:
         self.backend.apply_scope(conn)
-    except _MEDIA_NONCRITICAL_EXCEPTIONS:
-        pass
+    except BaseException:
+        # apply_scope discarded the connection; it may carry another tenant's GUCs.
+        self._set_persistent_conn(None)
+        raise
     return conn
 
 

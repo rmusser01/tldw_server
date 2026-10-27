@@ -10,7 +10,6 @@ import asyncio
 import contextlib
 import copy
 import json
-import os
 import re
 import sqlite3
 import time
@@ -52,6 +51,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_search_r
     append_sqlite_media_visibility,
 )
 from tldw_Server_API.app.core.RAG.exceptions import RAGDatabaseError
+from tldw_Server_API.app.core.testing import is_production_like_env
 
 from .hyde import (
     _embedding_model_from_config,
@@ -754,12 +754,7 @@ class BaseRetriever(ABC):
         self.config = config or RetrievalConfig()
         self._db_adapter = db_adapter
         self.db_path = self._validate_path(db_path) if db_path else None
-        # Determine production mode from env var used across the project
-        try:
-            prod_val = str(os.getenv("tldw_production", "false")).strip().lower()
-            self._production_mode = prod_val in {"true", "1", "yes", "on", "y"}
-        except (AttributeError, TypeError, ValueError):
-            self._production_mode = False
+        self._production_mode = is_production_like_env()
         # In production, prefer adapters over any raw SQL fallbacks
         if self._production_mode and self._db_adapter is None:
             logger.warning(

@@ -36,10 +36,10 @@ from fastapi import (
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
+    WebSocketException,
     status,
 )
 from loguru import logger
-from starlette.requests import Request as StarletteRequest
 from starlette.responses import FileResponse
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
@@ -47,7 +47,6 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     check_rate_limit,
     get_request_user,
     require_expected_user,
-    verify_jwt_and_fetch_user,
 )
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.schemas.persona import (
@@ -151,19 +150,12 @@ from tldw_Server_API.app.api.v1.schemas.voice_assistant_schemas import (
     VoiceCommandListResponse,
     VoiceCommandToggleRequest,
 )
-from tldw_Server_API.app.core.AuthNZ.api_key_manager import (
-    get_api_key_manager,
-    has_scope,
-    normalize_scope,
+from tldw_Server_API.app.core.AuthNZ.api_key_manager import has_scope, normalize_scope
+from tldw_Server_API.app.core.AuthNZ.websocket_principal import (
+    auth_subprotocol,
+    resolve_ws_principal_or_deprecated_query,
 )
-from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError, InvalidTokenError, TokenExpiredError
-from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip
-from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
-from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
-    cookie_websocket_rejection_code,
-    resolve_single_user_cookie_websocket,
-)
+from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import cookie_websocket_rejection_code
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.Notes_Graph.semantic_publication import run_quiescent_operation
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
@@ -186,7 +178,6 @@ from tldw_Server_API.app.core.Image_Generation.adapter_registry import (
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.MCP_unified import MCPRequest, get_mcp_server
-from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
 from tldw_Server_API.app.core.MCP_unified.persona_scope import normalize_persona_scope_payload
 from tldw_Server_API.app.core.Metrics import increment_counter
 from tldw_Server_API.app.core.Persona import live_conversation
@@ -3539,88 +3530,8 @@ async def _generate_persona_live_tts_audio(
     )
 
 
-def _is_authnz_access_token(token: str) -> bool:
-    """Return True when token verifies as an AuthNZ access token."""
-    try:
-        jwt_service = get_jwt_service()
-        jwt_service.decode_access_token(token)
-        return True
-    except TokenExpiredError:
-        return True
-    except InvalidTokenError:
-        return False
-    except Exception:
-        return False
-
-
-def _looks_like_jwt(token: str | None) -> bool:
-    raw = str(token or "").strip()
-    if not raw:
-        return False
-    parts = raw.split(".")
-    return len(parts) == 3 and all(bool(part.strip()) for part in parts)
-
-
-def _should_treat_bearer_as_api_key(
-    token: str | None,
-    resolved_api_key: str | None,
-) -> bool:
-    """Mirror HTTP auth behavior for WS: single-user bearer or non-JWT bearer -> API key."""
-    if not token or resolved_api_key:
-        return False
-
-    try:
-        settings = get_settings()
-        if getattr(settings, "AUTH_MODE", None) == "single_user":
-            return True
-    except Exception as settings_error:
-        # Fall through to token-shape heuristics when settings resolution fails.
-        logger.debug("Failed to resolve auth settings for WS bearer handling", exc_info=settings_error)
-
-    return not _looks_like_jwt(token)
-
-
-def _extract_auth_credentials(
-    ws: WebSocket,
-    token: str | None,
-    api_key: str | None,
-) -> tuple[str | None, str | None]:
-    """Resolve auth credentials with headers taking precedence over query params."""
-    auth_token = token
-    resolved_api_key = api_key
-
-    try:
-        authz = ws.headers.get("authorization") or ws.headers.get("Authorization")
-        if authz and authz.lower().startswith("bearer "):
-            auth_token = authz.split(" ", 1)[1].strip()
-    except Exception as authz_header_error:
-        logger.debug("Failed to parse websocket authorization header", exc_info=authz_header_error)
-
-    try:
-        header_key = ws.headers.get("x-api-key") or ws.headers.get("X-API-KEY")
-        if header_key:
-            resolved_api_key = header_key.strip()
-    except Exception as api_key_header_error:
-        logger.debug("Failed to parse websocket x-api-key header", exc_info=api_key_header_error)
-
-    try:
-        proto = ws.headers.get("sec-websocket-protocol") or ws.headers.get("Sec-WebSocket-Protocol")
-        if proto and not auth_token:
-            parts = [p.strip() for p in proto.split(",")]
-            if len(parts) >= 2 and parts[0].lower() == "bearer" and parts[1]:
-                auth_token = parts[1]
-    except Exception as protocol_header_error:
-        logger.debug("Failed to parse websocket subprotocol auth header", exc_info=protocol_header_error)
-
-    return auth_token, resolved_api_key
-
-
-def _persona_conversation_headers(
-    ws: WebSocket,
-    token: str | None,
-    api_key: str | None,
-) -> dict[str, str]:
-    """Forward the authenticated credential family and original proxy context.
+def _persona_conversation_headers(ws: WebSocket) -> dict[str, str]:
+    """Forward the credential the socket was verified with, and the original proxy context.
 
     The caller keeps the original socket peer as the internal ASGI client, so
     HTTP authentication applies the same trusted-proxy rules again. Duplicate
@@ -3634,159 +3545,45 @@ def _persona_conversation_headers(
         )
         if (values := ws.headers.getlist(name))
     }
-    auth_token, resolved_api_key = _extract_auth_credentials(ws, token, api_key)
     method = getattr(ws.state, "persona_auth_method", "")
-    if method == "api_key":
-        if selected_key := resolved_api_key or auth_token:
-            headers["x-api-key"] = selected_key
-    elif method in {"jwt_authnz", "jwt_mcp"}:
-        if auth_token:
-            headers["authorization"] = f"Bearer {auth_token}"
-    elif method == "single_user_session":
+    if method == "single_user_session":
         # This server-owned method is set only after cookie authentication's
         # exact trusted-Origin check. HTTP revalidates expiry, ownership and CSRF.
         if cookie := ws.headers.get("cookie"):
             headers["cookie"] = cookie
         if csrf_token := ws.cookies.get("csrf_token"):
             headers["x-csrf-token"] = csrf_token
+    elif method:
+        # The one credential HTTP accepted at the handshake (the JWT, or the API key), never a
+        # loser beside it, recorded by the core resolver.
+        headers.update(getattr(ws.state, "ws_credential_headers", None) or {})
     return headers
 
 
-def _build_request_from_websocket(ws: WebSocket) -> StarletteRequest:
-    scope: dict[str, Any] = {
-        "type": "http",
-        "method": "GET",
-        "path": "/api/v1/persona/stream",
-        "headers": [
-            (k.encode("latin-1"), v.encode("latin-1"))
-            for k, v in ws.headers.items()
-        ],
-    }
+async def _resolve_authenticated_user_id(ws: WebSocket) -> tuple[str | None, bool, bool]:
+    """Resolve the caller with the core WebSocket resolver (TASK-13950.7).
+
+    Returns ``(user_id, credentials_supplied, auth_ok)``. On success it records how the caller
+    authenticated in ``ws.state.persona_auth_method`` (the principal's token type) and, for a scoped
+    API key only, its scopes in ``ws.state.persona_api_key_scopes`` for per-tool checks. The
+    deprecated ``?token=`` / ``?api_key=`` channel stays readable for persona-stream.ts, which falls
+    back to it for a credential that is not subprotocol-safe (TASK-13950.61).
+
+    The state changes only once the verdict is in: the watchdog re-verifies in its own task while
+    tools run, and a cleared scope list would read as "not a scoped key" and allow every tool.
+    """
     try:
-        client = ws.client
-        if isinstance(client, (list, tuple)) and len(client) >= 2:
-            scope["client"] = (client[0], client[1])
-        elif client is not None and getattr(client, "host", None) is not None:
-            scope["client"] = (client.host, getattr(client, "port", 0))
-    except Exception as client_scope_error:
-        logger.debug("Failed to propagate websocket client scope details", exc_info=client_scope_error)
-    return StarletteRequest(scope)
-
-
-async def _resolve_authenticated_user_id(
-    ws: WebSocket,
-    token: str | None,
-    api_key: str | None,
-    *,
-    required_api_key_scope: str | None = "read",
-) -> tuple[str | None, bool, bool]:
-    """
-    Resolve authenticated user id from WS credentials.
-
-    Returns: (user_id, credentials_supplied, auth_ok)
-    """
-    auth_token, resolved_api_key = _extract_auth_credentials(ws, token, api_key)
-    if _should_treat_bearer_as_api_key(auth_token, resolved_api_key):
-        resolved_api_key = auth_token
-        auth_token = None
-
-    def _set_auth_context(*, method: str | None, api_key_scopes: set[str] | None = None) -> None:
-        try:
-            ws.state.persona_auth_method = str(method or "").strip().lower()
-            ws.state.persona_api_key_scopes = sorted(
-                str(scope).strip().lower() for scope in (api_key_scopes or set()) if str(scope).strip()
-            )
-        except Exception:
-            return
-
-    def _clear_auth_context() -> None:
-        _set_auth_context(method=None, api_key_scopes=set())
-
-    credentials_supplied = bool(auth_token or resolved_api_key)
-    user_id: str | None = None
-    auth_method: str | None = None
-    api_key_scopes: set[str] = set()
-
-    if auth_token:
-        auth_ok = False
-        authnz_token_failed = False
-        try:
-            req = _build_request_from_websocket(ws)
-            user = await verify_jwt_and_fetch_user(req, auth_token)
-            uid = str(getattr(user, "id", None) or "")
-            if uid:
-                user_id = uid
-                auth_ok = True
-                auth_method = "jwt_authnz"
-                logger.debug("persona stream: authenticated via AuthNZ JWT")
-        except Exception as exc:
-            logger.debug(f"persona stream: AuthNZ JWT auth failed: {exc}")
-            if _is_authnz_access_token(auth_token):
-                authnz_token_failed = True
-                if not resolved_api_key:
-                    _clear_auth_context()
-                    return None, True, False
-        if not auth_ok and not authnz_token_failed:
-            try:
-                token_data = get_jwt_manager().verify_token(auth_token)
-                uid = str(getattr(token_data, "sub", "") or "")
-                if uid:
-                    user_id = uid
-                    auth_ok = True
-                    auth_method = "jwt_mcp"
-                    logger.debug("persona stream: authenticated via MCP JWT")
-            except Exception as exc:
-                logger.debug(f"persona stream: MCP JWT auth failed: {exc}")
-        if auth_token and not auth_ok and not resolved_api_key:
-            _clear_auth_context()
-            return None, True, False
-
-    if resolved_api_key and not user_id:
-        try:
-            api_mgr = await get_api_key_manager()
-            client_ip = resolve_client_ip(ws, None)
-            required_scope = (
-                str(required_api_key_scope or "").strip().lower()
-                if required_api_key_scope is not None
-                else None
-            )
-            info = await api_mgr.validate_api_key(
-                resolved_api_key,
-                required_scope=required_scope,
-                ip_address=client_ip,
-            )
-            if info and info.get("user_id") is not None:
-                user_id = str(info["user_id"])
-                auth_method = "api_key"
-                api_key_scopes = normalize_scope(info.get("scope"))
-                logger.debug("persona stream: authenticated via API key")
-            else:
-                _clear_auth_context()
-                return None, True, False
-        except (DatabaseError, InvalidTokenError) as exc:
-            logger.debug(f"persona stream: API key authentication failed: {exc}")
-            _clear_auth_context()
-            return None, True, False
-        except Exception:
-            logger.exception("persona stream: unexpected API key authentication error")
-            _clear_auth_context()
-            return None, True, False
-
-    if not credentials_supplied:
-        cookie_identity = await resolve_single_user_cookie_websocket(ws)
-        if cookie_identity is not None:
-            _set_auth_context(method="single_user_session", api_key_scopes=set())
-            return str(cookie_identity.user_id), True, True
-        if cookie_websocket_rejection_code(ws) is not None:
-            _clear_auth_context()
-            return None, True, False
-        _clear_auth_context()
-        return None, False, False
-    if not user_id:
-        _clear_auth_context()
+        principal = await resolve_ws_principal_or_deprecated_query(ws, required_scope="read")
+    except WebSocketException as exc:
+        # Fail closed until the socket closes: forward no credential and deny every scoped tool.
+        ws.state.persona_auth_method, ws.state.persona_api_key_scopes = "", []
+        return None, exc.reason != "authentication_required", False
+    if principal.user_id is None:  # a service token has no user to own persona state
+        ws.state.persona_auth_method, ws.state.persona_api_key_scopes = "", []
         return None, True, False
-    _set_auth_context(method=auth_method, api_key_scopes=api_key_scopes)
-    return user_id, True, True
+    ws.state.persona_auth_method = principal.token_type or ""
+    ws.state.persona_api_key_scopes = getattr(ws.state, "ws_api_key_scopes", None)
+    return str(principal.user_id), True, True
 
 
 @router.get("/profiles", response_model=list[PersonaProfileResponse], tags=["persona"], status_code=status.HTTP_200_OK)
@@ -8234,8 +8031,6 @@ async def persona_session_export(
 @router.websocket("/stream")
 async def persona_stream(
     ws: WebSocket,
-    token: str | None = Query(default=None),
-    api_key: str | None = Query(default=None),
     runtime_explorer_provider: PersonaRuntimeExplorerProvider = Depends(get_persona_runtime_explorer_provider),
 ):
     """
@@ -8246,7 +8041,7 @@ async def persona_stream(
 
     Security model:
     - Feature-gated via PERSONA_ENABLED.
-    - Supports token/api-key auth resolution similar to MCP.
+    - Callers resolve through the core WebSocket resolver, as on HTTP (TASK-13950.7).
     - Tool execution requires an authenticated user_id.
     - Connections must authenticate before the stream is accepted.
     """
@@ -8288,7 +8083,7 @@ async def persona_stream(
     observed_live_control_session_ids: set[str] = set()
     live_control_stream_user_id = ""
     try:
-        user_id, credentials_supplied, auth_ok = await _resolve_authenticated_user_id(ws, token=token, api_key=api_key)
+        user_id, credentials_supplied, auth_ok = await _resolve_authenticated_user_id(ws)
         if not auth_ok:
             auth_message = "Authentication failed" if credentials_supplied else "Authentication required"
             logger.info(f"persona stream rejected: {auth_message}")
@@ -8296,11 +8091,9 @@ async def persona_stream(
                 await ws.close(code=cookie_websocket_rejection_code(ws) or 4401)
             return
 
-        # Wrap socket for lifecycle and metrics; keep domain payloads unchanged
-        # Browsers require selection from an offered protocol list. Echo only
-        # the recognized auth marker, never the credential following it.
-        auth_protocol = (ws.headers.get("sec-websocket-protocol") or "").split(",", 1)[0].strip()
-        if auth_protocol.lower() == "bearer":
+        # Wrap socket for lifecycle and metrics; keep domain payloads unchanged. Browsers need
+        # the offered auth marker echoed, never the credential following it.
+        if auth_protocol := auth_subprotocol(ws):
             await ws.accept(subprotocol=auth_protocol)
         stream = WebSocketStream(
             ws,
@@ -8316,17 +8109,13 @@ async def persona_stream(
                 await stream.ws.close(code=1008)
             return
         live_control_stream_user_id = authenticated_user_id
-        conversation_headers = _persona_conversation_headers(ws, token, api_key)
+        conversation_headers = _persona_conversation_headers(ws)
         auth_watchdog_stop = asyncio.Event()
         auth_revoked_event = asyncio.Event()
 
         async def _is_stream_auth_valid() -> bool:
             try:
-                revalidated_user_id, _credentials_supplied, revalidated_ok = await _resolve_authenticated_user_id(
-                    ws,
-                    token=token,
-                    api_key=api_key,
-                )
+                revalidated_user_id, _credentials_supplied, revalidated_ok = await _resolve_authenticated_user_id(ws)
             except Exception as exc:
                 logger.debug("persona stream auth revalidation failed with exception: {}", exc)
                 return False
@@ -8410,20 +8199,10 @@ async def persona_stream(
             )
 
         def _api_key_scope_allows(required_scope: Any) -> bool:
-            try:
-                auth_method = str(getattr(ws.state, "persona_auth_method", "") or "").strip().lower()
-            except Exception:
-                auth_method = ""
-            if auth_method != "api_key":
-                return True
+            """Only a scoped API key is checked per tool, as HTTP's require_api_key_scope does."""
+            key_scopes = getattr(ws.state, "persona_api_key_scopes", None)
             required = str(required_scope or "").strip().lower()
-            if not required:
-                return True
-            try:
-                key_scopes = normalize_scope(getattr(ws.state, "persona_api_key_scopes", None))
-            except Exception:
-                key_scopes = set()
-            return has_scope(key_scopes, required)
+            return key_scopes is None or not required or has_scope(normalize_scope(key_scopes), required)
 
         def _next_ws_event_meta(session_id: str) -> dict[str, Any]:
             sid = _normalize_ws_identifier(session_id, fallback=default_session_id)
