@@ -294,6 +294,15 @@ SCOPE_ALLOWLIST: dict[str, str] = {
         "allow_private_network), or an admin BYOK base_url when audio_cpp is in "
         "BYOK_ALLOWED_BASE_URL_PROVIDERS."
     ),
+    "tldw_Server_API/app/core/Chat/chat_service.py": (
+        "model-discovery scope from provider_model_inventory.inventory_endpoint_scope: only the provider base "
+        "the server's own config and environment resolve to; caller app config, BYOK and per-request bases "
+        "get no scope."
+    ),
+    "tldw_Server_API/app/core/LLM_Calls/provider_model_inventory.py": (
+        "discovery scope is the caller's inventory_endpoint_scope (server-config base only) or the strict call "
+        "policy's required_endpoint_scope, the same decision generation makes for that endpoint."
+    ),
 }
 
 
