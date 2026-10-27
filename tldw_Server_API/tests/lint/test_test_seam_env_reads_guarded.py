@@ -117,7 +117,6 @@ ALLOWLIST: dict[str, tuple[str, tuple[str, ...]]] = {
     "TEST_CHAT_TOKENS_PER_MINUTE": (_UNDER_TEST_MODE, ("core/Chat/rate_limiter.py",)),
     "USE_REAL_OPENAI_IN_TESTS": (_UNDER_TEST_MODE, ("api/v1/endpoints/embeddings_v5_production_enhanced.py",)),
     "WORKFLOWS_TEST_REPLAY_SUCCESS": (_UNDER_TEST_MODE, ("api/v1/endpoints/workflows.py",)),
-    "CHAT_ALLOW_OPENROUTER_DISCOVERY_IN_TESTS": (_UNDER_PYTEST, ("core/Chat/chat_service.py",)),
     "MINIMAL_TEST_INCLUDE_AUDIO": (_UNDER_PYTEST, ("core/testing.py",)),
     "MINIMAL_TEST_INCLUDE_AUDIO_JOBS": (_UNDER_PYTEST, ("api/v1/router_groups/minimal.py",)),
     "PYTEST_XDIST_WORKER": (
