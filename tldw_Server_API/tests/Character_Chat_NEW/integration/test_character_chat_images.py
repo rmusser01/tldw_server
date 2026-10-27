@@ -364,25 +364,14 @@ def test_character_image_reads_leave_event_loop_and_release_operation(
 
         monkeypatch.setattr(pool, "return_connection", return_connection)
         # Observe each checkout after the pool's own cleanup, just before it is published for reuse.
-        if pool._use_psycopg_pool:
-            # psycopg_pool resets a returned checkout on its own worker, then publishes it.
-            original_publish = pool._pool._add_to_pool
+        # psycopg_pool resets a returned checkout on its own worker, then publishes it.
+        original_publish = pool._pool._add_to_pool
 
-            def publish(raw: Any) -> None:
-                settled(raw)
-                original_publish(raw)
+        def publish(raw: Any) -> None:
+            settled(raw)
+            original_publish(raw)
 
-            monkeypatch.setattr(pool._pool, "_add_to_pool", publish)
-        else:
-
-            class ObservedFreeList(list):
-                """The fallback pool rolls back synchronously, then appends the checkout to its free list."""
-
-                def append(self, raw: Any) -> None:
-                    settled(raw)
-                    super().append(raw)
-
-            monkeypatch.setattr(pool, "_free", ObservedFreeList(pool._free))
+        monkeypatch.setattr(pool._pool, "_add_to_pool", publish)
     monkeypatch.setattr(character_chat_sessions, "_verify_chat_ownership", verify)
     monkeypatch.setattr(character_chat_sessions, "read_messages_with_images", read)
     monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", lambda **kwargs: {

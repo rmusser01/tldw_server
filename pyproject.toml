@@ -47,6 +47,8 @@ dependencies = [
   "argon2-cffi>=23.0.0",
   "asyncpg",
   "psycopg[binary]>=3.1",
+  # The PostgreSQL backend's only pool: it resets tenant session state on check-in.
+  "psycopg-pool>=3.3",
   "cachetools>=5.0.0",
   "click>=8.0.0",
   "click-completion>=0.5.2",
@@ -457,7 +459,7 @@ backend_vllm = [
 # Database backends
 db_postgres = [
   "psycopg[binary]>=3.1",
-  "psycopg-pool>=3.1",
+  "psycopg-pool>=3.3",
   "psycopg2-binary>=2.9.9"
 ]
 
