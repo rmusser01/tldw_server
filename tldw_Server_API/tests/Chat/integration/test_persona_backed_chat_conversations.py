@@ -351,43 +351,45 @@ def test_explicit_retry_persists_new_identical_question_after_pre_persistence_mo
     with patch(
         "tldw_Server_API.app.api.v1.endpoints.chat.is_model_known_for_provider",
         return_value=False,
-    ):
+    ) as model_known:
         rejected = client.post("/api/v1/chat/completions", json=invalid, headers=headers)
-    assert rejected.status_code == 400, rejected.text
-    assert rejected.json()["detail"]["error_code"] == "model_not_available"
-    assert db.get_messages_for_conversation(conversation_id) == first_rows
-    assert provider_call.call_count == 1
+        assert rejected.status_code == 400, rejected.text
+        assert rejected.json()["detail"]["error_code"] == "model_not_available"
+        assert db.get_messages_for_conversation(conversation_id) == first_rows
+        assert provider_call.call_count == 1
 
-    retry = {
-        **original,
-        "metadata": {
-            "tldw_client_message_id": "failed-new-turn",
-            "tldw_retry_failed_turn": True,
-        },
-    }
-    recovered = client.post("/api/v1/chat/completions", json=retry, headers=headers)
-    assert recovered.status_code == 200, recovered.text
-    rows = db.get_messages_for_conversation(conversation_id)
-    users = [row for row in rows if row["sender"] == "user"]
-    assistants = [row for row in rows if row["sender"] == "assistant"]
-    assert [row["content"] for row in users] == [question, question]
-    assert [row["id"] for row in users] == [first_user["id"], recovered.json()["tldw_user_message_id"]]
-    assert len({row["id"] for row in assistants}) == 2
-    assert first_assistant["id"] in {row["id"] for row in assistants}
-    assert db.get_message_metadata(users[0]["id"])["extra"]["client_message_id"] == "answered-turn"
-    assert db.get_message_metadata(users[1]["id"])["extra"]["client_message_id"] == "failed-new-turn"
-    provider_user_texts = [
-        content if isinstance(content := message["content"], str) else "".join(part.get("text", "") for part in content)
-        for message in provider_call.call_args.kwargs["messages_payload"]
-        if message["role"] == "user"
-    ]
-    assert provider_user_texts[-2:] == [question, question]
-    assert provider_call.call_count == 2
+        # Strict selection asks the provider's live list (TASK-13460), which holds the original model.
+        model_known.return_value = True
+        retry = {
+            **original,
+            "metadata": {
+                "tldw_client_message_id": "failed-new-turn",
+                "tldw_retry_failed_turn": True,
+            },
+        }
+        recovered = client.post("/api/v1/chat/completions", json=retry, headers=headers)
+        assert recovered.status_code == 200, recovered.text
+        rows = db.get_messages_for_conversation(conversation_id)
+        users = [row for row in rows if row["sender"] == "user"]
+        assistants = [row for row in rows if row["sender"] == "assistant"]
+        assert [row["content"] for row in users] == [question, question]
+        assert [row["id"] for row in users] == [first_user["id"], recovered.json()["tldw_user_message_id"]]
+        assert len({row["id"] for row in assistants}) == 2
+        assert first_assistant["id"] in {row["id"] for row in assistants}
+        assert db.get_message_metadata(users[0]["id"])["extra"]["client_message_id"] == "answered-turn"
+        assert db.get_message_metadata(users[1]["id"])["extra"]["client_message_id"] == "failed-new-turn"
+        provider_user_texts = [
+            content if isinstance(content := message["content"], str) else "".join(part.get("text", "") for part in content)
+            for message in provider_call.call_args.kwargs["messages_payload"]
+            if message["role"] == "user"
+        ]
+        assert provider_user_texts[-2:] == [question, question]
+        assert provider_call.call_count == 2
 
-    replay = client.post("/api/v1/chat/completions", json=retry, headers=headers)
-    assert replay.status_code == 409, replay.text
-    assert db.get_messages_for_conversation(conversation_id) == rows
-    assert provider_call.call_count == 2
+        replay = client.post("/api/v1/chat/completions", json=retry, headers=headers)
+        assert replay.status_code == 409, replay.text
+        assert db.get_messages_for_conversation(conversation_id) == rows
+        assert provider_call.call_count == 2
 
 
 @pytest.mark.parametrize("retry_identity_chat_client", ["sqlite", "postgres"], indirect=True)

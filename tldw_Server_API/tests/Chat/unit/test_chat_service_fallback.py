@@ -4056,14 +4056,15 @@ async def test_perform_async_chat_starts_without_default_executor_and_drains_can
         task.cancel()
         await asyncio.wait_for(drain_entered.wait(), timeout=1.0)
         assert task.done() is False
-        assert lifecycle == ["adapter-start"]
+        # Model discovery (TASK-13460) takes and returns its own pool slot before the adapter starts.
+        assert lifecycle == ["capacity-release", "adapter-start"]
 
         adapter_release.set()
         with pytest.raises(asyncio.CancelledError):
             await asyncio.wait_for(task, timeout=1.0)
 
-        assert lifecycle == ["adapter-start", "adapter-exit", "capacity-release"]
-        assert pool.release_count == 1
+        assert lifecycle == ["capacity-release", "adapter-start", "adapter-exit", "capacity-release"]
+        assert pool.release_count == 2
         assert pool.active_count == 0
     finally:
         adapter_release.set()

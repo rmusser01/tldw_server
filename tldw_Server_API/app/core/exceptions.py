@@ -876,6 +876,9 @@ class PersonaBuddyValidationError(BadRequestError):
 class ChatAPIError(Exception):
     """Base exception for chat API call errors."""
 
+    # Set only on a provider 401 that a refreshed credential may safely retry (no generation output sent).
+    credential_refresh_retry_safe: bool = False
+
     def __init__(
         self,
         message: str = "An error occurred during the chat API call.",
@@ -908,6 +911,7 @@ class ChatConfigurationError(ChatAPIError):
         {
             "provider_configuration_invalid",
             "missing_provider_credentials",
+            "provider_model_inventory_unavailable",
         }
     )
 
@@ -930,6 +934,28 @@ class ChatBadRequestError(ChatAPIError):
         provider: str | None = None,
     ) -> None:
         super().__init__(message, status_code=400, provider=provider)
+
+
+class ChatModelNotAvailableError(ChatBadRequestError):
+    """The selected model is not in the provider's current model list.
+
+    The message is built here from the request's own provider and model, never from upstream text, so it is
+    safe to show the client.
+    """
+
+    error_code = "model_not_available"
+
+    @staticmethod
+    def message_for(provider: str, model: object) -> str:
+        """Name the model and provider, and say how to pick the right provider."""
+        return (
+            f"Model '{model}' is not available for provider '{provider}'. "
+            "Set api_provider to the model's provider, or use '<provider>/<model>'."
+        )
+
+    def __init__(self, provider: str, model: object) -> None:
+        self.model = model
+        super().__init__(message=self.message_for(provider, model), provider=provider)
 
 
 class ChatRateLimitError(ChatAPIError):

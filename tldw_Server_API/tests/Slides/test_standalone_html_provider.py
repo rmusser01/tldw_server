@@ -17,6 +17,7 @@ import httpx
 import pytest
 from loguru import logger
 
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
 from tldw_Server_API.app.core.Slides.standalone_html_config import (
     CLOSED_ADAPTER_CATALOG,
     ResolvedExecutionTarget,
@@ -103,6 +104,15 @@ def provider_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     # Pre-migration the module built httpx.AsyncClient through the _AsyncClient alias.
     seam = "create_async_client" if hasattr(module, "create_async_client") else "_AsyncClient"
     monkeypatch.setattr(module, seam, isolated_test_client)
+
+    def test_inventory(provider: str, api_key: str, *, base_url: str, call_policy):
+        assert provider in {"openai", "anthropic"}
+        assert api_key
+        assert call_policy.required_endpoint_scope.matches(base_url)
+        assert call_policy.maximum_timeout_seconds > 0
+        return ModelDiscoveryResult("ready", ("CaseSensitive-Model", "gpt-4o-mini", "gpt-5"))
+
+    monkeypatch.setattr(module.provider_model_inventory, "discover_provider_models", test_inventory)
     return module
 
 

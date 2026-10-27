@@ -19,6 +19,7 @@ import hashlib  # noqa: E402
 import inspect  # noqa: E402
 import json  # noqa: E402
 import logging  # noqa: E402
+import math  # noqa: E402
 import os  # noqa: E402
 import re  # noqa: E402
 import socket  # noqa: E402
@@ -895,6 +896,8 @@ class TransportAdapter(Protocol):
         cert_pinning: dict[str, set[str]] | None = None,
         configured_endpoint: ConfiguredEndpointScope | None = None,
         sensitive_observability: bool = False,
+        max_response_bytes: int | None = None,
+        deadline: float | None = None,
     ) -> SyncResponseLike: ...
 
     async def arequest(
@@ -988,7 +991,16 @@ class HttpxAdapter:
         cert_pinning: dict[str, set[str]] | None = None,
         configured_endpoint: ConfiguredEndpointScope | None = None,
         sensitive_observability: bool = False,
+        max_response_bytes: int | None = None,
+        deadline: float | None = None,
     ) -> httpx.Response:
+        response_limit_kwargs: dict[str, Any] = (
+            {"max_response_bytes": max_response_bytes}
+            if max_response_bytes is not None
+            else {}
+        )
+        if deadline is not None:
+            response_limit_kwargs["deadline"] = deadline
         return _fetch_httpx_response(
             method=method,
             url=url,
@@ -1006,6 +1018,7 @@ class HttpxAdapter:
             cert_pinning=cert_pinning,
             configured_endpoint=configured_endpoint,
             sensitive_observability=sensitive_observability,
+            **response_limit_kwargs,
         )
 
     @_with_sensitive_http_log_context_async
@@ -1944,6 +1957,7 @@ def _validate_egress_or_raise(
     dns_pin_cache: dict[str, tuple[str, ...]] | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
     sensitive_observability: bool = False,
+    deadline: float | None = None,
 ) -> None:
     from urllib.parse import urlparse as _urlparse
 
@@ -1984,6 +1998,10 @@ def _validate_egress_or_raise(
         pinned_ips = dns_pin_cache.get(cache_host)
 
     policy_kwargs: dict[str, Any] = {"block_private_override": block_override}
+    if deadline is not None:
+        if time.monotonic() >= deadline:
+            raise NetworkError("TimeoutError")
+        policy_kwargs["deadline"] = deadline
     if configured_endpoint is not None:
         policy_kwargs["configured_endpoint"] = configured_endpoint
     if sensitive_observability:
@@ -1991,6 +2009,8 @@ def _validate_egress_or_raise(
     if pinned_ips:
         policy_kwargs["pinned_resolved_ips"] = pinned_ips
     res = evaluate_url_policy(url, **policy_kwargs)
+    if deadline is not None and time.monotonic() >= deadline:
+        raise NetworkError("TimeoutError")
     if not pinned_ips:
         if dns_pin_cache is not None and cache_host:
             resolved_ips = tuple(
@@ -2656,12 +2676,23 @@ def _check_cert_pinning(
     configured_endpoint: ConfiguredEndpointScope | None = None,
     accepted_resolved_ips: tuple[str, ...] = (),
     sensitive_observability: bool = False,
+    deadline: float | None = None,
 ) -> None:
     if not host or not pins:
         return
     sensitive_observability = _effective_sensitive_observability(
         sensitive_observability
     )
+
+    def pin_timeout() -> float:
+        """Share the caller's absolute deadline across pinning I/O."""
+        remaining = DEFAULT_CONNECT_TIMEOUT if deadline is None else min(
+            DEFAULT_CONNECT_TIMEOUT, deadline - time.monotonic(),
+        )
+        if remaining <= 0:
+            raise NetworkError("TimeoutError")
+        return remaining
+
     try:
         # Enforce egress policy for the pinning connection itself. This guards
         # against any future callers that might invoke pinning without having
@@ -2686,8 +2717,10 @@ def _check_cert_pinning(
                 }
             if sensitive_observability:
                 validation_kwargs["sensitive_observability"] = True
+            if deadline is not None:
+                validation_kwargs["deadline"] = deadline
             _validate_egress_or_raise(url, **validation_kwargs)
-        except EgressPolicyError:
+        except (EgressPolicyError, NetworkError):
             raise
         except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
             raise EgressPolicyError(
@@ -2701,18 +2734,24 @@ def _check_cert_pinning(
         except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
             ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         # Synchronous, and it runs on the event loop in the async paths: every address
-        # shares one DEFAULT_CONNECT_TIMEOUT budget, so the fallback never blocks longer
-        # than the single connect did.
-        deadline = time.monotonic() + DEFAULT_CONNECT_TIMEOUT
+        # shares one connect budget (pin_timeout(): DEFAULT_CONNECT_TIMEOUT, capped by the
+        # caller's absolute deadline), so the fallback never blocks longer than the single
+        # connect did. A separate name: ``deadline`` is the caller's.
+        connect_deadline = time.monotonic() + pin_timeout()
         sock = _first_connected(
             [(address,) for address in accepted_resolved_ips[:_PINNED_ADDRESS_ATTEMPTS] or (host,)],
             lambda address, *, final: socket.create_connection(
-                (address, port), timeout=max(deadline - time.monotonic(), 0.001)
+                (address, port), timeout=max(connect_deadline - time.monotonic(), 0.001)
             ),
             failures=(OSError,),
         )
-        with sock, ctx.wrap_socket(sock, server_hostname=host) as ssock:
-            der = ssock.getpeercert(binary_form=True)
+        with sock:
+            if deadline is not None:
+                sock.settimeout(pin_timeout())
+            with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+                der = ssock.getpeercert(binary_form=True)
+        if deadline is not None and time.monotonic() >= deadline:
+            raise NetworkError("TimeoutError")
         if not der:
             raise EgressPolicyError(
                 "TLS pinning: no certificate presented",
@@ -2724,9 +2763,11 @@ def _check_cert_pinning(
                 "TLS pinning mismatch for host",
                 reason_code="tls_pin_mismatch",
             )
-    except EgressPolicyError:
+    except (EgressPolicyError, NetworkError):
         raise
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise NetworkError("TimeoutError") from None
         raise EgressPolicyError(
             f"TLS pinning verification failed: {e}",
             reason_code="tls_pin_error",
@@ -2740,6 +2781,7 @@ def _check_cert_pins_for_url(
     configured_endpoint: ConfiguredEndpointScope | None,
     dns_pin_cache: dict[str, tuple[str, ...]],
     sensitive_observability: bool = False,
+    deadline: float | None = None,
 ) -> None:
     """Apply configured certificate pins to one already-validated request hop."""
     if not pins_map:
@@ -2759,6 +2801,7 @@ def _check_cert_pins_for_url(
         configured_endpoint=configured_endpoint,
         accepted_resolved_ips=_accepted_ips_for_url(dns_pin_cache, url),
         sensitive_observability=sensitive_observability,
+        **({"deadline": deadline} if deadline is not None else {}),
     )
 
 
@@ -2978,6 +3021,44 @@ def create_client(
 # Transport-only IO helpers (no policy enforcement)
 # --------------------------------------------------------------------------------------
 
+def _httpx_request_with_deadline(
+    *,
+    client: httpx.Client,
+    deadline: float,
+    proxies: str | dict[str, str] | None = None,
+    **kwargs: Any,
+) -> httpx.Response:
+    """Run cancellable bounded I/O without retaining a client on a closed loop.
+
+    Sync callers only, on a thread with no running event loop (a worker thread, or an
+    ``asyncio.to_thread``/bounded-pool offload). On a loop thread this would block that loop
+    for the whole deadline, so it raises RuntimeError instead (review M8).
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        raise RuntimeError(
+            "A deadline-bounded sync fetch cannot run on a thread with a running event loop; "
+            "offload it to a worker thread."
+        )
+
+    async def read() -> httpx.Response:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Request deadline exceeded")
+        async with _stream_timeout(remaining):
+            async with create_async_client(
+                timeout=kwargs.get("timeout"),
+                proxies=proxies,
+                cert_pinning=_get_client_cert_pins(client),
+            ) as async_client:
+                return await _httpx_arequest_io(client=async_client, **kwargs)
+
+    return asyncio.run(read())
+
+
 def _httpx_request_io(
     *,
     client: httpx.Client,
@@ -2992,9 +3073,62 @@ def _httpx_request_io(
     timeout: float | httpx.Timeout | None = None,
     follow_redirects: bool = False,
     accepted_resolved_ips: tuple[str, ...] = (),
+    max_response_bytes: int | None = None,
 ) -> httpx.Response:
     method_upper = str(method).upper()
     request_timeout = _timeout_or_client_default(timeout)
+    targets = _pinned_transport_targets(url, headers, accepted_resolved_ips)
+    if max_response_bytes is not None:
+        if type(max_response_bytes) is not int or max_response_bytes < 0:
+            raise ValueError("max_response_bytes must be a non-negative integer")
+        bound = max_response_bytes
+
+        def read_bounded(
+            transport_url: str,
+            pinned_headers: dict[str, str] | None,
+            sni_hostname: str | None,
+            *,
+            final: bool,
+        ) -> httpx.Response:
+            stream_kwargs: dict[str, Any] = {
+                "headers": _force_identity_accept_encoding(pinned_headers),
+                "cookies": cookies,
+                "params": params,
+                "json": json,
+                "data": data,
+                "files": files,
+                "timeout": request_timeout if final else _httpx_fallback_timeout(request_timeout, client),
+                "follow_redirects": follow_redirects,
+                "extensions": {_BOUNDED_RESPONSE_EXTENSION: True},
+            }
+            if sni_hostname:
+                stream_kwargs["extensions"]["sni_hostname"] = sni_hostname
+            with client.stream(method_upper, transport_url, **stream_kwargs) as streamed:
+                body = b""
+                if 200 <= int(streamed.status_code) < 300:
+                    if _uses_compressed_content_encoding(streamed.headers):
+                        raise NetworkError(
+                            "Compressed responses are not allowed with max_response_bytes"
+                        )
+                    try:
+                        body = _read_bounded_chunks(streamed.iter_raw(), bound)
+                    except ValueError as exc:
+                        raise NetworkError("Response exceeds max_response_bytes limit") from exc
+                copied_headers = httpx.Headers(streamed.headers)
+                bounded = httpx.Response(
+                    status_code=streamed.status_code,
+                    content=body,
+                    request=streamed.request,
+                    extensions=streamed.extensions,
+                    history=streamed.history,
+                )
+                bounded.headers = copied_headers
+            return bounded
+
+        response = _first_connected(targets, read_bounded)
+        if accepted_resolved_ips:
+            _restore_httpx_response_url(response, url)
+        return response
     if accepted_resolved_ips:
 
         def send(
@@ -3018,10 +3152,7 @@ def _httpx_request_io(
                 extensions={"sni_hostname": sni_hostname},
             )
 
-        response = _first_connected(
-            _pinned_transport_targets(url, headers, accepted_resolved_ips),
-            send,
-        )
+        response = _first_connected(targets, send)
         _restore_httpx_response_url(response, url)
         return response
     if method_upper == "POST" and hasattr(client, "post"):
@@ -4499,8 +4630,15 @@ def _fetch_httpx_response(
     cert_pinning: dict[str, set[str]] | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
     sensitive_observability: bool = False,
+    max_response_bytes: int | None = None,
+    deadline: float | None = None,
 ) -> httpx.Response:
     """Sync httpx request with retries and egress enforcement.
+
+    ``max_response_bytes`` bounds successful raw bodies, requests identity
+    encoding, and skips non-success bodies, matching the async response API.
+    ``deadline`` is an absolute monotonic deadline for bounded reads and retry
+    waits using an owned client; it does not change inactivity timeouts.
 
     Raises ValueError when retries are enabled and a file-like object in `files`
     is not seekable: "File-like object must be seekable when retries are enabled.
@@ -4508,6 +4646,11 @@ def _fetch_httpx_response(
     """
     if httpx is None:  # pragma: no cover
         raise RuntimeError("httpx is not available")  # noqa: TRY003
+    if deadline is not None:
+        if type(deadline) not in (int, float) or not math.isfinite(deadline):
+            raise ValueError("deadline must be a finite monotonic timestamp")
+        if client is not None or max_response_bytes is None:
+            raise ValueError("deadline requires max_response_bytes and an owned client")
     sensitive_observability = _effective_sensitive_observability(
         sensitive_observability
     )
@@ -4519,6 +4662,7 @@ def _fetch_httpx_response(
         dns_pin_cache=dns_pin_cache,
         configured_endpoint=configured_endpoint,
         sensitive_observability=sensitive_observability,
+        **({"deadline": deadline} if deadline is not None else {}),
     )
     _validate_proxies_or_raise(proxies)
 
@@ -4530,6 +4674,25 @@ def _fetch_httpx_response(
     method_upper = str(method).upper()
     _head_disable_h2_tried = False
     _head_get_range_tried = False
+    response_limit_kwargs: dict[str, Any] = (
+        {"max_response_bytes": max_response_bytes}
+        if max_response_bytes is not None
+        else {}
+    )
+    request_io: Callable[..., httpx.Response] = _httpx_request_io
+    if deadline is not None:
+        request_io = _httpx_request_with_deadline
+        response_limit_kwargs.update(deadline=deadline, proxies=proxies)
+
+    def _retry_sleep(delay: float) -> None:
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise NetworkError("TimeoutError")
+            delay = min(delay, remaining)
+        time.sleep(delay)
+        if deadline is not None and time.monotonic() >= deadline:
+            raise NetworkError("TimeoutError")
 
     def _do_once(sc: httpx.Client, target_url: str) -> tuple[httpx.Response | None, str]:
         req_headers = _inject_trace_headers(headers)
@@ -4560,12 +4723,13 @@ def _fetch_httpx_response(
                                     dns_pin_cache, target_url
                                 ),
                                 sensitive_observability=sensitive_observability,
+                                **({"deadline": deadline} if deadline is not None else {}),
                             )
-            except EgressPolicyError:
+            except (EgressPolicyError, NetworkError):
                 raise
             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
                 return None, e.__class__.__name__
-            r = _httpx_request_io(
+            r = request_io(
                 client=sc,
                 method=method_upper,
                 url=target_url,
@@ -4581,9 +4745,10 @@ def _fetch_httpx_response(
                     dns_pin_cache,
                     target_url,
                 ),
+                **response_limit_kwargs,
             )
             return r, "ok"  # noqa: TRY300
-        except EgressPolicyError:
+        except (EgressPolicyError, NetworkError):
             raise
         except _HTTPCLIENT_REQUEST_EXCEPTIONS as e:
             # Classify DNS resolution errors explicitly so that retry logic
@@ -4612,11 +4777,14 @@ def _fetch_httpx_response(
                 cur_url = url
                 redirects = 0
                 while True:
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise NetworkError("TimeoutError")
                     _validate_egress_or_raise(
                         cur_url,
                         dns_pin_cache=dns_pin_cache,
                         configured_endpoint=configured_endpoint,
                         sensitive_observability=sensitive_observability,
+                        **({"deadline": deadline} if deadline is not None else {}),
                     )
                     resp, reason = _do_once(sc, cur_url)
                     if resp is None:
@@ -4641,6 +4809,7 @@ def _fetch_httpx_response(
                                         dns_pin_cache=dns_pin_cache,
                                         configured_endpoint=configured_endpoint,
                                         sensitive_observability=sensitive_observability,
+                                        **({"deadline": deadline} if deadline is not None else {}),
                                     )
                                     _check_cert_pins_for_url(
                                         cur_url,
@@ -4648,6 +4817,7 @@ def _fetch_httpx_response(
                                         configured_endpoint=configured_endpoint,
                                         dns_pin_cache=dns_pin_cache,
                                         sensitive_observability=sensitive_observability,
+                                        **({"deadline": deadline} if deadline is not None else {}),
                                     )
                                     req_headers = _inject_trace_headers(headers)
                                     req_headers = _strip_sensitive_headers_for_cross_origin(
@@ -4661,7 +4831,7 @@ def _fetch_httpx_response(
                                         _head_fb_to = float(os.getenv("HTTP_HEAD_RANGE_FALLBACK_TIMEOUT", "5"))
                                     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                                         _head_fb_to = 5.0
-                                    r2 = _httpx_request_io(
+                                    r2 = request_io(
                                         client=sc,
                                         method="GET",
                                         url=cur_url,
@@ -4677,6 +4847,7 @@ def _fetch_httpx_response(
                                             dns_pin_cache,
                                             cur_url,
                                         ),
+                                        **response_limit_kwargs,
                                     )
                                     with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                         tm.set_attributes({"http.status_code": int(r2.status_code)})
@@ -4703,7 +4874,7 @@ def _fetch_httpx_response(
                             f"fetch network retry attempt={attempt} reason={rsn} delay={delay:.3f}s "
                             f"url={_sanitize_url_for_logs(observability_url)}"
                         )
-                        time.sleep(delay)
+                        _retry_sleep(delay)
                         sleep_s = delay
                         break
                     # redirect handling
@@ -4715,7 +4886,7 @@ def _fetch_httpx_response(
                             if attempt == attempts:
                                 raise NetworkError("Redirect without Location header")  # noqa: TRY003
                             delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
-                            time.sleep(delay)
+                            _retry_sleep(delay)
                             sleep_s = delay
                             break
                         try:
@@ -4797,7 +4968,7 @@ def _fetch_httpx_response(
                     )
                     with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                         tm.add_event("http.retry", {"attempt": attempt, "reason": rsn})
-                    time.sleep(delay)
+                    _retry_sleep(delay)
                     sleep_s = delay
                     break
         _log_outbound_request(

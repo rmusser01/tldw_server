@@ -146,7 +146,6 @@ describe("image Retry with the real model cache and factory", () => {
     async (state) => {
       const { service, factory } = await load()
       await service.getModels(true)
-      const durable = structuredClone(io.stored)
       if (state === "metadata-outage")
         io.metadata.mockRejectedValue(new Error("Catalog unreachable"))
       if (state === "missing-model") io.metadata.mockResolvedValue([])
@@ -160,7 +159,8 @@ describe("image Retry with the real model cache and factory", () => {
       )
       expect(io.metadata).toHaveBeenCalledTimes(2)
       expect(io.send).not.toHaveBeenCalled()
-      if (state === "metadata-outage") expect(io.stored).toEqual(durable)
+      // A failed refresh evicts the durable catalog (TASK-13460): no stale availability outlives it.
+      if (state === "metadata-outage") expect(io.stored).toMatchObject({ models: null })
     },
   )
   it.each(["llama.cpp", undefined])(

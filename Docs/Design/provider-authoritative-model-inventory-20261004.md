@@ -1,0 +1,124 @@
+# Provider-authoritative model inventory
+
+Task: TASK-13460. Initial baseline: dev `75ab224081`.
+Rebased without conflicts onto dev `ba553fdc51` before final publication.
+
+The commercial catalog currently combines config and historical pricing IDs;
+OpenRouter adds live IDs without removing stale ones. Chat validation also accepts
+these IDs and fuzzy date-stripped aliases. This can display and call retired models.
+
+## Contract
+
+- Commercial selectable IDs originate from the provider's authenticated model
+  list, never pricing, defaults or override allowlists. Pricing remains historical
+  enrichment. Local discovery and native authentication remain unchanged.
+- A short-lived, bounded credential/endpoint-scoped cache avoids repeated calls.
+  Refresh failures and expired entries fail closed, with no stale fallback.
+  Concurrent misses share one fetch within each caller's deadline. Forced
+  refreshes supersede waiters and cache publication, not a leader's already
+  authenticated response; this is request-snapshot behavior, not revocation.
+  `unreachable` and `server_error` results are cached for 20 seconds, so a
+  failing `/models` is not re-fetched on every call; `auth_failed`, `not_found`
+  and `unsupported` are never cached, and a forced refresh bypasses the window.
+  Cache hits refresh their LRU position. A confirmed alias or selector lookup
+  (ready or not_found) is stored inside its inventory entry, so it lives exactly
+  as long as that inventory.
+- Discovery uses checked HTTP egress, no redirects, bounded pagination/timeouts,
+  no secret logging and no generation probes. Unsupported APIs are explicitly
+  unavailable rather than inventing an inventory. It accepts `http` and `https`
+  bases wherever the generation adapter would use them (gateways, the mock
+  server). Egress follows generation's rule for server-owned endpoints: the
+  base the server's own config and environment resolve to is scoped to its
+  exact origin (`ConfiguredEndpointScope`, as for server-owned local and custom
+  endpoints), so an operator's localhost or private gateway is discoverable. A
+  BYOK or per-request base, or any base that is not the server's, keeps the
+  default policy its base_url was admitted under, never a wider scope. A call
+  policy's own scope replaces both. Cached results are keyed by that scope. A
+  failure logs one line with provider, status and endpoint host only.
+- Failures map to the errors endpoints already handle: `auth_failed` is a 401
+  authentication error (refresh-and-retry safe for OAuth credentials, since no
+  generation was sent); `unreachable`/`server_error` use the public code
+  `provider_model_inventory_unavailable` (503) in chat completions and Messages;
+  `unsupported` stays a configuration error. An unlisted model is a 400
+  `model_not_available` that names the model and provider and says to set
+  `api_provider` or use `<provider>/<model>`. The strict pre-check defers to
+  dispatch when the list cannot be read, so OAuth refresh still runs there.
+- The provider listing discovers commercial providers concurrently (four
+  workers). A credential-store failure drops only the commercial entries; local
+  providers stay listed.
+- Shared Chat dispatch checks the exact selected ID with the effective credential
+  and endpoint before generation, including saved selections and defaults.
+  BYOK and audited transport restrictions must not be bypassed by discovery.
+  Anthropic aliases require an authenticated single-model lookup resolving to a
+  current inventory ID. A saved dotted Claude name (claude-sonnet-4.5) is checked
+  as its dashed API ID, the ID the request builders send. Router selectors validate their current catalog entry
+  while preserving the request string; catalog variants cannot be dropped.
+- The shared adapter credential-binding boundary also checks direct generation
+  callers, including speech, summaries, prompts and workflows. Discovery time
+  consumes audited call deadlines; it does not reset the generation budget.
+- Native Anthropic Messages (including token counting) and standalone Slides
+  validate the same effective credential and endpoint before direct requests.
+  Slides rechecks its closed target and tightened limits after discovery yields.
+- Discovery's absolute network deadline cancels slow-trickle reads and closes
+  owned clients; response-size caps are enforced before buffering the full body.
+  Retry waits consume that same deadline. Async ordinary and character auto
+  routing and prompt improvement offload discovery rather than blocking the
+  event loop. DNS and certificate-pin connect/handshake checks share the deadline.
+- OpenRouter uses its account-filtered `/models/user` endpoint and validates
+  every explicit fallback model against the same credential-scoped inventory.
+- Override model lists restrict current IDs; they cannot restore absent IDs.
+- Browser catalogs use a five-minute TTL and a new persisted-cache version;
+  expired cached getters and failed fetches cannot return old availability. An
+  aborted read (navigation, client timeout) is not a server failure and keeps
+  the catalog.
+  Empty refreshes also clear the outer cache. Invalidation does not recursively
+  retry an outage; callers join only an actual newer refresh.
+
+Discovery currently covers OpenAI, Anthropic, Cohere, DeepSeek, Google, Groq,
+Mistral, Moonshot, OpenRouter, Qwen, Novita, Poe, Together and Hugging Face's
+global chat router. Bedrock control-plane discovery is not implemented, and
+Z.AI and MiniMax listing contracts are not verified. Providers without a model
+list defer to the provider (owner decision, merge review I1): the dispatcher,
+adapter boundary and strict pre-check skip the inventory check, the request goes
+to the provider unchanged and the provider's own 404 rejects a bad model; the
+provider listing shows their configured models plus pricing extras, as before.
+A provider that has a listing still fails closed, including a misconfigured one
+whose discovery is `unsupported`. Legacy Hugging Face model-specific routes stay
+unavailable (Hugging Face has a listing; those routes are not it).
+
+## Implementation Plan
+
+### Stage 1: Discovery
+
+Goal: bounded provider inventories using existing HTTP and readiness helpers.
+Success criteria: no pricing/config resurrection, credential-scoped cache and
+sanitized failures. Tests: stale IDs, pagination, egress and refresh concurrency.
+Status: Complete.
+
+### Stage 2: Generation Boundaries
+
+Goal: provider-authoritative catalog and shared availability/dispatch checks.
+Success criteria: retired selections cannot generate; provider-supported aliases
+and routing modifiers remain compatible without fuzzy availability inference.
+Tests: ordinary/direct/native/Slides calls, overrides and routing selections.
+Status: Complete (provider-confirmed compatibility and dispatch/offload tests).
+
+### Stage 3: Verification And Publication
+
+Goal: Python 3.12 regressions, lint, Bandit and independent review; upstream dev
+PR and separate private backport. Success criteria: verified exact source and
+normal review gates, with source merge distinguished from live deployment.
+Tests: integrated regressions and strict frozen-pin private patch replay.
+Status: In Progress (PR #3191; final followup verification pending).
+
+ADR check: no new ADR required. This repairs availability within the adapter and
+trusted endpoint boundary governed by ADR-025; no new transport, authentication,
+storage or dependency architecture is introduced.
+
+Official API references: [Anthropic](https://platform.claude.com/docs/en/api/models),
+[DeepSeek](https://api-docs.deepseek.com/api/list-models/),
+[Gemini](https://ai.google.dev/api/models),
+[Cohere](https://docs.cohere.com/reference/list-models).
+Compatibility references: [Anthropic alias lookup](https://platform.claude.com/docs/en/api/models/retrieve),
+[OpenRouter routing/catalog variants](https://openrouter.ai/docs/guides/routing/model-variants/overview),
+[Hugging Face router selectors](https://huggingface.co/docs/inference-providers/main/en/index).

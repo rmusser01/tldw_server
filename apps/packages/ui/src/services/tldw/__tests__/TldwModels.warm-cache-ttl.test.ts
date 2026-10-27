@@ -85,7 +85,7 @@ describe("TldwModelsService warm-cache TTL (model-warm alarm no-op)", () => {
     expect(mocks.initialize.mock.calls.length).toBe(initializeAfterCold)
   })
 
-  it("the no-op is TTL-bound: warm refetches only after the 15-minute TTL", async () => {
+  it("the no-op is TTL-bound: warm refetches only after the 5-minute TTL", async () => {
     vi.useFakeTimers()
     vi.setSystemTime(Date.now())
     try {
@@ -93,8 +93,8 @@ describe("TldwModelsService warm-cache TTL (model-warm alarm no-op)", () => {
       await cold.warmCache(false)
       expect(mocks.getModels).toHaveBeenCalledTimes(1)
 
-      // 14 minutes later: still inside the 15-minute TTL → zero fetches.
-      vi.advanceTimersByTime(14 * 60 * 1000)
+      // 4 minutes later: still inside the 5-minute TTL (the backend inventory TTL) → zero fetches.
+      vi.advanceTimersByTime(4 * 60 * 1000)
       const warm = new TldwModelsService()
       expect(await warm.isCatalogFresh()).toBe(true)
       await warm.warmCache(false)

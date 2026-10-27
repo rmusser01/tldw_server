@@ -122,12 +122,12 @@ export class TldwModelsService {
   private cachedModels: ModelInfo[] | null = null
   private lastFetchTime: number = 0
   private lastForcedFetchTime: number = 0
-  private readonly CACHE_DURATION = 15 * 60 * 1000 // 15 minutes
+  private readonly CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
   private readonly FORCE_REFRESH_COOLDOWN = 30 * 1000
   private readonly CACHE_KEY = "tldwModelsCache"
   // Preserve catalog refresh cooldown across worker restarts.
   private readonly FORCE_COOLDOWN_KEY = "tldwModelsForceCooldown"
-  private readonly CACHE_SCHEMA_VERSION = 5
+  private readonly CACHE_SCHEMA_VERSION = 6
   private readonly INVALIDATION_TOKEN_HISTORY_LIMIT = 64
   private storage = createSafeStorage({ area: "local" })
   private storageLoaded = false
@@ -422,38 +422,28 @@ export class TldwModelsService {
 
     const now = Date.now()
 
-    let cookieAuthenticated = false
-    const handleError = (error: unknown): ModelInfo[] => {
+    const handleError = async (error: unknown): Promise<ModelInfo[]> => {
       if (fetchGeneration !== this.invalidationGeneration) {
         if (throwOnError) throw error
         return []
       }
-      if (cookieSession) {
-        const status = (error as { status?: number } | null)?.status
-        if (fetchGeneration === this.invalidationGeneration) {
-          if (status === 401 || status === 403) {
-            this.invalidateCacheState()
-          } else if (cookieAuthenticated && !requireFresh) {
-            return this.cachedModels || []
-          }
-        }
-        // A failed profile check cannot authorize fallback to a cached catalog.
-        if (throwOnError) throw error
-        return []
+      // Failed discovery has no stale fallback. A throwOnError caller gets the
+      // failure itself and leaves the last catalog (still inside its TTL) alone;
+      // any other failure drops the catalog it was meant to refresh. An aborted
+      // read (navigation, client timeout) says nothing about the server's models,
+      // so it keeps the catalog too.
+      if (!isAbortLikeModelFetchError(error)) {
+        if (cookieSession) this.invalidateCacheState()
+        else if (!throwOnError) await this.clearCache()
       }
       if (throwOnError) throw error
       if (requireFresh) return []
       if (isAbortLikeModelFetchError(error)) {
-        return this.cachedModels || []
+        return []
       }
 
       if (!import.meta.env?.DEV) {
         console.error('Failed to fetch models from tldw:', error)
-      }
-
-      // Return cached models if available, even if expired
-      if (this.cachedModels) {
-        return this.cachedModels
       }
 
       // Return empty array as fallback
@@ -469,6 +459,7 @@ export class TldwModelsService {
       forceRefresh &&
       !requireFresh &&
       this.cachedModels &&
+      (now - this.lastFetchTime) < this.CACHE_DURATION &&
       (now - this.lastForcedFetchTime) < this.FORCE_REFRESH_COOLDOWN
     ) {
       return this.cachedModels
@@ -483,12 +474,11 @@ export class TldwModelsService {
 
     if (!this.isConfiguredForModels(config)) {
       if (throwOnError) throw new Error("Connect to your tldw server before checking models.")
-      return requireFresh ? [] : this.cachedModels || []
+      return []
     }
 
     if (requireFresh) {
-      // Capability Retry must outlive an older discovery, without discarding
-      // the last useful catalog if the new read fails.
+      // Capability Retry must outlive an older discovery.
       fetchGeneration = ++this.invalidationGeneration
     }
 
@@ -509,7 +499,6 @@ export class TldwModelsService {
           this.cacheScopeKey = scopeKey
           this.cookiePrincipalId = principal
         }
-        cookieAuthenticated = principal !== null
       }
       const models = await tldwClient.getModels({
         refreshOpenRouter: options?.refreshOpenRouter === true
@@ -575,6 +564,7 @@ export class TldwModelsService {
     const scopeKey = this.buildCacheScope(config)
     this.reconcileCacheScope(scopeKey, requestGeneration)
     if (isActiveCookieSessionConfig(config)) return []
+    if (Date.now() - this.lastFetchTime >= this.CACHE_DURATION) return []
     return (this.cachedModels || []).filter((model) =>
       this.isSelectableChatModel(model)
     )
