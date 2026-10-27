@@ -1555,6 +1555,104 @@ def _safe_model_extra_body_compat(provider: str, model: str, runtime_context: di
         return _fallback_extra_body_compat()
 
 
+_LISTING_DISCOVERY_WORKERS = 4
+_CommercialListing = tuple[Optional[str], bool, Optional[ModelDiscoveryResult]]
+
+
+def _resolve_commercial_listing(
+    provider_name: str,
+    provider_info: dict[str, Any],
+    config_parser: Any,
+    api_keys_by_provider: dict[str, Any],
+    override: Any,
+    refresh_openrouter: bool,
+) -> _CommercialListing:
+    """(API key, configured, live inventory) for one commercial listing entry.
+
+    Raises ByokResolutionError when the credential store itself is unavailable.
+    """
+    section_name = provider_info.get('section')
+    api_key_field = provider_info.get('api_key_field')
+    config_key = None
+    if (
+        api_key_field and section_name and config_parser.has_section(section_name)
+        and config_parser.has_option(section_name, api_key_field)
+    ):
+        config_key = config_parser.get(section_name, api_key_field, fallback='')
+    api_key_value = (
+        valid_provider_api_key(api_keys_by_provider.get(provider_name)) or valid_provider_api_key(config_key)
+    )
+    if override is not None and (override.is_enabled is False or override.credentials_invalid):
+        if override.credentials_invalid:
+            return None, False, ModelDiscoveryResult("auth_failed")
+        return api_key_value, bool(api_key_value), ModelDiscoveryResult("auth_failed")
+    try:
+        static = resolve_static_server_fallback(provider_name)
+        fallback = ProviderOverrideCallSnapshot(provider_name, override).server_fallback(
+            ServerFallbackCredentials(api_key=api_key_value, credential_fields={}, app_config=static.app_config)
+        )
+    except ByokResolutionError as error:
+        if error.code != "invalid_provider_credentials":
+            raise
+        return None, False, ModelDiscoveryResult("auth_failed")
+    if fallback is not None:
+        api_key_value = valid_provider_api_key(fallback.api_key)
+    if not api_key_value:
+        return None, False, None
+    fallback_config = fallback.app_config if fallback is not None else static.app_config
+    base_url = resolve_provider_models_base_url(
+        provider_name, dict(fallback_config) if fallback_config is not None else None, credentials_resolved=True,
+    )
+    if base_url is None:
+        return api_key_value, True, ModelDiscoveryResult("unsupported")
+    return api_key_value, True, discover_provider_models(
+        provider_name, api_key_value, base_url=base_url,
+        force_refresh=refresh_openrouter and provider_name == "openrouter",
+    )
+
+
+def _resolve_commercial_listings(
+    provider_mappings: dict[str, Any],
+    config_parser: Any,
+    api_keys_by_provider: dict[str, Any],
+    provider_overrides: Any,
+    refresh_openrouter: bool,
+) -> dict[str, _CommercialListing] | None:
+    """Resolve every listed commercial provider, discovering concurrently (review I5).
+
+    One slow or failing provider then costs about one discovery budget instead of delaying every provider after
+    it. Returns None when the credential store is unavailable: commercial entries are left out, and the local
+    providers, which never read the store, are still listed (review M6).
+    """
+    jobs = []
+    for provider_name, provider_info in provider_mappings.items():
+        if provider_info.get('type') != 'commercial':
+            continue
+        section_name = provider_info.get('section')
+        override = provider_overrides.get(_normalize_catalog_provider_for_chat(provider_name))
+        listed = (
+            bool(section_name and config_parser.has_section(section_name))
+            or has_custom_openai_env_configuration(provider_name)
+            or override is not None
+        )
+        if listed:
+            jobs.append((provider_name, provider_info, override))
+    if not jobs:
+        return {}
+
+    def resolve(job: tuple[str, dict[str, Any], Any]) -> _CommercialListing:
+        provider_name, provider_info, override = job
+        return _resolve_commercial_listing(
+            provider_name, provider_info, config_parser, api_keys_by_provider, override, refresh_openrouter,
+        )
+
+    try:
+        with ThreadPoolExecutor(max_workers=min(_LISTING_DISCOVERY_WORKERS, len(jobs))) as pool:
+            return dict(zip([job[0] for job in jobs], pool.map(resolve, jobs)))
+    except ByokResolutionError:
+        return None
+
+
 def get_configured_providers(
     include_deprecated: bool = False,
     refresh_openrouter: bool = False,
@@ -1567,7 +1665,11 @@ def get_configured_providers(
     """
     try:
         config_parser = load_comprehensive_config()
-        provider_overrides = get_llm_provider_overrides_snapshot()
+        try:
+            provider_overrides = get_llm_provider_overrides_snapshot()
+            credential_store_available = True
+        except ByokResolutionError:
+            provider_overrides, credential_store_available = {}, False
         runtime_context = _build_runtime_context(config_parser)
         providers = []
 
@@ -1857,8 +1959,19 @@ def get_configured_providers(
         supported_chat_providers = set(ALL_SUPPORTED_PROVIDER_NAMES_LIST)
         endpoint_probe_enabled = _configured_endpoint_probe_enabled()
 
+        commercial_listings = (
+            _resolve_commercial_listings(
+                provider_mappings, config_parser, api_keys_by_provider, provider_overrides, refresh_openrouter,
+            )
+            if credential_store_available else None
+        )
+        if commercial_listings is None:
+            logger.error("Provider credential store is unavailable; listing local providers only")
+
         # Process each provider
         for provider_name, provider_info in provider_mappings.items():
+            if provider_info['type'] == 'commercial' and commercial_listings is None:
+                continue
             section_name = provider_info.get('section')
             override = provider_overrides.get(_normalize_catalog_provider_for_chat(provider_name))
 
@@ -1877,16 +1990,11 @@ def get_configured_providers(
             endpoint_url: Optional[str] = None
             api_key_value: Optional[str] = None
 
+            commercial_discovery: ModelDiscoveryResult | None = None
             if provider_info['type'] == 'commercial':
-                # Check for API key
-                api_key_field = provider_info.get('api_key_field')
-                api_key = None
-                if api_key_field and config_section_exists and config_parser.has_option(section_name, api_key_field):
-                    api_key = config_parser.get(section_name, api_key_field, fallback='')
-                api_key = valid_provider_api_key(api_keys_by_provider.get(provider_name)) or valid_provider_api_key(api_key)
-                if api_key:
-                    is_configured = True
-                    api_key_value = api_key
+                api_key_value, is_configured, commercial_discovery = (commercial_listings or {}).get(
+                    provider_name, (None, False, None),
+                )
             else:
                 # Check for endpoint URL for local providers
                 endpoint_field = provider_info.get('endpoint_field')
@@ -1952,49 +2060,12 @@ def get_configured_providers(
                         reason_code="invalid_url",
                     )
 
-            discovery_result: ModelDiscoveryResult | None = None
+            discovery_result: ModelDiscoveryResult | None = commercial_discovery
             if provider_info['type'] == 'commercial':
-                models = []
-                blocked = override is not None and (
-                    override.is_enabled is False or override.credentials_invalid
+                models = (
+                    list(discovery_result.models)
+                    if discovery_result is not None and discovery_result.status == "ready" else []
                 )
-                if blocked:
-                    if override is not None and override.credentials_invalid:
-                        api_key_value = None
-                        is_configured = False
-                    discovery_result = ModelDiscoveryResult("auth_failed")
-                else:
-                    try:
-                        static = resolve_static_server_fallback(provider_name)
-                        fallback = ProviderOverrideCallSnapshot(provider_name, override).server_fallback(
-                            ServerFallbackCredentials(
-                                api_key=api_key_value, credential_fields={},
-                                app_config=static.app_config,
-                            )
-                        )
-                        if fallback is not None:
-                            api_key_value = valid_provider_api_key(fallback.api_key)
-                        is_configured = bool(api_key_value)
-                        if is_configured:
-                            fallback_config = fallback.app_config if fallback is not None else static.app_config
-                            base_url = resolve_provider_models_base_url(
-                                provider_name, dict(fallback_config) if fallback_config is not None else None,
-                                credentials_resolved=True,
-                            )
-                            discovery_result = (
-                                discover_provider_models(
-                                    provider_name, api_key_value, base_url=base_url,
-                                    force_refresh=refresh_openrouter and provider_name == "openrouter",
-                                ) if base_url is not None else ModelDiscoveryResult("unsupported")
-                            )
-                            if discovery_result.status == "ready":
-                                models = list(discovery_result.models)
-                    except ByokResolutionError as error:
-                        if error.code != "invalid_provider_credentials":
-                            raise
-                        api_key_value = None
-                        is_configured = False
-                        discovery_result = ModelDiscoveryResult("auth_failed")
             should_discover = (
                 provider_info['type'] == 'local'
                 and is_configured
@@ -2216,11 +2287,14 @@ def get_configured_providers(
 
         # Strict policy: do not pull models from other sections.
 
-        return {
+        listing: dict[str, Any] = {
             'providers': providers,
             'default_provider': default_api,
             'total_configured': len(providers)
         }
+        if commercial_listings is None:
+            listing['error'] = 'Provider credential store is unavailable.'
+        return listing
 
     except ByokResolutionError:
         logger.error("Provider credential store is unavailable")

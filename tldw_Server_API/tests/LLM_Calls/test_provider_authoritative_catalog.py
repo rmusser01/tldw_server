@@ -138,19 +138,92 @@ def test_unhealthy_credential_store_never_reverts_to_plaintext(inventory, monkey
 
     monkeypatch.setattr(catalog, "get_llm_provider_overrides_snapshot", unavailable)
     result = catalog.get_configured_providers()
-    assert result["providers"] == []
-    assert result["total_configured"] == 0
+    assert [p for p in result["providers"] if p["type"] == "commercial"] == []
     assert result["error"] == "Provider credential store is unavailable."
     inventory.assert_not_called()
 
 
 @pytest.mark.unit
-def test_credential_store_health_loss_during_resolution_fails_entire_catalog(inventory, monkeypatch):
+def test_credential_store_health_loss_during_resolution_drops_every_commercial_entry(inventory, monkeypatch):
     def unavailable(*_args, **_kwargs):
         raise ByokResolutionError("credential_store_unavailable", "provider-overrides")
 
     monkeypatch.setattr(overrides.ProviderOverrideCallSnapshot, "server_fallback", unavailable)
     result = catalog.get_configured_providers()
-    assert result["providers"] == []
-    assert result["total_configured"] == 0
+    assert [p for p in result["providers"] if p["type"] == "commercial"] == []
+    assert result["error"] == "Provider credential store is unavailable."
     inventory.assert_not_called()
+
+
+def _with_local_provider(monkeypatch):
+    parser = ConfigParser()
+    parser.read_dict({
+        "API": {"anthropic_api_key": "synthetic-key"},
+        "Local-API": {"ollama_api_IP": "http://127.0.0.1:11434/v1/chat/completions", "ollama_model": "llama3"},
+    })
+    monkeypatch.setattr(catalog, "load_comprehensive_config", lambda: parser)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("where", ["snapshot", "resolution"])
+def test_credential_store_failure_drops_only_commercial_entries(inventory, monkeypatch, where):
+    """Local providers do not depend on the credential store, so they stay listed (review M6)."""
+    def unavailable(*_args, **_kwargs):
+        raise ByokResolutionError("credential_store_unavailable", "provider-overrides")
+
+    _with_local_provider(monkeypatch)
+    if where == "snapshot":
+        monkeypatch.setattr(catalog, "get_llm_provider_overrides_snapshot", unavailable)
+    else:
+        monkeypatch.setattr(overrides.ProviderOverrideCallSnapshot, "server_fallback", unavailable)
+    result = catalog.get_configured_providers()
+    names = {provider["name"] for provider in result["providers"]}
+    assert "ollama" in names
+    assert "anthropic" not in names
+    assert result["error"] == "Provider credential store is unavailable."
+    inventory.assert_not_called()
+
+
+@pytest.mark.unit
+def test_listing_discovers_slow_failing_providers_concurrently_and_briefly_caches_failures(
+    monkeypatch, healthy_no_override_tts_credential_snapshot,
+):
+    """N slow failing /models cost about one discovery budget, and a repeat within ~20 s fetches nothing (review I5)."""
+    import time as _time
+
+    from tldw_Server_API.app.core.LLM_Calls import provider_model_inventory as inventory_module
+
+    providers = ("openai", "anthropic", "groq", "mistral")
+    parser = ConfigParser()
+    parser.read_dict({"API": {f"{name}_api_key": "synthetic-key" for name in providers}})
+    monkeypatch.setattr(catalog, "load_comprehensive_config", lambda: parser)
+    monkeypatch.setattr(catalog, "get_api_keys", lambda: {})
+    monkeypatch.setattr(catalog, "get_provider_manager", lambda: None)
+    monkeypatch.setattr(catalog, "list_image_models_for_catalog", lambda: [])
+    monkeypatch.setattr(catalog, "_llm_registry_capability_envelopes", lambda: {})
+    monkeypatch.setattr(catalog, "_resolve_model_tokenizer_support", lambda *args: {})
+    monkeypatch.setattr(catalog, "get_llm_provider_overrides_snapshot", lambda: {}, raising=False)
+    monkeypatch.setattr(catalog, "resolve_static_server_fallback", lambda _: SimpleNamespace(app_config={}))
+    monkeypatch.setattr(
+        catalog, "resolve_provider_models_base_url", lambda provider, *_a, **_k: f"https://{provider}.example.invalid/v1",
+    )
+    monkeypatch.setattr(catalog, "discover_provider_models", inventory_module.discover_provider_models)
+    monkeypatch.setattr(inventory_module, "_CACHE", type(inventory_module._CACHE)())
+    monkeypatch.setattr(inventory_module, "_FAILED", type(inventory_module._FAILED)())
+    fetches: list[str] = []
+
+    def slow_failure(**kwargs):
+        fetches.append(kwargs["url"])
+        _time.sleep(0.4)
+        return SimpleNamespace(status_code=503, json=lambda: {}, close=lambda: None)
+
+    monkeypatch.setattr(inventory_module, "_http_fetch", slow_failure)
+    started = _time.monotonic()
+    first = catalog.get_configured_providers()
+    elapsed = _time.monotonic() - started
+    assert len(fetches) == len(providers)
+    assert elapsed < 1.2, f"discovery ran one provider at a time ({elapsed:.2f}s)"
+    assert all(p["models"] == [] for p in first["providers"] if p["name"] in providers)
+
+    catalog.get_configured_providers()
+    assert len(fetches) == len(providers)
