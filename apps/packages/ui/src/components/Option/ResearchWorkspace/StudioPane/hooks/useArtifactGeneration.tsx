@@ -2109,7 +2109,8 @@ async function generateSlidesFromApi(
       model: fallbackOptions.model,
       claimsVerificationProvider: options?.claimsVerificationProvider,
       claimsVerificationModel: options?.claimsVerificationModel,
-      temperature: fallbackOptions.temperature
+      temperature: fallbackOptions.temperature,
+      maxTokens: fallbackOptions.maxTokens
     })
     requireUsableSlidesPresentation(presentation)
     const usage = extractUsageMetrics(presentation)

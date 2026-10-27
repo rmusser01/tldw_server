@@ -1818,7 +1818,7 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     })
   })
 
-  it("passes the selected model runtime through to slides generation", async () => {
+  it("passes the selected model runtime and token budget through to slides generation", async () => {
     messageOptionStoreState.selectedModel = "llama-3.1-8b"
     chatModelSettingsStoreState.apiProvider = "ollama"
 
@@ -1832,7 +1832,8 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
         expect.objectContaining({
           model: "llama-3.1-8b",
           provider: "ollama",
-          temperature: 0.7
+          temperature: 0.7,
+          maxTokens: 800
         })
       )
     })

@@ -260,3 +260,12 @@ UI validation composition: the full three connected lifecycle modules had 115 pa
 Three touched Python modules compile. Scoped Bandit baseline/current has 365 identical signatures, zero new findings and zero errors; Ruff retains one inherited diagnostic and introduces none. Five touched TypeScript syntax parses pass; touched ESLint had 31 identical diagnostics, zero new and no ignored paths, followed by a separate check of the final timestamp/fixture delta. Inherited diagnostics and the skipped whole-project typecheck remain explicit. A rejected Bandit CLI option performed no scan; the supported stdin invocation above is the qualified result. An initial ESLint invocation ignored out-of-base shared paths and is not qualification; the corrected repository-root invocation used the existing explicit config.
 
 Independent actual-source review of all eight source/test paths is CLEAR, including the corrected store semantics and backend edges. ADR required: no new decision; existing request cancellation, owned-worker drain, workspace persistence and API patterns are reused without a new public schema. Final staged review, normal hooks/local commit, exact-source packaging/build and real Presentations generation/edit/reorder/save/reload/export/recovery/mode/UX checks remain required. Original-tab DOM verification and S03 closure remain OPEN at 39/43.
+
+
+## Presentations readiness and token setting
+
+The reviewed request-ID/current-document-loader readiness correction completed both live routes on bc09. All 597 browser request records were terminal, normal Logout was acknowledged, the private API/frontend/Chrome released, and pre-shutdown plus final ASGI receipts were quiet. The saved Data Table and protected original owner/control checks passed. No Presentation generation ran. The original-tab DOM/draft verification remains open.
+
+Studio Max Tokens was dropped at the hook and shared Slides client boundary. The existing backend already accepts max_tokens. Two causal checks failed while the omitted-value control passed. The minimal correction forwards the existing setting and serializes it only when specified. Eight selected/connected checks pass in each client configuration; no default, public schema or cancellation behavior changes. Independent actual-source review is clear. ADR assessment: no new durable decision; reuse the existing Studio setting and Slides request contract.
+
+Packaging and live three-slide generation, edit/reorder, exports, recovery, mode checks and human UX remain required. This does not close Stage 1/2/3 or S03.
