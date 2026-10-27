@@ -1416,6 +1416,30 @@ def test_backend_required_enforces_size_ratchets(ratchet: str) -> None:
     assert "base_sha" in str(gate.get("env", {}).get(BASE_ENV, ""))  # nosec B101 - regression assertion
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "ratchet",
+    [
+        "tldw_Server_API/tests/lint/test_layering_contract.py",
+        "tldw_Server_API/tests/lint/test_core_to_api_import_boundary.py",
+    ],
+)
+def test_backend_required_enforces_layering_ratchets(ratchet: str) -> None:
+    """TASK-13950.9: the layering contract and its core -> api view run in a required step."""
+    import shlex
+
+    from tldw_Server_API.tests.lint.test_layering_contract import BASE_ENV
+
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    steps = workflow["jobs"]["backend-required"]["steps"]
+    gate = next(step for step in steps if step.get("name") == "Enforce CI contracts and code ratchets")
+    assert not gate.get("continue-on-error", False)  # nosec B101 - regression assertion
+    # Shell words, as bash reads them: a commented-out path is not an argument.
+    assert ratchet in shlex.split(gate["run"].replace("\\\n", " "), comments=True)  # nosec B101
+    # The layering baseline's bump-with-reason check reads the PR base from this variable.
+    assert "base_sha" in str(gate.get("env", {}).get(BASE_ENV, ""))  # nosec B101 - regression assertion
+
+
 def test_backend_required_enforces_isolation_ratchets():
     workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
     steps = workflow["jobs"]["backend-required"]["steps"]
