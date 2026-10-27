@@ -236,6 +236,7 @@ async def test_init_local_llm_manager_runs_llamacpp_runtime_reconciler(
 
     class _Manager:
         def __init__(self, _config: object) -> None:
+            self.config = _config
             self.llamacpp_supervisor = supervisor
 
     class _Reconciler:
@@ -254,9 +255,10 @@ async def test_init_local_llm_manager_runs_llamacpp_runtime_reconciler(
     from tldw_Server_API.app.core import Local_LLM as local_llm_package
     from tldw_Server_API.app.core import config as config_module
     from tldw_Server_API.app.core.Local_LLM import llamacpp_runtime_reconciler
+    from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 
     llamacpp_endpoint_module = ModuleType("tldw_Server_API.app.api.v1.endpoints.llamacpp")
-    monkeypatch.setattr(config_module, "get_llamacpp_handler_settings", lambda: None)
+    monkeypatch.setattr(config_module, "get_llamacpp_handler_settings", lambda: {"enabled": True})
     monkeypatch.setattr(local_llm_package, "LLMInferenceManager", _Manager, raising=False)
     monkeypatch.setattr(local_llm_package, "LLMManagerConfig", lambda **kwargs: kwargs, raising=False)
     monkeypatch.setattr(llamacpp_runtime_reconciler, "LlamaCppRuntimeReconciler", _Reconciler)
@@ -276,6 +278,7 @@ async def test_init_local_llm_manager_runs_llamacpp_runtime_reconciler(
 
     assert calls == ["created", "reconcile"]
     assert app.state.llm_manager.llamacpp_supervisor is supervisor
+    assert isinstance(app.state.llm_manager.config["llamacpp"], LlamaCppConfig)
     assert app.state.llamacpp_runtime_reconciler.__class__ is _Reconciler
     assert llamacpp_endpoint_module.llm_manager is app.state.llm_manager
 

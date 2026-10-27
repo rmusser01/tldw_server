@@ -137,9 +137,8 @@ class DocumentGeneratorService:
         self.db = db
         # Load external overrides from Prompts/chat if available
         try:
-            from tldw_Server_API.app.core.Context_Integrity.prompt_loader import (
-                load_prompt,  # local import to avoid cycles
-            )
+            # local import to avoid cycles
+            from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
             overrides = {
                 DocumentType.TIMELINE: (load_prompt("chat", "timeline_system"), load_prompt("chat", "timeline_user")),
                 DocumentType.STUDY_GUIDE: (load_prompt("chat", "study_guide_system"), load_prompt("chat", "study_guide_user")),

@@ -5,14 +5,13 @@
 from datetime import datetime, timezone
 from typing import Optional
 
+#######################################################################################################################
+#
+# Base Exceptions
 from tldw_Server_API.app.core.exceptions import (  # noqa: F401 - re-exported; defined in core.exceptions (TASK-13950.12)
     DatabaseError,
     UserRegistrationException,
 )
-
-#######################################################################################################################
-#
-# Base Exceptions
 
 #######################################################################################################################
 #

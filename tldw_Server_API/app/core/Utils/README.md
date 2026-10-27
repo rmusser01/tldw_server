@@ -1,7 +1,7 @@
 # Utils
 
 The Utils package holds shared helpers that are safe to import from endpoints,
-services, and core modules. It covers filesystem path helpers, prompt loading,
+services, and core modules. It covers filesystem path helpers,
 metadata normalization, image validation, tokenizer helpers, pydantic
 compatibility, CPU-bound execution, and optional system checks.
 
