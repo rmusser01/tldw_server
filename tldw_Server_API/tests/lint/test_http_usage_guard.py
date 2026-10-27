@@ -98,14 +98,6 @@ ALLOWLIST: dict[str, str] = {
         "migrate: audiocpp_server client. Loopback by default, but allow_remote_base_url sends to any "
         "host through a raw httpx.AsyncClient with no egress policy; use create_async_client/afetch."
     ),
-    "tldw_Server_API/app/core/Workflows/adapters/integration/github.py": (
-        "migrate: creates GitHub issues via POST https://api.github.com with a raw httpx.AsyncClient "
-        "that honours env proxies; use apost/afetch."
-    ),
-    "tldw_Server_API/app/services/admin_webhooks_service.py": (
-        "migrate: delivers admin webhooks to registered URLs through a raw httpx.AsyncClient "
-        "(_default_async_client_factory) with no egress check per attempt; use afetch."
-    ),
     "tldw_Server_API/app/core/Audio_Studio/providers/ace_step.py": (
         "migrate: defaults client_factory to httpx.AsyncClient (a reference the regex guard missed). "
         "It checks its own origin allowlist, not the egress policy; default to create_async_client."
@@ -113,10 +105,6 @@ ALLOWLIST: dict[str, str] = {
     "tldw_Server_API/app/core/Slides/standalone_html_provider.py": (
         "migrate: streams provider completions through _AsyncClient = httpx.AsyncClient (an alias the "
         "regex guard missed), with no egress policy; use create_async_client with a configured endpoint."
-    ),
-    "tldw_Server_API/app/core/Ingestion_Sources/git_repository.py": (
-        "migrate: GitHub API sync via urllib urlopen. Only the first URL is pinned to api.github.com; "
-        "urlopen follows redirects and honours env proxies. Use fetch/fetch_json."
     ),
     "tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_AudioCpp.py": (
         "migrate: builds a raw aiohttp.ClientSession via _http_client.aiohttp (a reach-through the "
