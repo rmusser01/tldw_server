@@ -192,11 +192,11 @@ def test_frontend_required_enforces_shared_hooks_and_preserves_full_lint() -> No
     workflow = _load(".github/workflows/frontend-required.yml")
     steps = workflow["jobs"]["frontend-required"]["steps"]
     lint = _get_step(steps, "Run frontend lint")
-    hooks = _get_step(steps, "Run shared UI hook enforcement")
+    hooks = _get_step(steps, "Run shared UI lint and hook enforcement")
 
     assert lint["run"] == "bun run lint"
     assert lint["working-directory"] == "apps/tldw-frontend"
     assert hooks["if"] == lint["if"]
     assert hooks["working-directory"] == "apps/tldw-frontend"
-    assert hooks["run"] == "bun scripts/check-shared-hooks.mjs"
+    assert hooks["run"] == "node scripts/check-shared-hooks.mjs"
     assert not hooks.get("continue-on-error", False)
