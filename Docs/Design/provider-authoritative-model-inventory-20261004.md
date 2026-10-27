@@ -24,7 +24,8 @@ these IDs and fuzzy date-stripped aliases. This can display and call retired mod
   and endpoint before generation, including saved selections and defaults.
   BYOK and audited transport restrictions must not be bypassed by discovery.
   Anthropic aliases require an authenticated single-model lookup resolving to a
-  current inventory ID. Router selectors validate their current catalog entry
+  current inventory ID. A saved dotted Claude name (claude-sonnet-4.5) is checked
+  as its dashed API ID, the ID the request builders send. Router selectors validate their current catalog entry
   while preserving the request string; catalog variants cannot be dropped.
 - The shared adapter credential-binding boundary also checks direct generation
   callers, including speech, summaries, prompts and workflows. Discovery time
