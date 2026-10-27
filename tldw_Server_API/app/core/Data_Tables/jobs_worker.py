@@ -68,6 +68,8 @@ from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int as _coerce_int, jobs_manager_from_env as _jobs_manager
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
+from tldw_Server_API.app.core.LLM_Calls.adapter_utils import resolve_provider_model
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputNoPayloadError,
@@ -259,8 +261,7 @@ def _resolve_max_rows(payload: dict[str, Any]) -> int:
 def _resolve_model(provider: str, model: str | None, app_config: dict[str, Any]) -> str | None:
     if model:
         return model
-    key = f"{provider.replace('-', '_').replace('.', '_')}_api"
-    return (app_config.get(key) or {}).get("model")
+    return resolve_provider_model(canonical_provider_name(provider), app_config)
 
 
 def _get_adapter(provider: str) -> Any:

@@ -796,3 +796,89 @@ async def test_reopening_a_publication_conflict_does_not_rewrite_failure_metadat
         assert first.json()["table"]["status"] == "failed"  # nosec B101 # conflict explicitly retired.
         assert db.get_data_table(job["payload"]["table_id"]) == before  # nosec B101 # failure replay is read-only.
         assert _s03_content(db, job["payload"]["table_id"]) == original  # nosec B101 # never replaces a newer edit.
+
+
+@pytest.mark.asyncio
+async def test_local_provider_alias_without_key_completes_generation(monkeypatch, tmp_path, data_tables_app_factory):
+    """The real credential policy must admit a registered keyless local alias."""
+    media_path = _configure_worker_paths(tmp_path, monkeypatch)
+    app, jobs_db_path = data_tables_app_factory(media_path)
+    calls = []
+
+    class LocalAdapter:
+        def chat(self, request, **_kwargs):
+            calls.append(request)
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "columns": [{"name": "Fact", "type": "text"}],
+                                    "rows": [["Selene"]],
+                                }
+                            )
+                        }
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(jobs_worker, "_get_adapter", lambda _provider: LocalAdapter())
+    monkeypatch.setattr(jobs_worker, "resolve_provider_api_key", lambda *_args, **_kwargs: ("", {}))
+    monkeypatch.setattr(jobs_worker, "DEFAULT_LLM_PROVIDER", "llamacpp")
+    monkeypatch.setattr(jobs_worker, "load_and_log_configs", lambda: {"llama_api": {"model": "local-test-model"}})
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/data-tables/generate",
+                json={
+                    "name": "Keyless local alias",
+                    "prompt": "Extract the telescope name",
+                    "sources": [
+                        {
+                            "source_type": "rag_query",
+                            "source_id": "local",
+                            "snapshot": {"chunks": [{"chunk_text": "The telescope is Selene."}]},
+                        }
+                    ],
+                },
+            )
+            assert response.status_code == 202  # nosec B101 -- actual API admission.
+            receipt = response.json()
+        manager = JobManager(Path(jobs_db_path))
+        sdk = WorkerSDK(
+            manager,
+            WorkerConfig(
+                domain="data_tables",
+                queue="default",
+                worker_id="keyless-local-test",
+                lease_seconds=5,
+                renew_threshold_seconds=1,
+                renew_jitter_seconds=0,
+                bind_completion_token=True,
+            ),
+        )
+
+        async def handle(job):
+            try:
+                return await jobs_worker._handle_job(job, manager)
+            finally:
+                sdk.stop()
+
+        async def completed(job, _result):
+            jobs_worker.publish_completed_generation(manager, job["id"], expected_uuid=job["uuid"])
+
+        await asyncio.wait_for(sdk.run(handler=handle, on_completed=completed), timeout=2)
+        job = manager.get_job(receipt["job_id"])
+        assert job["status"] == "completed", job.get("error_message")  # nosec B101 -- real SDK completion.
+        assert len(calls) == 1 and calls[0]["api_key"] == "" and calls[0]["model"] == "local-test-model"  # nosec B101 -- actual keyless configured model.
+        db = MediaDatabase(db_path=str(media_path), client_id="test_client")
+        try:
+            table = db.get_data_table_by_uuid(receipt["table"]["uuid"])
+            assert table["status"] == "ready" and table["row_count"] == 1  # nosec B101 -- actual published result.
+            rows = db.list_data_table_rows(table["id"], limit=10, offset=0)
+            assert list(json.loads(rows[0]["row_json"]).values()) == ["Selene"]  # nosec B101 -- real stored content.
+        finally:
+            db.close_connection()
+    finally:
+        app.dependency_overrides.clear()
