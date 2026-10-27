@@ -155,7 +155,8 @@ def _recording_client(seen: list[httpx.Request], respond):
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        return respond(request)
+        response: httpx.Response = respond(request)
+        return response
 
     return create_async_client(transport=httpx.MockTransport(handler))
 

@@ -1859,7 +1859,9 @@ async def test_transient_dns_refusals_stay_retryable(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("error", [httpx.ReadTimeout, httpx.ConnectTimeout, httpx.WriteTimeout, httpx.PoolTimeout])
-async def test_httpx_timeouts_stay_provider_timeouts(provider_module: ModuleType, error: type[Exception]) -> None:
+async def test_httpx_timeouts_stay_provider_timeouts(
+    provider_module: ModuleType, error: type[httpx.TimeoutException]
+) -> None:
     target = _target("openai_official_chat_v1")
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -1880,7 +1882,8 @@ async def test_oversized_error_body_through_the_real_client_factory_is_capped(
     from tldw_Server_API.app.core import http_client
 
     def real_factory(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
-        return http_client.create_async_client(*args, transport=_TEST_TRANSPORT.get(), **kwargs)
+        transport: Any = _TEST_TRANSPORT.get()  # create_async_client's annotation says BaseTransport
+        return http_client.create_async_client(*args, transport=transport, **kwargs)
 
     monkeypatch.setattr(provider_module, "create_async_client", real_factory)
     target = _target("openai_official_chat_v1")

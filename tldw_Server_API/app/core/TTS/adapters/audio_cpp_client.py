@@ -96,7 +96,7 @@ class AudioCppClient:
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         try:
-            response = await afetch(
+            response: httpx.Response = await afetch(
                 method=method,
                 url=self._url(path),
                 client=self._http_client,

@@ -98,7 +98,7 @@ class _AiohttpSession:
         self.seen.append((host, kwargs["headers"]["Host"], kwargs.get("server_hostname")))
         if host not in self.up:
             raise aiohttp.ClientConnectorError(
-                SimpleNamespace(host=host, port=8080, ssl=None),
+                SimpleNamespace(host=host, port=8080, ssl=None),  # type: ignore[arg-type]  # stand-in ConnectionKey
                 ConnectionRefusedError(61, "Connection refused"),
             )
         remaining = bytearray(b"ok")

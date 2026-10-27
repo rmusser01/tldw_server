@@ -201,7 +201,7 @@ class AceStepHttpAdapter:
     ) -> httpx.Response:
         """Send one request scoped to ``allowlisted_url``'s origin, already allowlisted by the caller."""
         try:
-            return await afetch(
+            response: httpx.Response = await afetch(
                 method=method,
                 url=url,
                 client=client,
@@ -213,5 +213,6 @@ class AceStepHttpAdapter:
                 configured_endpoint=ConfiguredEndpointScope.from_url(allowlisted_url),
                 sensitive_observability=True,
             )
+            return response
         except EgressPolicyError:
             raise AceStepGenerationError("ace_step_endpoint_refused_by_egress_policy") from None

@@ -97,6 +97,7 @@ async def test_create_aiohttp_session_carries_default_headers_pins_and_tls_floor
         assert session.timeout.total == 7.5
         assert session.trust_env is False
         assert isinstance(session.connector, aiohttp.TCPConnector)
+        assert isinstance(session.connector._ssl, ssl.SSLContext)
         assert session.connector._ssl.minimum_version == ssl.TLSVersion.TLSv1_3
     finally:
         await session.close()
@@ -118,6 +119,7 @@ async def test_default_aiohttp_sessions_carry_headers_pins_tls_floor_and_timeout
         assert session.headers["User-Agent"] == "tldw-test-agent"
         assert hc._get_client_cert_pins(session) == {"audio.example.test": {"abcd"}}
         assert isinstance(session.connector, aiohttp.TCPConnector)
+        assert isinstance(session.connector._ssl, ssl.SSLContext)
         assert session.connector._ssl.minimum_version == ssl.TLSVersion.TLSv1_3
         assert session.timeout == aiohttp.ClientTimeout(
             total=None,

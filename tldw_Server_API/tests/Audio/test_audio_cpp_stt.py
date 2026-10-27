@@ -2811,7 +2811,9 @@ async def test_audio_cpp_aiohttp_client_carries_http_client_defaults(
     assert isinstance(session, aiohttp.ClientSession)
     try:
         assert session.headers["User-Agent"] == "tldw-test-agent"
-        assert session._tldw_cert_pinning == {"audio.example.test": {"abcd"}}
+        from tldw_Server_API.app.core.http_client import _get_client_cert_pins
+
+        assert _get_client_cert_pins(session) == {"audio.example.test": {"abcd"}}
         assert session.timeout.total == 17.25
         assert session.trust_env is False
     finally:
