@@ -12,6 +12,26 @@ from tldw_Server_API.app.core.Jobs.manager import JobManager
 pytestmark = pytest.mark.unit
 
 
+
+@pytest.fixture(autouse=True)
+def _isolate_worker_database_paths():
+    """Each test binds its own temporary paths, never a previous cached table."""
+    for db in jobs_worker._MEDIA_DB_CACHE.values():
+        db.close_connection()
+    jobs_worker._MEDIA_DB_CACHE.clear()
+    yield
+    for db in jobs_worker._MEDIA_DB_CACHE.values():
+        db.close_connection()
+    jobs_worker._MEDIA_DB_CACHE.clear()
+
+
+def _acquire_generation(jm, job):
+    """Exercise the real acquired-attempt contract while stubbing only the LLM."""
+    jm.create_job(domain="data_tables", queue="default", job_type=job["job_type"],
+                  owner_user_id=job["owner_user_id"], payload=job["payload"])
+    return jm.acquire_next_job(domain="data_tables", queue="default", worker_id="worker-test", lease_seconds=60)
+
+
 class _StubAdapter:
     def __init__(self, payload):
         self._payload = payload
@@ -146,8 +166,13 @@ async def test_data_tables_worker_generates_rows(monkeypatch, tmp_path):
         },
     }
 
-    jm = JobManager()
+    jm = JobManager(tmp_path / "jobs.db")
+    job = _acquire_generation(jm, job)
     result = await jobs_worker._handle_job(job, jm)
+    assert jm.complete_job(job["id"], result=result, expected_uuid=job["uuid"],
+                           worker_id=job["worker_id"], lease_id=job["lease_id"],
+                           completion_token=job["lease_id"], enforce=True)  # nosec B101 -- actual completion.
+    assert jobs_worker.publish_completed_generation(jm, job["id"], expected_uuid=job["uuid"], db=db) == "ready"  # nosec B101 -- actual saved result.
     assert result["row_count"] == 2
 
     refreshed = db.get_data_table(table_id, include_deleted=True)
@@ -449,7 +474,8 @@ async def test_retryable_llm_timeout_keeps_table_retriable(monkeypatch, tmp_path
         },
     }
 
-    jm = JobManager()
+    jm = JobManager(tmp_path / "jobs.db")
+    job = _acquire_generation(jm, job)
     with pytest.raises(DataTablesJobError) as exc:
         await jobs_worker._handle_job(job, jm)
 
@@ -524,7 +550,8 @@ async def test_llm_request_includes_adapter_timeout(monkeypatch, tmp_path):
         },
     }
 
-    result = await jobs_worker._handle_job(job, JobManager())
+    jm = JobManager(tmp_path / "jobs.db")
+    result = await jobs_worker._handle_job(_acquire_generation(jm, job), jm)
 
     assert result["row_count"] == 1
     assert "timeout" not in seen_request

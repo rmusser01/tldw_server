@@ -43,6 +43,14 @@ from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.config_llm_providers import get_default_provider
+from tldw_Server_API.app.core.Data_Tables.publication import (
+    PROTOCOL_KEY,
+    RECEIPT_KEY,
+    check_result_size,
+    publish_completed_generation,
+    read_generation_reservation,
+    reservation_for_job,
+)
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import owns_chacha_checkouts
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import (
@@ -860,6 +868,8 @@ def _mark_table_for_job_error(
     table_id: int,
     user_id: str,
     exc: Exception,
+    generation_job: str,
+    expected_version: int,
 ) -> None:
     """Persist table state for worker errors, keeping retryable failures queued."""
     retryable = bool(getattr(exc, "retryable", False))
@@ -868,6 +878,8 @@ def _mark_table_for_job_error(
         status="queued" if retryable else "failed",
         last_error=str(exc),
         owner_user_id=user_id,
+        expected_generation_job=generation_job,
+        expected_version=expected_version,
     )
 
 
@@ -886,20 +898,22 @@ def _drain_late_llm_future(future: asyncio.Future[Any]) -> None:
 def _is_job_cancelled(jm: JobManager, job_id: int) -> bool:
     try:
         job = jm.get_job(job_id)
-    except DATA_TABLES_DB_EXCEPTIONS:
-        return False
+    except DATA_TABLES_DB_EXCEPTIONS as exc:
+        raise DataTablesJobError("job_status_unavailable", retryable=True) from exc
     status = str(job.get("status") or "").lower() if job else ""
     return status == "cancelled"
 
 
 @owns_chacha_checkouts
 async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
-    """Handle a single data tables job and persist the generated table."""
+    """Stage a table result; only exact Jobs completion authorizes publication."""
     payload = _normalize_payload(job.get("payload"))
     user_id = _normalize_user_id(job, payload)
     table_id = _coerce_int(payload.get("table_id"), 0)
     db: Any | None = None
     table_row: dict[str, Any] | None = None
+    generation_job: str | None = None
+    expected_version: int | None = None
     try:
         job_type = str(job.get("job_type") or payload.get("job_type") or "").strip().lower()
         if job_type and job_type != DATA_TABLES_JOB_TYPE:
@@ -911,6 +925,8 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
         model = str(payload.get("model") or "").strip() or None
 
         job_id = _coerce_int(job.get("id"), 0)
+        if not jm.should_enforce_leases() or not job.get("uuid") or not job.get("lease_id"):
+            raise DataTablesJobError("exact_job_attempt_required", retryable=False)
         max_rows = _resolve_max_rows(payload)
 
         db = _get_media_db(user_id)
@@ -926,6 +942,32 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
                 raise DataTablesJobError("data_table_not_found", retryable=False)
         else:
             user_id = resolved_user_id
+
+        if PROTOCOL_KEY in payload and (type(payload[PROTOCOL_KEY]) is not int or payload[PROTOCOL_KEY] != 1):
+            raise DataTablesJobError("unsupported_publication_protocol", retryable=False)
+        if payload.get("table_uuid") and payload["table_uuid"] != table_row["uuid"]:
+            raise DataTablesJobError("data_table_identity_changed", retryable=False)
+        try:
+            reservation = reservation_for_job(job, payload, bind_attempt=True)
+            existing_reservation = table_row.get("generation_job_json")
+            if existing_reservation is None and job.get("idempotency_key"):
+                raise ValueError("missing_generation_reservation")
+            if existing_reservation is not None:
+                current = read_generation_reservation(existing_reservation)
+                if any(reservation[key] != value for key, value in current.items() if key != "attempt"):
+                    raise ValueError("generation_superseded")
+        except (ValueError, TypeError, KeyError) as exc:
+            raise DataTablesJobError("generation_superseded", retryable=False) from exc
+        upgraded = {
+            **payload, PROTOCOL_KEY: 1, "table_uuid": table_row["uuid"],
+            "user_id": user_id, "generation_key": reservation["key"],
+        }
+        if not jm.replace_job_payload(
+            job_id, payload=upgraded, expected_uuid=job["uuid"], expected_domain=DATA_TABLES_DOMAIN,
+            expected_worker_id=job["worker_id"], expected_lease_id=job["lease_id"], expected_payload=payload,
+        ):
+            raise DataTablesJobError("job_attempt_changed", retryable=False)
+        payload = upgraded
 
         chacha_db: CharactersRAGDB | None = None
 
@@ -968,18 +1010,26 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
         if not sources:
             raise DataTablesJobError("missing_sources", retryable=False)
 
-        db.update_data_table(
+        running_table = db.update_data_table(
             table_id,
             status="running",
+            generation_job=reservation,
+            expected_generation_job=existing_reservation,
             last_error=None,
             generation_model=model or table_row.get("generation_model"),
             prompt=prompt,
             owner_user_id=user_id,
         )
+        if not running_table:
+            raise DataTablesJobError("generation_state_changed", retryable=True)
+        if running_table.get("uuid") != table_row.get("uuid"):
+            raise DataTablesJobError("data_table_not_found", retryable=False)
+        generation_job = running_table["generation_job_json"]
+        expected_version = int(running_table["version"])
         jm.update_job_progress(job_id, progress_percent=5.0, progress_message="resolve_sources")
 
         if _is_job_cancelled(jm, job_id):
-            db.update_data_table(table_id, status="cancelled", last_error=None, owner_user_id=user_id)
+            db.update_data_table(table_id, status="cancelled", last_error=None, owner_user_id=user_id, expected_generation_job=generation_job, expected_version=expected_version)
             return {"cancelled": True, "table_id": table_id}
 
         resolved_sources: list[dict[str, Any]] = []
@@ -1057,7 +1107,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
 
         jm.update_job_progress(job_id, progress_percent=30.0, progress_message="build_prompt")
         if _is_job_cancelled(jm, job_id):
-            db.update_data_table(table_id, status="cancelled", last_error=None, owner_user_id=user_id)
+            db.update_data_table(table_id, status="cancelled", last_error=None, owner_user_id=user_id, expected_generation_job=generation_job, expected_version=expected_version)
             return {"cancelled": True, "table_id": table_id}
 
         llm_prompt = _build_prompt(
@@ -1069,7 +1119,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
 
         jm.update_job_progress(job_id, progress_percent=55.0, progress_message="llm_generate")
         if _is_job_cancelled(jm, job_id):
-            db.update_data_table(table_id, status="cancelled", last_error=None, owner_user_id=user_id)
+            db.update_data_table(table_id, status="cancelled", last_error=None, owner_user_id=user_id, expected_generation_job=generation_job, expected_version=expected_version)
             return {"cancelled": True, "table_id": table_id}
 
         provider = (get_default_provider() or "openai").strip().lower()
@@ -1128,7 +1178,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
 
         jm.update_job_progress(job_id, progress_percent=75.0, progress_message="validate")
         if _is_job_cancelled(jm, job_id):
-            db.update_data_table(table_id, status="cancelled", last_error=None, owner_user_id=user_id)
+            db.update_data_table(table_id, status="cancelled", last_error=None, owner_user_id=user_id, expected_generation_job=generation_job, expected_version=expected_version)
             return {"cancelled": True, "table_id": table_id}
 
         columns = _normalize_columns(raw_columns, column_hints=column_hints)
@@ -1160,6 +1210,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
             }
             row_records.append(
                 {
+                    "row_id": str(uuid.uuid4()),
                     "row_index": idx,
                     "row_json": row_json,
                 }
@@ -1167,32 +1218,30 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
 
         jm.update_job_progress(job_id, progress_percent=90.0, progress_message="persist")
         if _is_job_cancelled(jm, job_id):
-            db.update_data_table(table_id, status="cancelled", last_error=None, owner_user_id=user_id)
+            db.update_data_table(table_id, status="cancelled", last_error=None, owner_user_id=user_id, expected_generation_job=generation_job, expected_version=expected_version)
             return {"cancelled": True, "table_id": table_id}
 
-        with db.transaction():
-            db.persist_data_table_generation(
-                table_id,
-                columns=column_records,
-                rows=row_records,
-                sources=sources_db_payload if sources_db_payload else None,
-                status="ready",
-                row_count=len(row_records),
-                generation_model=model or table_row.get("generation_model"),
-                last_error=None,
-            )
-
-        jm.update_job_progress(job_id, progress_percent=100.0, progress_message="finalize")
-        return {
+        result = {
             "table_id": table_id,
-            "table_uuid": payload.get("table_uuid") or table_row.get("uuid"),
+            "table_uuid": table_row["uuid"],
             "row_count": len(row_records),
             "columns": [{"name": col["name"], "type": col["type"]} for col in column_records],
+            RECEIPT_KEY: {
+                "version": 1, "generation_key": reservation["key"], "job_uuid": job["uuid"],
+                "job_owner": str(job.get("owner_user_id") or ""), "owner": user_id,
+                "lease_hash": hashlib.sha256(str(job["lease_id"]).encode()).hexdigest(),
+                "table_id": table_id, "table_uuid": table_row["uuid"],
+                "expected_version": expected_version, "columns": column_records, "rows": row_records,
+                "sources": sources_db_payload, "model": model or table_row.get("generation_model"),
+            },
         }
+        check_result_size(result)
+        jm.update_job_progress(job_id, progress_percent=100.0, progress_message="finalize")
+        return result
     except DataTablesJobError as exc:
-        if db is not None and table_id > 0:
+        if db is not None and table_id > 0 and generation_job is not None:
             try:
-                _mark_table_for_job_error(db, table_id=table_id, user_id=user_id, exc=exc)
+                _mark_table_for_job_error(db, table_id=table_id, user_id=user_id, exc=exc, generation_job=generation_job, expected_version=expected_version)
             except DATA_TABLES_DB_EXCEPTIONS as reset_exc:
                 logger.debug(
                     "data_tables worker: failed to update table status for {}: {}",
@@ -1201,9 +1250,9 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
                 )
         raise
     except DATA_TABLES_RUNTIME_EXCEPTIONS as exc:
-        if db is not None and table_id > 0:
+        if db is not None and table_id > 0 and generation_job is not None:
             try:
-                db.update_data_table(table_id, status="failed", last_error=str(exc), owner_user_id=user_id)
+                db.update_data_table(table_id, status="failed", last_error=str(exc), owner_user_id=user_id, expected_generation_job=generation_job, expected_version=expected_version)
             except DATA_TABLES_DB_EXCEPTIONS as reset_exc:
                 logger.debug(
                     "data_tables worker: failed to update table status for {}: {}",
@@ -1226,10 +1275,13 @@ async def run_data_tables_jobs_worker(stop_event: asyncio.Event | None = None) -
         renew_threshold_seconds=_coerce_int(os.getenv("DATA_TABLES_JOBS_RENEW_THRESHOLD_SECONDS") or os.getenv("JOBS_LEASE_RENEW_THRESHOLD_SECONDS"), 10),
         backoff_base_seconds=_coerce_int(os.getenv("DATA_TABLES_JOBS_BACKOFF_BASE_SECONDS"), 2),
         backoff_max_seconds=_coerce_int(os.getenv("DATA_TABLES_JOBS_BACKOFF_MAX_SECONDS"), 30),
+        bind_completion_token=True,
         retry_on_exception=True,
         retry_backoff_seconds=_coerce_int(os.getenv("DATA_TABLES_JOBS_RETRY_BACKOFF_SECONDS"), 10),
     )
     jm = _jobs_manager()
+    if not jm.should_enforce_leases():
+        raise DataTablesJobError("data_tables_requires_lease_enforcement", retryable=False)
     sdk = WorkerSDK(jm, cfg)
     stop_watcher_task: asyncio.Task[None] | None = None
 
@@ -1249,7 +1301,12 @@ async def run_data_tables_jobs_worker(stop_event: asyncio.Event | None = None) -
         return await _handle_job(job, jm)
 
     try:
-        await sdk.run(handler=_handler)
+        async def _completed(job: dict[str, Any], _result: Any) -> None:
+            state = publish_completed_generation(jm, job["id"], expected_uuid=job["uuid"])
+            if state != "ready":
+                logger.warning("Data table publication deferred: job_id={}, state={}", job["id"], state)
+
+        await sdk.run(handler=_handler, on_completed=_completed)
     finally:
         if stop_watcher_task is not None and not stop_watcher_task.done():
             stop_watcher_task.cancel()

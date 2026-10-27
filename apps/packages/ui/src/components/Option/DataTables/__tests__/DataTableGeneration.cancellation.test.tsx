@@ -253,3 +253,21 @@ it.each(['switch', 'close'])('ignores a held detail fetch after %s', async (acti
   await act(async () => first.resolve(saved));
   expect(useDataTablesStore.getState().currentTable).toEqual(action === 'close' ? null : second);
 });
+
+
+describe.each(['wizard', 'detail'])('%s publication failure', (mode) => {
+  it.each(['conflict', 'unavailable', 'pending'])('preserves content and retires Cancel after %s', async (publication) => {
+    polling.poll.mockResolvedValue({ status: 'completed', table_uuid: saved.id, result: { publication_status: publication } });
+    await open(mode);
+    await act(async () => start.resolve(receipt));
+    await screen.findAllByText(publication === 'conflict'
+      ? 'Your saved table changed. Your edits were preserved. Generate again to use the latest version.'
+      : publication === 'pending'
+        ? 'Generation finished, but saving is not confirmed yet. Reopen the table to check its saved content.'
+        : 'The generated result could not be saved. Your saved table is unchanged. Try generating again.');
+    expect(result(mode)).toEqual(mode === 'wizard' ? null : saved);
+    expect(screen.queryByRole('button', { name: 'Cancel generation' })).not.toBeInTheDocument();
+    expect(api.getDataTable).toHaveBeenCalledTimes(mode === 'wizard' ? 0 : 1);
+    expect(api.cancelDataTableJob).not.toHaveBeenCalled();
+  });
+});

@@ -114,6 +114,12 @@ def ensure_sqlite_data_tables(db: Any, conn: sqlite3.Connection) -> None:
 
     try:
         conn.executescript(db._DATA_TABLES_SQL)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(data_tables)")}
+        if "generation_job_json" not in columns:
+            conn.execute("ALTER TABLE data_tables ADD COLUMN generation_job_json TEXT")
+        # Replacement live indexes must exist before removing tombstone uniqueness.
+        conn.execute("DROP INDEX IF EXISTS ux_data_table_columns_table_position_active")
+        conn.execute("DROP INDEX IF EXISTS ux_data_table_rows_table_index_active")
     except sqlite3.Error as exc:
         logger.warning(f"Could not ensure data_tables schema on SQLite: {exc}")
 

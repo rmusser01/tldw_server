@@ -38,3 +38,15 @@ ADR-023 retains Media as table storage and Jobs as generation authority. ADR-058
 ## Follow-up
 
 Implement and independently review the bounded design and SQLite/official PostgreSQL regressions, then package and validate real S03 workflows. This proposed record is not implementation or UAT acceptance.
+
+
+### Recovery refinement under implementation
+
+A nullable internal generation-job JSON reservation stores the generation key, original Jobs owner/queue and exact UUID when acquired. It enables authorized table reopen to discover the same active/archive job and replay publication without re-enqueueing. The key is reserved before admission and guards all worker/publication/error state changes, so stale generations cannot overwrite newer intent. This remains Proposed until the backend and native checks qualify it.
+
+
+### Attempt identity and failure replay refinement
+
+The acquired reservation also includes a SHA256 lease witness; terminal replay derives the same witness from stored completion_token. Exact Jobs processing-lease authentication precedes a full captured-reservation CAS under the Media parent lock. A replacement lease may bind over metadata-only old-attempt updates, but delayed old binds cannot match the replacement witness. Later status/error writes require both their exact witness and captured running version. A transient bind CAS miss is retryable, not a false missing-table failure.
+
+Admin remount recovery opens the actual Media owner's managed session rather than treating the Admin's handle as the owner. A definitive rejected admission marks only its own reserved table failed while keeping the lookup record; uncertain commits do not clear or re-enqueue. Publication-conflict failure marking is version-guarded and idempotent. The proposal remains unaccepted until PostgreSQL and native qualification complete.
