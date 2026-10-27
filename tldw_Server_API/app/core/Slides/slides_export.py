@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import os
@@ -38,11 +39,11 @@ except Exception as exc:  # pragma: no cover - markdown is a declared dependency
     raise RuntimeError("markdown package is required for slides export") from exc
 
 try:
-    from playwright.sync_api import Error as PlaywrightError  # type: ignore
-    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError  # type: ignore
-    from playwright.sync_api import sync_playwright  # type: ignore
+    from playwright.async_api import Error as PlaywrightError  # type: ignore
+    from playwright.async_api import TimeoutError as PlaywrightTimeoutError  # type: ignore
+    from playwright.async_api import async_playwright  # type: ignore
 except Exception:  # pragma: no cover - playwright is an optional dependency
-    sync_playwright = None
+    async_playwright = None
     PlaywrightError = Exception  # type: ignore
     PlaywrightTimeoutError = TimeoutError  # type: ignore
 
@@ -1113,7 +1114,7 @@ def export_presentation_pdf(
     if max_html_bytes and len(index_html.encode("utf-8")) > max_html_bytes:
         raise SlidesExportInputError("pdf_html_too_large")
 
-    if sync_playwright is None:
+    if async_playwright is None:
         raise SlidesExportError("playwright_unavailable")
 
     pdf_settings = _normalize_pdf_options(pdf_options)
@@ -1131,28 +1132,52 @@ def export_presentation_pdf(
 
         pdf_url = (base_dir / "index.html").resolve().as_uri() + "?print-pdf"
 
-        try:
-            with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(headless=True)
+        async def render_pdf() -> bytes:
+            playwright = await async_playwright().start()
+            browser = None
+            primary_error = None
+            try:
+                browser = await playwright.chromium.launch(headless=True)
+                page = await browser.new_page()
+                page.set_default_timeout(timeout_ms)
+                await page.goto(pdf_url, wait_until="load", timeout=timeout_ms)
                 try:
-                    page = browser.new_page()
-                    page.set_default_timeout(timeout_ms)
-                    page.goto(pdf_url, wait_until="load", timeout=timeout_ms)
+                    await page.emulate_media(media="print")
+                except PlaywrightError:
+                    logger.debug("slides export: emulate_media not supported by playwright")
+                try:
+                    await page.wait_for_function(
+                        "window.Reveal && window.Reveal.isReady && window.Reveal.isReady()",
+                        timeout=timeout_ms,
+                    )
+                except PlaywrightTimeoutError:
+                    logger.warning("slides export: reveal did not signal ready before timeout")
+                # Page.pdf has no timeout option and ignores the page default.
+                async with asyncio.timeout(timeout_ms / 1000) as deadline:
+                    pdf_bytes = await page.pdf(**pdf_settings)
+                if deadline.expired():
+                    raise TimeoutError("PDF rendering exceeded its deadline")
+            except BaseException as exc:  # noqa: BLE001 -- retain the primary outcome while releasing both owned resources.
+                primary_error = exc
+            finally:
+                cleanups = [playwright.stop]
+                if browser is not None:
+                    cleanups.insert(0, browser.close)
+                for cleanup in cleanups:
                     try:
-                        page.emulate_media(media="print")
-                    except PlaywrightError:
-                        logger.debug("slides export: emulate_media not supported by playwright")
-                    try:
-                        page.wait_for_function(
-                            "window.Reveal && window.Reveal.isReady && window.Reveal.isReady()",
-                            timeout=timeout_ms,
-                        )
-                    except PlaywrightTimeoutError:
-                        logger.warning("slides export: reveal did not signal ready before timeout")
-                    pdf_bytes = page.pdf(timeout=timeout_ms, **pdf_settings)
-                finally:
-                    browser.close()
-        except PlaywrightTimeoutError as exc:
+                        await cleanup()
+                    except BaseException as exc:  # noqa: BLE001 -- a failed close cannot prevent the remaining owner from releasing.
+                        if primary_error is None:
+                            primary_error = exc
+                        else:
+                            primary_error.add_note(f"PDF cleanup failed: {type(exc).__name__}")
+            if primary_error is not None:
+                raise primary_error
+            return pdf_bytes
+
+        try:
+            pdf_bytes = asyncio.run(render_pdf())
+        except (PlaywrightTimeoutError, TimeoutError) as exc:
             raise SlidesExportError("pdf_timeout") from exc
         except PlaywrightError as exc:
             raise SlidesExportError("pdf_render_failed") from exc
