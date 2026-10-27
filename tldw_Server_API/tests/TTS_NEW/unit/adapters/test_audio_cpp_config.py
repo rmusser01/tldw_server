@@ -183,3 +183,32 @@ def test_negative_or_unknown_managed_and_retain_tokens_resolve_false(token):
     config = AudioCppConfig.from_provider_config(_provider_config(extra_params=extra))
     assert config.managed is False
     assert config.retain_request_artifacts is False
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("token", "expected"),
+    [(None, False), (True, True), ("true", True), ("yes", True), (False, False), ("n", False), ("garbage", False)],
+)
+def test_allow_private_network_is_read_from_extra_params_and_defaults_off(token, expected):
+    extra = dict(_provider_config()["extra_params"])
+    if token is not None:
+        extra["allow_private_network"] = token
+    config = AudioCppConfig.from_provider_config(_provider_config(extra_params=extra))
+    assert config.allow_private_network is expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("base_url", ["http://127.0.0.1:99999", "http://tts.example.com:notaport"])
+def test_validate_base_url_rejects_invalid_ports(base_url):
+    """An invalid port never worked; reject it as a validation error, not a raw ValueError."""
+    with pytest.raises(TTSValidationError) as error:
+        validate_base_url(base_url, allow_remote_base_url=True)
+    assert error.value.error_code == "invalid_base_url"
+
+
+@pytest.mark.unit
+def test_validate_base_url_keeps_remote_userinfo():
+    """Userinfo is refused only where an egress scope is built (see AudioCppClient)."""
+    url = "http://u:p@tts.example.com"
+    assert validate_base_url(url, allow_remote_base_url=True) == url

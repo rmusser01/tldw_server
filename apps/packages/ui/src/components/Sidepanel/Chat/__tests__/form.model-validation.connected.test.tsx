@@ -30,11 +30,39 @@ const allowAnswer = (fixture: Awaited<ReturnType<typeof mountReady>>) =>
     };
   });
 
+// The side panel picks an available model when none is chosen (XS-02), so a
+// send is blocked for a missing model only when the server offers none.
+const noModels = { catalog: [] };
+
 describe("sidebar model validation in the real Form", () => {
+  it("picks an available model for an empty selection and sends", async () => {
+    const fixture = await mountReady({ model: "" });
+    try {
+      await waitFor(() =>
+        expect(useStoreMessageOption.getState().selectedModel).toMatch(
+          /:ready-model$/,
+        ),
+      );
+      expect(screen.getByTestId("chat-model-select")).toHaveTextContent(
+        "ready-model",
+      );
+      allowAnswer(fixture);
+      await typeDraft("keep my draft");
+      submit();
+      await waitFor(() => expect(fixture.provider).toHaveBeenCalledTimes(1));
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      await act(async () => {
+        await Promise.allSettled(ready.submissions);
+      });
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
   it.each(["", "  ", "tldw:"])(
     "keeps missing-model feedback and draft for selection %j",
     async (model) => {
-      const fixture = await mountReady({ model });
+      const fixture = await mountReady({ model, ...noModels });
       try {
         await typeDraft("keep my draft");
         submit();
@@ -73,7 +101,7 @@ describe("sidebar model validation in the real Form", () => {
     }
   });
 
-  it.each(["", "removed-model"])(
+  it.each(["removed-model"])(
     "offers the real Casual picker and sends the retained draft after selection %j",
     async (model) => {
       const fixture = await mountReady({ model });
@@ -112,7 +140,7 @@ describe("sidebar model validation in the real Form", () => {
   );
 
   it("clears an error after a draft edit, then validates the next Send again", async () => {
-    const fixture = await mountReady({ model: "" });
+    const fixture = await mountReady({ model: "", ...noModels });
     try {
       await typeDraft("keep my draft");
       submit();
@@ -128,7 +156,7 @@ describe("sidebar model validation in the real Form", () => {
   });
 
   it("supports explicit error dismissal without discarding the draft", async () => {
-    const fixture = await mountReady({ model: "" });
+    const fixture = await mountReady({ model: "", ...noModels });
     try {
       await typeDraft("keep my draft");
       submit();
@@ -142,7 +170,7 @@ describe("sidebar model validation in the real Form", () => {
   });
 
   it("validates image-only input in Pro mode", async () => {
-    const fixture = await mountReady({ model: "", mode: "pro" });
+    const fixture = await mountReady({ model: "", mode: "pro", ...noModels });
     try {
       expect(ready.setImage).not.toBeNull();
       await act(async () => {
@@ -194,7 +222,7 @@ describe("sidebar model validation in the real Form", () => {
     }
   });
 
-  it("sends with an available model and keeps the Casual picker out of the way", async () => {
+  it("sends with an available model and keeps the model chip in view", async () => {
     const fixture = await mountReady();
     try {
       allowAnswer(fixture);
@@ -204,7 +232,11 @@ describe("sidebar model validation in the real Form", () => {
       expect(JSON.stringify(fixture.provider.mock.calls[0][0])).toContain(
         "keep my draft",
       );
-      expect(screen.queryByTestId("chat-model-select")).not.toBeInTheDocument();
+      // The chip names the model instead of disappearing (XS-02).
+      expect(screen.getByTestId("chat-model-select")).toHaveTextContent(
+        "ready-model",
+      );
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
       await act(async () => {
         expect(
           (await Promise.allSettled(ready.submissions)).map(
@@ -233,7 +265,10 @@ describe("sidebar model validation in the real Form", () => {
       submit();
       await waitFor(() => expect(fixture.provider).toHaveBeenCalledTimes(1));
       await typeDraft("keep my draft");
-      fireEvent.click(screen.getByRole("button", { name: "Queue request" }));
+      // XS-10: while a reply is pending the primary action sends after it.
+      fireEvent.click(
+        screen.getByRole("button", { name: "Send after this reply" }),
+      );
       await waitFor(() =>
         expect(useStoreMessageOption.getState().queuedMessages).toEqual([
           expect.objectContaining({ promptText: "keep my draft" }),

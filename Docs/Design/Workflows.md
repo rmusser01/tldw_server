@@ -177,7 +177,7 @@ The following additional step types are available and surfaced via `/step-types`
   - Partial indexes on statuses: `status='running'`, `status='queued'`, `status='succeeded'`, and `status='failed'` for faster active/queue/history queries (PostgreSQL and modern SQLite).
   - JSON payloads: PostgreSQL stores `workflow_events.payload_json` as `JSONB` with a GIN index; SQLite stores JSON as `TEXT`.
 - Pooling & contention:
-  - PostgreSQL uses `psycopg_pool` when available (min/max size, timeouts, max lifetime/idle) with `dict_row` rows; falls back to a minimal pool if not installed.
+  - PostgreSQL uses `psycopg_pool` (a core dependency; min/max size, timeouts, max lifetime/idle) with `dict_row` rows and a reset on check-in that clears tenant session state.
   - SQLite applies `PRAGMA busy_timeout=5000`, `wal_autocheckpoint=1000`; hot write paths include exponential backoff on `database is locked`.
 
 ## Security Model

@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import base64
+import time
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -126,13 +129,8 @@ def _install_fake_webhook_client(svc: AdminWebhooksService, response_or_response
     factory_calls: list[dict[str, object]] = []
     client = _FakeAsyncWebhookClient(response_or_responses)
 
-    def _factory(*, timeout: int, follow_redirects: bool):
-        factory_calls.append(
-            {
-                "timeout": timeout,
-                "follow_redirects": follow_redirects,
-            }
-        )
+    def _factory(*, timeout: int):
+        factory_calls.append({"timeout": timeout})
         return client
 
     svc.http_client_factory = _factory
@@ -263,7 +261,7 @@ async def test_deliver_success(svc: AdminWebhooksService):
     entry = await svc.deliver(wh, "test.event", {"key": "value"})
 
     assert entry.status_code == 200
-    assert factory_calls == [{"timeout": 5, "follow_redirects": False}]
+    assert factory_calls == [{"timeout": 5}]
     mock_client.post.assert_awaited_once()
 
 
@@ -295,11 +293,15 @@ async def test_deliver_refreshes_signature_and_timestamp_for_each_retry_attempt(
 
     with (
         patch("tldw_Server_API.app.services.admin_webhooks_service.asyncio.sleep", new=AsyncMock()),
-        patch("tldw_Server_API.app.services.admin_webhooks_service.time.time", side_effect=[1000, 1005]),
+        # Only the service's own clock: afetch reads time.time too.
+        patch(
+            "tldw_Server_API.app.services.admin_webhooks_service.time",
+            SimpleNamespace(time=MagicMock(side_effect=[1000, 1005]), monotonic=time.monotonic),
+        ),
     ):
         await svc.deliver(wh, "test.event", {"key": "value"})
 
-    assert factory_calls == [{"timeout": 5, "follow_redirects": False}]
+    assert factory_calls == [{"timeout": 5}]
     first_call = mock_client.post.await_args_list[0]
     second_call = mock_client.post.await_args_list[1]
     assert first_call.kwargs["headers"]["X-Admin-Webhook-Timestamp"] == "1000"
@@ -342,7 +344,7 @@ async def test_dispatch_event_filters_by_event_type(svc: AdminWebhooksService):
 
     delivered = await svc.dispatch_event("incident.created", {"id": 1})
 
-    assert factory_calls == [{"timeout": 5, "follow_redirects": False}]
+    assert factory_calls == [{"timeout": 5}]
     mock_client.post.assert_awaited_once()
     # Only webhook 1 matches "incident.created", webhook 2 only wants "alert.fired"
     assert delivered == 1
@@ -371,3 +373,289 @@ async def test_dispatch_event_counts_only_2xx_deliveries(svc: AdminWebhooksServi
     delivered = await svc.dispatch_event("incident.created", {"id": 1})
 
     assert delivered == 1
+
+
+# ---------------------------------------------------------------------------
+# Delivery through core.http_client (TASK-13950.11)
+# ---------------------------------------------------------------------------
+
+_PUBLIC_HOOK_URL = "http://93.184.216.34/hook"
+
+
+def _hook(url: str, *, retry_count: int = 0) -> WebhookRecord:
+    return WebhookRecord(
+        id=7, url=url, secret="test-secret", event_types=["*"], description="", active=True,
+        retry_count=retry_count, timeout_seconds=5, created_by=None, created_at=None, updated_at=None,
+    )
+
+
+@pytest.fixture
+def http_route(monkeypatch: pytest.MonkeyPatch, svc: AdminWebhooksService):
+    """Deliver through the default client factory and the real afetch over a MockTransport.
+
+    Egress and redirect handling run for real; only the socket layer is replaced, and any
+    real connection attempt fails loudly. ``replies`` holds (status, headers, body) or an
+    exception to raise, per request; the delivery log row is captured instead of written.
+    """
+    import socket
+
+    import httpx
+
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.services import admin_webhooks_service
+
+    def _no_real_network(*_args, **_kwargs):
+        raise AssertionError("admin webhook delivery bypassed core.http_client")
+
+    monkeypatch.setattr(socket, "create_connection", _no_real_network)
+    monkeypatch.setattr(socket.socket, "connect", _no_real_network)
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+    requests: list[httpx.Request] = []
+    replies: list[Any] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        reply = replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        status, headers, body = reply
+        return httpx.Response(status, headers=headers, content=body, request=request)
+
+    def _mock_transport_client(**kwargs):
+        return http_client.create_async_client(transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(admin_webhooks_service, "create_async_client", _mock_transport_client, raising=False)
+    log = AsyncMock(return_value=MagicMock())
+    svc._log_delivery = log  # type: ignore[method-assign]
+    return requests, replies, log
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "url",
+    ["http://127.0.0.1/hook", "http://169.254.169.254/latest/meta-data/", "http://10.0.0.5/hook"],
+)
+async def test_deliver_refuses_private_target_at_delivery_time(svc: AdminWebhooksService, http_route, url):
+    """A stored webhook URL on loopback, link-local metadata or a private range is never contacted."""
+    requests, _replies, log = http_route
+    with patch("tldw_Server_API.app.services.admin_webhooks_service.asyncio.sleep", new=AsyncMock()) as sleep:
+        await svc.deliver(_hook(url, retry_count=2), "test.event", {"key": "value"})
+
+    assert requests == []
+    logged = log.await_args.kwargs
+    assert logged["status_code"] is None
+    assert logged["delivered_at"] is None
+    assert logged["error_message"] == "egress policy refused: address_forbidden"
+    # A policy refusal is final: no backoff, no second attempt.
+    assert logged["retry_attempt"] == 0
+    sleep.assert_not_awaited()
+
+
+@pytest.mark.unit
+async def test_deliver_does_not_follow_redirect_to_private_address(svc: AdminWebhooksService, http_route):
+    """A public receiver that redirects to link-local metadata is logged as the 302 it returned."""
+    requests, replies, log = http_route
+    replies.append((302, {"Location": "http://169.254.169.254/latest/meta-data/"}, b""))
+
+    await svc.deliver(_hook(_PUBLIC_HOOK_URL), "test.event", {"key": "value"})
+
+    assert [str(r.url) for r in requests] == [_PUBLIC_HOOK_URL]
+    logged = log.await_args.kwargs
+    assert logged["status_code"] == 302
+    assert logged["error_message"] == "HTTP 302"
+    assert logged["delivered_at"] is None
+
+
+@pytest.mark.unit
+async def test_deliver_signs_and_posts_to_a_public_target(svc: AdminWebhooksService, http_route):
+    """A valid delivery sends the same body, signature headers and timeout as before."""
+    import warnings
+
+    requests, replies, log = http_route
+    replies.append((200, {}, b"OK"))
+
+    with warnings.catch_warnings():
+        # The body goes as content=, not httpx's deprecated data=<str>.
+        warnings.simplefilter("error", DeprecationWarning)
+        await svc.deliver(_hook(_PUBLIC_HOOK_URL), "test.event", {"key": "value"})
+
+    (request,) = requests
+    body = '{"key": "value"}'
+    timestamp = request.headers["X-Admin-Webhook-Timestamp"]
+    assert request.method == "POST"
+    assert str(request.url) == _PUBLIC_HOOK_URL
+    assert request.content == body.encode()
+    assert request.headers["Content-Type"] == "application/json"
+    assert request.headers["X-Admin-Webhook-Event"] == "test.event"
+    assert request.headers["X-Admin-Webhook-Signature"] == generate_signature("test-secret", timestamp, body)
+    assert request.extensions["timeout"] == {"connect": 5.0, "read": 5.0, "write": 5.0, "pool": 5.0}
+    logged = log.await_args.kwargs
+    assert logged["status_code"] == 200
+    assert logged["response_body"] == "OK"
+    assert logged["error_message"] is None
+    assert logged["delivered_at"] is not None
+    assert logged["retry_attempt"] == 0
+    assert logged["signature"] == request.headers["X-Admin-Webhook-Signature"]
+
+
+@pytest.mark.unit
+async def test_deliver_retries_with_backoff_and_a_fresh_signature(
+    svc: AdminWebhooksService, http_route, monkeypatch: pytest.MonkeyPatch,
+):
+    """Non-2xx answers are retried with 2**attempt backoff; each attempt is signed afresh."""
+    import itertools
+
+    from tldw_Server_API.app.services import admin_webhooks_service
+
+    clock = itertools.count(1000, 5)
+    monkeypatch.setattr(
+        admin_webhooks_service,
+        "time",
+        SimpleNamespace(time=lambda: next(clock), monotonic=time.monotonic),
+    )
+    requests, replies, log = http_route
+    replies.extend([(500, {}, b"boom"), (503, {}, b"busy"), (200, {}, b"OK")])
+
+    with patch("tldw_Server_API.app.services.admin_webhooks_service.asyncio.sleep", new=AsyncMock()) as sleep:
+        await svc.deliver(_hook(_PUBLIC_HOOK_URL, retry_count=2), "test.event", {"key": "value"})
+
+    assert [call.args[0] for call in sleep.await_args_list] == [2, 4]
+    timestamps = [r.headers["X-Admin-Webhook-Timestamp"] for r in requests]
+    assert timestamps == ["1000", "1005", "1010"]
+    for request, timestamp in zip(requests, timestamps):
+        expected = generate_signature("test-secret", timestamp, '{"key": "value"}')
+        assert request.headers["X-Admin-Webhook-Signature"] == expected
+    logged = log.await_args.kwargs
+    assert logged["status_code"] == 200
+    assert logged["retry_attempt"] == 2
+    assert logged["error_message"] == "HTTP 503"
+
+
+def _resolve_hostnames(monkeypatch: pytest.MonkeyPatch, resolver) -> None:
+    """Make the egress check resolve hostnames through ``resolver``, as it does outside pytest."""
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Security import egress
+
+    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
+    monkeypatch.setattr(http_client, "env_flag_enabled", lambda _name: False)
+    monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda host, **_kwargs: resolver(host))
+
+
+@pytest.mark.unit
+async def test_deliver_refuses_a_hostname_resolving_to_a_private_address(
+    svc: AdminWebhooksService, http_route, monkeypatch: pytest.MonkeyPatch,
+):
+    """The DNS answer is checked at delivery, not only the literal URL."""
+    requests, _replies, log = http_route
+    _resolve_hostnames(monkeypatch, lambda _host: ["10.0.0.5"])
+
+    await svc.deliver(_hook("http://hooks.internal.example/hook"), "test.event", {"key": "value"})
+
+    assert requests == []
+    logged = log.await_args.kwargs
+    assert logged["status_code"] is None
+    assert logged["error_message"] == "egress policy refused: address_forbidden"
+
+
+@pytest.mark.unit
+async def test_deliver_rechecks_egress_on_every_attempt(
+    svc: AdminWebhooksService, http_route, monkeypatch: pytest.MonkeyPatch,
+):
+    """A host that answers 500 and then rebinds to a private address is refused on the retry.
+
+    The refusal row must not keep the first attempt's status and body.
+    """
+    sent, replies, log = http_route
+    replies.append((500, {}, b"boom"))
+    _resolve_hostnames(monkeypatch, lambda _host: ["10.0.0.5"] if sent else ["93.184.216.34"])
+
+    with patch("tldw_Server_API.app.services.admin_webhooks_service.asyncio.sleep", new=AsyncMock()) as sleep:
+        await svc.deliver(_hook("http://hooks.example.com/hook", retry_count=3), "test.event", {"key": "value"})
+
+    assert len(sent) == 1
+    assert sent[0].headers["Host"] == "hooks.example.com"
+    # One backoff before attempt 2, then the refusal stops the loop.
+    assert [call.args[0] for call in sleep.await_args_list] == [2]
+    logged = log.await_args.kwargs
+    assert logged["retry_attempt"] == 1
+    assert logged["status_code"] is None
+    assert logged["response_body"] is None
+    assert logged["error_message"] == "egress policy refused: address_forbidden"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("outcome", ["egress", "transport", "delivered"])
+async def test_delivery_warnings_log_only_the_url_origin(
+    svc: AdminWebhooksService, http_route, monkeypatch: pytest.MonkeyPatch, outcome,
+):
+    """Slack/Discord-style URLs carry their secret in the path.
+
+    It must not reach the service's warnings, http_client's loguru records (DEBUG included,
+    extras serialized), span attributes, or the stdlib httpx log; warnings keep the origin.
+    """
+    import json
+    import logging
+    from contextlib import asynccontextmanager, contextmanager
+
+    import httpx
+
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.services.admin_webhooks_service import logger
+
+    _requests, replies, _log = http_route
+    if outcome == "egress":
+        monkeypatch.setenv("EGRESS_DENYLIST", "hooks.slack.com")
+    elif outcome == "transport":
+        replies.append(httpx.ConnectError("refused"))
+    else:
+        replies.append((200, {}, b"ok"))
+
+    span_attributes: list[dict[str, Any]] = []
+
+    class _SpanRecorder:
+        @contextmanager
+        def span(self, _name: str, *, attributes: dict[str, Any]):
+            span_attributes.append(dict(attributes))
+            yield None
+
+        @asynccontextmanager
+        async def async_span(self, _name: str, *, attributes: dict[str, Any]):
+            span_attributes.append(dict(attributes))
+            yield None
+
+        def set_attributes(self, attributes: dict[str, Any]) -> None:
+            span_attributes.append(dict(attributes))
+
+        def add_event(self, _name: str, attributes: dict[str, Any] | None = None) -> None:
+            span_attributes.append(dict(attributes or {}))
+
+    monkeypatch.setattr(http_client, "get_tracing_manager", _SpanRecorder)
+    loguru_records: list[str] = []
+    stdlib_records: list[str] = []
+
+    class _StdlibCapture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            stdlib_records.append(f"{record.name}: {record.getMessage()}")
+
+    httpx_logger = logging.getLogger("httpx")
+    previous_level = httpx_logger.level
+    capture = _StdlibCapture(level=logging.DEBUG)
+    httpx_logger.setLevel(logging.DEBUG)
+    httpx_logger.addHandler(capture)
+    sink = logger.add(lambda message: loguru_records.append(str(message)), level="DEBUG", serialize=True)
+    try:
+        await svc.deliver(
+            _hook("https://hooks.slack.com/services/T000/B000/SECRETTOKEN?x=1"), "test.event", {"key": "value"},
+        )
+    finally:
+        logger.remove(sink)
+        httpx_logger.removeHandler(capture)
+        httpx_logger.setLevel(previous_level)
+
+    observed = "\n".join([*loguru_records, *stdlib_records, json.dumps(span_attributes, default=str)])
+    assert loguru_records, "the loguru sink captured nothing"
+    assert "SECRETTOKEN" not in observed
+    assert "/services/T000" not in observed
+    if outcome != "delivered":
+        assert "https://hooks.slack.com" in "".join(loguru_records)

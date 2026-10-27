@@ -273,6 +273,9 @@ jobs:
       # The task-format ratchet checks only the task files this PR changed since its
       # merge base with BACKLOG_TASK_FORMAT_BASE, so it never fails a PR for a file
       # that reached dev through a backlog-only PR this gate did not run on.
+      # The size ratchets (TASK-13950.8) compare their baselines with the same base, so a
+      # raised ceiling must carry a new reason in the PR diff.
+      # The layering contract (TASK-13950.9) does the same for a raised import count.
       # inputs.base_sha is set only on a dispatch (the merge queue passes dev's tip).
       - name: Enforce CI contracts and code ratchets
         if: needs.changes.outputs.backend_changed == 'true'
@@ -292,10 +295,21 @@ jobs:
             tldw_Server_API/tests/CI/test_merge_queue_gate_workflows.py \
             tldw_Server_API/tests/CI/test_merge_queue_frontend_required.py \
             tldw_Server_API/tests/CI/test_merge_queue_license_dispatch.py \
+            tldw_Server_API/tests/lint/test_function_size_ratchet.py \
+            tldw_Server_API/tests/lint/test_charactersragdb_surface_ratchet.py \
+            tldw_Server_API/tests/lint/test_http_usage_guard.py \
+            tldw_Server_API/tests/lint/test_layering_contract.py \
+            tldw_Server_API/tests/lint/test_core_to_api_import_boundary.py \
             tldw_Server_API/tests/lint/test_private_coercion_ratchet.py \
             tldw_Server_API/tests/lint/test_first_party_source_pinning.py \
+            tldw_Server_API/tests/lint/test_production_detector_single_source.py \
+            tldw_Server_API/tests/lint/test_test_seam_env_reads_guarded.py \
+            tldw_Server_API/tests/lint/test_keyword_identity_ratchet.py \
             tldw_Server_API/tests/CI/test_backlog_task_format_ratchet.py \
-            tools/backlog-py/tests
+            tools/backlog-py/tests \
+            tldw_Server_API/tests/Services/test_startup_test_runtime_guard.py \
+            tldw_Server_API/tests/AuthNZ/unit/test_runtime_environment.py \
+            tldw_Server_API/tests/AuthNZ/unit/test_test_mode_runtime_guard.py
           # TASK-13950.7: WebSocket auth guards. Their own run: the auth matrix reloads the app module.
           # pytest_timeout, as in ci.yml's shards: a route that neither accepts nor closes fails the
           # test in minutes instead of holding the step until the job times out.

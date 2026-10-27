@@ -157,7 +157,27 @@ def _capture_real_openai_adapter_headers(monkeypatch):
             return FakeResponse()
 
     monkeypatch.setattr(adapter_module, "http_client_factory", lambda **_kwargs: FakeClient())
+    _stub_openai_model_inventory(monkeypatch)
     return adapter_module.OpenAIAdapter(), captured_headers
+
+
+def _stub_openai_model_inventory(monkeypatch, *, api_key: str | None = None):
+    """Serve the adapter's pre-generation model check without a network call.
+
+    The endpoint is pinned so env left by other tests cannot change it. With
+    ``api_key``, only that credential sees an inventory, so a test also proves
+    discovery used the same credential as generation.
+    """
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    def discover(_provider, key, **_kwargs):
+        if api_key is not None and key != api_key:
+            return ModelDiscoveryResult("auth_failed")
+        return ModelDiscoveryResult("ready", ("gpt-test",))
+
+    monkeypatch.setattr(chat_service, "resolve_provider_models_base_url", lambda *_args, **_kwargs: "https://api.openai.com/v1")
+    monkeypatch.setattr(chat_service, "discover_provider_models", discover)
 
 
 async def _insert_raw_user_payload(pool, *, user_id: int, provider: str, payload: dict) -> None:
@@ -659,6 +679,7 @@ async def test_revoked_shared_tombstone_check_wins_before_lower_scope(tmp_path, 
 
 
 @pytest.mark.asyncio
+@pytest.mark.provider_inventory
 async def test_team_alias_credentials_cross_real_openai_adapter_boundary(tmp_path, monkeypatch):
     state = await _setup_byok_sqlite(tmp_path, monkeypatch)
     user_id = int(state["user"]["id"])
@@ -727,6 +748,7 @@ async def test_team_alias_credentials_cross_real_openai_adapter_boundary(tmp_pat
     from tldw_Server_API.app.core.LLM_Calls.providers import openai_adapter as adapter_module
 
     monkeypatch.setattr(adapter_module, "http_client_factory", lambda **_kwargs: FakeClient())
+    _stub_openai_model_inventory(monkeypatch, api_key=team_key)
     runtime = ProviderCredentialRuntime(
         user_id=user_id,
         team_ids=[team_id],
@@ -895,6 +917,7 @@ async def test_alias_revoke_interleaving_fails_closed_before_openai_adapter_sqli
 
 
 @pytest.mark.asyncio
+@pytest.mark.provider_inventory
 async def test_legacy_oai_oauth_refresh_migrates_before_openai_adapter_sqlite(
     tmp_path,
     monkeypatch,

@@ -982,6 +982,12 @@ class CharactersRAGDB:
             self, *, conversation_id: str, sync_client_id: str, object_revision: int, object_hash: str
         ) -> bool: ...
 
+        def tombstone_unsynced_conversation_from_sync(
+            self, *, conversation_id: str, sync_client_id: str, object_revision: int, object_hash: str
+        ) -> str: ...
+
+        def unsynced_conversation_is_foreign(self, *, conversation_id: str, sync_client_id: str) -> bool: ...
+
         def update_conversation(
             self, conversation_id: str, update_data: dict[str, Any], expected_version: int
         ) -> bool | None: ...
@@ -1028,6 +1034,10 @@ class CharactersRAGDB:
             object_revision: int,
             object_hash: str,
         ) -> str: ...
+
+        def unsynced_message_is_foreign(
+            self, *, stable_message_id: str, sync_client_id: str, object_hash: str
+        ) -> bool: ...
 
         def get_message_by_id(
             self, message_id: str, include_deleted: bool = False, *, strict_images: bool = False
@@ -1147,7 +1157,9 @@ class CharactersRAGDB:
 
         def count_notes(self, include_deleted: bool = False, only_deleted: bool = False) -> int: ...
 
-        def count_notes_matching_keywords(self, search_term: str | None, keyword_tokens: list[str]) -> int: ...
+        def count_notes_matching_keywords(
+            self, search_term: str | None, keyword_tokens: list[str], match: str = "all"
+        ) -> int: ...
 
         def get_conversation_by_id(
             self, conversation_id: str, include_deleted: bool = False
@@ -1260,6 +1272,7 @@ class CharactersRAGDB:
             keyword_tokens: list[str],
             limit: int = 10,
             offset: int = 0,
+            match: str = "all",
         ) -> list[dict[str, Any]]: ...
 
         def soft_delete_conversation(self, conversation_id: str, expected_version: int) -> bool | None: ...
@@ -1292,6 +1305,16 @@ class CharactersRAGDB:
             conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
             semantic_dataset_id: str | None = None,
         ) -> bool: ...
+
+        def tombstone_unsynced_note_from_sync(
+            self,
+            *,
+            note_id: str,
+            sync_client_id: str,
+            object_revision: int,
+            object_hash: str,
+            conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        ) -> str: ...
 
         def unlink_collection_from_keyword(self, collection_id: int, keyword_id: int) -> bool: ...
 
@@ -35158,6 +35181,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             version_value = 1
             deleted_value = 0
 
+        unique_match_sql = self._unique_text_match_sql(table_name, unique_col_name)
         table_name = self._map_table_for_backend(table_name)
         insert_cols_sql = ', '.join(cols_str_list_insert)
         insert_placeholders_sql = ', '.join(placeholders_str_list_insert)
@@ -35176,7 +35200,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             with self.transaction() as conn:
                 # Check if a soft-deleted item exists and undelete it
                 undelete_cursor = conn.execute(
-                    f"SELECT id, version FROM {table_name} WHERE {unique_col_name} = ? AND deleted = 1{owner_clause}",  # nosec B608
+                    f"SELECT id, version FROM {table_name} WHERE {unique_match_sql} AND deleted = 1{owner_clause}",  # nosec B608
                     (main_col_value,) + owner_params)
                 existing_deleted = undelete_cursor.fetchone()
                 if existing_deleted:
@@ -35212,7 +35236,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 item_id_insert = cursor_insert.lastrowid if hasattr(cursor_insert, 'lastrowid') else None
                 if item_id_insert is None and self.backend_type == BackendType.POSTGRESQL:
                     sel = conn.execute(
-                        f"SELECT id FROM {table_name} WHERE {unique_col_name} = ?{owner_clause}",  # nosec B608
+                        f"SELECT id FROM {table_name} WHERE {unique_match_sql}{owner_clause}",  # nosec B608
                         (main_col_value,) + owner_params
                     )
                     row = sel.fetchone()
@@ -35274,9 +35298,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         Raises:
             CharactersRAGDBError: For database errors.
         """
+        unique_match_sql = self._unique_text_match_sql(table_name, unique_col_name)
         table_name = self._map_table_for_backend(table_name)
         owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
-        query = f"SELECT * FROM {table_name} WHERE {unique_col_name} = ? AND deleted = 0{owner_clause}"  # nosec B608
+        query = f"SELECT * FROM {table_name} WHERE {unique_match_sql} AND deleted = 0{owner_clause}"  # nosec B608
         try:
             cursor = self.execute_query(query, (value,) + owner_params)
             row = cursor.fetchone()
@@ -35284,6 +35309,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except CharactersRAGDBError as e:
             logger.error(f"Database error fetching {table_name} by {unique_col_name} '{value}': {e}")
             raise
+
+    def _unique_text_match_sql(self, table_name: str, column: str) -> str:
+        """Return the equality predicate for a unique text column.
+
+        Keywords and keyword collections are case-insensitive (TASK-13950.5). SQLite
+        gets that from the columns' ``COLLATE NOCASE``; PostgreSQL strips NOCASE and
+        indexes ``LOWER(keyword)``/``LOWER(name)`` instead, so it compares ``LOWER`` too.
+        """
+        if table_name in {"keywords", "keyword_collections"} and self.backend_type == BackendType.POSTGRESQL:
+            return f"LOWER({column}) = LOWER(?)"
+        return f"{column} = ?"
 
     def _case_insensitive_order_expression(self, column: str, direction: str | None = None) -> str:
         column_clean = (column or '').strip()
@@ -38819,7 +38855,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             join_tag = f"JOIN flashcard_keywords fk ON fk.card_id = f.id JOIN {keyword_table} kw ON kw.id = fk.keyword_id"
             if self.backend_type == BackendType.POSTGRESQL:
                 join_tag += " AND kw.client_id = f.client_id"
-            where_clauses.append("kw.keyword = ?")
+            where_clauses.append(self._unique_text_match_sql("keywords", "kw.keyword"))
             params.append(tag)
 
         # FTS filter
@@ -38912,7 +38948,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             join_tag = f"JOIN flashcard_keywords fk ON fk.card_id = f.id JOIN {keyword_table} kw ON kw.id = fk.keyword_id"
             if self.backend_type == BackendType.POSTGRESQL:
                 join_tag += " AND kw.client_id = f.client_id"
-            where_clauses.append("kw.keyword = ?")
+            where_clauses.append(self._unique_text_match_sql("keywords", "kw.keyword"))
             params.append(tag)
 
         fts_filter = ""
@@ -39754,11 +39790,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if scope_tag:
                     tag_owner_filter, tag_owner_params = self._flashcard_owner_filter("kw")
                     keyword_table = self._map_table_for_backend("keywords")
+                    tag_match_sql = self._unique_text_match_sql("keywords", "kw.keyword")
                     matching_tag = conn.execute(
                         f"""
                         SELECT 1 FROM flashcard_keywords fk
                         JOIN {keyword_table} kw ON kw.id = fk.keyword_id
-                        WHERE fk.card_id = ? AND kw.keyword = ?{tag_owner_filter}
+                        WHERE fk.card_id = ? AND {tag_match_sql}{tag_owner_filter}
                         """,  # nosec B608 -- keyword table comes from the backend mapping
                         (card_id, scope_tag, *tag_owner_params),
                     ).fetchone()
@@ -47417,6 +47454,8 @@ for _conversation_store_method in (
     "add_conversation",
     "upsert_conversation_from_sync",
     "tombstone_conversation_from_sync",
+    "tombstone_unsynced_conversation_from_sync",
+    "unsynced_conversation_is_foreign",
     "get_conversation_by_id",
     "get_conversation_by_source_ref",
     "conversation_title_exists",
@@ -47514,6 +47553,7 @@ for _message_store_method in (
     "append_message_from_sync",
     "tombstone_message_from_sync",
     "tombstone_unsynced_message_from_sync",
+    "unsynced_message_is_foreign",
     "get_messages_by_sync_stable_id",
     "_insert_message_images",
     "append_message_image",
@@ -47585,6 +47625,7 @@ for _note_store_method in (
     "get_note_counts_for_keywords",
     "upsert_note_from_sync",
     "tombstone_note_from_sync",
+    "tombstone_unsynced_note_from_sync",
 ):
     setattr(
         CharactersRAGDB,

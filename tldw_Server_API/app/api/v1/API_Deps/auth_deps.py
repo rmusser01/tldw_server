@@ -220,10 +220,7 @@ async def _authenticate_api_key_from_request(request: Request, api_key: str) -> 
     if test_mode:
         # SECURITY: Warn loudly about TEST_MODE and block in production unless explicitly allowed
         allow_test_in_prod = _env_flag_enabled("ALLOW_TEST_MODE_IN_PRODUCTION")
-        environment = os.getenv("ENVIRONMENT", "").strip().lower()
-        prod_flag = _env_flag_enabled("tldw_production")
-        is_production = environment in {"production", "prod"} or prod_flag
-        if is_production:
+        if _is_production_like_env():
             if not allow_test_in_prod:
                 logger.critical(
                     "TEST_MODE is enabled in production environment! "

@@ -972,6 +972,16 @@ def test_chat_completion_strict_selection_accepts_a_saved_dotted_anthropic_name(
 
     provider_manager = MagicMock()
     provider_manager.circuit_breakers = {}
+    # Strict selection asks Anthropic's live list (TASK-13460), which holds only the dashed ID.
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    monkeypatch.setattr(
+        chat_service, "resolve_provider_models_base_url", lambda *_args, **_kwargs: "https://api.anthropic.com/v1",
+    )
+    monkeypatch.setattr(
+        chat_service, "discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready", ("claude-sonnet-4-5",)),
+    )
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call", side_effect=fake_execute_non_stream_call),
@@ -3607,6 +3617,8 @@ def test_real_openai_adapter_nonstream_failure_is_bounded_across_endpoint_logs_a
             patch.object(chat_endpoint, "get_request_queue", return_value=None),
             patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
             patch.object(chat_endpoint, "_shared_is_test_mode", return_value=False),
+            # Production mode turns on strict selection, which asks the live model list (TASK-13460).
+            patch.object(chat_endpoint, "_validate_explicit_model_availability", return_value=None),
             patch.object(adapter_module, "http_client_factory", fail_before_dispatch),
             patch.dict(
                 app.dependency_overrides,
@@ -3661,6 +3673,8 @@ def test_nonstream_output_limit_guidance_reaches_http_boundary(
         patch.object(chat_service, "get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
         patch.object(chat_endpoint, "_shared_is_test_mode", return_value=False),
+        # Production mode turns on strict selection, which asks the live model list (TASK-13460).
+        patch.object(chat_endpoint, "_validate_explicit_model_availability", return_value=None),
         patch.object(chat_endpoint, "perform_chat_api_call", return_value=provider_result) as provider_call,
     ):
         response = authenticated_client.post(
@@ -4075,7 +4089,7 @@ def test_real_openai_401_refreshes_oauth_once_before_stream_output(
                 raise httpx.HTTPStatusError(
                     sentinel,
                     request=self.request,
-                    response=self,
+                    response=self,  # type: ignore[arg-type]  # a stand-in httpx.Response
                 )
 
         def iter_lines(self):
@@ -6796,6 +6810,154 @@ def test_real_openai_nonstream_auth_status_controls_oauth_refresh(
     assert sentinel not in response.text
 
 
+def _real_openai_inventory_call(client, *, discover, stream: bool = False, auth_source: str | None = "oauth"):
+    """POST one OpenAI chat through the real adapter; only the model list and generation transport are faked."""
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls.providers import openai_adapter
+
+    generation_keys: list[str] = []
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"id": "chatcmpl-inventory", "choices": [{"message": {"role": "assistant", "content": "ok"}}]}
+
+    class Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, _url, *, headers, **_kwargs):
+            generation_keys.append(headers["Authorization"].removeprefix("Bearer "))
+            return Response()
+
+    runtime_type = _credential_runtime_double(auth_source=auth_source)
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {"openai": SimpleNamespace(can_attempt_call=lambda: True)}
+    request_data = ChatCompletionRequest(
+        model="gpt-4o-mini",
+        api_provider="openai",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+        stream=stream,
+    )
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
+        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
+        patch.object(chat_endpoint, "_shared_is_test_mode", return_value=False),
+        patch.object(chat_endpoint, "_should_enforce_strict_model_selection", return_value=False),
+        patch.object(chat_service, "resolve_provider_models_base_url", lambda *_a, **_k: "https://api.openai.com/v1"),
+        patch.object(chat_service, "discover_provider_models", discover),
+        patch.object(openai_adapter, "http_client_factory", lambda **_kwargs: Client()),
+    ):
+        response = client.post("/api/v1/chat/completions", json=request_data.model_dump())
+    return response, runtime_type, generation_keys
+
+
+@pytest.mark.provider_inventory
+def test_discovery_401_reaches_the_openai_oauth_refresh_path(authenticated_client, mock_chacha_db, setup_dependencies):
+    """A rejected OAuth token on the model list refreshes once and retries, like a generation 401 (review I3)."""
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    discovery_keys: list[str] = []
+
+    def discover(_provider, key, **_kwargs):
+        discovery_keys.append(key)
+        if key == "openai-runtime-key":
+            return ModelDiscoveryResult("auth_failed")
+        return ModelDiscoveryResult("ready", ("gpt-4o-mini",))
+
+    response, runtime_type, generation_keys = _real_openai_inventory_call(authenticated_client, discover=discover)
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert discovery_keys[0] == "openai-runtime-key"
+    assert set(discovery_keys[1:]) == {"openai-refreshed-runtime-key"}
+    assert generation_keys == ["openai-refreshed-runtime-key"]
+    assert runtime_type.instances[0].resolve_calls.count(("openai", True)) == 1
+
+
+@pytest.mark.provider_inventory
+def test_discovery_401_without_oauth_is_a_provider_authentication_failure(
+    authenticated_client, mock_chacha_db, setup_dependencies,
+):
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    response, runtime_type, generation_keys = _real_openai_inventory_call(
+        authenticated_client, discover=lambda *_a, **_k: ModelDiscoveryResult("auth_failed"), auth_source=None,
+    )
+
+    assert response.status_code == status.HTTP_502_BAD_GATEWAY
+    assert response.json()["detail"]["error_code"] == "provider_authentication_failed"
+    assert generation_keys == []
+    assert runtime_type.instances[0].resolve_calls.count(("openai", True)) == 0
+
+
+@pytest.mark.provider_inventory
+@pytest.mark.parametrize("outage", ["server_error", "unreachable"])
+def test_inventory_outage_has_its_own_public_status_and_code(
+    authenticated_client, mock_chacha_db, setup_dependencies, outage,
+):
+    """A model-list outage is reported as one, not as a configuration error (review M1)."""
+    from tldw_Server_API.app.core.Chat.streaming_utils import PROVIDER_STREAM_ERROR_MESSAGES
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    response, _runtime_type, generation_keys = _real_openai_inventory_call(
+        authenticated_client, discover=lambda *_a, **_k: ModelDiscoveryResult(outage), auth_source=None,
+    )
+
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert response.json()["detail"] == {
+        "error_code": "provider_model_inventory_unavailable",
+        "message": PROVIDER_STREAM_ERROR_MESSAGES["provider_model_inventory_unavailable"],
+    }
+    assert generation_keys == []
+
+
+@pytest.mark.provider_inventory
+def test_unlisted_model_rejection_names_model_provider_and_fix(
+    authenticated_client, mock_chacha_db, setup_dependencies,
+):
+    """The non-strict rejection says which model, which provider, and how to pick another (review M2)."""
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    response, _runtime_type, generation_keys = _real_openai_inventory_call(
+        authenticated_client, discover=lambda *_a, **_k: ModelDiscoveryResult("ready", ("gpt-other",)), auth_source=None,
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST, response.text
+    text = response.text
+    assert "gpt-4o-mini" in text and "openai" in text
+    assert "api_provider" in text and "<provider>/<model>" in text
+    assert generation_keys == []
+
+
+@pytest.mark.provider_inventory
+def test_streaming_unlisted_model_rejection_matches_the_nonstream_answer(
+    authenticated_client, mock_chacha_db, setup_dependencies,
+):
+    """A non-strict stream for an unlisted model gets the same 400 model_not_available, not 502 (re-review M2)."""
+    from tldw_Server_API.app.core.exceptions import ChatModelNotAvailableError
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    response, _runtime_type, generation_keys = _real_openai_inventory_call(
+        authenticated_client, stream=True, auth_source=None,
+        discover=lambda *_a, **_k: ModelDiscoveryResult("ready", ("gpt-other",)),
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST, response.text
+    detail = response.json()["detail"]
+    assert detail["error_code"] == "model_not_available"
+    assert detail["message"] == ChatModelNotAvailableError.message_for("openai", "gpt-4o-mini")
+    assert generation_keys == []
+
+
 @pytest.mark.asyncio
 async def test_real_openai_nonstream_upstream_status_is_concurrency_isolated(monkeypatch):
     import httpx
@@ -6989,10 +7151,10 @@ def test_queued_provider_forged_guardrail_boolean_is_sanitized(
     provider_manager.circuit_breakers = {
         "openai": SimpleNamespace(can_attempt_call=lambda: True)
     }
-    request_data = ChatCompletionRequest(
+    request_data = ChatCompletionRequest(  # type: ignore[call-arg]  # pydantic defaults
         model="gpt-4o-mini",
         api_provider="openai",
-        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],  # type: ignore[call-arg]
         stream=True,
     )
     with (

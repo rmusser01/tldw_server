@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from contextlib import suppress
+from collections.abc import AsyncGenerator
+from contextlib import aclosing, suppress
 from typing import Any
 from urllib.parse import urljoin
 
@@ -14,8 +15,16 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_transport impor
     MCPTransport,
 )
 from tldw_Server_API.app.core.Agent_Client_Protocol.hardening import (
+    mcp_http_egress_scope,
     validate_mcp_http_url,
     validate_sse_post_url,
+)
+from tldw_Server_API.app.core.http_client import (
+    RetryPolicy,
+    SSEEvent,
+    afetch,
+    astream_sse,
+    create_async_client,
 )
 
 
@@ -31,6 +40,11 @@ class MCPSSETransport(MCPTransport):
     2. If ``post_url`` is not provided, discover it from the first SSE ``endpoint`` event
     3. Start background reader task for SSE stream
     4. Perform MCP ``initialize`` / ``initialized`` handshake
+
+    Both channels go through ``core.http_client``: the egress policy is checked
+    on the address each connection uses and on every SSE redirect hop, and env
+    proxies are not read. The SSE stream follows same-origin redirects only;
+    POSTs do not follow redirects.
     """
 
     def __init__(
@@ -53,9 +67,6 @@ class MCPSSETransport(MCPTransport):
         self._next_id = 1
         self._reader_task: asyncio.Task | None = None
         self._connected = False
-        # SSE line parser state
-        self._sse_event_type: str | None = None
-        self._sse_data: str | None = None
 
     # ------------------------------------------------------------------
     # MCPTransport interface
@@ -131,11 +142,50 @@ class MCPSSETransport(MCPTransport):
     # ------------------------------------------------------------------
 
     def _create_http_client(self) -> httpx.AsyncClient:
-        """Create an httpx.AsyncClient. Extracted for test patching."""
-        return httpx.AsyncClient(
-            headers=self._headers or {},
+        """Create the async HTTP client. Extracted for test patching."""
+        return create_async_client()
+
+    def _sse_events(self) -> AsyncGenerator[SSEEvent, None]:
+        """Open the SSE stream at ``sse_url``; close it with ``aclosing``."""
+        if self._http_client is None:
+            raise RuntimeError("HTTP client not initialized")
+        return astream_sse(
+            url=self._sse_url,
+            client=self._http_client,
+            headers=self._headers,
             timeout=httpx.Timeout(self._timeout_sec),
+            retry=RetryPolicy(attempts=1),
+            configured_endpoint=mcp_http_egress_scope(
+                self._sse_url,
+                allow_private_network=self._allow_private_network,
+            ),
+            # Configured headers (tokens) must not follow a redirect to another origin.
+            allow_cross_origin_redirects=False,
         )
+
+    async def _post(self, message: dict[str, Any]) -> None:
+        """POST one JSON-RPC message to ``post_url`` and raise on a non-2xx status."""
+        if self._http_client is None:
+            raise RuntimeError("HTTP client not initialized")
+        if self._post_url is None:
+            raise RuntimeError("post_url must be set before making calls")
+        # The private-network scope belongs to the operator-configured SSE origin. A
+        # server-supplied POST URL on another origin gets the default policy instead.
+        scope = mcp_http_egress_scope(self._sse_url, allow_private_network=self._allow_private_network)
+        if scope is not None and not scope.matches(self._post_url):
+            scope = None
+        response = await afetch(
+            method="POST",
+            url=self._post_url,
+            client=self._http_client,
+            headers=self._headers,
+            json=message,
+            timeout=httpx.Timeout(self._timeout_sec),
+            allow_redirects=False,
+            retry=RetryPolicy(attempts=1),
+            configured_endpoint=scope,
+        )
+        response.raise_for_status()
 
     # ------------------------------------------------------------------
     # SSE discovery
@@ -148,23 +198,17 @@ class MCPSSETransport(MCPTransport):
         ``data: <relative_url>``.  We resolve this against the ``sse_url``
         base to get the absolute POST URL.
         """
-        if self._http_client is None:
-            raise RuntimeError("HTTP client not initialized")
-
-        async with self._http_client.stream("GET", self._sse_url) as response:
-            async for raw_line in response.aiter_lines():
-                event = self._parse_sse_line(raw_line)
-                if event is not None:
-                    event_type, data = event
-                    if event_type == "endpoint":
-                        # Resolve relative URL against sse_url base
-                        post_url = urljoin(self._sse_url, data)
-                        return validate_sse_post_url(
-                            self._sse_url,
-                            post_url,
-                            allow_private_network=self._allow_private_network,
-                            allow_cross_origin=self._allow_cross_origin_post_url,
-                        )
+        async with aclosing(self._sse_events()) as events:
+            async for event in events:
+                if event.event == "endpoint" and event.data.strip():
+                    # Resolve relative URL against sse_url base
+                    post_url = urljoin(self._sse_url, event.data.strip())
+                    return validate_sse_post_url(
+                        self._sse_url,
+                        post_url,
+                        allow_private_network=self._allow_private_network,
+                        allow_cross_origin=self._allow_cross_origin_post_url,
+                    )
 
         raise RuntimeError(
             f"SSE stream at {self._sse_url} closed without sending an endpoint event"
@@ -179,14 +223,10 @@ class MCPSSETransport(MCPTransport):
         if self._http_client is None:
             return
         try:
-            async with self._http_client.stream("GET", self._sse_url) as response:
-                async for raw_line in response.aiter_lines():
-                    event = self._parse_sse_line(raw_line)
-                    if event is None:
-                        continue
-                    event_type, data = event
-                    if event_type == "message":
-                        self._route_sse_message(data)
+            async with aclosing(self._sse_events()) as events:
+                async for event in events:
+                    if event.event == "message" and event.data:
+                        self._route_sse_message(event.data)
             logger.warning("SSE reader loop ended because the stream closed")
             await self._teardown(reason=RuntimeError("SSE stream closed"))
         except asyncio.CancelledError:
@@ -221,45 +261,6 @@ class MCPSSETransport(MCPTransport):
             logger.debug("SSE server notification: {}", msg.get("method", "unknown"))
 
     # ------------------------------------------------------------------
-    # SSE line parser
-    # ------------------------------------------------------------------
-
-    def _parse_sse_line(self, line: str) -> tuple[str, str] | None:
-        """Parse a single SSE line and return a complete event when ready.
-
-        SSE events are separated by blank lines. Each event consists of
-        ``event:`` and ``data:`` fields.  Returns ``(event_type, data)``
-        when a blank line (event boundary) is encountered and there is a
-        complete event buffered.  Returns ``None`` otherwise.
-        """
-        line = line.rstrip("\r\n")
-
-        if line.startswith("event:"):
-            self._sse_event_type = line[len("event:"):].strip()
-            return None
-        elif line.startswith("data:"):
-            chunk = line[len("data:"):].strip()
-            if self._sse_data is None:
-                self._sse_data = chunk
-            else:
-                self._sse_data = f"{self._sse_data}\n{chunk}"
-            return None
-        elif line == "":
-            # Blank line = event boundary
-            if self._sse_data is not None:
-                event = (self._sse_event_type or "message", self._sse_data)
-                self._sse_event_type = None
-                self._sse_data = None
-                return event
-            # Reset even if incomplete
-            self._sse_event_type = None
-            self._sse_data = None
-            return None
-        else:
-            # Comment or unknown field — ignore
-            return None
-
-    # ------------------------------------------------------------------
     # JSON-RPC helpers
     # ------------------------------------------------------------------
 
@@ -282,16 +283,12 @@ class MCPSSETransport(MCPTransport):
             raise RuntimeError("post_url must be set before making calls")
 
         try:
-            response = await self._http_client.post(
-                self._post_url,
-                json={
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "method": method,
-                    "params": params,
-                },
-            )
-            response.raise_for_status()
+            await self._post({
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "method": method,
+                "params": params,
+            })
             return await asyncio.wait_for(future, timeout=self._timeout_sec)
         except Exception as exc:
             await self._teardown(reason=exc)
@@ -303,22 +300,13 @@ class MCPSSETransport(MCPTransport):
 
     async def _json_rpc_notify(self, method: str, params: dict[str, Any]) -> None:
         """Send a JSON-RPC notification (no id, no response expected)."""
-        if self._http_client is None:
-            raise RuntimeError("HTTP client not initialized")
-        if self._post_url is None:
-            raise RuntimeError("post_url must be set before making calls")
-
-        response = await self._http_client.post(
-            self._post_url,
-            json={
+        try:
+            await self._post({
                 "jsonrpc": "2.0",
                 "method": method,
                 "params": params,
-            },
-        )
-        try:
-            response.raise_for_status()
-        except Exception as exc:
+            })
+        except httpx.HTTPStatusError as exc:
             await self._teardown(reason=exc)
             raise
 

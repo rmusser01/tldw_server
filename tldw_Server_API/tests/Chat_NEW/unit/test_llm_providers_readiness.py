@@ -18,6 +18,8 @@ from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
 )
 from tldw_Server_API.app.core.Security.egress import URLPolicyResult
 
+pytestmark = pytest.mark.usefixtures("healthy_no_override_tts_credential_snapshot")
+
 
 class _EmptyProviderManager:
     """Provider manager stub that reports no provider health state."""
@@ -45,7 +47,7 @@ def _client_for_config(monkeypatch: pytest.MonkeyPatch, parser: ConfigParser) ->
     monkeypatch.setattr(llm_providers, "load_comprehensive_config", lambda: parser)
     monkeypatch.setattr(llm_providers, "get_api_keys", lambda: {})
     monkeypatch.setattr(llm_providers, "get_provider_manager", lambda: _EmptyProviderManager())
-    monkeypatch.setattr(llm_providers, "list_provider_models", lambda _provider: [])
+    monkeypatch.setattr(llm_providers, "discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready"))
     monkeypatch.setattr(llm_providers, "list_image_models_for_catalog", lambda: [])
     monkeypatch.setattr(llm_providers, "discover_models_from_endpoint", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(llm_providers, "apply_llm_provider_overrides_to_listing", lambda result: result)
@@ -768,10 +770,10 @@ def test_external_custom_openai_env_placeholder_key_is_missing_credentials(
 
 
 @pytest.mark.unit
-def test_llm_provider_readiness_marks_unsupported_catalog_alias_unavailable(
+def test_llm_provider_readiness_marks_mlx_chat_supported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Catalog providers unsupported by chat completions are unavailable."""
+    """mlx is a supported chat completions provider (TASK-13950.1)."""
     parser = _config(
         {
             "API": {},
@@ -787,7 +789,5 @@ def test_llm_provider_readiness_marks_unsupported_catalog_alias_unavailable(
 
     assert response.status_code == 200, response.text
     mlx = _provider(response.json(), "mlx")
-    assert mlx["availability"] == "unavailable"
-    assert mlx["provider_enabled"] is False
-    assert mlx["readiness_reason_code"] == "unsupported_chat_provider"
-    assert "is not supported by chat completions" in mlx["readiness_message"]
+    assert mlx["readiness_reason_code"] != "unsupported_chat_provider"
+    assert mlx["availability"] == "enabled"

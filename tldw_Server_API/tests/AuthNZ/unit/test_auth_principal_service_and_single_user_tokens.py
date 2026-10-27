@@ -387,6 +387,10 @@ async def test_get_request_user_bypass_blocked_in_environment_production(monkeyp
     monkeypatch.setenv("EVALS_HEAVY_ADMIN_ONLY", "false")
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.delenv("tldw_production", raising=False)
+    # ENVIRONMENT=production now also enforces the production key format (TASK-13950.6).
+    from tldw_Server_API.app.core.AuthNZ.api_key_crypto import format_api_key
+
+    monkeypatch.setenv("SINGLE_USER_API_KEY", format_api_key("deadbeefcafe", "production-strength-secret"))
     reset_settings()
 
     request = _build_request({})

@@ -38,6 +38,8 @@ import { promptBulkAddTags } from "@/components/Notes/NotesBulkAddTagsPrompt"
 import NotesSidebar from "@/components/Notes/NotesSidebar"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { createNotesGraphAuthorityScope, useNotesGraphAuthorityScope } from "@/components/Notes/hooks/useNotesGraphAuthorityScope"
+import { useNotesFormattingKeyDown } from "@/components/Notes/hooks/useNotesFormattingKeys"
+import { useNotesSelectionReport, type NotesSelectionListener } from "@/components/Notes/hooks/useNotesSelectionReport"
 import {
   useNotesKeywords,
   useNotesListManagement,
@@ -83,13 +85,10 @@ import {
   normalizeGraphNoteId,
   getNotesGraphEdgeLabel,
   parseSourceNodeId,
-  MIN_SIDEBAR_HEIGHT,
   NOTES_LIST_REGION_ID,
   NOTES_EDITOR_REGION_ID,
   NOTES_SHORTCUTS_SUMMARY_ID,
-  calculateSidebarHeight,
   NOTE_TEMPLATES,
-  toSortableTimestamp,
   toNoteVersion,
   extractKeywords,
   normalizeTagList,
@@ -121,6 +120,15 @@ import {
   resolveNotesGraphFocusNoteId,
 } from './notes-manager-utils'
 import { isEditableTarget } from "@/utils/editable-target"
+import { useConnectionsMemory } from './notes-connections'
+import { useNotesKeyboardNavigation } from "@/components/Notes/hooks/useNotesKeyboardNavigation"
+import { revealNotesListAndFocusSearch } from "@/components/Notes/hooks/useNotesOffCanvasList"
+import { focusActiveNotesListRow } from "@/components/Notes/notes-list-keyboard"
+import { buildNotesTimelineSections } from "@/components/Notes/notes-timeline"
+import { isNotesServerUnavailableError } from "@/components/Notes/notes-list-error"
+import { buildMoveToTrashConfirm, dismissNoteDeletedToast, findNoteTitleForConfirm, notesDeleteToastKey } from "@/components/Notes/notes-trash"
+import NotesTrashGuidance from "@/components/Notes/NotesTrashGuidance"
+import { useLatchedFlag } from "./hooks/useLatchedFlag"
 
 const LazyNotesManagerOverlays = React.lazy(() => import("./NotesManagerOverlays"))
 
@@ -210,9 +218,11 @@ type NotesManagerPageProps = {
    * independent of the router; without it only the unmount backstop applies.
    */
   LeaveGuard?: React.ComponentType<NotesLeaveGuardState>
+  /** Told which note is open, so the route can keep its address in step (XP-05). */
+  onNoteSelectionChange?: NotesSelectionListener
 }
 
-const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null, LeaveGuard }) => {
+const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null, LeaveGuard, onNoteSelectionChange }) => {
   const transferFlashcards = useFlashcardsGenerateTransfer()
   const transferStudyPack = useStudyPackTransfer()
   const { t } = useTranslation(['option', 'common'])
@@ -250,7 +260,6 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   const [shortcutHelpOpen, setShortcutHelpOpen] = React.useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false)
   const desktopSidebarCollapsedRef = React.useRef(false)
-  const [sidebarHeight, setSidebarHeight] = React.useState(calculateSidebarHeight())
   const [conversationLabelById, setConversationLabelById] = React.useState<Record<string, string>>({})
   const conversationLabelByIdRef = React.useRef<Record<string, string>>({})
   conversationLabelByIdRef.current = conversationLabelById
@@ -355,12 +364,14 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     setMobileSidebarOpen,
     editorKeywords: kw.editorKeywords,
     setEditorKeywords: kw.setEditorKeywords,
+    knownKeywords: kw.allKeywords,
     keywordSuggestionReturnFocusRef: kw.keywordSuggestionReturnFocusRef,
     setKeywordSuggestionOptions: kw.setKeywordSuggestionOptions,
     setKeywordSuggestionSelection: kw.setKeywordSuggestionSelection,
     editorDisabled,
     onNoteRenamed: (event) => noteRenamedRef.current(event),
   })
+  useNotesSelectionReport(onNoteSelectionChange, { selectedId: ed.selectedId, title: ed.title, authorityScope: notesGraphAuthorityScope, hasDraft: ed.isDirty })
   const [hasActiveDraft, setHasActiveDraft] = React.useState(false)
   const [preparingDraft, setPreparingDraft] = React.useState(false)
   const preparingDraftRef = React.useRef<ReturnType<typeof ed.captureNoteMutation> | null>(null)
@@ -433,8 +444,8 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     ed.resetEditor()
   }, [ed.resetEditor])
   const focusSearchInput = React.useCallback(() => {
-    searchInputRef.current?.focus()
-  }, [])
+    revealNotesListAndFocusSearch({ isMobileViewport, mobileSidebarOpen, sidebarCollapsed, setMobileSidebarOpen, setSidebarCollapsed, focusSearch: () => searchInputRef.current?.focus() })
+  }, [isMobileViewport, mobileSidebarOpen, sidebarCollapsed])
 
   React.useEffect(() => {
     if (ed.selectedId != null) {
@@ -474,6 +485,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   }, [list.data, list.listMode, list.listViewMode, ed.pinnedNoteIdSet])
 
   const filteredCount = visibleNotes.length
+  const listKeyboard = useNotesKeyboardNavigation({ visibleNotes, selectedId: ed.selectedId, selectNote: ed.handleSelectNote, richEditorRef: ed.richEditorRef, contentTextareaRef: ed.contentTextareaRef, editorRegionId: NOTES_EDITOR_REGION_ID, listMode: list.listMode })
   const graphInitialFocusNoteId = React.useMemo(
     () =>
       resolveNotesGraphFocusNoteId(
@@ -551,6 +563,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     setNeighborsIntent({ owner: noteNeighborsOwner, requested: false, denied: false })
   }
   const noteNeighborsRequested = neighborsIntent.owner === noteNeighborsOwner && neighborsIntent.requested
+  const connectionsMemory = useConnectionsMemory()
   const {
     data: requestedNoteNeighborsData,
     error: noteNeighborsFailure,
@@ -724,7 +737,8 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
               ? t('option:notesSearch.connectionLabelManualBacklink', { defaultValue: 'Manual backlink' })
               : getNotesGraphEdgeLabel(type)
 
-      upsertRelation(relatedById, counterpartId, relationLabel)
+      // Manual links have their own list (NE-10).
+      if (type !== 'manual') upsertRelation(relatedById, counterpartId, relationLabel)
 
       if (type === 'wikilink' && target === selectedNormalized) {
         upsertRelation(
@@ -740,18 +754,11 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
           t('option:notesSearch.connectionLabelBacklink', { defaultValue: 'Backlink' })
         )
       }
-      if (type === 'manual' && directed && target === selectedNormalized) {
-        upsertRelation(
-          backlinksById,
-          source,
-          t('option:notesSearch.connectionLabelManualBacklink', { defaultValue: 'Manual backlink' })
-        )
-      }
       if (type === 'manual') {
         if (!counterpartId) continue
         const edgeId = String(edge?.id || '')
         if (!edgeId) continue
-        const relation = buildNoteRelation(counterpartId, getNotesGraphEdgeLabel(type))
+        const relation = buildNoteRelation(counterpartId, relationLabel)
         manualLinkByEdgeId.set(edgeId, {
           edgeId,
           noteId: counterpartId,
@@ -765,8 +772,9 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       }
     }
 
+    const manualLinkIds = new Set(Array.from(manualLinkByEdgeId.values(), (link) => link.noteId))
     for (const normalizedId of noteNodeMap.keys()) {
-      if (normalizedId !== selectedNormalized) {
+      if (normalizedId !== selectedNormalized && !manualLinkIds.has(normalizedId)) {
         upsertRelation(
           relatedById,
           normalizedId,
@@ -920,6 +928,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     kw.keywordMergeDraft != null ||
     imp.importModalOpen ||
     shortcutHelpOpen
+  const deferredOverlaysMounted = useLatchedFlag(hasDeferredOverlayOpen)
 
   // ---- Remaining logic that stays in the component ----
 
@@ -1370,7 +1379,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
 
   const showDeleteUndoToast = React.useCallback(
     (noteId: string, original: MutationOwner) => {
-      const toastKey = `notes-delete-${noteId}`
+      const toastKey = notesDeleteToastKey(noteId)
       const handleUndo = async () => {
         if (!original.isOwnerCurrent()) return
         const operation = beginNoteMutation(original)
@@ -1469,18 +1478,8 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       const ownedRequest = await operation.requestOptions()
       const inboundReferenceCount = await countInboundDeleteReferences(targetId, operation, ownedRequest)
       operation.requireCurrent()
-      const warningSuffix =
-        inboundReferenceCount > 0
-          ? `\n\nThis note is referenced by ${inboundReferenceCount} other note${
-              inboundReferenceCount === 1 ? '' : 's'
-            }. Deleting it will break those links.`
-          : ''
-      const ok = await confirmDanger({
-        title: 'Please confirm',
-        content: `Delete this note?${warningSuffix}`,
-        okText: 'Delete',
-        cancelText: 'Cancel'
-      })
+      const noteTitle = findNoteTitleForConfirm(targetId, { selectedId: ed.selectedId, selectedTitle: ed.title, rows: list.data })
+      const ok = await confirmDanger(buildMoveToTrashConfirm(t, { noteTitle, inboundReferenceCount }))
       if (!ok || !operation.isCurrent()) return
       let expectedVersion: number | null = null
       if (ed.selectedId != null && String(ed.selectedId) === targetId) {
@@ -1550,6 +1549,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         method: 'POST' as any
       })
       operation.requireCurrent()
+      dismissNoteDeletedToast(message, target)
       message.success('Note restored')
       list.setListMode('active')
       list.setPage(1)
@@ -2147,6 +2147,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     event.preventDefault()
     handleWysiwygInput(event)
   }, [editorDisabled, handleWysiwygInput])
+  const handleMarkdownEditorKeyDown = useNotesFormattingKeyDown(wl.handleEditorKeyDown, applyMarkdownToolbarAction)
 
   const handleWysiwygPaste = React.useCallback((event: React.ClipboardEvent<HTMLDivElement>) => {
     if (editorDisabled) return
@@ -2540,35 +2541,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   // Timeline sections
   const timelineSections = React.useMemo(() => {
     if (list.listMode !== 'active') return [] as Array<{ key: string; label: string; notes: NoteListItem[] }>
-    const bucketMap = new Map<string, NoteListItem[]>()
-    for (const note of visibleNotes) {
-      const rawTimestamp = toSortableTimestamp(note.updated_at)
-      if (rawTimestamp <= 0) {
-        const fallback = bucketMap.get('unknown') || []
-        fallback.push(note)
-        bucketMap.set('unknown', fallback)
-        continue
-      }
-      const parsed = new Date(rawTimestamp)
-      const key = `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth() + 1).padStart(2, '0')}`
-      const bucket = bucketMap.get(key) || []
-      bucket.push(note)
-      bucketMap.set(key, bucket)
-    }
-    const orderedKeys = Array.from(bucketMap.keys()).sort((a, b) => {
-      if (a === 'unknown') return 1
-      if (b === 'unknown') return -1
-      return b.localeCompare(a)
-    })
-    return orderedKeys.map((key) => {
-      const notesForKey = bucketMap.get(key) || []
-      notesForKey.sort((a, b) => toSortableTimestamp(b.updated_at) - toSortableTimestamp(a.updated_at))
-      if (key === 'unknown') return { key, label: t('option:notesSearch.timelineUnknownDate', { defaultValue: 'Unknown date' }), notes: notesForKey }
-      const monthLabel = `${key}-01T00:00:00.000Z`
-      const parsed = new Date(monthLabel)
-      const label = Number.isNaN(parsed.getTime()) ? key : parsed.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
-      return { key, label, notes: notesForKey }
-    })
+    return buildNotesTimelineSections(visibleNotes, { unknownLabel: t('option:notesSearch.timelineUnknownDate', { defaultValue: 'Unknown date' }) })
   }, [list.listMode, visibleNotes, t])
 
   // Search tips
@@ -2644,14 +2617,6 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     })()
     return () => { cancelled = true }
   }, [list.data, ed, isOnline, list.listMode, pendingNoteId, sourceNoteId])
-
-  // Sidebar layout
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return
-    const handleResize = () => setSidebarHeight(calculateSidebarHeight())
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
-  }, [])
 
   React.useEffect(() => {
     if (!isMobileViewport) desktopSidebarCollapsedRef.current = sidebarCollapsed
@@ -2806,7 +2771,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       window.requestAnimationFrame(() => {
         const target = document.getElementById(targetId) as HTMLElement | null
         if (!target) return
-        target.focus()
+        if (targetId !== NOTES_LIST_REGION_ID || !focusActiveNotesListRow(target)) target.focus()
         if (typeof window !== 'undefined') window.location.hash = targetId
       })
     },
@@ -2814,7 +2779,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   )
 
   return (
-    <div className="relative flex h-full w-full bg-bg p-2 sm:p-4 mt-16">
+    <div className="relative flex h-full min-h-0 w-full flex-1 bg-bg p-2 sm:p-4" data-testid="notes-page-frame">
       {LeaveGuard ? <LeaveGuard when={ed.leaveGuard.when} onLeave={ed.leaveGuard.onLeave} /> : null}
       <a href={`#${NOTES_LIST_REGION_ID}`} onClick={handleSkipLinkActivate(NOTES_LIST_REGION_ID)} className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:border focus:border-border focus:bg-surface focus:px-3 focus:py-2 focus:text-sm focus:text-text focus:shadow">
         {t('option:notesSearch.skipToNotesList', { defaultValue: 'Skip to notes list' })}
@@ -2826,13 +2791,12 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         {t('option:notesSearch.shortcutSummaryText', { defaultValue: 'Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs.' })}
       </p>
       {isMobileViewport && mobileSidebarOpen && (
-        <button type="button" aria-label={t('option:notesSearch.closeMobileSidebar', { defaultValue: 'Close notes list' })} data-testid="notes-mobile-sidebar-backdrop" className="absolute inset-0 z-30 bg-black/35" onClick={() => setMobileSidebarOpen(false)} />
+        <button type="button" aria-label={t('option:notesSearch.closeMobileSidebar', { defaultValue: 'Close notes list' })} data-testid="notes-mobile-sidebar-backdrop" tabIndex={-1} aria-hidden="true" className="absolute inset-0 z-30 bg-black/35" onClick={() => setMobileSidebarOpen(false)} />
       )}
       <NotesSidebar
         isMobileViewport={isMobileViewport}
         mobileSidebarOpen={mobileSidebarOpen}
         sidebarCollapsed={sidebarCollapsed}
-        sidebarHeight={sidebarHeight}
         listMode={list.listMode}
         listViewMode={list.listViewMode}
         page={list.page}
@@ -2852,6 +2816,12 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         keywordTokens={kw.keywordTokens}
         keywordOptions={kw.keywordOptions}
         availableKeywords={kw.availableKeywords}
+        tagMatch={list.tagMatch}
+        tagMatchApplies={list.effectiveKeywordTokens.length > 1}
+        onTagMatchChange={(match) => {
+          list.setTagMatch(match)
+          list.setPage(1)
+        }}
         notebookOptions={list.notebookOptions}
         selectedNotebookId={list.selectedNotebookId}
         selectedNotebook={list.selectedNotebook}
@@ -2868,6 +2838,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         searchTipsContent={searchTipsContent}
         query={list.query}
         isFetching={list.isFetching}
+        isPlaceholderData={list.isPlaceholderData}
         hasListError={list.isError}
         listErrorMessage={list.listErrorMessage}
         isStaleResults={list.isError && Array.isArray(list.data) && list.data.length > 0}
@@ -2899,6 +2870,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         handleSelectNote={async (id) => {
           await ed.handleSelectNote(id)
         }}
+        handleOpenNoteFromKeyboard={listKeyboard.openNoteAndFocusEditor}
         handleClearFilters={list.handleClearFilters}
         handleKeywordFilterSearch={kw.handleKeywordFilterSearch}
         handleKeywordFilterChange={kw.handleKeywordFilterChange}
@@ -2911,6 +2883,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         createMoodboard={list.createMoodboard}
         renameMoodboard={list.renameMoodboard}
         deleteMoodboard={list.deleteMoodboard}
+        addNoteToMoodboard={list.addNoteToMoodboard}
         clearBulkSelection={list.clearBulkSelection}
         exportSelectedBulk={exp.exportSelectedBulk}
         addTagsToSelectedBulk={addTagsToSelectedBulk}
@@ -2930,9 +2903,10 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       {!isMobileViewport && (
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className="relative w-6 bg-surface border-y border-r border-border hover:bg-surface2 flex items-center justify-center group transition-colors motion-reduce:transition-none rounded-r-lg"
-          style={{ minHeight: `${MIN_SIDEBAR_HEIGHT}px`, height: `${sidebarHeight}px` }}
-          aria-label={sidebarCollapsed ? t('option:notesSearch.expandSidebar', { defaultValue: 'Expand sidebar' }) : t('option:notesSearch.collapseSidebar', { defaultValue: 'Collapse sidebar' })}
+          className="relative h-full w-6 bg-surface border-y border-r border-border hover:bg-surface2 flex items-center justify-center group transition-colors motion-reduce:transition-none rounded-r-lg"
+          aria-label={sidebarCollapsed ? t('option:notesSearch.expandSidebar', { defaultValue: 'Expand notes sidebar' }) : t('option:notesSearch.collapseSidebar', { defaultValue: 'Collapse notes sidebar' })}
+          aria-expanded={!sidebarCollapsed}
+          aria-controls={NOTES_LIST_REGION_ID}
           data-testid="notes-desktop-sidebar-toggle"
         >
           <div className="flex items-center justify-center w-full h-full">
@@ -2963,10 +2937,13 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
             void handleNewNote()
           }}
         />
+      ) : list.listMode === 'trash' && showEditorEmptyState ? (
+        <NotesTrashGuidance isMobileViewport={isMobileViewport} onShowTrashList={() => setMobileSidebarOpen(true)} onBackToNotes={() => { void ed.switchListMode('active') }} />
       ) : (
       <NotesEditorPane
         isMobileViewport={isMobileViewport}
         setMobileSidebarOpen={setMobileSidebarOpen}
+        mobileSidebarOpen={mobileSidebarOpen}
         selectedId={ed.selectedId}
         showEmptyState={showEditorEmptyState}
         title={ed.title}
@@ -2974,6 +2951,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         editorDisabled={editorDisabled || ed.loadingSelection || preparingDraft}
         isDirty={ed.isDirty}
         isOnline={isOnline}
+        notesServerUnavailable={list.isError && isNotesServerUnavailableError(list.error)}
         loadingDetail={ed.loadingDetail}
         saving={ed.saving}
         backlinkConversationId={ed.backlinkConversationId}
@@ -2986,6 +2964,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         noteNeighborsState={noteNeighborsState}
         noteNeighborsRequestKey={noteNeighborsOwner}
         onRequestNeighbors={() => setNeighborsIntent((current) => ({ ...current, requested: true }))}
+        connectionsMemory={connectionsMemory}
         onRetryNeighbors={noteNeighborsUnavailable ? undefined : () => {
           void refetchNoteNeighbors()
         }}
@@ -3108,7 +3087,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         handleWysiwygKeyDown={handleWysiwygKeyDown}
         handleWysiwygPaste={handleWysiwygPaste}
         handleEditorChange={handleEditorChange}
-        handleEditorKeyDown={wl.handleEditorKeyDown}
+        handleEditorKeyDown={handleMarkdownEditorKeyDown}
         handleEditorSelectionUpdate={handleEditorSelectionUpdate}
         applyWikilinkSuggestion={wl.applyWikilinkSuggestion}
       />
@@ -3127,7 +3106,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         }}
       />
       <input ref={imp.importInputRef} type="file" multiple accept=".json,.md,.markdown,.txt,application/json,text/markdown,text/plain" className="hidden" data-testid="notes-import-input" onChange={(event) => { void imp.handleImportInputChange(event) }} />
-      {hasDeferredOverlayOpen && (
+      {deferredOverlaysMounted && (
         <React.Suspense fallback={null}>
           <LazyNotesManagerOverlays
             kw={kw}

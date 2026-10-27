@@ -87,6 +87,24 @@ def _parse_long_prompt_tier(tier: dict) -> dict | None:
     return {"above_tokens": above_tokens, **_parse_rates(tier)}
 
 
+def _parse_service_tier(rates: dict) -> dict | None:
+    """One service tier's rate set (``prompt``, ``completion``, cache rates, optional ``long_prompt``), or None.
+
+    None when it would misprice: without ``prompt`` or ``completion`` that side would cost $0, and a malformed
+    ``long_prompt`` would drop the tier's long-context price.
+    """
+    if not _has_rate(rates, "prompt", "in", "input") or not _has_rate(rates, "completion", "out", "output"):
+        return None
+    tier = _parse_rates(rates)
+    long_prompt = rates.get("long_prompt")
+    if long_prompt is not None:
+        parsed = _parse_long_prompt_tier(long_prompt) if isinstance(long_prompt, dict) else None
+        if parsed is None:
+            return None
+        tier["long_prompt"] = parsed
+    return tier
+
+
 def _has_rate(rates: dict, *keys: str) -> bool:
     """Whether the first of ``keys`` present holds a number; a null or unparseable rate counts as missing.
 
@@ -295,10 +313,28 @@ class PricingCatalog:
                         )
                     else:
                         entry["long_prompt"] = parsed_tier
+                service_tiers = rates.get("service_tiers")
+                if isinstance(service_tiers, dict):
+                    # Keyed by the service_tier the provider reports (OpenAI: batch, flex, priority).
+                    parsed_tiers = {}
+                    for tier_name, tier_rates in service_tiers.items():
+                        parsed = _parse_service_tier(tier_rates) if isinstance(tier_rates, dict) else None
+                        if parsed is None:
+                            logger.warning(
+                                "Ignoring service tier {} of pricing entry {}/{}: it needs prompt and completion "
+                                "rates and a valid long_prompt; the standard rates apply",
+                                tier_name,
+                                provider,
+                                model,
+                            )
+                        else:
+                            parsed_tiers[str(tier_name)] = parsed
+                    if parsed_tiers:
+                        entry["service_tiers"] = parsed_tiers
                 base[model] = entry
 
     def get_rate_details(
-        self, provider: str, model: str, *, prompt_tokens: int = 0
+        self, provider: str, model: str, *, prompt_tokens: int = 0, service_tier: str = ""
     ) -> tuple[dict[str, float], bool]:
         """
         Return pricing fields and estimated flag for provider/model.
@@ -308,7 +344,9 @@ class PricingCatalog:
         1-hour cache-write rate) are present only when supplied by defaults or
         overrides. ``prompt_tokens`` is the request's whole prompt (cache
         tokens included); above an entry's ``long_prompt.above_tokens`` the
-        tier's rates apply.
+        tier's rates apply. ``service_tier`` is the tier the provider reports;
+        an entry's ``service_tiers`` rates for it apply, and a tier the entry
+        has no rates for costs the standard rates.
         """
         prov = canonical_provider_name(provider or "")
         mdl = (model or "").lower()
@@ -318,7 +356,9 @@ class PricingCatalog:
             mdl = canonical_anthropic_model_id(mdl)
 
         if mdl in prov_map:
-            return self._entry_rate_details(prov_map[mdl], estimated=False, prompt_tokens=prompt_tokens)
+            return self._entry_rate_details(
+                prov_map[mdl], estimated=False, prompt_tokens=prompt_tokens, service_tier=service_tier
+            )
 
         best_match: tuple[str, dict] | None = None
         for mk, rates in prov_map.items():
@@ -328,21 +368,32 @@ class PricingCatalog:
                 if best_match is None or len(mk) > len(best_match[0]):
                     best_match = (mk, rates)
         if best_match is not None:
-            return self._entry_rate_details(best_match[1], estimated=True, prompt_tokens=prompt_tokens)
+            return self._entry_rate_details(
+                best_match[1], estimated=True, prompt_tokens=prompt_tokens, service_tier=service_tier
+            )
 
         if "default" in prov_map:
             # A provider-wide price (LLM usage accounting spec §6): local providers ship one at zero.
-            return self._entry_rate_details(prov_map["default"], estimated=True, prompt_tokens=prompt_tokens)
+            return self._entry_rate_details(
+                prov_map["default"], estimated=True, prompt_tokens=prompt_tokens, service_tier=service_tier
+            )
         return _unknown_billable_rate(), True
 
     @staticmethod
     def _entry_rate_details(
-        rates: dict, *, estimated: bool, prompt_tokens: int = 0
+        rates: dict, *, estimated: bool, prompt_tokens: int = 0, service_tier: str = ""
     ) -> tuple[dict[str, float], bool]:
         if isinstance(rates, dict) and rates.get("placeholder"):
             return _unknown_billable_rate(), True
         if not isinstance(rates, dict):
             return {"prompt": 0.0, "completion": 0.0}, True
+        estimated = bool(rates.get("estimated", estimated))
+        service = (rates.get("service_tiers") or {}).get(service_tier) if service_tier else None
+        long_tier = rates.get("long_prompt")
+        long_applies = isinstance(long_tier, dict) and prompt_tokens > int(long_tier.get("above_tokens", 0) or 0)
+        if isinstance(service, dict) and (not long_applies or "long_prompt" in service):
+            # The tier's own prices. A tier with no long-prompt price leaves a long prompt at the standard one.
+            rates = service
         tier = rates.get("long_prompt")
         if isinstance(tier, dict) and prompt_tokens > int(tier.get("above_tokens", 0) or 0):
             rates = {**rates, **{k: v for k, v in tier.items() if k != "above_tokens"}}
@@ -356,7 +407,7 @@ class PricingCatalog:
             details["cache_write"] = float(rates.get("cache_write", 0.0) or 0.0)
         if "cache_write_1h" in rates:
             details["cache_write_1h"] = float(rates.get("cache_write_1h", 0.0) or 0.0)
-        return details, bool(rates.get("estimated", estimated))
+        return details, estimated
 
     def get_rates(self, provider: str, model: str) -> tuple[float, float, bool]:
         """

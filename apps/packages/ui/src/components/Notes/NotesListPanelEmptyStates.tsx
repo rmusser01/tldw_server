@@ -5,6 +5,7 @@ import FeatureEmptyState from '@/components/Common/FeatureEmptyState'
 import ConnectionProblemBanner from '@/components/Common/ConnectionProblemBanner'
 import { useConnectionActions } from '@/hooks/useConnectionState'
 import { getDemoNotes } from '@/utils/demo-content'
+import NotesListErrorMessage from './NotesListErrorMessage'
 
 type NotesListPanelEmptyStatesProps = {
   variant: 'demo' | 'connect' | 'unsupported' | 'empty' | 'no-results' | 'error'
@@ -180,10 +181,12 @@ const NotesListPanelEmptyStates: React.FC<NotesListPanelEmptyStatesProps> = ({
             </span>
           }
           description={
-            errorMessage ||
-            t('option:notesSearch.loadErrorDescription', {
-              defaultValue: 'The notes list failed to load. Retry the request or check server health.'
-            })
+            <NotesListErrorMessage
+              message={errorMessage}
+              fallback={t('option:notesSearch.loadErrorDescription', {
+                defaultValue: 'The notes list failed to load. Retry the request or check server health.'
+              })}
+            />
           }
           examples={[
             t('option:notesSearch.loadErrorExampleRetry', {

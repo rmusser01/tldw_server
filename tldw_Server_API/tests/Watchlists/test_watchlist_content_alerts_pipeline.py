@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import types
 from typing import Any
 
 import pytest
@@ -9,7 +10,11 @@ from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistConten
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.Watchlists import pipeline as wl_pipeline
-from tldw_Server_API.app.core.Watchlists.content_alerts import _match_rule, evaluate_content_alert_rules_for_item
+from tldw_Server_API.app.core.Watchlists.content_alerts import (
+    _match_rule,
+    _source_constraints_match,
+    evaluate_content_alert_rules_for_item,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -461,3 +466,12 @@ async def test_source_refresh_alerts_use_source_memberships_and_monitor_keeps_it
     other = WatchlistsDatabase.for_user(9704)
     with pytest.raises(KeyError, match="watchlist_not_found"):
         other.list_content_alerts(owned[0].id, limit=50, offset=0)
+
+
+def test_source_tag_constraints_compare_tag_identities() -> None:
+    rule: Any = types.SimpleNamespace(source_constraints_json=json.dumps({"source_tags": ["STRASSE"]}))
+    tagged: Any = types.SimpleNamespace(id=1, source_type="rss", url="https://example.com/a.xml", tags=["Straße"])
+    untagged: Any = types.SimpleNamespace(id=2, source_type="rss", url="https://example.com/b.xml", tags=["Other"])
+
+    assert _source_constraints_match(rule, tagged)
+    assert not _source_constraints_match(rule, untagged)

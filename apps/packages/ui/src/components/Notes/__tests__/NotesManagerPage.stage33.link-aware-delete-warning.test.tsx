@@ -252,7 +252,7 @@ describe("NotesManagerPage stage 33 link-aware delete warnings", () => {
       expect(mockConfirmDanger).toHaveBeenCalled()
     })
     const deleteDialogArgs = mockConfirmDanger.mock.calls[0][0]
-    expect(String(deleteDialogArgs.content)).toContain("This note is referenced by 2 other notes")
+    expect(String(deleteDialogArgs.content)).toContain("This note is linked from 2 other notes")
   })
 
   it("keeps baseline delete confirmation copy when inbound links are absent", async () => {
@@ -293,6 +293,11 @@ describe("NotesManagerPage stage 33 link-aware delete warnings", () => {
       mockConfirmDanger.mock.invocationCallOrder[0]
     )
     const deleteDialogArgs = mockConfirmDanger.mock.calls[0][0]
-    expect(String(deleteDialogArgs.content)).toBe("Delete this note?")
+    // NL-15: the confirm names the note and says it can be restored from Trash.
+    expect(deleteDialogArgs).toMatchObject({
+      title: "Move to Trash?",
+      content: 'Move "Delete me" to Trash? You can restore it from Trash.',
+      okText: "Move to Trash"
+    })
   })
 })

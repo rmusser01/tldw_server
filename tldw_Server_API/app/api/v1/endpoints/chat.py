@@ -71,6 +71,7 @@ from tldw_Server_API.app.core.Utils.image_validation import (
     get_max_base64_bytes,
     validate_image_url,
 )
+from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 
 # Import new modules for integration
 
@@ -243,7 +244,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.transaction_utils import (
     db_transaction,
 )
-from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, raise_detached_error
+from tldw_Server_API.app.core.exceptions import ChatModelNotAvailableError, LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.routing import (
     InMemoryRoutingDecisionStore,
     RouterRequest,
@@ -1008,7 +1009,8 @@ def _provider_credential_error_code(exc: BaseException) -> str | None:
     if isinstance(exc, ChatAuthenticationError):
         return "provider_authentication_failed"
     if isinstance(exc, ChatConfigurationError):
-        return "provider_configuration_invalid"
+        code = getattr(exc, "error_code", None)
+        return code if code in _PROVIDER_CREDENTIAL_MESSAGES else "provider_configuration_invalid"
     if isinstance(exc, ByokResolutionError):
         code = getattr(exc, "policy_code", exc.code)
         return code if code in _PROVIDER_CREDENTIAL_MESSAGES else "provider_configuration_invalid"
@@ -1060,14 +1062,19 @@ async def _existing_input_validation_request(
 
 
 def _admitted_native_provider_error_response(
-    admission: dict[str, Any], error_code: str,
+    admission: dict[str, Any], error_code: str, message: str | None = None,
 ) -> StreamingResponse:
-    """Keep an accepted input identifiable when provider preparation fails."""
+    """Keep an accepted input identifiable when provider preparation fails.
+
+    ``message`` replaces the allow-listed copy only for ``model_not_available``, whose text is built from the
+    request's own provider and model.
+    """
     code = error_code if error_code in _PROVIDER_CREDENTIAL_MESSAGES else "provider_configuration_invalid"
+    public_message = message if code == "model_not_available" and message else _PROVIDER_CREDENTIAL_MESSAGES[code]
     # Freeze only server-owned metadata and allow-listed public error copy.
     frames = (
         {"tldw_history_admission_v1": admission},
-        {"error": {"code": code, "message": _PROVIDER_CREDENTIAL_MESSAGES[code]}},
+        {"error": {"code": code, "message": public_message}},
     )
     encoded = tuple("data: " + json.dumps(frame) + "\n\n" for frame in frames)
 
@@ -1085,10 +1092,18 @@ def _provider_credential_http_exception(exc: BaseException) -> HTTPException:
     return _provider_credential_http_exception_for_code(code)
 
 
-def _provider_credential_http_exception_for_code(code: str) -> HTTPException:
-    """Build a bounded downstream-provider response for an allow-listed code."""
+def _provider_credential_http_exception_for_code(code: str, message: str | None = None) -> HTTPException:
+    """Build a bounded downstream-provider response for an allow-listed code.
+
+    ``message`` is used only for ``model_not_available``, whose text names the request's own model and provider.
+    """
     if code not in _PROVIDER_CREDENTIAL_MESSAGES:
         code = "provider_configuration_invalid"
+    if code == "model_not_available":
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error_code": code, "message": message or _PROVIDER_CREDENTIAL_MESSAGES[code]},
+        )
     if code in {"provider_disabled", "model_not_allowed"}:
         return HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -1270,6 +1285,8 @@ def _record_provider_stream_error(
         and error.output_emitted is False
         and getattr(error, "credential_refresh_retry_safe", None) is True
     )
+    if error.code == "model_not_available":
+        error_state["model_not_available_message"] = error.message
 
 
 def _sanitize_provider_stream_call(
@@ -1831,7 +1848,7 @@ async def _resolve_auto_chat_routing_decision(
     """Resolve `model='auto'` into a canonical provider/model pair."""
     provider_overrides = get_llm_provider_overrides_snapshot()
     provider_listing = apply_llm_provider_overrides_to_listing(
-        get_configured_providers(),
+        await asyncio.to_thread(get_configured_providers),
         overrides=provider_overrides,
     )
     default_provider = str(
@@ -2872,25 +2889,43 @@ def _should_enforce_strict_model_selection() -> bool:
     return not _shared_is_test_mode()
 
 
-def _validate_explicit_model_availability(provider: str, model: str) -> dict[str, Any] | None:
+def _validate_explicit_model_availability(
+    provider: str, model: str, *, api_key: str | None = None,
+    app_config: dict[str, Any] | None = None, credentials_resolved: bool = False,
+    endpoint_provenance: str | None = None,
+) -> dict[str, Any] | None:
     """Validate explicit model selection against known provider inventory when available."""
     provider_name = (provider or "").strip()
     model_name = (model or "").strip()
     if not provider_name or not model_name:
         return None
 
-    availability = is_model_known_for_provider(provider_name, model_name)
+    try:
+        if credentials_resolved:
+            availability = is_model_known_for_provider(
+                provider_name, model_name, api_key=api_key,
+                app_config=app_config, credentials_resolved=True,
+                endpoint_provenance=endpoint_provenance,
+            )
+        else:
+            availability = is_model_known_for_provider(provider_name, model_name)
+    except (ChatAuthenticationError, ChatConfigurationError):
+        # The model list could not be read. Dispatch repeats the authoritative check inside the credential
+        # refresh-and-retry path, so a rejected OAuth token still refreshes (review I3).
+        return None
     if availability is None or availability:
         return None
 
+    return _model_not_available_detail(provider_name, model_name)
+
+
+def _model_not_available_detail(provider: str, model: str) -> dict[str, Any]:
+    """The 400 body for a model the provider does not list, strict pre-check or dispatch alike."""
     return {
-        "error_code": "model_not_available",
-        "message": (
-            f"Model '{model_name}' is not available for provider '{provider_name}'. "
-            "Select one of the server-advertised models for this provider."
-        ),
-        "provider": provider_name,
-        "model": model_name,
+        "error_code": ChatModelNotAvailableError.error_code,
+        "message": ChatModelNotAvailableError.message_for(provider, model),
+        "provider": provider,
+        "model": model,
     }
 
 
@@ -4673,7 +4708,14 @@ async def create_chat_completion(
                         },
                     )
                 if strict_model_selection and explicit_model_requested:
-                    availability_error = _validate_explicit_model_availability(target_api_provider, model)
+                    availability_error = await asyncio.to_thread(
+                        _validate_explicit_model_availability, target_api_provider, model,
+                        api_key=provider_api_key, app_config=app_config_override,
+                        credentials_resolved=True,
+                        endpoint_provenance=_derive_endpoint_provenance(
+                            credential_handle, request_override=_request_has_endpoint_override(request_data),
+                        ),
+                    )
                     if availability_error:
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
@@ -4758,9 +4800,14 @@ async def create_chat_completion(
                     reference = ({key: history_admission[key] for key in ("version", "owner_key", "conversation_id",
                         "input_message_id", "input_message_revision", "selection_digest")}
                         if history_admission is not None else None)
+                    continue_prefix = continuation_runtime.get("history_continue_prefix")
                     async def completion_save_message(db, cid, payload, use_transaction=False):
                         if payload.get("role") == "system":
                             return None
+                        if continue_prefix is not None and payload.get("role") == "assistant":
+                            # Continue saves the original reply plus its continuation as one sibling reply.
+                            from tldw_Server_API.app.core.Chat.history_continuation import merge_continued_reply
+                            payload = merge_continued_reply(payload, continue_prefix)
                         prepared = await prepare_native_history_message(payload, cid, _process_content_for_db_sync)
                         prepared["extra_metadata"].update(assistant_generation_extra(payload))
                         prepared["id"] = str(uuid.uuid4())
@@ -5625,6 +5672,7 @@ async def create_chat_completion(
                                 0.0,
                                 _provider_stream_prime_remaining(error_state),
                             ),
+                            forward_usage_chunk=_client_asked_for_stream_usage(request_data),
                         ), records_itself=True)
 
                     attempted_providers: list[str] = []
@@ -5831,7 +5879,9 @@ async def create_chat_completion(
 
                         if oauth_retry_state["attempted"]:
                             _record_openai_oauth_retry("retry_auth_failed")
-                        raise _provider_credential_http_exception_for_code(stream_error_code)
+                        raise _provider_credential_http_exception_for_code(
+                            stream_error_code, stream_error_state.get("model_not_available_message"),
+                        )
 
                     if persona_debug_requested and persona_debug_meta and persona_debug_meta.get("debug_id"):
                         try:
@@ -6059,6 +6109,23 @@ async def create_chat_completion(
                         history_admission, _provider_credential_error_code(credential_error) or "provider_configuration_invalid",
                     )
                 raise_detached_error(_provider_credential_http_exception(credential_error))
+
+            except ChatModelNotAvailableError as unavailable:
+                if request_data.stream and history_admission is not None:
+                    native_stream_failure = _provider_credential_http_exception_for_code(
+                        "model_not_available", str(unavailable),
+                    )
+                    return _admitted_native_provider_error_response(
+                        history_admission, "model_not_available", str(unavailable),
+                    )
+                raise_detached_error(
+                    HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=_model_not_available_detail(
+                            str(unavailable.provider or provider), str(unavailable.model),
+                        ),
+                    )
+                )
 
             except (ChatAuthenticationError, ChatConfigurationError) as provider_error:
                 if request_data.stream and history_admission is not None:
@@ -6424,6 +6491,21 @@ async def get_chat_queue_activity(
         return {"enabled": True, "error": "Queue activity unavailable"}
 
 
+def _client_asked_for_stream_usage(request_data: Any) -> bool:
+    """Whether the client asked for a stream's usage chunk (OpenAI's ``stream_options.include_usage``).
+
+    The OpenAI SDKs send ``stream_options`` at the top level of the body; other clients may put it in ``extra_body``.
+    """
+    extra_body = getattr(request_data, "extra_body", None)
+    for options in (
+        (getattr(request_data, "model_extra", None) or {}).get("stream_options"),
+        extra_body.get("stream_options") if isinstance(extra_body, dict) else None,
+    ):
+        if isinstance(options, dict) and options.get("include_usage") is True:
+            return True
+    return False
+
+
 def _build_streaming_commit_cb(
     rg_handle_id: str | None,
     request: Request | None,
@@ -6433,7 +6515,8 @@ def _build_streaming_commit_cb(
     """Build the rg_commit_cb for streaming chat that handles both RG and billing.
 
     The callback is invoked by chat_service when the stream finishes with the
-    total estimated token count.  It must:
+    recorded token count: the provider's usage chunk when it sent one, else the
+    estimate.  It must:
       - Record billing usage via apply_usage_delta (hot cache) AND schedule a
         durable cost-units ledger write so usage survives cache expiry/restart.
       - Return an awaitable that the caller awaits, combining the durable
@@ -6723,9 +6806,11 @@ def _replace_conversation_keywords(
         )
         return
     existing = db.get_keywords_for_conversation(conversation_id)
-    existing_map = {str(k.get("keyword") or "").strip().lower(): int(k.get("id")) for k in existing if k.get("id")}
-    target = {str(k).strip() for k in keywords if k is not None and str(k).strip()}
-    target_map = {t.lower(): t for t in target}
+    existing_map = {normalize_keyword_identity(str(k.get("keyword") or "")): int(k["id"]) for k in existing if k.get("id")}
+    target_map: dict[str, str] = {}
+    for keyword in keywords:
+        if keyword is not None and str(keyword).strip():
+            target_map.setdefault(normalize_keyword_identity(str(keyword)), str(keyword).strip())
 
     for key, kw_id in existing_map.items():
         if key not in target_map:

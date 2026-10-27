@@ -22,10 +22,10 @@ import threading
 import time
 import uuid as _uuid
 from collections.abc import AsyncIterator, Awaitable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache, partial
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, NoReturn
 
 from fastapi import HTTPException, status
 from fastapi.encoders import jsonable_encoder
@@ -172,7 +172,12 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_number,
     iter_custom_openai_provider_numbers,
 )
-from tldw_Server_API.app.core.exceptions import EgressPolicyError, LLMQuotaExceededError, raise_detached_error
+from tldw_Server_API.app.core.exceptions import (
+    ChatModelNotAvailableError,
+    EgressPolicyError,
+    LLMQuotaExceededError,
+    raise_detached_error,
+)
 from tldw_Server_API.app.core.LLM_Calls import adapter_registry as _adapter_registry
 from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
@@ -184,14 +189,16 @@ from tldw_Server_API.app.core.LLM_Calls.llamacpp_request_extensions import (
     resolve_llamacpp_request_extensions,
     resolve_llamacpp_runtime_caps,
 )
-from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
-    clear_openrouter_model_cache as _clear_openrouter_model_cache_shared,
-)
-from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
-    discover_openrouter_models as _discover_openrouter_models_shared,
-)
 from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import resolve_provider_model_value
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import (
+    CLOUD_MODEL_PROVIDERS,
+    discover_provider_models,
+    has_model_listing,
+    inventory_endpoint_scope,
+    resolve_provider_model_selection,
+    resolve_provider_models_base_url,
+)
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import normalize_catalog_provider_for_chat
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
 from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line, sse_data, sse_done
@@ -205,6 +212,7 @@ from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     negotiate_structured_response_mode,
     parse_and_validate_structured_output,
 )
+from tldw_Server_API.app.core.LLM_Calls.usage_accounting import _usage_tokens
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
 from tldw_Server_API.app.core.Moderation.review_service import (
     capture_moderation_review_item,
@@ -220,7 +228,7 @@ from tldw_Server_API.app.core.testing import (
 )
 from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
 from tldw_Server_API.app.core.Usage.llm_quota_gate import check_llm_call_async, check_llm_call_sync
-from tldw_Server_API.app.core.Usage.llm_usage_normalizer import normalize_llm_usage
+from tldw_Server_API.app.core.Usage.llm_usage_normalizer import normalize_llm_usage, usage_with_service_tier
 from tldw_Server_API.app.core.Usage.pricing_catalog import (
     get_pricing_catalog,
     list_provider_models,
@@ -660,7 +668,6 @@ _INLINE_MODEL_PROVIDER_NAMES = frozenset(
 )
 _NAMESPACED_MODEL_PROVIDERS = {"openrouter", "huggingface", "novita", "poe", "together"}
 
-_OPENROUTER_MODEL_DISCOVERY_TIMEOUT_SECONDS = 5.0
 _DEFAULT_ASSISTANT_SYSTEM_PROMPT = "You are a helpful AI assistant."
 
 
@@ -704,38 +711,6 @@ def _split_model_list(raw_value: str | None) -> list[str]:
     if not raw:
         return []
     return [item.strip() for item in raw.split(",") if item and item.strip()]
-
-
-def _resolve_openrouter_api_key_for_discovery() -> str:
-    env_key = (os.getenv("OPENROUTER_API_KEY") or "").strip()
-    if env_key:
-        return env_key
-
-    try:
-        if _config and _config.has_section("API"):
-            cfg_key = (_config.get("API", "openrouter_api_key", fallback="") or "").strip()
-            if cfg_key and not (cfg_key.startswith("<") and cfg_key.endswith(">")):
-                return cfg_key
-    except _CHAT_NONCRITICAL_EXCEPTIONS:
-        return ""
-    return ""
-
-
-def _discover_openrouter_models_for_chat(*, force_refresh: bool = False) -> tuple[str, ...]:
-    if os.getenv("PYTEST_CURRENT_TEST") and not _shared_is_truthy(
-        os.getenv("CHAT_ALLOW_OPENROUTER_DISCOVERY_IN_TESTS", "0")
-    ):
-        return ()
-
-    return tuple(
-        _discover_openrouter_models_shared(
-            _resolve_openrouter_api_key_for_discovery(),
-            force_refresh=force_refresh,
-            include_extended_aliases=True,
-            timeout_seconds=_OPENROUTER_MODEL_DISCOVERY_TIMEOUT_SECONDS,
-            log_prefix="[OpenRouter model discovery/chat]",
-        )
-    )
 
 
 def _normalize_conversation_assistant_context(
@@ -977,11 +952,34 @@ def _configured_models_for_provider(provider: str) -> tuple[str, ...]:
     return tuple(_split_model_list(raw_value))
 
 
-def known_models_for_provider_cached(provider: str) -> tuple[str, ...]:
-    """Combine cached sources without retaining inventory across config refreshes."""
-    provider_key = (provider or "").strip().lower()
+def known_models_for_provider_cached(
+    provider: str,
+    *,
+    api_key: str | None = None,
+    app_config: dict[str, Any] | None = None,
+    credentials_resolved: bool = False,
+) -> tuple[str, ...]:
+    """Read scoped commercial inventory; retain configured catalogs only locally."""
+    provider_key = canonical_provider_name(normalize_catalog_provider_for_chat(provider))
     if not provider_key:
         return ()
+    if has_model_listing(provider_key):
+        # A context-free prevalidator cannot select the requesting tenant's key.
+        if not api_key:
+            return ()
+        request = {
+            "api_key": api_key,
+            "app_config": (
+                app_config if app_config is not None
+                else ({} if credentials_resolved else None)
+            ),
+            "credentials_resolved": credentials_resolved,
+        }
+        base_url, discovery_options = _provider_inventory_endpoint(provider_key, request)
+        result = discover_provider_models(provider_key, api_key, base_url=base_url, **discovery_options)
+        if result.status != "ready":
+            _raise_inventory_failure(provider_key, result.status)
+        return tuple(result.models)
 
     known: set[str] = set()
     try:
@@ -1000,64 +998,44 @@ def known_models_for_provider_cached(provider: str) -> tuple[str, ...]:
     return tuple(sorted(known))
 
 
-def is_model_known_for_provider(provider: str, model: str) -> bool | None:
-    """Return whether model is known for provider; None means no inventory is available."""
-    provider_key = (provider or "").strip().lower()
-    model_key = (model or "").strip().lower()
+def is_model_known_for_provider(
+    provider: str,
+    model: str,
+    *,
+    api_key: str | None = None,
+    app_config: dict[str, Any] | None = None,
+    credentials_resolved: bool = False,
+    endpoint_provenance: str | None = None,
+) -> bool | None:
+    """Check authoritative commercial request IDs with credential context, else defer."""
+    provider_key = canonical_provider_name(normalize_catalog_provider_for_chat(provider))
+    model_key = (model or "").strip()
     if not provider_key or not model_key:
         return None
-
+    if provider_key in CLOUD_MODEL_PROVIDERS and not has_model_listing(provider_key):
+        return None  # no listing: the provider itself rejects a bad model
+    if provider_key in CLOUD_MODEL_PROVIDERS:
+        if api_key is None and not credentials_resolved:
+            return None
+        if not api_key:
+            return False
+        request = {
+            "app_config": app_config if app_config is not None else ({} if credentials_resolved else None),
+            "credentials_resolved": credentials_resolved,
+            "_endpoint_provenance": endpoint_provenance,
+        }
+        base_url, discovery_options = _provider_inventory_endpoint(provider_key, request)
+        inventory = discover_provider_models(provider_key, api_key, base_url=base_url, **discovery_options)
+        selection = resolve_provider_model_selection(
+            provider_key, api_key, model_key, base_url=base_url, inventory=inventory, **discovery_options,
+        )
+        if selection.status not in {"ready", "not_found"}:
+            _raise_inventory_failure(provider_key, selection.status)
+        return selection.status == "ready"
     known_models = known_models_for_provider_cached(provider_key)
-    if provider_key == "openrouter":
-        discovered_models = _discover_openrouter_models_for_chat(force_refresh=False)
-        if discovered_models:
-            known_models = tuple(sorted(set(known_models) | set(discovered_models)))
     if not known_models:
         return None
-
-    # Most providers use flat model IDs; keep strict exact matching there.
-    # Some providers commonly use namespaced IDs (vendor/model),
-    # so treat namespaced and non-namespaced forms as equivalent.
-    if provider_key not in {"openrouter", "huggingface", "novita", "poe", "together"}:
-        known_lower = {str(item).strip().lower() for item in known_models}
-        # A saved dotted Anthropic name (claude-sonnet-4.5) is known when its dashed API ID is.
-        return model_key in known_lower or canonical_anthropic_model_id(model_key).lower() in known_lower
-
-    def _aliases(raw_model: str) -> set[str]:
-        normalized = (raw_model or "").strip().lower()
-        if not normalized:
-            return set()
-        candidates = {normalized}
-        namespace = ""
-        model_part = normalized
-        if "/" in normalized:
-            namespace, model_part = normalized.split("/", 1)
-            if model_part:
-                candidates.add(model_part)
-        base_model = re.sub(r"-(?:\d{4}-\d{2}-\d{2}|\d{4,8})$", "", model_part)
-        if base_model and base_model != model_part:
-            candidates.add(base_model)
-            if namespace:
-                candidates.add(f"{namespace}/{base_model}")
-        return candidates
-
-    known_aliases: set[str] = set()
-    for known in known_models:
-        known_aliases.update(_aliases(str(known)))
-
-    if _aliases(model_key) & known_aliases:
-        return True
-
-    # If there is a near real-time provider inventory, force one refresh on miss.
-    # This avoids stale-cache false negatives for newly published OpenRouter ids.
-    refreshed_models = _discover_openrouter_models_for_chat(force_refresh=True)
-    if not refreshed_models:
-        return False
-
-    refreshed_aliases: set[str] = set()
-    for known in refreshed_models:
-        refreshed_aliases.update(_aliases(str(known)))
-    return bool(_aliases(model_key) & refreshed_aliases)
+    return model_key.lower() in {str(item).strip().lower() for item in known_models}
 
 
 _MAX_HISTORY_MESSAGES = max(1, _coerce_int(_chat_config.get("max_history_messages"), 200))
@@ -1489,7 +1467,6 @@ def _load_alias_overrides_cached() -> dict[str, dict[str, str]]:
     Resolution order:
     1) ENV var CHAT_MODEL_ALIAS_OVERRIDES (JSON)
     2) Keys in Config_Files/model_pricing.json: model_aliases/aliases/alias_map
-    3) Test-friendly defaults when PYTEST_CURRENT_TEST is set
     """
     # 1) ENV
     try:
@@ -1529,14 +1506,6 @@ def _load_alias_overrides_cached() -> dict[str, dict[str, str]]:
         pass
         logger.warning("Unexpected error loading alias overrides: {}", exception_summary(_ue))
 
-    # 3) Test-friendly defaults (preserve legacy behavior under pytest only)
-    if os.getenv("PYTEST_CURRENT_TEST"):
-        return {
-            "anthropic": {"claude-sonnet": "claude-sonnet-4-5"},
-            # Use a small, fast model via OpenRouter in tests
-            "openrouter": {"dummy": "z-ai/glm-4.6"},
-            "mistral": {"dummy": "mistral-small-latest"},
-        }
     return {}
 
 
@@ -1617,6 +1586,9 @@ def infer_provider_from_model_catalog(
     if not current_provider or not model_value:
         debug["reason"] = "missing_provider_or_model"
         return current_provider, debug
+    if not _is_local_chat_provider(current_provider):
+        debug["reason"] = "commercial_inventory_requires_credentials"
+        return current_provider, debug
     if "/" in model_value:
         debug["reason"] = "inline_model_namespace"
         return current_provider, debug
@@ -1633,9 +1605,13 @@ def infer_provider_from_model_catalog(
         debug["reason"] = "current_provider_match"
         return current_provider, debug
 
-    candidates = list(
-        _find_catalog_providers_for_model_cached(model_value) or _find_catalog_providers_for_model_cached(lookup_model)
-    )
+    candidates = [
+        name for name in _find_catalog_providers_for_model_cached(model_value)
+        if _is_local_chat_provider(name)
+    ] or [
+        name for name in _find_catalog_providers_for_model_cached(lookup_model)
+        if _is_local_chat_provider(name)
+    ]
     debug["candidates"] = candidates
     if not candidates:
         debug["reason"] = "no_catalog_match"
@@ -1710,8 +1686,6 @@ def invalidate_model_alias_caches() -> None:
         _provider_has_model_cached.cache_clear()
     with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
         _find_catalog_providers_for_model_cached.cache_clear()
-    with contextlib.suppress(_CHAT_NONCRITICAL_EXCEPTIONS):
-        _clear_openrouter_model_cache_shared()
 
 
 def queue_is_active(queue: Any) -> bool:
@@ -1866,6 +1840,8 @@ def normalize_request_provider_and_model(
 
 
         def _resolve_alias(provider: str, raw_model: str) -> str | None:
+            if not _is_local_chat_provider(provider):
+                return None
             m = (raw_model or "").strip()
             if not m:
                 return None
@@ -1883,7 +1859,8 @@ def normalize_request_provider_and_model(
         # without changing code. Sources (first match wins):
         #  - ENV JSON CHAT_MODEL_ALIAS_OVERRIDES = { provider: { alias: concrete_model } }
         #  - Config_Files/model_pricing.json key "model_aliases" or "aliases"
-        #  - Test-safe built-ins when PYTEST_CURRENT_TEST is set (keeps historical behavior)
+        # Explicit aliases select a destination; only scoped inventory can
+        # authorize that destination for a commercial provider at dispatch.
         alias_overrides = _load_alias_overrides_cached()
 
         # First apply alias override (supports cross-provider targets)
@@ -1904,11 +1881,9 @@ def normalize_request_provider_and_model(
                 model_str = combined
             else:
                 # Prevent accidental provider flips unless explicitly allowed.
-                # Special-case OpenRouter: it expects namespaced model ids like
-                # "z-ai/glm-4.6" to be preserved when api_provider is openrouter.
                 if provider_for_mapping == "openrouter":
                     request_data.model = resolved
-                    model_str = request_data.model
+                    model_str = resolved
                 elif "/" in resolved and not allow_cross:
                     resolved = None
                 else:
@@ -2640,6 +2615,132 @@ async def _await_with_call_policy_deadline(
     )
 
 
+def _provider_inventory_endpoint(
+    provider: str, request: dict[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    """Resolve the discovery base and the discovery options carrying generation's egress decision for it.
+
+    Unavailable scoped configuration never falls back to global discovery. A call policy's scope wins, as it
+    does for generation; otherwise ``inventory_endpoint_scope`` decides from the endpoint's provenance.
+    """
+    base_url = resolve_provider_models_base_url(
+        provider, request.get("app_config"),
+        credentials_resolved=request.get("credentials_resolved") is True,
+        base_url=request.get("base_url"),
+    )
+    if not base_url:
+        raise ChatConfigurationError(
+            provider=provider, message="Provider model inventory endpoint is unavailable.",
+        )
+    policy = request.get("call_policy")
+    if isinstance(policy, ProviderCallPolicy):
+        return base_url, {"call_policy": policy}
+    credentials = request.get(PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY)
+    provenance = request.get("_endpoint_provenance") or getattr(credentials, "endpoint_provenance", None)
+    scope = inventory_endpoint_scope(provider, base_url, endpoint_provenance=provenance)
+    return base_url, ({"configured_endpoint": scope} if scope is not None else {})
+
+
+_INVENTORY_OUTAGES = frozenset({"unreachable", "server_error"})
+
+
+def _raise_inventory_failure(provider: str, status: str, *, refreshable_oauth: bool = False) -> NoReturn:
+    """Raise the typed error the endpoints already map for a model list that is not ready.
+
+    auth_failed is the provider rejecting the credential, so it is an authentication error. Discovery runs
+    before generation, so a refreshable OAuth credential may refresh and retry (review I3). An outage gets its
+    own public code (review M1); anything else is a configuration problem.
+    """
+    if status == "auth_failed":
+        error = ChatAuthenticationError(
+            provider=provider, message="The provider rejected the credential while listing its models.",
+        )
+        if refreshable_oauth:
+            error.credential_refresh_retry_safe = True
+        raise error
+    if status in _INVENTORY_OUTAGES:
+        raise ChatConfigurationError(
+            provider=provider,
+            message="Provider model inventory is temporarily unavailable.",
+            error_code="provider_model_inventory_unavailable",
+        )
+    raise ChatConfigurationError(provider=provider, message="Provider model inventory is not supported.")
+
+
+def _validate_provider_model_selection(
+    provider: str, request: dict[str, Any], *, refreshable_oauth: bool | None = None,
+) -> None:
+    """Authorize current IDs, confirmed aliases and explicit router fallback IDs."""
+    if not has_model_listing(provider):
+        return  # no listing: the provider itself rejects a bad model
+    if refreshable_oauth is None:
+        credentials = request.get(PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY)
+        refreshable_oauth = getattr(credentials, "auth_source", None) == "oauth"
+    selected_models: list[Any] = [request.get("model")]
+    extra_body = request.get("extra_body")
+    fallback_models = None
+    if provider == "openrouter" and isinstance(extra_body, Mapping) and "models" in extra_body:
+        raw_models = extra_body["models"]
+        if (
+            not isinstance(raw_models, list)
+            or not raw_models
+            or any(
+                not isinstance(model, str) or not model.strip() or model != model.strip()
+                for model in raw_models
+            )
+        ):
+            raise ChatBadRequestError(
+                provider=provider, message="Fallback models must be a non-empty list of model IDs.",
+            )
+        fallback_models = list(raw_models)
+        selected_models.extend(fallback_models)
+    policy = request.get("call_policy")
+    discovery_started = time.monotonic()
+    base_url, discovery_options = _provider_inventory_endpoint(provider, request)
+    result = discover_provider_models(
+        provider, request.get("api_key"), base_url=base_url, **discovery_options,
+    )
+    if result.status != "ready":
+        _raise_inventory_failure(provider, result.status, refreshable_oauth=refreshable_oauth)
+    for model in selected_models:
+        if model in result.models:
+            continue
+        selection_policy = policy if isinstance(policy, ProviderCallPolicy) else None
+        if selection_policy is not None and selection_policy.maximum_timeout_seconds is not None:
+            remaining = selection_policy.maximum_timeout_seconds - (time.monotonic() - discovery_started)
+            if remaining <= 0:
+                _raise_inventory_failure(provider, "unreachable")
+            selection_policy = replace(selection_policy, maximum_timeout_seconds=remaining)
+        selection_options = {"call_policy": selection_policy} if selection_policy is not None else discovery_options
+        selection = resolve_provider_model_selection(
+            provider, request.get("api_key"), model,
+            base_url=base_url, inventory=result, **selection_options,
+        )
+        if selection.status == "not_found":
+            raise ChatModelNotAvailableError(provider, model)
+        if selection.status != "ready":
+            _raise_inventory_failure(provider, selection.status, refreshable_oauth=refreshable_oauth)
+    # Freeze the resolved endpoint so a config/env rotation between discovery
+    # and generation cannot validate one server's models and call another.
+    request["base_url"] = base_url
+    if fallback_models is not None:
+        request["extra_body"] = {**(extra_body or {}), "models": fallback_models}
+
+
+def _call_policy_after_model_discovery(
+    provider: str, request: dict[str, Any], started_at: float,
+) -> ProviderCallPolicy | None:
+    policy = request.get("call_policy")
+    if not isinstance(policy, ProviderCallPolicy) or policy.maximum_timeout_seconds is None:
+        return None
+    remaining = policy.maximum_timeout_seconds - (time.monotonic() - started_at)
+    if remaining <= 0:
+        _raise_inventory_failure(provider, "unreachable")
+    remaining_policy = replace(policy, maximum_timeout_seconds=remaining)
+    request["call_policy"] = remaining_policy
+    return remaining_policy
+
+
 def perform_chat_api_call(**kwargs: Any) -> Any:
     """Adapter-backed replacement for chat_orchestrator.chat_api_call."""
     # LLM usage accounting spec §4b: refuse before the try below, which can rebuild any error as a provider error.
@@ -2657,7 +2758,11 @@ def perform_chat_api_call(**kwargs: Any) -> Any:
     admitted = llm_call_context(prechecked=True) if checked else contextlib.nullcontext()
     try:
         with provider_error_privacy_scope(privacy_safe_errors), admitted:
+            call_started = time.monotonic()
             _validate_audited_call_policy_transport(registry, provider, request)
+            _validate_provider_model_selection(provider, request)
+            if has_model_listing(provider):
+                _call_policy_after_model_discovery(provider, request, call_started)
             if request.get("stream"):
                 return _map_sync_stream_egress_errors(
                     provider,
@@ -2688,9 +2793,17 @@ async def perform_chat_api_call_async(**kwargs: Any) -> Any:
 
     try:
         with provider_error_privacy_scope(privacy_safe_errors), llm_call_context(prechecked=True):
+            call_started = time.monotonic()
             strict_policy = _validate_audited_call_policy_transport(
                 registry, provider, request
             )
+            if has_model_listing(provider):
+                await await_bounded_sync_call(
+                    partial(_validate_provider_model_selection, provider, request),
+                    pool=SYNC_ADAPTER_CALL_POOL,
+                    exhaustion_message="Provider model discovery capacity is exhausted",
+                )
+                strict_policy = _call_policy_after_model_discovery(provider, request, call_started)
             if request.get("stream"):
                 try:
                     stream_iter = adapter.astream(request, **timeout_kwargs)
@@ -3506,14 +3619,20 @@ def _bound_provider_invocation_exception(exc: BaseException) -> BaseException:
     if _is_trusted_local_chat_http_exception(exc):
         return exc
     if isinstance(exc, ChatAuthenticationError):
-        return ChatAuthenticationError(
+        bounded = ChatAuthenticationError(
             message="The selected provider credentials could not be authenticated.",
             status_code=403 if getattr(exc, "status_code", None) == 403 else 401,
         )
+        if getattr(exc, "credential_refresh_retry_safe", None) is True:
+            bounded.credential_refresh_retry_safe = True
+        return bounded
     if isinstance(exc, ChatConfigurationError):
         return ChatConfigurationError(
             message="The selected provider configuration is invalid.",
+            error_code=getattr(exc, "error_code", "provider_configuration_invalid"),
         )
+    if isinstance(exc, ChatModelNotAvailableError):
+        return exc  # its message is built from the request's provider and model, never upstream text
     if isinstance(exc, ChatBadRequestError):
         return ChatBadRequestError(
             provider=getattr(exc, "provider", None),
@@ -4212,15 +4331,28 @@ async def build_context_and_messages(
     regenerate_reply_id = request_metadata.get("tldw_regenerate_from_message_id") if isinstance(request_metadata, dict) else None
     if regenerate_reply_id is not None:
         if not isinstance(regenerate_reply_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", regenerate_reply_id):
-            raise HTTPException(status_code=422, detail="A valid saved reply ID is required for regeneration.")
+            # 400: the chat endpoint turns statuses outside its allow-list (422) into 500.
+            raise HTTPException(status_code=400, detail="A valid saved reply ID is required for regeneration.")
         if (not final_conversation_id or explicit_failed_retry
                 or getattr(request_data, "tldw_continuation", None) is not None):
             raise HTTPException(status_code=409, detail="Regeneration requires an existing saved answered turn.")
+    from tldw_Server_API.app.core.Chat.history_continuation import (
+        continued_reply_prefix,
+        parse_continue_reply_id,
+    )
+
+    continue_reply_id = parse_continue_reply_id(
+        request_data,
+        conversation_id=final_conversation_id,
+        regenerate_reply_id=regenerate_reply_id,
+        explicit_failed_retry=explicit_failed_retry,
+    )
+    continue_prefix: str | None = None
     reuse_saved_turn = explicit_failed_retry or regenerate_reply_id is not None
 
     server_existing_input = getattr(request_data, "tldw_history_server_existing_input_v1", None)
     history_selection = getattr(request_data, "tldw_history_selection_v1", None) or server_existing_input
-    if history_selection is not None and (explicit_failed_retry or (server_existing_input is not None and regenerate_reply_id is not None)):
+    if history_selection is not None and (explicit_failed_retry or (server_existing_input is not None and (regenerate_reply_id is not None or continue_reply_id is not None))):
         raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "unsupported_history_legacy_retry"})
     versioned = history_selection is not None
     history_runtime = runtime_state or {}
@@ -4242,6 +4374,7 @@ async def build_context_and_messages(
         edit_target = getattr(request_data, "tldw_history_edit_v1", None)
         edit_target = edit_target.model_dump(mode="json") if edit_target is not None else None
         owner = history_runtime["history_owner_key"]
+        continuation_holder: dict[str, str] = {}
 
         def accept_history() -> tuple[
             HistorySelectionSnapshotV1,
@@ -4283,11 +4416,16 @@ async def build_context_and_messages(
                     except InputError as exc:
                         raise HistorySelectionError("unsupported_history_context_dictionaries") from exc
                 _format_selected_history_messages(snap, content, context[0] or {})
+                reused_reply_id = regenerate_reply_id if regenerate_reply_id is not None else continue_reply_id
+                unsupported_code = (
+                    "unsupported_history_continuation" if continue_reply_id is not None
+                    else "unsupported_history_regeneration"
+                )
                 if server_existing_input is not None:
                     accepted = None
-                elif regenerate_reply_id is not None:
+                elif reused_reply_id is not None:
                     if getattr(request_data, "tldw_history_branch", None) is not True:
-                        raise HistorySelectionError("unsupported_history_regeneration")
+                        raise HistorySelectionError(unsupported_code)
                     inputs = [
                         message.model_dump(exclude_none=True)
                         for message in request_data.messages
@@ -4295,14 +4433,19 @@ async def build_context_and_messages(
                     ]
                     if len(inputs) != 1 or inputs[0].get("role") != "user":
                         raise HistorySelectionError("invalid_regeneration_input")
-                    accepted = chat_db.reuse_selected_history_admission(
-                        final_conversation_id,
-                        selection,
-                        regenerate_reply_id,
-                        owner_client_id=history_runtime["history_owner_client_id"],
-                        owner_key=owner,
-                        conn=conn,
-                    )
+                    try:
+                        accepted = chat_db.reuse_selected_history_admission(
+                            final_conversation_id,
+                            selection,
+                            reused_reply_id,
+                            owner_client_id=history_runtime["history_owner_client_id"],
+                            owner_key=owner,
+                            conn=conn,
+                        )
+                    except HistorySelectionError as exc:
+                        if exc.code == "unsupported_history_regeneration":
+                            raise HistorySelectionError(unsupported_code) from exc
+                        raise
                     original = next(item for item in content if item["id"] == accepted["input_message_id"])
                     extra = original.get("extra_metadata") or {}
                     if (
@@ -4310,7 +4453,7 @@ async def build_context_and_messages(
                         or extra.get("function_call") is not None
                         or extra.get("tool_call_id") is not None
                     ):
-                        raise HistorySelectionError("unsupported_history_regeneration")
+                        raise HistorySelectionError(unsupported_code)
                     text = _saved_image_text(
                         {
                             "sender": "user",
@@ -4333,7 +4476,13 @@ async def build_context_and_messages(
                         or inputs[0].get("name") not in (None, extra.get("sender_name"))
                     ):
                         raise HistorySelectionError("regeneration_input_changed")
-                    content = tuple(item for item in content if item["id"] != regenerate_reply_id)
+                    if continue_reply_id is not None:
+                        # Continue keeps the saved reply as the final context message.
+                        continuation_holder["prefix"] = continued_reply_prefix(
+                            next(item for item in content if item["id"] == continue_reply_id)
+                        )
+                    else:
+                        content = tuple(item for item in content if item["id"] != regenerate_reply_id)
                 else:
                     accepted = chat_db.append_selected_history_inputs(
                         final_conversation_id,
@@ -4352,10 +4501,12 @@ async def build_context_and_messages(
         except HistorySelectionError as exc:
             failure = (
                 "unsupported_history_capability"
-                if (exc.code.startswith("unsupported_history_context") or exc.code == "unsupported_history_regeneration")
+                if (exc.code.startswith("unsupported_history_context")
+                    or exc.code in {"unsupported_history_regeneration", "unsupported_history_continuation"})
                 else "stale_selection"
             )
             raise HTTPException(409, detail={"status": failure, "code": exc.code, **exc.details}) from exc
+        continue_prefix = continuation_holder.get("prefix")
         character_card, character_db_id, assistant_context = context
         for field, value in assistant_context.pop("history_sampling", {}).items():
             if field not in request_data.model_fields_set:
@@ -4440,7 +4591,7 @@ async def build_context_and_messages(
         )
         should_persist = False
 
-    if regenerate_reply_id:
+    if regenerate_reply_id or continue_reply_id:
         if (not should_persist or not existing_conversation
                 or existing_conversation.get("client_id") != client_id_from_db
                 or not (is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation or versioned
@@ -4842,7 +4993,7 @@ async def build_context_and_messages(
                         )
 
     if versioned:
-        if regenerate_reply_id is not None:
+        if regenerate_reply_id is not None or continue_reply_id is not None:
             overlap_cut = len(request_messages)
         formatted_history = _format_selected_history_messages(history_snapshot, selected_content, character_card)
         if server_existing_input is not None:
@@ -4857,6 +5008,8 @@ async def build_context_and_messages(
             runtime_state["tldw_history_server_existing_input_v1"] = history_selection.model_dump(mode="json")
         else:
             runtime_state["tldw_history_admission_v1"] = admission
+        if continue_prefix is not None:
+            runtime_state["history_continue_prefix"] = continue_prefix
 
     if retry_user_message_id and any(message.get("role") == "user" for message in request_messages[overlap_cut:-1]):
         raise HTTPException(status_code=409, detail="This retry contains extra unsaved user messages. Resolve the local conversation before retrying.")
@@ -5298,6 +5451,7 @@ async def execute_streaming_call(
     queue_request_id: str | None = None,
     provider_factory_timeout: float | None = None,
     history_persistence_ack: bool = False,
+    forward_usage_chunk: bool = False,
 ) -> StreamingResponse:
     """Execute a streaming LLM call with queue, failover, moderation, and persistence.
 
@@ -6160,6 +6314,7 @@ async def execute_streaming_call(
         function_call: dict[str, Any] | None,
         *,
         generation: dict[str, Any] | None = None,
+        provider_usage: dict[str, Any] | None = None,
     ):
         nonlocal stream_metrics_recorded
         saved_message_id: str | None = None
@@ -6280,15 +6435,19 @@ async def execute_streaming_call(
                     "Streaming chat tool auto-execution skipped error_type={}",
                     type(autoexec_err).__name__,
                 )
-        # Usage logging (estimated) after stream completes
-        total_est = 0
+        # Usage logging after the stream completes: from the provider's usage chunk, else an estimate
+        total_tokens = 0
         try:
-            pt_est = 0
-            try:
-                pt_est = _estimate_tokens_from_messages(templated_llm_payload)
-            except _CHAT_NONCRITICAL_EXCEPTIONS:
-                pt_est = 0
-            ct_est = max(0, len(full_reply or "") // 4)
+            reported_prompt, reported_completion = _usage_tokens(provider_usage) if provider_usage else (0, 0)
+            reported = (reported_prompt, reported_completion) != (0, 0)
+            # A side the block does not count (a prompt-only block, say) comes from the estimate.
+            prompt_tokens = reported_prompt
+            if not prompt_tokens:
+                try:
+                    prompt_tokens = _estimate_tokens_from_messages(templated_llm_payload)
+                except _CHAT_NONCRITICAL_EXCEPTIONS:
+                    prompt_tokens = 0
+            completion_tokens = reported_completion or max(0, len(full_reply or "") // 4)
             user_id = None
             api_key_id = None
             try:
@@ -6298,7 +6457,7 @@ async def execute_streaming_call(
             except _CHAT_NONCRITICAL_EXCEPTIONS:
                 pass
             latency_ms = int((time.time() - llm_start_time) * 1000)
-            total_est = int(pt_est + ct_est)
+            total_tokens = int(prompt_tokens + completion_tokens)
             await log_llm_usage(
                 user_id=user_id,
                 key_id=api_key_id,
@@ -6309,21 +6468,22 @@ async def execute_streaming_call(
                 model=model,
                 status=200,
                 latency_ms=latency_ms,
-                prompt_tokens=int(pt_est),
-                completion_tokens=int(ct_est),
-                total_tokens=total_est,
+                prompt_tokens=int(prompt_tokens),
+                completion_tokens=int(completion_tokens),
+                total_tokens=total_tokens,
                 request_id=(request.headers.get("X-Request-ID") if request else None) or (get_request_id() or None),
                 conversation_id=(str(final_conversation_id) if final_conversation_id is not None else None),
-                estimated=True,
-                estimate_source="stream_estimate",
+                usage_metadata=provider_usage if reported else None,
+                estimated=None if reported_prompt and reported_completion else True,
+                estimate_source=None if reported else "stream_estimate",
             )
         except _CHAT_NONCRITICAL_EXCEPTIONS:
             pass
-        # Commit reserved tokens to Resource Governor, if provided
+        # Commit the recorded tokens to the Resource Governor, if provided
         try:
             if callable(rg_commit_cb):
                 # rg_commit_cb may be async or sync; call accordingly
-                res = rg_commit_cb(total_est)
+                res = rg_commit_cb(total_tokens)
                 if hasattr(res, "__await__"):
                     await res  # type: ignore[misc]
         except _CHAT_NONCRITICAL_EXCEPTIONS:
@@ -6694,6 +6854,7 @@ async def execute_streaming_call(
                     user_message_id=user_message_id,
                     continuation_metadata=normalized_continuation_metadata,
                     history_persistence_ack=history_persistence_ack or None,
+                    forward_usage_chunk=forward_usage_chunk,
                 ),
                 stream_factory=create_streaming_response_with_timeout,
             )
@@ -6881,7 +7042,7 @@ async def _execute_non_stream_call_impl(
         """Record token and durable usage for one validated dict response."""
 
         choices = response.get("choices")
-        usage = response.get("usage")
+        usage = usage_with_service_tier(response)  # OpenAI reports service_tier beside usage
         if usage:
             try:
                 normalized_usage = normalize_llm_usage(

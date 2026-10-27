@@ -305,3 +305,16 @@ async def test_classify_items_by_topic_lets_a_quota_refusal_through(adapter: _Ad
     adapter.error = _refusal()
     with pytest.raises(LLMQuotaExceededError):
         await outputs_service.classify_items_by_topic([{"title": "Cedar"}], **_LLM)
+
+
+@pytest.mark.unit
+def test_custom_exact_tag_rules_match_tag_identities() -> None:
+    items = [{"id": 1, "tags": ["AI"]}, {"id": 2, "tags": ["Straße"]}, {"id": 3, "tags": ["ml"]}]
+    rules = [
+        {"group_name": "AI", "match_field": "tag", "match_pattern": "ai", "match_mode": "exact"},
+        {"group_name": "Streets", "match_field": "tag", "match_pattern": "STRASSE", "match_mode": "exact"},
+    ]
+
+    groups = {group["name"]: [item["id"] for item in group["items"]] for group in outputs_service.group_items(items, group_by="custom", custom_rules=rules)}
+
+    assert groups == {"AI": [1], "Streets": [2], "Uncategorized": [3]}
