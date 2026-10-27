@@ -42,7 +42,6 @@ from tldw_Server_API.app.core.Utils.provider_identity import canonical_provider_
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.config_sections import ConfigSections
-    from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 
 _CONFIG_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -2923,9 +2922,10 @@ def usage_quotas_enabled() -> bool:
     return _as_bool(v, False)
 
 
-def get_llamacpp_handler_config() -> Optional["LlamaCppConfig"]:
+def get_llamacpp_handler_settings() -> dict[str, Any] | None:
     """
-    Build a LlamaCppConfig from environment variables or [LlamaCpp] section in config.txt.
+    Return the LlamaCppConfig keyword arguments from environment variables or the
+    [LlamaCpp] section in config.txt, or None when the handler is disabled.
 
     Env overrides (precedence over config.txt):
         LLAMACPP_ENABLED
@@ -2943,12 +2943,6 @@ def get_llamacpp_handler_config() -> Optional["LlamaCppConfig"]:
         LLAMACPP_ALLOWED_PATHS  (comma separated)
         LLAMACPP_LOG_OUTPUT_FILE
     """
-    try:
-        from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
-    except _CONFIG_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
-        _log_warning(f"llama.cpp handler config unavailable (import failed): {exc}")
-        return None
-
     try:
         cp = load_comprehensive_config()
     except _CONFIG_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
@@ -2972,7 +2966,7 @@ def get_llamacpp_handler_config() -> Optional["LlamaCppConfig"]:
     if not enabled:
         return None
 
-    kwargs: dict[str, object] = {"enabled": True}
+    kwargs: dict[str, Any] = {"enabled": True}
 
     exe = _get("executable_path", "LLAMACPP_EXECUTABLE_PATH")
     models_dir = _get("models_dir", "LLAMACPP_MODELS_DIR")
@@ -3024,11 +3018,7 @@ def get_llamacpp_handler_config() -> Optional["LlamaCppConfig"]:
     if log_output_file:
         kwargs["log_output_file"] = Path(str(log_output_file))
 
-    try:
-        return LlamaCppConfig(**kwargs)
-    except _CONFIG_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
-        _log_warning(f"llama.cpp handler config invalid; disabling handler: {exc}")
-        return None
+    return kwargs
 
 
 _GOVERNANCE_ROLLOUT_MODES = {"off", "shadow", "enforce"}

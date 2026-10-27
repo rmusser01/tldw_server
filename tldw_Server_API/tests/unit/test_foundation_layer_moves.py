@@ -28,3 +28,26 @@ def test_provider_identity_lives_in_utils_and_the_llm_calls_path_reexports_it() 
     assert old.provider_lookup_names is new.provider_lookup_names
     assert old.PROVIDER_ALIASES is new.PROVIDER_ALIASES
     assert new.canonical_provider_name("OpenAI-Compatible") == "custom-openai-api"
+
+
+def test_llamacpp_handler_settings_are_plain_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pathlib import Path
+
+    from tldw_Server_API.app.core import config
+
+    monkeypatch.setenv("LLAMACPP_ENABLED", "1")
+    monkeypatch.setenv("LLAMACPP_PORT", "9001")
+    monkeypatch.setenv("LLAMACPP_ALLOWED_PATHS", "/models/a, /models/b")
+
+    settings = config.get_llamacpp_handler_settings()
+
+    assert settings is not None
+    assert settings["enabled"] is True and settings["default_port"] == 9001
+    assert settings["allowed_paths"] == [Path("/models/a"), Path("/models/b")]
+
+
+def test_llamacpp_handler_settings_are_none_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core import config
+
+    monkeypatch.setenv("LLAMACPP_ENABLED", "0")
+    assert config.get_llamacpp_handler_settings() is None
