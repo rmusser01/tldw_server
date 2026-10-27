@@ -269,7 +269,7 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
     window.addEventListener("tldw:slides-scope-mismatch", handleAuthorityBoundary)
     window.addEventListener("pagehide", handlePagehideBoundary, true)
     window.addEventListener("pageshow", handleRestorationBoundary, true)
-    window.addEventListener("focus", handleRestorationBoundary, true)
+    window.addEventListener("focus", handleRestorationBoundary)
     document.addEventListener("visibilitychange", handleVisibilityBoundary, true)
     return () => {
       window.removeEventListener("tldw:config-updated", handleAuthorityBoundary)
@@ -277,7 +277,7 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
       window.removeEventListener("tldw:slides-scope-mismatch", handleAuthorityBoundary)
       window.removeEventListener("pagehide", handlePagehideBoundary, true)
       window.removeEventListener("pageshow", handleRestorationBoundary, true)
-      window.removeEventListener("focus", handleRestorationBoundary, true)
+      window.removeEventListener("focus", handleRestorationBoundary)
       document.removeEventListener("visibilitychange", handleVisibilityBoundary, true)
     }
   }, [invalidateDetailRequest, mode])
