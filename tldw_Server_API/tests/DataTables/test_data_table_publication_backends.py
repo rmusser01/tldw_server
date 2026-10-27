@@ -19,7 +19,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDa
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("healthy_no_override_tts_credential_snapshot")]
 
 
 @pytest.fixture(params=["sqlite", "postgres"])
@@ -117,7 +117,9 @@ def test_existing_index_upgrade_retains_history_and_live_uniqueness(publication_
             reopened.close_connection()
 
 
-def _complete_generation(db, backend, tmp_path, monkeypatch, *, modern=False):
+def _complete_generation(
+    db, backend, tmp_path, monkeypatch, *, modern=False, background=False, document_source=False, source_owner=401
+):
     if backend is None:
         jm = JobManager(tmp_path / "jobs.db")
     else:
@@ -129,15 +131,38 @@ def _complete_generation(db, backend, tmp_path, monkeypatch, *, modern=False):
         name="Rowan completion", prompt="Extract facts", status="ready", generation_job=reservation
     )
     _replace(db, table["id"], "Selene")
+    if document_source:
+        with scoped_context(user_id=source_owner, is_admin=False):
+            source_path = tmp_path / ("media.db" if backend is not None or source_owner == 401 else f"media-{source_owner}.db")
+            source_db = MediaDatabase(
+                db_path=str(source_path), client_id=str(source_owner), backend=backend,
+                existing_only=backend is not None or source_owner == 401,
+            )
+            try:
+                media_id, _media_uuid, _content_hash = source_db.add_media_with_keywords(
+                    title="Rowan background source",
+                    media_type="document",
+                    content="The telescope is named Selene.",
+                    owner_user_id=source_owner,
+                    author="Rowan curator",
+                    ingestion_date="2026-10-27T12:00:00",
+                    keywords=[],
+                )
+            finally:
+                source_db.close_connection()
     payload = {
         "table_id": table["id"],
         "table_uuid": table["uuid"],
         "user_id": "401",
         "data_table_publication_version": 1,
         "prompt": "Extract facts",
-        "sources": [
-            {"source_type": "rag_query", "source_id": "Rowan", "snapshot": {"chunks": [{"chunk_text": "Selene"}]}}
-        ],
+        "sources": (
+            [{"source_type": "document", "source_id": str(media_id)}]
+            if document_source
+            else [
+                {"source_type": "rag_query", "source_id": "Rowan", "snapshot": {"chunks": [{"chunk_text": "Selene"}]}}
+            ]
+        ),
     }
     if modern:
         payload["generation_key"] = reservation["key"]
@@ -171,7 +196,11 @@ def _complete_generation(db, backend, tmp_path, monkeypatch, *, modern=False):
     monkeypatch.setattr(jobs_worker, "provider_requires_api_key", lambda _provider: False)
     monkeypatch.setattr(jobs_worker, "resolve_provider_api_key", lambda *_args, **_kwargs: ("", {}))
     monkeypatch.setattr(jobs_worker, "load_and_log_configs", lambda: {})
-    result = asyncio.run(jobs_worker._handle_job(job, jm))
+    if background:
+        with scoped_context(user_id=None, is_admin=False):
+            result = asyncio.run(jobs_worker._handle_job(job, jm))
+    else:
+        result = asyncio.run(jobs_worker._handle_job(job, jm))
     assert jm.complete_job(
         job["id"],
         result=result,
@@ -285,3 +314,37 @@ def test_real_backend_timestamp_responses_keep_the_public_string_contract(public
         assert (
             actual == expected
         )  # nosec B101 -- actual database timestamp values retain the public string/null contract.
+
+
+@pytest.mark.parametrize("document_source", [False, True], ids=["snapshot", "document"])
+def test_background_generation_opens_only_the_admitted_owner_scope(
+    publication_store, tmp_path, monkeypatch, document_source
+):
+    """A background delivery cannot depend on the API request's content scope."""
+    db, backend, _path = publication_store
+    with scoped_context(user_id=401, is_admin=False):
+        jm, job, table = _complete_generation(
+            db, backend, tmp_path, monkeypatch, modern=True, background=True, document_source=document_source
+        )
+    with scoped_context(user_id=None, is_admin=False):
+        state = jobs_worker.publish_completed_generation(jm, job["id"], expected_uuid=job["uuid"], db=db)
+    with scoped_context(user_id=401, is_admin=False):
+        columns, rows = _contents(db, table["id"])
+        assert (
+            state == "ready"
+            and len(columns) == len(rows) == 1
+            and json.loads(rows[0]["row_json"]) == {columns[0]["column_id"]: "Replacement"}
+        )  # nosec B101 -- real background stage/completion/publication needs no foreground scope.
+
+
+def test_document_generation_does_not_borrow_ambient_admin_access(publication_store, tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.DB_Management.scope_context import get_scope
+    from tldw_Server_API.app.core.exceptions import DataTablesJobError
+
+    db, backend, _path = publication_store
+    with scoped_context(user_id=999, is_admin=True) as parent:
+        with pytest.raises(DataTablesJobError, match="media_not_found"):
+            _complete_generation(
+                db, backend, tmp_path, monkeypatch, modern=True, document_source=True, source_owner=402
+            )
+        assert get_scope() is parent  # nosec B101 -- failed source reads restore the caller's exact content context.

@@ -576,3 +576,39 @@ def test_default_model_uses_registered_configuration_section(provider, section):
 @pytest.mark.parametrize("provider", ["llamacpp", "openai"])
 def test_explicit_model_precedes_default_configuration(provider):
     assert jobs_worker._resolve_model(provider, "selected-model", {}) == "selected-model"  # nosec B101 -- explicit model precedence.
+
+
+@pytest.mark.parametrize("owner", ["test_client", "0", "-1", "01", "+1", "1.0", None])
+def test_owned_document_read_refuses_invalid_owner_before_lookup(monkeypatch, owner):
+    calls = []
+    monkeypatch.setattr(jobs_worker, "_extract_media_text", lambda *args: calls.append(args))
+    with pytest.raises(DataTablesJobError, match="invalid_media_owner") as caught:
+        jobs_worker._extract_owned_media_text(object(), 1, owner)
+    assert (
+        calls == [] and caught.value.retryable is False
+    )  # nosec B101 -- invalid identities never reach source storage.
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_owned_document_read_restores_context_and_drops_ambient_admin(monkeypatch, fails):
+    from tldw_Server_API.app.core.DB_Management.scope_context import get_scope, scoped_context
+
+    def extract(_db, media_id):
+        scope = get_scope()
+        assert (
+            scope.user_id == 401 and scope.is_admin is False and scope.org_ids == scope.team_ids == [] and media_id == 7
+        )  # nosec B101 -- only the validated personal owner is delegated.
+        if fails:
+            raise DataTablesJobError("media_not_found:7", retryable=False)
+        return "Selene"
+
+    monkeypatch.setattr(jobs_worker, "_extract_media_text", extract)
+    with scoped_context(user_id=999, is_admin=True, org_ids=[3], team_ids=[4]) as parent:
+        if fails:
+            with pytest.raises(DataTablesJobError, match="media_not_found:7"):
+                jobs_worker._extract_owned_media_text(object(), 7, "401")
+        else:
+            assert (
+                jobs_worker._extract_owned_media_text(object(), 7, "401") == "Selene"
+            )  # nosec B101 -- successful owner-scoped content retained.
+        assert get_scope() is parent  # nosec B101 -- success/failure restores the exact caller context.
