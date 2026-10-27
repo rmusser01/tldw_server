@@ -4968,6 +4968,9 @@ class JobManager:
         payload: dict[str, Any],
         expected_uuid: str | None = None,
         expected_domain: str | None = None,
+        expected_worker_id: str | None = None,
+        expected_lease_id: str | None = None,
+        expected_payload: dict[str, Any] | None = None,
     ) -> bool:
         """Atomically replace one guarded live Jobs payload."""
         if not isinstance(payload, dict):
@@ -4984,17 +4987,29 @@ class JobManager:
                 if expected_domain is not None:
                     clauses.append("domain = %s")
                     guards.append(str(expected_domain))
+                if expected_worker_id is not None:
+                    clauses.append("worker_id = %s")
+                    guards.append(expected_worker_id)
+                if expected_lease_id is not None:
+                    clauses.append("lease_id = %s")
+                    guards.append(expected_lease_id)
+                if expected_worker_id is not None or expected_lease_id is not None:
+                    clauses.append("status = 'processing'")
                 where_sql = " AND ".join(clauses)
                 with conn:
                     with self._pg_cursor(conn) as cur:
                         cur.execute(
-                            "SELECT domain, queue, job_type FROM jobs "
+                            "SELECT domain, queue, job_type, payload FROM jobs "
                             f"WHERE {where_sql} FOR UPDATE",  # nosec B608
                             tuple(guards),
                         )
                         row = cur.fetchone()
                         if not row:
                             return False
+                        if expected_payload is not None:
+                            current_payload = self._maybe_decrypt_json(self._parse_json_value(row["payload"]))
+                            if json.dumps(current_payload, sort_keys=True, allow_nan=False) != json.dumps(expected_payload, sort_keys=True, allow_nan=False):
+                                return False
                         serialized = self._serialize_replacement_payload(
                             payload,
                             domain=str(row["domain"]),
@@ -5016,16 +5031,28 @@ class JobManager:
             if expected_domain is not None:
                 clauses.append("domain = ?")
                 guards.append(str(expected_domain))
+            if expected_worker_id is not None:
+                clauses.append("worker_id = ?")
+                guards.append(expected_worker_id)
+            if expected_lease_id is not None:
+                clauses.append("lease_id = ?")
+                guards.append(expected_lease_id)
+            if expected_worker_id is not None or expected_lease_id is not None:
+                clauses.append("status = 'processing'")
             where_sql = " AND ".join(clauses)
             with conn:
                 conn.execute("BEGIN IMMEDIATE")
                 row = conn.execute(
-                    "SELECT domain, queue, job_type FROM jobs "
+                    "SELECT domain, queue, job_type, payload FROM jobs "
                     f"WHERE {where_sql}",  # nosec B608
                     tuple(guards),
                 ).fetchone()
                 if not row:
                     return False
+                if expected_payload is not None:
+                    current_payload = self._maybe_decrypt_json(self._parse_json_value(row[3]))
+                    if json.dumps(current_payload, sort_keys=True, allow_nan=False) != json.dumps(expected_payload, sort_keys=True, allow_nan=False):
+                        return False
                 serialized = self._serialize_replacement_payload(
                     payload,
                     domain=str(row[0]),

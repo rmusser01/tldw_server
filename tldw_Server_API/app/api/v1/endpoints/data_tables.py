@@ -15,11 +15,18 @@ from uuid import UUID
 from cachetools import LRUCache
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from loguru import logger
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal, get_request_user, rbac_rate_limit, RequirePermission, User
 
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    User,
+    check_rate_limit,
+    get_auth_principal,
+    get_request_user,
+    rbac_rate_limit,
+)
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.data_tables_schemas import (
     DataTableColumn,
     DataTableContentUpdateRequest,
@@ -45,13 +52,22 @@ from tldw_Server_API.app.api.v1.schemas.file_artifacts_schemas import (
     FileCreateRequest,
     FileExportRequest,
 )
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.permissions import (
     MEDIA_CREATE,
     MEDIA_DELETE,
     MEDIA_READ,
     MEDIA_UPDATE,
 )
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.Data_Tables.publication import (
+    PROTOCOL_KEY,
+    public_generation_result,
+    publish_completed_generation,
+    recover_table_generation,
+    reservation_for_job,
+)
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError, InputError
 from tldw_Server_API.app.core.exceptions import (
@@ -67,8 +83,6 @@ from tldw_Server_API.app.core.File_Artifacts.file_artifacts_service import (
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent
 from tldw_Server_API.app.core.Utils.Utils import sanitize_filename
-from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
-from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 router = APIRouter(prefix="/data-tables", tags=["data-tables"])
 
@@ -97,6 +111,7 @@ def _mark_data_table_generate_failed(
     table_id: int | None,
     owner_user_id: int | str | None,
     exc: Exception,
+    generation_job: str | None,
 ) -> None:
     """Best-effort failure marker for partially created data tables."""
     if table_id is None:
@@ -107,6 +122,7 @@ def _mark_data_table_generate_failed(
             status="failed",
             last_error=DATA_TABLE_GENERATION_FAILED_DETAIL,
             owner_user_id=owner_user_id,
+            expected_generation_job=generation_job,
         )
     except Exception:
         logger.debug("data_tables.generate: failed to mark table as failed")
@@ -371,7 +387,12 @@ async def _wait_for_job_completion(
         if not job:
             raise HTTPException(status_code=404, detail="job_not_found")
         status_val = str(job.get("status") or "").lower()
-        if status_val in {"completed", "failed", "cancelled", "quarantined"}:
+        if status_val == "completed":
+            publication = publish_completed_generation(jm, job_id, expected_uuid=job.get("uuid"))
+            job["result"] = public_generation_result(job, publication)
+            if publication != "pending":
+                return job
+        elif status_val in {"failed", "cancelled", "quarantined"}:
             return job
         await asyncio.sleep(poll_interval)
     raise HTTPException(status_code=408, detail="data_table_job_timeout")
@@ -461,6 +482,8 @@ async def generate_data_table(
     table_id = None
     table_uuid = None
     owner_user_id = _resolve_owner_id(principal, current_user)
+    reservation = {"key": str(uuid.uuid4()), "owner": str(current_user.id), "queue": _data_tables_jobs_queue()}
+    generation_job = json.dumps(reservation, sort_keys=True)
 
     try:
         column_hints = None
@@ -474,6 +497,7 @@ async def generate_data_table(
             workspace_tag=req.workspace_tag,
             column_hints=column_hints,
             status="queued",
+            generation_job=reservation,
             row_count=0,
             generation_model=req.model,
             owner_user_id=owner_user_id,
@@ -508,6 +532,8 @@ async def generate_data_table(
             db.insert_data_table_sources(table_id, sources_db_payload, owner_user_id=owner_user_id)
 
         payload: dict[str, Any] = {
+            PROTOCOL_KEY: 1,
+            "generation_key": reservation["key"],
             "table_id": table_id,
             "table_uuid": table_uuid,
             "prompt": req.prompt,
@@ -521,7 +547,8 @@ async def generate_data_table(
 
         job = jm.create_job(
             domain="data_tables",
-            queue=_data_tables_jobs_queue(),
+            queue=reservation["queue"],
+            idempotency_key=reservation["key"],
             job_type="data_table_generate",
             payload=payload,
             owner_user_id=str(current_user.id),
@@ -530,11 +557,14 @@ async def generate_data_table(
             request_id=rid,
             trace_id=tp or None,
         )
+        admitted = reservation_for_job(job, payload)
+        if any(admitted[key] != value for key, value in reservation.items()):
+            raise RuntimeError("data_table_admission_mismatch")
 
         if wait_for_completion:
             job_state = await _wait_for_job_completion(jm, int(job.get("id")), timeout_seconds=wait_timeout_seconds)
             job_status = str(job_state.get("status") or "").lower()
-            if job_status != "completed":
+            if job_status != "completed" or (job_state.get("result") or {}).get("publication_status", "ready") != "ready":
                 raise HTTPException(
                     status_code=409,
                     detail=job_state.get("error_message") or "data_table_job_failed",
@@ -579,6 +609,7 @@ async def generate_data_table(
             table_id=table_id,
             owner_user_id=owner_user_id,
             exc=exc,
+            generation_job=generation_job,
         )
         raise map_db_error_to_http(
             exc,
@@ -591,6 +622,7 @@ async def generate_data_table(
             table_id=table_id,
             owner_user_id=owner_user_id,
             exc=exc,
+            generation_job=generation_job,
         )
         raise HTTPException(status_code=500, detail="Failed to submit data table job") from exc
 
@@ -700,6 +732,7 @@ async def get_data_table(
     current_user: User = Depends(get_request_user),
     principal: AuthPrincipal = Depends(get_auth_principal),
     db: Any = Depends(get_media_db_for_user),
+    jm: JobManager = Depends(get_job_manager),
 ) -> DataTableDetailResponse:
     """Return a single data table with optional rows and sources."""
     owner_user_id = _resolve_owner_id(principal, current_user)
@@ -708,6 +741,7 @@ async def get_data_table(
         if not table_row:
             raise HTTPException(status_code=404, detail="data_table_not_found")
 
+        table_row = recover_table_generation(jm, db, table_row)
         return _build_table_detail_response(
             table_row,
             db,
@@ -1135,7 +1169,10 @@ async def regenerate_data_table(
     if prompt_override == "":
         prompt_override = None
 
+    reservation = {"key": str(uuid.uuid4()), "owner": str(current_user.id), "queue": _data_tables_jobs_queue()}
     payload: dict[str, Any] = {
+        PROTOCOL_KEY: 1,
+        "generation_key": reservation["key"],
         "table_id": table_id,
         "table_uuid": table_uuid,
         "prompt": prompt_override or table_row.get("prompt"),
@@ -1148,21 +1185,11 @@ async def regenerate_data_table(
     if table_owner_client_id:
         payload["user_id"] = table_owner_client_id
 
-    job = jm.create_job(
-        domain="data_tables",
-        queue=_data_tables_jobs_queue(),
-        job_type="data_table_generate",
-        payload=payload,
-        owner_user_id=str(current_user.id),
-        priority=5,
-        max_retries=3,
-        request_id=rid,
-        trace_id=tp or None,
-    )
     try:
-        db.update_data_table(
+        table_row = db.update_data_table(
             table_id,
             status="queued",
+            generation_job=reservation,
             generation_model=req.model or table_row.get("generation_model"),
             prompt=prompt_override,
             owner_user_id=table_owner_client_id or owner_user_id,
@@ -1172,13 +1199,35 @@ async def regenerate_data_table(
             exc,
             default_detail="Failed to regenerate data table",
         ) from exc
+    try:
+        job = jm.create_job(
+            domain="data_tables",
+            queue=reservation["queue"],
+            idempotency_key=reservation["key"],
+            job_type="data_table_generate",
+            payload=payload,
+            owner_user_id=str(current_user.id),
+            priority=5,
+            max_retries=3,
+            request_id=rid,
+            trace_id=tp or None,
+        )
+    except ValueError as exc:
+        _mark_data_table_generate_failed(
+            db, table_id=table_id, owner_user_id=table_owner_client_id or owner_user_id,
+            exc=exc, generation_job=json.dumps(reservation, sort_keys=True),
+        )
+        raise HTTPException(status_code=409, detail="data_table_generation_rejected") from exc
+    admitted = reservation_for_job(job, payload)
+    if any(admitted[key] != value for key, value in reservation.items()):
+        raise HTTPException(status_code=409, detail="data_table_admission_mismatch")
 
     if wait_for_completion:
         job_state = await _wait_for_job_completion(
             jm, int(job.get("id")), timeout_seconds=wait_timeout_seconds
         )
         job_status = str(job_state.get("status") or "").lower()
-        if job_status != "completed":
+        if job_status != "completed" or (job_state.get("result") or {}).get("publication_status", "ready") != "ready":
             raise HTTPException(
                 status_code=409,
                 detail=job_state.get("error_message") or "data_table_job_failed",
@@ -1249,6 +1298,9 @@ async def get_data_table_job(
     if not (_principal_has_admin_claims(principal) or owner == str(current_user.id)):
         raise HTTPException(status_code=403, detail="not_authorized")
     payload = job.get("payload") or {}
+    publication = None
+    if job.get("status") == "completed":
+        publication = publish_completed_generation(jm, job_id, expected_uuid=job.get("uuid"))
     return DataTableJobStatus(
         id=int(job.get("id")),
         uuid=job.get("uuid"),
@@ -1262,7 +1314,7 @@ async def get_data_table_job(
         cancellation_reason=job.get("cancellation_reason"),
         progress_percent=job.get("progress_percent"),
         progress_message=job.get("progress_message"),
-        result=job.get("result"),
+        result=public_generation_result(job, publication),
         error_message=job.get("error_message"),
         table_uuid=payload.get("table_uuid"),
     )

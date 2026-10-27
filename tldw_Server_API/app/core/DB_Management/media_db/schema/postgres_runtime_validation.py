@@ -75,6 +75,7 @@ _ADDITIVE_COLUMNS = {
     "data_tables": {
         "workspace_tag",
         "column_hints_json",
+        "generation_job_json",
         "last_modified",
         "version",
         "client_id",

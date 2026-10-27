@@ -133,7 +133,7 @@ def insert_data_table_columns(
                 now,
                 1,
                 write_client_id,
-                0,
+                False,
                 column.get("prev_version"),
                 column.get("merge_parent_uuid"),
             )
@@ -243,7 +243,7 @@ def insert_data_table_rows(
                 now,
                 1,
                 write_client_id,
-                0,
+                False,
                 row.get("prev_version"),
                 row.get("merge_parent_uuid"),
             )
@@ -354,7 +354,7 @@ def insert_data_table_sources(
                 now,
                 1,
                 write_client_id,
-                0,
+                False,
                 src.get("prev_version"),
                 src.get("merge_parent_uuid"),
             )

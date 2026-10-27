@@ -116,6 +116,13 @@ export function useDataTableGeneration(enabled = true, tableId?: string | null) 
         );
         if (String(status.status).toLowerCase() !== 'completed')
           throw new Error(status.error_message || 'Generation failed');
+        const publication = status.result?.publication_status;
+        if (publication && publication !== 'ready')
+          throw new Error(publication === 'conflict'
+            ? 'Your saved table changed. Your edits were preserved. Generate again to use the latest version.'
+            : publication === 'pending'
+              ? 'Generation finished, but saving is not confirmed yet. Reopen the table to check its saved content.'
+              : 'The generated result could not be saved. Your saved table is unchanged. Try generating again.');
         const table = await tldwClient.getDataTable(
           status.table_uuid || receipt.table.uuid,
           { rows_limit: rowsLimit },

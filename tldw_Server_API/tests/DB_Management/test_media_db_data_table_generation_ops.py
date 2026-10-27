@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.errors import InputError
-
 
 pytestmark = pytest.mark.unit
 
@@ -40,6 +40,8 @@ def _build_db_with_generation_state():
             return False
 
     class _FakeDB:
+        backend_type = BackendType.SQLITE
+
         def __init__(self):
             self.state = {
                 "table": {
