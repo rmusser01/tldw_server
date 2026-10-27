@@ -312,9 +312,12 @@ async def test_verify_ws_credential_verifies_only_the_credential_it_is_given(mon
     monkeypatch.setattr(websocket_principal, "get_auth_principal", verifier)
     handshake = [(b"authorization", b"Bearer header-token"), (b"x-api-key", b"header-key")]
 
-    await websocket_principal.verify_ws_credential(_websocket(handshake), token="frame-token")
-    await websocket_principal.resolve_ws_principal(
+    frame = _websocket(handshake)
+    by_frame = await websocket_principal.verify_ws_credential(frame, token="frame-token")
+    by_subprotocol = await websocket_principal.resolve_ws_principal(
         _websocket([(b"sec-websocket-protocol", b"bearer, a.b.c"), (b"x-api-key", b"header-key")])
     )
 
+    assert (by_frame.user_id, by_subprotocol.user_id) == (7, 7)
     assert seen == [("Bearer frame-token", None), ("Bearer a.b.c", "header-key")]
+    assert frame.state.ws_credential_headers == {"authorization": "Bearer frame-token"}  # what persona would forward
