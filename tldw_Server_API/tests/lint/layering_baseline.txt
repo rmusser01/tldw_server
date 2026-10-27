@@ -208,7 +208,6 @@ core.LLM_Calls -> core.Chat: 48
 core.Local_LLM -> api.v1.schemas: 4
 core.MCP_unified -> api.v1.schemas: 1
 core.MCP_unified -> services: 11
-core.Metrics -> core.Ingestion_Media_Processing: 1
 core.Monitoring -> api.v1.schemas: 1
 core.Persona -> api.v1.schemas: 2
 core.PrivilegeMaps -> api.v1.utils: 2

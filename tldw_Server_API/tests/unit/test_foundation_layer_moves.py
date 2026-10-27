@@ -92,3 +92,16 @@ def test_utils_no_longer_owns_db_code() -> None:
     assert callable(safe_metadata_write_ops.update_version_safe_metadata_in_transaction)
     assert not hasattr(metadata_utils, "update_version_safe_metadata_in_transaction")
     assert not hasattr(Utils, "get_db_config")
+
+
+def test_email_metric_families_are_defined_in_metrics() -> None:
+    from tldw_Server_API.app.core.Metrics.email_metrics import iter_email_metric_definitions
+    from tldw_Server_API.app.core.Metrics.metrics_manager import MetricsRegistry
+
+    names = {definition["name"] for definition in iter_email_metric_definitions()}
+    assert names == {
+        "email_ingestion_parse_total", "email_ingestion_parse_seconds",
+        "email_ingestion_persist_total", "email_ingestion_persist_seconds",
+        "email_native_persist_seconds", "email_ingestion_dedupe_total",
+    }
+    assert {"email_ingestion_parse_total", "email_ingestion_dedupe_total"} <= set(MetricsRegistry().metrics)
