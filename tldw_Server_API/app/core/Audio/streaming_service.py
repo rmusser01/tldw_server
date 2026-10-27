@@ -14,6 +14,7 @@ from starlette.websockets import WebSocketState
 from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import bearer_credential
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.websocket_principal import (
+    WS_UNREAD_FRAME,
     auth_subprotocol,
     has_ws_credential,
     resolve_ws_principal,
@@ -50,8 +51,6 @@ _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS = (
     WebSocketDisconnect,
 )
 
-# Where websocket_principal.resolve_ws_principal_first_frame leaves a cookie client's first data frame.
-_AUDIO_WS_PENDING_TEXT_FRAME = "ws_unread_frame"
 
 
 def _ensure_audio_ws_state(websocket: WebSocket) -> Any:
@@ -66,9 +65,9 @@ def _ensure_audio_ws_state(websocket: WebSocket) -> Any:
 async def receive_audio_websocket_text(websocket: WebSocket) -> str:
     """Receive text while replaying a first application frame inspected during auth."""
     state = _ensure_audio_ws_state(websocket)
-    pending = getattr(state, _AUDIO_WS_PENDING_TEXT_FRAME, None)
+    pending = getattr(state, WS_UNREAD_FRAME, None)
     if pending is not None:
-        setattr(state, _AUDIO_WS_PENDING_TEXT_FRAME, None)
+        setattr(state, WS_UNREAD_FRAME, None)
         return str(pending)
     return await websocket.receive_text()
 

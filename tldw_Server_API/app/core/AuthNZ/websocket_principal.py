@@ -33,6 +33,7 @@ than a flag on ``resolve_ws_principal``, which is called before accept.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from collections.abc import Awaitable, Callable
 
@@ -52,6 +53,10 @@ WS_UNAUTHENTICATED = 4401
 WS_FORBIDDEN = 4403
 WS_EXPECTED_AUTH_FRAME = 4400
 FIRST_FRAME_TIMEOUT_S = 10.0
+# An auth frame is a few hundred bytes; a first frame longer than this is never parsed as one.
+AUTH_FRAME_MAX_CHARS = 4096
+# Where resolve_ws_principal_first_frame leaves a cookie client's first data frame for the route.
+WS_UNREAD_FRAME = "ws_unread_frame"
 _BEARER_SUBPROTOCOL = "bearer"
 # Logged once per connection that authenticates through a deprecated channel; names the channel
 # and path, never the credential.
@@ -168,15 +173,17 @@ async def resolve_ws_principal_first_frame(
         required_scope: API-key scope the route needs, as for ``resolve_ws_principal``.
         timeout: How long to wait for the frame.
         cookie_may_send_data_first: The route's cookie clients may skip the auth frame and send data
-            first (the audio streams). With a cookie, a frame that is not auth is then left unread in
-            ``websocket.state.ws_unread_frame`` for the route, and a silent client keeps the cookie.
+            first (the audio streams). With a cookie, a text frame that is not auth is then left unread
+            in ``websocket.state.ws_unread_frame`` (``WS_UNREAD_FRAME``) for the route, and a silent
+            client keeps the cookie.
         tokenless_frame: Resolves an auth frame without a token, after the cookie: by default the
             handshake (``resolve_ws_principal``); voice passes the deprecated query shim.
 
     Raises:
         WebSocketException: the cookie check's own code before accept; after it, 4400 when the first
-            frame is not an auth frame, 4401 when the token is missing, refused or revoked or no frame
-            arrives in time, and ``resolve_ws_principal``'s other codes.
+            frame is not an auth frame (binary, or text longer than ``AUTH_FRAME_MAX_CHARS``, is never
+            parsed), 4401 when the token is missing, refused or revoked or no frame arrives in time,
+            and ``resolve_ws_principal``'s other codes.
         WebSocketDisconnect: the client left before sending a frame.
     """
     cookie: AuthPrincipal | None = None
@@ -196,13 +203,13 @@ async def resolve_ws_principal_first_frame(
     if message["type"] == "websocket.disconnect":
         raise WebSocketDisconnect(message.get("code", 1000))
     raw = message.get("text")
-    try:
-        frame = json.loads(raw) if raw is not None else None
-    except ValueError:
-        frame = None
+    frame = None  # a binary frame, or text too long to be an auth frame, is not parsed
+    if raw is not None and len(raw) <= AUTH_FRAME_MAX_CHARS:
+        with contextlib.suppress(ValueError):
+            frame = json.loads(raw)
     if not isinstance(frame, dict) or frame.get("type") != "auth":
         if data_first_ok is not None and raw is not None:
-            websocket.state.ws_unread_frame = raw
+            setattr(websocket.state, WS_UNREAD_FRAME, raw)
             return data_first_ok
         raise WebSocketException(code=WS_EXPECTED_AUTH_FRAME, reason="expected_auth_frame")
     token = frame.get("token")

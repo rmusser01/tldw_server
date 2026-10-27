@@ -8,11 +8,12 @@ cheaply: API-key scope, and a failing credential store.
 from __future__ import annotations
 
 import contextlib
+import json
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import HTTPException, WebSocket, WebSocketException
+from fastapi import HTTPException, WebSocket, WebSocketDisconnect, WebSocketException
 from starlette.types import Message
 
 from tldw_Server_API.app.core.AuthNZ import websocket_principal
@@ -331,7 +332,8 @@ _COOKIE = AuthPrincipal(kind="user", user_id=1, token_type="single_user_session"
 
 
 def _frame_socket(*frames: object, headers: list[tuple[bytes, bytes]] | None = None) -> tuple[WebSocket, list[Message]]:
-    """A socket whose client connects, then sends ``frames`` (text, or a dict sent as JSON), then waits.
+    """A socket whose client connects, then sends ``frames`` (text, bytes as a binary frame, or a dict
+    sent as JSON), then waits.
 
     Returns the socket and the messages the server sent, so a test can see whether it accepted."""
     import asyncio
@@ -339,7 +341,10 @@ def _frame_socket(*frames: object, headers: list[tuple[bytes, bytes]] | None = N
 
     inbox: list[Message] = [{"type": "websocket.connect"}]
     for frame in frames:
-        inbox.append({"type": "websocket.receive", "text": frame if isinstance(frame, str) else json.dumps(frame)})
+        if isinstance(frame, bytes):
+            inbox.append({"type": "websocket.receive", "bytes": frame})
+        else:
+            inbox.append({"type": "websocket.receive", "text": frame if isinstance(frame, str) else json.dumps(frame)})
     sent: list[Message] = []
 
     async def receive() -> Message:
@@ -543,3 +548,61 @@ async def test_the_frame_credential_is_never_logged(monkeypatch: pytest.MonkeyPa
         logger.remove(sink)
 
     assert not [message for message in logged if "revoked" in message or "a.b.c" in message]
+
+
+@pytest.mark.parametrize("data_first", [False, True])
+@pytest.mark.asyncio
+async def test_a_binary_first_frame_is_refused_4400_even_where_data_may_come_first(
+    monkeypatch: pytest.MonkeyPatch, data_first: bool
+) -> None:
+    """Only a text frame can be kept for the route, so a binary first frame is refused with a cookie too."""
+    _cookie(monkeypatch, _COOKIE if data_first else None)
+    seen = _frame_verifier(monkeypatch)
+    websocket, _sent = _frame_socket(b"\x00\x01", {"type": "auth", "token": "a.b.c"})
+
+    with pytest.raises(WebSocketException) as refused:
+        await websocket_principal.resolve_ws_principal_first_frame(websocket, cookie_may_send_data_first=data_first)
+
+    assert (refused.value.code, refused.value.reason, seen) == (4400, "expected_auth_frame", [])
+    assert not hasattr(websocket.state, "ws_unread_frame")
+
+
+@pytest.mark.asyncio
+async def test_a_client_that_leaves_before_its_first_frame_is_a_disconnect(monkeypatch: pytest.MonkeyPatch) -> None:
+    _cookie(monkeypatch, _COOKIE)  # even a cookie session: there is no socket left to serve
+    websocket, _sent = _frame_socket()
+    websocket.scope["_inbox"].append({"type": "websocket.disconnect", "code": 1001})
+
+    with pytest.raises(WebSocketDisconnect) as left:
+        await websocket_principal.resolve_ws_principal_first_frame(websocket, cookie_may_send_data_first=True)
+
+    assert left.value.code == 1001
+
+
+@pytest.mark.asyncio
+async def test_an_oversized_first_frame_is_refused_4400_unparsed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An auth frame is tiny; a large one is refused before ``json.loads`` sees it, whatever it holds."""
+    _cookie(monkeypatch, None)
+    seen = _frame_verifier(monkeypatch)
+    oversized = json.dumps({"type": "auth", "token": "a." + "b" * websocket_principal.AUTH_FRAME_MAX_CHARS + ".c"})
+    websocket, _sent = _frame_socket(oversized)
+    parsed: list[str] = []
+    monkeypatch.setattr(websocket_principal.json, "loads", lambda raw: parsed.append(raw) or {})
+
+    with pytest.raises(WebSocketException) as refused:
+        await websocket_principal.resolve_ws_principal_first_frame(websocket)
+
+    assert (refused.value.code, refused.value.reason) == (4400, "expected_auth_frame")
+    assert (seen, parsed) == ([], [])
+
+
+@pytest.mark.asyncio
+async def test_an_oversized_first_frame_from_a_cookie_client_is_its_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A cookie client's first data frame may be large (a TTS prompt); it is kept for the route unparsed."""
+    _cookie(monkeypatch, _COOKIE)
+    prompt = json.dumps({"type": "prompt", "text": "x" * (2 * websocket_principal.AUTH_FRAME_MAX_CHARS)})
+    websocket, _sent = _frame_socket(prompt)
+
+    principal = await websocket_principal.resolve_ws_principal_first_frame(websocket, cookie_may_send_data_first=True)
+
+    assert (principal, websocket.state.ws_unread_frame) == (_COOKIE, prompt)
