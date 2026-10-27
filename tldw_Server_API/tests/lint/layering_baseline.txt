@@ -248,7 +248,6 @@ core.Workspaces -> api.v1.schemas: 2
 core.Workspaces -> services: 1
 core.config -> core.LLM_Calls: 1
 core.config -> core.Local_LLM: 1
-core.exceptions -> core.AuthNZ: 1
 core.http_client -> core.Metrics: 2
 core.http_client -> core.Security: 6
 core.http_client -> core.stt_observability_context: 2
