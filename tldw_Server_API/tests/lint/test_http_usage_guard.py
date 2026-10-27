@@ -102,10 +102,6 @@ ALLOWLIST: dict[str, str] = {
         "migrate: defaults client_factory to httpx.AsyncClient (a reference the regex guard missed). "
         "It checks its own origin allowlist, not the egress policy; default to create_async_client."
     ),
-    "tldw_Server_API/app/core/Slides/standalone_html_provider.py": (
-        "migrate: streams provider completions through _AsyncClient = httpx.AsyncClient (an alias the "
-        "regex guard missed), with no egress policy; use create_async_client with a configured endpoint."
-    ),
     "tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_AudioCpp.py": (
         "migrate: builds a raw aiohttp.ClientSession via _http_client.aiohttp (a reach-through the "
         "first guard missed). Every request still goes through afetch(configured_endpoint=..., "
@@ -251,6 +247,202 @@ def problems(found: dict[str, list[str]], allowlist: dict[str, str]) -> list[str
 
 def test_outbound_http_goes_through_core_http_client() -> None:
     found = problems(scan(), ALLOWLIST)
+    assert not found, "\n\n".join(found)
+
+
+# --- Pin: who may pass configured_endpoint= -------------------------------------------------------
+# ``configured_endpoint=<scope>`` is the private-network opt-in: it lets one exact origin through the
+# egress policy. Only a module whose origin comes from operator configuration or a code-owned catalog
+# may build a scope, never from a user-supplied or server-discovered URL. The scan fails on any call
+# keyword ``configured_endpoint=<expr>``, and on a ``"configured_endpoint"`` dict-literal key or
+# subscript store, outside SCOPE_ALLOWLIST. Only a *parameter* of an enclosing function passed on under
+# its own name (``configured_endpoint=configured_endpoint``) is plumbing and exempt; a local variable of
+# that name is a source, and so is any rebind of the parameter to something other than ``None``. A dict
+# built elsewhere and ``**``-splatted is seen only where its literal key, key store or
+# ``setdefault("configured_endpoint", ...)`` is. Known limits: dict comprehensions and ``dict([...])``
+# pairs that spell the key are not seen. Other scope carriers (``required_endpoint_scope=``, ``TrustedProviderEndpoint(scope=...)``,
+# ``provider_credential_runtime``) are gated through the allowlisted adapters they feed.
+# Group A's MCP transports (sse.py, streamable_http.py) join this set when that branch merges.
+SCOPE_ALLOWLIST: dict[str, str] = {
+    "tldw_Server_API/app/api/v1/endpoints/llm_providers.py": (
+        "scope built from the configured provider endpoint URL for the provider calls it makes."
+    ),
+    "tldw_Server_API/app/core/LLM_Calls/providers/openai_adapter.py": (
+        "scope required by the strict call policy (required_endpoint_scope), checked against the request URL."
+    ),
+    "tldw_Server_API/app/core/LLM_Calls/providers/custom_openai_adapter.py": (
+        "scope from the operator-configured custom endpoint (endpoint.scope)."
+    ),
+    "tldw_Server_API/app/core/LLM_Calls/providers/local_adapters.py": (
+        "scope from the operator-configured local-LLM (llama.cpp, Ollama, ...) base URL."
+    ),
+    "tldw_Server_API/app/core/Local_LLM/llamacpp_snapshot_operations.py": (
+        "scope from the configured llama.cpp server origin."
+    ),
+    "tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Qwen3ASR.py": (
+        "scope from the operator-configured Qwen3-ASR server URL."
+    ),
+    "tldw_Server_API/app/api/v1/endpoints/setup.py": (
+        "POST /first-run/providers/validate scopes the request payload's base_url so a local provider can be "
+        "probed. require_local_setup_access admits only a loopback client with a local Host header and any "
+        "proxy client-IP headers resolving to loopback, or an admin when remote setup is explicitly enabled. "
+        "Reachable only while needs_setup is true and the first-run state is non-terminal (409 afterwards). "
+        "No ordinary authenticated user can reach it."
+    ),
+    "tldw_Server_API/app/core/Ingestion_Media_Processing/OCR/backends/llamacpp_ocr.py": (
+        "scope from the operator-configured LLAMACPP_OCR_HOST/PORT (remote) or the managed local runtime's "
+        "own host/port."
+    ),
+    "tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_AudioCpp.py": (
+        "scope from the operator-configured audio.cpp server origin, passed to afetch through request_kwargs."
+    ),
+    "tldw_Server_API/app/core/Slides/standalone_html_provider.py": (
+        "scope from the code-owned loopback adapter catalog (llama.cpp / Ollama); never a request URL."
+    ),
+    "tldw_Server_API/app/core/Agent_Client_Protocol/adapters/mcp_transports/sse.py": (
+        "scope from the operator-configured MCP SSE origin (sse_url, allow_private_network) via "
+        "mcp_http_egress_scope; a server-supplied POST URL on another origin gets no scope."
+    ),
+    "tldw_Server_API/app/core/Agent_Client_Protocol/adapters/mcp_transports/streamable_http.py": (
+        "scope from the operator-configured MCP streamable-HTTP origin (allow_private_network) via "
+        "mcp_http_egress_scope."
+    ),
+}
+
+
+_SCOPE_KEY = "configured_endpoint"
+
+
+def _parameter_names(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda) -> set[str]:
+    args = node.args
+    names = {a.arg for a in [*args.posonlyargs, *args.args, *args.kwonlyargs]}
+    names |= {a.arg for a in (args.vararg, args.kwarg) if a is not None}
+    return names
+
+
+def _is_none(node: ast.AST) -> bool:
+    return isinstance(node, ast.Constant) and node.value is None
+
+
+class _ScopeVisitor(ast.NodeVisitor):
+    """Collect lines that set a configured_endpoint scope; a parameter passed on by name is plumbing."""
+
+    def __init__(self) -> None:
+        self.params: list[set[str]] = []
+        self.lines: list[int] = []
+        self.plumbing: set[int] = set()  # id() of subscript targets assigned a parameter
+        self.narrowing: set[int] = set()  # id() of Name targets assigned the literal None
+
+    def _is_parameter(self, value: ast.AST) -> bool:
+        return isinstance(value, ast.Name) and value.id == _SCOPE_KEY and any(_SCOPE_KEY in p for p in self.params)
+
+    def _function(self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda) -> None:
+        self.params.append(_parameter_names(node))  # closures see every enclosing function's parameters
+        self.generic_visit(node)
+        self.params.pop()
+
+    visit_FunctionDef = visit_AsyncFunctionDef = visit_Lambda = _function  # noqa: N815
+
+    def visit_Call(self, node: ast.Call) -> None:
+        self.lines += [node.lineno for kw in node.keywords if kw.arg == _SCOPE_KEY and not self._is_parameter(kw.value)]
+        func = node.func
+        if (
+            isinstance(func, ast.Attribute)
+            and func.attr == "setdefault"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and node.args[0].value == _SCOPE_KEY
+            and not (len(node.args) > 1 and self._is_parameter(node.args[1]))
+        ):
+            self.lines.append(node.lineno)
+        self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        # Any rebind of the name, even of a parameter, is a possible new source; `= None` only narrows.
+        if node.id == _SCOPE_KEY and isinstance(node.ctx, ast.Store) and id(node) not in self.narrowing:
+            self.lines.append(node.lineno)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        if node.name == _SCOPE_KEY:
+            self.lines.append(node.lineno)
+        self.generic_visit(node)
+
+    def visit_Dict(self, node: ast.Dict) -> None:
+        for key, value in zip(node.keys, node.values, strict=True):
+            if isinstance(key, ast.Constant) and key.value == _SCOPE_KEY and not self._is_parameter(value):
+                self.lines.append(node.lineno)
+        self.generic_visit(node)
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        if self._is_parameter(node.value):
+            self.plumbing |= {id(t) for t in node.targets if isinstance(t, ast.Subscript)}
+        if _is_none(node.value):
+            self.narrowing |= {id(t) for t in node.targets}
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        if node.value is not None and _is_none(node.value):
+            self.narrowing.add(id(node.target))
+        self.generic_visit(node)
+
+    def visit_Subscript(self, node: ast.Subscript) -> None:
+        if (
+            id(node) not in self.plumbing
+            and isinstance(node.ctx, ast.Store)
+            and isinstance(node.slice, ast.Constant)
+            and node.slice.value == _SCOPE_KEY
+        ):
+            self.lines.append(node.lineno)
+        self.generic_visit(node)
+
+
+def scope_uses(tree: ast.Module) -> list[str]:
+    """Lines that set a scope: ``configured_endpoint=<expr>``, a ``"configured_endpoint"`` dict key or store.
+
+    Exempt only a parameter of an enclosing function passed on under its own name and never rebound to
+    anything but None. A local or module variable of that name, or a rebind of the parameter (assignment,
+    walrus, for/with/except target, comprehension), is a scope source and counts.
+    """
+    visitor = _ScopeVisitor()
+    visitor.visit(tree)
+    return [f"line {line}" for line in sorted(set(visitor.lines))]
+
+
+def scope_scan(repo_root: Path = REPO_ROOT) -> dict[str, list[str]]:
+    """Repo-relative path -> lines that set a configured_endpoint scope, under tldw_Server_API/app."""
+    repo_root = repo_root.resolve()
+    app = repo_root / "tldw_Server_API" / "app"
+    found: dict[str, list[str]] = {}
+    for path, tree in parse_tree(app).items():
+        if "tests" not in path.relative_to(app).parts and (hits := scope_uses(tree)):
+            found[path.relative_to(repo_root).as_posix()] = hits
+    return found
+
+
+def scope_problems(found: dict[str, list[str]], allowlist: dict[str, str]) -> list[str]:
+    out = [
+        f"{path} passes configured_endpoint= ({'; '.join(found[path])}), the private-network opt-in. "
+        "Build the scope only from operator configuration or a code-owned catalog, never from a user or "
+        f"server-supplied URL; then add an entry to SCOPE_ALLOWLIST in {GUARD} saying where the origin "
+        "comes from:\n"
+        f'    "{path}": "<where the configured origin comes from>",'
+        for path in sorted(found.keys() - allowlist.keys())
+    ]
+    out += [
+        f"SCOPE_ALLOWLIST entry {path} is stale: the file is gone or no longer sets configured_endpoint=. "
+        f"Delete it from {GUARD}."
+        for path in sorted(allowlist.keys() - found.keys())
+    ]
+    out += [
+        f"SCOPE_ALLOWLIST entry {path} has no reason. Say where the configured origin comes from."
+        for path, reason in sorted(allowlist.items())
+        if not reason.strip()
+    ]
+    return out
+
+
+def test_only_allowlisted_modules_set_a_configured_endpoint_scope() -> None:
+    found = scope_problems(scope_scan(), SCOPE_ALLOWLIST)
     assert not found, "\n\n".join(found)
 
 
@@ -419,3 +611,101 @@ def test_stale_and_reasonless_entries_fail(tmp_path: Path) -> None:
     ], out
     assert "is stale" in out[0] and "is stale" in out[1] and "has no reason" in out[2]
     assert problems(found, {"tldw_Server_API/app/core/a.py": "loopback-only sidecar"}) == []
+
+
+# --- Pin: who may pass configured_endpoint= (the private-network opt-in) --------------------------
+
+
+def test_a_seeded_module_passing_configured_endpoint_fails(tmp_path: Path) -> None:
+    root = _seed(
+        tmp_path,
+        {
+            "core/new.py": "from x import afetch, Scope\nafetch(url=u, configured_endpoint=Scope.from_url(u))\n",
+            "core/passthrough.py": "def f(configured_endpoint=None):\n    g(configured_endpoint=configured_endpoint)\n",
+            "core/other_kw.py": "g(configured=1, endpoint=2)\n",
+        },
+    )
+    found = scope_scan(root)
+
+    assert list(found) == ["tldw_Server_API/app/core/new.py"]
+    out = scope_problems(found, {})
+    assert len(out) == 1 and "core/new.py" in out[0] and "SCOPE_ALLOWLIST" in out[0]
+
+
+def test_stale_and_reasonless_scope_entries_fail(tmp_path: Path) -> None:
+    root = _seed(tmp_path, {"core/a.py": "g(configured_endpoint=s)\n", "core/clean.py": "g(x=1)\n"})
+    found = scope_scan(root)
+    out = scope_problems(
+        found,
+        {
+            "tldw_Server_API/app/core/a.py": " ",
+            "tldw_Server_API/app/core/clean.py": "operator endpoint",
+            "tldw_Server_API/app/core/gone.py": "operator endpoint",
+        },
+    )
+
+    assert "is stale" in out[0] and "clean.py" in out[0]
+    assert "is stale" in out[1] and "gone.py" in out[1]
+    assert "has no reason" in out[2] and "a.py" in out[2]
+    assert scope_problems(found, {"tldw_Server_API/app/core/a.py": "operator endpoint"}) == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def f():\n    configured_endpoint = Scope.from_url(u)\n    g(configured_endpoint=configured_endpoint)\n",
+        "configured_endpoint = Scope.from_url(u)\ng(configured_endpoint=configured_endpoint)\n",
+        "def f(other):\n    g(**{'configured_endpoint': Scope.from_url(other)})\n",
+        "def f(other):\n    kw = dict(configured_endpoint=Scope.from_url(other))\n    g(**kw)\n",
+        "def f(other):\n    kw = {}\n    kw['configured_endpoint'] = Scope.from_url(other)\n    g(**kw)\n",
+        "def f(other):\n    kw = {}\n    kw.setdefault('configured_endpoint', Scope.from_url(other))\n    g(**kw)\n",
+        "def f(configured_endpoint=None):\n    configured_endpoint = Scope.from_url(u)\n    g(configured_endpoint=configured_endpoint)\n",
+        "def f(configured_endpoint=None):\n    if configured_endpoint is None:\n        configured_endpoint = Scope.from_url(u)\n    g(configured_endpoint=configured_endpoint)\n",
+        "def f(configured_endpoint=None):\n    if (configured_endpoint := Scope.from_url(u)):\n        g(configured_endpoint=configured_endpoint)\n",
+        "def f(configured_endpoint=None):\n    for configured_endpoint in scopes:\n        g(configured_endpoint=configured_endpoint)\n",
+        "def f(configured_endpoint=None):\n    with open_scope() as configured_endpoint:\n        g(configured_endpoint=configured_endpoint)\n",
+        "def f(configured_endpoint=None):\n    configured_endpoint: object = Scope.from_url(u)\n    g(configured_endpoint=configured_endpoint)\n",
+        "def f(configured_endpoint=None):\n    configured_endpoint += 1\n    g(configured_endpoint=configured_endpoint)\n",
+        "def f(configured_endpoint=None):\n    def inner(u):\n        configured_endpoint = Scope.from_url(u)\n        g(configured_endpoint=configured_endpoint)\n",
+        "def f(configured_endpoint=None):\n    scopes = [configured_endpoint for configured_endpoint in many]\n",
+    ],
+    ids=[
+        "local-variable",
+        "module-variable",
+        "dict-literal-key",
+        "dict-call",
+        "subscript-store",
+        "setdefault",
+        "shadowed-parameter",
+        "fallback-rebind",
+        "walrus",
+        "for-target",
+        "with-target",
+        "annassign",
+        "augassign",
+        "closure-local-shadow",
+        "comprehension-target",
+    ],
+)
+def test_scope_carriers_other_than_a_parameter_pass_through_fail(tmp_path: Path, source: str) -> None:
+    root = _seed(tmp_path, {"core/carrier.py": source})
+
+    assert list(scope_scan(root)) == ["tldw_Server_API/app/core/carrier.py"]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def f(configured_endpoint=None):\n    g(configured_endpoint=configured_endpoint)\n",
+        "def f(*, configured_endpoint):\n    g(configured_endpoint=configured_endpoint)\n",
+        "def f(configured_endpoint, /):\n    g(configured_endpoint=configured_endpoint)\n",
+        "def f(configured_endpoint=None):\n    def inner():\n        g(configured_endpoint=configured_endpoint)\n",
+        "async def f(configured_endpoint=None):\n    kw = {'configured_endpoint': configured_endpoint}\n    await g(**kw)\n",
+        "def f(configured_endpoint=None):\n    kw = {}\n    kw['configured_endpoint'] = configured_endpoint\n    g(**kw)\n",
+        "class C:\n    def m(self, configured_endpoint=None):\n        return lambda: g(configured_endpoint=configured_endpoint)\n",
+        "def f(configured_endpoint=None, strict=False):\n    if strict:\n        configured_endpoint = None\n    g(configured_endpoint=configured_endpoint)\n",
+    ],
+    ids=["default", "kwonly", "posonly", "closure", "dict-of-param", "store-of-param", "lambda-closure", "narrow-to-none"],
+)
+def test_a_real_parameter_pass_through_is_not_a_scope_source(tmp_path: Path, source: str) -> None:
+    assert scope_scan(_seed(tmp_path, {"core/plumbing.py": source})) == {}

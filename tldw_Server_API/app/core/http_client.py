@@ -934,6 +934,7 @@ class TransportAdapter(Protocol):
         on_response: ResponseHeadersCallback | None = None,
         raise_for_status: bool = True,
         verify: bool | str | ssl.SSLContext | None = None,
+        configured_endpoint: ConfiguredEndpointScope | None = None,
     ) -> AsyncIterator[bytes]: ...
 
     def stream_sse(
@@ -1066,6 +1067,7 @@ class HttpxAdapter:
         on_response: ResponseHeadersCallback | None = None,
         raise_for_status: bool = True,
         verify: bool | str | ssl.SSLContext | None = None,
+        configured_endpoint: ConfiguredEndpointScope | None = None,
     ) -> AsyncGenerator[bytes, None]:
         stream = _astream_bytes_httpx(
             method=method,
@@ -1086,6 +1088,7 @@ class HttpxAdapter:
             on_response=on_response,
             raise_for_status=raise_for_status,
             verify=verify,
+            configured_endpoint=configured_endpoint,
         )
         scoped_stream = _iterate_sensitive_http_items(
             stream,
@@ -1215,6 +1218,7 @@ class AiohttpAdapter:
         on_response: ResponseHeadersCallback | None = None,
         raise_for_status: bool = True,
         verify: bool | str | ssl.SSLContext | None = None,
+        configured_endpoint: ConfiguredEndpointScope | None = None,
     ) -> AsyncGenerator[bytes, None]:
         stream = _astream_bytes_aiohttp(
             method=method,
@@ -1235,6 +1239,7 @@ class AiohttpAdapter:
             on_response=on_response,
             raise_for_status=raise_for_status,
             verify=verify,
+            configured_endpoint=configured_endpoint,
         )
         scoped_stream = _iterate_sensitive_http_items(
             stream,
@@ -5406,6 +5411,7 @@ async def _astream_bytes_httpx(
     on_response: ResponseHeadersCallback | None = None,
     raise_for_status: bool = True,
     verify: bool | str | ssl.SSLContext | None = None,
+    configured_endpoint: ConfiguredEndpointScope | None = None,
 ) -> AsyncGenerator[bytes, None]:
     if httpx is None:  # pragma: no cover
         raise RuntimeError("httpx is not available")  # noqa: TRY003
@@ -5418,6 +5424,7 @@ async def _astream_bytes_httpx(
     await _avalidate_egress_or_raise(
         url,
         dns_pin_cache=dns_pin_cache,
+        configured_endpoint=configured_endpoint,
         sensitive_observability=sensitive_observability,
     )
     _validate_proxies_or_raise(proxies)
@@ -5440,6 +5447,7 @@ async def _astream_bytes_httpx(
             await _avalidate_egress_or_raise(
                 url,
                 dns_pin_cache=dns_pin_cache,
+                configured_endpoint=configured_endpoint,
                 sensitive_observability=sensitive_observability,
             )
             yielded_any = False
@@ -5460,6 +5468,7 @@ async def _astream_bytes_httpx(
                                     int(u.port or 443),
                                     pins_map[host],
                                     TLS_MIN_VERSION,
+                                    configured_endpoint=configured_endpoint,
                                     accepted_resolved_ips=_accepted_ips_for_url(
                                         dns_pin_cache,
                                         url,
@@ -5688,6 +5697,7 @@ async def _astream_bytes_aiohttp(
     on_response: ResponseHeadersCallback | None = None,
     raise_for_status: bool = True,
     verify: bool | str | ssl.SSLContext | None = None,
+    configured_endpoint: ConfiguredEndpointScope | None = None,
 ) -> AsyncGenerator[bytes, None]:
     if aiohttp is None:  # pragma: no cover
         raise RuntimeError("aiohttp is not available")  # noqa: TRY003
@@ -5700,6 +5710,7 @@ async def _astream_bytes_aiohttp(
     await _avalidate_egress_or_raise(
         url,
         dns_pin_cache=dns_pin_cache,
+        configured_endpoint=configured_endpoint,
         sensitive_observability=sensitive_observability,
     )
     _validate_proxies_or_raise(proxies)
@@ -5716,6 +5727,7 @@ async def _astream_bytes_aiohttp(
         await _avalidate_egress_or_raise(
             url,
             dns_pin_cache=dns_pin_cache,
+            configured_endpoint=configured_endpoint,
             sensitive_observability=sensitive_observability,
         )
         yielded_any = False
@@ -5742,6 +5754,7 @@ async def _astream_bytes_aiohttp(
                             port,
                             pins_map[host],
                             TLS_MIN_VERSION,
+                            configured_endpoint=configured_endpoint,
                             accepted_resolved_ips=_accepted_ips_for_url(
                                 dns_pin_cache,
                                 url,
@@ -5961,6 +5974,7 @@ async def astream_bytes(
     on_response: ResponseHeadersCallback | None = None,
     raise_for_status: bool = True,
     verify: bool | str | ssl.SSLContext | None = None,
+    configured_endpoint: ConfiguredEndpointScope | None = None,
 ) -> AsyncGenerator[bytes, None]:
     sensitive_observability = _effective_sensitive_observability(
         sensitive_observability
@@ -5989,6 +6003,7 @@ async def astream_bytes(
         on_response=on_response,
         raise_for_status=raise_for_status,
         verify=verify,
+        configured_endpoint=configured_endpoint,
     )
     try:
         async for chunk in stream:

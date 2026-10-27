@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib
 import inspect
 import io
@@ -99,7 +100,9 @@ def provider_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
             kwargs["transport"] = transport
         return httpx.AsyncClient(*args, **kwargs)
 
-    monkeypatch.setattr(module, "_AsyncClient", isolated_test_client)
+    # Pre-migration the module built httpx.AsyncClient through the _AsyncClient alias.
+    seam = "create_async_client" if hasattr(module, "create_async_client") else "_AsyncClient"
+    monkeypatch.setattr(module, seam, isolated_test_client)
     return module
 
 
@@ -308,6 +311,8 @@ async def test_each_catalog_adapter_uses_exact_endpoint_payload_and_credentials(
         "content-length",
         "host",
         "user-agent",
+        "x-request-id",  # http_client propagates the tracing request id when one is set
+        "traceparent",
     }
     expected_headers = {"accept", "accept-encoding", "content-type"}
     payload = json.loads(request.content)
@@ -390,12 +395,11 @@ async def test_client_disables_environment_redirects_and_shared_hooks(
         kwargs["transport"] = _TEST_TRANSPORT.get()
         return real_client(*args, **kwargs)
 
-    monkeypatch.setattr(provider_module, "_AsyncClient", client_factory)
+    monkeypatch.setattr(provider_module, "create_async_client", client_factory)
 
     await _call(provider_module, config, transport)
 
     assert seen["trust_env"] is False
-    assert seen["follow_redirects"] is False
     assert "transport" not in seen
     assert "event_hooks" not in seen
     assert "proxy" not in seen
@@ -759,7 +763,7 @@ async def test_current_configuration_is_rechecked_immediately_before_request(
         current_config_loader=load_config,
     )
 
-    assert order == ["config", "config", "network"]
+    assert order == ["config", "config", "config", "network"]  # the last is the request hook's
 
 
 @pytest.mark.asyncio
@@ -816,7 +820,7 @@ async def test_dispatch_rechecks_config_after_client_entry_before_network(
             **kwargs,
         )
 
-    monkeypatch.setattr(provider_module, "_AsyncClient", client_factory)
+    monkeypatch.setattr(provider_module, "create_async_client", client_factory)
     flipper = asyncio.create_task(flip_config())
     try:
         with pytest.raises(provider_module.StandaloneHtmlProviderError) as exc_info:
@@ -874,7 +878,7 @@ async def test_post_client_entry_loader_failure_is_redacted_before_network(
 
 
 @pytest.mark.asyncio
-async def test_dispatch_does_not_yield_after_fresh_recheck_before_transport(
+async def test_dispatch_does_not_yield_after_final_recheck_before_transport(
     provider_module: ModuleType,
 ) -> None:
     target = _target("openai_official_chat_v1")
@@ -890,7 +894,8 @@ async def test_dispatch_does_not_yield_after_fresh_recheck_before_transport(
     def load_config() -> SlidesStandaloneHtmlConfig:
         nonlocal loader_calls
         loader_calls += 1
-        if loader_calls == 2:
+        # The last recheck is the request hook's; the flip is scheduled there and must not run first.
+        if loader_calls == 3:
             asyncio.get_running_loop().call_soon(flip_config)
         return config
 
@@ -905,11 +910,38 @@ async def test_dispatch_does_not_yield_after_fresh_recheck_before_transport(
         httpx.MockTransport(handler),
         current_config_loader=load_config,
     )
-    await config_flipped.wait()
+    await asyncio.wait_for(config_flipped.wait(), timeout=2)
 
     assert result == DOCUMENT.encode()
-    assert loader_calls == 2
+    assert loader_calls == 3
     assert order == ["network", "config-flipped"]
+
+
+@pytest.mark.asyncio
+async def test_kill_switch_at_the_final_recheck_sends_nothing_and_is_not_wrapped(
+    provider_module: ModuleType,
+) -> None:
+    target = _target("openai_official_chat_v1")
+    config = _config(target)
+    killed = replace(config, egress_enabled=False)
+    loader_calls = 0
+    seen: list[httpx.Request] = []
+
+    def load_config() -> SlidesStandaloneHtmlConfig:
+        nonlocal loader_calls
+        loader_calls += 1
+        return config if loader_calls < 3 else killed
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return _response(_response_body(target.provider))[0]
+
+    with pytest.raises(provider_module.StandaloneHtmlProviderError) as exc_info:
+        await _call(provider_module, config, httpx.MockTransport(handler), current_config_loader=load_config)
+
+    assert exc_info.value.code == "standalone_html_egress_disabled"
+    assert loader_calls == 3
+    assert seen == []
 
 
 @pytest.mark.asyncio
@@ -920,7 +952,7 @@ async def test_fresh_attempt_snapshot_solely_controls_overall_timeout(
     target = _target("openai_official_chat_v1")
     initial = _config(target, overall_timeout=0.01)
     fresh = _config(target, overall_timeout=1.0)
-    snapshots = iter((initial, fresh))
+    snapshots = iter((initial, fresh, fresh))
     loader_calls = 0
     network_calls = 0
 
@@ -948,7 +980,7 @@ async def test_fresh_attempt_snapshot_solely_controls_overall_timeout(
             **kwargs,
         )
 
-    monkeypatch.setattr(provider_module, "_AsyncClient", client_factory)
+    monkeypatch.setattr(provider_module, "create_async_client", client_factory)
     result = await provider_module.generate_standalone_html(
         stored_target=target,
         system_prompt=SYSTEM_PROMPT,
@@ -958,7 +990,7 @@ async def test_fresh_attempt_snapshot_solely_controls_overall_timeout(
     )
 
     assert result == DOCUMENT.encode()
-    assert loader_calls == 2
+    assert loader_calls == 3
     assert network_calls == 1
 
 
@@ -1092,7 +1124,9 @@ async def test_raw_stream_cap_cannot_be_bypassed_by_missing_chunked_or_dishonest
 
     assert exc_info.value.code == "standalone_html_provider_response_too_large"
     assert stream.closed is True
-    assert stream.yielded == [b"x" * 32, b"y" * 33]
+    # http_client's chunk iterator may read one chunk past the one that trips the cap.
+    assert stream.yielded[:2] == [b"x" * 32, b"y" * 33]
+    assert len(stream.yielded) <= 3
     _assert_redacted(exc_info.value, captured_logs())
 
 
@@ -1136,7 +1170,8 @@ async def test_non_2xx_body_uses_the_same_raw_cap_and_stops_early(
     if headers == [(b"Content-Length", b"65")]:
         assert stream.yielded == []
     else:
-        assert stream.yielded == list(stream.chunks[:2])
+        assert stream.yielded[:2] == list(stream.chunks[:2])
+        assert len(stream.yielded) <= 3
     assert stream.closed is True
 
 
@@ -1298,7 +1333,8 @@ async def test_json_preflight_rejects_split_oversize_string_before_materializati
 
     assert exc_info.value.code == "standalone_html_provider_response_invalid"
     assert decoder_called is False
-    assert stream.yielded == [first, second]
+    assert stream.yielded[:2] == [first, second]
+    assert len(stream.yielded) <= 3
 
 
 @pytest.mark.asyncio
@@ -1621,3 +1657,239 @@ async def test_document_limit_is_utf8_bytes_and_clamped_to_fixed_one_mib(
         )
 
     assert exc_info.value.code == "standalone_html_provider_response_too_large"
+
+
+# --- Production egress policy (TASK-13950.11 group D) -------------------------------------------
+# The fixtures above run under http_client's test-mode shortcut (no DNS check for hostnames). These
+# switch it off and answer DNS from a table, so the egress policy decides as it does in production.
+
+
+@pytest.fixture
+def production_egress(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Security import egress
+
+    answers: dict[str, list[str]] = {}
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
+    for name in ("TESTING", "TEST_MODE", "TLDW_TEST_MODE"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(
+        egress, "_resolve_host_ips", lambda host, **_kwargs: answers.get(host, ["93.184.216.34"])
+    )
+    return answers
+
+
+def _chunked_ok(target: ResolvedExecutionTarget) -> httpx.Response:
+    body = _response_body(target.provider)
+    third = len(body) // 3
+    stream = _CountingStream(body[:third], body[third : 2 * third], body[2 * third :])
+    return _response(b"", stream=stream)[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("adapter_id", ["llamacpp_loopback_chat_v1_ipv4", "ollama_loopback_chat_v1_ipv6"])
+async def test_configured_loopback_endpoint_is_reachable_under_production_egress(
+    provider_module: ModuleType,
+    production_egress: dict[str, list[str]],
+    adapter_id: str,
+) -> None:
+    target = _target(adapter_id)
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return _chunked_ok(target)
+
+    result = await _call(provider_module, _config(target), httpx.MockTransport(handler))
+
+    assert result == DOCUMENT.encode("utf-8")
+    assert len(seen) == 1
+    payload = json.loads(seen[0].content)
+    assert payload["model"] == target.model
+    assert payload["stream"] is False
+    assert seen[0].headers["accept-encoding"] == "identity"
+    assert "authorization" not in seen[0].headers
+
+
+@pytest.mark.asyncio
+async def test_official_host_streams_chunks_with_bearer_header_under_production_egress(
+    provider_module: ModuleType,
+    production_egress: dict[str, list[str]],
+) -> None:
+    target = _target("openai_official_chat_v1")
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return _chunked_ok(target)
+
+    result = await _call(provider_module, _config(target), httpx.MockTransport(handler))
+
+    assert result == DOCUMENT.encode("utf-8")
+    assert len(seen) == 1
+    assert seen[0].headers["authorization"] == f"Bearer {PROVIDER_SECRET}"
+    assert seen[0].headers["content-type"] == "application/json"
+    assert json.loads(seen[0].content)["messages"][0] == {"role": "system", "content": SYSTEM_PROMPT}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("private_address", ["10.0.0.5", "127.0.0.1", "169.254.169.254", "::1"])
+async def test_official_host_resolving_to_a_private_address_is_refused_before_any_request(
+    provider_module: ModuleType,
+    production_egress: dict[str, list[str]],
+    private_address: str,
+) -> None:
+    target = _target("openai_official_chat_v1")
+    production_egress["api.openai.com"] = [private_address]
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return _chunked_ok(target)
+
+    with pytest.raises(provider_module.StandaloneHtmlProviderError) as exc_info:
+        await _call(provider_module, _config(target), httpx.MockTransport(handler))
+
+    assert exc_info.value.code == "standalone_html_endpoint_not_allowed"
+    assert seen == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("adapter_id", ["openai_official_chat_v1", "llamacpp_loopback_chat_v1_ipv4"])
+@pytest.mark.parametrize("location", ["http://169.254.169.254/latest/meta-data", "http://10.0.0.5:8080/v1/chat/completions"])
+async def test_redirect_to_a_private_address_is_not_followed(
+    provider_module: ModuleType,
+    production_egress: dict[str, list[str]],
+    adapter_id: str,
+    location: str,
+) -> None:
+    target = _target(adapter_id)
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return _response(b"", status_code=307, headers=[(b"Location", location.encode())])[0]
+
+    with pytest.raises(provider_module.StandaloneHtmlProviderError) as exc_info:
+        await _call(provider_module, _config(target), httpx.MockTransport(handler))
+
+    assert exc_info.value.code == "standalone_html_provider_http_error"
+    assert exc_info.value.status_code == 307
+    assert len(seen) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["delivered", "egress-refused", "http-error"])
+async def test_provider_credential_stays_out_of_logs_and_the_httpx_logger(
+    provider_module: ModuleType,
+    production_egress: dict[str, list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: str,
+) -> None:
+    import logging
+    target = _target("openai_official_chat_v1")
+    if outcome == "egress-refused":
+        production_egress["api.openai.com"] = ["10.0.0.5"]
+    stdlib_records: list[str] = []
+
+    class _StdlibCapture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            stdlib_records.append(f"{record.name}: {record.getMessage()}")
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        if outcome == "http-error":
+            return httpx.Response(401, content=b"bad key")
+        return _chunked_ok(target)
+
+    httpx_logger = logging.getLogger("httpx")
+    previous_level = httpx_logger.level
+    capture = _StdlibCapture(level=logging.DEBUG)
+    httpx_logger.setLevel(logging.DEBUG)
+    httpx_logger.addHandler(capture)
+    loguru_records: list[str] = []
+    sink = logger.add(lambda message: loguru_records.append(str(message)), level="DEBUG", serialize=True)
+    try:
+        # Probes prove both sinks are wired even when the call logs nothing (a refusal does not).
+        logger.debug("sink-probe")
+        httpx_logger.debug("sink-probe")
+        with contextlib.suppress(provider_module.StandaloneHtmlProviderError):
+            await _call(provider_module, _config(target), httpx.MockTransport(handler))
+    finally:
+        logger.remove(sink)
+        httpx_logger.removeHandler(capture)
+        httpx_logger.setLevel(previous_level)
+
+    observed = "\n".join([*loguru_records, *stdlib_records])
+    assert any("sink-probe" in record for record in loguru_records)
+    assert any("sink-probe" in record for record in stdlib_records)
+    assert PROVIDER_SECRET not in observed
+    assert "source-secret" not in observed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reason_code", "expected"),
+    [
+        ("dns_unresolved", "standalone_html_provider_unavailable"),
+        ("dns_changed", "standalone_html_provider_unavailable"),
+        ("address_forbidden", "standalone_html_endpoint_not_allowed"),
+    ],
+)
+async def test_transient_dns_refusals_stay_retryable(
+    provider_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    reason_code: str,
+    expected: str,
+) -> None:
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+
+    async def refuse(**_kwargs: Any):
+        raise EgressPolicyError("refused", reason_code=reason_code)
+        yield b""  # pragma: no cover - makes this an async generator like astream_bytes
+
+    monkeypatch.setattr(provider_module, "astream_bytes", refuse)
+    target = _target("openai_official_chat_v1")
+
+    with pytest.raises(provider_module.StandaloneHtmlProviderError) as exc_info:
+        await _call(provider_module, _config(target), httpx.MockTransport(lambda _r: pytest.fail("sent")))
+
+    assert exc_info.value.code == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [httpx.ReadTimeout, httpx.ConnectTimeout, httpx.WriteTimeout, httpx.PoolTimeout])
+async def test_httpx_timeouts_stay_provider_timeouts(provider_module: ModuleType, error: type[Exception]) -> None:
+    target = _target("openai_official_chat_v1")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise error("slow", request=request)
+
+    with pytest.raises(provider_module.StandaloneHtmlProviderError) as exc_info:
+        await _call(provider_module, _config(target), httpx.MockTransport(handler))
+
+    assert exc_info.value.code == "standalone_html_provider_timeout"
+
+
+@pytest.mark.asyncio
+async def test_oversized_error_body_through_the_real_client_factory_is_capped(
+    provider_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """create_async_client installs an error-body capture hook; it must not defeat the byte cap."""
+    from tldw_Server_API.app.core import http_client
+
+    def real_factory(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        return http_client.create_async_client(*args, transport=_TEST_TRANSPORT.get(), **kwargs)
+
+    monkeypatch.setattr(provider_module, "create_async_client", real_factory)
+    target = _target("openai_official_chat_v1")
+    stream = _CountingStream(b"a" * 32, b"b" * 33, *([b"c" * 4096] * 20))
+    response, _ = _response(b"", status_code=500, stream=stream)
+
+    with pytest.raises(provider_module.StandaloneHtmlProviderError) as exc_info:
+        await _call(provider_module, _config(target, provider_response_bytes=64), httpx.MockTransport(lambda _r: response))
+
+    assert exc_info.value.code == "standalone_html_provider_response_too_large"
+    # httpx coalesces to 64 KiB chunks and http_client reads one ahead; the 80 KiB body is not drained.
+    assert sum(len(chunk) for chunk in stream.yielded) <= 65_536 + 2 * 4096

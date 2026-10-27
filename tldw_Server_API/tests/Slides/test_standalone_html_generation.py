@@ -50,7 +50,7 @@ def provider_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
             kwargs["transport"] = transport
         return httpx.AsyncClient(*args, **kwargs)
 
-    monkeypatch.setattr(module, "_AsyncClient", isolated_test_client)
+    monkeypatch.setattr(module, "create_async_client", isolated_test_client)
     return module
 
 
