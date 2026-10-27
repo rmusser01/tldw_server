@@ -125,11 +125,19 @@ export const buildFriendlyErrorMessage = (
 
   if (rawError instanceof ChatStreamTimeoutError) {
     const startup = rawError.phase === "startup"
+    const modelLabel = context.modelLabel?.trim()
     return encodeChatErrorPayload({
-      summary: translateErrorText(
-        startup ? "common:error.chatStartupTimeoutSummary" : "common:error.chatIdleTimeoutSummary",
-        startup ? "The model did not start responding in time." : "The response stopped progressing."
-      ),
+      // A reply that never started names its model and the wait (CM-06).
+      summary: startup && modelLabel
+        ? translateErrorText(
+            "common:error.chatStartupTimeoutModelSummary",
+            "No response from {{model}} after {{seconds}} seconds.",
+            { model: modelLabel, seconds: String(Math.round(rawError.timeoutMs / 1_000)) }
+          )
+        : translateErrorText(
+            startup ? "common:error.chatStartupTimeoutSummary" : "common:error.chatIdleTimeoutSummary",
+            startup ? "The model did not start responding in time." : "The response stopped progressing."
+          ),
       hint: translateErrorText(
         startup ? "common:error.chatStartupTimeoutHint" : "common:error.chatIdleTimeoutHint",
         startup

@@ -344,6 +344,11 @@ type Props = {
   ) => void;
   onPrepareResearchFollowUp?: (target: ResearchFollowUpTarget) => void;
   stickyDockEnabled?: boolean;
+  /**
+   * The transcript shows its latest message, so a failed reply's error bubble
+   * is already on screen and the composer must not repeat it (CC-N2).
+   */
+  latestMessageVisible?: boolean;
   mobileCockpitModeActive?: boolean;
   forceWideMode?: boolean;
   onComposerLayoutChange?: (metrics: ComposerDockLayoutMetrics) => void;
@@ -543,6 +548,7 @@ export const PlaygroundForm = ({
   onSelectAttachedResearchContextHistory,
   onPrepareResearchFollowUp,
   stickyDockEnabled = false,
+  latestMessageVisible = false,
   mobileCockpitModeActive = false,
   forceWideMode = false,
   onComposerLayoutChange,
@@ -6634,7 +6640,7 @@ export const PlaygroundForm = ({
                       className="flex w-full min-w-0 flex-col"
                     >
                       <PlaygroundChatErrorBanner
-                        error={chatErrorBanner}
+                        error={latestMessageVisible ? null : chatErrorBanner}
                         diagnosticsLabel={
                           t(
                             "playground:composer.errorBanner.openDiagnostics",

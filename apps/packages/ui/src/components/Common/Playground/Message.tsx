@@ -2515,6 +2515,11 @@ const PlaygroundMessageImpl = (props: Props) => {
               isSearchingInternet={props.isSearchingInternet}
               isEmbedding={props.isEmbedding}
               actionInfo={props.actionInfo}
+              modelLabel={
+                props.isBot
+                  ? formatChatMessageAuthorName(resolvedModelName || props?.name)
+                  : undefined
+              }
             />
           )}
           {showUsageMetadata && (

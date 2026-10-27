@@ -4,7 +4,18 @@ import { Globe, Cpu, Database, Sparkles, Loader2 } from "lucide-react"
 
 type Props = {
   action: string
+  /** Seconds since the reply started; shown after a few seconds (CM-06). */
+  elapsedSeconds?: number
 }
+
+/** Show the elapsed time once a wait is long enough to wonder about. */
+const SHOW_ELAPSED_AFTER_SECONDS = 5
+/** Spoken updates during a long wait, replacing a 5 s "checkpoint" count (CM-06). */
+const STILL_WORKING_AFTER_SECONDS = 10
+const TAKING_A_WHILE_AFTER_SECONDS = 30
+
+const formatElapsed = (seconds: number) =>
+  `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
 
 // Screen reader only announcement component
 const SrAnnouncement: React.FC<{ message: string }> = ({ message }) => (
@@ -28,7 +39,7 @@ const actionConfig: Record<string, { icon: React.ElementType; labelKey: string; 
   thinking: { icon: Sparkles, labelKey: "actionInfo.thinking", defaultLabel: "Thinking..." },
 }
 
-export const ActionInfo = ({ action }: Props) => {
+export const ActionInfo = ({ action, elapsedSeconds = 0 }: Props) => {
   const { t } = useTranslation("common")
 
   const config = actionConfig[action]
@@ -42,11 +53,18 @@ export const ActionInfo = ({ action }: Props) => {
       className="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-primary/10 border border-primary/30"
       role="status"
       aria-live="polite"
+      data-testid="chat-loading-status"
     >
       <IconComponent className="size-4 text-primary animate-pulse" />
       <span className="text-sm font-medium text-primary shimmer-text">
         {label}
       </span>
+      {elapsedSeconds >= SHOW_ELAPSED_AFTER_SECONDS && (
+        // The time is visual only; the spoken updates come from LoadingStatus.
+        <span aria-hidden="true" className="text-xs tabular-nums text-text-muted">
+          {formatElapsed(elapsedSeconds)}
+        </span>
+      )}
     </div>
   )
 }
@@ -58,6 +76,8 @@ type LoadingStatusProps = {
   isSearchingInternet?: boolean
   isEmbedding?: boolean
   actionInfo?: string | null
+  /** "model (Provider)", named in the long-wait announcements (CM-06). */
+  modelLabel?: string
 }
 
 export const LoadingStatus = ({
@@ -65,14 +85,15 @@ export const LoadingStatus = ({
   isStreaming,
   isSearchingInternet,
   isEmbedding,
-  actionInfo
+  actionInfo,
+  modelLabel
 }: LoadingStatusProps) => {
   const { t } = useTranslation("common")
   const [completionAnnouncement, setCompletionAnnouncement] = React.useState<string | null>(null)
   const [liveAnnouncement, setLiveAnnouncement] = React.useState<string | null>(null)
   const wasActiveRef = React.useRef(false)
   const previousActionRef = React.useRef<string | null>(null)
-  const progressCheckpointRef = React.useRef(0)
+  const [elapsedSeconds, setElapsedSeconds] = React.useState(0)
 
   // Determine the current action based on state
   let currentAction: string | null = null
@@ -94,7 +115,6 @@ export const LoadingStatus = ({
   React.useEffect(() => {
     if (!currentAction) {
       setLiveAnnouncement(null)
-      progressCheckpointRef.current = 0
       previousActionRef.current = null
       return
     }
@@ -111,29 +131,42 @@ export const LoadingStatus = ({
     setLiveAnnouncement(startedLabel)
   }, [currentAction, t])
 
+  // Count the seconds of this reply; a new reply starts again from zero.
   React.useEffect(() => {
-    if (!isStreaming || !isActive) {
-      progressCheckpointRef.current = 0
-      return
-    }
-
+    setElapsedSeconds(0)
+    if (!isActive) return
+    const startedAt = Date.now()
     const timer = window.setInterval(() => {
-      progressCheckpointRef.current += 1
-      setLiveAnnouncement(
-        t(
-          "actionInfo.progressCheckpoint",
-          "Still generating response (checkpoint {{count}}).",
-          {
-            count: progressCheckpointRef.current
-          }
-        )
-      )
-    }, 5000)
-
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000))
+    }, 1000)
     return () => {
       window.clearInterval(timer)
     }
-  }, [isActive, isStreaming, t])
+  }, [isActive])
+
+  const model = modelLabel?.trim()
+  React.useEffect(() => {
+    if (elapsedSeconds === STILL_WORKING_AFTER_SECONDS) {
+      setLiveAnnouncement(
+        model
+          ? t("actionInfo.stillWorkingModel", "Still working on the reply from {{model}}.", { model })
+          : t("actionInfo.stillWorking", "Still working on the reply.")
+      )
+    } else if (elapsedSeconds === TAKING_A_WHILE_AFTER_SECONDS) {
+      setLiveAnnouncement(
+        model
+          ? t(
+              "actionInfo.takingAWhileModel",
+              "{{model}} is taking a while. You can stop the reply and try again.",
+              { model }
+            )
+          : t(
+              "actionInfo.takingAWhile",
+              "This reply is taking a while. You can stop it and try again."
+            )
+      )
+    }
+  }, [elapsedSeconds, model, t])
 
   // Announce completion when transitioning from active to inactive
   React.useEffect(() => {
@@ -158,7 +191,9 @@ export const LoadingStatus = ({
         <SrAnnouncement message={completionAnnouncement} />
       )}
       {/* Visual status indicator */}
-      {currentAction && <ActionInfo action={currentAction} />}
+      {currentAction && (
+        <ActionInfo action={currentAction} elapsedSeconds={elapsedSeconds} />
+      )}
     </>
   )
 }

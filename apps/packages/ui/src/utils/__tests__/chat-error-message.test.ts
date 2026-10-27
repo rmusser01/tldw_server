@@ -1,11 +1,12 @@
 import i18n from "i18next"
 import { beforeAll, describe, expect, it } from "vitest"
 
+import { ChatStreamTimeoutError } from "@/services/tldw/chat-timeouts"
 import {
+  buildAssistantErrorContent,
   buildFriendlyErrorMessage,
   decodeChatErrorPayload,
   encodeChatErrorPayload,
-  buildAssistantErrorContent,
   ImageSupportUnconfirmedError
 } from "../chat-error-message"
 
@@ -187,3 +188,23 @@ describe("provider failures name the model (CC-N2)", () => {
   })
 })
 
+describe("a reply that never starts names the model and the wait (CM-06)", () => {
+  beforeAll(async () => { await i18n.init({ lng: "en", resources: {} }) })
+
+  it("says which model didn't respond, and after how long", () => {
+    expect(
+      decodeChatErrorPayload(
+        buildFriendlyErrorMessage(new ChatStreamTimeoutError("startup", 30_000), {
+          modelLabel: "mock-gpt-4o (Custom OpenAI API)"
+        })
+      )?.summary
+    ).toBe("No response from mock-gpt-4o (Custom OpenAI API) after 30 seconds.")
+  })
+
+  it("keeps the general wording without a model", () => {
+    expect(
+      decodeChatErrorPayload(buildFriendlyErrorMessage(new ChatStreamTimeoutError("startup", 30_000)))
+        ?.summary
+    ).toBe("The model did not start responding in time.")
+  })
+})

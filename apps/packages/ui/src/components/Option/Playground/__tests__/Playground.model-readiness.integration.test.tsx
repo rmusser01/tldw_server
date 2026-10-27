@@ -137,7 +137,9 @@ describe("Playground model readiness chip (CC-01, #3111)", { timeout: 90_000 }, 
     await sendFailingTurn(view, "Is anyone there?")
 
     const named = new RegExp(`Couldn't reach ${OLLAMA_MODEL.replace(/[.]/g, "\\.")} \\(Ollama\\)\\.`)
-    expect((await screen.findAllByText(named, {}, HARNESS_WAIT)).length).toBeGreaterThan(0)
+    // Shown once: the composer banner doesn't repeat an error the transcript shows.
+    await screen.findAllByText(named, {}, HARNESS_WAIT)
+    expect(screen.getAllByText(named)).toHaveLength(1)
     expect(screen.queryByText(/Something went wrong while talking to your tldw server/)).toBeNull()
   })
 

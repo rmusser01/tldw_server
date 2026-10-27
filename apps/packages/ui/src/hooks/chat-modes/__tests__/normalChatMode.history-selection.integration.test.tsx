@@ -853,7 +853,8 @@ it.each([
   const entry = (await loadHistoryTurnRecoveries(current.bookmarkScope!, current.view!))[0]
   expect(entry.turn).toMatchObject({ state: "accepted_unsent", input_id: "first-user", input_text: question, result_text: "" })
   const guidance = startupTimeout
-    ? "The model did not start responding in time. Retry, or adjust Chat startup timeout in Settings → tldw server → Advanced timeouts."
+    // CM-06: a reply that never started names its model and the wait.
+    ? "No response from test after 120 seconds. Retry, or adjust Chat startup timeout in Settings → tldw server → Advanced timeouts."
     : "Something went wrong while talking to your tldw server. Try again in a moment, or open Health & diagnostics to inspect server health."
   const review = render(<HistorySelectionReview selection={reopened.result.current} />)
   expect(screen.getByRole("alert").textContent).toBe(guidance)

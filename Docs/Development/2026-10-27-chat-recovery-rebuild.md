@@ -75,11 +75,16 @@ the skipped result is enough for the second part).
 
 ### Stage 3: long waits (CM-06) and one error surface (CC-N2)
 **Goal:** waits show elapsed time and announce plainly; an error shows once.
-**Success criteria:** "Waiting for <model>… 0:12"; announcements at ~10 s and
-~30 s, no "checkpoint"; a startup timeout names the model; the composer
-error banner doesn't repeat an error bubble the user can see.
-**Tests:** `ActionInfo` tests with fake timers; banner tests.
-**Status:** Not Started
+**Success criteria:** the status pill shows the elapsed time after 5 s
+("0:12"). Screen readers hear "Still working on the reply from <model>." at
+10 s and "<model> is taking a while. You can stop the reply and try again."
+at 30 s, instead of "checkpoint N" every 5 s. A reply that never starts says
+"No response from <model> after 30 seconds." The composer error banner stays
+hidden while the transcript shows its latest message (the error bubble), and
+appears when the user has scrolled away from it.
+**Tests:** `ActionInfo` tests with fake timers; timeout copy unit tests; the
+temporary-chat provider failure shows its message once.
+**Status:** Complete
 
 ### Stage 4: history review (CC-04)
 **Goal:** the owner decision above.
