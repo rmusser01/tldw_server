@@ -2630,7 +2630,7 @@ def _validate_provider_model_selection(
     """Authorize current IDs, confirmed aliases and explicit router fallback IDs."""
     if provider not in CLOUD_MODEL_PROVIDERS:
         return
-    selected_models = [request.get("model")]
+    selected_models: list[Any] = [request.get("model")]
     extra_body = request.get("extra_body")
     fallback_models = None
     if provider == "openrouter" and isinstance(extra_body, Mapping) and "models" in extra_body:
@@ -2649,7 +2649,7 @@ def _validate_provider_model_selection(
         fallback_models = list(raw_models)
         selected_models.extend(fallback_models)
     policy = request.get("call_policy")
-    discovery_options = {"call_policy": policy} if isinstance(policy, ProviderCallPolicy) else {}
+    discovery_options: dict[str, Any] = {"call_policy": policy} if isinstance(policy, ProviderCallPolicy) else {}
     discovery_started = time.monotonic()
     base_url = _provider_inventory_base_url(provider, request)
     result = discover_provider_models(
@@ -2686,7 +2686,7 @@ def _validate_provider_model_selection(
     # and generation cannot validate one server's models and call another.
     request["base_url"] = base_url
     if fallback_models is not None:
-        request["extra_body"] = {**extra_body, "models": fallback_models}
+        request["extra_body"] = {**(extra_body or {}), "models": fallback_models}
 
 
 def _call_policy_after_model_discovery(

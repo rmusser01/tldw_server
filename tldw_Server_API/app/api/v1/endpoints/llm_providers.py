@@ -1596,7 +1596,7 @@ def get_configured_providers(
             api_keys_by_provider = {}
 
         # Define provider mappings with their config keys
-        provider_mappings = {
+        provider_mappings: dict[str, Any] = {
             # Commercial APIs (from API section)
             'openai': {
                 'display_name': 'OpenAI',
@@ -1959,7 +1959,7 @@ def get_configured_providers(
                     override.is_enabled is False or override.credentials_invalid
                 )
                 if blocked:
-                    if override.credentials_invalid:
+                    if override is not None and override.credentials_invalid:
                         api_key_value = None
                         is_configured = False
                     discovery_result = ModelDiscoveryResult("auth_failed")
@@ -1976,8 +1976,9 @@ def get_configured_providers(
                             api_key_value = valid_provider_api_key(fallback.api_key)
                         is_configured = bool(api_key_value)
                         if is_configured:
+                            fallback_config = fallback.app_config if fallback is not None else static.app_config
                             base_url = resolve_provider_models_base_url(
-                                provider_name, fallback.app_config if fallback is not None else static.app_config,
+                                provider_name, dict(fallback_config) if fallback_config is not None else None,
                                 credentials_resolved=True,
                             )
                             discovery_result = (

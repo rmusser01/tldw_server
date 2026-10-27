@@ -983,7 +983,7 @@ class HttpxAdapter:
         max_response_bytes: int | None = None,
         deadline: float | None = None,
     ) -> httpx.Response:
-        response_limit_kwargs = (
+        response_limit_kwargs: dict[str, Any] = (
             {"max_response_bytes": max_response_bytes}
             if max_response_bytes is not None
             else {}
@@ -4373,12 +4373,12 @@ def _fetch_httpx_response(
     method_upper = str(method).upper()
     _head_disable_h2_tried = False
     _head_get_range_tried = False
-    response_limit_kwargs = (
+    response_limit_kwargs: dict[str, Any] = (
         {"max_response_bytes": max_response_bytes}
         if max_response_bytes is not None
         else {}
     )
-    request_io = _httpx_request_io
+    request_io: Callable[..., httpx.Response] = _httpx_request_io
     if deadline is not None:
         request_io = _httpx_request_with_deadline
         response_limit_kwargs.update(deadline=deadline, proxies=proxies)

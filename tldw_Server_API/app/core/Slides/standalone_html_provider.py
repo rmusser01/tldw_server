@@ -477,7 +477,7 @@ def _document_bytes(text: str, *, max_document_bytes: int) -> bytes:
 
 async def _verify_model_inventory(
     target: ResolvedExecutionTarget,
-    provider_api_key: str,
+    provider_api_key: str | None,
     *,
     deadline: float,
 ) -> None:
@@ -495,19 +495,21 @@ async def _verify_model_inventory(
         privacy_safe_errors=True,
     )
 
+    budget = remaining
+
     def discover_and_validate() -> ModelDiscoveryResult:
         """Share the worker's remaining deadline across catalog and alias lookup."""
         started = time.monotonic()
         discovered = provider_model_inventory.discover_provider_models(
             target.provider, provider_api_key, base_url=base_url, call_policy=policy,
         )
-        remaining = policy.maximum_timeout_seconds - (time.monotonic() - started)
-        if remaining <= 0:
+        left = budget - (time.monotonic() - started)
+        if left <= 0:
             return ModelDiscoveryResult("unreachable")
         return provider_model_inventory.resolve_provider_model_selection(
             target.provider, provider_api_key, target.model,
             base_url=base_url, inventory=discovered,
-            call_policy=replace(policy, maximum_timeout_seconds=remaining),
+            call_policy=replace(policy, maximum_timeout_seconds=left),
         )
 
     failed = False

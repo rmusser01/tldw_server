@@ -517,21 +517,22 @@ def discover_provider_models(
         if not force_refresh and cached and time.monotonic() - cached[0] < _TTL_SECONDS:
             return cached[1]
         pending = _IN_FLIGHT.get(cache_key)
+        follower: Future[ModelDiscoveryResult] | None = None
         if force_refresh or pending is None:
             if pending is not None and not pending.done():
                 pending.set_result(ModelDiscoveryResult("unreachable"))
             _CACHE.pop(cache_key, None)
-            refresh_token = Future()
+            refresh_token: Future[ModelDiscoveryResult] = Future()
             _IN_FLIGHT[cache_key] = refresh_token
         else:
-            refresh_token = None
+            follower = pending
 
-    if refresh_token is None:
+    if follower is not None:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return ModelDiscoveryResult("unreachable")
         try:
-            result = pending.result(timeout=remaining)
+            result = follower.result(timeout=remaining)
         except TimeoutError:
             return ModelDiscoveryResult("unreachable")
         return result if time.monotonic() < deadline else ModelDiscoveryResult("unreachable")
@@ -569,7 +570,7 @@ def discover_provider_models(
             if provider == "qwen":
                 url = endpoint + "?" + urlencode({"page_no": _page + 1, "page_size": 100})
             else:
-                url = endpoint + ("?" + urlencode({cursor_parameter: cursor}) if cursor else "")
+                url = endpoint + ("?" + urlencode({cursor_parameter: cursor}) if cursor and cursor_parameter else "")
             response = fetcher(
                 method="GET",
                 url=url,
