@@ -16,7 +16,12 @@ import { focusComposer } from "@/hooks/useComposerFocus"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { useTranslation } from "react-i18next"
 import { useActiveTutorial, useTutorialStore } from "@/store/tutorials"
-import { getTutorialById, type TutorialDefinition } from "@/tutorials"
+import {
+  getTutorialById,
+  type TutorialDefinition,
+  type TutorialStep
+} from "@/tutorials"
+import { VIEWPORT_CONSTRAINED_PATHS } from "@/routes/route-paths"
 import { isHiddenBySelfOrAncestor } from "@/utils/focus-return"
 
 const TARGET_RETRY_DELAY_MS = 350
@@ -56,6 +61,15 @@ const isElementVisible = (element: HTMLElement): boolean => {
   const rect = element.getBoundingClientRect()
   return rect.width > 0 && rect.height > 0
 }
+
+/**
+ * The steps a run will show: optional steps whose target is missing when the
+ * run starts are dropped, so Joyride's "Step x of N" stays truthful (NO-02).
+ */
+const selectRunSteps = (steps: TutorialStep[]): TutorialStep[] =>
+  steps.filter(
+    (step) => !step.optional || resolveTargetElement(step.target) !== null
+  )
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -125,7 +139,6 @@ export const TutorialRunner: React.FC = () => {
     setStepIndex,
     markComplete
   } = useActiveTutorial()
-  const retryAttemptsRef = React.useRef<Map<string, number>>(new Map())
   const retryTimersRef = React.useRef<Map<string, number>>(new Map())
   const mounted = React.useRef(true)
   const location = useLocation()
@@ -222,19 +235,54 @@ export const TutorialRunner: React.FC = () => {
     })
   }, [activeRun])
 
-  const [retryNonce, setRetryNonce] = React.useState(0)
+  // Bumped when a missing target mounts, so the controlled Joyride re-renders
+  // the same step and finds it. Never part of the Joyride key: a remount
+  // stops Joyride from reporting a missing target again (NO-N1).
+  const [, setTargetRefresh] = React.useState(0)
+  const shownRunIdRef = React.useRef<number | null>(null)
+  const scrollOriginRef = React.useRef<{
+    runId: number
+    x: number
+    y: number
+  } | null>(null)
+  if (
+    activeRun &&
+    scrollOriginRef.current?.runId !== activeRun.id &&
+    typeof window !== "undefined"
+  ) {
+    scrollOriginRef.current = {
+      runId: activeRun.id,
+      x: window.scrollX,
+      y: window.scrollY
+    }
+  }
+  const restoreScrollOrigin = React.useCallback(() => {
+    const origin = scrollOriginRef.current
+    if (!origin || origin.runId !== activeRun?.id) return
+    if (window.scrollX !== origin.x || window.scrollY !== origin.y) {
+      window.scrollTo(origin.x, origin.y)
+    }
+  }, [activeRun])
 
   const clearRetryState = React.useCallback(() => {
     retryTimersRef.current.forEach((timerId) => {
       window.clearTimeout(timerId)
     })
     retryTimersRef.current.clear()
-    retryAttemptsRef.current.clear()
   }, [])
 
   React.useEffect(() => {
     clearRetryState()
   }, [activeRun, clearRetryState])
+
+  // A retry belongs to one step; drop it once the tour is on another step.
+  React.useEffect(() => {
+    retryTimersRef.current.forEach((timerId, key) => {
+      if (key.endsWith(`:${activeStepIndex}`)) return
+      window.clearTimeout(timerId)
+      retryTimersRef.current.delete(key)
+    })
+  }, [activeStepIndex])
 
   React.useEffect(() => {
     mounted.current = true
@@ -250,10 +298,23 @@ export const TutorialRunner: React.FC = () => {
     ? getTutorialById(activeTutorialId)
     : undefined
 
+  // Chosen once per run so step indices stay stable while it is active.
+  const runSteps = React.useMemo(
+    () => (activeRun ? selectRunSteps(tutorial?.steps ?? []) : []),
+    [tutorial, activeRun]
+  )
+
+  // On a viewport-framed route the window never scrolls, so Joyride's
+  // "scroll parent fix" (overflow: initial on a pane that is not scrolling
+  // yet) would only break that pane's own scrolling.
+  const isViewportConstrainedRoute = (
+    VIEWPORT_CONSTRAINED_PATHS as readonly string[]
+  ).includes(location.pathname)
+
   /**
    * Convert tutorial steps to Joyride format with i18n
    */
-  const joyrideSteps: Step[] = (tutorial?.steps ?? []).map((step) => ({
+  const joyrideSteps: Step[] = runSteps.map((step) => ({
     target: resolveTargetElement(step.target) ?? step.target,
     title: t(step.titleKey, step.titleFallback),
     content: t(step.contentKey, step.contentFallback),
@@ -292,14 +353,20 @@ export const TutorialRunner: React.FC = () => {
 
       if (action === ACTIONS.CLOSE) {
         clearRetryState()
+        restoreScrollOrigin()
         returnTourFocus()
         endTutorial(activeRun!)
         return
       }
 
+      if (type === EVENTS.TOOLTIP) {
+        shownRunIdRef.current = activeRun!.id
+      }
+
       // Tutorial finished or skipped
       if (status === STATUS.FINISHED || status === STATUS.SKIPPED) {
         clearRetryState()
+        restoreScrollOrigin()
         returnTourFocus()
         if (status === STATUS.FINISHED && activeTutorialId) {
           markComplete(activeTutorialId, activeRun!)
@@ -311,7 +378,6 @@ export const TutorialRunner: React.FC = () => {
       // Step progression
       if (type === EVENTS.STEP_AFTER) {
         const retryKey = `${activeRun!.id}:${index}`
-        retryAttemptsRef.current.delete(retryKey)
         const retryTimer = retryTimersRef.current.get(retryKey)
         if (typeof retryTimer === "number") {
           window.clearTimeout(retryTimer)
@@ -325,78 +391,72 @@ export const TutorialRunner: React.FC = () => {
         }
       }
 
-      // Target not found - retry briefly for delayed mount/collapsed UI, then fallback.
+      // Target not found: poll briefly for a delayed mount or collapsed UI.
+      // Joyride reports a missing target once per step, so the runner keeps
+      // the step itself and never remounts Joyride to ask again (NO-N1).
       if (type === EVENTS.TARGET_NOT_FOUND) {
-        const retryKey = `${activeRun!.id}:${index}`
-        const currentAttempts = retryAttemptsRef.current.get(retryKey) ?? 0
-        const currentStep = tutorial?.steps[index]
+        const run = activeRun!
+        const retryKey = `${run.id}:${index}`
+        if (retryTimersRef.current.has(retryKey)) return
+        const currentStep = runSteps[index]
 
-        if (currentStep && currentAttempts < MAX_TARGET_RETRY_ATTEMPTS) {
-          retryAttemptsRef.current.set(retryKey, currentAttempts + 1)
-
-          const existingTimer = retryTimersRef.current.get(retryKey)
-          if (typeof existingTimer === "number") {
-            window.clearTimeout(existingTimer)
+        const advancePastMissingStep = () => {
+          console.warn(
+            `[TutorialRunner] Target not found for step ${index}:`,
+            currentStep?.target
+          )
+          if (index < runSteps.length - 1) {
+            setStepIndex(index + 1, run)
+            return
           }
+          // The last target never mounted. A user who has seen the tour has
+          // finished it; a tour that never showed a step has not.
+          if (shownRunIdRef.current === run.id && activeTutorialId) {
+            markComplete(activeTutorialId, run)
+          }
+          restoreScrollOrigin()
+          if (isRunCurrent()) endTutorial(run)
+        }
 
+        const poll = (attempt: number) => {
           const timerId = window.setTimeout(() => {
             retryTimersRef.current.delete(retryKey)
-            if (!isRunCurrent()) {
-              return
-            }
+            if (!isRunCurrent()) return
 
-            const refreshedTarget = resolveTargetElement(currentStep.target)
+            const refreshedTarget = currentStep
+              ? resolveTargetElement(currentStep.target)
+              : null
             if (refreshedTarget) {
               refreshedTarget.scrollIntoView({
                 block: "center",
                 inline: "nearest",
                 behavior: "smooth"
               })
+              setTargetRefresh((value) => value + 1)
+              return
             }
-
-            if (refreshedTarget) {
-              retryAttemptsRef.current.delete(retryKey)
+            if (attempt + 1 < MAX_TARGET_RETRY_ATTEMPTS) {
+              poll(attempt + 1)
+              return
             }
-
-            setStepIndex(index, activeRun!)
-            if (isRunCurrent()) setRetryNonce((value) => value + 1)
+            advancePastMissingStep()
           }, TARGET_RETRY_DELAY_MS)
-
           retryTimersRef.current.set(retryKey, timerId)
-          return
         }
 
-        retryAttemptsRef.current.delete(retryKey)
-        const finalRetryTimer = retryTimersRef.current.get(retryKey)
-        if (typeof finalRetryTimer === "number") {
-          window.clearTimeout(finalRetryTimer)
-          retryTimersRef.current.delete(retryKey)
-        }
-
-        console.warn(
-          `[TutorialRunner] Target not found for step ${index}:`,
-          currentStep?.target
-        )
-
-        // After retries are exhausted, skip to next step (or end without completion).
-        if (index < joyrideSteps.length - 1) {
-          setStepIndex(index + 1, activeRun!)
-        } else {
-          // Last step target never resolved, so end without granting completion.
-          endTutorial(activeRun!)
-        }
+        poll(0)
       }
     },
     [
       activeTutorialId,
       activeRun,
       returnTourFocus,
+      restoreScrollOrigin,
       clearRetryState,
       endTutorial,
       markComplete,
       setStepIndex,
-      tutorial,
-      joyrideSteps.length
+      runSteps
     ]
   )
 
@@ -407,7 +467,7 @@ export const TutorialRunner: React.FC = () => {
 
   return (
     <Joyride
-      key={`${activeRun?.id}-${retryNonce}`}
+      key={activeRun?.id}
       steps={joyrideSteps}
       run={true}
       stepIndex={activeStepIndex}
@@ -416,11 +476,14 @@ export const TutorialRunner: React.FC = () => {
       showSkipButton
       scrollToFirstStep
       disableScrolling={false}
+      disableScrollParentFix={isViewportConstrainedRoute}
       callback={handleCallback}
       styles={tutorialStyles}
       locale={joyrideLocale}
       floaterProps={{
-        disableAnimation: false
+        disableAnimation: false,
+        // Keep the tooltip on screen even when its target sits near an edge.
+        options: { preventOverflow: { boundariesElement: "viewport" } }
       }}
     />
   )

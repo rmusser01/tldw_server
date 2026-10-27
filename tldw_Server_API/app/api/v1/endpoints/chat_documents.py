@@ -67,6 +67,7 @@ from tldw_Server_API.app.core.Chat.document_generator import (
 )
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     invoke_stream_close_bounded,
+    is_empty_choices_usage_chunk,
     normalize_provider_stream_error,
     provider_stream_error_payload,
 )
@@ -519,6 +520,9 @@ async def generate_document(
                             if terminal_kind == "done":
                                 await stream.done()
                                 return
+                            if is_empty_choices_usage_chunk(payload):
+                                # OpenAI's usage chunk, which this request cannot ask for: not sent (TASK-13951).
+                                continue
                             if successful and not stream_success_state.get("terminal_error"):
                                 stream_success_state["successful"] = True
                             if not payload:
@@ -626,6 +630,9 @@ async def generate_document(
                         if terminal_kind == "done":
                             yield _encode_sse(payload)
                             return
+                        if is_empty_choices_usage_chunk(payload):
+                            # OpenAI's usage chunk, which this request cannot ask for: not sent (TASK-13951).
+                            continue
                         if successful and not stream_success_state.get("terminal_error"):
                             stream_success_state["successful"] = True
                         if payload:

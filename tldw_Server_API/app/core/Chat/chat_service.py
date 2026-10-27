@@ -205,6 +205,7 @@ from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     negotiate_structured_response_mode,
     parse_and_validate_structured_output,
 )
+from tldw_Server_API.app.core.LLM_Calls.usage_accounting import _usage_tokens
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
 from tldw_Server_API.app.core.Moderation.review_service import (
     capture_moderation_review_item,
@@ -220,7 +221,7 @@ from tldw_Server_API.app.core.testing import (
 )
 from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
 from tldw_Server_API.app.core.Usage.llm_quota_gate import check_llm_call_async, check_llm_call_sync
-from tldw_Server_API.app.core.Usage.llm_usage_normalizer import normalize_llm_usage
+from tldw_Server_API.app.core.Usage.llm_usage_normalizer import normalize_llm_usage, usage_with_service_tier
 from tldw_Server_API.app.core.Usage.pricing_catalog import (
     get_pricing_catalog,
     list_provider_models,
@@ -4212,15 +4213,28 @@ async def build_context_and_messages(
     regenerate_reply_id = request_metadata.get("tldw_regenerate_from_message_id") if isinstance(request_metadata, dict) else None
     if regenerate_reply_id is not None:
         if not isinstance(regenerate_reply_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", regenerate_reply_id):
-            raise HTTPException(status_code=422, detail="A valid saved reply ID is required for regeneration.")
+            # 400: the chat endpoint turns statuses outside its allow-list (422) into 500.
+            raise HTTPException(status_code=400, detail="A valid saved reply ID is required for regeneration.")
         if (not final_conversation_id or explicit_failed_retry
                 or getattr(request_data, "tldw_continuation", None) is not None):
             raise HTTPException(status_code=409, detail="Regeneration requires an existing saved answered turn.")
+    from tldw_Server_API.app.core.Chat.history_continuation import (
+        continued_reply_prefix,
+        parse_continue_reply_id,
+    )
+
+    continue_reply_id = parse_continue_reply_id(
+        request_data,
+        conversation_id=final_conversation_id,
+        regenerate_reply_id=regenerate_reply_id,
+        explicit_failed_retry=explicit_failed_retry,
+    )
+    continue_prefix: str | None = None
     reuse_saved_turn = explicit_failed_retry or regenerate_reply_id is not None
 
     server_existing_input = getattr(request_data, "tldw_history_server_existing_input_v1", None)
     history_selection = getattr(request_data, "tldw_history_selection_v1", None) or server_existing_input
-    if history_selection is not None and (explicit_failed_retry or (server_existing_input is not None and regenerate_reply_id is not None)):
+    if history_selection is not None and (explicit_failed_retry or (server_existing_input is not None and (regenerate_reply_id is not None or continue_reply_id is not None))):
         raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "unsupported_history_legacy_retry"})
     versioned = history_selection is not None
     history_runtime = runtime_state or {}
@@ -4242,6 +4256,7 @@ async def build_context_and_messages(
         edit_target = getattr(request_data, "tldw_history_edit_v1", None)
         edit_target = edit_target.model_dump(mode="json") if edit_target is not None else None
         owner = history_runtime["history_owner_key"]
+        continuation_holder: dict[str, str] = {}
 
         def accept_history() -> tuple[
             HistorySelectionSnapshotV1,
@@ -4283,11 +4298,16 @@ async def build_context_and_messages(
                     except InputError as exc:
                         raise HistorySelectionError("unsupported_history_context_dictionaries") from exc
                 _format_selected_history_messages(snap, content, context[0] or {})
+                reused_reply_id = regenerate_reply_id if regenerate_reply_id is not None else continue_reply_id
+                unsupported_code = (
+                    "unsupported_history_continuation" if continue_reply_id is not None
+                    else "unsupported_history_regeneration"
+                )
                 if server_existing_input is not None:
                     accepted = None
-                elif regenerate_reply_id is not None:
+                elif reused_reply_id is not None:
                     if getattr(request_data, "tldw_history_branch", None) is not True:
-                        raise HistorySelectionError("unsupported_history_regeneration")
+                        raise HistorySelectionError(unsupported_code)
                     inputs = [
                         message.model_dump(exclude_none=True)
                         for message in request_data.messages
@@ -4295,14 +4315,19 @@ async def build_context_and_messages(
                     ]
                     if len(inputs) != 1 or inputs[0].get("role") != "user":
                         raise HistorySelectionError("invalid_regeneration_input")
-                    accepted = chat_db.reuse_selected_history_admission(
-                        final_conversation_id,
-                        selection,
-                        regenerate_reply_id,
-                        owner_client_id=history_runtime["history_owner_client_id"],
-                        owner_key=owner,
-                        conn=conn,
-                    )
+                    try:
+                        accepted = chat_db.reuse_selected_history_admission(
+                            final_conversation_id,
+                            selection,
+                            reused_reply_id,
+                            owner_client_id=history_runtime["history_owner_client_id"],
+                            owner_key=owner,
+                            conn=conn,
+                        )
+                    except HistorySelectionError as exc:
+                        if exc.code == "unsupported_history_regeneration":
+                            raise HistorySelectionError(unsupported_code) from exc
+                        raise
                     original = next(item for item in content if item["id"] == accepted["input_message_id"])
                     extra = original.get("extra_metadata") or {}
                     if (
@@ -4310,7 +4335,7 @@ async def build_context_and_messages(
                         or extra.get("function_call") is not None
                         or extra.get("tool_call_id") is not None
                     ):
-                        raise HistorySelectionError("unsupported_history_regeneration")
+                        raise HistorySelectionError(unsupported_code)
                     text = _saved_image_text(
                         {
                             "sender": "user",
@@ -4333,7 +4358,13 @@ async def build_context_and_messages(
                         or inputs[0].get("name") not in (None, extra.get("sender_name"))
                     ):
                         raise HistorySelectionError("regeneration_input_changed")
-                    content = tuple(item for item in content if item["id"] != regenerate_reply_id)
+                    if continue_reply_id is not None:
+                        # Continue keeps the saved reply as the final context message.
+                        continuation_holder["prefix"] = continued_reply_prefix(
+                            next(item for item in content if item["id"] == continue_reply_id)
+                        )
+                    else:
+                        content = tuple(item for item in content if item["id"] != regenerate_reply_id)
                 else:
                     accepted = chat_db.append_selected_history_inputs(
                         final_conversation_id,
@@ -4352,10 +4383,12 @@ async def build_context_and_messages(
         except HistorySelectionError as exc:
             failure = (
                 "unsupported_history_capability"
-                if (exc.code.startswith("unsupported_history_context") or exc.code == "unsupported_history_regeneration")
+                if (exc.code.startswith("unsupported_history_context")
+                    or exc.code in {"unsupported_history_regeneration", "unsupported_history_continuation"})
                 else "stale_selection"
             )
             raise HTTPException(409, detail={"status": failure, "code": exc.code, **exc.details}) from exc
+        continue_prefix = continuation_holder.get("prefix")
         character_card, character_db_id, assistant_context = context
         for field, value in assistant_context.pop("history_sampling", {}).items():
             if field not in request_data.model_fields_set:
@@ -4440,7 +4473,7 @@ async def build_context_and_messages(
         )
         should_persist = False
 
-    if regenerate_reply_id:
+    if regenerate_reply_id or continue_reply_id:
         if (not should_persist or not existing_conversation
                 or existing_conversation.get("client_id") != client_id_from_db
                 or not (is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation or versioned
@@ -4842,7 +4875,7 @@ async def build_context_and_messages(
                         )
 
     if versioned:
-        if regenerate_reply_id is not None:
+        if regenerate_reply_id is not None or continue_reply_id is not None:
             overlap_cut = len(request_messages)
         formatted_history = _format_selected_history_messages(history_snapshot, selected_content, character_card)
         if server_existing_input is not None:
@@ -4857,6 +4890,8 @@ async def build_context_and_messages(
             runtime_state["tldw_history_server_existing_input_v1"] = history_selection.model_dump(mode="json")
         else:
             runtime_state["tldw_history_admission_v1"] = admission
+        if continue_prefix is not None:
+            runtime_state["history_continue_prefix"] = continue_prefix
 
     if retry_user_message_id and any(message.get("role") == "user" for message in request_messages[overlap_cut:-1]):
         raise HTTPException(status_code=409, detail="This retry contains extra unsaved user messages. Resolve the local conversation before retrying.")
@@ -5298,6 +5333,7 @@ async def execute_streaming_call(
     queue_request_id: str | None = None,
     provider_factory_timeout: float | None = None,
     history_persistence_ack: bool = False,
+    forward_usage_chunk: bool = False,
 ) -> StreamingResponse:
     """Execute a streaming LLM call with queue, failover, moderation, and persistence.
 
@@ -6160,6 +6196,7 @@ async def execute_streaming_call(
         function_call: dict[str, Any] | None,
         *,
         generation: dict[str, Any] | None = None,
+        provider_usage: dict[str, Any] | None = None,
     ):
         nonlocal stream_metrics_recorded
         saved_message_id: str | None = None
@@ -6280,15 +6317,19 @@ async def execute_streaming_call(
                     "Streaming chat tool auto-execution skipped error_type={}",
                     type(autoexec_err).__name__,
                 )
-        # Usage logging (estimated) after stream completes
-        total_est = 0
+        # Usage logging after the stream completes: from the provider's usage chunk, else an estimate
+        total_tokens = 0
         try:
-            pt_est = 0
-            try:
-                pt_est = _estimate_tokens_from_messages(templated_llm_payload)
-            except _CHAT_NONCRITICAL_EXCEPTIONS:
-                pt_est = 0
-            ct_est = max(0, len(full_reply or "") // 4)
+            reported_prompt, reported_completion = _usage_tokens(provider_usage) if provider_usage else (0, 0)
+            reported = (reported_prompt, reported_completion) != (0, 0)
+            # A side the block does not count (a prompt-only block, say) comes from the estimate.
+            prompt_tokens = reported_prompt
+            if not prompt_tokens:
+                try:
+                    prompt_tokens = _estimate_tokens_from_messages(templated_llm_payload)
+                except _CHAT_NONCRITICAL_EXCEPTIONS:
+                    prompt_tokens = 0
+            completion_tokens = reported_completion or max(0, len(full_reply or "") // 4)
             user_id = None
             api_key_id = None
             try:
@@ -6298,7 +6339,7 @@ async def execute_streaming_call(
             except _CHAT_NONCRITICAL_EXCEPTIONS:
                 pass
             latency_ms = int((time.time() - llm_start_time) * 1000)
-            total_est = int(pt_est + ct_est)
+            total_tokens = int(prompt_tokens + completion_tokens)
             await log_llm_usage(
                 user_id=user_id,
                 key_id=api_key_id,
@@ -6309,21 +6350,22 @@ async def execute_streaming_call(
                 model=model,
                 status=200,
                 latency_ms=latency_ms,
-                prompt_tokens=int(pt_est),
-                completion_tokens=int(ct_est),
-                total_tokens=total_est,
+                prompt_tokens=int(prompt_tokens),
+                completion_tokens=int(completion_tokens),
+                total_tokens=total_tokens,
                 request_id=(request.headers.get("X-Request-ID") if request else None) or (get_request_id() or None),
                 conversation_id=(str(final_conversation_id) if final_conversation_id is not None else None),
-                estimated=True,
-                estimate_source="stream_estimate",
+                usage_metadata=provider_usage if reported else None,
+                estimated=None if reported_prompt and reported_completion else True,
+                estimate_source=None if reported else "stream_estimate",
             )
         except _CHAT_NONCRITICAL_EXCEPTIONS:
             pass
-        # Commit reserved tokens to Resource Governor, if provided
+        # Commit the recorded tokens to the Resource Governor, if provided
         try:
             if callable(rg_commit_cb):
                 # rg_commit_cb may be async or sync; call accordingly
-                res = rg_commit_cb(total_est)
+                res = rg_commit_cb(total_tokens)
                 if hasattr(res, "__await__"):
                     await res  # type: ignore[misc]
         except _CHAT_NONCRITICAL_EXCEPTIONS:
@@ -6694,6 +6736,7 @@ async def execute_streaming_call(
                     user_message_id=user_message_id,
                     continuation_metadata=normalized_continuation_metadata,
                     history_persistence_ack=history_persistence_ack or None,
+                    forward_usage_chunk=forward_usage_chunk,
                 ),
                 stream_factory=create_streaming_response_with_timeout,
             )
@@ -6881,7 +6924,7 @@ async def _execute_non_stream_call_impl(
         """Record token and durable usage for one validated dict response."""
 
         choices = response.get("choices")
-        usage = response.get("usage")
+        usage = usage_with_service_tier(response)  # OpenAI reports service_tier beside usage
         if usage:
             try:
                 normalized_usage = normalize_llm_usage(

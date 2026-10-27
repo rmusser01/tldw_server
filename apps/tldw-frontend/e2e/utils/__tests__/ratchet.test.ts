@@ -65,7 +65,8 @@ describe("committed ux-regression baselines", () => {
 
   it("tag every a11y entry with a review id, issue and note", () => {
     const { entries } = read("a11y.json") as { entries: Array<RatchetEntry & { rule: string; nodes: number }> }
-    expect(entries.length).toBeGreaterThan(0)
+    // An empty list is valid: every baselined violation has been fixed.
+    expect(Array.isArray(entries)).toBe(true)
     const problems = entries.flatMap((item, index) =>
       ratchetEntryProblems({ ...item, key: item.rule, count: item.nodes }, `a11y.json entries[${index}]`)
     )

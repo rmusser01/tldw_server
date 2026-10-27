@@ -4,6 +4,7 @@ import asyncio
 import os
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
+from urllib.parse import urlparse
 
 try:
     import httpx
@@ -358,6 +359,18 @@ class OpenAIAdapter(ChatProvider):
             payload = merge_extra_body(payload, request)
             headers = merge_extra_headers(self._openai_headers(api_key, request), request)
             try:
+                # Inside the try: a malformed base URL (``http://[::1``) fails as a sanitized provider error.
+                host = urlparse(url).hostname or ""
+                if host == "api.openai.com" or host.endswith(".api.openai.com"):
+                    # OpenAI sends a stream's usage only when asked: a last chunk with empty choices, which the
+                    # usage record reads (TASK-13951). OpenAI's data-residency hosts (eu.api.openai.com, ...) are
+                    # asked too. The caller's own stream_options win. Another server behind this provider is not
+                    # asked, as it may reject the field.
+                    caller_options = payload.get("stream_options")
+                    payload["stream_options"] = {
+                        "include_usage": True,
+                        **(caller_options if isinstance(caller_options, dict) else {}),
+                    }
                 resolved_timeout = self._resolve_timeout(request, timeout)
                 with http_client_factory(timeout=resolved_timeout) as client:
                     with client.stream("POST", url, headers=headers, json=payload) as resp:

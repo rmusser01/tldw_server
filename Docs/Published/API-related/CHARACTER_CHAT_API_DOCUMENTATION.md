@@ -478,7 +478,7 @@ This endpoint supports:
 - Conversation history
 - Ephemeral or persistent operation (see `save_to_db` below)
 
-Streaming behavior follows the core Chat API: the server sends an initial `event: stream_start`, emits delta chunks as OpenAI-style `choices[].delta.content`, and terminates with a single `data: [DONE]` (heartbeat comments are sent periodically). Duplicate terminal markers are suppressed.
+Streaming behavior follows the core Chat API: the server sends an initial `event: stream_start`, emits delta chunks as OpenAI-style `choices[].delta.content`, and terminates with a single `data: [DONE]` (heartbeat comments are sent periodically). Duplicate terminal markers are suppressed. A usage chunk with empty `choices` is sent only to a client that asks for one, as the Chat API documentation describes.
 
 ### Workflow for Character Chat Completions
 
@@ -610,6 +610,7 @@ When `stream=true` and the provider supports streaming, the server emits Server-
 
 - Each chunk is sent as a line prefixed with `data: `, followed by a blank line (SSE framing).
 - If the upstream provider already emits SSE-formatted lines (beginning with `data:`), they are forwarded as-is.
+- OpenAI's usage chunk is the exception. The server asks OpenAI (`api.openai.com` and its data-residency hosts) for it and costs the stream from it, but this request cannot ask for it, so it is not sent: no line with an empty `choices` array and a usage block reaches the client. Every other OpenAI chunk carries `"usage": null`, as in OpenAI's own streams.
 - Exactly one terminal marker is sent at the end: `data: [DONE]`. Duplicate terminal markers are suppressed.
 - On transform/iteration errors mid-stream, an error payload is sent and the stream still terminates with `data: [DONE]`.
 

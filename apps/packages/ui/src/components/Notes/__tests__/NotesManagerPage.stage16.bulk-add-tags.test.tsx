@@ -874,7 +874,7 @@ describe("NotesManagerPage stage 16 bulk add tags (NL-03)", { timeout: 30_000 },
       mockConfirmDanger.mockReturnValueOnce(confirm.promise)
       await user.click(screen.getByTestId("notes-overflow-menu-button"))
       await user.click(await screen.findByRole("menuitem", { name: "Delete" }))
-      await waitFor(() => expect(mockConfirmDanger).toHaveBeenCalledWith(expect.objectContaining({ content: "Delete this note?" })))
+      await waitFor(() => expect(mockConfirmDanger).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining("to Trash?") })))
       await changeOwner(view, "account-return")
       await open("n2")
       await act(async () => { confirm.resolve(true) })

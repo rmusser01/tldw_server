@@ -4919,9 +4919,15 @@ export default defineBackground({
             }
             assertStreamCurrent();
             requestAbort.signal.throwIfAborted();
+            // CM-03: forward a final unterminated line, and tell the page when
+            // the body ended without [DONE] so a cut-off reply is not complete.
+            const tail = buffer.trim();
+            const tailData = tail.startsWith("data:") ? tail.slice(5).trim() : tail;
+            if (tailData && tailData !== "[DONE]" && /^(data:|\{|\[)/.test(tail))
+              safePost({ event: "data", data: tailData });
             closed = true;
             if (idleTimer) clearTimeout(idleTimer);
-            safePost({ event: "done" });
+            safePost({ event: "done", ...(tailData === "[DONE]" ? {} : { incomplete: true }) });
           } catch (caught: any) {
             let e = caught;
             if (streamEpoch !== connectionAuthorityEpoch) {

@@ -215,6 +215,14 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
   ]
   const menuItems = isTrashView ? trashMenuItems : activeMenuItems
 
+  // A topic that repeats the title adds nothing to the row (CS-08).
+  const topicLabel =
+    chat.topic_label &&
+    String(chat.topic_label).trim().toLowerCase() !==
+      String(chat.title ?? "").trim().toLowerCase()
+      ? String(chat.topic_label)
+      : null
+
   const renderSourceInfo = () => {
     if (chat.parent_conversation_id) {
       return (
@@ -291,8 +299,10 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
             {chat.match_snippet}
           </span>
         )}
-        <div className="mt-1 flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-muted">
-          <ChatStateBadge state={chat.state} />
+        <div
+          data-testid="server-chat-row-meta"
+          className="mt-1 flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-muted">
+          <ChatStateBadge state={chat.state} t={t} />
           {lastModifiedLabel && (
             <span
               className="shrink-0 text-xs text-text-muted"
@@ -300,11 +310,11 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
               {lastModifiedLabel}
             </span>
           )}
-          {chat.topic_label && (
+          {topicLabel && (
             <span
               className="max-w-full truncate"
-              title={String(chat.topic_label)}>
-              {String(chat.topic_label)}
+              title={topicLabel}>
+              {topicLabel}
             </span>
           )}
         </div>
@@ -324,7 +334,7 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
             <button
               type="button"
               onClick={(event) => event.stopPropagation()}
-              className="rounded p-1 text-text-subtle hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-focus)] h-9 w-9 sm:min-w-0 sm:min-h-0"
+              className="rounded p-1 text-text-subtle hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus h-9 w-9 sm:min-w-0 sm:min-h-0"
               aria-label={`${t("option:header.moreActions", {
                 defaultValue: "More actions"
               })}: ${chat.title}`}

@@ -23,6 +23,7 @@ Filed from the TASK-13878/13879/13880/13885 PR (plan Docs/superpowers/plans/2026
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+From TASK-13936 (2026-10-26): when the gpt-6* and gpt-5.6* models are catalogued, give them service_tiers too (their Batch, Flex and Fast rows include 30-minute and 12-hour write columns), and price the Ultrafast tier the page lists for gpt-6-astra and gpt-6.1-sol. Key their Fast rates by the service_tier the response reports: OpenAI's Fast-mode guide (developers.openai.com/api/docs/guides/priority-processing) says 'For GPT-5.6 and earlier models, the response returns priority whether the request specifies priority or fast', so gpt-5.6* stay keyed priority; the guide (2026-10-26) does not say what gpt-6* report, likely fast, so check it then and key those rates by the value it gives.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

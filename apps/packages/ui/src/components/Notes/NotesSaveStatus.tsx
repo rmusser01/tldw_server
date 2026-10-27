@@ -70,6 +70,8 @@ const NotesSaveStatus: React.FC<NotesSaveStatusProps> = ({ state, lastSavedAt, o
 
 const ANNOUNCED_STATES = new Set<SaveIndicatorState>(['saved', 'error', 'retrying', 'conflict', 'offline'])
 
+// Text colours are theme tokens so they follow the palette and stay at
+// 4.5:1 on every surface (AX-07); the dot carries the status hue.
 function statusConfig(
   state: SaveIndicatorState,
   lastSavedAt: string | null | undefined,
@@ -82,43 +84,43 @@ function statusConfig(
       return {
         dotClass: 'bg-amber-400',
         text: t('option:notesSearch.saveStatusDirty', { defaultValue: 'Unsaved changes' }),
-        textClass: 'text-amber-600 dark:text-amber-400'
+        textClass: 'text-warn'
       }
     case 'saving':
       return {
         dotClass: 'bg-blue-400 animate-pulse',
         text: t('option:notesSearch.saving', { defaultValue: 'Saving...' }),
-        textClass: 'text-blue-600 dark:text-blue-400'
+        textClass: 'text-primaryStrong dark:text-primary'
       }
     case 'saved':
       return {
         dotClass: 'bg-emerald-500',
         text: formatSavedText(lastSavedAt, t),
-        textClass: 'text-emerald-600 dark:text-emerald-400'
+        textClass: 'text-success'
       }
     case 'offline':
       return {
         dotClass: 'bg-sky-500',
         text: t('option:notesSearch.saveStatusOffline', { defaultValue: 'Saved on this device' }),
-        textClass: 'text-sky-700 dark:text-sky-300'
+        textClass: 'text-primaryStrong dark:text-primary'
       }
     case 'retrying':
       return {
         dotClass: 'bg-amber-500 animate-pulse',
         text: t('option:notesSearch.saveStatusRetrying', { defaultValue: 'Not saved, retrying' }),
-        textClass: 'text-amber-700 dark:text-amber-400'
+        textClass: 'text-warn'
       }
     case 'conflict':
       return {
         dotClass: 'bg-amber-500',
         text: t('option:notesSearch.saveStatusConflict', { defaultValue: 'Changed elsewhere' }),
-        textClass: 'text-amber-700 dark:text-amber-400'
+        textClass: 'text-warn'
       }
     case 'error':
       return {
         dotClass: 'bg-red-500',
         text: t('option:notesSearch.saveStatusError', { defaultValue: 'Not saved, needs attention' }),
-        textClass: 'text-red-600 dark:text-red-400'
+        textClass: 'text-danger'
       }
   }
 }
