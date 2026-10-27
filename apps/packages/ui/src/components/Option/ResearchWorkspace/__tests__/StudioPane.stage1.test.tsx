@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { Modal } from "antd"
 import type { AudioGenerationSettings, WorkspaceSource } from "@/types/workspace"
@@ -409,7 +409,8 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
               ? {
                   ...artifact,
                   status,
-                  ...updates
+                  ...updates,
+                  ...(status === "completed" ? { completedAt: updates.completedAt ?? new Date() } : {})
                 }
               : artifact
         )
@@ -2250,4 +2251,54 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
       )
     })
   })
+  it.each(["failure", "cancel", "unmount", "early-cancel"])("retains saved slides when replacement ends in %s", async (outcome) => {
+    const original = {
+      id: "artifact-saved-slides",
+      type: "slides",
+      title: "Saved Rowan slides",
+      status: "completed",
+      content: "# Rowan\nOpened in 2019.",
+      presentationId: "saved-presentation",
+      presentationVersion: 4,
+      exportRefs: [{ format: "json", url: "/saved-export" }],
+      data: { saved: "exact original payload" },
+      createdAt: new Date("2026-02-18T10:00:00.000Z"),
+      completedAt: new Date("2026-02-18T10:01:00.000Z")
+    }
+    workspaceStoreState.generatedArtifacts = [original]
+    let resolve!: (value: unknown) => void
+    const pending = new Promise((done) => { resolve = done })
+    mockGenerateSlidesFromMedia.mockReturnValueOnce(pending)
+    const view = renderStudioPane()
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Regenerate options" }))
+      fireEvent.click(await screen.findByText("Replace existing"))
+      if (outcome !== "early-cancel") {
+        await waitFor(() => expect(mockGenerateSlidesFromMedia).toHaveBeenCalledTimes(1))
+      } else {
+        fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+        await waitFor(() => expect(workspaceStoreState.isGeneratingOutput).toBe(false))
+        expect(mockGenerateSlidesFromMedia).not.toHaveBeenCalled()
+      }
+      if (outcome === "cancel") fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+      if (outcome === "unmount") view.unmount()
+      await act(async () => {
+        resolve({
+          id: "late-presentation",
+          title: "Late replacement",
+          theme: "black",
+          version: 1,
+          slides: outcome === "failure" ? [] : [{ order: 0, layout: "title", title: "Late", content: "Replacement" }]
+        })
+        await pending
+      })
+      await waitFor(() => expect(workspaceStoreState.generatedArtifacts[0]).toMatchObject(original))
+      if (outcome === "unmount") expect(workspaceStoreState.isGeneratingOutput).toBe(false)
+      expect(mockMessageSuccess).not.toHaveBeenCalled()
+    } finally {
+      resolve({ id: "unused", slides: [] })
+      view.unmount()
+    }
+  })
+
 })

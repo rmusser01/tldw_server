@@ -2858,7 +2858,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                             )}
                           </p>
                         )}
-                        {artifact.status === "failed" && artifact.errorMessage && (
+                        {artifact.errorMessage && (
                           <p className="mt-1 text-xs text-error">
                             {artifact.errorMessage}
                           </p>

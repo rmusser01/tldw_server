@@ -29,6 +29,13 @@ class _LoggerStub:
         self.warnings.append((message, args, kwargs))
 
 
+def _connected_request():
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    return Request({"type": "http"}, receive)
+
+
 def _request() -> SimpleNamespace:
     return SimpleNamespace(
         visual_style_id=None,
@@ -70,6 +77,7 @@ def test_generate_presentation_metric_error_log_is_sanitized(monkeypatch):
         asyncio.run(
             slides_ep._generate_presentation(
                 response=Response(),
+                http_request=_connected_request(),
                 db=SimpleNamespace(client_id="1"),
                 request=_request(),
                 source_text="Source text",
@@ -149,6 +157,7 @@ def test_generate_presentation_latency_metric_log_is_sanitized(monkeypatch):
     response = asyncio.run(
         slides_ep._generate_presentation(
             response=Response(),
+            http_request=_connected_request(),
             db=_PresentationDB(),
             request=_request(),
             source_text="Source text",
