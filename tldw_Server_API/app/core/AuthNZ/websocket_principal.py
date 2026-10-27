@@ -12,11 +12,15 @@ Credentials, in order:
 - ``Authorization: Bearer <token>``, or ``Sec-WebSocket-Protocol: bearer, <token>`` for
   browsers, which cannot set headers on a WebSocket. Echo the marker with
   ``auth_subprotocol``: a browser fails a handshake whose offered protocol is ignored.
+  Only the Bearer scheme counts: a browser behind a Basic-auth proxy attaches the proxy's
+  ``Authorization: Basic`` to the upgrade, which is not a credential here.
 - ``X-API-KEY``.
 - With neither, the single-user session cookie, behind its trusted-Origin check
   (``websocket_session_auth``), since cookies are sent cross-site.
 
-Query-string tokens are not read: they end up in access logs (TASK-12113).
+Query-string tokens are not read: they end up in access logs (TASK-12113). A route that must
+keep a deprecated channel for shipped clients reads it itself and hands the credential to
+``verify_ws_credential``, so it is verified exactly as the header it stands for.
 First-message-frame auth arrives with the audio slice of TASK-13950.7, with its consumer.
 """
 
@@ -26,7 +30,7 @@ from fastapi import HTTPException, WebSocket, WebSocketException, status
 from starlette.requests import Request
 
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import has_scope, normalize_scope
-from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import get_auth_principal
+from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import _extract_bearer_token, get_auth_principal
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
     cookie_websocket_rejection_code,
@@ -51,6 +55,15 @@ def auth_subprotocol(websocket: WebSocket) -> str | None:
     return _BEARER_SUBPROTOCOL if _subprotocol_token(websocket) else None
 
 
+def has_ws_credential(websocket: WebSocket) -> bool:
+    """Whether the handshake presents a credential ``resolve_ws_principal`` reads.
+
+    That is ``Authorization: Bearer``, ``X-API-KEY`` or the bearer subprotocol. Another
+    ``Authorization`` scheme (a proxy's Basic auth) does not count, nor does the ambient cookie.
+    """
+    return bool(_subprotocol_token(websocket) or _extract_bearer_token(websocket)) or "x-api-key" in websocket.headers
+
+
 async def resolve_ws_principal(
     websocket: WebSocket,
     *,
@@ -71,11 +84,10 @@ async def resolve_ws_principal(
             are valid but not allowed, the cookie check's own code, or 1011 when the
             credential store failed. Uncaught, Starlette closes the socket with it.
     """
-    headers = list(websocket.scope.get("headers") or [])
     token = _subprotocol_token(websocket)
-    if token and "authorization" not in websocket.headers:
-        headers.append((b"authorization", f"Bearer {token}".encode("latin-1")))
-    elif not token and "authorization" not in websocket.headers and "x-api-key" not in websocket.headers:
+    if token and not _extract_bearer_token(websocket):
+        return await verify_ws_credential(websocket, token=token, required_scope=required_scope)
+    if not has_ws_credential(websocket):
         if await resolve_single_user_cookie_websocket(websocket) is not None:
             cookie_principal: AuthPrincipal = websocket.state.auth_principal
             return cookie_principal
@@ -83,7 +95,48 @@ async def resolve_ws_principal(
         if cookie_code is not None:
             raise WebSocketException(code=cookie_code, reason="cookie_auth_rejected")
         raise WebSocketException(code=WS_UNAUTHENTICATED, reason="authentication_required")
+    return await _verify(websocket, list(websocket.scope.get("headers") or []), required_scope)
 
+
+async def verify_ws_credential(
+    websocket: WebSocket,
+    *,
+    token: str | None = None,
+    api_key: str | None = None,
+    required_scope: str | None = None,
+) -> AuthPrincipal:
+    """Verify a credential found elsewhere in the handshake as ``Authorization: Bearer`` or
+    ``X-API-KEY``, on the same path as ``resolve_ws_principal``.
+
+    ``resolve_ws_principal`` uses it for the bearer subprotocol, and a route for a deprecated
+    channel; call it when no ``Authorization: Bearer`` header competes (a route shim: when
+    ``has_ws_credential`` is False). An ``Authorization`` header of another scheme (a proxy's
+    Basic auth) is replaced by the token, so the verifier sees the token.
+
+    Raises ``WebSocketException`` as ``resolve_ws_principal`` does, and 4401 when given no
+    credential: the handshake's own headers are never verified here, or a bare cookie would
+    reach the session check without its Origin check.
+    """
+    if not token and not api_key:
+        raise WebSocketException(code=WS_UNAUTHENTICATED, reason="authentication_required")
+    replaced: set[bytes] = {b"authorization"} if token else set()
+    if api_key:
+        replaced.add(b"x-api-key")
+    handshake = websocket.scope.get("headers") or []
+    headers = [(name, value) for name, value in handshake if name not in replaced]
+    try:
+        if token:
+            headers.append((b"authorization", f"Bearer {token}".encode("latin-1")))
+        if api_key:
+            headers.append((b"x-api-key", api_key.encode("latin-1")))
+    except UnicodeEncodeError:  # no header could carry it, so no such credential exists
+        raise WebSocketException(code=WS_UNAUTHENTICATED, reason="invalid_token") from None
+    return await _verify(websocket, headers, required_scope)
+
+
+async def _verify(
+    websocket: WebSocket, headers: list[tuple[bytes, bytes]], required_scope: str | None
+) -> AuthPrincipal:
     request = Request({**websocket.scope, "type": "http", "method": "GET", "headers": headers, "state": {}})
     try:
         principal = await get_auth_principal(request)
