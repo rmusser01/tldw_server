@@ -1611,10 +1611,10 @@ def _resolve_commercial_listing(
     if base_url is None:
         return api_key_value, True, ModelDiscoveryResult("unsupported")
     scope = inventory_endpoint_scope(provider_name, base_url)
+    scope_option: dict[str, Any] = {"configured_endpoint": scope} if scope is not None else {}
     return api_key_value, True, discover_provider_models(
         provider_name, api_key_value, base_url=base_url,
-        force_refresh=refresh_openrouter and provider_name == "openrouter",
-        **({"configured_endpoint": scope} if scope is not None else {}),
+        force_refresh=refresh_openrouter and provider_name == "openrouter", **scope_option,
     )
 
 

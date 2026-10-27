@@ -108,7 +108,7 @@ _CacheKey = tuple[str, str, str, ConfiguredEndpointScope | None]
 # Each entry holds the inventory and the single-model lookups checked against it (model -> result).
 _CACHE: OrderedDict[_CacheKey, tuple[float, ModelDiscoveryResult, dict[str, ModelDiscoveryResult]]] = OrderedDict()
 _FAILED: OrderedDict[_CacheKey, tuple[float, ModelDiscoveryResult]] = OrderedDict()
-_IN_FLIGHT: dict[tuple[str, str, str], Future[ModelDiscoveryResult]] = {}
+_IN_FLIGHT: dict[_CacheKey, Future[ModelDiscoveryResult]] = {}
 _CACHE_LOCK = threading.Lock()
 
 
