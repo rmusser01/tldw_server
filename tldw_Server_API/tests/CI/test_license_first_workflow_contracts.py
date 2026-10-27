@@ -1379,6 +1379,20 @@ def test_full_suite_summaries_fail_closed_on_skipped_shards(summary: str) -> Non
 
 
 @pytest.mark.unit
+def test_backend_required_enforces_http_usage_guard() -> None:
+    """TASK-13950.11: the HTTP usage guard runs in a required step that cannot soft-fail."""
+    import shlex
+
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    steps = workflow["jobs"]["backend-required"]["steps"]
+    gate = next(step for step in steps if step.get("name") == "Enforce CI contracts and code ratchets")
+    assert not gate.get("continue-on-error", False)  # nosec B101 - regression assertion
+    # Shell words, as bash reads them: a commented-out path is not an argument.
+    words = shlex.split(gate["run"].replace("\\\n", " "), comments=True)
+    assert "tldw_Server_API/tests/lint/test_http_usage_guard.py" in words  # nosec B101
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "ratchet",
     [
