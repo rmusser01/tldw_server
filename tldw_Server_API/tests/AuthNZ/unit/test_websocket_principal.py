@@ -610,6 +610,19 @@ async def test_a_client_that_leaves_before_its_first_frame_is_a_disconnect(monke
 
 
 @pytest.mark.asyncio
+async def test_a_large_scoped_jwt_in_the_auth_frame_is_still_verified(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A scoped virtual-key JWT can run to several KiB; the size cap must not refuse it as a non-auth frame."""
+    _cookie(monkeypatch, None)
+    seen = _frame_verifier(monkeypatch)
+    token = "a." + "b" * 8000 + ".c"
+    websocket, _sent = _frame_socket({"type": "auth", "token": token})
+
+    principal = await websocket_principal.resolve_ws_principal_first_frame(websocket)
+
+    assert (principal, seen) == (_ACCESS, [f"Bearer {token}"])
+
+
+@pytest.mark.asyncio
 async def test_an_oversized_first_frame_is_refused_4400_unparsed(monkeypatch: pytest.MonkeyPatch) -> None:
     """An auth frame is tiny; a large one is refused before ``json.loads`` sees it, whatever it holds."""
     _cookie(monkeypatch, None)

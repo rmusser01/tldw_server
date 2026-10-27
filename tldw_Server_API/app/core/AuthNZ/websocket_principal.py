@@ -53,8 +53,9 @@ WS_UNAUTHENTICATED = 4401
 WS_FORBIDDEN = 4403
 WS_EXPECTED_AUTH_FRAME = 4400
 FIRST_FRAME_TIMEOUT_S = 10.0
-# An auth frame is a few hundred bytes; a first frame longer than this is never parsed as one.
-AUTH_FRAME_MAX_CHARS = 4096
+# An auth frame holds one credential; a scoped virtual-key JWT can run to several KiB. A first frame
+# longer than this is never parsed as one, which bounds the work an unauthenticated client can cause.
+AUTH_FRAME_MAX_CHARS = 16384
 # Where resolve_ws_principal_first_frame leaves a cookie client's first data frame for the route.
 WS_UNREAD_FRAME = "ws_unread_frame"
 _BEARER_SUBPROTOCOL = "bearer"
