@@ -559,6 +559,26 @@ def test_workflows_ws_accepts_an_authnz_access_token_and_rejects_it_revoked(env:
     assert _outcome(env.client, url, headers={"Authorization": f"Bearer {env.revoked}"}) == "close 4401"
 
 
+def test_bearer_subprotocol_rides_with_the_handshake_api_key_as_http_headers_do(env: SimpleNamespace) -> None:
+    """The bearer subprotocol stands in for ``Authorization``, so beside an ``X-API-KEY`` it resolves as
+    the two HTTP headers do: the JWT first, the key when the JWT is refused with 401. (A first-frame
+    token stands alone; see test_voice_frame_token_is_not_rescued_by_a_handshake_api_key.)"""
+    env.workflows_db.create_run(
+        run_id="matrix-run-subprotocol-key",
+        tenant_id="default",
+        user_id=str(env.user_id),
+        inputs={},
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot={"name": "ws-auth-matrix", "version": 1, "steps": []},
+    )
+    url = "/api/v1/workflows/ws?run_id=matrix-run-subprotocol-key"
+    revoked = ["bearer", env.revoked]
+
+    assert _outcome(env.client, url, subprotocols=revoked) == "close 4401"
+    assert _accepted_subprotocol(env.client, url, headers={"X-API-KEY": env.api_key}, subprotocols=revoked) == "bearer"
+
+
 def _deprecated_request(env: SimpleNamespace, route: str, channel: str, *, valid: bool) -> tuple[str, dict[str, object]]:
     """The credential, and the websocket_connect arguments that send it on ``channel``."""
     url = ROUTES[route][0]
