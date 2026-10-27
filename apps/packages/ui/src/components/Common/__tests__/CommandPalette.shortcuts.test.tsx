@@ -494,4 +494,21 @@ describe("CommandPalette shortcut hints", () => {
 
     expect(screen.getByTestId("current-route")).toHaveTextContent("/mcp-hub")
   })
+  it("names the side panel's Ctrl+E mode 'chat with current page', like its menu and help sheet (XS-08)", async () => {
+    render(
+      <MemoryRouter>
+        <CommandPalette scope="sidepanel" onToggleRag={vi.fn()} />
+      </MemoryRouter>
+    )
+
+    window.dispatchEvent(new CustomEvent("tldw:open-command-palette"))
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    expect(
+      screen.getByRole("option", { name: /Toggle chat with current page/i })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("option", { name: /Toggle Search & Context/i })
+    ).not.toBeInTheDocument()
+  })
 })

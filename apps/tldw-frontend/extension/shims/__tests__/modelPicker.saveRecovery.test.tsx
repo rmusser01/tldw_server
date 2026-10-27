@@ -61,6 +61,7 @@ if (!inlineSource) throw new Error("Missing Compact inline composer")
 const compactInline = new Function("React", "ModelSelect", "normalizeChatModelId", "findUnavailableChatModel",
   ts.transpileModule(`return function(selectedModel) {
     const isConnectionReady = true, isProMode = false, streaming = false;
+    const modelPickerRef = { current: null };
     const personaSubmitDisabledReason = null;
     const availableChatModelIds = new Set(["openai:new-model"]);
     const form = { errors: {} };
@@ -97,7 +98,8 @@ describe.each(["full", "compact"] as const)("actual %s picker save recovery", su
       return write.call(this, key, value)
     })
     fireEvent.click(choice)
-    if (surface === "compact") expect(screen.queryByRole("menuitem", { name: /New model/i })).not.toBeInTheDocument()
+    // The compact chip stays and names the chosen model (XS-02).
+    if (surface === "compact") expect(screen.getByTestId("chat-model-select")).toHaveTextContent(/New model|new-model/)
     expect(await screen.findByRole("alert")).toHaveTextContent("Your preference could not be saved")
     expect(window.localStorage.getItem("selectedModel")).toBe(JSON.stringify("openai:old-model"))
     const revision = useStoreMessageOption.getState().selectedModelRevision

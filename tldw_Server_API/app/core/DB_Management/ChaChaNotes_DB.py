@@ -982,6 +982,12 @@ class CharactersRAGDB:
             self, *, conversation_id: str, sync_client_id: str, object_revision: int, object_hash: str
         ) -> bool: ...
 
+        def tombstone_unsynced_conversation_from_sync(
+            self, *, conversation_id: str, sync_client_id: str, object_revision: int, object_hash: str
+        ) -> str: ...
+
+        def unsynced_conversation_is_foreign(self, *, conversation_id: str, sync_client_id: str) -> bool: ...
+
         def update_conversation(
             self, conversation_id: str, update_data: dict[str, Any], expected_version: int
         ) -> bool | None: ...
@@ -1028,6 +1034,10 @@ class CharactersRAGDB:
             object_revision: int,
             object_hash: str,
         ) -> str: ...
+
+        def unsynced_message_is_foreign(
+            self, *, stable_message_id: str, sync_client_id: str, object_hash: str
+        ) -> bool: ...
 
         def get_message_by_id(
             self, message_id: str, include_deleted: bool = False, *, strict_images: bool = False
@@ -1147,7 +1157,9 @@ class CharactersRAGDB:
 
         def count_notes(self, include_deleted: bool = False, only_deleted: bool = False) -> int: ...
 
-        def count_notes_matching_keywords(self, search_term: str | None, keyword_tokens: list[str]) -> int: ...
+        def count_notes_matching_keywords(
+            self, search_term: str | None, keyword_tokens: list[str], match: str = "all"
+        ) -> int: ...
 
         def get_conversation_by_id(
             self, conversation_id: str, include_deleted: bool = False
@@ -1260,6 +1272,7 @@ class CharactersRAGDB:
             keyword_tokens: list[str],
             limit: int = 10,
             offset: int = 0,
+            match: str = "all",
         ) -> list[dict[str, Any]]: ...
 
         def soft_delete_conversation(self, conversation_id: str, expected_version: int) -> bool | None: ...
@@ -1292,6 +1305,16 @@ class CharactersRAGDB:
             conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
             semantic_dataset_id: str | None = None,
         ) -> bool: ...
+
+        def tombstone_unsynced_note_from_sync(
+            self,
+            *,
+            note_id: str,
+            sync_client_id: str,
+            object_revision: int,
+            object_hash: str,
+            conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        ) -> str: ...
 
         def unlink_collection_from_keyword(self, collection_id: int, keyword_id: int) -> bool: ...
 
@@ -47417,6 +47440,8 @@ for _conversation_store_method in (
     "add_conversation",
     "upsert_conversation_from_sync",
     "tombstone_conversation_from_sync",
+    "tombstone_unsynced_conversation_from_sync",
+    "unsynced_conversation_is_foreign",
     "get_conversation_by_id",
     "get_conversation_by_source_ref",
     "conversation_title_exists",
@@ -47514,6 +47539,7 @@ for _message_store_method in (
     "append_message_from_sync",
     "tombstone_message_from_sync",
     "tombstone_unsynced_message_from_sync",
+    "unsynced_message_is_foreign",
     "get_messages_by_sync_stable_id",
     "_insert_message_images",
     "append_message_image",
@@ -47585,6 +47611,7 @@ for _note_store_method in (
     "get_note_counts_for_keywords",
     "upsert_note_from_sync",
     "tombstone_note_from_sync",
+    "tombstone_unsynced_note_from_sync",
 ):
     setattr(
         CharactersRAGDB,

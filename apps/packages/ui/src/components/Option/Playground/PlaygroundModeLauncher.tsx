@@ -83,33 +83,35 @@ export const PlaygroundModeLauncher: React.FC<PlaygroundModeLauncherProps> =
         <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
           {t("playground:composer.modes", "Modes")}
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            const next = !compareModeActive
-            onToggleCompare()
-            onModeAnnouncement(
-              next
-                ? t(
-                    "playground:composer.modeCompareEnabled",
-                    "Compare mode enabled."
-                  )
-                : t(
-                    "playground:composer.modeCompareDisabled",
-                    "Compare mode disabled."
-                  )
-            )
-            onOpenChange(false)
-          }}
-          disabled={!compareFeatureEnabled}
-          className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm text-text transition hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50">
-          <span>
-            {t("playground:composer.modeCompare", "Compare responses")}
-          </span>
-          <span className="text-xs text-text-muted">
-            {compareModeActive ? t("common:on", "On") : t("common:off", "Off")}
-          </span>
-        </button>
+        {/* Compare stays hidden until it is verified (owner decision D4). */}
+        {compareFeatureEnabled ? (
+          <button
+            type="button"
+            onClick={() => {
+              const next = !compareModeActive
+              onToggleCompare()
+              onModeAnnouncement(
+                next
+                  ? t(
+                      "playground:composer.modeCompareEnabled",
+                      "Compare mode enabled."
+                    )
+                  : t(
+                      "playground:composer.modeCompareDisabled",
+                      "Compare mode disabled."
+                    )
+              )
+              onOpenChange(false)
+            }}
+            className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm text-text transition hover:bg-surface2">
+            <span>
+              {t("playground:composer.modeCompare", "Compare responses")}
+            </span>
+            <span className="text-xs text-text-muted">
+              {compareModeActive ? t("common:on", "On") : t("common:off", "Off")}
+            </span>
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={() => {

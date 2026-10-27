@@ -61,7 +61,9 @@ vi.mock("@/components/Common/Button", () => ({
 }));
 
 vi.mock("../playground-features", () => ({
-  ParameterPresets: () => <div data-testid="parameter-presets" />,
+  ParameterPresets: ({ compact }: { compact?: boolean }) => (
+    <div data-testid="parameter-presets" data-compact={String(Boolean(compact))} />
+  ),
   ParameterPresetsDropdown: () => (
     <div data-testid="parameter-presets-dropdown" />
   ),
@@ -399,6 +401,34 @@ describe("calm composer", () => {
   it("does not offer web search without the server capability", () => {
     render(<ToolbarHarness optionsExpanded hasWebSearch={false} />);
     expect(screen.queryByRole("button", { name: "Web search" })).toBeNull();
+  });
+
+  // CC-09: the Pro presets read as named styles, not four bare icons; on a
+  // phone they stay compact (named for assistive tech) so Tools fits.
+  it("names the Pro generation-style presets inside Tools", () => {
+    const { unmount } = render(<ToolbarHarness isProMode optionsExpanded />);
+    expect(screen.getByTestId("parameter-presets")).toHaveAttribute(
+      "data-compact",
+      "false",
+    );
+    unmount();
+
+    render(<ToolbarHarness isProMode isMobile optionsExpanded />);
+    expect(screen.getByTestId("parameter-presets")).toHaveAttribute(
+      "data-compact",
+      "true",
+    );
+  });
+
+  // CC-11: '@' mentions work only in the extension with tab mentions on.
+  it("names '@' mentions in the shortcut hint only where they work", () => {
+    const { unmount } = render(<ToolbarHarness />);
+    expect(screen.getByText("/ commands")).toBeVisible();
+    expect(screen.queryByText(/@ mentions/)).toBeNull();
+    unmount();
+
+    render(<ToolbarHarness mentionsAvailable />);
+    expect(screen.getByText("/ commands · @ mentions")).toBeVisible();
   });
 });
 

@@ -1275,7 +1275,7 @@ export const CurrentChatModelSettings = ({
                   type="submit"
                   aria-busy={saving}
                   disabled={saving || conversationDirty || conversationPending || !sceneReady}
-                  className="inline-flex w-full items-center justify-center rounded-md border border-transparent bg-primary px-3 py-2 min-h-[40px] text-sm font-medium text-surface shadow-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-focus)] disabled:opacity-50">
+                  className="inline-flex w-full items-center justify-center rounded-md border border-transparent bg-primary px-3 py-2 min-h-[40px] text-sm font-medium text-surface shadow-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:opacity-50">
                   {saving ? t("saving", "Saving...") : t("save", "Save")}
                 </button>
               </div>

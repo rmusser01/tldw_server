@@ -7,7 +7,6 @@ vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (_key: string, fal
 const errors = vi.hoisted(() => new Map<string, () => void>())
 vi.mock("antd", () => ({ Image: (props: React.ImgHTMLAttributes<HTMLImageElement>) => {
   errors.set(props.src!, props.onError as unknown as () => void)
-  // eslint-disable-next-line @next/next/no-img-element -- Native img delivers the browser error event in this component test.
   return <img {...props} />
 } }))
 

@@ -115,16 +115,16 @@ const continueChatModeDefinition: ChatModeDefinition<ContinueChatModeParams> = {
     }
 
     const templatesActive = !!ctx.selectedSystemPrompt
+    // Without an actor message this is the same array, so use it as returned:
+    // clearing and refilling it in place would send an empty conversation.
     const nextHistory = await maybeInjectActorMessage(
       applicationChatHistory,
       ctx.actorSettings || null,
       templatesActive
     )
-    applicationChatHistory.length = 0
-    applicationChatHistory.push(...nextHistory)
 
     return {
-      chatHistory: applicationChatHistory,
+      chatHistory: nextHistory,
       promptId: ctx.selectedSystemPrompt,
       promptContent
     }

@@ -5,6 +5,8 @@ import { useStorage } from "@plasmohq/storage/hook"
 import { useTranslation } from "react-i18next"
 import {
   DEFAULT_CHAT_SETTINGS,
+  SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT,
+  SIDEPANEL_STICKY_CHAT_INPUT_KEY,
   type ChatRichTextColorOption,
   type ChatRichTextFontOption,
   type ChatRichTextMode,
@@ -16,6 +18,7 @@ import { useChatSettings } from "@/hooks/useChatSettings"
 import { useSetting } from "@/hooks/useSetting"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { toBase64 } from "@/libs/to-base64"
+import { isExtensionRuntime } from "@/utils/browser-runtime"
 import {
   CHAT_BACKGROUND_IMAGE_MAX_BASE64_LENGTH,
   CHAT_BACKGROUND_IMAGE_MAX_SIZE_MB,
@@ -62,6 +65,13 @@ export const ChatSettings = () => {
     "quickChatStrictDocsOnly",
     true
   )
+  const [sidepanelStickyChatInput, setSidepanelStickyChatInput] =
+    useStorage<boolean>(
+      SIDEPANEL_STICKY_CHAT_INPUT_KEY,
+      SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT
+    )
+  // The web app shares this screen but has no side panel.
+  const hasSidepanel = isExtensionRuntime()
   const [quickChatDocsNamespace, setQuickChatDocsNamespace] = useStorage<string>(
     "quickChatDocsIndexNamespace",
     QUICK_CHAT_DEFAULT_PROJECT_DOCS_NAMESPACE
@@ -780,6 +790,29 @@ export const ChatSettings = () => {
           />
         }
       />
+      {hasSidepanel && (
+        <SettingRow
+          label={t(
+            "generalSettings.settings.sidepanelStickyChatInput.label",
+            "Keep the side panel chat input visible while scrolling"
+          )}
+          {...getResetProps(
+            sidepanelStickyChatInput,
+            SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT,
+            setSidepanelStickyChatInput
+          )}
+          control={
+            <Switch
+              checked={sidepanelStickyChatInput}
+              onChange={setSidepanelStickyChatInput}
+              aria-label={t(
+                "generalSettings.settings.sidepanelStickyChatInput.label",
+                "Keep the side panel chat input visible while scrolling"
+              )}
+            />
+          }
+        />
+      )}
       <SettingRow
         label={t("generalSettings.settings.menuDensity.label", "Menu density")}
         {...getResetProps(

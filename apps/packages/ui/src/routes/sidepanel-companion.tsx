@@ -1,5 +1,7 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
+import { Link } from "react-router-dom"
+import { MessageSquare } from "lucide-react"
 
 import { RouteErrorBoundary } from "@/components/Common/RouteErrorBoundary"
 import { CompanionHomeShell } from "@/components/Option/CompanionHome"
@@ -81,6 +83,16 @@ const SidepanelCompanion = () => {
       >
         <SidepanelHeaderSimple activeTitle={t("option:header.companion", "Companion")} />
         <div className="pt-11">
+          {/* Chat stays one tap away above the dashboard (XS-17). */}
+          <div className="px-3 pt-3">
+            <Link
+              to="/?view=chat"
+              className="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-border bg-bg px-3 text-sm font-medium text-text transition-colors hover:bg-surface-hover"
+            >
+              <MessageSquare className="h-4 w-4" aria-hidden="true" />
+              {t("sidepanel:companion.openChat", "Open chat")}
+            </Link>
+          </div>
           {banner ? (
             <div className="px-3 pt-3">
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">

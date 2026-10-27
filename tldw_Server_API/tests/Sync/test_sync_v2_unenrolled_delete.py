@@ -9,8 +9,13 @@ write for the user fail with 503.
 
 The rule under test:
 
-* a row with no Sync history is deleted directly, exactly as without a profile,
-  and nothing is appended to the log;
+* a row with no Sync history is deleted directly, exactly as without a profile;
+* the server then publishes a tombstone of it that carries the id and no
+  content, recorded as already applied (owner decision Q8, 2026-10-19), so a
+  device that holds a copy outside Sync deletes it too, and one that never had
+  the row applies it as a no-op;
+* nothing is published while another conflict blocks the dataset, and the
+  direct delete still works;
 * a row with Sync history is still tombstoned through the log and reaches the
   other devices;
 * a dataset already blocked by the old behaviour recovers on the next
@@ -19,6 +24,7 @@ The rule under test:
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -37,16 +43,18 @@ from tldw_Server_API.app.core.Sync.v2.models import (
 )
 from tldw_Server_API.app.core.Sync.v2.server_origin import (
     SERVER_ORIGIN_DEVICE_ID,
+    AppliedServerOriginObject,
     SyncServerOriginMutationNotSupportedError,
     canonical_payload_hash,
     capture_server_origin_mutation,
 )
-from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
+from tldw_Server_API.app.core.Sync.v2.service import SyncPushResult, SyncV2Service
 from tldw_Server_API.tests.Sync.test_sync_v2_native_history_capture import (
     CHAT_ID,
     INPUT_ID,
     REPLY_ID,
     USER,
+    _active_profile,
     _admit,
     _block_dataset,
     _client,
@@ -98,6 +106,47 @@ def _blocker(service: SyncV2Service):
     return service.store.get_unresolved_materialization_conflict(_dataset_id(service))
 
 
+@pytest.fixture()
+def replica(tmp_path: Path) -> Iterator[tuple[SyncV2Service, CharactersRAGDB]]:
+    """Another replica that runs the server's own projection: its own Sync store and chat database."""
+    database = CharactersRAGDB(db_path=str(tmp_path / "replica" / "ChaChaNotes.db"), client_id=USER)
+    projection = CharactersRAGDB(db_path=database.db_path_str, client_id=USER)
+    try:
+        service = _active_profile(SyncDatabase(sqlite_path=tmp_path / "replica" / "Sync_v2.db"), projection)
+        yield service, database
+    finally:
+        projection.close_all_connections()
+        database.close_all_connections()
+
+
+def _deliver(replica_service: SyncV2Service, envelopes: list[SyncEnvelope]) -> SyncPushResult:
+    """Hand pulled envelopes to the replica, which projects them under its own rules."""
+    dataset_id = _dataset_id(replica_service)
+    return replica_service.push(
+        user_id=USER,
+        dataset_id=dataset_id,
+        device_id="offline-device",
+        envelopes=[
+            SyncEnvelopeCreate(
+                dataset_id=dataset_id,
+                client_envelope_id=f"replica-{item.client_envelope_id}",
+                domain=item.domain,
+                operation=item.operation,
+                object_id=item.object_id,
+                device_id="offline-device",
+                client_sequence=index,
+                object_revision=item.object_revision,
+                parent_id=item.parent_id,
+                payload=dict(item.payload),
+                payload_hash=item.payload_hash,
+                deleted=item.deleted,
+                encryption_metadata={"policy": "server_trusted_v1"},
+            )
+            for index, item in enumerate(envelopes, start=1)
+        ],
+    )
+
+
 def _has_sync_history(service: SyncV2Service, domain: str, object_id: str) -> bool:
     dataset_id = _dataset_id(service)
     return (
@@ -107,7 +156,11 @@ def _has_sync_history(service: SyncV2Service, domain: str, object_id: str) -> bo
 
 
 def _apply_to_replica(replica: CharactersRAGDB, envelopes: list[SyncEnvelope]) -> None:
-    """Project pulled chat envelopes, tombstones included, the way another device would."""
+    """Project pulled chat envelopes, tombstones included, the way another device would.
+
+    A tombstone with no base names a row the server never published; the
+    device applies it under the satisfied rule (§5.4), as the materializer does.
+    """
     for envelope in envelopes:
         payload = envelope.payload
         key = (envelope.domain, envelope.operation)
@@ -134,12 +187,26 @@ def _apply_to_replica(replica: CharactersRAGDB, envelopes: list[SyncEnvelope]) -
                 payload_hash=envelope.payload_hash or "",
                 parent_message_id=payload.get("parent_message_id"),
             )
+        elif key == ("chat.message", "tombstone") and envelope.base_object_hash is None:
+            replica.tombstone_unsynced_message_from_sync(
+                stable_message_id=envelope.object_id,
+                sync_client_id=str(replica.client_id),
+                object_revision=revision,
+                object_hash=envelope.payload_hash or "",
+            )
         elif key == ("chat.message", "tombstone"):
             replica.tombstone_message_from_sync(
                 stable_message_id=envelope.object_id,
                 sync_client_id=str(replica.client_id),
                 object_revision=revision,
                 object_hash=envelope.base_object_hash or "",
+            )
+        elif key == ("chat.conversation", "tombstone") and envelope.base_object_hash is None:
+            replica.tombstone_unsynced_conversation_from_sync(
+                conversation_id=envelope.object_id,
+                sync_client_id=str(replica.client_id),
+                object_revision=revision,
+                object_hash=envelope.payload_hash or "",
             )
         elif key == ("chat.conversation", "tombstone"):
             replica.tombstone_conversation_from_sync(
@@ -150,6 +217,23 @@ def _apply_to_replica(replica: CharactersRAGDB, envelopes: list[SyncEnvelope]) -
             )
         else:
             raise AssertionError(f"unexpected envelope {envelope.domain}/{envelope.operation}")
+
+
+def _id_only_tombstones(service: SyncV2Service) -> list[tuple[str, str, dict[str, object]]]:
+    """The id-only tombstones the server published for rows it deleted directly."""
+    return [
+        (item.domain, item.object_id, dict(item.payload))
+        for item in _pull(service)
+        if item.operation == "tombstone" and item.base_object_hash is None and item.device_id == SERVER_ORIGIN_DEVICE_ID
+    ]
+
+
+def _message_tombstone_payload(message_id: str, chat_id: str) -> dict[str, object]:
+    return {"id": message_id, "deleted": True, "conversation_id": chat_id, "client_id": USER, "owner_user_id": USER}
+
+
+def _chat_tombstone_payload(chat_id: str) -> dict[str, object]:
+    return {"id": chat_id, "deleted": True, "client_id": USER, "owner_user_id": USER}
 
 
 def _leave_the_old_bug_behind(service: SyncV2Service, message_id: str, chat_id: str) -> SyncEnvelope:
@@ -212,11 +296,11 @@ def _leave_the_old_bug_behind(service: SyncV2Service, message_id: str, chat_id: 
 
 
 # ---------------------------------------------------------------------------
-# A row Sync never saw is deleted directly
+# A row Sync never saw is deleted directly, and an id-only tombstone is published
 # ---------------------------------------------------------------------------
 
 
-def test_deleting_a_message_sync_never_saw_succeeds_and_appends_nothing(
+def test_deleting_a_message_sync_never_saw_deletes_it_and_publishes_an_id_only_tombstone(
     client: TestClient,
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
@@ -228,10 +312,18 @@ def test_deleting_a_message_sync_never_saw_succeeds_and_appends_nothing(
     assert deleted.status_code == 204, deleted.text
     assert _is_deleted(chacha_db, LEGACY_QUESTION)
     assert not _is_deleted(chacha_db, LEGACY_ANSWER)
-    assert _log(sync_service) == []
+    assert _log(sync_service) == [("chat.message", "tombstone", LEGACY_QUESTION, "applied")]
     assert sync_service.store.list_conflicts(_dataset_id(sync_service)) == []
-    assert not _has_sync_history(sync_service, "chat.message", LEGACY_QUESTION)
-    assert _pull(sync_service) == []
+    assert _blocker(sync_service) is None
+    state = sync_service.store.get_object_state(_dataset_id(sync_service), "chat.message", LEGACY_QUESTION)
+    assert (state.deleted, state.object_revision) == (True, 1)
+    (tombstone,) = _pull(sync_service)
+    assert (tombstone.device_id, tombstone.parent_id, tombstone.object_revision, tombstone.base_server_cursor) == (
+        SERVER_ORIGIN_DEVICE_ID, LEGACY_CHAT, 1, None,
+    )
+    # The id, never the content.
+    assert tombstone.payload == _message_tombstone_payload(LEGACY_QUESTION, LEGACY_CHAT)
+    assert tombstone.routing_metadata["server_owner_user_id"] == USER
 
 
 def test_the_dataset_still_takes_writes_after_deleting_a_message_sync_never_saw(
@@ -254,12 +346,12 @@ def test_the_dataset_still_takes_writes_after_deleting_a_message_sync_never_saw(
     assert {item[3] for item in _log(sync_service)} == {"applied"}
 
 
-def test_deleting_a_chat_sync_never_saw_succeeds_and_appends_nothing(
+def test_deleting_a_chat_sync_never_saw_publishes_id_only_tombstones_messages_first(
     client: TestClient,
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
 ) -> None:
-    """Neither the messages nor the chat reach the log: no device ever held them."""
+    """Every row is deleted directly and then published by id: the messages, then the chat."""
     _legacy_chat(chacha_db, messages=(LEGACY_QUESTION, LEGACY_ANSWER))
 
     deleted = _delete_chat(client, chacha_db, LEGACY_CHAT)
@@ -268,14 +360,19 @@ def test_deleting_a_chat_sync_never_saw_succeeds_and_appends_nothing(
     assert chacha_db.get_conversation_by_id(LEGACY_CHAT) is None
     assert chacha_db.get_conversation_by_id(LEGACY_CHAT, include_deleted=True)["deleted"] in (1, True)
     assert _is_deleted(chacha_db, LEGACY_QUESTION) and _is_deleted(chacha_db, LEGACY_ANSWER)
-    assert _log(sync_service) == []
+    assert _id_only_tombstones(sync_service) == [
+        ("chat.message", LEGACY_QUESTION, _message_tombstone_payload(LEGACY_QUESTION, LEGACY_CHAT)),
+        ("chat.message", LEGACY_ANSWER, _message_tombstone_payload(LEGACY_ANSWER, LEGACY_CHAT)),
+        ("chat.conversation", LEGACY_CHAT, _chat_tombstone_payload(LEGACY_CHAT)),
+    ]
+    assert {item[3] for item in _log(sync_service)} == {"applied"}
     assert sync_service.store.list_conflicts(_dataset_id(sync_service)) == []
-    assert not _has_sync_history(sync_service, "chat.conversation", LEGACY_CHAT)
+    assert sync_service.store.get_object_state(_dataset_id(sync_service), "chat.conversation", LEGACY_CHAT).deleted
     # The dataset is still healthy.
     assert client.post("/api/v1/chats/", json={"title": "After the delete"}).status_code == 201
 
 
-def test_deleting_an_empty_chat_sync_never_saw_appends_nothing(
+def test_deleting_an_empty_chat_sync_never_saw_publishes_only_the_chat(
     client: TestClient,
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
@@ -286,7 +383,7 @@ def test_deleting_an_empty_chat_sync_never_saw_appends_nothing(
 
     assert deleted.status_code == 204, deleted.text
     assert chacha_db.get_conversation_by_id(LEGACY_CHAT) is None
-    assert _log(sync_service) == []
+    assert _log(sync_service) == [("chat.conversation", "tombstone", LEGACY_CHAT, "applied")]
 
 
 def test_a_message_whose_capture_was_lost_can_be_deleted(
@@ -313,7 +410,7 @@ def test_a_message_whose_capture_was_lost_can_be_deleted(
 
     assert deleted.status_code == 204, deleted.text
     assert _is_deleted(chacha_db, INPUT_ID)
-    assert _log(sync_service) == before
+    assert _log(sync_service) == [*before, ("chat.message", "tombstone", INPUT_ID, "applied")]
     assert _blocker(sync_service) is None
 
 
@@ -340,6 +437,7 @@ def test_deleting_a_published_chat_with_rows_sync_never_saw_tombstones_only_the_
 
         assert deleted.status_code == 204, deleted.text
         assert _log(sync_service)[3:] == [
+            ("chat.message", "tombstone", "unpublished-save", "applied"),
             ("chat.message", "tombstone", INPUT_ID, "applied"),
             ("chat.message", "tombstone", REPLY_ID, "applied"),
             ("chat.conversation", "tombstone", CHAT_ID, "applied"),
@@ -347,10 +445,12 @@ def test_deleting_a_published_chat_with_rows_sync_never_saw_tombstones_only_the_
         assert sync_service.store.list_conflicts(_dataset_id(sync_service)) == []
         for message_id in (INPUT_ID, REPLY_ID, "unpublished-save"):
             assert _is_deleted(chacha_db, message_id)
-        assert not _has_sync_history(sync_service, "chat.message", "unpublished-save")
+        assert _id_only_tombstones(sync_service) == [
+            ("chat.message", "unpublished-save", _message_tombstone_payload("unpublished-save", CHAT_ID)),
+        ]
         assert chacha_db.get_conversation_by_id(CHAT_ID) is None
 
-        # The other device receives exactly the deletes of what it holds.
+        # The other device receives the deletes, and the one of a row it never had is a no-op.
         _apply_to_replica(replica, _pull(sync_service)[3:])
         assert replica.get_conversation_by_id(CHAT_ID) is None
         assert replica.get_messages_for_conversation(CHAT_ID) == []
@@ -359,12 +459,12 @@ def test_deleting_a_published_chat_with_rows_sync_never_saw_tombstones_only_the_
     assert client.post("/api/v1/chats/", json={"title": "After the delete"}).status_code == 201
 
 
-def test_deleting_a_chat_sync_never_saw_with_a_published_message_tombstones_only_that_message(
+def test_deleting_a_chat_sync_never_saw_with_a_published_message_publishes_the_rest_by_id(
     client: TestClient,
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
 ) -> None:
-    """A chat that predates the profile, continued under it: only the new message is in the log."""
+    """A chat that predates the profile, continued under it: the old rows follow by id, the chat last."""
     _legacy_chat(chacha_db, messages=(LEGACY_QUESTION,))
     sent = client.post(f"/api/v1/chats/{LEGACY_CHAT}/messages", json={"role": "user", "content": "sent under the profile"})
     assert sent.status_code == 201, sent.text
@@ -376,7 +476,9 @@ def test_deleting_a_chat_sync_never_saw_with_a_published_message_tombstones_only
     assert deleted.status_code == 204, deleted.text
     assert _log(sync_service) == [
         ("chat.message", "append", published_id, "applied"),
+        ("chat.message", "tombstone", LEGACY_QUESTION, "applied"),
         ("chat.message", "tombstone", published_id, "applied"),
+        ("chat.conversation", "tombstone", LEGACY_CHAT, "applied"),
     ]
     assert sync_service.store.list_conflicts(_dataset_id(sync_service)) == []
     assert _is_deleted(chacha_db, LEGACY_QUESTION) and _is_deleted(chacha_db, published_id)
@@ -398,7 +500,7 @@ def test_deleting_one_unpublished_message_leaves_its_published_neighbours_alone(
     assert deleted.status_code == 204, deleted.text
     assert _is_deleted(chacha_db, "unpublished-save")
     assert not _is_deleted(chacha_db, INPUT_ID) and not _is_deleted(chacha_db, REPLY_ID)
-    assert _log(sync_service) == before
+    assert _log(sync_service) == [*before, ("chat.message", "tombstone", "unpublished-save", "applied")]
     # The chat is enrolled, so its row is not touched outside the log.
     state = sync_service.store.get_object_state(_dataset_id(sync_service), "chat.conversation", CHAT_ID)
     assert chacha_db.get_conversation_by_id(CHAT_ID)["version"] == state.object_revision
@@ -477,7 +579,7 @@ def test_a_row_sync_never_saw_can_be_deleted_while_another_conflict_blocks_the_d
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
 ) -> None:
-    """A direct delete appends nothing, so an unrelated unresolved conflict does not stop it."""
+    """An unrelated unresolved conflict does not stop a direct delete; its tombstone is not published then."""
     _send_turn(client)
     _legacy_chat(chacha_db, messages=(LEGACY_QUESTION,))
     _block_dataset(sync_service)
@@ -488,6 +590,7 @@ def test_a_row_sync_never_saw_can_be_deleted_while_another_conflict_blocks_the_d
 
     assert direct.status_code == 204, direct.text
     assert _is_deleted(chacha_db, LEGACY_QUESTION)
+    assert not _has_sync_history(sync_service, "chat.message", LEGACY_QUESTION)
     # A published row needs a tombstone, which the blocked dataset cannot take.
     assert published.status_code == 503, published.text
     assert published.json()["detail"]["error_code"] == "sync_server_origin_append_failed"
@@ -596,20 +699,18 @@ def test_retrying_the_lost_admission_after_its_row_was_deleted_is_refused_withou
     assert client.post("/api/v1/chats/", json={"title": "After the retry"}).status_code == 201
 
 
-def test_a_device_that_publishes_its_own_copy_of_a_directly_deleted_row_does_not_block_the_dataset(
+def test_a_device_that_later_publishes_its_own_copy_of_a_directly_deleted_row_is_told_it_was_deleted(
     client: TestClient,
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
 ) -> None:
-    """Known limit of a direct delete, pinned so that a change to it is deliberate.
+    """A device can hold a row under the same id without Sync. Its append now meets the published delete.
 
-    A device can hold a row under the same id without Sync (the append
-    materializer adopts a matching row that has no Sync metadata). The server's
-    delete of such a row is not in the log, so the device's later append
-    enrolls the message for the other devices while the server row stays
-    deleted. The same happens to a row deleted before the profile existed.
-    Nothing conflicts and the dataset stays healthy. See §5.2 of
-    Docs/Design/2026-10-04-d7-sync-v2-native-history.md.
+    Before the id-only tombstone, the server's delete was not in the log, so the
+    device's later append enrolled the message for every other device while the
+    server row stayed deleted (§5.2, route 2). Now the tombstone is the object's
+    head: the append is a push conflict, which blocks nothing, and the device
+    pulls the delete instead.
     """
     _legacy_chat(chacha_db, messages=(LEGACY_QUESTION,))
     assert _delete_message(client, chacha_db, LEGACY_QUESTION).status_code == 204
@@ -637,12 +738,127 @@ def test_a_device_that_publishes_its_own_copy_of_a_directly_deleted_row_does_not
         ],
     )
 
-    assert [item.apply_status for item in pushed.accepted] == ["applied"]
-    assert pushed.conflicts == [] and pushed.rejected == []
+    assert pushed.accepted == [] and pushed.rejected == []
+    assert [item.client_envelope_id for item in pushed.conflicts] == ["env-device-own-copy"]
     assert _blocker(sync_service) is None
     assert _is_deleted(chacha_db, LEGACY_QUESTION)
-    assert sync_service.store.get_object_state(dataset_id, "chat.message", LEGACY_QUESTION).deleted is False
+    assert sync_service.store.get_object_state(dataset_id, "chat.message", LEGACY_QUESTION).deleted is True
+    assert [(item.operation, item.object_id) for item in _pull(sync_service)] == [("tombstone", LEGACY_QUESTION)]
     assert client.post("/api/v1/chats/", json={"title": "After the push"}).status_code == 201
+
+
+def test_a_row_another_dataset_of_the_owner_holds_is_not_published_by_id(
+    client: TestClient,
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    """The id-only tombstone is for rows Sync never saw. This one came from another dataset (§5.2, route 3).
+
+    The default dataset has no history for it, so the route still deletes it
+    directly, as before. But a replica that holds the row through the other
+    dataset would read a tombstone of it in the default dataset as one that is
+    not its to apply, and record a conflict there. So nothing is published.
+    """
+    sync_service.enroll_dataset(user_id=USER, dataset_id="second-dataset", domains=["chat.conversation", "chat.message"])
+    pushed = sync_service.push(
+        user_id=USER,
+        dataset_id="second-dataset",
+        device_id="offline-device",
+        envelopes=[
+            SyncEnvelopeCreate(
+                dataset_id="second-dataset",
+                client_envelope_id="env-second-chat",
+                domain="chat.conversation",
+                operation="upsert",
+                object_id="second-chat",
+                device_id="offline-device",
+                client_sequence=1,
+                object_revision=1,
+                payload={"title": "From the other dataset"},
+                payload_hash="sha256:second-chat",
+                encryption_metadata={"policy": "server_trusted_v1"},
+            ),
+            SyncEnvelopeCreate(
+                dataset_id="second-dataset",
+                client_envelope_id="env-second-message",
+                domain="chat.message",
+                operation="append",
+                object_id="second-message",
+                device_id="offline-device",
+                client_sequence=2,
+                object_revision=1,
+                parent_id="second-chat",
+                payload={"conversation_id": "second-chat", "sender": "user", "content": "held by the other dataset"},
+                payload_hash="sha256:second-message",
+                encryption_metadata={"policy": "server_trusted_v1"},
+            ),
+        ],
+    )
+    assert [item.apply_status for item in pushed.accepted] == ["applied", "applied"], (pushed.rejected, pushed.conflicts)
+
+    deleted = _delete_message(client, chacha_db, "second-message")
+
+    assert deleted.status_code == 204, deleted.text
+    assert _is_deleted(chacha_db, "second-message")
+    assert _log(sync_service) == []
+    assert not _has_sync_history(sync_service, "chat.message", "second-message")
+    assert _blocker(sync_service) is None
+
+
+def test_deleting_the_row_again_publishes_nothing_twice(
+    client: TestClient,
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    _legacy_chat(chacha_db, messages=(LEGACY_QUESTION,))
+    version = chacha_db.get_message_by_id(LEGACY_QUESTION)["version"]
+    assert client.delete(f"/api/v1/messages/{LEGACY_QUESTION}", params={"expected_version": version}).status_code == 204
+    before = _log(sync_service)
+
+    again = client.delete(f"/api/v1/messages/{LEGACY_QUESTION}", params={"expected_version": version})
+
+    assert again.status_code == 404, again.text
+    assert _log(sync_service) == before == [("chat.message", "tombstone", LEGACY_QUESTION, "applied")]
+
+
+def test_a_device_that_never_had_the_row_applies_the_id_only_tombstone_as_a_no_op(
+    client: TestClient,
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+    replica: tuple[SyncV2Service, CharactersRAGDB],
+) -> None:
+    replica_service, replica_db = replica
+    _legacy_chat(chacha_db, messages=(LEGACY_QUESTION,))
+    assert _delete_chat(client, chacha_db, LEGACY_CHAT).status_code == 204
+
+    delivered = _deliver(replica_service, _pull(sync_service))
+
+    assert delivered.conflicts == [] and delivered.rejected == []
+    assert [item.apply_status for item in delivered.accepted] == ["applied", "applied"]
+    assert replica_db.get_message_by_id(LEGACY_QUESTION, include_deleted=True) is None
+    assert replica_db.get_conversation_by_id(LEGACY_CHAT, include_deleted=True) is None
+    assert _blocker(replica_service) is None
+
+
+def test_a_device_that_kept_a_copy_deletes_it_when_the_id_only_tombstone_arrives(
+    client: TestClient,
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+    replica: tuple[SyncV2Service, CharactersRAGDB],
+) -> None:
+    """The point of publishing: both sides held the chat outside Sync, and both end without it."""
+    replica_service, replica_db = replica
+    _legacy_chat(chacha_db, messages=(LEGACY_QUESTION,))
+    _legacy_chat(replica_db, messages=(LEGACY_QUESTION,))
+    assert _delete_chat(client, chacha_db, LEGACY_CHAT).status_code == 204
+
+    delivered = _deliver(replica_service, _pull(sync_service))
+
+    assert delivered.conflicts == []
+    assert [item.apply_status for item in delivered.accepted] == ["applied", "applied"]
+    assert _is_deleted(replica_db, LEGACY_QUESTION)
+    assert replica_db.get_conversation_by_id(LEGACY_CHAT) is None
+    assert _blocker(replica_service) is None
 
 
 # ---------------------------------------------------------------------------
@@ -763,6 +979,133 @@ def test_helper_deletes_what_has_no_history_and_returns_what_has(
 
     assert enrolled == _objects(INPUT_ID, REPLY_ID)
     assert deleted == [_objects("never-seen-one", "never-seen-two")]
+
+
+def _tombstone(message_id: str, chat_id: str = CHAT_ID) -> AppliedServerOriginObject:
+    return AppliedServerOriginObject(
+        domain="chat.message",
+        operation="tombstone",
+        object_id=message_id,
+        parent_id=chat_id,
+        payload=_message_tombstone_payload(message_id, chat_id),
+    )
+
+
+def test_helper_publishes_the_tombstones_of_what_it_deleted_directly(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    """Only rows ``delete`` removed are published; an enrolled row is left to the caller's tombstone."""
+    _send_turn(client)
+    before = _log(sync_service)
+
+    enrolled = server_origin.delete_unenrolled_server_origin_objects(
+        sync_service,
+        user_id=USER,
+        objects=_objects("never-seen", INPUT_ID),
+        delete=lambda _objects: None,
+        tombstones=[_tombstone("never-seen"), _tombstone(INPUT_ID)],
+    )
+
+    assert enrolled == _objects(INPUT_ID)
+    assert _log(sync_service) == [*before, ("chat.message", "tombstone", "never-seen", "applied")]
+    published = sync_service.store.get_current_head(_dataset_id(sync_service), "chat.message", "never-seen")
+    assert (published.device_id, published.object_revision, published.base_object_hash) == (
+        SERVER_ORIGIN_DEVICE_ID, 1, None,
+    )
+    assert published.routing_metadata["server_owner_user_id"] == USER
+    assert sync_service.store.get_object_state(_dataset_id(sync_service), "chat.message", INPUT_ID).deleted is False
+
+
+def test_helper_publishes_nothing_twice(sync_service: SyncV2Service) -> None:
+    """A second call finds the published tombstone, so the object is enrolled and nothing is deleted directly."""
+    deleted: list[list[tuple[Any, str]]] = []
+
+    def delete(objects):
+        deleted.append(list(objects))
+
+    for _attempt in range(2):
+        enrolled = server_origin.delete_unenrolled_server_origin_objects(
+            sync_service,
+            user_id=USER,
+            objects=_objects("never-seen"),
+            delete=delete,
+            tombstones=[_tombstone("never-seen")],
+        )
+
+    assert deleted == [_objects("never-seen")]
+    assert enrolled == _objects("never-seen")
+    assert _log(sync_service) == [("chat.message", "tombstone", "never-seen", "applied")]
+
+
+def test_helper_deletes_but_publishes_nothing_while_another_conflict_blocks_the_dataset(
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    _send_turn(client)
+    _block_dataset(sync_service)
+    before = _log(sync_service)
+    deleted: list[list[tuple[Any, str]]] = []
+
+    enrolled = server_origin.delete_unenrolled_server_origin_objects(
+        sync_service,
+        user_id=USER,
+        objects=_objects("never-seen"),
+        delete=lambda objects: deleted.append(list(objects)),
+        tombstones=[_tombstone("never-seen")],
+    )
+
+    assert enrolled == []
+    assert deleted == [_objects("never-seen")]
+    assert _log(sync_service) == before
+    assert not _has_sync_history(sync_service, "chat.message", "never-seen")
+
+
+def test_helper_keeps_a_committed_delete_when_its_tombstone_cannot_be_published(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+    sync_service: SyncV2Service,
+) -> None:
+    """The rows are already deleted; a failed publication is logged, not reported as a failed delete."""
+    deleted: list[list[tuple[Any, str]]] = []
+
+    def failing_insert(self, envelope, **kwargs):
+        raise SyncStoreError("append is unavailable")
+
+    monkeypatch.setattr(SyncDatabase, "insert_envelope", failing_insert)
+
+    enrolled = server_origin.delete_unenrolled_server_origin_objects(
+        sync_service,
+        user_id=USER,
+        objects=_objects("never-seen"),
+        delete=lambda objects: deleted.append(list(objects)),
+        tombstones=[_tombstone("never-seen")],
+    )
+
+    assert enrolled == []
+    assert deleted == [_objects("never-seen")]
+    assert not _has_sync_history(sync_service, "chat.message", "never-seen")
+
+
+def test_helper_refuses_a_tombstone_that_is_not_an_id_only_delete(sync_service: SyncV2Service) -> None:
+    def no_delete(_objects):
+        raise AssertionError("refused before any delete")
+
+    with pytest.raises(SyncStoreError):
+        server_origin.delete_unenrolled_server_origin_objects(
+            sync_service,
+            user_id=USER,
+            objects=_objects("never-seen"),
+            delete=no_delete,
+            tombstones=[
+                AppliedServerOriginObject(
+                    domain="chat.message",
+                    operation="append",
+                    object_id="never-seen",
+                    payload={"conversation_id": CHAT_ID, "sender": "user", "content": "not a delete"},
+                )
+            ],
+        )
 
 
 def test_helper_does_not_call_delete_when_everything_is_published(
