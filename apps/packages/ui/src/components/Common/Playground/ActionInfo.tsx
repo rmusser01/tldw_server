@@ -78,6 +78,8 @@ type LoadingStatusProps = {
   actionInfo?: string | null
   /** "model (Provider)", named in the long-wait announcements (CM-06). */
   modelLabel?: string
+  /** Text has started to arrive, so a long reply isn't a stuck one. */
+  replyStarted?: boolean
 }
 
 export const LoadingStatus = ({
@@ -86,7 +88,8 @@ export const LoadingStatus = ({
   isSearchingInternet,
   isEmbedding,
   actionInfo,
-  modelLabel
+  modelLabel,
+  replyStarted = false
 }: LoadingStatusProps) => {
   const { t } = useTranslation("common")
   const [completionAnnouncement, setCompletionAnnouncement] = React.useState<string | null>(null)
@@ -94,6 +97,8 @@ export const LoadingStatus = ({
   const wasActiveRef = React.useRef(false)
   const previousActionRef = React.useRef<string | null>(null)
   const [elapsedSeconds, setElapsedSeconds] = React.useState(0)
+  // The long-wait announcements already made for this reply.
+  const announcedRef = React.useRef({ stillWorking: false, takingAWhile: false })
 
   // Determine the current action based on state
   let currentAction: string | null = null
@@ -134,6 +139,7 @@ export const LoadingStatus = ({
   // Count the seconds of this reply; a new reply starts again from zero.
   React.useEffect(() => {
     setElapsedSeconds(0)
+    announcedRef.current = { stillWorking: false, takingAWhile: false }
     if (!isActive) return
     const startedAt = Date.now()
     const timer = window.setInterval(() => {
@@ -146,13 +152,14 @@ export const LoadingStatus = ({
 
   const model = modelLabel?.trim()
   React.useEffect(() => {
-    if (elapsedSeconds === STILL_WORKING_AFTER_SECONDS) {
-      setLiveAnnouncement(
-        model
-          ? t("actionInfo.stillWorkingModel", "Still working on the reply from {{model}}.", { model })
-          : t("actionInfo.stillWorking", "Still working on the reply.")
-      )
-    } else if (elapsedSeconds === TAKING_A_WHILE_AFTER_SECONDS) {
+    const announced = announcedRef.current
+    if (
+      elapsedSeconds >= TAKING_A_WHILE_AFTER_SECONDS &&
+      !announced.takingAWhile &&
+      !replyStarted
+    ) {
+      announced.takingAWhile = true
+      announced.stillWorking = true
       setLiveAnnouncement(
         model
           ? t(
@@ -165,8 +172,15 @@ export const LoadingStatus = ({
               "This reply is taking a while. You can stop it and try again."
             )
       )
+    } else if (elapsedSeconds >= STILL_WORKING_AFTER_SECONDS && !announced.stillWorking) {
+      announced.stillWorking = true
+      setLiveAnnouncement(
+        model
+          ? t("actionInfo.stillWorkingModel", "Still working on the reply from {{model}}.", { model })
+          : t("actionInfo.stillWorking", "Still working on the reply.")
+      )
     }
-  }, [elapsedSeconds, model, t])
+  }, [elapsedSeconds, model, replyStarted, t])
 
   // Announce completion when transitioning from active to inactive
   React.useEffect(() => {

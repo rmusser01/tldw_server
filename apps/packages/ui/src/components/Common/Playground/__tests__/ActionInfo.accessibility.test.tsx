@@ -78,6 +78,21 @@ describe("LoadingStatus during a long wait (CM-06)", () => {
     ).toBeInTheDocument()
   })
 
+  it("doesn't suggest stopping a reply that is already streaming text", () => {
+    render(<LoadingStatus isStreaming replyStarted modelLabel="mock-gpt-4o" />)
+    advance(30_000)
+    expect(screen.queryByText(/taking a while/)).toBeNull()
+  })
+
+  it("still announces a long wait if a timer tick is skipped", () => {
+    render(<LoadingStatus isStreaming modelLabel="mock-gpt-4o" />)
+    advance(9_000)
+    // Jump past the 10 s mark in one tick, as a blocked main thread would.
+    vi.setSystemTime(Date.now() + 3_000)
+    advance(1_000)
+    expect(screen.getByText("Still working on the reply from mock-gpt-4o.")).toBeInTheDocument()
+  })
+
   it("shows the elapsed time on the status pill after five seconds", () => {
     render(<LoadingStatus isStreaming modelLabel="mock-gpt-4o" />)
     const pill = () => screen.getByTestId("chat-loading-status")

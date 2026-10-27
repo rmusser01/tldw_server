@@ -165,18 +165,30 @@ const PROVIDER_FAILURE_CODES = new Set([
 ])
 
 /**
- * True when a failed chat request says the model's provider, not the tldw
- * server, failed (CC-N2): a provider error code, or a 502/504 without one. A
- * 503 alone is not enough, because the server also answers 503 for missing
+ * How a failed chat request says the model's provider didn't answer (CC-N2):
+ * "provider" for a tldw provider error code, "gateway" for a 502/504 without
+ * one (the provider, or a proxy in front of the tldw server), or null. A 503
+ * alone is not enough, because the server also answers 503 for missing
  * provider credentials, routing failures and while it is busy.
  */
-export const isChatProviderFailureError = (error: unknown): boolean =>
-  someErrorLevel(
-    error,
-    (status, codes) =>
-      codes.some((code) => PROVIDER_FAILURE_CODES.has(code)) ||
-      (codes.length === 0 && (status === 502 || status === 504))
+export const chatProviderFailureKind = (
+  error: unknown
+): "provider" | "gateway" | null => {
+  if (someErrorLevel(error, (_status, codes) => codes.some((code) => PROVIDER_FAILURE_CODES.has(code))))
+    return "provider"
+  if (
+    someErrorLevel(
+      error,
+      (status, codes) => codes.length === 0 && (status === 502 || status === 504)
+    )
   )
+    return "gateway"
+  return null
+}
+
+/** True when the request failed because the model's provider didn't answer. */
+export const isChatProviderFailureError = (error: unknown): boolean =>
+  chatProviderFailureKind(error) !== null
 
 type ReadinessModelDescriptor = Record<string, unknown> | null | undefined
 

@@ -4163,7 +4163,6 @@ const PlaygroundContent = () => {
                   onCharacterRouteApplyReady={onCharacterRouteApplyReady}
                   droppedFiles={droppedFiles}
                   stickyDockEnabled={stickyChatInput}
-                  latestMessageVisible={isAutoScrollToBottom}
                   mobileCockpitModeActive={mobileCockpitComposerConstrained}
                   forceWideMode={cockpitRailCollapsedWideContent}
                   onComposerLayoutChange={

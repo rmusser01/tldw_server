@@ -166,6 +166,17 @@ describe("provider failures name the model (CC-N2)", () => {
     })
   })
 
+  it("doesn't claim the server is fine for a bare gateway error, which may be a proxy", () => {
+    const bare = new Error("Stream completion failed", { cause: { status: 502 } })
+    expect(
+      decodeChatErrorPayload(buildFriendlyErrorMessage(bare, { modelLabel: "gemma3:1b (Ollama)" }))
+    ).toMatchObject({
+      summary: "Couldn't reach gemma3:1b (Ollama).",
+      hint: "The model's provider, or a proxy in front of your tldw server, didn't respond. Check that both are running, or switch models.",
+      recoveryAction: "open-model-selector"
+    })
+  })
+
   it("names the provider generically when the model is unknown", () => {
     expect(decodeChatErrorPayload(buildFriendlyErrorMessage(providerDown()))?.summary).toBe(
       "Couldn't reach this model's provider."

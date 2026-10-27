@@ -716,6 +716,9 @@
   "error_providerUnavailableHint": {
     "message": "Your tldw server is fine, but this model's provider didn't respond. Start the provider or switch models."
   },
+  "error_gatewayUnavailableHint": {
+    "message": "The model's provider, or a proxy in front of your tldw server, didn't respond. Check that both are running, or switch models."
+  },
   "error_switchModel": {
     "message": "Switch model"
   },

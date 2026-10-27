@@ -160,6 +160,11 @@ export const usePlaygroundChatErrorBanner = (
 
 type PlaygroundChatErrorBannerProps = {
   error: PlaygroundChatErrorBannerEntry | null
+  /**
+   * Announce the error (role="alert"). False when the banner repeats an error
+   * bubble that already announced it, so scrolling doesn't re-announce (CC-N2).
+   */
+  announce?: boolean
   diagnosticsLabel: string
   retryLabel?: string
   editProviderLabel?: string
@@ -175,6 +180,7 @@ export const PlaygroundChatErrorBanner: React.FC<
   PlaygroundChatErrorBannerProps
 > = ({
   error,
+  announce = true,
   diagnosticsLabel,
   retryLabel = "Retry",
   editProviderLabel = "Edit provider",
@@ -228,7 +234,7 @@ export const PlaygroundChatErrorBanner: React.FC<
       data-testid="playground-chat-error-banner"
       title={error.summary}
       message={error.hint}
-      role="alert"
+      role={announce ? "alert" : undefined}
       className="mb-2"
       primaryAction={primaryAction}
       secondaryActions={[

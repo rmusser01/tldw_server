@@ -71,6 +71,14 @@ describe("history review presentation (CC-04)", () => {
     expect(chronologicalHistoryNodes(roots).map((row) => row.id)).toEqual(["r2", "r1"])
   })
 
+  it("orders a very long chain listed newest first without overflowing", () => {
+    const chain = Array.from({ length: 50_000 }, (_, index) =>
+      node(`n${index}`, index % 2 ? "assistant" : "user", index ? `n${index - 1}` : null))
+    const ordered = chronologicalHistoryNodes([...chain].reverse())
+    expect(ordered[0].id).toBe("n0")
+    expect(ordered.at(-1)?.id).toBe("n49999")
+  })
+
   it("survives a parent cycle without dropping messages", () => {
     const cyclic = [node("x", "user", "y"), node("y", "assistant", "x")]
     expect(chronologicalHistoryNodes(cyclic).map((row) => row.id).sort()).toEqual(["x", "y"])
@@ -84,6 +92,7 @@ describe("history review presentation (CC-04)", () => {
       "item one quoted const a = 1"
     )
     expect(plainHistoryPreview("snake_case_name stays")).toBe("snake_case_name stays")
+    expect(plainHistoryPreview("Use List<String> here<br/>next")).toBe("Use List<String> here next")
     expect(plainHistoryPreview(null)).toBe("")
   })
 

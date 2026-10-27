@@ -421,9 +421,15 @@ export function HistorySelectionReview({
   const [failedRetry, setFailedRetry] = React.useState<string | null>(null)
   const [retryRefusal, setRetryRefusal] = React.useState<string | null>(null)
   const trigger = React.useRef<HTMLButtonElement>(null)
-  // "Start fresh" moves focus to "Restore all", which is its undo (CC-04).
+  // "Start fresh" moves focus to "Restore all", which is its undo (CC-04):
+  // it returns to the choice Start fresh replaced, on the same branch.
   const restoreAction = React.useRef<HTMLButtonElement>(null)
+  const coverageBlock = React.useRef<HTMLDivElement>(null)
   const focusRestoreAfterChoice = React.useRef(false)
+  const [startFreshFrom, setStartFreshFrom] = React.useState<{
+    owner: string | null
+    cursor: HistoryCursorV1
+  } | null>(null)
   const scroller = React.useRef<HTMLDivElement>(null)
   const errorRegion = React.useRef<HTMLDivElement>(null)
   const identity = React.useId()
@@ -485,12 +491,14 @@ export function HistorySelectionReview({
   const stale =
     selection.status === "stale_selection" || selection.status === "error"
   // How much of the conversation the AI sees, when it isn't all of it (CC-04).
+  const restorePreference =
+    startFreshFrom?.owner === reviewOwner ? startFreshFrom.cursor : null
   const coverage = React.useMemo(
     () =>
       selection.status === "ready"
-        ? partialHistoryCoverage(selection.capture, selection.view)
+        ? partialHistoryCoverage(selection.capture, selection.view, restorePreference)
         : null,
-    [selection.status, selection.capture, selection.view]
+    [selection.status, selection.capture, selection.view, restorePreference]
   )
   // The review is offered once there is something to choose between, or
   // something it must explain (CC-04): not for a single exchange.
@@ -505,7 +513,9 @@ export function HistorySelectionReview({
   React.useEffect(() => {
     if (!coverage || !focusRestoreAfterChoice.current) return
     focusRestoreAfterChoice.current = false
-    restoreAction.current?.focus()
+    // A disabled "Restore all" (a send in progress) can't take focus.
+    if (restoreAction.current && !restoreAction.current.disabled) restoreAction.current.focus()
+    else coverageBlock.current?.focus()
   }, [coverage])
   React.useEffect(() => {
     if (previousReviewOwner.current === reviewOwner) return
@@ -517,6 +527,7 @@ export function HistorySelectionReview({
     setCursor({ kind: "empty" })
     setFocusedId(null)
     setFailedKeep(null)
+    setStartFreshFrom(null)
   }, [reviewOwner])
   React.useEffect(() => {
     setRetryReview(null)
@@ -755,7 +766,9 @@ export function HistorySelectionReview({
           <p className="font-medium">
             {entry.turn.state === "generated_unsaved"
               ? text("recoveryUnsavedReplyTitle", "Reply not saved")
-              : text("recoveryTitle", "No reply to this message")}
+              : entry.turn.persistence === "server" && entry.turn.admission
+                ? text("recoveryUnconfirmedTitle", "Reply not confirmed")
+                : text("recoveryTitle", "No reply to this message")}
           </p>
           {entry.turn.failure_reason && <p role="alert">{entry.turn.failure_reason}</p>}
           <p>
@@ -1195,13 +1208,13 @@ export function HistorySelectionReview({
               })
           }}>
           <summary className="cursor-pointer py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
-            {`${text("retainedOutcomes", "Earlier messages without a reply")} (${olderRecoveries.length})`}
+            {`${text("retainedOutcomes", "Earlier messages to review")} (${olderRecoveries.length})`}
           </summary>
           {olderRecoveries.map(renderRecovery)}
         </details>
       )}
       {coverage && (!sendInProgress || coverage.seen === 0) && (
-        <div className="mb-2 rounded border border-border p-2 text-sm">
+        <div ref={coverageBlock} tabIndex={-1} className="mb-2 rounded border border-border p-2 text-sm focus:outline-none">
           <div className="flex flex-wrap items-center gap-2">
             <p role="status">
               {fill(text("coverage", "AI sees {{seen}} of {{total}} messages"), {
@@ -1220,7 +1233,10 @@ export function HistorySelectionReview({
                 openingRecovery !== null ||
                 Boolean(recoveryAction?.pending)
               }
-              onClick={() => void selection.choose(coverage.restore)}>
+              onClick={() => {
+                if (mounted.current && renderedSource.isCurrent() && renderedSelectionIsCurrent())
+                  void selection.choose(coverage.restore)
+              }}>
               {text("restoreAll", "Restore all")}
             </Button>
           </div>
@@ -1237,7 +1253,7 @@ export function HistorySelectionReview({
                   keeps them out of the transcript and its actions). */}
               <ul
                 aria-label={text("hiddenEarlier", "Earlier messages, hidden from the AI")}
-                className="mt-1 space-y-0.5 text-xs text-text-muted opacity-70">
+                className="mt-1 space-y-0.5 text-xs text-text-muted">
                 {(coverage.hidden.length > HIDDEN_PREVIEW_LIMIT
                   ? coverage.hidden.slice(-HIDDEN_PREVIEW_SHOWN)
                   : coverage.hidden
@@ -1311,9 +1327,18 @@ export function HistorySelectionReview({
             disabled={pending}
             onClick={() => {
               // Hides every earlier message from the AI now; "Restore all" undoes it.
+              const previous = selection.view?.cursor
+              if (previous) setStartFreshFrom({ owner: reviewOwner, cursor: previous })
               focusRestoreAfterChoice.current = true
               setExpanded(false)
-              void selection.choose({ kind: "empty" })
+              void Promise.resolve(selection.choose({ kind: "empty" })).then(
+                (chosen) => {
+                  if (chosen === false) focusRestoreAfterChoice.current = false
+                },
+                () => {
+                  focusRestoreAfterChoice.current = false
+                }
+              )
             }}>
             {text("startFresh", "Start fresh")}
           </Button>

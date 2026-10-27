@@ -217,7 +217,7 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
     ).toBeInTheDocument()
     const notice = await interruptionNotice("Interrupted")
     expect(within(notice).getByRole("button", { name: /retry/i })).toBeInTheDocument()
-    expect(screen.queryByText(/^(No reply to this message|Reply not saved)$/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^(No reply to this message|Reply not saved|Reply not confirmed)$/)).not.toBeInTheDocument()
     // Not only on screen: a fresh chat is owned by a server chat from its first
     // send (#3195), which holds the question; the cut-off reply is kept from this
     // device, as for any server chat.
@@ -282,7 +282,7 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
       HARNESS_WAIT
     )
     const notice = await interruptionNotice("Interrupted")
-    expect(screen.queryByText(/^(No reply to this message|Reply not saved)$/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^(No reply to this message|Reply not saved|Reply not confirmed)$/)).not.toBeInTheDocument()
 
     await view.user.click(within(notice).getByRole("button", { name: /retry/i }))
     await waitFor(() => expect(server.completionRequests()).toHaveLength(2), HARNESS_WAIT)
@@ -322,7 +322,7 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
     )
     const notice = await interruptionNotice("Stopped")
     expect(within(notice).getByRole("button", { name: /retry/i })).toBeInTheDocument()
-    expect(screen.queryByText(/^(No reply to this message|Reply not saved)$/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^(No reply to this message|Reply not saved|Reply not confirmed)$/)).not.toBeInTheDocument()
   })
 
   it.each([
@@ -517,7 +517,7 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
         ]),
       HARNESS_WAIT
     )
-    expect(screen.queryByText(/^(No reply to this message|Reply not saved)$/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^(No reply to this message|Reply not saved|Reply not confirmed)$/)).not.toBeInTheDocument()
     // Returning must not promote the chat into an empty or partial server chat.
     // Since #3195 the first send creates the chat's server owner; returning adds
     // no other chat, and the one chat holds the whole turn.
@@ -615,7 +615,7 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
       HARNESS_WAIT
     )
     await interruptionNotice("Interrupted")
-    expect(screen.queryByText(/^(No reply to this message|Reply not saved)$/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^(No reply to this message|Reply not saved|Reply not confirmed)$/)).not.toBeInTheDocument()
     const state = useStoreMessageOption.getState()
     expect(state.serverChatId).toBe("saved-chat")
     expect(
@@ -1053,7 +1053,7 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
       // Nothing waits for review or keeps the cut-off reply on screen.
       await new Promise((resolve) => setTimeout(resolve, 500))
       expect(transcript()).toEqual(expectedTranscript)
-      expect(screen.queryByText(/^(No reply to this message|Reply not saved)$/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/^(No reply to this message|Reply not saved|Reply not confirmed)$/)).not.toBeInTheDocument()
       const state = useStoreMessageOption.getState()
       expect(
         resolveChatPersistenceKind({

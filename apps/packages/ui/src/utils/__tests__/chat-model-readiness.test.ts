@@ -3,6 +3,7 @@ import {
   chatModelReadinessKey,
   getChatModelSendOutcome,
   isChatModelUnreachableError,
+  chatProviderFailureKind,
   isChatProviderFailureError,
   recordChatModelSendOutcome,
   resetChatModelSendOutcomes,
@@ -95,6 +96,12 @@ describe("isChatProviderFailureError (CC-N2)", () => {
     ["a 504 in the message", new Error("Request failed: HTTP 504 Gateway Timeout")]
   ])("is true for %s", (_label, error) => {
     expect(isChatProviderFailureError(error)).toBe(true)
+  })
+
+  it("tells a provider error code from a bare gateway status", () => {
+    expect(chatProviderFailureKind({ status: 502, detail: { error_code: "provider_unavailable" } })).toBe("provider")
+    expect(chatProviderFailureKind({ status: 504 })).toBe("gateway")
+    expect(chatProviderFailureKind({ status: 503 })).toBeNull()
   })
 
   // The server also answers 503 for missing credentials, routing failures

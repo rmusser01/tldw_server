@@ -130,3 +130,34 @@ backends none); `pageAssistModel` request options; request body field names;
 catalog normalization; the support resolver and hook; both settings
 surfaces.
 **Status:** Complete
+
+## Review fixes (superpowers code-reviewer, 2026-10-27)
+
+No critical findings. Fixed:
+- **Backend:** config-based llama.cpp and TabbyAPI catalog names ("llama",
+  "tabby") are normalized before the capability lookup, so their models list
+  `top_k` and `min_p`.
+- **CC-04:** "Restore all" returns to the choice "Start fresh" replaced (on
+  the same branch), not the newest branch. A failed choice no longer leaves
+  focus to be stolen later; a disabled "Restore all" passes focus to its
+  block. "Restore all" checks the rendered source like the other actions.
+- **CC-N2 banner:** it now shows only while the error bubble it repeats is
+  off screen (IntersectionObserver on the bubble), not by scroll position,
+  whose threshold the banner's own height moved. It is no longer a live
+  region, so scrolling doesn't re-announce the error.
+- **CC-N2 copy:** "Your tldw server is fine" only for a tldw provider error
+  code. A bare 502/504 (possibly a proxy) says "The model's provider, or a
+  proxy in front of your tldw server, didn't respond."
+- **CM-06:** a reply that is already streaming text is not told to stop at
+  30 s; announcements use thresholds, so a skipped timer tick can't miss one.
+- **Minor:** "Reply not confirmed" for server turns whose reply is unknown;
+  the disclosure reads "Earlier messages to review"; Top K is rounded and its
+  inputs take whole numbers (the server field is an int); the hidden list
+  drops the extra opacity; the ordering helper is iterative (no stack
+  overflow on long chains); previews keep generic text such as
+  `List<String>`; `failure_action` is typed in the record helper.
+
+Not changed: the nested `role="status"`/`role="alert"` in the recovery card
+predates this branch; the catalog's unique-id fallback for a selection
+without a provider can differ from the request's provider resolution.
+

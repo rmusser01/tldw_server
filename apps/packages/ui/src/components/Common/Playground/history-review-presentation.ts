@@ -23,17 +23,22 @@ export const chronologicalHistoryNodes = <T extends LinkedNode>(
   const byId = new Map(nodes.map((node) => [node.id, node]))
   const ordered: T[] = []
   const placed = new Set<string>()
-  const visiting = new Set<string>()
-  const place = (node: T) => {
-    if (placed.has(node.id) || visiting.has(node.id)) return
-    visiting.add(node.id)
-    const parent = node.parent_id === null ? undefined : byId.get(node.parent_id)
-    if (parent) place(parent)
-    visiting.delete(node.id)
-    placed.add(node.id)
-    ordered.push(node)
+  for (const node of nodes) {
+    // Walk up to the first placed ancestor without recursion, so a long
+    // child-first chain can't overflow the stack; a cycle stops the walk.
+    const chain: T[] = []
+    const inChain = new Set<string>()
+    let current: T | undefined = node
+    while (current && !placed.has(current.id) && !inChain.has(current.id)) {
+      chain.push(current)
+      inChain.add(current.id)
+      current = current.parent_id === null ? undefined : byId.get(current.parent_id)
+    }
+    for (let index = chain.length - 1; index >= 0; index -= 1) {
+      placed.add(chain[index].id)
+      ordered.push(chain[index])
+    }
   }
-  nodes.forEach(place)
   return ordered
 }
 
@@ -43,7 +48,8 @@ export const plainHistoryPreview = (value: string | null | undefined): string =>
     .replace(/```[^\n]*/g, " ")
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replace(/<\/?[a-z][^>]*>/gi, " ")
+    // HTML tags only, so "List<String>" keeps its text.
+    .replace(/<\/?(?:a|b|blockquote|br|code|div|em|h[1-6]|hr|i|img|li|ol|p|pre|s|span|strong|sub|sup|table|td|th|tr|u|ul)\b[^>]*>/gi, " ")
     .replace(/^[ \t]{0,3}(?:#{1,6}|>+|[-*+]|\d+[.)])[ \t]+/gm, "")
     .replace(/\*\*|__|~~|`/g, "")
     .replace(/(^|[\s(])[*_](?=\S)([^*_\n]*?\S)[*_](?=$|[\s).,!?:;])/g, "$1$2")
@@ -82,7 +88,9 @@ export type HistoryCoverage = {
  */
 export const partialHistoryCoverage = (
   capture: HistoryCaptureResultV1 | null | undefined,
-  view: HistoryViewSelectionV1 | null | undefined
+  view: HistoryViewSelectionV1 | null | undefined,
+  /** The choice "Start fresh" replaced, restored in preference to the latest message. */
+  previous?: HistoryCursorV1 | null
 ): HistoryCoverage | null => {
   if (!capture || capture.status !== "captured" || !view || capture.view !== view)
     return null
@@ -90,6 +98,7 @@ export const partialHistoryCoverage = (
   const status = snapshot?.interpretation_status
   if (!status || !Array.isArray(capture.rows)) return null
   const candidates = [
+    previous?.kind === "after_message" ? previous.message_id : undefined,
     latestHistoryTipId(snapshot.nodes),
     status.kind === "legacy_linear_v1" ? status.ordered_path_ids.at(-1) : undefined
   ].filter((id): id is string => typeof id === "string")

@@ -2550,7 +2550,8 @@ def _optional_sampling_fields(provider: Any) -> list[str]:
     """
     if not isinstance(provider, str) or not provider.strip():
         return []
-    allowed = get_allowed_fields(provider)
+    # Catalog names ("llama", "tabby") differ from the registry keys.
+    allowed = get_allowed_fields(_normalize_catalog_provider_for_chat(provider))
     return [field for field in _OPTIONAL_SAMPLING_FIELDS if field in allowed]
 
 

@@ -256,3 +256,14 @@ def test_llm_models_metadata_lists_top_k_and_min_p_for_openrouter(monkeypatch, c
 
     assert openrouter
     assert all(model["sampling_fields"] == ["top_k", "min_p"] for model in openrouter)
+
+
+def test_optional_sampling_fields_normalize_catalog_provider_names():
+    """Catalog names such as "llama" and "tabby" map to their registry keys first."""
+    from tldw_Server_API.app.api.v1.endpoints.llm_providers import _optional_sampling_fields
+
+    assert _optional_sampling_fields("llama") == ["top_k", "min_p"]
+    assert _optional_sampling_fields("tabby") == ["top_k", "min_p"]
+    assert _optional_sampling_fields("ollama") == ["top_k"]
+    assert _optional_sampling_fields("openai") == []
+    assert _optional_sampling_fields(None) == []

@@ -166,6 +166,7 @@ const ErrorBubble: React.FC<{
     <div
       role="alert"
       aria-live="assertive"
+      data-chat-error-bubble=""
       className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
       <p className="font-semibold">{payload.summary}</p>
       {payload.hint && (
@@ -2520,6 +2521,7 @@ const PlaygroundMessageImpl = (props: Props) => {
                   ? formatChatMessageAuthorName(resolvedModelName || props?.name)
                   : undefined
               }
+              replyStarted={props.message.replace(/▋$/, "").trim().length > 0}
             />
           )}
           {showUsageMetadata && (

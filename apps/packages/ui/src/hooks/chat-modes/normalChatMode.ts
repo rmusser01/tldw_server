@@ -1270,7 +1270,7 @@ const captureNormalHistoryTurn = async (
     state: HistoryTurnRecovery["state"],
     extra: Pick<
       Partial<HistoryTurnRecovery>,
-      "outcome" | "interruption_reason" | "failure_reason" | "settled_message_id"
+      "outcome" | "interruption_reason" | "failure_reason" | "failure_action" | "settled_message_id"
     > = {}
   ): HistoryTurnRecovery => ({
     operation_id: operationId,

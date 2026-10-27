@@ -370,6 +370,7 @@ const ModelParamsPanelBase: React.FC<ModelParamsPanelProps> = ({
               onChange={(value) => updateSetting("topK", value ?? undefined)}
               placeholder={t("sidepanel:modelParams.default", "Default")}
               className="w-24"
+              precision={0}
               disabled={Boolean(topKUnavailableReason)}
               aria-describedby={topKUnavailableReason ? "sidepanel-topk-unavailable" : undefined}
             />

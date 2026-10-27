@@ -111,6 +111,7 @@ export function AdvancedParamsTab({
                   <InputNumber
                     style={{ width: "100%" }}
                     placeholder={t("modelSettings.form.topK.placeholder")}
+                    precision={0}
                     disabled={Boolean(topKUnavailableReason)}
                   />
                 </Form.Item>

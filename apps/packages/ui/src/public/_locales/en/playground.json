@@ -3497,6 +3497,9 @@
   "historySelection_recoveryUnsavedReplyTitle": {
     "message": "Reply not saved"
   },
+  "historySelection_recoveryUnconfirmedTitle": {
+    "message": "Reply not confirmed"
+  },
   "historySelection_switchModel": {
     "message": "Switch model"
   },
@@ -4422,7 +4425,7 @@
     "message": "Could not open the saved reply. Your current view and saved reply are retained."
   },
   "historySelection_retainedOutcomes": {
-    "message": "Earlier messages without a reply"
+    "message": "Earlier messages to review"
   },
   "historySelection_savedRegeneratedReplyTitle": {
     "message": "New reply saved"

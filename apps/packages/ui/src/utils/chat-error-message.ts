@@ -3,7 +3,7 @@ import { formatErrorMessage } from "@/utils/format-error-message"
 import { parseBillingLimitError } from "@/utils/billing-error"
 import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import { ChatStreamTimeoutError } from "@/services/tldw/chat-timeouts"
-import { isChatProviderFailureError } from "@/utils/chat-model-readiness"
+import { chatProviderFailureKind } from "@/utils/chat-model-readiness"
 
 export const TLDW_ERROR_BUBBLE_PREFIX = "__tldw_error__:"
 
@@ -168,8 +168,10 @@ export const buildFriendlyErrorMessage = (
     })
   }
 
-  // The provider behind the model didn't answer; the tldw server did (CC-N2).
-  if (isChatProviderFailureError(rawError)) {
+  // The provider behind the model didn't answer (CC-N2). Only a tldw provider
+  // error code shows the tldw server itself answered.
+  const providerFailure = chatProviderFailureKind(rawError)
+  if (providerFailure) {
     const modelLabel = context.modelLabel?.trim()
     return encodeChatErrorPayload({
       summary: modelLabel
@@ -182,10 +184,15 @@ export const buildFriendlyErrorMessage = (
             "common:error.providerUnavailableSummaryGeneric",
             "Couldn't reach this model's provider."
           ),
-      hint: translateErrorText(
-        "common:error.providerUnavailableHint",
-        "Your tldw server is fine, but this model's provider didn't respond. Start the provider or switch models."
-      ),
+      hint: providerFailure === "provider"
+        ? translateErrorText(
+            "common:error.providerUnavailableHint",
+            "Your tldw server is fine, but this model's provider didn't respond. Start the provider or switch models."
+          )
+        : translateErrorText(
+            "common:error.gatewayUnavailableHint",
+            "The model's provider, or a proxy in front of your tldw server, didn't respond. Check that both are running, or switch models."
+          ),
       detail: sanitizeServerErrorMessage(rawError, detail),
       recoveryAction: "open-model-selector",
       recoveryLabel: translateErrorText("common:error.switchModel", "Switch model")

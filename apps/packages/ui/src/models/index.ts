@@ -295,7 +295,11 @@ export const pageAssistModel = async ({
     presencePenalty: modelSettings?.presencePenalty ?? presencePenalty,
     // Providers reject fields they don't support, so these go only where the
     // server says they are accepted (#3283).
-    topK: modelSamplingFields.includes("top_k") ? payload.topK : undefined,
+    // The server takes a whole number for top_k.
+    topK:
+      modelSamplingFields.includes("top_k") && typeof payload.topK === "number"
+        ? Math.round(payload.topK)
+        : undefined,
     minP: modelSamplingFields.includes("min_p") ? payload.minP : undefined,
     maxTokens: payload.numPredict,
     streaming: true,

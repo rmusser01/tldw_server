@@ -1137,7 +1137,7 @@ it.each(["unchanged", "Prompt edit", "Prompt whitespace"])("mounted Sidepanel ac
   h1.lookupRecoveries.mockResolvedValue([entry])
   const { result } = renderHook(() => useMessage())
   render(<HistorySelectionReview selection={{ ...h1.controller, ...current, recoveries: [entry] }} getRetryContext={result.current.getRecoveryRetryContext} onRetryRecovery={result.current.retryRecoveredHistoryTurn} />)
-  fireEvent.click(screen.getByText(/Earlier messages without a reply \(1\)/))
+  fireEvent.click(screen.getByText(/Earlier messages to review \(1\)/))
   fireEvent.click(screen.getByRole("button", { name: "Review retry" }))
   expect(await screen.findByText("Answer like a pirate.")).toBeVisible()
   expect(h1.wire).not.toHaveBeenCalled()

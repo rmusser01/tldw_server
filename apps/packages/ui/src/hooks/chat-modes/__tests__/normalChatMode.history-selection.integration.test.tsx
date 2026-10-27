@@ -1886,9 +1886,9 @@ describe("normal Chat owned history creation and H1 admission", () => {
     if (replay === "saved") {
       await waitFor(() => expect(controller.recoveries).toEqual([]))
       expect(await loadHistoryTurnRecoveries(scope, savedView)).toEqual([])
-      expect(screen.queryByText(/^(No reply to this message|Reply not saved)$/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/^(No reply to this message|Reply not saved|Reply not confirmed)$/)).not.toBeInTheDocument()
     } else {
-      expect(await screen.findByText(/^(No reply to this message|Reply not saved)$/)).toBeInTheDocument()
+      expect(await screen.findByText(/^(No reply to this message|Reply not saved|Reply not confirmed)$/)).toBeInTheDocument()
       expect(screen.getByText(assistant.content)).toBeInTheDocument()
       expect(controller.getCurrent()).toMatchObject({
         status: "stale_selection", settingsQualified: true,
@@ -1901,7 +1901,7 @@ describe("normal Chat owned history creation and H1 admission", () => {
       expect(await screen.findByText("Could not keep this reply. The original recovery is retained for review."))
         .toBeInTheDocument()
       expect(await loadHistoryTurnRecoveries(scope, savedView)).toHaveLength(1)
-      expect(screen.getByText(/^(No reply to this message|Reply not saved)$/)).toBeInTheDocument()
+      expect(screen.getByText(/^(No reply to this message|Reply not saved|Reply not confirmed)$/)).toBeInTheDocument()
     }
     expect(capture.mock.calls.some(([, request]) =>
       request.required_capability === "tldw_history_existing_input_v1" &&
