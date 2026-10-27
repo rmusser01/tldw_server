@@ -10,13 +10,18 @@ Counting. In each module under tldw_Server_API/app (modules in an in-app ``tests
 package directory are skipped, and so is every module in EXEMPT), count every attribute
 reference ``<x>.<m>`` with ``m`` in METHODS where ``<x>`` is one of:
   * a call to a GETTERS name: ``get_adapter_or_raise(p).chat(...)``;
-  * a local or module name bound from such a call (``adapter = registry.get_adapter(p)``);
+  * a local or module name bound from such a call by ``=``, an annotated ``=`` or ``:=``
+    (``adapter = registry.get_adapter(p)``);
   * ``self.<attr>`` bound from such a call.
 References count, not only calls, so ``asyncio.to_thread(adapter.chat, payload)`` and
 ``partial(adapter.chat, ...)`` count. Names are matched per module, not per scope.
 
-Known limits: an adapter passed in as a parameter is not seen, and neither is one bound
-from ``await <getter>(...)`` or from a conditional expression around the call.
+Known limits. These escape the count:
+  * an adapter passed in as a parameter;
+  * a name bound from ``await <getter>(...)`` or from a conditional expression around the call
+    (``a = reg.get_adapter(p) if p else None``);
+  * a name bound by tuple unpacking or a ``with ... as`` target;
+  * a method fetched by name, ``getattr(adapter, "chat")``.
 
 Growth fails: call the provider through the gateway (perform_chat_api_call or
 perform_chat_api_call_async), not the adapter. If growth is unavoidable, raise the count
@@ -148,6 +153,7 @@ def test_the_counter_counts_each_direct_adapter_shape(tmp_path: Path) -> None:
                 "        return self._adapter.stream(r)\n"
             ),
             "core/X/d.py": "def f(client, url):\n    return client.stream('GET', url)\n",
+            "core/X/e.py": "def f(p, r):\n    if (a := get_adapter(p)):\n        return a.chat(r)\n",
             "core/LLM_Calls/gateway.py": "def f(registry, p, r):\n    adapter = registry.get_adapter(p)\n    return adapter.chat(r)\n",
             "core/X/tests/test_x.py": "def f(p, r):\n    return get_adapter_or_raise(p).chat(r)\n",
         },
@@ -157,6 +163,7 @@ def test_the_counter_counts_each_direct_adapter_shape(tmp_path: Path) -> None:
         "core/X/a.py": {"references": 1},
         "core/X/b.py": {"references": 2},
         "core/X/c.py": {"references": 1},
+        "core/X/e.py": {"references": 1},
     }
 
 
