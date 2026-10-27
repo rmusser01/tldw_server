@@ -3,6 +3,7 @@ import { flushSync } from "react-dom"
 import { useNavigate } from "react-router-dom"
 
 import { ProjectWorkspace } from "./ProjectWorkspace"
+import { PresentationExportMenu } from "./PresentationExportMenu"
 import { PresentationStudioIndex } from "./PresentationStudioIndex"
 import { StandaloneHtmlWorkspace } from "./StandaloneHtmlWorkspace"
 import { VisualStylePicker } from "./VisualStylePicker"
@@ -891,6 +892,12 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
               description="Updates deck appearance defaults and future generated slides. Existing slide content stays unchanged."
             />
           </div>
+          <PresentationExportMenu
+            key={detailContextKey}
+            presentationId={currentDetailState.projectId}
+            title={title}
+            isAuthorityCurrent={() => isStandaloneKindAuthorityCurrent(authorityEpoch, currentDetailState.projectId)}
+          />
         </div>
       </header>
 
