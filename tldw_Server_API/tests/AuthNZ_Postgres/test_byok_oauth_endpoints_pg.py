@@ -174,7 +174,25 @@ def _capture_real_openai_adapter_headers(monkeypatch):
             return FakeResponse()
 
     monkeypatch.setattr(adapter_module, "http_client_factory", lambda **_kwargs: FakeClient())
+    _stub_openai_model_inventory(monkeypatch)
     return adapter_module.OpenAIAdapter(), captured_headers
+
+
+def _stub_openai_model_inventory(monkeypatch, *, api_key: str | None = None):
+    """Serve the adapter's pre-generation model check without a network call.
+
+    With ``api_key``, only that credential sees an inventory, so a test also
+    proves discovery used the same credential as generation.
+    """
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    def discover(_provider, key, **_kwargs):
+        if api_key is not None and key != api_key:
+            return ModelDiscoveryResult("auth_failed")
+        return ModelDiscoveryResult("ready", ("gpt-test",))
+
+    monkeypatch.setattr(chat_service, "discover_provider_models", discover)
 
 
 async def _create_postgres_runtime_scope(test_db_pool) -> tuple[int, int, int]:
