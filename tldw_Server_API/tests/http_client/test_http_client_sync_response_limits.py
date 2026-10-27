@@ -245,7 +245,10 @@ def test_discovery_deadline_interrupts_trickling_network_reads(monkeypatch, phas
         )
     assert result.status == "unreachable"
     assert elapsed < 0.8
-    assert clients and all(client.is_closed for client in clients)
+    if running_loop:
+        assert clients == []  # refused on a loop thread instead of blocking it (review M8)
+    else:
+        assert clients and all(client.is_closed for client in clients)
 
 
 class CountingStream(httpx.SyncByteStream):
@@ -467,3 +470,16 @@ def test_unbounded_sync_fetch_does_not_add_keyword_to_legacy_io(monkeypatch):
     with hc.create_client(transport=httpx.MockTransport(lambda request: None)) as client:
         response = hc.fetch(method="GET", url=URL, client=client, retry=hc.RetryPolicy(attempts=1))
     assert response.content == b"legacy"
+
+
+@pytest.mark.asyncio
+async def test_deadline_bridge_refuses_a_thread_with_a_running_loop():
+    """Blocking a loop thread for the whole deadline would stall every other task on it (review M8)."""
+    import time
+
+    from tldw_Server_API.app.core import http_client
+
+    with pytest.raises(RuntimeError, match="running event loop"):
+        http_client._httpx_request_with_deadline(
+            client=object(), deadline=time.monotonic() + 5, method="GET", url="https://example.invalid/v1/models",
+        )

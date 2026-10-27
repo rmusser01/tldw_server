@@ -36,7 +36,6 @@ from collections.abc import (  # noqa: E402
     Iterator,
     Mapping,
 )
-from concurrent.futures import ThreadPoolExecutor  # noqa: E402
 from contextlib import asynccontextmanager, contextmanager, nullcontext, suppress  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
 from functools import wraps  # noqa: E402
@@ -2820,7 +2819,22 @@ def _httpx_request_with_deadline(
     proxies: str | dict[str, str] | None = None,
     **kwargs: Any,
 ) -> httpx.Response:
-    """Run cancellable bounded I/O without retaining a client on a closed loop."""
+    """Run cancellable bounded I/O without retaining a client on a closed loop.
+
+    Sync callers only, on a thread with no running event loop (a worker thread, or an
+    ``asyncio.to_thread``/bounded-pool offload). On a loop thread this would block that loop
+    for the whole deadline, so it raises RuntimeError instead (review M8).
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        raise RuntimeError(
+            "A deadline-bounded sync fetch cannot run on a thread with a running event loop; "
+            "offload it to a worker thread."
+        )
+
     async def read() -> httpx.Response:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -2833,17 +2847,7 @@ def _httpx_request_with_deadline(
             ) as async_client:
                 return await _httpx_arequest_io(client=async_client, **kwargs)
 
-    def run() -> httpx.Response:
-        return asyncio.run(read())
-
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return run()
-    # A sync caller may already be on an event-loop thread. Join the bridge
-    # worker, and preserve request-local logging/tracing context there.
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        return executor.submit(contextvars.copy_context().run, run).result()
+    return asyncio.run(read())
 
 
 def _httpx_request_io(
