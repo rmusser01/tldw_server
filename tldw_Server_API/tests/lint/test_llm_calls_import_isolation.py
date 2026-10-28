@@ -22,7 +22,11 @@ from tldw_Server_API.tests.lint._ast_cache import REPO_ROOT
 pytestmark = pytest.mark.unit
 
 _SCRIPT = "import importlib, json, sys; importlib.import_module(sys.argv[1]); print(json.dumps(sorted(sys.modules)))"
-CASES = [("tldw_Server_API.app.core.Chat", "tldw_Server_API.app.api")]
+CASES = [
+    ("tldw_Server_API.app.core.Chat", "tldw_Server_API.app.api"),
+    ("tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter", "tldw_Server_API.app.core.Chat"),
+    ("tldw_Server_API.app.core.LLM_Calls.gateway", "tldw_Server_API.app.core.Chat"),
+]
 
 
 def loaded_after_import(module: str) -> list[str]:

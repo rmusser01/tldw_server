@@ -11,6 +11,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     ChatCompletionRequest,
     ChatCompletionUserMessageParam,
 )
+from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.Chat.chat_route_resolver import resolve_chat_route
 from tldw_Server_API.app.core.LLM_Calls.routing import InMemoryRoutingDecisionStore
 from tldw_Server_API.app.core.Prompt_Management.prompt_improvement_dispatch import (
@@ -201,16 +202,9 @@ async def test_dispatch_crosses_real_resolver_inventory_and_adapter_once(
         fake_session_factory,
     )
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.schemas.chat_request_schemas.get_api_keys",
+        config_llm_providers,
+        "get_api_keys",
         lambda: {"moonshot": "test-secret-boundary"},
-    )
-    monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.schemas.chat_request_schemas.API_KEYS",
-        {"moonshot": "test-secret-boundary"},
-    )
-    monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS",
-        {"moonshot": "test-secret-boundary"},
     )
     messages = [
         {"role": "system", "content": "private meta instruction"},

@@ -145,9 +145,8 @@ core.AuthNZ -> api.v1.API_Deps: 3
 core.AuthNZ -> services: 1
 core.Buddy -> api.v1.schemas: 2
 core.Chat -> api.v1.API_Deps: 1
-core.Chat -> api.v1.endpoints.chat: 2
 core.Chat -> api.v1.endpoints.llm_providers: 1
-core.Chat -> api.v1.schemas: 6
+core.Chat -> api.v1.schemas: 4
 core.Chat_Macros -> api.v1.API_Deps: 1
 core.Chunking -> api.v1.schemas: 1
 core.Claims_Extraction -> api.v1.schemas: 1
@@ -203,8 +202,8 @@ core.Ingestion_Media_Processing -> api.v1.endpoints.media_embeddings: 1
 core.Ingestion_Media_Processing -> api.v1.schemas: 1
 core.Ingestion_Media_Processing -> services: 6
 core.Ingestion_Sources -> services: 1
-core.LLM_Calls -> core.AuthNZ: 7
-core.LLM_Calls -> core.Chat: 2
+core.LLM_Calls -> core.AuthNZ: 8  # bump: gateway.resolve_provider_api_key, moved from chat_service, keeps its llm_provider_overrides lookup; TASK-13950.17 cuts LLM_Calls -> AuthNZ to 0 (TASK-13950.13)
+core.LLM_Calls -> core.Chat: 1
 core.Local_LLM -> api.v1.schemas: 4
 core.Logging -> core.Security: 1
 core.MCP_unified -> api.v1.schemas: 1

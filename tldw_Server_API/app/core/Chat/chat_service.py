@@ -36,11 +36,7 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventType,
     MandatoryAuditWriteError,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    ByokResolutionError,
-    ServerFallbackCredentials,
-    resolve_static_server_fallback,
-)
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
 )
@@ -185,6 +181,9 @@ from tldw_Server_API.app.core.LLM_Calls.error_utils import (
     privacy_safe_chat_error,
     provider_error_privacy_scope,
 )
+from tldw_Server_API.app.core.LLM_Calls.gateway import (  # noqa: F401 - re-exported; callers move to the gateway
+    resolve_provider_api_key,
+)
 from tldw_Server_API.app.core.LLM_Calls.llamacpp_request_extensions import (
     resolve_llamacpp_request_extensions,
     resolve_llamacpp_runtime_caps,
@@ -220,9 +219,6 @@ from tldw_Server_API.app.core.Moderation.review_service import (
 )
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
 from tldw_Server_API.app.core.Persona.conversation_admission import require_current_persona
-from tldw_Server_API.app.core.testing import (
-    is_test_mode as _shared_is_test_mode,
-)
 from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
@@ -2090,173 +2086,6 @@ def resolve_model_context_window(provider: str, model: str) -> Any:
         return metadata.get("context_window") if isinstance(metadata, dict) else None
     except Exception:  # noqa: BLE001 - metadata failure falls back conservatively.
         return None
-
-
-def resolve_provider_api_key(
-    provider: str,
-    *,
-    prefer_module_keys_in_tests: bool = True,
-    include_override: bool = True,
-) -> tuple[str | None, dict[str, Any]]:
-    """
-    Resolve the API key for a provider using env/config first, with optional test overrides.
-
-    Resolution order:
-    1) In test contexts (PYTEST_CURRENT_TEST or TEST_MODE) and when prefer_module_keys_in_tests=True,
-       use module-level API_KEYS (schemas first, then endpoint) if present for the provider.
-    2) Otherwise, return the dynamic key from get_api_keys() (env/config/dotenv).
-    Returns (normalized_key, debug_info).
-    """
-    provider_key = (provider or "").strip().lower()
-    debug_info: dict[str, Any] = {
-        "provider": provider_key or provider,
-        "selected_source": "missing",
-        "module_sources": [],
-        "test_flags": {},
-        "raw_value_provided": False,
-        "raw_value_was_empty": False,
-        "dynamic_value_present": False,
-        "override_value_present": False,
-    }
-
-    try:
-        is_pytest = bool(os.getenv("PYTEST_CURRENT_TEST"))
-    except _CHAT_NONCRITICAL_EXCEPTIONS:
-        is_pytest = False
-    test_mode_enabled = _shared_is_test_mode()
-    use_module_overrides = prefer_module_keys_in_tests and (is_pytest or test_mode_enabled)
-    debug_info["test_flags"] = {"pytest": is_pytest, "test_mode": test_mode_enabled}
-
-    try:
-        from tldw_Server_API.app.api.v1.schemas import chat_request_schemas as _schemas_mod  # type: ignore
-
-        dynamic_keys = _schemas_mod.get_api_keys() or {}
-    except _CHAT_NONCRITICAL_EXCEPTIONS as _err:
-        # API key loading errors should be visible in production
-        pass
-        logger.warning("resolve_provider_api_key failed to load dynamic keys: {}", exception_summary(_err))
-        dynamic_keys = {}
-
-    module_keys: dict[str, str | None] = {}
-    if use_module_overrides:
-        try:
-            schema_keys = getattr(_schemas_mod, "API_KEYS", None)
-            if isinstance(schema_keys, dict) and schema_keys:
-                module_keys.update(schema_keys)
-                debug_info["module_sources"].append("chat_request_schemas")
-        except _CHAT_NONCRITICAL_EXCEPTIONS as _schema_err:
-            logger.warning(
-                "resolve_provider_api_key skipped schema module keys: {}",
-                exception_summary(_schema_err),
-            )
-        try:
-            from tldw_Server_API.app.api.v1.endpoints import chat as _chat_mod  # type: ignore
-
-            endpoint_keys = getattr(_chat_mod, "API_KEYS", None)
-            if isinstance(endpoint_keys, dict) and endpoint_keys:
-                # Endpoint-level patches override schema-level for tests.
-                module_keys.update(endpoint_keys)
-                debug_info["module_sources"].append("chat_endpoint")
-        except _CHAT_NONCRITICAL_EXCEPTIONS as _chat_err:
-            logger.warning(
-                "resolve_provider_api_key skipped endpoint module keys: {}",
-                exception_summary(_chat_err),
-            )
-
-    module_override_present = use_module_overrides and provider_key in module_keys
-    override_value = None
-    if include_override and not module_override_present:
-        try:
-            from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import get_llm_provider_override
-
-            override = get_llm_provider_override(provider_key)
-            override_value = override.api_key if override else None
-        except _CHAT_NONCRITICAL_EXCEPTIONS:
-            override_value = None
-
-    debug_info["override_value_present"] = override_value is not None
-
-    dynamic_value = dynamic_keys.get(provider_key)
-    debug_info["dynamic_value_present"] = dynamic_value is not None
-
-    def _normalize(value: str | None) -> str | None:
-        if value is None:
-            return None
-        if isinstance(value, str) and value.strip() == "":
-            return None
-        return value
-
-    raw_value = dynamic_value
-    selected_override = False
-    if override_value is not None:
-        raw_value = override_value
-        selected_override = True
-        debug_info["selected_source"] = "override"
-    if module_override_present:
-        raw_value = module_keys.get(provider_key)
-        debug_info["selected_source"] = "module_override"
-    elif raw_value is not None and not selected_override:
-        env_var = (
-            f"{provider_key.upper().replace('.', '_').replace('-', '_')}_API_KEY"
-            if provider_key
-            else None
-        )
-        debug_info["selected_source"] = "env" if env_var and os.getenv(env_var) is not None else "config"
-    elif raw_value is None:
-        debug_info["selected_source"] = "missing"
-
-    debug_info["raw_value_provided"] = raw_value is not None
-    debug_info["raw_value_was_empty"] = isinstance(raw_value, str) and raw_value.strip() == ""
-    normalized_value = _normalize(raw_value)
-    return normalized_value, debug_info
-
-
-def _resolve_test_module_provider_api_key(provider: str) -> tuple[bool, str | None]:
-    """Return an explicit legacy test-module key without reading server config."""
-    provider_key = (provider or "").strip().lower()
-    try:
-        is_pytest = bool(os.getenv("PYTEST_CURRENT_TEST"))
-    except _CHAT_NONCRITICAL_EXCEPTIONS:
-        is_pytest = False
-    if not (is_pytest or _shared_is_test_mode()):
-        return False, None
-
-    module_keys: dict[str, Any] = {}
-    try:
-        from tldw_Server_API.app.api.v1.schemas import chat_request_schemas as _schemas_mod  # type: ignore
-
-        schema_keys = getattr(_schemas_mod, "API_KEYS", None)
-        if isinstance(schema_keys, dict):
-            module_keys.update(schema_keys)
-    except _CHAT_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Static fallback skipped schema module keys: {}", exc)
-    try:
-        from tldw_Server_API.app.api.v1.endpoints import chat as _chat_mod  # type: ignore
-
-        endpoint_keys = getattr(_chat_mod, "API_KEYS", None)
-        if isinstance(endpoint_keys, dict):
-            module_keys.update(endpoint_keys)
-    except _CHAT_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Static fallback skipped endpoint module keys: {}", exc)
-
-    if provider_key not in module_keys:
-        return False, None
-    value = module_keys[provider_key]
-    normalized = value.strip() if isinstance(value, str) and value.strip() else None
-    return True, normalized
-
-
-def resolve_static_provider_fallback(provider: str) -> ServerFallbackCredentials:
-    """Capture one authoritative server fallback, honoring explicit test patches."""
-    module_override_present, module_key = _resolve_test_module_provider_api_key(provider)
-    if module_override_present:
-        return ServerFallbackCredentials(
-            api_key=module_key,
-            credential_fields={},
-            auth_source=None,
-            app_config={},
-        )
-    return resolve_static_server_fallback(provider)
 
 
 def _resolve_base_url_override(provider: str, chat_args: dict[str, Any]) -> str | None:

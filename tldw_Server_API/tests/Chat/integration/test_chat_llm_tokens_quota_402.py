@@ -10,7 +10,9 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     ChatCompletionRequest,
     ChatCompletionUserMessageParam,
 )
+from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.tests.helpers.provider_keys import api_keys_source
 
 
 async def _tiny_llm_tokens_limit(_uid, key):
@@ -38,7 +40,7 @@ def test_chat_completions_402_on_monthly_llm_token_quota(
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.quota_checks.llm_tokens_this_month", _month_already_spent)
     monkeypatch.setattr(chat_ep, "perform_chat_api_call", _recording_dispatch)
     monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_orchestrator.chat_api_call", _recording_dispatch)
-    monkeypatch.setitem(chat_ep.API_KEYS, "local-llm", "dummy-key")
+    monkeypatch.setattr(config_llm_providers, "get_api_keys", api_keys_source({"local-llm": "dummy-key"}))
 
     request_data = ChatCompletionRequest(
         model="local-llm",
@@ -93,7 +95,7 @@ def test_chat_completions_402_on_daily_llm_cost_quota(
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.quota_checks.llm_cost_today", _spent_fifty_cents)
     monkeypatch.setattr(chat_ep, "perform_chat_api_call", _recording_dispatch)
     monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_orchestrator.chat_api_call", _recording_dispatch)
-    monkeypatch.setitem(chat_ep.API_KEYS, "local-llm", "dummy-key")
+    monkeypatch.setattr(config_llm_providers, "get_api_keys", api_keys_source({"local-llm": "dummy-key"}))
 
     request_data = ChatCompletionRequest(
         model="local-llm",
