@@ -6,6 +6,7 @@ import { focusComposer } from "@/hooks/useComposerFocus"
 import { classifyCharacterChatFailureRecovery } from "@/hooks/chat/useCharacterChatMode"
 import { isHiddenBySelfOrAncestor } from "@/utils/focus-return"
 import { Button } from "@/components/Common/Button"
+import { openModelSelector } from "@/components/Option/Playground/playground-cockpit-actions"
 import { RecoveryCallout, StatePanel } from "@/components/ui/state"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import { keepHistoryTurnRecovery } from "@/services/history-turn-keep"
@@ -72,10 +73,14 @@ export function HistorySelectionReview({
   onRetryRecovery,
   getSavedQuestionReview,
   onRetrySavedQuestion,
-  onSwitchModel
+  onSwitchModel = () => openModelSelector()
 }: {
   selection: HistorySelectionController
-  /** Open this surface's model picker, offered when a send failed because of its model (CC-02). */
+  /**
+   * Open the model picker, offered when a send failed because of its model
+   * (CC-02). Defaults to the shared model-selector event, which the full page
+   * and the side panel both answer.
+   */
   onSwitchModel?: () => void
   onExpand?: () => void
   onBind?: () => void
@@ -787,7 +792,7 @@ export function HistorySelectionReview({
                 : 'Your message is kept. Nothing is sent again unless you choose to retry.'
             )}
           </p>
-          {entry.turn.failure_action === "open-model-selector" && onSwitchModel && (
+          {entry.turn.failure_action === "open-model-selector" && (
             <Button
               variant="text"
               disabled={sendInProgress}

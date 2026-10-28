@@ -13,7 +13,6 @@ import { useKeepInterruptedHistoryTurns } from "@/hooks/chat/useKeepInterruptedH
 import { SidepanelSendGateContext, type SidepanelSendGate } from "@/hooks/chat/sidepanel-send-gate"
 import type { HistorySelectionCaptureV1 } from "@/types/history-selection"
 import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview"
-import { openModelSelector } from "@/components/Option/Playground/playground-cockpit-actions"
 import { formatSelectedHistory } from "@/db/dexie/helpers"
 import { useSidepanelChatOwner, type SidepanelChatOwner } from "@/hooks/useSidepanelChatOwner"
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
@@ -3309,7 +3308,7 @@ const SidepanelChatContent = ({
                 </div>
               ) : null}
               <div className={historySelection.status === "idle" || freshnessNotice ? undefined : "pt-12"}>
-                <HistorySelectionReview selection={historySelection} hideRecovery={hideKeptHistoryTurn} getRetryContext={getRecoveryRetryContext} onRetryRecovery={retryRecoveredHistoryTurn} getSavedQuestionReview={getSavedQuestionReview} onRetrySavedQuestion={retrySavedQuestion} onSwitchModel={openModelSelector} onExpand={expandSelectedHistory} onBind={() => void historySelection.bindUnavailableConversation()} />
+                <HistorySelectionReview selection={historySelection} hideRecovery={hideKeptHistoryTurn} getRetryContext={getRecoveryRetryContext} onRetryRecovery={retryRecoveredHistoryTurn} getSavedQuestionReview={getSavedQuestionReview} onRetrySavedQuestion={retrySavedQuestion} onExpand={expandSelectedHistory} onBind={() => void historySelection.bindUnavailableConversation()} />
               </div>
               <SidePanelBody
                 scrollParentRef={containerRef}

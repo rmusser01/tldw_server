@@ -351,7 +351,7 @@ describe("CC-02: a send that got no reply explains itself", () => {
     expect(onSwitchModel).toHaveBeenCalledTimes(1)
   })
 
-  it("offers Switch model only when the failure is about the model and the surface can open a picker", () => {
+  it("offers Switch model only when the failure is about the model, using the shared picker event by default", () => {
     const withoutAction = recoveryController("client", "accepted_unsent", "", {
       failure_reason: "Your message is too large. Use a smaller image or shorten your message, then try again."
     })
@@ -365,10 +365,16 @@ describe("CC-02: a send that got no reply explains itself", () => {
       failure_reason: providerFailure,
       failure_action: "open-model-selector"
     })
-    render(<HistorySelectionReview selection={withAction} />)
-    fireEvent.click(screen.getByText("Earlier messages to review (1)"))
-    expect(screen.getByText("No reply to this message")).toBeVisible()
-    expect(screen.queryByRole("button", { name: "Switch model" })).toBeNull()
+    const opened = vi.fn()
+    window.addEventListener("tldw:open-model-selector", opened)
+    try {
+      render(<HistorySelectionReview selection={withAction} />)
+      fireEvent.click(screen.getByText("Earlier messages to review (1)"))
+      fireEvent.click(screen.getByRole("button", { name: "Switch model" }))
+      expect(opened).toHaveBeenCalledTimes(1)
+    } finally {
+      window.removeEventListener("tldw:open-model-selector", opened)
+    }
   })
 
   it("calls a reply that arrived but was not saved what it is", () => {

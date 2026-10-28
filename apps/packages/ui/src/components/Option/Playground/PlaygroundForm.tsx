@@ -250,7 +250,6 @@ import {
   PlaygroundChatErrorBanner,
   usePlaygroundChatErrorBanner,
 } from "./PlaygroundChatErrorBanner";
-import { useChatErrorBubbleInView } from "./hooks/useChatErrorBubbleInView";
 import { PlaygroundKnowledgeSection } from "./PlaygroundKnowledgeSection";
 import { PlaygroundMcpControl } from "./PlaygroundMcpControl";
 import { PlaygroundModelCatalogControls } from "./PlaygroundModelCatalogControls";
@@ -4076,8 +4075,6 @@ export const PlaygroundForm = ({
     dismissError: dismissChatErrorBanner,
     dismissAfterSuccessfulSubmit: dismissChatErrorAfterSuccessfulSubmit,
   } = usePlaygroundChatErrorBanner(messages);
-  // Show the banner only while the error bubble it repeats is off screen (CC-N2).
-  const chatErrorBubbleInView = useChatErrorBubbleInView(chatErrorBanner?.key ?? null);
 
   const { mutateAsync: sendMessage } = useMutation({
     mutationFn: onSubmit,
@@ -6637,8 +6634,7 @@ export const PlaygroundForm = ({
                       className="flex w-full min-w-0 flex-col"
                     >
                       <PlaygroundChatErrorBanner
-                        error={chatErrorBubbleInView === false ? chatErrorBanner : null}
-                        announce={false}
+                        error={chatErrorBanner}
                         diagnosticsLabel={
                           t(
                             "playground:composer.errorBanner.openDiagnostics",

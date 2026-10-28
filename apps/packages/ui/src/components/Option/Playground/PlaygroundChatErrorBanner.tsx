@@ -11,6 +11,7 @@ import {
   openModelSelector,
   openModelSettings
 } from "./playground-cockpit-actions"
+import { useChatErrorBubbleInView } from "./hooks/useChatErrorBubbleInView"
 
 type ChatErrorMessageCandidate = {
   id?: string | number | null
@@ -161,8 +162,9 @@ export const usePlaygroundChatErrorBanner = (
 type PlaygroundChatErrorBannerProps = {
   error: PlaygroundChatErrorBannerEntry | null
   /**
-   * Announce the error (role="alert"). False when the banner repeats an error
-   * bubble that already announced it, so scrolling doesn't re-announce (CC-N2).
+   * Announce the error (role="alert"). Off by default: the banner repeats an
+   * error bubble that already announced it, so scrolling doesn't re-announce
+   * (CC-N2).
    */
   announce?: boolean
   diagnosticsLabel: string
@@ -180,7 +182,7 @@ export const PlaygroundChatErrorBanner: React.FC<
   PlaygroundChatErrorBannerProps
 > = ({
   error,
-  announce = true,
+  announce = false,
   diagnosticsLabel,
   retryLabel = "Retry",
   editProviderLabel = "Edit provider",
@@ -192,8 +194,10 @@ export const PlaygroundChatErrorBanner: React.FC<
   onDismiss
 }) => {
   const navigate = useNavigate()
+  // Shown only while the error bubble it repeats is off screen (CC-N2).
+  const bubbleInView = useChatErrorBubbleInView(error?.key ?? null)
 
-  if (!error) {
+  if (!error || bubbleInView !== false) {
     return null
   }
 
