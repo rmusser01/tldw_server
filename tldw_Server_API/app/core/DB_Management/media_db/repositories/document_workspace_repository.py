@@ -141,6 +141,35 @@ class DocumentWorkspaceRepository:
             rows: list[dict[str, Any]] = self.db._fetchall_with_connection(conn, query, (media_id, user_id, _ACTIVE))
         return rows
 
+    def list_annotations_for_export(self, *, media_id: int, user_id: str) -> list[dict[str, Any]]:
+        """Bound rows and text before materializing the canonical export payload."""
+        # SQLite SUBSTR stops at NUL; PostgreSQL TEXT cannot contain NUL.
+        if self._is_postgres():
+            query = """
+        SELECT 0 AS invalid_text, SUBSTR(location, 1, 65) AS location, SUBSTR(text, 1, 6001) AS text,
+               SUBSTR(color, 1, 16) AS color, SUBSTR(note, 1, 6001) AS note,
+               SUBSTR(annotation_type, 1, 32) AS annotation_type
+        FROM document_annotations
+        WHERE media_id = ? AND user_id = ? AND deleted = ?
+        ORDER BY created_at ASC, id ASC
+        LIMIT 501
+        """
+        else:
+            query = """
+        SELECT CASE WHEN
+            INSTR(CAST(location AS BLOB), X'00') > 0 OR INSTR(CAST(text AS BLOB), X'00') > 0 OR
+            INSTR(CAST(note AS BLOB), X'00') > 0 OR INSTR(CAST(color AS BLOB), X'00') > 0 OR
+            INSTR(CAST(annotation_type AS BLOB), X'00') > 0 THEN 1 ELSE 0 END AS invalid_text, SUBSTR(location, 1, 65) AS location, SUBSTR(text, 1, 6001) AS text,
+               SUBSTR(color, 1, 16) AS color, SUBSTR(note, 1, 6001) AS note,
+               SUBSTR(annotation_type, 1, 32) AS annotation_type
+        FROM document_annotations
+        WHERE media_id = ? AND user_id = ? AND deleted = ?
+        ORDER BY created_at ASC, id ASC
+        LIMIT 501
+        """
+        with self.db.transaction() as conn:
+            return self.db._fetchall_with_connection(conn, query, (media_id, user_id, 0))
+
     def create_annotation(
         self,
         *,

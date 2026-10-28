@@ -646,7 +646,10 @@ export const AnnotationsPanel: React.FC = () => {
 
       {/* Export annotations modal */}
       <ExportAnnotationsModal
+        key={activeDocumentId ?? "none"}
         open={exportModalOpen}
+        documentId={activeDocumentId}
+        hasPendingWrites={updateMutation.isPending || deleteMutation.isPending || editingAnnotation !== null}
         onClose={() => setExportModalOpen(false)}
         annotations={annotations.filter(annotation => annotation.documentId === activeDocumentId)}
         documentTitle={documentTitle}

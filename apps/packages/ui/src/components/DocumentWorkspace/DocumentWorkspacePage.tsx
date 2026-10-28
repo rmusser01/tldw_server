@@ -23,7 +23,8 @@ import {
   Keyboard,
   Plus,
   ChevronDown,
-  CircleHelp
+  CircleHelp,
+  Sparkles
 } from "lucide-react"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { useDocumentOperation } from "@/hooks/document-workspace/useDocumentOperation"
@@ -51,6 +52,7 @@ import {
 } from "@/hooks/document-workspace"
 import { isEditableTarget } from "@/utils/editable-target"
 
+const GenerateDocumentDialog = React.lazy(() => import("./GenerateDocumentDialog"))
 const DocumentPickerModal = React.lazy(() => import("./DocumentPickerModal"))
 const DocumentViewer = React.lazy(() =>
   import("./DocumentViewer").then((module) => ({
@@ -369,6 +371,7 @@ const WorkspaceHeader: React.FC<{
   onToggleLeftPane: () => void
   onToggleRightPane: () => void
   onShowShortcuts: () => void
+  onGenerate: () => void
   onOpenPicker: (tab: "library" | "upload") => void
   onRetrySync?: () => void
   hideToggles?: boolean
@@ -379,6 +382,7 @@ const WorkspaceHeader: React.FC<{
   onToggleRightPane,
   onShowShortcuts,
   onOpenPicker,
+  onGenerate,
   onRetrySync,
   hideToggles
 }) => {
@@ -396,7 +400,7 @@ const WorkspaceHeader: React.FC<{
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-surface px-4">
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 items-center gap-3">
         {!hideToggles && (
           <Tooltip title={leftPaneToggleLabel}>
             <button
@@ -414,16 +418,17 @@ const WorkspaceHeader: React.FC<{
             </button>
           </Tooltip>
         )}
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <FileText className="h-5 w-5 text-primary" />
-          <h1 className="text-lg font-medium">
+          <h1 className="truncate text-lg font-medium">
             {activeDocument?.title ||
               t("option:documentWorkspace.title", "Document Workspace")}
           </h1>
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
+        <button onClick={onGenerate} aria-label="Generate document" title="Generate document" className="flex h-11 shrink-0 items-center gap-1.5 rounded px-2 text-sm text-text hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"><Sparkles className="h-5 w-5"/><span className="hidden sm:inline">Generate document</span></button>
         {/* Sync status indicator */}
         <SyncStatusIndicator onRetry={onRetrySync} />
 
@@ -589,6 +594,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
   // Keyboard shortcuts modal state
   const [shortcutsModalOpen, setShortcutsModalOpen] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [generateOpen, setGenerateOpen] = useState(false)
   const [pickerTab, setPickerTab] = useState<"library" | "upload">("library")
   const [loadingDocumentId, setLoadingDocumentId] = useState<number | null>(null)
   const blobUrlMapRef = useRef(new Map(openDocuments.filter(doc => doc.url?.startsWith("blob:")).map(doc => [doc.id, doc.url])))
@@ -1093,6 +1099,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
             onToggleRightPane={handleToggleRightPane}
             onShowShortcuts={handleShowShortcuts}
             onOpenPicker={handleOpenPicker}
+            onGenerate={() => setGenerateOpen(true)}
             onRetrySync={retrySync}
             hideToggles
           />
@@ -1101,6 +1108,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
             onClose={handleCloseShortcuts}
           />
           <Suspense fallback={null}>
+            {generateOpen && <GenerateDocumentDialog operation={owner} onClose={() => setGenerateOpen(false)} onLibrary={() => { setGenerateOpen(false); handleOpenPicker("library") }} onOpenSaved={async id => { await openDocumentById(id, "pdf", owner); owner.assertCurrent(); return useDocumentWorkspaceStore.getState().openDocuments.some(doc => doc.id === id) }} />}
             {pickerOpen && (
               <DocumentPickerModal
                 open={pickerOpen}
@@ -1158,6 +1166,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
           onToggleRightPane={handleToggleRightPane}
           onShowShortcuts={handleShowShortcuts}
           onOpenPicker={handleOpenPicker}
+          onGenerate={() => setGenerateOpen(true)}
           onRetrySync={retrySync}
         />
         <DocumentShortcutsModal
@@ -1165,7 +1174,8 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
           onClose={handleCloseShortcuts}
         />
         <Suspense fallback={null}>
-          {pickerOpen && (
+          {generateOpen && <GenerateDocumentDialog operation={owner} onClose={() => setGenerateOpen(false)} onLibrary={() => { setGenerateOpen(false); handleOpenPicker("library") }} onOpenSaved={async id => { await openDocumentById(id, "pdf", owner); owner.assertCurrent(); return useDocumentWorkspaceStore.getState().openDocuments.some(doc => doc.id === id) }} />}
+            {pickerOpen && (
             <DocumentPickerModal
               open={pickerOpen}
               initialTab={pickerTab}
