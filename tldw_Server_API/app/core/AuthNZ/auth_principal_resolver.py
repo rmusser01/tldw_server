@@ -36,7 +36,7 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import (
 from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.AuthNZ.single_user_session import validate_single_user_session
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, _looks_like_jwt
 from tldw_Server_API.app.core.exceptions import InactiveUserError
 from tldw_Server_API.app.core.testing import env_flag_enabled
 
@@ -74,16 +74,24 @@ _PLATFORM_ADMIN_ROLES = PLATFORM_ADMIN_ROLES
 _ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 
+def bearer_credential(value: Optional[str]) -> Optional[str]:
+    """Return ``<credential>`` from ``Bearer <credential>`` (the scheme in any case), else None.
+
+    The one bearer-scheme parser (TASK-13950.7): endpoints that read a bearer from a header call
+    it rather than splitting the header themselves.
+    """
+    if not isinstance(value, str):
+        return None
+    scheme, _, credential = value.partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+    return credential.strip() or None
+
+
 def _extract_bearer_token(request: HTTPConnection) -> Optional[str]:
     """Extract Bearer token from Authorization header (of a request or a WebSocket handshake)."""
     try:
-        auth_header = request.headers.get("Authorization")
-        if not auth_header:
-            return None
-        scheme, _, credential = auth_header.partition(" ")
-        if scheme.lower() != "bearer" or not credential:
-            return None
-        return credential.strip()
+        return bearer_credential(request.headers.get("Authorization"))
     except (AttributeError, TypeError):
         return None
 
@@ -96,12 +104,6 @@ def _extract_api_key(request: Request) -> Optional[str]:
             return api_key.strip()
     except (AttributeError, TypeError):
         return None
-
-
-def _looks_like_jwt(token: Optional[str]) -> bool:
-    if not isinstance(token, str):
-        return False
-    return token.count(".") == 2
 
 
 def _peek_jwt_token_type(token: str) -> Optional[str]:

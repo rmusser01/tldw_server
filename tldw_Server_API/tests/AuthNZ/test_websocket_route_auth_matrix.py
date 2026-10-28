@@ -7,9 +7,12 @@ and checks its route list against the ratchet's ``WS`` baseline lines:
 
 - Handshake routes must refuse before accept: a policy close (4401, 1008) or an HTTP 401
   denial.
-- First-message-frame routes accept, then must close with a policy code, without
-  answering anything but an error, when the first frame is data or carries a revoked
-  token. Voice's 4400 ("Expected AUTH message") counts: the frame is refused unread.
+- First-message-frame routes (audio streams, voice) resolve on the core
+  resolve_ws_principal_first_frame: they accept only to read the auth frame, then must close
+  with a policy code, without answering anything but an error, when the first frame is data
+  (4400, refused unread) or carries a missing or revoked token (4401). A data frame sent
+  before a valid auth frame is never processed. The audio streams verify a handshake
+  credential before accept and read no frame; voice reads only its frame.
 - The revoked token is tried in the Authorization header, in the ``token`` query
   parameter, and, for first-frame routes, in the auth frame.
 - A valid AuthNZ access token must get past authentication on every route (the control
@@ -298,9 +301,11 @@ def _outcome(
     headers: dict[str, str] | None = None,
     subprotocols: list[str] | None = None,
     frame: Mapping[str, object] | None = None,
+    then: Mapping[str, object] | None = None,
     timeout: float = FRAME_TIMEOUT_S,
 ) -> str:
-    """Connect, send ``frame`` if accepted, and describe what the server did.
+    """Connect, send ``frame`` (and ``then`` right behind it) if accepted, and describe what the
+    server did.
 
     Returns ``"close <code>"`` or ``"http <status>"`` when refused before accept,
     ``"accepted"`` when a handshake succeeds and no frame is sent, ``"closed <code>"`` for a
@@ -320,6 +325,8 @@ def _outcome(
         # A route that already closed still has its close queued for the reads below.
         with contextlib.suppress(WebSocketDisconnect, anyio.ClosedResourceError, anyio.BrokenResourceError):
             ws.send_json(frame)
+            if then is not None:
+                ws.send_json(then)
         for _ in range(MAX_FRAMES):
             try:
                 message = _receive(ws, timeout)
@@ -752,6 +759,89 @@ def test_persona_refuses_an_mcp_issued_token(env: SimpleNamespace) -> None:
     url = ROUTES[PERSONA][0]
     assert _outcome(env.client, url, headers={"Authorization": f"Bearer {mcp_token}"}) == "close 4401"
     assert _outcome(env.client, url, subprotocols=["bearer", mcp_token]) == "close 4401"
+
+
+FIRST_FRAME_ROUTES = [route for route, (_url, style) in ROUTES.items() if style == FIRST_FRAME]
+
+
+@pytest.mark.parametrize("route", FIRST_FRAME_ROUTES)
+def test_first_frame_routes_refuse_with_their_policy_codes(env: SimpleNamespace, route: str) -> None:
+    """Exact codes for the four kinds of refusal (the shared refusal sets above accept any)."""
+    url = ROUTES[route][0]
+    revoked_header = {"Authorization": f"Bearer {env.revoked}"}
+
+    assert _outcome(env.client, url, frame=DATA_FRAME) == "closed 4400"  # not an auth frame, read no further
+    assert _outcome(env.client, url, frame={"type": "auth"}) == "closed 4401"  # no credential
+    assert _outcome(env.client, url, frame={"type": "auth", "token": env.revoked}) == "closed 4401"
+    # The audio streams verify a handshake credential before accept; voice reads only its frame.
+    expected = "closed 4400" if route == VOICE else "close 4401"
+    assert _outcome(env.client, url, headers=revoked_header, frame=DATA_FRAME) == expected
+
+
+@pytest.mark.parametrize("route", FIRST_FRAME_ROUTES)
+def test_a_data_frame_before_the_auth_frame_is_never_processed(
+    env: SimpleNamespace, route: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A valid auth frame right behind a data frame does not rescue it: the route closes 4400 at the
+    data frame and its work never starts. The control shows the spy sees a caller who gets through."""
+    from tldw_Server_API.app.api.v1.endpoints import voice_assistant
+    from tldw_Server_API.app.api.v1.endpoints.audio import audio_streaming
+
+    started: list[str] = []
+    if route == VOICE:  # the first thing voice does for a known caller
+        sessions = voice_assistant.get_voice_session_manager
+
+        def first_work() -> object:
+            started.append(route)
+            return sessions()
+
+        monkeypatch.setattr(voice_assistant, "get_voice_session_manager", first_work)
+    else:  # the first thing an audio stream does for a known caller
+        guard = audio_streaming._guard_audio_ws_work_start
+
+        async def first_work_async(*args: object, **kwargs: object) -> bool:
+            started.append(route)
+            return await guard(*args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(audio_streaming, "_guard_audio_ws_work_start", first_work_async)
+    url, valid = ROUTES[route][0], {"type": "auth", "token": env.valid}
+
+    assert _outcome(env.client, url, frame=DATA_FRAME, then=valid) == "closed 4400"
+    assert started == []
+    assert _past_auth(_outcome(env.client, url, frame=valid, timeout=ADMITTED_AFTER_S))
+    assert started == [route]
+
+
+@pytest.mark.parametrize("opt_in", [False, True], ids=["query-auth-off", "AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH"])
+@pytest.mark.parametrize("route", FIRST_FRAME_ROUTES)
+def test_first_frame_routes_never_read_a_query_api_key(
+    env: SimpleNamespace, route: str, opt_in: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Voice read only ``?token=`` before TASK-13950.7, and the audio streams only ``?token=``, behind
+    their opt-in. The shared query shim also reads ``?api_key=``; these routes must not gain it, alone
+    or as HTTP's fall-back beside a refused ``?token=``."""
+    if opt_in:
+        monkeypatch.setenv("AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH", "1")
+    else:
+        monkeypatch.delenv("AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH", raising=False)
+    url = _with_query(ROUTES[route][0], "api_key", env.api_key)
+    beside_revoked = _with_query(url, "token", env.revoked)
+    # Behind the opt-in the audio streams verify ?token= before accept; voice reads it after its frame.
+    revoked_query = "close 4401" if opt_in and route != VOICE else "closed 4401"
+
+    with _warnings() as warned:
+        assert _outcome(env.client, url, frame={"type": "auth"}) == "closed 4401"
+        assert _outcome(env.client, beside_revoked, frame={"type": "auth"}) == revoked_query
+
+    assert not [message for message in _deprecations(warned) if "api_key" in message], warned
+
+
+@pytest.mark.parametrize("route", ["/api/v1/audio/realtime", "/v1/realtime"])
+def test_realtime_speech_echoes_the_bearer_subprotocol(env: SimpleNamespace, route: str) -> None:
+    """Realtime verifies a ``bearer, <token>`` subprotocol credential, so it must echo the marker: a browser
+    fails a handshake that echoes nothing (and after a scoped credential's quota was charged)."""
+    assert _accepted_subprotocol(env.client, ROUTES[route][0], subprotocols=["bearer", env.valid]) == "bearer"
+    assert _outcome(env.client, ROUTES[route][0], subprotocols=["bearer", env.revoked]) == "close 4401"
 
 
 def _voice_auth(client: TestClient, url: str = ROUTES[VOICE][0], **frame: object) -> str:

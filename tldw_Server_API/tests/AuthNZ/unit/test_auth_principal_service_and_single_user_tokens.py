@@ -428,3 +428,24 @@ def test_auth_principal_resolver_is_test_context_accepts_single_letter_y(
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
 
     assert auth_principal_resolver._is_test_context() is True
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("Bearer abc.def.ghi", "abc.def.ghi"),
+        ("bearer key", "key"),
+        ("BEARER  key ", "key"),
+        ("Bearer", None),
+        ("Bearer   ", None),
+        ("Bearerkey", None),
+        ("Basic dXNlcjpwYXNz", None),
+        ("Token key", None),
+        (None, None),
+    ],
+)
+def test_bearer_credential_is_the_one_bearer_scheme_parser(value, expected):
+    """Endpoints read a bearer through this, not by splitting the header (TASK-13950.7)."""
+    assert auth_principal_resolver.bearer_credential(value) == expected
+    request = _build_request({"Authorization": value} if value is not None else {})
+    assert auth_principal_resolver._extract_bearer_token(request) == expected

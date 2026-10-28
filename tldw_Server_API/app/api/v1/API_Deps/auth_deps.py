@@ -73,6 +73,7 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
     User as User,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
+    _looks_like_jwt,
     authenticate_api_key_user,
     get_request_user,
     get_single_user_instance,
@@ -212,12 +213,6 @@ def _public_user_dict(user: Mapping[str, Any]) -> dict[str, Any]:
             continue
         safe[key] = value
     return safe
-
-
-def _looks_like_jwt(token: Optional[str]) -> bool:
-    if not isinstance(token, str):
-        return False
-    return token.count(".") == 2
 
 
 async def _authenticate_api_key_from_request(request: Request, api_key: str) -> dict[str, Any]:
