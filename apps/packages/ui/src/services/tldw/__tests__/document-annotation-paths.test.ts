@@ -3,6 +3,8 @@ import { isServicePromptRequestPath } from "../service-prompt-scope-error"
 
 describe("captured document annotation routes", () => {
   it.each([
+    ["GET", "/api/v1/media/12/annotated-file"],
+    ["POST", "/api/v1/media/documents/render"],
     ["GET", "/api/v1/media/12/progress"],
     ["PUT", "/api/v1/media/12/progress"],
     ["DELETE", "/api/v1/media/12/progress"],
@@ -15,6 +17,8 @@ describe("captured document annotation routes", () => {
     expect(isServicePromptRequestPath(path, method)).toBe(true)
   )
   it.each([
+    ["POST", "/api/v1/media/12/annotated-file"],
+    ["GET", "/api/v1/media/documents/render"],
     ["POST", "/api/v1/media/12/progress"],
     ["PUT", "/api/v1/media/0/progress"],
     ["DELETE", "/api/v1/media/12/annotations"],

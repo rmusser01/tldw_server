@@ -144,7 +144,7 @@ describe("DocumentPickerModal design-system states", () => {
     vi.mocked(useServerOnline).mockReturnValue(true)
     vi.mocked(tldwClient.listMedia).mockResolvedValue({ items: [] })
     vi.mocked(tldwClient.searchMedia).mockResolvedValue({ items: [] })
-    vi.mocked(tldwClient.uploadMedia).mockResolvedValue({ result: { id: 17 } })
+    vi.mocked(tldwClient.uploadMedia).mockResolvedValue({ result: { status: "Success", id: 17 } })
   })
 
   afterEach(() => releaseAuthority?.())
@@ -163,7 +163,7 @@ describe("DocumentPickerModal design-system states", () => {
     fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(["private"], "Bob.pdf", { type: "application/pdf" })] } })
     await waitFor(() => expect(tldwClient.uploadMedia).toHaveBeenCalled())
     act(() => window.dispatchEvent(new Event("tldw:auth-principal-changed")))
-    await act(async () => complete({ result: { id: 7 } }))
+    await act(async () => complete({ result: { status: "Success", id: 7 } }))
     expect(onOpenDocument).not.toHaveBeenCalled()
   })
 
@@ -196,7 +196,7 @@ describe("DocumentPickerModal design-system states", () => {
   it("preserves the upload storage warning action inside the design-system Alert", async () => {
     const onClose = vi.fn()
     vi.mocked(tldwClient.uploadMedia).mockResolvedValue({
-      result: {
+      result: { status: "Success",
         id: 42,
         warnings: ["original file could not be stored"]
       }
@@ -225,4 +225,13 @@ describe("DocumentPickerModal design-system states", () => {
       expect(onClose).toHaveBeenCalled()
     })
   })
+  it("keeps a partial import's known ID for reconciliation without opening it as success",async()=>{
+    const onOpenDocument=vi.fn()
+    vi.mocked(tldwClient.uploadMedia).mockResolvedValue({results:[{status:"Error",db_id:71,error:"Chunk consistency validation failed"}]})
+    const {container}=renderModal({onOpenDocument})
+    fireEvent.change(container.querySelector('input[type="file"]')!,{target:{files:[new File(["PDF"],"rowan.pdf",{type:"application/pdf"})]}})
+    await screen.findByText(/Import failed/)
+    expect(onOpenDocument).not.toHaveBeenCalled()
+  })
+
 })
