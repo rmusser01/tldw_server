@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useRef } from "react"
+import React, { useState, useMemo, useCallback, useRef, useEffect } from "react"
 import { useTranslation } from "react-i18next"
 import {
   Empty,
@@ -8,8 +8,7 @@ import {
   Input,
   Modal,
   Tooltip,
-  Segmented,
-  message
+  Segmented
 } from "antd"
 import type { MenuProps } from "antd"
 import {
@@ -33,6 +32,7 @@ import {
   useDeleteAnnotation
 } from "@/hooks/document-workspace"
 import type { Annotation, AnnotationColor, AnnotationType, DocumentType } from "../types"
+import { useDocumentOperation } from "@/hooks/document-workspace/useDocumentOperation"
 import { COLOR_BADGES } from "../config"
 
 const { TextArea } = Input
@@ -43,6 +43,7 @@ type TypeFilter = "all" | "highlight" | "page_note"
 interface AnnotationCardProps {
   annotation: Annotation
   documentType: DocumentType | null
+  pending: boolean
   onNavigate: () => void
   onEdit: () => void
   onDelete: () => void
@@ -51,6 +52,7 @@ interface AnnotationCardProps {
 const AnnotationCard: React.FC<AnnotationCardProps> = ({
   annotation,
   documentType,
+  pending,
   onNavigate,
   onEdit,
   onDelete
@@ -106,6 +108,8 @@ const AnnotationCard: React.FC<AnnotationCardProps> = ({
         <div className="flex items-center gap-1 text-text-muted hover:text-text transition-colors">
           <Tooltip title={t("common:edit", "Edit")}>
             <button
+              aria-label={t("common:edit", "Edit")}
+              disabled={pending}
               onClick={onEdit}
               className="rounded p-1 hover:bg-hover"
             >
@@ -114,6 +118,8 @@ const AnnotationCard: React.FC<AnnotationCardProps> = ({
           </Tooltip>
           <Tooltip title={t("common:delete", "Delete")}>
             <button
+              aria-label={t("common:delete", "Delete")}
+              disabled={pending}
               onClick={onDelete}
               className="rounded p-1 hover:bg-hover"
             >
@@ -167,6 +173,7 @@ interface EditNoteModalProps {
   onClose: () => void
   onSave: (note: string) => void
   saving: boolean
+  error: string | null
 }
 
 const EditNoteModal: React.FC<EditNoteModalProps> = ({
@@ -174,7 +181,8 @@ const EditNoteModal: React.FC<EditNoteModalProps> = ({
   open,
   onClose,
   onSave,
-  saving
+  saving,
+  error
 }) => {
   const { t } = useTranslation(["option", "common"])
   const [note, setNote] = useState(annotation?.note || "")
@@ -192,7 +200,12 @@ const EditNoteModal: React.FC<EditNoteModalProps> = ({
       okText={t("common:save", "Save")}
       cancelText={t("common:cancel", "Cancel")}
       confirmLoading={saving}
+      cancelButtonProps={{ disabled: saving }}
+      closable={!saving}
+      maskClosable={!saving}
+      keyboard={!saving}
     >
+      {error && <p role="alert" className="mb-3 text-sm text-danger">{error}</p>}
       {annotation && (
         <div className="space-y-4">
           <div className="rounded-lg border border-border bg-surface-hover p-3">
@@ -204,6 +217,7 @@ const EditNoteModal: React.FC<EditNoteModalProps> = ({
             </label>
             <TextArea
               value={note}
+              disabled={saving}
               onChange={(e) => setNote(e.target.value)}
               placeholder={t(
                 "option:documentWorkspace.notePlaceholder",
@@ -235,6 +249,10 @@ export const AnnotationsPanel: React.FC = () => {
   const activeDocumentId = useDocumentWorkspaceStore((s) => s.activeDocumentId)
   const activeDocumentType = useDocumentWorkspaceStore((s) => s.activeDocumentType)
   const annotations = useDocumentWorkspaceStore((s) => s.annotations)
+  const pending = useDocumentWorkspaceStore((s) => s.pendingAnnotations)
+  const operation = useDocumentOperation()
+  const dialogOwner = useRef(operation)
+  const dialogRevision = useRef(0)
   const setCurrentPage = useDocumentWorkspaceStore((s) => s.setCurrentPage)
 
   // Local state
@@ -244,6 +262,15 @@ export const AnnotationsPanel: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState("")
   const [editingAnnotation, setEditingAnnotation] = useState<Annotation | null>(null)
   const [exportModalOpen, setExportModalOpen] = useState(false)
+  const [deletingAnnotation, setDeletingAnnotation] = useState<Annotation | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  useEffect(() => {
+    dialogRevision.current += 1
+    setEditingAnnotation(null)
+    setDeletingAnnotation(null)
+    setExportModalOpen(false)
+    setActionError(null)
+  }, [activeDocumentId, operation])
 
   // Get document title for export
   const openDocuments = useDocumentWorkspaceStore((s) => s.openDocuments)
@@ -257,7 +284,7 @@ export const AnnotationsPanel: React.FC = () => {
 
   // Filter and sort annotations
   const filteredAnnotations = useMemo(() => {
-    let result = [...annotations]
+    let result = annotations.filter(annotation => annotation.documentId === activeDocumentId)
 
     // Filter by type
     if (typeFilter !== "all") {
@@ -325,7 +352,7 @@ export const AnnotationsPanel: React.FC = () => {
     })
 
     return result
-  }, [annotations, typeFilter, colorFilter, sortOption, searchQuery])
+  }, [annotations, activeDocumentId, typeFilter, colorFilter, sortOption, searchQuery])
 
   // Handlers
   const handleNavigate = useCallback((annotation: Annotation) => {
@@ -346,79 +373,50 @@ export const AnnotationsPanel: React.FC = () => {
   }, [activeDocumentType, activeDocumentId, setCurrentPage])
 
   const handleEdit = useCallback((annotation: Annotation) => {
+    if (!operation?.isCurrent() || pending.some(item => item.id === annotation.id)) return
+    dialogOwner.current = operation
+    dialogRevision.current += 1
+    setActionError(null)
     setEditingAnnotation(annotation)
-  }, [])
+  }, [operation, pending])
 
   const handleSaveNote = useCallback(async (note: string) => {
-    if (!editingAnnotation || !activeDocumentId) return
-
-    await updateMutation.mutateAsync({
-      mediaId: activeDocumentId,
-      annotationId: editingAnnotation.id,
-      updates: { note: note || undefined }
-    })
-    setEditingAnnotation(null)
-  }, [editingAnnotation, activeDocumentId, updateMutation])
-
-  // Soft-delete with undo: remove from UI immediately, delay server delete by 5s
-  const pendingDeleteTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+    const owner = dialogOwner.current
+    const revision = dialogRevision.current
+    if (!editingAnnotation || !owner?.isCurrent() || editingAnnotation.documentId !== activeDocumentId) return
+    setActionError(null)
+    try {
+      await updateMutation.mutateAsync({
+        mediaId: editingAnnotation.documentId,
+        annotationId: editingAnnotation.id,
+        updates: { note }
+      })
+      if (owner.isCurrent() && revision === dialogRevision.current) setEditingAnnotation(null)
+    } catch {
+      if (owner.isCurrent() && revision === dialogRevision.current) setActionError(t("option:documentWorkspace.saveNoteError", "Could not save the note. Your changes are still here."))
+    }
+  }, [editingAnnotation, activeDocumentId, updateMutation, t])
 
   const handleDelete = useCallback((annotation: Annotation) => {
-    if (!activeDocumentId) return
+    if (!operation?.isCurrent() || pending.some(item => item.id === annotation.id)) return
+    dialogOwner.current = operation
+    dialogRevision.current += 1
+    setActionError(null)
+    setDeletingAnnotation(annotation)
+  }, [operation, pending])
 
-    // Capture full annotation for undo (preserves original id)
-    const savedAnnotation = { ...annotation }
-
-    // Remove from local store immediately
-    const removeAnnotation = useDocumentWorkspaceStore.getState().removeAnnotation
-    removeAnnotation(annotation.id)
-
-    // Show undo toast
-    const key = `delete-${annotation.id}`
-    message.info({
-      key,
-      content: (
-        <span>
-          {t("option:documentWorkspace.annotationDeleted", "Annotation deleted")}{" "}
-          <Button
-            type="link"
-            size="small"
-            onClick={() => {
-              // Cancel the pending server delete
-              const timer = pendingDeleteTimers.current.get(annotation.id)
-              if (timer) {
-                clearTimeout(timer)
-                pendingDeleteTimers.current.delete(annotation.id)
-              }
-              // Restore with original id to stay in sync with server
-              useDocumentWorkspaceStore.setState((state) => ({
-                annotations: [...state.annotations, savedAnnotation]
-              }))
-              message.destroy(key)
-            }}
-          >
-            {t("common:undo", "Undo")}
-          </Button>
-        </span>
-      ),
-      duration: 5
-    })
-
-    // Schedule server-side delete after 5s
-    const timer = setTimeout(async () => {
-      pendingDeleteTimers.current.delete(annotation.id)
-      try {
-        await deleteMutation.mutateAsync({
-          mediaId: activeDocumentId,
-          annotationId: annotation.id
-        })
-      } catch {
-        // If server delete fails, the annotation was already removed from UI
-        // It will re-appear on next sync
-      }
-    }, 5000)
-    pendingDeleteTimers.current.set(annotation.id, timer)
-  }, [activeDocumentId, deleteMutation, t])
+  const confirmDelete = async () => {
+    const owner = dialogOwner.current
+    const revision = dialogRevision.current
+    if (!deletingAnnotation || !owner?.isCurrent() || deletingAnnotation.documentId !== activeDocumentId) return
+    setActionError(null)
+    try {
+      await deleteMutation.mutateAsync({mediaId: deletingAnnotation.documentId, annotationId: deletingAnnotation.id})
+      if (owner.isCurrent() && revision === dialogRevision.current) setDeletingAnnotation(null)
+    } catch {
+      if (owner.isCurrent() && revision === dialogRevision.current) setActionError(t("option:documentWorkspace.deleteNoteError", "Could not delete the annotation. It has been kept."))
+    }
+  }
 
   // Color filter menu
   const colorFilterItems: MenuProps["items"] = [
@@ -569,7 +567,7 @@ export const AnnotationsPanel: React.FC = () => {
                 type="text"
                 icon={<Download className="h-3.5 w-3.5" />}
                 onClick={() => setExportModalOpen(true)}
-                disabled={annotations.length === 0}
+                disabled={!annotations.some(annotation => annotation.documentId === activeDocumentId)}
               />
             </Tooltip>
           </div>
@@ -610,6 +608,7 @@ export const AnnotationsPanel: React.FC = () => {
                 key={annotation.id}
                 annotation={annotation}
                 documentType={activeDocumentType}
+                pending={pending.some(item => item.id === annotation.id)}
                 onNavigate={() => handleNavigate(annotation)}
                 onEdit={() => handleEdit(annotation)}
                 onDelete={() => handleDelete(annotation)}
@@ -619,20 +618,37 @@ export const AnnotationsPanel: React.FC = () => {
         )}
       </div>
 
+      <Modal
+        title={t("option:documentWorkspace.deleteAnnotation", "Delete annotation")}
+        open={Boolean(deletingAnnotation)}
+        onCancel={() => { if (!deleteMutation.isPending) {dialogRevision.current += 1; setDeletingAnnotation(null)} }}
+        onOk={confirmDelete}
+        okText={t("common:delete", "Delete")}
+        cancelText={t("common:cancel", "Cancel")}
+        confirmLoading={deleteMutation.isPending}
+        cancelButtonProps={{disabled: deleteMutation.isPending}}
+        closable={!deleteMutation.isPending}
+        maskClosable={!deleteMutation.isPending}
+        keyboard={!deleteMutation.isPending}
+      >
+        {actionError && <p role="alert" className="mb-3 text-sm text-danger">{actionError}</p>}
+        <p>{t("option:documentWorkspace.deleteAnnotationConfirm", "Delete this annotation from the saved document?")}</p>
+      </Modal>
       {/* Edit note modal */}
       <EditNoteModal
         annotation={editingAnnotation}
         open={!!editingAnnotation}
-        onClose={() => setEditingAnnotation(null)}
+        onClose={() => {if (!updateMutation.isPending) {dialogRevision.current += 1; setEditingAnnotation(null)}}}
         onSave={handleSaveNote}
         saving={updateMutation.isPending}
+        error={actionError}
       />
 
       {/* Export annotations modal */}
       <ExportAnnotationsModal
         open={exportModalOpen}
         onClose={() => setExportModalOpen(false)}
-        annotations={annotations}
+        annotations={annotations.filter(annotation => annotation.documentId === activeDocumentId)}
         documentTitle={documentTitle}
         documentType={activeDocumentType}
       />

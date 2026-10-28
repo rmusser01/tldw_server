@@ -27,6 +27,7 @@ import {
   TldwApiClient,
   TldwApiClientBase
 } from "@/services/tldw/TldwApiClient"
+import { mediaMethods } from "@/services/tldw/domains/media"
 import { characterMethods } from "@/services/tldw/domains/characters"
 import { chatRagMethods } from "@/services/tldw/domains/chat-rag"
 
@@ -50,6 +51,31 @@ const expectedScopeFields = {
 }
 
 describe("TldwApiClient captured request scope", () => {
+  it.each(["base", "domain"])("pins document annotations and progress in the %s implementation", async implementation => {
+    const client = new TldwApiClientBase()
+    const methods = implementation === "base" ? TldwApiClientBase.prototype : mediaMethods
+    const signal = new AbortController().signal
+    const options = {requestScope, signal}
+    const annotation = {location:"1", text:"Selene", chapter_title:"Rowan", percentage:20}
+    mocks.bgRequest.mockResolvedValue({})
+    await methods.listAnnotations.call(client, 12, options)
+    await methods.createAnnotation.call(client, 12, annotation, options)
+    await methods.updateAnnotation.call(client, 12, "ann_123", {note:"Exact note"}, options)
+    await methods.deleteAnnotation.call(client, 12, "ann_123", options)
+    await methods.syncAnnotations.call(client, 12, [annotation], ["client-intent"], options)
+    await methods.getReadingProgress.call(client, 12, options)
+    await methods.updateReadingProgress.call(client, 12, {current_page:2,total_pages:4}, options)
+    await methods.deleteReadingProgress.call(client, 12, options)
+    expect(mocks.bgRequest.mock.calls.map(args => [args[0].method,args[0].path])).toEqual([
+      ["GET","/api/v1/media/12/annotations"],["POST","/api/v1/media/12/annotations"],
+      ["PUT","/api/v1/media/12/annotations/ann_123"],["DELETE","/api/v1/media/12/annotations/ann_123"],
+      ["POST","/api/v1/media/12/annotations/sync"],["GET","/api/v1/media/12/progress"],
+      ["PUT","/api/v1/media/12/progress"],["DELETE","/api/v1/media/12/progress"]
+    ])
+    for (const [request] of mocks.bgRequest.mock.calls) expect(request).toMatchObject({abortSignal:signal,headers:{"X-TLDW-Expected-User-ID":"42"},servicePromptConfig:expectedScopeFields.servicePromptConfig})
+    expect(mocks.bgRequest.mock.calls[4][0].body).toEqual({annotations:[annotation],client_ids:["client-intent"]})
+  })
+
   it("pins dictionary source reads to the captured owner before catalogue display", async () => {
     const client = new TldwApiClient()
     const signal = new AbortController().signal

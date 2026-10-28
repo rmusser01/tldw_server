@@ -3748,7 +3748,7 @@ export class TldwApiClientBase {
   // Document Annotations Methods
   async listAnnotations(
     mediaId: string | number,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<{
     media_id: number
     annotations: Array<{
@@ -3782,6 +3782,7 @@ export class TldwApiClientBase {
     }>({
       path: `/api/v1/media/${id}/annotations`,
       method: "GET",
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   }
@@ -3794,8 +3795,10 @@ export class TldwApiClientBase {
       color?: "yellow" | "green" | "blue" | "pink"
       note?: string
       annotation_type?: "highlight" | "page_note"
+      chapter_title?: string
+      percentage?: number
     },
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<{
     id: string
     media_id: number
@@ -3821,8 +3824,9 @@ export class TldwApiClientBase {
     }>({
       path: `/api/v1/media/${id}/annotations`,
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...requestScopeFields(options?.requestScope).headers, "Content-Type": "application/json" },
       body: annotation,
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   }
@@ -3835,7 +3839,7 @@ export class TldwApiClientBase {
       color?: "yellow" | "green" | "blue" | "pink"
       note?: string
     },
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<{
     id: string
     media_id: number
@@ -3862,8 +3866,9 @@ export class TldwApiClientBase {
     }>({
       path: `/api/v1/media/${id}/annotations/${annId}`,
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...requestScopeFields(options?.requestScope).headers, "Content-Type": "application/json" },
       body: updates,
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   }
@@ -3871,13 +3876,14 @@ export class TldwApiClientBase {
   async deleteAnnotation(
     mediaId: string | number,
     annotationId: string,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<void> {
     const id = encodeURIComponent(String(mediaId))
     const annId = encodeURIComponent(annotationId)
     await bgRequest<void>({
       path: `/api/v1/media/${id}/annotations/${annId}`,
       method: "DELETE",
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   }
@@ -3890,9 +3896,11 @@ export class TldwApiClientBase {
       color?: "yellow" | "green" | "blue" | "pink"
       note?: string
       annotation_type?: "highlight" | "page_note"
+      chapter_title?: string
+      percentage?: number
     }>,
     clientIds?: string[],
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<{
     media_id: number
     synced_count: number
@@ -3928,11 +3936,12 @@ export class TldwApiClientBase {
     }>({
       path: `/api/v1/media/${id}/annotations/sync`,
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...requestScopeFields(options?.requestScope).headers, "Content-Type": "application/json" },
       body: {
         annotations,
         ...(clientIds && { client_ids: clientIds })
       },
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   }
@@ -3940,7 +3949,7 @@ export class TldwApiClientBase {
   // Reading Progress Methods
   async getReadingProgress(
     mediaId: string | number,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<{
     media_id: number
     has_progress?: boolean
@@ -3966,6 +3975,7 @@ export class TldwApiClientBase {
     }>({
       path: `/api/v1/media/${id}/progress`,
       method: "GET",
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   }
@@ -3980,7 +3990,7 @@ export class TldwApiClientBase {
       cfi?: string
       percentage?: number
     },
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<{
     media_id: number
     current_page: number
@@ -4004,20 +4014,22 @@ export class TldwApiClientBase {
     }>({
       path: `/api/v1/media/${id}/progress`,
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...requestScopeFields(options?.requestScope).headers, "Content-Type": "application/json" },
       body: progress,
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   }
 
   async deleteReadingProgress(
     mediaId: string | number,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<void> {
     const id = encodeURIComponent(String(mediaId))
     await bgRequest<void>({
       path: `/api/v1/media/${id}/progress`,
       method: "DELETE",
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   }
