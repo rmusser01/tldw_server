@@ -108,6 +108,13 @@ export const isServicePromptRequestPath = (
   if (/^\/api\/v1\/data-tables\/jobs\/[1-9][0-9]*$/.test(pathname)) return ["GET", "DELETE"].includes(requestMethod)
   const tablePath = /^\/api\/v1\/data-tables\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(\/regenerate)?$/i.exec(pathname)
   if (tablePath) return requestMethod === (tablePath[1] ? "POST" : "GET")
+  if (/^\/api\/v1\/media\/[1-9][0-9]*\/progress$/.test(pathname)) return ["GET", "PUT", "DELETE"].includes(requestMethod)
+  const annotationsPath = /^\/api\/v1\/media\/[1-9][0-9]*\/annotations(?:\/(sync|[A-Za-z0-9_-]+))?$/.exec(pathname)
+  if (annotationsPath) {
+    if (!annotationsPath[1]) return ["GET", "POST"].includes(requestMethod)
+    if (annotationsPath[1] === "sync") return requestMethod === "POST"
+    return ["PUT", "DELETE"].includes(requestMethod)
+  }
   if (pathname === "/openapi.json") return requestMethod === "GET"
   if (pathname === "/api/v1/config/docs-info") return requestMethod === "GET"
   if (pathname === "/api/v1/audio-studio/projects") return ["GET", "POST"].includes(requestMethod)

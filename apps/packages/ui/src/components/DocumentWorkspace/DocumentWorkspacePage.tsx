@@ -1,6 +1,6 @@
 import type { QuickIngestOperation } from "@/services/tldw/quick-ingest-authority"
 import { requestScopeFields } from "@/services/tldw/domains/service-prompts"
-import React, { useState, useEffect, useCallback, useRef, Suspense } from "react"
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, Suspense } from "react"
 import { useTranslation } from "react-i18next"
 import { useSearchParams } from "react-router-dom"
 import { useStorage } from "@plasmohq/storage/hook"
@@ -26,6 +26,7 @@ import {
   CircleHelp
 } from "lucide-react"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
+import { useDocumentOperation } from "@/hooks/document-workspace/useDocumentOperation"
 import { useDocumentWorkspaceStore } from "@/store/document-workspace"
 import { useMobile, useTablet } from "@/hooks/useMediaQuery"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
@@ -525,6 +526,23 @@ const DOCUMENT_FILE_TIMEOUT_MS = 30 * 1000
  * - sm (<768px): Bottom tab navigation between panes
  */
 export const DocumentWorkspacePage: React.FC = () => {
+  const operation = useDocumentOperation()
+  const authority = operation?.isCurrent() ? JSON.stringify([operation.authorityKey, operation.authorityRevision]) : null
+  const storedAuthority = useDocumentWorkspaceStore(state => state.workspaceAuthority)
+  const {t} = useTranslation(["option"])
+  useLayoutEffect(() => {
+    if (storedAuthority === authority) return
+    const state = useDocumentWorkspaceStore.getState()
+    const urls = new Set([...state.openDocuments.map(doc => doc.url), ...state.recentlyClosed.map(item => item.doc.url)])
+    for (const url of urls) if (url?.startsWith("blob:")) URL.revokeObjectURL(url)
+    state.reset()
+    useDocumentWorkspaceStore.setState({workspaceAuthority: authority})
+  }, [authority, storedAuthority])
+  if (!operation || !authority || storedAuthority !== authority) return <DesignSystemAlert variant="info" title={t("option:documentWorkspace.verifyAccount", "Connect to verify document access")} />
+  return <OwnedDocumentWorkspace key={authority} operation={operation} />
+}
+
+const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({operation: owner}) => {
   const { t } = useTranslation(["option", "common"])
   const isMobile = useMobile()
   const isTablet = useTablet()
@@ -534,6 +552,7 @@ export const DocumentWorkspacePage: React.FC = () => {
   const activeDocumentId = useDocumentWorkspaceStore((s) => s.activeDocumentId)
   const openDocuments = useDocumentWorkspaceStore((s) => s.openDocuments)
   const openDocument = useDocumentWorkspaceStore((s) => s.openDocument)
+  const [searchParams, setSearchParams] = useSearchParams()
   const annotationsHealth = useDocumentWorkspaceStore((s) => s.annotationsHealth)
   const progressHealth = useDocumentWorkspaceStore((s) => s.progressHealth)
 
@@ -543,8 +562,8 @@ export const DocumentWorkspacePage: React.FC = () => {
   useAnnotationSyncOnClose(activeDocumentId, forceSync)
 
   // Initialize reading progress loading and auto-save
-  useReadingProgress(activeDocumentId)
-  const { forceSave } = useReadingProgressAutoSave(activeDocumentId, 5000) // Save every 5 seconds
+  const readingProgress = useReadingProgress(activeDocumentId)
+  const { forceSave } = useReadingProgressAutoSave(activeDocumentId, 5000, !readingProgress.isPending && !readingProgress.isError) // Save every 5 seconds
   useReadingProgressSaveOnClose(activeDocumentId, forceSave)
 
   // Resizable panel widths
@@ -572,8 +591,25 @@ export const DocumentWorkspacePage: React.FC = () => {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pickerTab, setPickerTab] = useState<"library" | "upload">("library")
   const [loadingDocumentId, setLoadingDocumentId] = useState<number | null>(null)
-  const blobUrlMapRef = useRef<Map<number, string>>(new Map())
+  const blobUrlMapRef = useRef(new Map(openDocuments.filter(doc => doc.url?.startsWith("blob:")).map(doc => [doc.id, doc.url])))
   const openDocumentRequestRef = useRef(0)
+  const openingMediaIdRef = useRef<number | null>(null)
+  const ownedCloseNotices = useRef(new Set<string>())
+  const ownedCloseDialogs = useRef(new Set<ReturnType<typeof Modal.confirm>>())
+  const mounted = useRef(false)
+  useEffect(() => {
+    mounted.current = true
+    const notices = ownedCloseNotices.current
+    const dialogs = ownedCloseDialogs.current
+    return () => {
+      mounted.current = false
+      for (const key of notices) notification.destroy(key)
+      notices.clear()
+      for (const dialog of dialogs) dialog.destroy()
+      dialogs.clear()
+    }
+  }, [])
+  const openAbortRef = useRef<AbortController | null>(null)
 
   const handleShowShortcuts = useCallback(() => {
     setShortcutsModalOpen(true)
@@ -595,13 +631,18 @@ export const DocumentWorkspacePage: React.FC = () => {
   // Close document with confirmation when annotations are pending
   const closeDocument = useDocumentWorkspaceStore((s) => s.closeDocument)
   const undoCloseDocument = useDocumentWorkspaceStore((s) => s.undoCloseDocument)
-  const annotationSyncStatus = useDocumentWorkspaceStore((s) => s.annotationSyncStatus)
 
   const doClose = useCallback((id: number) => {
     const doc = openDocuments.find((d) => d.id === id)
     closeDocument(id)
+    if (id === activeDocumentId && openDocuments.length === 1) {
+      const next = new URLSearchParams(searchParams)
+      next.delete("open")
+      setSearchParams(next, {replace: true})
+    }
     if (doc) {
       const key = `undo-close-${id}`
+      ownedCloseNotices.current.add(key)
       notification.info({
         key,
         message: t("option:documentWorkspace.documentClosed", "Document closed"),
@@ -610,8 +651,10 @@ export const DocumentWorkspacePage: React.FC = () => {
           <button
             className="text-xs text-primary hover:underline font-medium"
             onClick={() => {
+              if (!mounted.current || !owner.isCurrent()) return
               undoCloseDocument()
               notification.destroy(key)
+              ownedCloseNotices.current.delete(key)
             }}
           >
             {t("option:documentWorkspace.undo", "Undo")}
@@ -621,32 +664,33 @@ export const DocumentWorkspacePage: React.FC = () => {
         placement: "bottomRight"
       })
     }
-  }, [closeDocument, undoCloseDocument, openDocuments, t])
+  }, [owner, closeDocument, undoCloseDocument, openDocuments, activeDocumentId, searchParams, setSearchParams, t])
 
   const handleCloseDocument = useCallback((id: number) => {
-    if (annotationSyncStatus === "pending") {
-      Modal.confirm({
+    owner.assertCurrent()
+    if (useDocumentWorkspaceStore.getState().pendingAnnotations.some(annotation => annotation.documentId === id)) {
+      const dialog = Modal.confirm({
         title: t("option:documentWorkspace.unsavedHighlights", "You have unsaved highlights"),
         content: t(
           "option:documentWorkspace.unsavedHighlightsDesc",
           "Some highlights and notes haven't been saved yet. What would you like to do?"
         ),
         okText: t("option:documentWorkspace.saveAndClose", "Save & close"),
-        cancelText: t("option:documentWorkspace.closeWithoutSaving", "Close without saving"),
+        cancelText: t("option:documentWorkspace.keepOpen", "Keep open"),
         closable: false,
         maskClosable: false,
         onOk: async () => {
-          await forceSync()
-          doClose(id)
-        },
-        onCancel: () => {
+          await forceSync(id)
+          owner.assertCurrent()
+          if (useDocumentWorkspaceStore.getState().pendingAnnotations.some(annotation => annotation.documentId === id)) throw new Error("Annotations are still saving")
           doClose(id)
         }
       })
+      if (dialog) ownedCloseDialogs.current.add(dialog)
     } else {
       doClose(id)
     }
-  }, [annotationSyncStatus, doClose, forceSync, t])
+  }, [owner, doClose, forceSync, t])
 
   // Workspace-level keyboard shortcuts
   useEffect(() => {
@@ -744,29 +788,30 @@ export const DocumentWorkspacePage: React.FC = () => {
     cleanupRemovedBlobUrls()
   }, [cleanupRemovedBlobUrls])
 
-  useEffect(() => {
-    return () => {
-      for (const url of blobUrlMapRef.current.values()) {
-        if (url.startsWith("blob:")) {
-          URL.revokeObjectURL(url)
-        }
-      }
-      blobUrlMapRef.current.clear()
-    }
+  useEffect(() => () => {
+    openDocumentRequestRef.current += 1
+    openAbortRef.current?.abort()
+    // Same-owner route returns reuse the store's still-owned Blob URLs.
   }, [])
 
   const openDocumentById = useCallback(
-    async (mediaId: number, docTypeHint?: "pdf" | "epub" | null, operation?: QuickIngestOperation) => {
-      operation?.assertCurrent()
+    async (mediaId: number, docTypeHint?: "pdf" | "epub" | null, providedOwner?: QuickIngestOperation) => {
+      const operation = providedOwner ?? owner
+      operation.assertCurrent()
+      openAbortRef.current?.abort()
+      const controller = new AbortController()
+      openAbortRef.current = controller
+      const signal = AbortSignal.any([operation.signal, controller.signal])
       const requestId = ++openDocumentRequestRef.current
+      openingMediaIdRef.current = mediaId
       setLoadingDocumentId(mediaId)
       try {
         const details = await tldwClient.getMediaDetails(mediaId, {
           include_content: false,
           include_versions: false,
-          requestScope: operation?.requestScope, signal: operation?.signal,
+          requestScope: operation.requestScope, signal,
         })
-        if (openDocumentRequestRef.current !== requestId || (operation && !operation.isCurrent())) {
+        if (openDocumentRequestRef.current !== requestId || !operation.isCurrent() || signal.aborted) {
           return
         }
 
@@ -822,14 +867,14 @@ export const DocumentWorkspacePage: React.FC = () => {
         try {
           data = await bgRequest<ArrayBuffer>({
             ...requestScopeFields(operation?.requestScope),
-            abortSignal: operation?.signal,
+            abortSignal: signal,
             path: `/api/v1/media/${mediaId}/file`,
             method: "GET",
             responseType: "arrayBuffer",
             timeoutMs: DOCUMENT_FILE_TIMEOUT_MS
           })
         } catch (err: unknown) {
-          if (openDocumentRequestRef.current !== requestId || (operation && !operation.isCurrent())) {
+          if (openDocumentRequestRef.current !== requestId || !operation.isCurrent() || signal.aborted) {
             return
           }
           const status = isErrorWithStatus(err) ? err.status : undefined
@@ -862,7 +907,7 @@ export const DocumentWorkspacePage: React.FC = () => {
           }
           throw err
         }
-        if (openDocumentRequestRef.current !== requestId || (operation && !operation.isCurrent())) {
+        if (openDocumentRequestRef.current !== requestId || !operation.isCurrent() || signal.aborted) {
           return
         }
 
@@ -892,7 +937,7 @@ export const DocumentWorkspacePage: React.FC = () => {
           url
         })
       } catch (err) {
-        if (openDocumentRequestRef.current !== requestId || (operation && !operation.isCurrent())) {
+        if (openDocumentRequestRef.current !== requestId || !operation.isCurrent() || signal.aborted) {
           return
         }
         message.error(
@@ -905,47 +950,49 @@ export const DocumentWorkspacePage: React.FC = () => {
         )
       } finally {
         if (openDocumentRequestRef.current === requestId) {
+          openingMediaIdRef.current = null
           setLoadingDocumentId(null)
         }
       }
     },
-    [message, openDocument, registerBlobUrl, setLoadingDocumentId, t]
+    [owner, message, openDocument, registerBlobUrl, setLoadingDocumentId, t]
   )
 
   // Handle ?open={mediaId} URL parameter for auto-opening documents
-  const [searchParams, setSearchParams] = useSearchParams()
   const autoOpenId = searchParams.get("open")
-  const autoOpenHandledRef = useRef(false)
+  const autoOpenHandledRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!autoOpenId) {
-      autoOpenHandledRef.current = false
+      autoOpenHandledRef.current = null
       return
     }
-    if (autoOpenHandledRef.current) return
+    if (autoOpenHandledRef.current === autoOpenId) return
     // Wait until we are not already loading another document
     if (loadingDocumentId !== null) return
     const mediaId = Number(autoOpenId)
     if (!Number.isFinite(mediaId) || mediaId <= 0) return
 
-    // Check if this document is already open
-    const alreadyOpen = openDocuments.some((d) => d.id === mediaId)
-    if (alreadyOpen) {
-      // Just clear the param
-      autoOpenHandledRef.current = true
-      const nextParams = new URLSearchParams(searchParams)
-      nextParams.delete("open")
-      setSearchParams(nextParams, { replace: true })
+    autoOpenHandledRef.current = autoOpenId
+    if (openDocuments.some(doc => doc.id === mediaId)) {
+      openingMediaIdRef.current = mediaId
+      useDocumentWorkspaceStore.getState().setActiveDocument(mediaId)
       return
     }
-
-    autoOpenHandledRef.current = true
-    // Remove the param from the URL first so it doesn't re-trigger
-    const nextParams = new URLSearchParams(searchParams)
-    nextParams.delete("open")
-    setSearchParams(nextParams, { replace: true })
     void openDocumentById(mediaId)
   }, [autoOpenId, loadingDocumentId, openDocuments, openDocumentById, searchParams, setSearchParams])
+
+  useEffect(() => {
+    if (openingMediaIdRef.current !== null) {
+      if (openingMediaIdRef.current !== activeDocumentId || loadingDocumentId !== null) return
+      openingMediaIdRef.current = null
+    }
+    if (activeDocumentId === null || loadingDocumentId !== null || (autoOpenId && autoOpenHandledRef.current !== autoOpenId)) return
+    if (autoOpenId === String(activeDocumentId)) return
+    const next = new URLSearchParams(searchParams)
+    next.set("open", String(activeDocumentId))
+    setSearchParams(next, {replace: true})
+  }, [activeDocumentId, loadingDocumentId, autoOpenId, searchParams, setSearchParams])
 
   const loadingAlert =
     loadingDocumentId !== null ? (
