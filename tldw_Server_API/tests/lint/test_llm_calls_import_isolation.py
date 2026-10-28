@@ -34,17 +34,25 @@ def loaded_after_import(module: str) -> list[str]:
         capture_output=True,
         text=True,
         timeout=180,
-        check=True,
+        check=False,
     )
+    # The traceback is at the end; startup logging can make stderr long.
+    assert result.returncode == 0, f"importing {module} failed:\n{result.stderr[-4000:]}"
     loaded: list[str] = json.loads(result.stdout.strip().splitlines()[-1])
     return loaded
 
 
+def forbidden_loads(module: str, forbidden: str) -> list[str]:
+    """The modules of package ``forbidden`` that importing ``module`` loads."""
+    return [m for m in loaded_after_import(module) if m == forbidden or m.startswith(forbidden + ".")]
+
+
 @pytest.mark.parametrize(("module", "forbidden"), CASES)
 def test_importing_does_not_load(module: str, forbidden: str) -> None:
-    loaded = [m for m in loaded_after_import(module) if m == forbidden or m.startswith(forbidden + ".")]
+    loaded = forbidden_loads(module, forbidden)
     assert loaded == [], f"importing {module} loaded {loaded[:5]}"
 
 
 def test_the_guard_sees_a_forbidden_load() -> None:
-    assert "tldw_Server_API.app.core.Chat" in loaded_after_import("tldw_Server_API.app.core.Chat.Chat_Deps")
+    # chat_loop_store imports api.v1.schemas.chat_loop_schemas: a known violator.
+    assert forbidden_loads("tldw_Server_API.app.core.Chat.chat_loop_store", "tldw_Server_API.app.api")

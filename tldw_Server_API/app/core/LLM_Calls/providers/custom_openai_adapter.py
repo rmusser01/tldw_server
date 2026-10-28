@@ -9,13 +9,12 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
     ProviderCallCredentials,
 )
-from tldw_Server_API.app.core.exceptions import ChatConfigurationError
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_endpoint_env_keys,
     custom_openai_provider_name,
     custom_openai_section_name,
 )
-from tldw_Server_API.app.core.exceptions import EgressPolicyError, raise_detached_error
+from tldw_Server_API.app.core.exceptions import ChatConfigurationError, EgressPolicyError, raise_detached_error
 from tldw_Server_API.app.core.http_client import fetch as _hc_fetch
 from tldw_Server_API.app.core.http_client import stream_response as _hc_stream_response
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload

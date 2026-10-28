@@ -5,7 +5,6 @@ import time
 import pytest
 from loguru import logger
 
-from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
 from tldw_Server_API.app.core.Chat import request_queue as request_queue_module
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     BoundedDaemonPool,
@@ -18,6 +17,7 @@ from tldw_Server_API.app.core.Chat.request_queue import (
     RequestPriority,
     RequestQueue,
 )
+from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
 
 
 @pytest.mark.asyncio

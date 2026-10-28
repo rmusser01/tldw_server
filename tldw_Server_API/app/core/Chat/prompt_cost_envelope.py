@@ -12,7 +12,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from tldw_Server_API.app.core.Utils.tokenizer import estimate_segment_tokens, redact_data_uris as _sanitize_data_uris
+from tldw_Server_API.app.core.Utils.tokenizer import estimate_segment_tokens
+from tldw_Server_API.app.core.Utils.tokenizer import redact_data_uris as _sanitize_data_uris
 
 FINGERPRINT_VERSION = "prompt-v1"
 

@@ -31,13 +31,13 @@ def raise_if_in_band_provider_error(
 ) -> None:
     """Reject structured HTTP-200 and SSE error envelopes safely."""
 
-    from tldw_Server_API.app.core.LLM_Calls.provider_results import (
-        normalize_provider_stream_error,
-    )
     from tldw_Server_API.app.core.exceptions import raise_detached_error
     from tldw_Server_API.app.core.LLM_Calls.error_utils import (
         build_sanitized_chat_error,
         log_provider_failure,
+    )
+    from tldw_Server_API.app.core.LLM_Calls.provider_results import (
+        normalize_provider_stream_error,
     )
 
     normalized = normalize_provider_stream_error(value)
