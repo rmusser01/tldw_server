@@ -1120,7 +1120,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
           </Suspense>
           {loadingAlert}
           {healthAlert}
-          <WorkspaceTour />
+          <WorkspaceTour paused={pickerOpen || generateOpen || shortcutsModalOpen} />
 
           {/* Content area */}
           <div className="relative flex-1 min-h-0 overflow-hidden">
@@ -1186,7 +1186,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
         </Suspense>
         {loadingAlert}
         {healthAlert}
-        <WorkspaceTour />
+        <WorkspaceTour paused={pickerOpen || generateOpen || shortcutsModalOpen} />
 
         {/* Document tabs - shown when multiple documents are open */}
         <div className="relative">
