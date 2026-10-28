@@ -2769,3 +2769,44 @@ def test_cancelled_slide_generation_waits_for_owned_provider_exit(monkeypatch):
 
     asyncio.run(exercise())
     assert writes == []  # nosec B101 - drained late output is never persisted.
+
+
+@pytest.mark.parametrize(
+    "store_unavailable,expected_status,expected_detail",
+    [
+        (False, 422, "provider_disabled"),
+        (True, 500, "Failed to generate presentation"),
+    ],
+)
+def test_slides_policy_refusal_is_typed_and_does_not_persist(
+    slides_client, monkeypatch, store_unavailable, expected_status, expected_detail
+):
+    from unittest.mock import Mock
+
+    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides as policy
+    from tldw_Server_API.app.core.Slides import slides_generator
+
+    def snapshot(provider):
+        if store_unavailable:
+            raise policy.LLMProviderOverridesRefreshError()
+        return policy.ProviderOverrideCallSnapshot(
+            provider="llama.cpp", _override=policy.LLMProviderOverride(provider="llama.cpp", is_enabled=False)
+        )
+
+    monkeypatch.setattr(policy, "capture_provider_override_call_snapshot", snapshot)
+    monkeypatch.setattr(slides_generator, "is_test_mode", lambda: False)
+    llm = Mock()
+    monkeypatch.setattr(slides_generator, "perform_chat_api_call", llm)
+    response = slides_client.post(
+        "/api/v1/slides/generate",
+        json={
+            "prompt": "Use only Rowan Observatory source facts.",
+            "provider": "llamacpp",
+            "model": "qwen",
+            "theme": "black",
+        },
+    )
+    assert response.status_code == expected_status  # nosec B101 # Pytest verifies existing policy/service error mapping.
+    assert response.json()["detail"] == expected_detail  # nosec B101 # Pytest checks sanitized API refusal.
+    assert slides_client.get("/api/v1/slides/presentations").json()["total"] == 0  # nosec B101 # Failed policy admission cannot publish a deck.
+    llm.assert_not_called()
