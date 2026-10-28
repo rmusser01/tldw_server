@@ -105,3 +105,165 @@ def test_email_metric_families_are_defined_in_metrics() -> None:
         "email_native_persist_seconds", "email_ingestion_dedupe_total",
     }
     assert {"email_ingestion_parse_total", "email_ingestion_dedupe_total"} <= set(MetricsRegistry().metrics)
+
+
+def test_old_security_egress_path_is_the_moved_module(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+    from unittest import mock
+
+    import tldw_Server_API.app.core.Security.egress as old
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Security import egress as via_package
+    from tldw_Server_API.app.core.Utils import egress as new
+
+    # tests/conftest.py defaults this to "false"; the policy reads it per call.
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+    assert old is new and via_package is new
+    with mock.patch(
+        "tldw_Server_API.app.core.Security.egress.evaluate_url_policy",
+        return_value=SimpleNamespace(allowed=True),
+    ):
+        assert http_client._is_url_allowed("http://169.254.169.254/") is True
+    assert http_client._is_url_allowed("http://169.254.169.254/") is False
+
+
+def test_http_client_denies_metadata_ip_without_core_security() -> None:
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = (
+        "import sys\n"
+        "from tldw_Server_API.app.core import http_client\n"
+        "from tldw_Server_API.app.core.exceptions import EgressPolicyError\n"
+        "try:\n"
+        "    http_client._validate_egress_or_raise('http://169.254.169.254/latest/meta-data/')\n"
+        "except EgressPolicyError:\n"
+        "    print('denied')\n"
+        "print(sorted(m for m in sys.modules if m.startswith('tldw_Server_API.app.core.Security')))\n"
+    )
+    out = subprocess.run(  # fixed argv, no shell
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).resolve().parents[3],
+        env={**os.environ, "WORKFLOWS_EGRESS_BLOCK_PRIVATE": "true"},
+        capture_output=True, text=True, check=True, timeout=120,
+    ).stdout.splitlines()
+    assert out[-2:] == ["denied", "[]"]
+
+
+def test_old_egress_path_aliases_when_imported_first() -> None:
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = (
+        "import tldw_Server_API.app.core.Security.egress as old\n"
+        "from tldw_Server_API.app.core.Utils import egress as new\n"
+        "from tldw_Server_API.app.core.Security import egress as via_package\n"
+        "assert old is new and via_package is new\n"
+    )
+    result = subprocess.run(  # fixed argv, no shell
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).resolve().parents[3],
+        capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+
+
+def test_http_client_observability_is_noop_until_installed(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+
+    from tldw_Server_API.app.core import http_client
+
+    monkeypatch.setattr(http_client, "_metrics_registry_getter", None)
+    monkeypatch.setattr(http_client, "_tracing_manager_getter", None)
+    assert http_client.get_metrics_registry().increment("http_client_requests_total", 1, labels={}) is None
+    assert "X-Request-Id" not in http_client._inject_trace_headers({})
+    client = http_client.create_client(transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)))
+    try:  # the request path opens a span on the no-op tracing manager
+        assert http_client.fetch(method="GET", url="http://93.184.216.34/ok", client=client).status_code == 200
+    finally:
+        client.close()
+
+
+def test_a_process_without_core_metrics_still_fetches() -> None:
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    # tests/conftest.py imports core.Metrics, so only a fresh interpreter has no installed hooks.
+    script = (
+        "import asyncio, sys\n"
+        "import httpx\n"
+        "from tldw_Server_API.app.core import http_client\n"
+        "def handler(request):\n"
+        "    return httpx.Response(200, request=request, text='ok')\n"
+        "client = http_client.create_client(transport=httpx.MockTransport(handler))\n"
+        "print(http_client.fetch(method='GET', url='http://93.184.216.34/ok', client=client).status_code)\n"
+        "async def main():\n"
+        "    aclient = http_client.create_async_client(transport=httpx.MockTransport(handler))\n"
+        "    try:\n"
+        "        return (await http_client.afetch(method='GET', url='http://93.184.216.34/ok', client=aclient)).status_code\n"
+        "    finally:\n"
+        "        await aclient.aclose()\n"
+        "print(asyncio.run(main()))\n"
+        "print('tldw_Server_API.app.core.Metrics' in sys.modules)\n"
+    )
+    result = subprocess.run(  # fixed argv, no shell
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).resolve().parents[3],
+        capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert result.stdout.splitlines()[-3:] == ["200", "200", "False"]
+
+
+def test_core_metrics_installs_http_client_observability() -> None:
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Metrics import get_metrics_registry, get_tracing_manager
+
+    assert http_client._metrics_registry_getter is get_metrics_registry
+    assert http_client._tracing_manager_getter is get_tracing_manager
+
+
+def test_installing_observability_survives_a_failing_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Metrics import http_client_metrics, traces
+
+    def broken_registry() -> None:
+        raise RuntimeError("metrics registry unavailable")
+
+    monkeypatch.setattr(http_client_metrics, "get_metrics_registry", broken_registry)
+    monkeypatch.setattr(http_client, "_metrics_registry_getter", None)
+    monkeypatch.setattr(http_client, "_tracing_manager_getter", None)
+    http_client_metrics.install_http_client_observability()  # must not raise
+    assert http_client._metrics_registry_getter is broken_registry
+    assert http_client._tracing_manager_getter is traces.get_tracing_manager
+
+
+def test_installed_tracing_manager_feeds_x_request_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core import http_client
+
+    class _Tracing:
+        def get_baggage(self, key: str) -> str | None:
+            return "rid-1" if key == "request_id" else None
+
+    monkeypatch.setattr(http_client, "_tracing_manager_getter", _Tracing)
+    assert http_client._inject_trace_headers({})["X-Request-Id"] == "rid-1"
+
+
+def test_http_client_metric_families_register_on_a_fresh_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Metrics import http_client_metrics
+    from tldw_Server_API.app.core.Metrics.metrics_manager import MetricsRegistry
+
+    registry = MetricsRegistry()
+    monkeypatch.setattr(http_client_metrics, "get_metrics_registry", lambda: registry)
+    monkeypatch.setattr(http_client, "_metrics_registry_getter", None)
+    monkeypatch.setattr(http_client, "_tracing_manager_getter", None)
+    http_client_metrics.install_http_client_observability()
+    assert {
+        "http_client_requests_total", "http_client_request_duration_seconds",
+        "http_client_retries_total", "http_client_egress_denials_total",
+    } <= set(registry.metrics)
