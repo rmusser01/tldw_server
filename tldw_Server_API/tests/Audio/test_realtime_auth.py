@@ -1,127 +1,110 @@
-from types import SimpleNamespace
+"""The realtime speech routes authenticate on the core resolver from the handshake alone: their
+protocol is opened by the server, so the auth step must never read a client event (TASK-13950.7)."""
+
+import asyncio
 
 import pytest
 
 from tldw_Server_API.app.core.Audio import streaming_service
+from tldw_Server_API.app.core.AuthNZ import websocket_principal
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.tests.Audio.ws_test_helpers import scripted_websocket
 
 pytestmark = pytest.mark.unit
 
-
-class DummyWebSocket:
-    def __init__(self, *, first_message: str | None = None):
-        self.headers = {}
-        self.query_params = {}
-        self.client = SimpleNamespace(host="127.0.0.1")
-        self.state = SimpleNamespace()
-        self.first_message = first_message
-        self.receive_text_calls = 0
-        self.closed = False
-        self.close_code = None
-        self.sent_json = []
-
-    async def receive_text(self):
-        self.receive_text_calls += 1
-        if self.first_message is None:
-            raise AssertionError("auth helper unexpectedly consumed the first client event")
-        return self.first_message
-
-    async def send_json(self, payload):
-        self.sent_json.append(payload)
-
-    async def close(self, code=1000, reason=None):  # noqa: ARG002
-        self.closed = True
-        self.close_code = code
+_COOKIE = AuthPrincipal(kind="user", user_id=1, token_type="single_user_session", subject="single_user")
+_SESSION_UPDATE = '{"type":"session.update","session":{"type":"realtime"}}'
 
 
-def _single_user_settings():
-    return SimpleNamespace(
-        SINGLE_USER_API_KEY="single-user-secret",
-        SINGLE_USER_ALLOWED_IPS=[],
-        SINGLE_USER_FIXED_ID=1,
-    )
+def _cookie(monkeypatch: pytest.MonkeyPatch, principal: AuthPrincipal | None) -> None:
+    async def resolve(websocket, **_kwargs):
+        if principal is None:
+            return None
+        websocket.state.auth_principal = principal
+        return object()
+
+    monkeypatch.setattr(websocket_principal, "resolve_single_user_cookie_websocket", resolve)
+
+
+def _single_user_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def verify(request):
+        if request.headers.get("x-api-key") != "single-user-secret":
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=401, detail="Could not validate credentials")
+        return AuthPrincipal(kind="user", user_id=1, token_type="api_key", subject="single_user")
+
+    monkeypatch.setattr(websocket_principal, "get_auth_principal", verify)
 
 
 @pytest.mark.asyncio
 async def test_cookie_realtime_auth_preserves_first_protocol_event(monkeypatch):
     from tldw_Server_API.app.core.Audio.Realtime.auth import authenticate_realtime_websocket
-    from tldw_Server_API.app.core.AuthNZ import ip_allowlist
-    from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
 
-    ws = DummyWebSocket(first_message='{"type":"session.update","session":{"type":"realtime"}}')
-    ws.state.single_user_session_id = "validated-cookie-session"
-    ws.state.user_id = 1
-    monkeypatch.setattr(streaming_service, "is_multi_user_mode", lambda: False)
-    monkeypatch.setattr(auth_settings, "get_settings", _single_user_settings)
-    monkeypatch.setattr(ip_allowlist, "resolve_client_ip", lambda *_args, **_kwargs: "127.0.0.1")
+    _cookie(monkeypatch, _COOKIE)
+    ws, sent = scripted_websocket(_SESSION_UPDATE, path="/api/v1/audio/realtime")
 
     assert await authenticate_realtime_websocket(ws, "native") == (True, 1)
-    assert ws.receive_text_calls == 0
+    assert len(ws.scope["_inbox"]) == 2  # neither the connect nor the client's event was read
+    assert sent == []  # the handler accepts, after its own quota check
 
 
 @pytest.mark.asyncio
-async def test_realtime_openai_compat_auth_does_not_consume_session_update(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_realtime_openai_compat_auth_does_not_consume_session_update(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.Audio.Realtime.auth import authenticate_realtime_websocket
-    from tldw_Server_API.app.core.AuthNZ import ip_allowlist
-    from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
 
-    ws = DummyWebSocket(first_message='{"type":"session.update","session":{"type":"realtime"}}')
-
-    monkeypatch.setattr(streaming_service, "is_multi_user_mode", lambda: False)
-    monkeypatch.setattr(auth_settings, "get_settings", _single_user_settings)
-    monkeypatch.setattr(ip_allowlist, "resolve_client_ip", lambda *_args, **_kwargs: "127.0.0.1")
+    _cookie(monkeypatch, None)
+    ws, sent = scripted_websocket(_SESSION_UPDATE, path="/v1/realtime")
 
     auth_ok, user_id = await authenticate_realtime_websocket(ws, route_kind="openai_compat")
 
     assert (auth_ok, user_id) == (False, None)
-    assert ws.receive_text_calls == 0
-    assert ws.sent_json == []
-    assert ws.closed is True
-    assert ws.close_code == 4401
+    assert len(ws.scope["_inbox"]) == 2
+    assert sent == [{"type": "websocket.close", "code": 4401, "reason": ""}]  # refused before accept
 
 
 @pytest.mark.asyncio
-async def test_existing_audio_stream_auth_still_accepts_initial_auth_message(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from tldw_Server_API.app.core.AuthNZ import ip_allowlist
-    from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
+async def test_realtime_takes_a_handshake_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.Audio.Realtime.auth import authenticate_realtime_websocket
 
-    ws = DummyWebSocket(first_message='{"type":"auth","token":"single-user-secret"}')
+    _cookie(monkeypatch, None)
+    _single_user_key(monkeypatch)
+    ws, sent = scripted_websocket(_SESSION_UPDATE, headers=[(b"x-api-key", b"single-user-secret")], path="/v1/realtime")
 
-    monkeypatch.setattr(streaming_service, "is_multi_user_mode", lambda: False)
-    monkeypatch.setattr(auth_settings, "get_settings", _single_user_settings)
-    monkeypatch.setattr(ip_allowlist, "resolve_client_ip", lambda *_args, **_kwargs: "127.0.0.1")
+    assert await authenticate_realtime_websocket(ws, route_kind="openai_compat") == (True, 1)
+    assert (len(ws.scope["_inbox"]), sent) == (2, [])
+
+
+@pytest.mark.asyncio
+async def test_existing_audio_stream_auth_still_accepts_initial_auth_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    _cookie(monkeypatch, None)
+
+    async def verify(request):
+        assert request.headers.get("authorization") == "Bearer single-user-secret"
+        return AuthPrincipal(kind="user", user_id=1, token_type="api_key", subject="single_user")
+
+    monkeypatch.setattr(websocket_principal, "get_auth_principal", verify)
+    ws, sent = scripted_websocket('{"type":"auth","token":"single-user-secret"}')
 
     auth_ok, user_id = await streaming_service._audio_ws_authenticate(
         ws,
-        None,
         endpoint_id="audio.stream.transcribe",
         ws_path="/api/v1/audio/stream/transcribe",
     )
 
     assert (auth_ok, user_id) == (True, 1)
-    assert ws.receive_text_calls == 1
-    assert ws.closed is False
+    assert ws.scope["_inbox"] == []
+    assert [message["type"] for message in sent] == ["websocket.accept"]
 
 
 @pytest.mark.asyncio
 async def test_realtime_auth_binds_the_user_for_the_handler_task_only(monkeypatch: pytest.MonkeyPatch) -> None:
     """A task that authenticates sees the user for the rest of its life; the parent task does not."""
-    import asyncio
-
     from tldw_Server_API.app.core.Audio.Realtime.auth import authenticate_realtime_websocket
-    from tldw_Server_API.app.core.AuthNZ import ip_allowlist
-    from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
     from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_user_id
 
-    ws = DummyWebSocket(first_message='{"type":"session.update","session":{"type":"realtime"}}')
-    ws.state.single_user_session_id = "validated-cookie-session"
-    ws.state.user_id = 1
-    monkeypatch.setattr(streaming_service, "is_multi_user_mode", lambda: False)
-    monkeypatch.setattr(auth_settings, "get_settings", _single_user_settings)
-    monkeypatch.setattr(ip_allowlist, "resolve_client_ip", lambda *_args, **_kwargs: "127.0.0.1")
+    _cookie(monkeypatch, _COOKIE)
+    ws, _sent = scripted_websocket(_SESSION_UPDATE, path="/api/v1/audio/realtime")
 
     async def _handler() -> tuple[tuple[bool, int | None], int | None]:
         """Authenticate, then report the user this task sees."""
@@ -136,14 +119,10 @@ async def test_realtime_auth_binds_the_user_for_the_handler_task_only(monkeypatc
 async def test_failed_realtime_auth_binds_no_user(monkeypatch: pytest.MonkeyPatch) -> None:
     """The openai-compat route with no credentials is refused and no user is bound."""
     from tldw_Server_API.app.core.Audio.Realtime.auth import authenticate_realtime_websocket
-    from tldw_Server_API.app.core.AuthNZ import ip_allowlist
-    from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
     from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_user_id
 
-    ws = DummyWebSocket(first_message='{"type":"session.update","session":{"type":"realtime"}}')
-    monkeypatch.setattr(streaming_service, "is_multi_user_mode", lambda: False)
-    monkeypatch.setattr(auth_settings, "get_settings", _single_user_settings)
-    monkeypatch.setattr(ip_allowlist, "resolve_client_ip", lambda *_args, **_kwargs: "127.0.0.1")
+    _cookie(monkeypatch, None)
+    ws, _sent = scripted_websocket(_SESSION_UPDATE, path="/v1/realtime")
 
     assert await authenticate_realtime_websocket(ws, route_kind="openai_compat") == (False, None)
     assert current_llm_user_id() is None
@@ -159,9 +138,9 @@ async def test_auth_with_no_user_id_succeeds_and_binds_no_user(monkeypatch: pyte
         return True, None
 
     monkeypatch.setattr(streaming_service, "_audio_ws_authenticate_impl", _auth_without_user)
-    ws = DummyWebSocket()
+    ws, _sent = scripted_websocket()
 
-    result = await streaming_service._audio_ws_authenticate(ws, None, endpoint_id="audio.test", ws_path="/test")
+    result = await streaming_service._audio_ws_authenticate(ws, endpoint_id="audio.test", ws_path="/test")
 
     assert result == (True, None)
     assert current_llm_user_id() is None
