@@ -612,6 +612,13 @@ def test_pdf_export_uses_public_page_contract_and_releases_browser(tmp_path, pdf
 
     assert body == b"%PDF-public-contract"  # nosec B101 -- pytest behavior assertion.
     assert page.pdf.call_args.kwargs["format"] == "Letter"  # nosec B101 -- pytest behavior assertion.
+    methods = [call[0] for call in page.method_calls]
+    assert (
+        methods.index("add_init_script")
+        < methods.index("goto")
+        < methods.index("wait_for_function")
+        < methods.index("pdf")
+    )  # nosec B101 -- pytest checks the capture-before-load and ready-before-print contract.
     browser.close.assert_awaited_once()
     context.stop.assert_awaited_once()
 
@@ -670,21 +677,22 @@ def test_pdf_render_error_awaits_browser_and_context_cleanup(tmp_path, pdf_rende
     context.stop.assert_awaited_once()
 
 
-def test_pdf_readiness_warning_retains_the_pdf_attempt(tmp_path, pdf_renderer):
+def test_pdf_incomplete_print_layout_refuses_export_and_releases_resources(tmp_path, pdf_renderer):
     from tldw_Server_API.app.core.Slides import slides_export
 
     page, browser, context = pdf_renderer
-    page.wait_for_function.side_effect = slides_export.PlaywrightTimeoutError("readiness")
-    body = slides_export.export_presentation_pdf(
-        title="Rowan",
-        slides=[{"title": "Selene", "content": "Verified source"}],
-        theme="black",
-        settings=None,
-        custom_css=None,
-        assets_dir=_build_assets(tmp_path),
-    )
-    assert body == b"%PDF-public-contract"  # nosec B101 -- pytest behavior assertion.
-    page.pdf.assert_awaited_once()
+    page.wait_for_function.side_effect = slides_export.PlaywrightTimeoutError("print layout pending")
+    with pytest.raises(slides_export.SlidesExportError, match="^pdf_timeout$"):
+        slides_export.export_presentation_pdf(
+            title="Rowan",
+            slides=[{"content": "Selene"}],
+            theme="black",
+            settings=None,
+            custom_css=None,
+            assets_dir=_build_assets(tmp_path),
+        )
+
+    page.pdf.assert_not_awaited()
     browser.close.assert_awaited_once()
     context.stop.assert_awaited_once()
 

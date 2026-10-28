@@ -1140,18 +1140,21 @@ def export_presentation_pdf(
                 browser = await playwright.chromium.launch(headless=True)
                 page = await browser.new_page()
                 page.set_default_timeout(timeout_ms)
+                # Reveal's general readiness precedes its asynchronous print layout.
+                await page.add_init_script(
+                    "document.addEventListener('pdf-ready', () => {"
+                    "window.__tldwSlidesPdfReady = true;"
+                    "}, {capture: true, once: true});"
+                )
                 await page.goto(pdf_url, wait_until="load", timeout=timeout_ms)
                 try:
                     await page.emulate_media(media="print")
                 except PlaywrightError:
                     logger.debug("slides export: emulate_media not supported by playwright")
-                try:
-                    await page.wait_for_function(
-                        "window.Reveal && window.Reveal.isReady && window.Reveal.isReady()",
-                        timeout=timeout_ms,
-                    )
-                except PlaywrightTimeoutError:
-                    logger.warning("slides export: reveal did not signal ready before timeout")
+                await page.wait_for_function(
+                    "window.__tldwSlidesPdfReady === true",
+                    timeout=timeout_ms,
+                )
                 # Page.pdf has no timeout option and ignores the page default.
                 async with asyncio.timeout(timeout_ms / 1000) as deadline:
                     pdf_bytes = await page.pdf(**pdf_settings)
