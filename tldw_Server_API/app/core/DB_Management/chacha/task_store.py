@@ -16,8 +16,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
     logger,
 )
-from tldw_Server_API.app.core.Sync.v2.models import normalize_sync_timestamp
-from tldw_Server_API.app.core.Sync.v2.notes_task_contract import (
+from tldw_Server_API.app.core.Sync_Contracts.models import normalize_sync_timestamp
+from tldw_Server_API.app.core.Sync_Contracts.notes_task_contract import (
     NotesTaskActivityTombstoneV1,
     NotesTaskActivityV1,
     NotesTaskV1Payload,

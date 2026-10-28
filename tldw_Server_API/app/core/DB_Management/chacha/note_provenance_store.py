@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError, InputError
-from tldw_Server_API.app.core.Sync.v2.notes_provenance_contract import (
+from tldw_Server_API.app.core.Sync_Contracts.notes_provenance_contract import (
     canonical_notes_provenance_json,
     notes_provenance_object_hash,
 )
