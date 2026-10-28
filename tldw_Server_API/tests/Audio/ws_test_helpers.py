@@ -45,3 +45,37 @@ def ws_session_or_skip(ws, *, reason: str = "audio WebSocket endpoint not availa
         yield session
     finally:
         ws.__exit__(None, None, None)
+
+
+def scripted_websocket(*frames, headers=None, query: bytes = b"", path: str = "/api/v1/audio/stream/transcribe"):
+    """A real Starlette WebSocket whose client connects, sends ``frames`` (text, or dicts as JSON),
+    then waits. Returns the socket and the messages the server sent; ``socket.scope["_inbox"]``
+    holds what the server left unread."""
+    import asyncio
+    import json
+
+    from starlette.types import Message
+    from starlette.websockets import WebSocket
+
+    inbox: list[Message] = [{"type": "websocket.connect"}]
+    inbox += [{"type": "websocket.receive", "text": f if isinstance(f, str) else json.dumps(f)} for f in frames]
+    sent: list[Message] = []
+
+    async def receive() -> Message:
+        if inbox:
+            return inbox.pop(0)
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    scope = {
+        "type": "websocket",
+        "path": path,
+        "headers": list(headers or []),
+        "query_string": query,
+        "client": ("127.0.0.1", 50000),
+        "_inbox": inbox,
+    }
+    return WebSocket(scope, receive=receive, send=send), sent

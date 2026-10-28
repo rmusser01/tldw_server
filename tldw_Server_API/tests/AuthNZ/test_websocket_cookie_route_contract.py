@@ -28,7 +28,7 @@ FIRST_PARTY_WEBSOCKET_AUTH_FILES = (
     "tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py",
     "tldw_Server_API/app/core/Audio/streaming_service.py",
     # Realtime speech routes (9d6104995e) authenticate via the shared audio
-    # handshake in streaming_service, which owns the cookie resolver.
+    # adapter in streaming_service, which sits on the core resolver.
     "tldw_Server_API/app/core/Audio/Realtime/auth.py",
     # The core WebSocket resolver (TASK-13950.7) owns it for migrated routes.
     "tldw_Server_API/app/core/AuthNZ/websocket_principal.py",
@@ -91,8 +91,13 @@ def test_first_party_websocket_auth_files_use_shared_cookie_resolver():
         source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
         if relative_path.endswith("endpoints/meetings.py"):
             assert "get_meetings_db_for_websocket" in source, relative_path
-        elif relative_path.endswith("Audio/Realtime/auth.py"):
+        elif relative_path.endswith(("Audio/Realtime/auth.py", "endpoints/audio/audio_streaming.py")):
             assert "_audio_ws_authenticate" in source, relative_path
+            assert "resolve_single_user_cookie_websocket" not in source, relative_path
+        elif relative_path.endswith(("endpoints/voice_assistant.py", "Audio/streaming_service.py")):
+            # First-message-frame routes: the core resolver reads the cookie before accept, then the frame.
+            assert re.search(r"\bresolve_ws_principal_first_frame\b", source), relative_path
+            assert "resolve_single_user_cookie_websocket" not in source, relative_path
         elif relative_path.endswith(("endpoints/workflows.py", "endpoints/sandbox.py")):
             # A whole word, so the deprecated query shim's longer name cannot satisfy it.
             assert re.search(r"\bresolve_ws_principal\b", source), relative_path
@@ -125,7 +130,6 @@ async def test_realtime_routes_enforce_shared_websocket_auth(
     path: str,
     untrusted_cookie: bool,
 ) -> None:
-    from tldw_Server_API.app.core.Audio import streaming_service
     from tldw_Server_API.app.core.Audio.Realtime import handler
     from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
     from tldw_Server_API.app.core.AuthNZ import websocket_session_auth
@@ -133,7 +137,6 @@ async def test_realtime_routes_enforce_shared_websocket_auth(
     module = importlib.import_module(f"tldw_Server_API.app.api.v1.endpoints.{module_name}")
     settings = auth_settings.get_settings()
     monkeypatch.setattr(settings, "AUTH_MODE", "single_user")
-    monkeypatch.setattr(streaming_service, "is_multi_user_mode", lambda: False)
     monkeypatch.setattr(websocket_session_auth, "trusted_webui_origins", lambda: {"http://localhost:3000"})
     pipeline_factory = Mock(side_effect=AssertionError("Unauthenticated realtime pipeline started"))
     monkeypatch.setattr(module, "DEFAULT_REALTIME_PIPELINE_FACTORY", pipeline_factory)
