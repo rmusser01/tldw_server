@@ -9,6 +9,27 @@ WebSocket Endpoint
 - Unified endpoint: `/api/v1/audio/stream/transcribe` (primary; includes auth/quotas/fallback)
 - Core handler: `Parakeet_Core_Streaming/ws_server.websocket_parakeet_core` (no route; no auth/quotas, so an embedding server must authenticate before calling it). The "Core Handler" sections below describe its protocol.
 
+WebSocket authentication (audio streams)
+- `/api/v1/audio/stream/transcribe`, `/stream/tts`, `/stream/tts/realtime` and `/chat/stream` authenticate through the
+  core WebSocket resolver (`websocket_principal`), so revocation, API-key handling and single-user rules match HTTP.
+- A handshake credential is verified before the socket is accepted, and no frame is read for auth:
+  `Authorization: Bearer <JWT or API key>`, `X-API-KEY: <key>`, or the browser subprotocol `bearer, <JWT or key>`
+  (the server echoes `bearer`). A refused one fails the handshake before accept: uvicorn answers HTTP 403, with no close code (the Starlette test client reports `4401`).
+- Without one, the server accepts the socket only to read one auth frame, `{"type": "auth", "token": "<JWT or API key>"}`,
+  within 5 seconds, and reads nothing after it until the caller is known:
+  - a first frame that is not an auth frame closes `4400`, unread (one over 16,384 characters is never parsed);
+  - a missing, refused or revoked token, or no frame in time, closes `4401`;
+  - each refusal sends `{"type": "error", "message": "..."}` first; the message never contains the credential.
+- The single-user WebUI session cookie (trusted Origin only) also authenticates. Its clients may skip the auth frame and
+  send their `config` frame first; it is then processed as the first post-auth message. An auth frame without a token
+  keeps the cookie; one with a token still overrides it, and a refused one is not rescued by it.
+- A scoped JWT's or a multi-user API key's limits still apply: allowed endpoints (`audio.stream.transcribe`,
+  `audio.stream.tts`, `audio.stream.tts.realtime`, `audio.chat.stream`) and path prefixes close `4403`; a call quota
+  closes `4003` (or `1008` with `AUDIO_WS_QUOTA_CLOSE_1008=1`).
+- Deprecated: `?token=<JWT or key>` is read only with `AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH=1`, logs a deprecation warning,
+  and is verified like `Authorization: Bearer`. URLs end up in access logs; send the auth frame instead. `?api_key=` is
+  never read.
+
 The unified endpoint uses strict audio protocol v1: the first post-auth message
 must be a config frame with `protocol_version: 1`, `mode: "dictate"` or
 `"captions"`, `audio_format: "pcm16"`, `sample_rate: 16000`, and
@@ -218,9 +239,7 @@ WebSocket TTS (PCM)
 
 Endpoint: `/api/v1/audio/stream/tts`
 
-- Auth/quotas: mirrors streaming STT (API key/JWT/single-user key) with per-user concurrent stream guard. Credentials
-  may be supplied via `X-API-KEY`, `Authorization: Bearer <JWT>`, a `token` query parameter (API key or JWT), or
-  an initial auth message; single-user setups additionally accept the fixed API key via these sources.
+- Auth/quotas: see "WebSocket authentication (audio streams)" above, with a per-user concurrent stream guard.
 - Client → server frames: one JSON prompt/config frame
 
 ```json
@@ -249,7 +268,8 @@ Notes:
   - `AUDIO_TTS_WS_QUEUE_MAXSIZE` (preferred) or `AUDIO_WS_TTS_QUEUE_MAXSIZE` (fallback)
   - Default `8`, clamped to `2..256`
 - Close-code mapping:
-  - `4400`: malformed/missing prompt frame or unsupported request payload
+  - `4400`: malformed/missing prompt frame or unsupported request payload, or a first frame that is not an auth frame
+    when the handshake carried no credential
   - `4401`: authentication required/invalid credentials
   - `4403`: token/key is valid but not authorized for endpoint/path
   - `4003` (or `1008` when `AUDIO_WS_QUOTA_CLOSE_1008=1`): quota/concurrency denial
@@ -325,8 +345,9 @@ for auth.
 
 - Single-user mode accepts `Authorization: Bearer <SINGLE_USER_API_KEY>` or `X-API-KEY: <SINGLE_USER_API_KEY>`.
 - Multi-user mode accepts `Authorization: Bearer <JWT>` or `X-API-KEY: <virtual API key>`.
-- Legacy `?token=` query-string auth remains disabled by default and is only accepted when
-  `AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH=1`.
+- Browsers may send the `bearer, <JWT or key>` subprotocol instead of a header.
+- Legacy `?token=` query-string auth remains disabled by default and is only accepted, with a deprecation warning,
+  when `AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH=1`.
 - `/v1/realtime` does not accept first-message auth such as `{"type":"auth","token":"..."}`. Unauthenticated
   connections close with `4401`.
 
@@ -461,8 +482,7 @@ WebSocket Voice Chat v1
 
 Endpoint: `/api/v1/audio/chat/stream`
 
-- Auth/quotas: same as `/stream/transcribe` (JWT/X-API-KEY/single-user key) with support for a `token` query parameter
-  (API key or JWT), `can_start_stream` concurrency guard, per-chunk minute accounting with bounded fail-open; closes
+- Auth/quotas: see "WebSocket authentication (audio streams)" above; `can_start_stream` concurrency guard, per-chunk minute accounting with bounded fail-open; closes
   with code 4003 (or 1008 when `AUDIO_WS_QUOTA_CLOSE_1008=1`) on quota failures.
 - Client → server frames:
   - `config` (required first post-auth): strict fields (`protocol_version: 1`, `mode: "voice_chat"` or `"push_to_talk"`, `audio_format: "pcm16"`, `sample_rate: 16000`, `channels: 1`), plus STT knobs (`model|variant|enable_vad|min_silence_ms|turn_stop_secs`), `llm` (`provider|model|temperature|max_tokens|system|extra_params`), `tts` (`voice|model|provider|format|speed|extra_params`), optional `session_id|metadata`.

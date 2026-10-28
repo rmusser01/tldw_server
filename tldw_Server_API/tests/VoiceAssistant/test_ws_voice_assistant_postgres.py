@@ -94,7 +94,7 @@ async def test_session_start_takes_no_checkout_on_the_event_loop(mock_ws_depende
     # The shared fixture's registry loads no commands, so the session's save is the ChaCha work here.
     ws = DummyWebSocket([{"type": "auth", "token": "valid-token"}, {"type": "config"}])
 
-    await voice_assistant.websocket_voice_assistant(ws, token=None)
+    await voice_assistant.websocket_voice_assistant(ws)
 
     sent = [m.get("type") for m in ws.sent_json]
     assert ("auth_ok" in sent, len(pg_voice_db.on_loop) > 0, sum(pg_voice_db.on_loop)) == (True, True, 0)
@@ -109,7 +109,7 @@ async def test_a_full_pool_at_session_start_degrades_the_session(mock_ws_depende
     ws = DummyWebSocket([{"type": "auth", "token": "valid-token"}, {"type": "config"}])
     escaped = None
     try:
-        await voice_assistant.websocket_voice_assistant(ws, token=None)
+        await voice_assistant.websocket_voice_assistant(ws)
     except Exception as exc:  # noqa: BLE001 - the RED shape: PoolTimeout used to escape the socket
         escaped = type(exc).__name__
     finally:
@@ -154,7 +154,7 @@ async def test_a_command_takes_no_checkout_on_the_event_loop_and_holds_none_whil
         [{"type": "auth", "token": "valid-token"}, {"type": "config"}, {"type": "text", "text": "hello there"}]
     )
     try:
-        await voice_assistant.websocket_voice_assistant(ws, token=None)
+        await voice_assistant.websocket_voice_assistant(ws)
     finally:
         await sessions.stop()
 
