@@ -1,6 +1,6 @@
 # S03 Artifact editors UAT
 
-Task: TASK-13260.278.18.83.45. S02 is closed; acceptance is39/43. Data Tables is complete by explicit composition. Presentation happy paths in all4modes and human UX are qualified; cancellation/no-extra-publication and changed-build policy refusal remain open. Kanban and Document Workspace generation/export additions are authorized and pending. Original-tab DOM is unverified and untouched; the stale manual B02 question is withdrawn, with server canonical/owner/target guards retained. Frozen dev is a412f6580b7ed0cf48fd7d222a47a20cfc0dde92, including3309/3310/3311. No fresh live-dev or release-wide claim.
+Task: TASK-13260.278.18.83.45. S02 is closed; acceptance is39/43. Data Tables is complete by explicit composition. Presentation Studio is complete by composed four-mode happy paths, independent exports, accepted UX and repaired native refusal/cancellation/no-extra-publication validation. Kanban and Document Workspace generation/export additions are authorized and pending. Original-tab DOM is unverified and untouched; the stale manual B02 question is withdrawn, with server canonical/owner/target guards retained. Frozen dev is a412f6580b7ed0cf48fd7d222a47a20cfc0dde92, including3309/3310/3311. No fresh live-dev or release-wide claim.
 
 ADR assessment: frontend save/cancellation repair requires no new architecture decision. The completion/publication protocol requires proposed [ADR-083](../ADR/083-data-table-completion-before-publication.md) and its [bounded design](../Design/Data_Tables_Completed_Job_Publication_20261027.md). Preserve ADR003 Jobs, ADR008 workspace persistence, ADR023 Media-owned tables/exports, ADR058 locked completion identity and ADR059 task editing. Governing accepted rationale stays immutable; proposed backend design is not implementation acceptance.
 
@@ -408,3 +408,33 @@ Actual middleware causal regression:2failed2passed/1.33s pytest2.651s outer; dis
 An initial candidate13passed1failed exposed a pre-dispatch watcher-start race; the explicit receipt fixes it. Held-verification regression on the exact committed endpoint source fails1/6warnings1.17s pytest2.557s outer, then exact candidate is restored finally. Final affected API+observer modules107passed6warnings4.48s pytest5.81s outer, natural0/600outer300case. Coverage includes actual0/1/3middleware layers, queued disconnect before/during generation/during verification, connected success, segmented bodies, receive errors/unexpected messages, unrelated-route pass-through, reader cancellation and held provider/verification drain. Old pytest-temp cleanup warnings remain untouched.
 
 Changed-block formatting preserves complete-file semantic ASTs; source compiles. Exact-filename/config Ruff baseline/current10identical inherited diagnostics/no new (initial temp-path comparison was unqualified). Bandit339identical test findings, production0/no new/errors. Final actual/staged review/normal hooks/local commit/exact package and changed-source native cancellation/refusal checks remain. Do not replay completed happy modes/exports or count the earlier cancelled request as accepted. S03 staysopen39/43.
+
+
+## Presentation Studio completion
+
+Exact0a2 backend package3819files/3822committedinputs/337dependencies722edges passes6.685s; frontend2c8/qM7 is unchanged. Two zero-generation operator failures were corrected: enter Settings directly for a reused connection, and read complete bounded own-workspace/source state instead of assuming an empty workspace. Both stop before provider override/Slides/Cancel; the second completes normal Logout/623terminal requests/private physical cleanup. Neither is product acceptance.
+
+Final native recovery passes1/1warning55.65s/natural0: exactly2SlidesPOSTs,422provider refusal with zero Chat, one actual Cancel/ERR_ABORTED, all3 prior full saved decks and exact inventory unchanged, no new publication, owned generation drained,601page/context/raw terminal requests, normalLogout and quiet API/frontend/ASGI release. PrivateChrome exits naturally0/no signals in0.097s. Original canonical/owners/target remain; its DOM is unverified and untouched. The completed recovery profile is removed after teardown. Historical unexpected3f remains unaccepted with unproven attribution; only the repaired cancellation is accepted.
+
+Presentation Studio is COMPLETE by this precise composition with prior four-mode happy paths/independent four-format exports/ownership controls and accepted UX. Do not replay those checks. Cleanup of now-unused master/old failed profile, private PDF renderer, obsolete policy package and screenshot follows fresh exact ownership/open-file checks. Keep the current backend/build for Kanban. S03 remains39/43 with Kanban and Document Workspace pending.
+
+
+## Kanban implementation checkpoint
+
+Design: [generated drafts](../Design/kanban_generated_drafts_20261027.md). Presentation Studio is complete; only Kanban is active. Use the current0a2 backend/qM7 build until a reviewed source change requires replacement. No new worktree/dependency/agent. ADR required:no; existing per-user SQLite/foreground Chat/import boundaries remain.
+
+1. Add causal real DB/import and UI draft/Stop/owner-boundary tests. Save must be all-or-nothing and replay-safe; generation must not mutate boards.
+2. Implement the smallest generated-draft import branch and lazy UI dialog using existing model selector/scoped transport. Run genuinely affected tests in both clients, compile/lint/baseline-current Bandit and independent actual/staged review/normal hooks/local commit. Preserve unrelated import behavior.
+3. Package/build only changed scope, then validate real2-list/3-card generation, move/save/reload/export, independent complete reader, failure/Cancel/Retry and account/database modes. Capture settled UX, get human review, remove completed payloads. Canonical API generation remains final S03 integration gate; no stale/manual fingerprint qualification. Finish Kanban before Document Workspace, and all S03 before S04.
+
+
+## Kanban causal and UI qualification
+
+The connected real DB/import/API scope passes33cases308warnings17.44s pytest23.831s outer, including atomic rollback, matching replay without overwrite, foreign identity, existing imports and normal vector indexing after commit. Existing endpoint already maps ConflictError to409; no new error mapping is needed.
+
+New generation/parser checks pass27 in each configured client (4.831/5.072s outer). Independent review exposed two real admission gaps: stale/unavailable catalog selection and otherwise-valid JSON marked length/content_filter. Five causal cases failed before fixing both through the existing usability helper and complete-termination validation. Stop, late result, account/server retirement, pending Save and same-identity Save recovery remain covered. The initial dialog failure was AntD test-mode duplicate IDs; role plus visible-title verification fixes that harness without changing production accessibility. Parser loading now occurs before the scoped request so no asynchronous gap follows its authority fence.
+
+Final lint/security readback, connected ownership checks, actual/staged review, normal hooks/local commit and exact package/build remain required before native generation/move/reload/export/recovery/four modes/UX and disposable cleanup. No Kanban native acceptance or S03 closure yet; Document Workspace follows Kanban.
+
+
+Kanban source gate CLEAR: connected owner/empty17passes per client (8.653/8.049s), composed with new27passes per client. Six Python paths compile; touched Ruff retains7 inherited diagnostics/no new, new DB module0. Bandit3production0/APItests476identical/fixtures0/newDBtests0/no errors/new. Corrected real-config ESLint has no ignored files, service/parent3 inherited warnings each and all four new files0; TSparse0. Final actual-source independent review CLEAR and mechanical UI detector empty. Normal hooks/local commit and exact package/build precede live checks; native/UX/modes/canonical API/S03 closure remain open.

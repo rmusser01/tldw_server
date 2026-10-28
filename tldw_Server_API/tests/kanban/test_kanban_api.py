@@ -3818,3 +3818,46 @@ def test_card_link_target_validation_when_content_db_available(client_with_kanba
         json={"linked_type": "note", "linked_id": "note-missing"},
     )
     assert missing_note.status_code == 404
+
+
+# Generated drafts retain the existing authenticated import response contract.
+def test_generated_draft_import_and_replay(client_with_kanban_db, draft):
+    client, db = client_with_kanban_db
+    first = client.post("/api/v1/kanban/boards/import", json={"data": draft})
+    assert first.status_code == 201, first.text  # nosec B101 - normal API create acknowledgement.
+    replay = client.post("/api/v1/kanban/boards/import", json={"data": draft})
+    assert replay.status_code == 201 and replay.json()["board"]["id"] == first.json()["board"]["id"]  # nosec B101 - API retry resolves the same board.
+    saved = client.get("/api/v1/kanban/boards/" + str(first.json()["board"]["id"])).json()
+    assert (
+        [row["name"] for row in saved["lists"]] == ["To Do", "Done"]
+        and saved["total_cards"] == 3
+        and db.list_boards()[1] == 1
+    )  # nosec B101 - public loader reads complete canonical content.
+
+
+def test_generated_draft_changed_identity_is_http_conflict(client_with_kanban_db, draft):
+    client, db = client_with_kanban_db
+    saved = client.post("/api/v1/kanban/boards/import", json={"data": draft})
+    assert saved.status_code == 201  # nosec B101 - establish one actual acknowledged save.
+    draft["board"]["name"] = "Changed intent"
+    response = client.post("/api/v1/kanban/boards/import", json={"data": draft})
+    assert response.status_code == 409  # nosec B101 - conflict remains a controlled API outcome.
+    assert db.get_board(saved.json()["board"]["id"])["name"] == "Rowan Tasks"  # nosec B101 - conflict cannot rewrite the first board.
+
+
+def test_generated_draft_late_failure_is_sanitized_and_atomic(client_with_kanban_db, draft, monkeypatch):
+    client, db = client_with_kanban_db
+    original = db._log_activity_internal
+    calls = []
+
+    def fail(conn, board_id, action, entity_type, *args, **kwargs):
+        original(conn, board_id, action, entity_type, *args, **kwargs)
+        if entity_type == "card":
+            calls.append(True)
+            if len(calls) == 2:
+                raise sqlite3.OperationalError("Controlled private storage details")
+
+    monkeypatch.setattr(db, "_log_activity_internal", fail)
+    response = client.post("/api/v1/kanban/boards/import", json={"data": draft})
+    assert response.status_code == 500 and response.json()["detail"] == "Failed to import board"  # nosec B101 - do not expose storage internals.
+    assert len(calls) == 2 and db.list_boards()[1] == 0  # nosec B101 - late real failure leaves no partial board.
