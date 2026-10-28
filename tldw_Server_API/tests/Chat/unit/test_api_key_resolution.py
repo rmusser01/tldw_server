@@ -2,6 +2,7 @@ import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 from tldw_Server_API.app.api.v1.schemas import chat_request_schemas
+from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     LLMProviderOverride,
     set_llm_provider_overrides_cache_for_tests,
@@ -181,9 +182,9 @@ def test_get_api_keys_supports_hyphenated_provider_env_vars(monkeypatch):
 
     monkeypatch.setenv("LOCAL_LLM_API_KEY", "local-key")
     monkeypatch.setenv("CUSTOM_OPENAI_API_KEY", "custom-key")
-    monkeypatch.setattr(chat_request_schemas, "load_and_log_configs", lambda: {})
+    monkeypatch.setattr(config_llm_providers, "load_and_log_configs", lambda: {})
 
-    keys = chat_request_schemas.get_api_keys()
+    keys = config_llm_providers.get_api_keys()
 
     assert keys.get("local-llm") == "local-key"
     assert keys.get("custom-openai-api") == "custom-key"
@@ -191,9 +192,9 @@ def test_get_api_keys_supports_hyphenated_provider_env_vars(monkeypatch):
 
 def test_get_api_keys_supports_numbered_custom_openai_env_vars(monkeypatch):
     monkeypatch.setenv("CUSTOM_OPENAI_API_KEY_99", "custom-key-99")
-    monkeypatch.setattr(chat_request_schemas, "load_and_log_configs", lambda: {})
+    monkeypatch.setattr(config_llm_providers, "load_and_log_configs", lambda: {})
 
-    keys = chat_request_schemas.get_api_keys()
+    keys = config_llm_providers.get_api_keys()
 
     assert keys.get("custom-openai-api-99") == "custom-key-99"
 
