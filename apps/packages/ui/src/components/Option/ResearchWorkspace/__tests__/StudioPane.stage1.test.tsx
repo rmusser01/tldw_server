@@ -1533,18 +1533,25 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(mockRagSearch).not.toHaveBeenCalled()
   })
 
-  it("completes slides artifacts from usable markdown fallback text", async () => {
-    mockGenerateSlidesFromMedia.mockRejectedValue(new Error("Slides API unavailable"))
+  it.each([404, 405, 501])(
+  "completes slides artifacts from usable markdown when the API is unsupported (%s)",
+  async (status) => {
+    mockGenerateSlidesFromMedia.mockRejectedValue(
+      Object.assign(new Error("Slides API unavailable"), {
+        status,
+        details: { detail: "Not Found" },
+      }),
+    )
     mockGetMediaDetails.mockResolvedValue({
       source: { title: "DSPy Prompting Talk" },
       content: {
-        text: "Project Falcon launched in March 2026 and improved retention by 18 percent."
-      }
+        text: "Project Falcon launched in March 2026 and improved retention by 18 percent.",
+      },
     })
     mockCreateChatCompletion.mockResolvedValue(
       createChatCompletionResponse(
-        "# Project Falcon Review\n\n## Slide 1: Overview\n- Project Falcon launched in March 2026.\n\n## Slide 2: Outcomes\n- Retention improved by 18 percent."
-      )
+        "# Project Falcon Review\n\n## Slide 1: Overview\n- Project Falcon launched in March 2026.\n\n## Slide 2: Outcomes\n- Retention improved by 18 percent.",
+      ),
     )
 
     renderStudioPane()
@@ -1557,10 +1564,10 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
 
     const slidesRequest = mockCreateChatCompletion.mock.calls[0]?.[0]
     expect(slidesRequest).toMatchObject({
-      model: "gpt-4o-mini"
+      model: "gpt-4o-mini",
     })
     expect(slidesRequest.messages?.[0]?.content).toContain(
-      "source-grounded presentation writer"
+      "source-grounded presentation writer",
     )
     expect(slidesRequest.messages?.[1]?.content).toContain("Project Falcon")
     expect(slidesRequest.messages?.[1]?.content).toContain("March 2026")
@@ -1570,10 +1577,11 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
       "completed",
       expect.objectContaining({
         content: expect.stringContaining("# Project Falcon"),
-        presentationId: undefined
-      })
+        presentationId: undefined,
+      }),
     )
-  })
+  },
+)
 
   it("falls back to the default summary instruction when no custom prompt is set", async () => {
     messageOptionStoreState.ragAdvancedOptions = {
@@ -2374,5 +2382,74 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
       view.unmount()
     }
   })
+
+  it.each([401, 403, 422, 429, 500, 0, undefined])(
+  "preserves saved slides without another inference after API status %s",
+  async (status) => {
+    const original = {
+      id: "artifact-policy-slides",
+      type: "slides",
+      title: "Saved Rowan slides",
+      status: "completed",
+      content: "# Rowan\nOpened in 2019.",
+      presentationId: "saved-presentation",
+      presentationVersion: 4,
+      createdAt: new Date("2026-02-18T10:00:00.000Z"),
+      completedAt: new Date("2026-02-18T10:01:00.000Z"),
+    }
+    workspaceStoreState.generatedArtifacts = [original]
+    mockGenerateSlidesFromMedia.mockReset()
+    mockGenerateSlidesFromMedia.mockRejectedValue(
+      Object.assign(new Error("Refused slide generation"), { status }),
+    )
+    mockCreateChatCompletion.mockRejectedValue(new Error("Unexpected fallback"))
+    const view = renderStudioPane()
+    try {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Regenerate options" }),
+      )
+      fireEvent.click(await screen.findByText("Replace existing"))
+      await waitFor(() => expect(mockMessageError).toHaveBeenCalled())
+      expect(workspaceStoreState.generatedArtifacts[0]).toMatchObject(original)
+      expect(mockGenerateSlidesFromMedia).toHaveBeenCalledTimes(1)
+      expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+      expect(mockMessageSuccess).not.toHaveBeenCalled()
+    } finally {
+      view.unmount()
+    }
+  },
+)
+
+  it.each(["visual_style_not_found", "media_not_found", undefined])(
+  "does not turn a domain or unclassified 404 (%s) into a differently styled outline",
+  async (detail) => {
+    mockGenerateSlidesFromMedia.mockReset()
+    mockGenerateSlidesFromMedia.mockRejectedValue(
+      Object.assign(new Error("Missing requested presentation input"), {
+        status: 404,
+        details: detail ? { detail } : undefined,
+      }),
+    )
+    mockGetMediaDetails.mockResolvedValue({
+      source: { title: "Readable Rowan source" },
+      content: {
+        text: "Rowan Observatory opened in 2019. Its telescope is Selene.",
+      },
+    })
+    mockCreateChatCompletion.mockRejectedValue(new Error("Unexpected fallback"))
+    const view = renderStudioPane()
+    try {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Slides", exact: true }),
+      )
+      await waitFor(() => expect(mockMessageError).toHaveBeenCalled())
+      expect(mockGenerateSlidesFromMedia).toHaveBeenCalledTimes(1)
+      expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+      expect(mockMessageSuccess).not.toHaveBeenCalled()
+    } finally {
+      view.unmount()
+    }
+  },
+)
 
 })
