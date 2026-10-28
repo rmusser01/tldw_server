@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import ProviderOverridePolicyError
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call
 from tldw_Server_API.app.core.Slides.visual_style_generation import (
@@ -412,14 +413,27 @@ class SlidesGenerator:
             {"role": "user", "content": user_prompt},
         ]
         try:
+            from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+                capture_provider_override_call_snapshot,
+            )
+            from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
+                ensure_app_config,
+                resolve_provider_model,
+            )
+
+            policy = capture_provider_override_call_snapshot(provider)
+            effective_model = model if model is not None else resolve_provider_model(policy.provider, ensure_app_config())
+            policy.enforce(effective_model, require_model=True)
             response = self._llm_call(
                 api_provider=provider,
-                model=model,
+                model=effective_model,
                 api_key=api_key,
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
+        except ProviderOverridePolicyError as exc:
+            raise SlidesGenerationInputError(exc.policy_code) from None
         except Exception as exc:
             logger.error("slides generation LLM call failed: {}", exc)
             raise SlidesGenerationError("llm_call_failed") from exc
