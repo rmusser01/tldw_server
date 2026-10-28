@@ -2158,7 +2158,12 @@ async function generateSlidesFromApi(
     if (error instanceof Error && error.message === SLIDES_UNUSABLE_PRESENTATION_MESSAGE) {
       throw error
     }
-    // Fallback to RAG-based generation if API fails
+    // Only an unsupported route permits a second generation through the legacy path.
+    const status = isRecord(error) ? error.status : undefined
+    const detail = isRecord(error) && isRecord(error.details) ? error.details.detail : undefined
+    if (!(status === 404 && detail === "Not Found") && status !== 405 && status !== 501) {
+      throw error
+    }
     console.warn(
       "Slides API failed, falling back to grounded source generation:",
       error instanceof Error ? error.message : String(error)
