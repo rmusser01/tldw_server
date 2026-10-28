@@ -2657,8 +2657,11 @@ def test_cancelled_slide_generation_does_not_persist(monkeypatch):
     assert writes == []  # nosec B101 - pytest verifies the no-write cancellation boundary.
 
 
-@pytest.mark.parametrize("disconnect_phase", ["before", "generation", "verification"])
-def test_disconnected_slide_generation_does_not_persist(slides_client, monkeypatch, disconnect_phase):
+@pytest.mark.parametrize("middleware_layers", [0, 1, 3])
+@pytest.mark.parametrize("disconnect_phase", ["before", "generation", "verification", "connected"])
+def test_disconnected_slide_generation_does_not_persist(
+    slides_client, monkeypatch, disconnect_phase, middleware_layers
+):
     """An actual ASGI disconnect must fence persistence even when the route task stays alive."""
     verified = []
     dispatched = []
@@ -2698,7 +2701,18 @@ def test_disconnected_slide_generation_does_not_persist(slides_client, monkeypat
 
         monkeypatch.setattr(slides_ep, "SlidesGenerator", ReturningGenerator)
         monkeypatch.setattr(slides_ep, "_verify_slides_against_source", verify)
-        await slides_client.app(
+        from starlette.middleware.base import BaseHTTPMiddleware
+
+        async def pass_through(request, call_next):
+            return await call_next(request)
+
+        app = slides_client.app
+        for _ in range(middleware_layers):
+            app = BaseHTTPMiddleware(app, dispatch=pass_through)
+        from tldw_Server_API.app.core.Slides.generation_disconnect import SlidesGenerationDisconnectMiddleware
+
+        app = SlidesGenerationDisconnectMiddleware(app)
+        await app(
             {
                 "type": "http",
                 "asgi": {"version": "3.0"},
@@ -2716,12 +2730,65 @@ def test_disconnected_slide_generation_does_not_persist(slides_client, monkeypat
             inbound.get,
             send,
         )
-        return next(message["status"] for message in sent if message["type"] == "http.response.start")
+        statuses = [message["status"] for message in sent if message["type"] == "http.response.start"]
+        return statuses[-1] if statuses else None
 
-    assert asyncio.run(exercise()) == 499  # nosec B101 - disconnected ASGI request cannot succeed.
+    status = asyncio.run(exercise())
+    assert slides_client.get("/api/v1/slides/presentations").json()["total"] == (disconnect_phase == "connected")  # nosec B101 - only a connected caller may publish.
+    assert status in ({200} if disconnect_phase == "connected" else {None, 499} if middleware_layers else {499})  # nosec B101 - disconnected ASGI request cannot succeed.
     assert len(dispatched) == (disconnect_phase != "before")  # nosec B101 - no provider dispatch for a disconnected caller.
-    assert len(verified) == (disconnect_phase == "verification")  # nosec B101 - no verification after a known disconnect.
-    assert slides_client.get("/api/v1/slides/presentations").json()["total"] == 0  # nosec B101 - real SQLite persistence remains empty.
+    assert len(verified) == (disconnect_phase in {"verification", "connected"})  # nosec B101 - no verification after a known disconnect.
+
+
+def test_cancelled_slide_generation_waits_for_owned_verification_exit(monkeypatch):
+    """Keep verification resources alive until the cancelled owning request drains them."""
+    writes = []
+
+    async def exercise():
+        entered, release, exited = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+        class ReturningGenerator:
+            def generate_from_text(self, **kwargs):
+                return {"title": "Rowan", "slides": [{"order": 0, "layout": "title", "content": "Opened in 2019."}]}
+
+        async def verify(**kwargs):
+            entered.set()
+            try:
+                await release.wait()
+                return SimpleNamespace(verdict="grounded", to_dict=lambda: {"verdict": "grounded"})
+            finally:
+                exited.set()
+
+        monkeypatch.setattr(slides_ep, "SlidesGenerator", ReturningGenerator)
+        monkeypatch.setattr(slides_ep, "_verify_slides_against_source", verify)
+        request = slides_ep.GenerateFromPromptRequest(prompt="Rowan", provider="llamacpp", theme="black")
+        task = asyncio.create_task(
+            slides_ep._generate_presentation(
+                response=Response(),
+                http_request=_connected_request(),
+                db=SimpleNamespace(client_id="1", create_presentation=lambda **kwargs: writes.append(kwargs)),
+                request=request,
+                source_text=request.prompt,
+                source_type="prompt",
+                source_ref=None,
+                source_query=request.prompt,
+            )
+        )
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            task.cancel()
+            await asyncio.sleep(0)
+            task.cancel()
+            await asyncio.sleep(0)
+            assert not task.done() and not exited.is_set()  # nosec B101 - caller still owns the held verification.
+        finally:
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        assert exited.is_set()  # nosec B101 - verification retires before caller cancellation escapes.
+
+    asyncio.run(exercise())
+    assert writes == []  # nosec B101 - cancelled verification cannot publish a late result.
 
 
 def test_cancelled_slide_generation_waits_for_owned_provider_exit(monkeypatch):

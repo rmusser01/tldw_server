@@ -84,6 +84,7 @@ from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
+from tldw_Server_API.app.core.Slides.generation_disconnect import generation_disconnected
 from tldw_Server_API.app.core.Slides.presentation_service import (
     CONTENT_KIND_HEADER,
     STANDALONE_HTML,
@@ -1276,7 +1277,7 @@ async def _generate_presentation(
     source_ref: Any | None,
     source_query: str | None,
 ) -> PresentationResponse:
-    if await http_request.is_disconnected():
+    if await generation_disconnected(http_request):
         raise HTTPException(status_code=499, detail="generation_cancelled")
     visual_style_application = _resolve_presentation_visual_style_application(
         visual_style_id=getattr(request, "visual_style_id", None),
@@ -1353,7 +1354,7 @@ async def _generate_presentation(
         _record_generation_error("generation_error")
         raise HTTPException(status_code=500, detail="Failed to generate presentation") from exc
 
-    if await http_request.is_disconnected():
+    if await generation_disconnected(http_request):
         raise HTTPException(status_code=499, detail="generation_cancelled")
 
     try:
@@ -1363,15 +1364,17 @@ async def _generate_presentation(
     except (ValidationError, KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail="invalid_generated_slides") from exc
     slides_text = _flatten_slides_text(slides)
-    claim_verification = await _verify_slides_against_source(
-        slides=slides,
-        source_text=source_text,
-        source_type=source_type,
-        source_ref=source_ref,
-        generation_provider=provider,
-        generation_model=request.model,
-        verification_provider=getattr(request, "claims_verification_provider", None),
-        verification_model=getattr(request, "claims_verification_model", None),
+    claim_verification = await await_owned_worker(
+        _verify_slides_against_source(
+            slides=slides,
+            source_text=source_text,
+            source_type=source_type,
+            source_ref=source_ref,
+            generation_provider=provider,
+            generation_model=request.model,
+            verification_provider=getattr(request, "claims_verification_provider", None),
+            verification_model=getattr(request, "claims_verification_model", None),
+        )
     )
     claim_verification_payload = claim_verification.to_dict()
     if claim_verification.verdict != "grounded":
@@ -1383,7 +1386,7 @@ async def _generate_presentation(
             },
         )
     studio_data = {"claimVerification": claim_verification_payload}
-    if await http_request.is_disconnected():
+    if await generation_disconnected(http_request):
         raise HTTPException(status_code=499, detail="generation_cancelled")
     row = db.create_presentation(
         presentation_id=None,

@@ -48,6 +48,7 @@ from tldw_Server_API.app.core.Security.drain_gate_middleware import (
     CORS_EXPOSE_HEADERS_VALUE,
     merge_vary_origin,
 )
+from tldw_Server_API.app.core.Slides.generation_disconnect import SlidesGenerationDisconnectMiddleware
 from tldw_Server_API.app.core.Security.standalone_html_request_guard import (
     StandaloneHtmlRequestGuardMiddleware,
     is_standalone_sensitive_route,
@@ -2717,6 +2718,8 @@ async def _trace_headers_middleware(request: Request, call_next):
 app.add_middleware(ChaChaOperationMiddleware)
 app.add_middleware(DrainGateMiddleware)
 app.add_middleware(RequestIDMiddleware)
+# Observe raw Slides disconnects before BaseHTTPMiddleware adds cancellable receive scopes.
+app.add_middleware(SlidesGenerationDisconnectMiddleware)
 
 
 # Register setup UI route conditionally
