@@ -528,3 +528,12 @@ Local b6c7da27 product/package/build qualification completed before native work.
 Minimal Tour repair pauses its timer/overlay for Generate, Picker and Shortcuts in both responsive layouts. Two causal real-Antd controls failed then passed; review found resumed-tour Close reopening, reproduced with a third failing control and fixed by avoiding an additional timer while open. Connected UI/WebUI page/generation cohorts25pass each, final focused Tour3UIpass/1.63s and WebUI3pass/1.35s, independent final source/operator review CLEAR. Final semantic TypeScript4roots baseline82/current81/no new diagnostics and explicitly0new-test diagnostics, with inherited diagnostics retained; actual scoped ESLint0errors/two inherited warnings. TS-only Bandit N/A. The native driver will dismiss the resumed tour through its real Close control. No application source/response/ownership guard bypass, user-session DOM access or new infrastructure.
 
 S03 remains39/43/InProgress; Document live four-mode generation/edit/save/reload/combined-export/recovery/visual/UX gates remain. Historical Kanban incident stays open/unattributed. No S04, GitHub or publication action.
+
+
+## Document worker package mismatch — 2026-10-28
+
+The repaired Tour passed its real resume/Close workflow, and Chat/render/upload200 acknowledged Media1. Page2 never mounted; raw worker Script had no terminal receipt and transport drain failed. Exact saved profile/ACK retained; no annotation write, regeneration or re-upload. Chrome/API physically released and original target metadata preserved.
+
+Actual public worker4.10.38 mismatched the shared viewer react-pdf9.2.1/PDF.js4.8.69. The existing copy step resolved an independent hoisted package. Minimal correction resolves shared UI then its react-pdf then that dependency PDF.js, accepts legacy/modern only within that package and refuses missing viewer worker. Three full-CLI isolated package-resolution cases failed then passed; actual normal copy now exactly matches the installed4.8.69worker. Script/test lint0; JS/TS Bandit N/A. No new package, dependency installation or user runtime/model change. The pending raw receipt is not independently attributed; normal repaired-build rendering and strict transport checks still required.
+
+Finish the existing saved PDF without another initial generation/upload, then continue the three unattempted deployment modes. Overall39/43/S03InProgress; historical Kanban incident stays open.
