@@ -28,8 +28,10 @@ a module that cannot migrate yet. Seed or re-count with:
     python tldw_Server_API/tests/lint/test_auth_token_parsing_ratchet.py
 
 Also pinned: the modules that may use ``resolve_ws_principal_or_deprecated_query``, the core shim
-that still reads ``?token=`` / ``?api_key=`` for shipped clients. It is public, so a new route could
-adopt it and bring query credentials back; TASK-13950.61 moves those clients and deletes it.
+that still reads ``?token=`` / ``?api_key=`` for shipped clients (a first-frame route passes it to
+``resolve_ws_principal_first_frame`` as its ``tokenless_frame`` fallback, which counts). It is public,
+so a new route could adopt it and bring query credentials back; TASK-13950.61 moves those clients
+and deletes it.
 """
 
 from __future__ import annotations
@@ -49,22 +51,20 @@ ENDPOINTS_ROOT = APP_ROOT / "api" / "v1" / "endpoints"
 
 # Per-module counts; lower or remove an entry when a module migrates.
 LOOKS_LIKE_JWT_BASELINE: dict[str, int] = {
-    "tldw_Server_API/app/api/v1/API_Deps/auth_deps.py": 1,
+    # The one definition; auth_deps and auth_principal_resolver import it.
     "tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py": 1,
-    "tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py": 1,
 }
 
 BEARER_PARSE_BASELINE: dict[str, int] = {
-    "tldw_Server_API/app/api/v1/endpoints/auth.py": 1,
-    "tldw_Server_API/app/api/v1/endpoints/authnz_debug.py": 1,
+    # Strips a case-sensitive "Bearer " from an X-API-KEY value; core bearer_credential matches any
+    # case and trims, so it would admit X-API-KEY "bearer <key>", which fails today. It goes when the
+    # evaluations auth moves onto the AuthNZ dependencies (TASK-13950.74).
     "tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_auth.py": 1,
-    "tldw_Server_API/app/api/v1/endpoints/prompts.py": 3,
-    "tldw_Server_API/app/api/v1/endpoints/rpg.py": 1,
 }
 
 # Each baseline's exact total. A migration lowers its entry and this number together; any
 # other change to a baseline's total is headroom being reused, and fails.
-SEED_TOTALS: dict[str, int] = {"LOOKS_LIKE_JWT_BASELINE": 3, "BEARER_PARSE_BASELINE": 7}
+SEED_TOTALS: dict[str, int] = {"LOOKS_LIKE_JWT_BASELINE": 1, "BEARER_PARSE_BASELINE": 1}
 
 # The only way to raise a count: (baseline name, module) -> (allowed count, reason). The
 # reason must cite a task or PR, e.g. "security fix in persona_stream needs one (TASK-1234)".
@@ -73,7 +73,8 @@ BUMPS: dict[tuple[str, str], tuple[int, str]] = {}
 _THIS_FILE = "tldw_Server_API/tests/lint/test_auth_token_parsing_ratchet.py"
 _FIX = (
     "Resolve WebSocket callers with core/AuthNZ/websocket_principal.resolve_ws_principal "
-    "and HTTP callers with the AuthNZ dependencies instead of parsing tokens by hand. If a "
+    "and HTTP callers with the AuthNZ dependencies instead of parsing tokens by hand; to read a "
+    "bearer from a header, call core/AuthNZ/auth_principal_resolver.bearer_credential. If a "
     f"copy is unavoidable, add a BUMPS entry with the reason and its task or PR in {_THIS_FILE}. "
     "If you are building an outbound Authorization header rather than parsing an inbound one, "
     "add a BUMPS entry citing the PR."
@@ -198,7 +199,13 @@ QUERY_SHIM_CALLERS = frozenset(
         # persona-stream.ts falls back to ?token= / ?api_key= for a credential that is not
         # subprotocol-safe (TASK-13950.61 moves it).
         "tldw_Server_API/app/api/v1/endpoints/persona.py",
+        # The voice SDKs (sdks/python, sdks/typescript) send ?token= beside the auth frame; it is read
+        # only for a frame without a token (TASK-13950.61 moves them).
+        "tldw_Server_API/app/api/v1/endpoints/voice_assistant.py",
         "tldw_Server_API/app/api/v1/endpoints/watchlists.py",
+        # The audio streams read ?token= only with AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH set, the opt-in that
+        # Helper_Scripts/streaming_unified_smoke.py needs (TASK-13950.61 moves it to the auth frame).
+        "tldw_Server_API/app/core/Audio/streaming_service.py",
     }
 )
 
@@ -226,6 +233,36 @@ def query_shim_problems(callers: set[str]) -> list[str]:
         for module in sorted(QUERY_SHIM_CALLERS - callers)
     ]
     return added + gone
+
+
+# A WebSocket route that sets this mark tells the core resolver to admit scoped tokens, as an HTTP route
+# that depends on require_token_scope does; it must then enforce their limits itself. Only audio does.
+SCOPE_MARK = "ws_token_scope_enforced"
+SCOPE_MARK_SETTERS = frozenset({"tldw_Server_API/app/core/Audio/streaming_service.py"})
+
+
+def count_scope_marks(tree: ast.AST) -> int:
+    """Return how many places in ``tree`` set ``<x>.ws_token_scope_enforced``, directly or by ``setattr``."""
+    return sum(
+        1
+        for node in ast.walk(tree)
+        if (isinstance(node, ast.Attribute) and node.attr == SCOPE_MARK and isinstance(node.ctx, ast.Store))
+        or (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "setattr"
+            and len(node.args) > 1
+            and isinstance(node.args[1], ast.Constant)
+            and node.args[1].value == SCOPE_MARK
+        )
+    )
+
+
+def test_only_audio_tells_the_core_it_enforces_token_scope() -> None:
+    """Self-test included: both ways of setting the mark count, reading it does not (TASK-13950.73)."""
+    seeded = ast.parse(f"ws.state.{SCOPE_MARK} = True\nsetattr(ws.state, '{SCOPE_MARK}', True)\nx = ws.state.{SCOPE_MARK}\n")
+    assert count_scope_marks(seeded) == 2
+    assert set(_counts(APP_ROOT, SCOPE_MARK, count_scope_marks)) == SCOPE_MARK_SETTERS
 
 
 def test_looks_like_jwt_copies_only_decrease() -> None:
