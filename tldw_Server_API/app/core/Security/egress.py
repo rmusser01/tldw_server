@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
-from tldw_Server_API.app.core.stt_observability_context import (
+from tldw_Server_API.app.core.Logging.stt_observability_context import (
     get_opaque_stt_endpoint_id,
 )
 from tldw_Server_API.app.core.testing import is_truthy

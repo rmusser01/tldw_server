@@ -13,7 +13,6 @@ from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from .AuthNZ.exceptions import DatabaseError as AuthNZDatabaseError
 from .exception_types import (  # noqa: F401 - centralized compatibility exports.
     PersonaArtworkValidationError,
     PromptCatalogError,
@@ -833,7 +832,17 @@ class _ParseDeadlineExceeded(Exception):
     pass
 
 
-class AudioQuotaStoreUnavailable(AuthNZDatabaseError):
+# AuthNZ's base errors live here so foundation code can subclass them, and
+# core/AuthNZ/exceptions.py re-exports them (TASK-13950.12).
+class UserRegistrationException(Exception):
+    """Base exception for user registration system"""
+
+
+class DatabaseError(UserRegistrationException):
+    """Base database exception"""
+
+
+class AudioQuotaStoreUnavailable(DatabaseError):
     """Raised when canonical audio daily-minute quota storage is unavailable."""
 
 

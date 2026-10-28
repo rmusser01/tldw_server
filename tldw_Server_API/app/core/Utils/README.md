@@ -1,7 +1,7 @@
 # Utils
 
 The Utils package holds shared helpers that are safe to import from endpoints,
-services, and core modules. It covers filesystem path helpers, prompt loading,
+services, and core modules. It covers filesystem path helpers,
 metadata normalization, image validation, tokenizer helpers, pydantic
 compatibility, CPU-bound execution, and optional system checks.
 
@@ -9,8 +9,8 @@ compatibility, CPU-bound execution, and optional system checks.
 
 - General helpers: `Utils.py`, `common.py`, `path_utils.py`, and
   `metadata_utils.py`.
-- Prompt and schema compatibility: `prompt_loader.py` and
-  `pydantic_compat.py`.
+- Schema compatibility: `pydantic_compat.py`. Prompt loading moved to
+  `Context_Integrity/prompt_loader.py`.
 - Runtime helpers: `cpu_bound_handler.py`, `executor_registry.py`,
   `tokenizer.py`, and `torch_import_guard.py`.
 - Media helpers: `chunked_image_processor.py` and `image_validation.py`.
@@ -35,7 +35,7 @@ compatibility, CPU-bound execution, and optional system checks.
   default). Use it instead of a private `_env_bool`/`_as_bool`;
   `core/testing.is_truthy` delegates to it.
 - `metadata_utils.py` normalizes safe metadata dictionaries for media APIs.
-- `prompt_loader.py` loads prompt resources from configured namespaces.
+- `provider_identity.py` canonical provider names and aliases.
 - `pydantic_compat.py` wraps model dump/validation compatibility.
 - `executor_registry.py` and `cpu_bound_handler.py` coordinate executor reuse.
 - `torch_import_guard.py` keeps optional ML imports explicit and diagnosable.

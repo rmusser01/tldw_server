@@ -16,12 +16,12 @@ from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import get_proces
 from tldw_Server_API.app.api.v1.endpoints.media import process_audios as endpoint
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ProcessAudiosForm
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.Context_Integrity import prompt_loader
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase, ServicePromptOverrideRow
 from tldw_Server_API.app.core.exceptions import ServicePromptCorruptOverride
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files as audio
 from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as summary
 from tldw_Server_API.app.core.Prompt_Management.service_prompts import resolve_service_prompt
-from tldw_Server_API.app.core.Utils import prompt_loader
 
 pytestmark = pytest.mark.integration
 PROMPT_ID = "media.audio.analysis"
