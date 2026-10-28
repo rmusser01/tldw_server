@@ -442,7 +442,7 @@ async def export_board(
     response_model=BoardImportResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Import a board",
-    description="Import a board from JSON data (tldw_kanban_v1 or Trello format).",
+    description="Import a native export, an atomic generated draft, or a Trello board from JSON data.",
     dependencies=[Depends(kanban_rate_limit("kanban.boards.import"))]
 )
 async def import_board(
@@ -452,7 +452,8 @@ async def import_board(
     """
     Import a board from JSON data.
 
-    Supports two formats:
+    Supports these formats:
+    - **tldw_kanban_draft_v1**: Validated generated board; atomic, replay-safe create
     - **tldw_kanban_v1**: Native format from board export
     - **Trello JSON**: Export from Trello board
 
