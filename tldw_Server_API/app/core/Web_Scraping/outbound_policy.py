@@ -138,10 +138,15 @@ def decide_web_outbound_policy_sync(
     source: str,
     stage: str,
     config: dict[str, Any] | None = None,
+    configured_endpoint: egress_policy.ConfiguredEndpointScope | None = None,
 ) -> WebOutboundPolicyDecision:
     """Evaluate outbound policy for synchronous callers without robots fetching."""
     mode = get_web_outbound_policy_mode(config)
-    raw = evaluate_url_policy(url)
+    raw = (
+        egress_policy.evaluate_url_policy(url, configured_endpoint=configured_endpoint)
+        if configured_endpoint is not None
+        else evaluate_url_policy(url)
+    )
     if not getattr(raw, "allowed", False):
         return _decision(
             False,
