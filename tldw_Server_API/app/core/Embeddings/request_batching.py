@@ -26,6 +26,7 @@ _BATCHER_NONCRITICAL_EXCEPTIONS = (
     asyncio.InvalidStateError,
     AttributeError,
     ConnectionError,
+    OSError,
     RuntimeError,
     TimeoutError,
     TypeError,
