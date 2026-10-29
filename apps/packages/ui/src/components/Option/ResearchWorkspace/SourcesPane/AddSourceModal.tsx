@@ -121,12 +121,6 @@ type ExistingMediaFilters = {
 }
 
 type MediaLibraryItem = Record<string, unknown>
-type ExistingMediaCache = {
-  items: MediaLibraryItem[]
-  totalCount: number
-  cachedAt: number
-}
-
 type SearchResultImportState =
   | {
       status: "imported"
@@ -140,9 +134,6 @@ type SearchResultImportState =
 export type AddSourceModalProps = {
   researchWorkspaceCapabilities?: ResearchWorkspaceCapabilitiesResponse
 }
-
-const EXISTING_MEDIA_CACHE_TTL_MS = 60_000
-let existingMediaCache: ExistingMediaCache | null = null
 
 const DEFAULT_EXISTING_MEDIA_FILTERS: ExistingMediaFilters = {
   query: "",
@@ -399,9 +390,14 @@ const extractMediaFromAddResponse = (
   }
   const root = response as Record<string, unknown>
   const rootTitle =
-    typeof root.title === "string" && root.title.trim()
-      ? root.title
-      : undefined
+    typeof root.title === "string" && root.title.trim() ? root.title : undefined
+  const failed = (candidate: Record<string, unknown>) =>
+    Boolean(candidate.error) ||
+    (typeof candidate.status === "string" &&
+      ["error", "failed", "cancelled"].includes(
+        candidate.status.trim().toLowerCase()
+      ))
+  if (failed(root)) return { mediaId: null, title: rootTitle }
   const candidates: Array<Record<string, unknown>> = []
   if (Array.isArray(root.results)) {
     for (const item of root.results) {
@@ -413,9 +409,10 @@ const extractMediaFromAddResponse = (
   if (root.result && typeof root.result === "object") {
     candidates.push(root.result as Record<string, unknown>)
   }
-  candidates.push(root)
+  if (!candidates.some(failed)) candidates.push(root)
 
   for (const candidate of candidates) {
+    if (failed(candidate)) continue
     const mediaId = toMediaId(
       candidate.media_id ?? candidate.db_id ?? candidate.id
     )
@@ -431,7 +428,9 @@ const extractMediaFromAddResponse = (
       mediaId,
       title,
       ...metadata,
-      mediaType: toOptionalString(candidate.type) || toOptionalString(candidate.media_type)
+      mediaType:
+        toOptionalString(candidate.type) ||
+        toOptionalString(candidate.media_type)
     }
   }
   return {
@@ -1714,13 +1713,6 @@ const ExistingTab: React.FC<{
         setCurrentPage(page)
         setHasMore(dedupedItems.length < normalizedTotal)
 
-        if (!hasActiveExistingMediaFilters(filters) && page === 1) {
-          existingMediaCache = {
-            items: dedupedItems,
-            totalCount: normalizedTotal,
-            cachedAt: Date.now()
-          }
-        }
       } catch (err) {
         setLoadError(
           isAuthRecoveryError(err)
@@ -1744,23 +1736,11 @@ const ExistingTab: React.FC<{
 
   const loadMedia = React.useCallback(
     async (filters: ExistingMediaFilters = DEFAULT_EXISTING_MEDIA_FILTERS) => {
-      if (!hasActiveExistingMediaFilters(filters) && existingMediaCache) {
-        const cacheIsFresh =
-          Date.now() - existingMediaCache.cachedAt < EXISTING_MEDIA_CACHE_TTL_MS
-        if (cacheIsFresh) {
-          setLoadError(null)
-          setMediaList(existingMediaCache.items)
-          setTotalCount(existingMediaCache.totalCount)
-          setCurrentPage(1)
-          setHasMore(existingMediaCache.items.length < existingMediaCache.totalCount)
-          return
-        }
-      }
       setCurrentPage(1)
       setSelectedMediaKeys(new Set())
       await fetchMediaFromServer(filters, { page: 1 })
     },
-    [fetchMediaFromServer, setMediaList]
+    [fetchMediaFromServer]
   )
 
   React.useEffect(() => {
