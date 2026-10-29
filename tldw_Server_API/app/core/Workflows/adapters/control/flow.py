@@ -14,7 +14,7 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
+from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string
 from tldw_Server_API.app.core.exceptions import AdapterError, LLMQuotaExceededError
 from tldw_Server_API.app.core.Metrics import start_async_span as _start_span
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
@@ -209,7 +209,7 @@ async def run_log_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
       - level: str (debug|info|warning|error) default info
     Output: { "logged": true, "message": ... }
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
     msg_t = str(config.get("message", ""))
     level = str(config.get("level", "info")).lower()
     # Pre-pass replacements for common templates like {{ inputs.name || '' }} and {{ inputs.name }}
@@ -272,7 +272,7 @@ async def run_branch_adapter(config: dict[str, Any], context: dict[str, Any]) ->
       - false_next: str (step id)
     Output: { "__next__": step_id, "branch": "true"|"false" }
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
     cond_t = str(config.get("condition", "")).strip()
     rendered = (_tmpl(cond_t, context) or cond_t).strip().lower()
     is_true = _is_truthy(rendered)
@@ -319,7 +319,7 @@ async def run_map_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
     if isinstance(items_cfg, list):
         items = items_cfg
     else:
-        from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+        from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
         raw = _tmpl(str(items_cfg or ""), context) or str(items_cfg or "")
         try:
             import json as _json

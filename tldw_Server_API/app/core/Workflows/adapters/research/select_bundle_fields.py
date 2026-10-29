@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
+from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string
 from tldw_Server_API.app.core.Workflows.adapters._common import (
     resolve_artifacts_dir,
     resolve_context_user_id,

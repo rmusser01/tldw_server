@@ -77,7 +77,7 @@ async def run_audio_normalize_adapter(config: dict[str, Any], context: dict[str,
     Output:
       - {"output_path": str, "normalized": bool}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -163,7 +163,7 @@ async def run_audio_concat_adapter(config: dict[str, Any], context: dict[str, An
     Output:
       - {"output_path": str, "concatenated": bool, "file_count": int}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -272,7 +272,7 @@ async def run_audio_trim_adapter(config: dict[str, Any], context: dict[str, Any]
     Output:
       - {"output_path": str, "trimmed": bool}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -334,7 +334,7 @@ async def run_audio_convert_adapter(config: dict[str, Any], context: dict[str, A
     Output:
       - {"output_path": str, "converted": bool, "format": str}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -399,7 +399,7 @@ async def run_audio_extract_adapter(config: dict[str, Any], context: dict[str, A
     Output:
       - {"output_path": str, "extracted": bool, "format": str}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -465,7 +465,7 @@ async def run_audio_mix_adapter(config: dict[str, Any], context: dict[str, Any])
     Output:
       - {"output_path": str, "mixed": bool, "track_count": int}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}

@@ -19,7 +19,7 @@ from tldw_Server_API.app.api.v1.schemas.pagination import (
     OffsetPaginationMeta,
     default_cursor_pagination_aliases,
 )
-from tldw_Server_API.app.core.Evaluations.run_state import normalize_run_status
+from tldw_Server_API.app.core.Evaluations.run_state import RunStatus, normalize_run_status
 
 try:
     import bleach
@@ -119,15 +119,6 @@ class EvaluationType(str, Enum):
     LABEL_CHOICE = "label_choice"  # Multi-class single-label selection
     NLI_FACTCHECK = "nli_factcheck"  # Claim verification via NLI-style labels
     CUSTOM = "custom"
-
-
-class RunStatus(str, Enum):
-    """Run status values"""
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
 
 
 class WebhookEventType(str, Enum):

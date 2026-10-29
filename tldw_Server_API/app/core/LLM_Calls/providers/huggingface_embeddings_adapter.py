@@ -87,7 +87,7 @@ class HuggingFaceEmbeddingsAdapter(EmbeddingsProvider):
                     "Resolved keyless Hugging Face embeddings require local fallback."
                 )
 
-            from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+            from tldw_Server_API.app.core.exceptions import ChatConfigurationError
 
             raise ChatConfigurationError(
                 provider=self.name,
@@ -102,7 +102,7 @@ class HuggingFaceEmbeddingsAdapter(EmbeddingsProvider):
             try:
                 model_path = encode_huggingface_model_path(model)
             except ValueError:
-                from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
+                from tldw_Server_API.app.core.exceptions import ChatBadRequestError
 
                 raise ChatBadRequestError(
                     provider=self.name,
@@ -131,7 +131,7 @@ class HuggingFaceEmbeddingsAdapter(EmbeddingsProvider):
                     data = resp.json()
                 return self._normalize(data, multi=multi)
             except Exception:  # noqa: BLE001 - sanitize arbitrary provider transport failures
-                from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
+                from tldw_Server_API.app.core.exceptions import ChatProviderError
 
                 provider_error = ChatProviderError(
                     provider=self.name,

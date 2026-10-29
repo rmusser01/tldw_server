@@ -22,7 +22,6 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCredentialRuntime,
 )
-from tldw_Server_API.app.core.Chat import bounded_daemon as bounded_daemon_module
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat import request_queue as request_queue_module
 from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
@@ -41,6 +40,7 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     write_mandatory_moderation_audit,
 )
 from tldw_Server_API.app.core.Chat.request_queue import RateLimitedQueue, RequestQueue
+from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
 from tldw_Server_API.tests.provider_credential_test_helpers import (
     resolved_request_fields,
     resolved_request_fields_async,

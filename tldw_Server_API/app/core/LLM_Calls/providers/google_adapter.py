@@ -8,7 +8,7 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
+from tldw_Server_API.app.core.exceptions import ChatBadRequestError
 from tldw_Server_API.app.core.http_client import (
     create_client as _hc_create_client,
 )
@@ -533,7 +533,7 @@ class GoogleAdapter(ChatProvider):
             log_http_400_body,
         )
         if is_http_status_error(exc):
-            from tldw_Server_API.app.core.Chat.Chat_Deps import (
+            from tldw_Server_API.app.core.exceptions import (
                 ChatAPIError,
                 ChatAuthenticationError,
                 ChatBadRequestError,
@@ -576,7 +576,7 @@ class GoogleAdapter(ChatProvider):
         api_key = request.get("api_key")
         model = request.get("model")
         if not api_key:
-            from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+            from tldw_Server_API.app.core.exceptions import ChatConfigurationError
             raise ChatConfigurationError(provider=self.name, message="Google API Key required.")
         url = f"{self._base_url(request)}/models/{self._model_path(model)}:generateContent"
         headers = self._headers(api_key)
@@ -606,7 +606,7 @@ class GoogleAdapter(ChatProvider):
         api_key = request.get("api_key")
         model = request.get("model")
         if not api_key:
-            from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+            from tldw_Server_API.app.core.exceptions import ChatConfigurationError
             raise ChatConfigurationError(provider=self.name, message="Google API Key required.")
         url = (
             f"{self._base_url(request)}/models/"

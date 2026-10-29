@@ -51,7 +51,7 @@ async def run_doi_resolve_adapter(config: dict[str, Any], context: dict[str, Any
       - metadata: dict - Paper metadata
       - resolved: bool
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -147,7 +147,7 @@ async def run_reference_parse_adapter(config: dict[str, Any], context: dict[str,
     Output:
       - parsed: dict - Structured citation data
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -299,7 +299,7 @@ async def run_literature_review_adapter(config: dict[str, Any], context: dict[st
       - review: str
       - paper_count: int
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
