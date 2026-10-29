@@ -168,8 +168,6 @@ from tldw_Server_API.app.core.exceptions import (
     raise_detached_error,
 )
 from tldw_Server_API.app.core.LLM_Calls.gateway import (  # noqa: F401 - re-exported; callers move to the gateway (TASK-13950.27)
-    _provider_inventory_endpoint,  # used by known_models_for_provider_cached / is_model_known_for_provider
-    _raise_inventory_failure,  # used by known_models_for_provider_cached / is_model_known_for_provider
     infer_provider_from_model_catalog,
     invalidate_model_alias_caches,
     normalize_request_provider_and_model,
@@ -177,6 +175,12 @@ from tldw_Server_API.app.core.LLM_Calls.gateway import (  # noqa: F401 - re-expo
     perform_chat_api_call_async,
     resolve_provider_and_model,
     resolve_provider_api_key,
+)
+
+# isort: split
+from tldw_Server_API.app.core.LLM_Calls.gateway import (  # used by known_models_for_provider_cached / is_model_known_for_provider
+    _provider_inventory_endpoint,
+    _raise_inventory_failure,
 )
 from tldw_Server_API.app.core.LLM_Calls.llamacpp_request_extensions import (
     resolve_llamacpp_request_extensions,

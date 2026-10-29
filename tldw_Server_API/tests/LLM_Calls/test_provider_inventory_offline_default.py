@@ -3,7 +3,7 @@
 import pytest
 
 from tldw_Server_API.app.core.http_client import fetch
-from tldw_Server_API.app.core.LLM_Calls import provider_model_inventory
+from tldw_Server_API.app.core.LLM_Calls import gateway, provider_model_inventory
 
 pytestmark = pytest.mark.unit
 
@@ -16,3 +16,8 @@ def test_unmarked_tests_cannot_reach_live_provider_discovery():
 @pytest.mark.provider_inventory
 def test_marked_tests_keep_the_real_egress_checked_fetch():
     assert provider_model_inventory._http_fetch is fetch
+
+
+def test_unmarked_tests_get_the_stubbed_model_check_where_the_call_path_reads_it():
+    """The conftest finds the check by module name; naming a module that no longer holds it skips the stub."""
+    assert gateway._validate_provider_model_selection.__module__.endswith("conftest")

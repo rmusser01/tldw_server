@@ -12,12 +12,8 @@ REEXPORTED = (
     "normalize_request_provider_and_model", "infer_provider_from_model_catalog",
     "invalidate_model_alias_caches", "resolve_provider_api_key",
 )
-NOT_REEXPORTED = (
-    "_get_llm_registry", "_load_models_with_case_cached", "_provider_has_model_cached",
-    "_find_catalog_providers_for_model_cached", "_load_alias_overrides_cached", "_privacy_safe_provider_errors_enabled",
-    "_build_adapter_request_from_chat_args", "_map_provider_egress_error", "_resolve_chat_provider_name",
-    "parse_provider_model_for_metrics", "_validate_provider_model_selection",
-)
+# chat_service's staying known-models functions still call these two; they are imported, not re-exported.
+STAYING_CODE_IMPORTS = ("_provider_inventory_endpoint", "_raise_inventory_failure")
 
 
 @pytest.mark.parametrize("name", REEXPORTED)
@@ -25,16 +21,16 @@ def test_chat_service_re_exports_the_gateway_object(name: str) -> None:
     assert getattr(chat_service, name) is getattr(gateway, name)
 
 
-@pytest.mark.parametrize("name", NOT_REEXPORTED)
-def test_moved_internals_are_not_re_exported(name: str) -> None:
-    """A patch or call on chat_service would no longer reach the gateway, so it must fail loudly instead."""
-    assert hasattr(gateway, name)
-    assert not hasattr(chat_service, name)
+@pytest.mark.provider_inventory  # keeps the gateway's real model check instead of the conftest stub
+def test_chat_service_holds_no_other_gateway_function() -> None:
+    """A patch or call on chat_service of any other moved name must fail loudly, not miss the gateway."""
+    on_chat_service = {
+        name
+        for name, value in vars(gateway).items()
+        if callable(value) and getattr(value, "__module__", None) == gateway.__name__ and hasattr(chat_service, name)
+    }
 
-
-def test_the_offline_inventory_default_stubs_the_gateway_check() -> None:
-    """The root conftest finds the model check by module name; a stale name would let real discovery run."""
-    assert gateway._validate_provider_model_selection.__module__ != gateway.__name__
+    assert on_chat_service == set(REEXPORTED) | set(STAYING_CODE_IMPORTS)
 
 
 class _Adapter:
