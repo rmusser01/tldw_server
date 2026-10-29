@@ -3780,7 +3780,9 @@ async def persist_primary_av_item(
                 )
 
         # Build plaintext chunks for chunk-level FTS if chunking is requested.
-        chunks_for_sql: list[dict[str, Any]] | None = None
+        chunks_for_sql: list[dict[str, Any]] | None = (
+            [] if getattr(form_data, "perform_chunking", True) is False else None
+        )
         try:
             _opts = effective_chunk_options or {}
             if _opts:
@@ -3853,16 +3855,11 @@ async def persist_primary_av_item(
                     seen_extra_keys.add(dedupe_key)
                     raw_chunk_type = ec.get("chunk_type") or "vlm"
                     try:
-                        normalized_chunk_type = _ck.normalize_chunk_type(raw_chunk_type)  # type: ignore[name-defined]
-                    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
-                        try:
-                            from tldw_Server_API.app.core.Chunking.chunker import (  # type: ignore
-                                Chunker as _Chunker,
-                            )
+                        from tldw_Server_API.app.core.Chunking.chunker import Chunker as _Chunker
 
-                            normalized_chunk_type = _Chunker.normalize_chunk_type(raw_chunk_type)
-                        except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
-                            normalized_chunk_type = raw_chunk_type
+                        normalized_chunk_type = _Chunker.normalize_chunk_type(raw_chunk_type)
+                    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
+                        normalized_chunk_type = raw_chunk_type
                     chunks_for_sql.append(
                         {
                             "text": ec.get("text", ""),
@@ -5835,7 +5832,9 @@ async def persist_doc_item_and_children(
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                 source_hash_for_db = None
 
-            chunks_for_sql: list[dict[str, Any]] | None = None
+            chunks_for_sql: list[dict[str, Any]] | None = (
+                [] if getattr(form_data, "perform_chunking", True) is False else None
+            )
             try:
                 opts = resolved_chunk_options or {}
                 if opts:
@@ -6037,7 +6036,9 @@ async def persist_doc_item_and_children(
                                     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                                         safe_child_meta_json = None
 
-                                    child_chunks_for_sql: list[dict[str, Any]] | None = None
+                                    child_chunks_for_sql: list[dict[str, Any]] | None = (
+                                        [] if getattr(form_data, "perform_chunking", True) is False else None
+                                    )
                                     try:
                                         opts_child = resolved_chunk_options or {}
                                         if opts_child:
@@ -6318,7 +6319,9 @@ async def persist_doc_item_and_children(
                                     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                                         pass
 
-                                    child_chunks_for_sql: list[dict[str, Any]] | None = None
+                                    child_chunks_for_sql: list[dict[str, Any]] | None = (
+                                        [] if getattr(form_data, "perform_chunking", True) is False else None
+                                    )
                                     try:
                                         opts_child = resolved_chunk_options or {}
                                         if opts_child:

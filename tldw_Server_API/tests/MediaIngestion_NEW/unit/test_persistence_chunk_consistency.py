@@ -553,8 +553,10 @@ async def test_persist_primary_av_item_recomputes_chunks_when_requested_but_chun
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("disable_chunking", [False, True], ids=["legacy-default", "explicit-skip"])
 async def test_persist_doc_item_and_children_routes_email_parent_and_child_through_media_repository(
     monkeypatch: pytest.MonkeyPatch,
+    disable_chunking: bool,
 ) -> None:
     _RepoBackedWorkerDB.instances = []
     _FakeMediaRepository.calls = []
@@ -613,6 +615,7 @@ async def test_persist_doc_item_and_children_routes_email_parent_and_child_throu
             accept_archives=False,
             accept_mbox=False,
             accept_pst=False,
+            **({"perform_chunking": False} if disable_chunking else {}),
         ),
         media_type="email",
         item_input_ref="mail.eml",
@@ -639,9 +642,17 @@ async def test_persist_doc_item_and_children_routes_email_parent_and_child_throu
     assert all(db.closed for db in _RepoBackedWorkerDB.instances)
 
 
+    if disable_chunking:
+        assert all(  # nosec B101 # Pytest checks terminal skipped parent/child work.
+            call["chunks"] == [] for call in _FakeMediaRepository.calls
+        )
+
+
 @pytest.mark.asyncio
+@pytest.mark.parametrize("disable_chunking", [False, True], ids=["legacy-default", "explicit-skip"])
 async def test_persist_doc_item_and_children_routes_archive_children_through_media_repository(
     monkeypatch: pytest.MonkeyPatch,
+    disable_chunking: bool,
 ) -> None:
     _RepoBackedWorkerDB.instances = []
     _FakeMediaRepository.calls = []
@@ -700,6 +711,7 @@ async def test_persist_doc_item_and_children_routes_archive_children_through_med
             accept_archives=True,
             accept_mbox=False,
             accept_pst=False,
+            **({"perform_chunking": False} if disable_chunking else {}),
         ),
         media_type="email",
         item_input_ref="bundle.zip",
@@ -720,6 +732,12 @@ async def test_persist_doc_item_and_children_routes_archive_children_through_med
     assert len(_RepoBackedWorkerDB.instances) == 1
     assert _RepoBackedWorkerDB.instances[0].upsert_calls
     assert _RepoBackedWorkerDB.instances[0].closed is True
+
+
+    if disable_chunking:
+        assert all(  # nosec B101 # Pytest checks terminal skipped parent/child work.
+            call["chunks"] == [] for call in _FakeMediaRepository.calls
+        )
 
 
 @pytest.mark.asyncio
