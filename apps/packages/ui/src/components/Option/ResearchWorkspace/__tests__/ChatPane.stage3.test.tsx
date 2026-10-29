@@ -1592,6 +1592,93 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     ).toHaveLength(2)
   })
 
+  it.each(["present", "removed"])(
+    "S04 keeps only the cited plain source in a saved workspace Note when its source is %s",
+    (presence) => {
+      workspaceStoreState.sources = [
+        {
+          id: "cited",
+          mediaId: 42,
+          title: "Rowan field report",
+          type: "text",
+          status: "ready",
+        },
+        {
+          id: "uncited",
+          mediaId: 43,
+          title: "Uncited appendix",
+          type: "text",
+          status: "ready",
+        },
+      ];
+      messageOptionState.messages = [
+        {
+          id: "cited-answer",
+          isBot: true,
+          name: "Assistant",
+          message: "The telescope is Selene.",
+          sources: [
+            {
+              name: "Rowan field report",
+              type: "text",
+              mode: "rag",
+              pageContent: "Selene is the telescope.",
+              metadata: {
+                media_id: 42,
+                title: "Rowan field report",
+                type: "text",
+                secret_unknown: "must-not-persist",
+              },
+            },
+          ],
+        },
+      ];
+      if (presence === "removed") workspaceStoreState.sources = [];
+      renderChatPane();
+      fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }));
+      const capture = mockCaptureToCurrentNote.mock.calls.at(-1)![0];
+      expect(capture.provenance).toMatchObject({
+        origin: "knowledge_qa",
+        sources: [
+          {
+            mediaId: 42,
+            title: "Rowan field report",
+            excerpt: "Selene is the telescope.",
+          },
+        ],
+      });
+      expect(capture.provenance.sources).toHaveLength(1);
+      expect(JSON.stringify(capture.provenance)).not.toContain(
+        "must-not-persist",
+      );
+    },
+  );
+
+  it("S04 refuses malformed cited evidence without changing the Note draft", () => {
+    workspaceStoreState.sources = [
+      { id: "cited", mediaId: 42, title: "Rowan", type: "text", status: "ready" },
+    ];
+    messageOptionState.messages = [
+      {
+        id: "bad-source",
+        isBot: true,
+        name: "Assistant",
+        message: "Keep this answer",
+        sources: [
+          {
+            name: "Rowan",
+            type: "text",
+            metadata: { media_id: 42 },
+            pageContent: "",
+          },
+        ],
+      },
+    ];
+    renderChatPane();
+    fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }));
+    expect(mockCaptureToCurrentNote).not.toHaveBeenCalled();
+  });
+
   it("saves chat message content into workspace note draft", () => {
     messageOptionState.messages = [
       {

@@ -1,3 +1,4 @@
+import { projectWorkspaceRagSources } from "@/utils/workspace-rag-sources"
 import { isChatSubmitSuccess } from "@/hooks/chat/chat-action-utils"
 import { sha256Text } from "@/store/workspace-migration"
 import { appendCapturedNoteProvenance } from "@/utils/knowledge-note-provenance"
@@ -2938,39 +2939,58 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   const handleSaveMessageToNotes = React.useCallback(
     (msg: {
-      isBot: boolean
-      message: string
-      name?: string
-      sources?: unknown[]
+      isBot: boolean;
+      message: string;
+      name?: string;
+      sources?: unknown[];
     }) => {
-      const snippet = String(msg.message || "").trim()
-      if (!snippet) return
-      const citedMediaIds = new Set(
-        (msg.sources || []).map(extractCitationMediaId)
-      )
-      const citedCaptures = sources.filter(
-        (source) => source.webCapture && citedMediaIds.has(source.mediaId)
-      )
-      const provenance = citedCaptures.length
-        ? appendCapturedNoteProvenance(
-            useWorkspaceStore.getState().currentNote,
-            citedCaptures
-          )
-        : null
-      captureToCurrentNote({
-        ...(provenance ? { provenance } : {}),
-        title: buildCapturedMessageTitle(
-          msg.isBot,
-          snippet,
-          t("playground:chat.savedAssistantPrefix", "Assistant"),
-          t("playground:chat.savedUserPrefix", "User")
-        ),
-        content: snippet,
-        mode: "append"
-      })
+      const snippet = String(msg.message || "").trim();
+      if (!snippet) return;
+      try {
+        const citedMediaIds = new Set(
+          (msg.sources || []).map(extractCitationMediaId),
+        );
+        const citedCaptures = sources.filter(
+          (source) => source.webCapture && citedMediaIds.has(source.mediaId),
+        );
+        const capturedMediaIds = new Set(
+          citedCaptures.map((source) => source.mediaId),
+        );
+        const citedPlainSources = (msg.sources || []).filter(
+          (source) => !capturedMediaIds.has(extractCitationMediaId(source)),
+        );
+        const plainProvenance = citedPlainSources.length
+          ? projectWorkspaceRagSources(citedPlainSources)
+          : null;
+        if (citedPlainSources.length && !plainProvenance)
+          throw new Error("Source history is invalid or too large to save");
+        const provenance = appendCapturedNoteProvenance(
+          useWorkspaceStore.getState().currentNote,
+          citedCaptures,
+          plainProvenance?.sources || [],
+        );
+        captureToCurrentNote({
+          ...(provenance ? { provenance } : {}),
+          title: buildCapturedMessageTitle(
+            msg.isBot,
+            snippet,
+            t("playground:chat.savedAssistantPrefix", "Assistant"),
+            t("playground:chat.savedUserPrefix", "User"),
+          ),
+          content: snippet,
+          mode: "append",
+        });
+      } catch {
+        messageApi.error(
+          t(
+            "option:researchWorkspace.sourceHistorySaveError",
+            "Source history is invalid or too large to save. Your Note has not changed.",
+          ),
+        );
+      }
     },
-    [captureToCurrentNote, sources, t]
-  )
+    [captureToCurrentNote, messageApi, sources, t],
+  );
 
   // Share conversation handler (UX-044)
   const handleShareConversation = React.useCallback(async () => {

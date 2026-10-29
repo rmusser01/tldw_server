@@ -1,3 +1,4 @@
+import { WORKSPACE_RAG_SOURCES_KEY, projectWorkspaceRagSources } from "@/utils/workspace-rag-sources"
 import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal, NativeHistoryEditRefusal } from "@/hooks/chat/native-character-preflight"
 import type { BaseMessage } from "@/types/messages"
 import {
@@ -85,6 +86,7 @@ const EMPTY_RESPONSE_ERROR_MESSAGE = "No response text was returned."
 let didLogPipelineSetHistoryMissing = false
 
 export type ChatModeParamsBase = {
+  saveToDb?: boolean
   onResponseDispatch?: () => void
   historyTurn?: HistorySendTurn
   actorSceneSend?: ActorSceneSend
@@ -882,6 +884,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       model: rawSelectedModel,
       toolChoice,
       conversationId,
+      ...(params.saveToDb !== undefined ? { saveToDb: params.saveToDb } : {}),
       ...(historyTurn ? nativeCompletion && historyTurn.owner.kind === "native"
         ? { saveToDb: true, conversationId: historyTurn.owner.conversation_id, scope: historyTurn.owner.scope ? structuredClone(historyTurn.owner.scope) : undefined }
         : { clientManagedHistory: true, saveToDb: false } : {}),
@@ -1142,9 +1145,26 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       params.dynamicUIRequest?.renderer === "openui"
         ? buildDynamicUIEnvelope("openui", fullText)
         : null
-    const assistantMetadataExtra = dynamicUIEnvelope
-      ? { dynamic_ui: dynamicUIEnvelope }
-      : undefined
+    const sourceProvenance =
+      mode.id === "rag" && params.saveToDb === false && sources.length
+        ? projectWorkspaceRagSources(sources)
+        : null;
+    if (
+      mode.id === "rag" &&
+      params.saveToDb === false &&
+      sources.length &&
+      !sourceProvenance
+    )
+      throw new Error("Source history is invalid or too large to save");
+    const assistantMetadataExtra =
+      dynamicUIEnvelope || sourceProvenance
+        ? {
+            ...(dynamicUIEnvelope ? { dynamic_ui: dynamicUIEnvelope } : {}),
+            ...(sourceProvenance
+              ? { [WORKSPACE_RAG_SOURCES_KEY]: sourceProvenance }
+              : {}),
+          }
+        : undefined;
     setMessagesWithTransition((prev) =>
       prev.map((msg) =>
         msg.id === generateMessageId
