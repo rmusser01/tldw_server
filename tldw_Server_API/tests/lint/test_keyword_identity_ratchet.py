@@ -110,7 +110,7 @@ KEYWORD_NORMALIZATION_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/core/RAG/rag_service/utils.py": 1,
     "tldw_Server_API/app/core/Research/planner.py": 1,
     "tldw_Server_API/app/core/Sync/v2/notes_organization_coordinator.py": 3,
-    "tldw_Server_API/app/core/Sync/v2/notes_task_contract.py": 2,
+    "tldw_Server_API/app/core/Sync_Contracts/notes_task_contract.py": 2,  # bump: moved from tldw_Server_API/app/core/Sync/v2/notes_task_contract.py (TASK-13950.16 PR C)
     "tldw_Server_API/app/core/Third_Party/RePEc.py": 1,
     "tldw_Server_API/app/core/Utils/keyword_identity.py": 1,  # the identity rule itself
     "tldw_Server_API/app/core/Watchlists/fetchers.py": 2,

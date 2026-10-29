@@ -6759,6 +6759,9 @@ async def _complete_roleplay_resume(
     from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import (
         RoleplayResumeConflictError,
     )
+    from tldw_Server_API.app.core.Character_Chat.roleplay_resume_prompt import (
+        prepare_roleplay_resume,
+    )
     from tldw_Server_API.app.core.LLM_Calls.capability_registry import (
         ProviderCallPolicy,
     )
@@ -6766,7 +6769,8 @@ async def _complete_roleplay_resume(
     contract = body.tldw_roleplay_resume_v1.model_dump(mode="json")
     try:
         prepared = await run_in_threadpool(
-            db.prepare_roleplay_resume_generation,
+            prepare_roleplay_resume,
+            db,
             chat_id,
             contract,
             owner_client_id=str(current_user.id),

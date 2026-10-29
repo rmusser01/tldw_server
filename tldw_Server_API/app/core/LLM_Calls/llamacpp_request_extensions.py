@@ -4,7 +4,7 @@ import os
 from collections.abc import Mapping
 from typing import Any
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
+from tldw_Server_API.app.core.exceptions import ChatBadRequestError
 
 
 _LLAMA_CPP_EXTENSION_FIELDS = (

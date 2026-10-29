@@ -21,7 +21,7 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
+from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.Notes.studio_markdown import (
     canonical_studio_sections,

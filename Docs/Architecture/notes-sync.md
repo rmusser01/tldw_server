@@ -12,7 +12,7 @@ All paths under `tldw_Server_API/` unless noted.
 | Contracts | `app/api/v1/schemas/sync_v2_models.py` | API Pydantic models; `ConflictResolutionAction` |
 | Service | `app/core/Sync/v2/service.py` | `SyncV2Service` — protocol invariants, push, pull, restore, conflicts, keys, retention, diagnostics |
 | Store | `app/core/Sync/v2/store.py` | `SyncV2Store` — persistence facade with materialization/projection/conflict/retention guards |
-| Models | `app/core/Sync/v2/models.py` | `SyncEnvelopeCreate`/`SyncEnvelope`/`SyncConflict`/`SyncDataset`; domain and operation literals |
+| Models | `app/core/Sync_Contracts/models.py` (alias: `app/core/Sync/v2/models.py`) | `SyncEnvelopeCreate`/`SyncEnvelope`/`SyncConflict`/`SyncDataset`; domain and operation literals |
 | Factory | `app/core/Sync/v2/factory.py` | `sync_v2_service_for_user`, env settings, per-user DB path, workspace access checker |
 | Security | `app/core/Sync/v2/security.py` | server-trusted readiness (at-rest mode + attestation), fail-closed |
 | Blobs | `app/core/Sync/v2/blob_store.py` | server-held blobs, chunked resumable upload/download |

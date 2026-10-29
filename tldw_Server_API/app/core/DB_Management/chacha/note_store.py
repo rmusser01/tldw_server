@@ -27,8 +27,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.Notes.wikilinks import parse_wikilinks
 from tldw_Server_API.app.core.Notes_Graph.semantic_content import semantic_content_fingerprint
-from tldw_Server_API.app.core.Sync.v2.models import validate_notes_note_upsert_payload
-from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
+from tldw_Server_API.app.core.Sync_Contracts.models import validate_notes_note_upsert_payload
+from tldw_Server_API.app.core.Sync_Contracts.notes_moodboard_studio_contract import (
     SYNC_ENVELOPE_MAX_BYTES,
     NotesMoodboardStudioContractError,
     StudioDiagramManifestV1,

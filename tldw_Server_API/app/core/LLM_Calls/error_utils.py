@@ -9,15 +9,16 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import (
+from tldw_Server_API.app.core.exceptions import (
     ChatAPIError,
     ChatAuthenticationError,
     ChatBadRequestError,
     ChatConfigurationError,
+    ChatModelNotAvailableError,
     ChatProviderError,
     ChatRateLimitError,
+    raise_detached_error,
 )
-from tldw_Server_API.app.core.exceptions import ChatModelNotAvailableError, raise_detached_error
 
 # Transport-exception classification now lives in core/Utils/http_status_extraction.py
 # so TTS, Local_LLM and Embeddings can use it without depending on LLM_Calls.

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import Any, NamedTuple
 
 from tldw_Server_API.app.core.Character_Chat.roleplay_resume_schemas import RoleplayResumeFenceV1
 
 ROLEPLAY_RESUME_CONTRACT_VERSION = 1
+MAX_ROLEPLAY_PROMPT_BYTES = 32 * 1024 * 1024
 ROLEPLAY_RESUME_FEATURES = (
     "snapshot_completion",
     "fenced_completion",
@@ -25,6 +27,19 @@ class RoleplayResumeConflictError(ValueError):
     def to_detail(self) -> dict[str, str]:
         """Expose the bounded reason, never private behavior or another owner's state."""
         return {"status": "resume_conflict", "code": self.code}
+
+
+class RoleplayResumeHistory(NamedTuple):
+    """Owner-read history rows; ``authority`` holds ``source_digest`` and ``storage_context_digest``."""
+
+    snapshot: Any
+    content: Any
+    authority: dict[str, str]
+
+
+RoleplayResumeMessageBuilder = Callable[
+    [dict[str, Any], RoleplayResumeHistory, str | None], tuple[dict[str, Any], list[dict[str, Any]]]
+]
 
 
 def roleplay_resume_fence(state: dict[str, Any]) -> dict[str, Any]:
