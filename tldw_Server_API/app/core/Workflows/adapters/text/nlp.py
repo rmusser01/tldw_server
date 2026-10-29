@@ -53,7 +53,7 @@ async def run_keyword_extract_adapter(config: dict[str, Any], context: dict[str,
     Output:
       - {"keywords": [str], "scores": [float], "count": int}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -148,7 +148,7 @@ async def run_sentiment_analyze_adapter(config: dict[str, Any], context: dict[st
     Output:
       - {"sentiment": str, "score": float, "confidence": float}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -225,7 +225,7 @@ async def run_language_detect_adapter(config: dict[str, Any], context: dict[str,
     Output:
       - {"language": str, "code": str, "confidence": float}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -287,7 +287,7 @@ async def run_topic_model_adapter(config: dict[str, Any], context: dict[str, Any
     Output:
       - {"topics": [{"name": str, "keywords": [str]}], "count": int}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -369,7 +369,7 @@ async def run_entity_extract_adapter(config: dict[str, Any], context: dict[str, 
     Output:
       - {"entities": [{"text": str, "type": str, "start": int, "end": int}], "count": int}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -469,7 +469,7 @@ async def run_token_count_adapter(config: dict[str, Any], context: dict[str, Any
     Output:
       - {"tokens": int, "characters": int, "words": int}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}

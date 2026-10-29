@@ -27,7 +27,7 @@ def _install_owned_worker_cancellation_ack(
     monkeypatch: pytest.MonkeyPatch,
 ) -> asyncio.Event:
     """Expose when cancellation has entered the owned-worker drain path."""
-    from tldw_Server_API.app.core.Chat import bounded_daemon
+    from tldw_Server_API.app.core.LLM_Calls import bounded_daemon
 
     drain_entered = asyncio.Event()
     original = bounded_daemon._drain_owned_task

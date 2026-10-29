@@ -15,7 +15,7 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import (
     ACPGovernanceDeniedError,
     get_runner_client,
 )
-from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
+from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string
 from tldw_Server_API.app.core.DB_Management.ACP_Sessions_DB import ACPSessionsDB
 from tldw_Server_API.app.core.exceptions import AdapterError
 from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content, resolve_context_user_id

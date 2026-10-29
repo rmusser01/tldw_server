@@ -37,6 +37,13 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCredentialRuntime,
     mark_provider_credential_used,
 )
+from tldw_Server_API.app.core.Chat.anthropic_messages import (
+    anthropic_messages_to_openai,
+    anthropic_tool_choice_to_openai,
+    anthropic_tools_to_openai,
+    openai_response_to_anthropic,
+    openai_stream_to_anthropic,
+)
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     SYNC_ADAPTER_CALL_POOL,
     DaemonCapacityError,
@@ -58,13 +65,6 @@ from tldw_Server_API.app.core.config import loaded_config_data
 from tldw_Server_API.app.core.exceptions import ChatModelNotAvailableError, raise_detached_error
 from tldw_Server_API.app.core.http_client import create_async_client as async_http_client_factory
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
-from tldw_Server_API.app.core.LLM_Calls.anthropic_messages import (
-    anthropic_messages_to_openai,
-    anthropic_tool_choice_to_openai,
-    anthropic_tools_to_openai,
-    openai_response_to_anthropic,
-    openai_stream_to_anthropic,
-)
 from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.LLM_Calls.usage_accounting import accounted_direct_stream, record_direct_response

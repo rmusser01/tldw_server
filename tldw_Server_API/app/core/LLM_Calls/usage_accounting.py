@@ -20,7 +20,6 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.prompt_cost_envelope import estimate_segment_tokens
 from tldw_Server_API.app.core.Usage.llm_accounting import submit_accounting
 from tldw_Server_API.app.core.Usage.llm_call_context import (
     accounted_call,
@@ -30,6 +29,7 @@ from tldw_Server_API.app.core.Usage.llm_call_context import (
 )
 from tldw_Server_API.app.core.Usage.llm_quota_gate import check_user_async, check_user_sync, user_to_check
 from tldw_Server_API.app.core.Usage.llm_usage_normalizer import usage_with_service_tier
+from tldw_Server_API.app.core.Utils.tokenizer import estimate_segment_tokens
 
 _ACCOUNTED_METHODS = ("chat", "achat", "stream", "astream")
 _MARK = "__llm_accounted__"

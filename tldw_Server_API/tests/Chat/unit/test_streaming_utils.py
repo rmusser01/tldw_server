@@ -12,7 +12,6 @@ import pytest
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
-from tldw_Server_API.app.core.Chat import bounded_daemon as bounded_daemon_module
 from tldw_Server_API.app.core.Chat import streaming_utils
 from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
 from tldw_Server_API.app.core.Chat.streaming_pipeline import (
@@ -25,6 +24,7 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     StreamingResponseHandler,
     create_streaming_response_with_timeout,
 )
+from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
 
 
 def test_create_chat_streaming_response_forwards_request_fields():

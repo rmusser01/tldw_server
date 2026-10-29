@@ -38,7 +38,6 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCredentialRuntime,
 )
-from tldw_Server_API.app.core.Chat import bounded_daemon as bounded_daemon_module
 from tldw_Server_API.app.core.Chat import (
     chat_service,
     chat_target_resolution,
@@ -53,6 +52,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
 from tldw_Server_API.app.core.Chat.streaming_utils import StreamingResponseHandler
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.exceptions import ProviderCredentialTerminalError
+from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RouterRequest, RoutingPolicy
 from tldw_Server_API.app.main import app
 from tldw_Server_API.tests.provider_credential_test_helpers import (
@@ -4057,8 +4057,8 @@ def test_real_openai_401_refreshes_oauth_once_before_stream_output(
 ):
     import httpx
 
-    from tldw_Server_API.app.core.Chat import bounded_daemon as bounded_daemon_module
     from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
+    from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
     from tldw_Server_API.app.core.LLM_Calls.providers import openai_adapter
 
     sentinel = "real-openai-401-secret-/srv/provider"

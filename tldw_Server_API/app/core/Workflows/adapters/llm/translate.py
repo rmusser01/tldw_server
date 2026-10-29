@@ -34,7 +34,7 @@ async def run_translate_adapter(config: dict[str, Any], context: dict[str, Any])
 
     Output: { text: translated_text, target_lang, provider? }
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     txt_t = str(config.get("input") or "").strip()
     if txt_t:

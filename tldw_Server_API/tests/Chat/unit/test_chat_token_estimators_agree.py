@@ -3,7 +3,7 @@
 Rate limiting, the billing reservation, the usage-quota check, queue admission, the
 prompt-cost guardrail, the post-call stream estimates and every recorded provider call's
 estimate row (usage_accounting) size a prompt with one estimate:
-``prompt_cost_envelope.estimate_segment_tokens`` (data:image payloads redacted by one
+``core.Utils.tokenizer.estimate_segment_tokens`` (data:image payloads redacted by one
 pattern, four characters per token rounded up).
 """
 

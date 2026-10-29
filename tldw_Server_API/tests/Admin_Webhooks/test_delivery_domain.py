@@ -1023,3 +1023,12 @@ async def test_capture_rechecks_key_state_after_lock(
         reason_code=reason_code,
         locked_updates=updates,
     )
+
+
+def test_the_lifecycle_reason_rule_lives_in_domain() -> None:
+    from tldw_Server_API.app.core.Admin_Webhooks import delivery, domain
+    assert (
+        domain.registration_work_lifecycle_reason.__module__
+        == "tldw_Server_API.app.core.Admin_Webhooks.domain"
+    )
+    assert delivery.registration_work_lifecycle_reason is domain.registration_work_lifecycle_reason
