@@ -42,6 +42,7 @@ from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_
 from tldw_Server_API.app.api.v1.schemas import prompt_schemas as schemas
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
+from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import bearer_credential
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.llm_budget_guard import enforce_llm_budget
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings as get_auth_settings
@@ -425,9 +426,7 @@ async def _resolve_prompts_auth_user(
             detail="Missing authentication token",
         )
 
-    normalized = raw_token
-    if normalized.lower().startswith("bearer "):
-        normalized = normalized[len("Bearer ") :].strip()
+    normalized = bearer_credential(raw_token) or raw_token
 
     if _is_single_user_auth_mode():
         expected = _get_single_user_api_key()
@@ -470,14 +469,13 @@ async def _resolve_prompts_auth_user(
     legacy_header = None
 
     if isinstance(Authorization, str) and Authorization.strip():
-        scheme, _, credential = Authorization.strip().partition(" ")
-        if scheme.lower() == "bearer" and credential:
-            bearer_token = credential.strip()
+        bearer_token = bearer_credential(Authorization.strip())
 
     if isinstance(Token, str) and Token.strip():
         legacy_header = Token.strip()
-        if legacy_header.lower().startswith("bearer "):
-            bearer_token = legacy_header[len("Bearer ") :].strip()
+        legacy_bearer = bearer_credential(legacy_header)
+        if legacy_bearer is not None:
+            bearer_token = legacy_bearer
         else:
             api_key = legacy_header
 

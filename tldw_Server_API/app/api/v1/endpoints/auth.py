@@ -70,6 +70,7 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
 )
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.auth_governor import get_auth_governor
+from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import bearer_credential
 from tldw_Server_API.app.core.AuthNZ.csrf_protection import (
     global_settings as _csrf_globals,
 )
@@ -206,19 +207,6 @@ router = APIRouter(
 )
 _AUTH_ENDPOINT_RG_LOCK: Optional[asyncio.Lock] = None
 _AUTH_RG_DIAGNOSTICS_SHIM_LOGGED: set[str] = set()
-
-def _extract_bearer_token(auth_header: Optional[str]) -> str:
-    """Parse Authorization header and return Bearer token (case-insensitive)."""
-    if not auth_header:
-        return ""
-    try:
-        scheme, _, credential = auth_header.strip().partition(" ")
-        if scheme.lower() != "bearer" or not credential.strip():
-            return ""
-        return credential.strip()
-    except _AUTH_NONCRITICAL_EXCEPTIONS:
-        return ""
-
 
 def _legacy_user_me_enabled() -> bool:
     raw = os.getenv("ENABLE_LEGACY_USER_ME_ENDPOINTS", "true")
@@ -2079,8 +2067,7 @@ async def logout(
             message = f"Logged out from {count} device(s)"
         else:
             # Revoke current access token and session.
-            auth_header = request.headers.get("Authorization", "") if request is not None else ""
-            token = _extract_bearer_token(auth_header)
+            token = bearer_credential(request.headers.get("Authorization")) if request is not None else None
             if not token:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,

@@ -18,13 +18,13 @@ from typing import TYPE_CHECKING, Any, Optional, Protocol, Union, cast
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
 from tldw_Server_API.app.core.Context_Integrity.resolver import (
     ContextIntegrityResolver,
     get_global_context_integrity_resolver,
 )
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
-from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
 from .runtime_provider_call import (
     attach_runtime_provider_credentials,

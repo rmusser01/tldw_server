@@ -70,12 +70,12 @@ except _CHROMA_EMBEDDINGS_IMPORT_EXCEPTIONS:
         raise RuntimeError("Embeddings backend unavailable; install embeddings dependencies")
 import contextlib
 
+from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
 from tldw_Server_API.app.core.Embeddings.audit_adapter import (
     log_security_violation,
 )
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze  # Assuming this is correct
 from tldw_Server_API.app.core.testing import env_flag_enabled, is_truthy
-from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 from tldw_Server_API.app.core.Utils.Utils import logger  # Assuming this is 'logging' aliased or a custom logger
 
 

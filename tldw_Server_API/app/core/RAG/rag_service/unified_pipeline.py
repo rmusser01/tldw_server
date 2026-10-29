@@ -996,7 +996,7 @@ except ImportError:
 RewriteCache = _RewriteCache
 
 try:
-    from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt as _load_prompt
+    from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt as _load_prompt
 except ImportError:
     _load_prompt = None
 

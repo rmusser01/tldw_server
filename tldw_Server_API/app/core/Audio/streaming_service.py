@@ -7,15 +7,19 @@ from collections.abc import Awaitable
 from types import SimpleNamespace
 from typing import Any, Callable, Optional
 
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket, WebSocketDisconnect, WebSocketException
 from loguru import logger
+from starlette.websockets import WebSocketState
 
-from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_org_memberships_for_user
+from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import bearer_credential
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.settings import is_multi_user_mode
-from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
-    cookie_websocket_rejection_code,
-    resolve_single_user_cookie_websocket,
+from tldw_Server_API.app.core.AuthNZ.websocket_principal import (
+    WS_UNREAD_FRAME,
+    auth_subprotocol,
+    has_ws_credential,
+    resolve_ws_principal,
+    resolve_ws_principal_first_frame,
+    resolve_ws_principal_or_deprecated_query,
 )
 from tldw_Server_API.app.core.Metrics.metrics_manager import (
     MetricDefinition,
@@ -47,9 +51,6 @@ _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS = (
     WebSocketDisconnect,
 )
 
-AUTH_TOKEN_TYPE_ACCESS = "access"  # nosec B105 - auth token type enum, not a credential
-AUTH_TOKEN_TYPE_API_KEY = "api_key"  # nosec B105 - auth token type enum, not a credential
-_AUDIO_WS_PENDING_TEXT_FRAME = "audio_ws_pending_text_frame"
 
 
 def _ensure_audio_ws_state(websocket: WebSocket) -> Any:
@@ -64,9 +65,9 @@ def _ensure_audio_ws_state(websocket: WebSocket) -> Any:
 async def receive_audio_websocket_text(websocket: WebSocket) -> str:
     """Receive text while replaying a first application frame inspected during auth."""
     state = _ensure_audio_ws_state(websocket)
-    pending = getattr(state, _AUDIO_WS_PENDING_TEXT_FRAME, None)
+    pending = getattr(state, WS_UNREAD_FRAME, None)
     if pending is not None:
-        setattr(state, _AUDIO_WS_PENDING_TEXT_FRAME, None)
+        setattr(state, WS_UNREAD_FRAME, None)
         return str(pending)
     return await websocket.receive_text()
 
@@ -367,479 +368,189 @@ async def _stream_tts_to_websocket(
             if producer_task in pending:
                 await _cancel_task(producer_task, "producer")
     finally:
-        cleanup_cancelled = False
+        # Re-raise the caught cancellation itself: a new bare CancelledError is not the host's
+        # (anyio's cancel scope does not recognise it) and escapes it (TASK-13950.7).
+        cleanup_cancelled: Optional[asyncio.CancelledError] = None
         for task, task_name in ((producer_task, "producer"), (consumer_task, "consumer")):
             try:
                 await _cancel_task(task, task_name)
-            except asyncio.CancelledError:
-                cleanup_cancelled = True
+            except asyncio.CancelledError as cancelled:
+                cleanup_cancelled = cleanup_cancelled or cancelled
                 logger.debug(f"{route} parent cancellation while cleaning up {task_name} task")
             except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as cleanup_exc:
                 logger.debug(f"{route} cleanup for {task_name} task failed: error={cleanup_exc}")
-        if cleanup_cancelled:
-            raise asyncio.CancelledError
+        if cleanup_cancelled is not None:
+            raise cleanup_cancelled
+
+
+_AUTH_FRAME_TIMEOUT_S = 5.0
+# What the client is told when its WebSocket is refused, by the refusal's reason; never the credential.
+_AUTH_REFUSAL_MESSAGES = {
+    "authentication_timeout": 'Authentication timeout. Send {"type": "auth", "token": ...} first.',
+    "expected_auth_frame": 'Authentication required. Send {"type": "auth", "token": ...} first.',
+    "authentication_required": 'Authentication required. Send {"type": "auth", "token": ...} first.',
+    "invalid_token": "Invalid or expired credentials",
+    "user_principal_required": "Invalid or expired credentials",
+    "insufficient_scope": "Credential not permitted",
+    "cookie_auth_rejected": "Session not accepted from this origin",
+    "auth_unavailable": "Authentication is unavailable",
+}
+
+
+def _policy_close_code() -> int:
+    return 1008 if is_truthy(os.getenv("AUDIO_WS_QUOTA_CLOSE_1008", "0")) else 4003
+
+
+def _json_value(raw: Any) -> Any:
+    """A key's JSON column (endpoints, metadata) as a value; malformed text counts as unset, as before."""
+    if not isinstance(raw, str):
+        return raw
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return None
+
+
+def _check_allowed(endpoints: Any, paths: Any, *, endpoint_id: str, ws_path: str) -> None:
+    if isinstance(endpoints, list) and endpoints and endpoint_id not in [str(item) for item in endpoints]:
+        raise WebSocketException(code=4403, reason="Endpoint not permitted for this credential")
+    if isinstance(paths, list) and paths and not any(ws_path.startswith(str(prefix)) for prefix in paths):
+        raise WebSocketException(code=4403, reason="Path not permitted for this credential")
+
+
+def _call_quota(limits: dict[str, Any]) -> tuple[Optional[int], Optional[str]]:
+    """The credential's call limit (``max_runs``, else ``max_calls``) and its daily bucket, if any."""
+    limit = limits.get("max_runs")
+    if limit is None:
+        limit = limits.get("max_calls")
+    if not isinstance(limit, int) or limit < 0:
+        return None, None
+    period = limits.get("period")
+    if isinstance(period, str) and period.lower() == "day":
+        from datetime import datetime, timezone
+
+        return limit, datetime.now(timezone.utc).date().isoformat()
+    return limit, None
+
+
+async def _enforce_scoped_credential_limits(
+    websocket: WebSocket, principal: AuthPrincipal, *, endpoint_id: str, ws_path: str
+) -> None:
+    """A scoped JWT's or a multi-user API key's own limits (allowed endpoints and paths, a call quota),
+    as the audio routes enforced them before the core resolver; admins (the JWT's role, the key's
+    scope) are exempt. Raises ``WebSocketException``."""
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.quotas import (
+        increment_and_check_api_key_quota,
+        increment_and_check_jwt_quota,
+    )
+
+    verified = getattr(websocket.state, "ws_credential_headers", None) or {}
+    if principal.token_type == "access":  # a JWT: a scoped one carries its limits as claims
+        from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
+
+        claims = get_jwt_service().decode_access_token(bearer_credential(verified.get("authorization")) or "")
+        if str(claims.get("role", "")).lower() == "admin":
+            return
+        _check_allowed(claims.get("allowed_endpoints"), claims.get("allowed_paths"), endpoint_id=endpoint_id, ws_path=ws_path)
+        limit, bucket = _call_quota(claims)
+        if limit is None:
+            return
+        allowed, _count = await increment_and_check_jwt_quota(
+            db_pool=await get_db_pool(), jti=str(claims.get("jti")), counter_type="call", limit=limit, bucket=bucket
+        )
+    elif principal.api_key_id is not None:  # a multi-user key: its limits live on the key
+        from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
+        from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip
+        from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+
+        info = await (await get_api_key_manager()).validate_api_key(
+            api_key=verified.get("x-api-key") or "",
+            ip_address=resolve_client_ip(websocket, get_settings()),
+            record_usage=False,
+        )
+        if not info:
+            raise WebSocketException(code=4401, reason="invalid_token")
+        if str(info.get("scope", "")).lower() == "admin":
+            return
+        metadata = _json_value(info.get("metadata"))
+        metadata = metadata if isinstance(metadata, dict) else {}
+        endpoints = _json_value(info.get("llm_allowed_endpoints"))
+        _check_allowed(endpoints, metadata.get("allowed_paths"), endpoint_id=endpoint_id, ws_path=ws_path)
+        limit, bucket = _call_quota(metadata)
+        if limit is None:
+            return
+        allowed, _count = await increment_and_check_api_key_quota(
+            db_pool=await get_db_pool(), api_key_id=int(info["id"]), counter_type="call", limit=limit, bucket=bucket
+        )
+    else:  # the single-user key or cookie: no per-credential limits
+        return
+    if not allowed:
+        raise WebSocketException(code=_policy_close_code(), reason="Credential quota exceeded")
+
+
+async def _refuse_audio_websocket(websocket: WebSocket, refused: WebSocketException) -> None:
+    """Tell an open socket why it is refused (never the credential), then close with the refusal's code."""
+    if websocket.application_state == WebSocketState.CONNECTED:
+        with contextlib.suppress(Exception):
+            await websocket.send_json({"type": "error", "message": _AUTH_REFUSAL_MESSAGES.get(refused.reason, refused.reason)})
+    with contextlib.suppress(Exception):
+        await websocket.close(code=refused.code)
 
 
 async def _audio_ws_authenticate_impl(
     websocket: WebSocket,
-    outer_stream: Optional[Any],
     *,
     endpoint_id: str,
     ws_path: str,
     allow_initial_auth_message: bool = True,
 ) -> tuple[bool, Optional[int]]:
+    """Resolve an audio WebSocket's caller with the core resolver (TASK-13950.7).
+
+    Handshake credentials (``Authorization: Bearer``, ``X-API-KEY``, the bearer subprotocol) are
+    verified before accept. Without them a streaming route (``allow_initial_auth_message``) reads an
+    auth frame through ``resolve_ws_principal_first_frame``, where the single-user cookie's clients
+    may send their data first; the realtime routes, whose protocol the server opens, take the cookie
+    or refuse. ``?token=`` is read only with AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH set, through the
+    deprecated query shim. On success a streaming route's socket is left accepted; a refusal is sent
+    as an error frame when the socket is open, then closed with the refusal's code.
     """
-    Shared authentication helper for audio WebSocket endpoints.
-
-    Returns (authenticated, user_id) where user_id is best-effort (JWT or API key owner).
-    """
-    jwt_user_id: Optional[int] = None
-
-    cookie_user_id: Optional[int] = None
-    existing_session_id = getattr(websocket.state, "single_user_session_id", None)
-    existing_user_id = getattr(websocket.state, "user_id", None)
-    if existing_session_id is not None and existing_user_id is not None:
-        cookie_user_id = int(existing_user_id)
-    else:
-        cookie_identity = await resolve_single_user_cookie_websocket(websocket)
-        if cookie_identity is not None:
-            cookie_user_id = cookie_identity.user_id
-        elif cookie_websocket_rejection_code(websocket) is not None:
-            await websocket.close(code=cookie_websocket_rejection_code(websocket) or 4401)
-            return False, None
-
-    def _ensure_ws_state() -> Any:
-        return _ensure_audio_ws_state(websocket)
-
-    async def _attach_ws_principal(
-        *,
-        kind: str,
-        user_id: Optional[int],
-        api_key_id: Optional[int] = None,
-        subject: Optional[str] = None,
-        token_type: Optional[str] = None,
-        org_ids: Optional[list[int]] = None,
-        active_org_id: Optional[int] = None,
-    ) -> None:
-        resolved_org_ids = list(org_ids or [])
-        resolved_active_org_id = active_org_id
-        if user_id is not None and not resolved_org_ids and subject != "single_user":
-            try:
-                memberships = await list_org_memberships_for_user(int(user_id))
-            except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug("WS auth org lookup failed for user_id={}: {}", user_id, exc)
-            else:
-                for membership in memberships or []:
-                    try:
-                        org_id = membership.get("org_id")
-                    except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
-                        continue
-                    if org_id is None:
-                        continue
-                    org_id_int = int(org_id)
-                    if org_id_int not in resolved_org_ids:
-                        resolved_org_ids.append(org_id_int)
-                if resolved_active_org_id is None and len(resolved_org_ids) == 1:
-                    resolved_active_org_id = resolved_org_ids[0]
-
-        principal = AuthPrincipal(
-            kind=kind,  # type: ignore[arg-type]
-            user_id=int(user_id) if user_id is not None else None,
-            api_key_id=api_key_id,
-            subject=subject,
-            token_type=token_type,
-            jti=None,
-            roles=[],
-            permissions=[],
-            is_admin=False,
-            org_ids=resolved_org_ids,
-            team_ids=[],
-            active_org_id=resolved_active_org_id,
-            active_team_id=None,
-        )
-        state = _ensure_ws_state()
-        with contextlib.suppress(Exception):
-            state.auth_principal = principal
-            state.user_id = principal.user_id
-            state.org_ids = list(principal.org_ids or [])
-            state.active_org_id = principal.active_org_id
-
-    def _policy_close_code() -> int:
-        flag = str(os.getenv("AUDIO_WS_QUOTA_CLOSE_1008", "0")).strip().lower()
-        return 1008 if is_truthy(flag) else 4003
-
-    async def _stream_error(message: str, code: int = 4401) -> None:
-        if outer_stream:
-            try:
-                await outer_stream.send_json({"type": "error", "message": message})
-            except Exception as exc:  # noqa: BLE001
-                logger.debug(f"Failed to send websocket error payload: {exc}")
-        try:
-            await websocket.close(code=code)
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"Failed to close websocket after auth error: {exc}")
-
-    async def _enforce_jwt_limits(payload: dict[str, Any]) -> bool:
-        """Enforce endpoint/path/quota limits for JWT-authenticated websocket sessions."""
-        try:
-            from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-            from tldw_Server_API.app.core.AuthNZ.quotas import increment_and_check_jwt_quota
-        except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:  # pragma: no cover - defensive import
-            logger.warning(f"Failed to import JWT quota helpers: {exc}")
-            return False
-
-        if str(payload.get("role", "")).lower() != "admin":
-            allowed_eps = payload.get("allowed_endpoints")
-            if isinstance(allowed_eps, list) and allowed_eps:
-                if endpoint_id not in [str(x) for x in allowed_eps]:
-                    await _stream_error("Endpoint not permitted for token", code=4403)
-                    return False
-            ap = payload.get("allowed_paths")
-            if isinstance(ap, list) and ap and not any(str(ws_path).startswith(str(pfx)) for pfx in ap):
-                await _stream_error("Path not permitted for token", code=4403)
-                return False
-            max_calls = payload.get("max_runs")
-            if max_calls is None:
-                max_calls = payload.get("max_calls")
-            if isinstance(max_calls, int) and max_calls >= 0:
-                bucket = None
-                per = payload.get("period")
-                if isinstance(per, str) and per.lower() == "day":
-                    from datetime import datetime, timezone
-
-                    bucket = datetime.now(timezone.utc).date().isoformat()
-                db_pool = await get_db_pool()
-                ok, _cnt = await increment_and_check_jwt_quota(
-                    db_pool=db_pool,
-                    jti=str(payload.get("jti")),
-                    counter_type="call",
-                    limit=int(max_calls),
-                    bucket=bucket,
-                )
-                if not ok:
-                    await _stream_error("Token quota exceeded", code=_policy_close_code())
-                    return False
-        return True
-
-    async def _decode_and_validate_jwt_token(token: str) -> Optional[int]:
-        """
-        Decode a JWT, enforce blacklist + user existence + scope/quotas, and return the user id.
-
-        Returns:
-            int user id when valid; None when rejected (after emitting an error/close).
-        """
-        try:
-            from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidTokenError, TokenExpiredError
-            from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
-            from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
-            from tldw_Server_API.app.core.DB_Management.Users_DB import get_user_by_id as _get_user_by_id
-
-            jwt_service = get_jwt_service()
-            payload = jwt_service.decode_access_token(token)
-            uid = payload.get("user_id") or payload.get("sub")
-            if isinstance(uid, str):
-                uid = int(uid)
-            if not uid:
-                raise InvalidTokenError("missing user_id/sub claim")
-            session_manager = await get_session_manager()
-            if await session_manager.is_token_blacklisted(token, payload.get("jti")):
-                raise InvalidTokenError("token revoked")
-            user_row = await _get_user_by_id(int(uid))
-            if not user_row:
-                raise InvalidTokenError("user not found")
-            if not await _enforce_jwt_limits(payload):
-                return None
-            raw_org_ids = payload.get("org_ids") or []
-            org_ids = [int(org_id) for org_id in raw_org_ids if org_id is not None]
-            active_org_id = payload.get("active_org_id")
-            with contextlib.suppress(Exception):
-                active_org_id = int(active_org_id) if active_org_id is not None else None
-            await _attach_ws_principal(
-                kind="user",
-                user_id=int(uid),
-                subject=str(payload.get("sub")) if payload.get("sub") else None,
-                token_type=AUTH_TOKEN_TYPE_ACCESS,
-                org_ids=org_ids,
-                active_org_id=active_org_id,
-            )
-            return int(uid)
-        except (InvalidTokenError, TokenExpiredError):
-            await _stream_error("Invalid or expired token", code=4401)
-            return None
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(f"JWT authentication failed: {exc}")
-            await _stream_error("Authentication failed", code=4401)
-            return None
-
-    if is_multi_user_mode():
-        # Optional X-API-KEY path (virtual API keys)
-        x_api_key = None
-        try:
-            x_api_key = websocket.headers.get("x-api-key") or websocket.headers.get("X-API-KEY")
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"Failed to read X-API-KEY header: {exc}")
-            x_api_key = None
-        # Legacy query-string token support is disabled by default because URLs
-        # are frequently captured in logs and browser history.
-        allow_query_token_auth = _allow_query_token_auth()
-        if not x_api_key and allow_query_token_auth:
-            try:
-                query_token = websocket.query_params.get("token") if hasattr(websocket, "query_params") else None
-            except Exception as exc:  # noqa: BLE001
-                logger.debug(f"Failed to read query token for API key auth: {exc}")
-                query_token = None
-            if query_token:
-                x_api_key = query_token
-        if x_api_key:
-            try:
-                from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
-                from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-                from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip
-                from tldw_Server_API.app.core.AuthNZ.quotas import increment_and_check_api_key_quota
-                from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-
-                api_mgr = await get_api_key_manager()
-                client_ip = resolve_client_ip(websocket, get_settings())
-                info = await api_mgr.validate_api_key(api_key=x_api_key, ip_address=client_ip)
-                if not info:
-                    await _stream_error("Invalid API key", code=4401)
-                    return False, None
-                if str(info.get("scope", "")).lower() != "admin":
-                    allowed_eps = info.get("llm_allowed_endpoints")
-                    if isinstance(allowed_eps, str):
-                        try:
-                            allowed_eps = json.loads(allowed_eps)
-                        except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
-                            allowed_eps = None
-                    if isinstance(allowed_eps, list) and allowed_eps:
-                        if endpoint_id not in [str(x) for x in allowed_eps]:
-                            await _stream_error("Endpoint not permitted for API key", code=4403)
-                            return False, None
-                    meta = info.get("metadata")
-                    if isinstance(meta, str):
-                        try:
-                            meta = json.loads(meta)
-                        except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
-                            meta = None
-                    if isinstance(meta, dict):
-                        ap = meta.get("allowed_paths")
-                        if isinstance(ap, list) and ap:
-                            if not any(str(ws_path).startswith(str(pfx)) for pfx in ap):
-                                await _stream_error("Path not permitted for API key", code=4403)
-                                return False, None
-                        quota = meta.get("max_runs")
-                        if quota is None:
-                            quota = meta.get("max_calls")
-                        if isinstance(quota, int) and quota >= 0:
-                            bucket = None
-                            per = meta.get("period")
-                            if isinstance(per, str) and per.lower() == "day":
-                                from datetime import datetime, timezone
-
-                                bucket = datetime.now(timezone.utc).date().isoformat()
-                            db_pool = await get_db_pool()
-                            ok, _cnt = await increment_and_check_api_key_quota(
-                                db_pool=db_pool,
-                                api_key_id=int(info.get("id")),
-                                counter_type="call",
-                                limit=int(quota),
-                                bucket=bucket,
-                            )
-                            if not ok:
-                                await _stream_error("API key quota exceeded", code=_policy_close_code())
-                                return False, None
-                uid = info.get("user_id")
-                try:
-                    jwt_user_id = int(uid) if uid is not None else None
-                except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
-                    jwt_user_id = None
-                await _attach_ws_principal(
-                    kind="api_key",
-                    user_id=jwt_user_id,
-                    api_key_id=int(info.get("id")) if info.get("id") is not None else None,
-                    subject=f"api_key:{info.get('id')}" if info.get("id") is not None else None,
-                    token_type=AUTH_TOKEN_TYPE_API_KEY,
-                )
-                return True, jwt_user_id
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(f"API key authentication failed: {exc}")
-                await _stream_error("API key authentication failed", code=4401)
-                return False, None
-
-        # JWT path
-        auth_header = websocket.headers.get("authorization")
-        bearer = None
-        if auth_header:
-            parts = auth_header.split()
-            if len(parts) == 2 and parts[0].lower() == "bearer":
-                bearer = parts[1]
-        if not bearer and allow_query_token_auth:
-            # Legacy fallback: support `?token=` as a JWT bearer source only
-            # when explicitly enabled.
-            try:
-                query_token = websocket.query_params.get("token") if hasattr(websocket, "query_params") else None
-            except Exception as exc:  # noqa: BLE001
-                logger.debug(f"Failed to read query token for JWT auth: {exc}")
-                query_token = None
-            if query_token:
-                bearer = query_token
-        if bearer:
-            try:
-                user_id = await _decode_and_validate_jwt_token(bearer)
-                if user_id is None:
-                    return False, None
-                jwt_user_id = user_id
-                return True, jwt_user_id
-            except Exception as exc:  # noqa: BLE001
-                logger.debug(f"JWT auth unexpected error: {exc}")
-                return False, None
-
-        # Message-based auth as a fallback
-        if not allow_initial_auth_message:
-            await _stream_error("Authentication required", code=4401)
-            return False, None
-        try:
-            first_message = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
-            auth_data = json.loads(first_message)
-            if auth_data.get("type") != "auth" or not auth_data.get("token"):
-                await _stream_error("Authentication required: Authorization: Bearer <JWT> or auth message", code=4401)
-                return False, None
-            bearer = auth_data.get("token")
-            user_id = await _decode_and_validate_jwt_token(bearer)
-            if user_id is None:
-                return False, None
-            jwt_user_id = user_id
-            return True, jwt_user_id
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"Message-based auth failed: {exc}")
-            await _stream_error("Authentication required", code=4401)
-            return False, None
-
-    # Single-user mode
-    from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip
-    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-
-    settings = get_settings()
-    expected_key = settings.SINGLE_USER_API_KEY
-    client_ip = resolve_client_ip(websocket, settings)
-
-    def _ip_allowed_single_user(ip: Optional[str]) -> bool:
-        try:
-            allowed = [s.strip() for s in (settings.SINGLE_USER_ALLOWED_IPS or []) if str(s).strip()]
-            if not allowed:
-                return True
-            if not ip:
-                return False
-            import ipaddress as _ip
-
-            pip = _ip.ip_address(ip)
-            for entry in allowed:
-                try:
-                    if "/" in entry:
-                        if pip in _ip.ip_network(entry, strict=False):
-                            return True
-                    else:
-                        if str(pip) == entry:
-                            return True
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug(f"Failed to parse single-user allowed IP entry '{entry}': {exc}")
-                    continue
-            return False
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"Failed to evaluate single-user IP allowlist: {exc}")
-            return False
-
-    if cookie_user_id is not None:
-        if not allow_initial_auth_message:
-            return True, cookie_user_id
-        try:
-            first_message = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
-        except asyncio.TimeoutError:
-            return True, cookie_user_id
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"Failed to inspect initial audio websocket frame: {exc}")
-            return False, None
-        try:
-            auth_data = json.loads(first_message)
-        except (json.JSONDecodeError, TypeError, ValueError):
-            auth_data = None
-        if not isinstance(auth_data, dict) or auth_data.get("type") != "auth":
-            setattr(_ensure_ws_state(), _AUDIO_WS_PENDING_TEXT_FRAME, first_message)
-            return True, cookie_user_id
-        if auth_data.get("token") != expected_key:
-            await _stream_error("Invalid authentication message")
-            return False, None
-        if not _ip_allowed_single_user(client_ip):
-            await _stream_error("IP not allowed", code=1008)
-            return False, None
-        await _attach_ws_principal(
-            kind="user",
-            user_id=settings.SINGLE_USER_FIXED_ID if hasattr(settings, "SINGLE_USER_FIXED_ID") else None,
-            subject="single_user",
-            token_type=AUTH_TOKEN_TYPE_ACCESS,
-        )
-        return True, settings.SINGLE_USER_FIXED_ID if hasattr(settings, "SINGLE_USER_FIXED_ID") else None
-
-    header_api_key = websocket.headers.get("x-api-key") or websocket.headers.get("X-API-KEY")
-    auth_header = websocket.headers.get("authorization") or websocket.headers.get("Authorization")
-    header_bearer = None
-    if auth_header and auth_header.lower().startswith("bearer "):
-        header_bearer = auth_header.split(" ", 1)[1].strip()
-    query_token = None
-    if _allow_query_token_auth():
-        try:
-            query_token = websocket.query_params.get("token") if hasattr(websocket, "query_params") else None
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"Failed to read query token: {exc}")
-            query_token = None
-
-    if (
-        (header_api_key and header_api_key == expected_key)
-        or (header_bearer and header_bearer == expected_key)
-        or query_token == expected_key
-    ):
-        if not _ip_allowed_single_user(client_ip):
-            await _stream_error("IP not allowed", code=1008)
-            return False, None
-        await _attach_ws_principal(
-            kind="user",
-            user_id=settings.SINGLE_USER_FIXED_ID if hasattr(settings, "SINGLE_USER_FIXED_ID") else None,
-            subject="single_user",
-            token_type=AUTH_TOKEN_TYPE_ACCESS,
-        )
-        return True, settings.SINGLE_USER_FIXED_ID if hasattr(settings, "SINGLE_USER_FIXED_ID") else None
-    if not allow_initial_auth_message:
-        await _stream_error("Authentication required", code=4401)
-        return False, None
-
+    # Audio enforces a scoped token's own limits below, as an HTTP route with require_token_scope does; only
+    # this module may set the mark (tests/lint/test_auth_token_parsing_ratchet.py). Not checked here yet: the
+    # token's ``scope`` claim and ``allowed_methods``, which HTTP's TokenScopeGuard applies (TASK-13950.73).
+    websocket.state.ws_token_scope_enforced = True
     try:
-        first_message = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
-        auth_data = json.loads(first_message)
-        if auth_data.get("type") != "auth" or auth_data.get("token") != expected_key:
-            await _stream_error('Authentication required. Send {"type": "auth", "token": "YOUR_API_KEY"}')
-            return False, None
-        if not _ip_allowed_single_user(client_ip):
-            await _stream_error("IP not allowed", code=1008)
-            return False, None
-        await _attach_ws_principal(
-            kind="user",
-            user_id=settings.SINGLE_USER_FIXED_ID if hasattr(settings, "SINGLE_USER_FIXED_ID") else None,
-            subject="single_user",
-            token_type=AUTH_TOKEN_TYPE_ACCESS,
-        )
-        return True, settings.SINGLE_USER_FIXED_ID if hasattr(settings, "SINGLE_USER_FIXED_ID") else None
-    except asyncio.TimeoutError:
-        await _stream_error("Authentication timeout. Send auth message within 5 seconds.")
+        if not has_ws_credential(websocket) and _allow_query_token_auth() and websocket.query_params.get("token"):
+            # ``?token=`` only, as before; the shim's ``?api_key=`` was never an audio channel.
+            principal = await resolve_ws_principal_or_deprecated_query(websocket, query_params=("token",))
+        elif has_ws_credential(websocket) or not allow_initial_auth_message:
+            principal = await resolve_ws_principal(websocket)
+        else:
+            principal = await resolve_ws_principal_first_frame(
+                websocket, timeout=_AUTH_FRAME_TIMEOUT_S, cookie_may_send_data_first=True
+            )
+        if principal.user_id is None:  # a service token is no audio user
+            raise WebSocketException(code=4401, reason="user_principal_required")
+        await _enforce_scoped_credential_limits(websocket, principal, endpoint_id=endpoint_id, ws_path=ws_path)
+        if allow_initial_auth_message and websocket.application_state != WebSocketState.CONNECTED:
+            await websocket.accept(subprotocol=auth_subprotocol(websocket))
+    except WebSocketException as refused:
+        await _refuse_audio_websocket(websocket, refused)
         return False, None
-    except Exception as exc:  # noqa: BLE001
-        logger.debug(f"Invalid authentication message for single-user API key: {exc}")
-        await _stream_error("Invalid authentication message")
+    except WebSocketDisconnect:
         return False, None
+    except Exception as exc:  # noqa: BLE001 - an audio socket fails closed, as it did before TASK-13950.7
+        logger.warning("Audio WebSocket authentication failed error_type={}", type(exc).__name__)
+        await _refuse_audio_websocket(websocket, WebSocketException(code=4401, reason="invalid_token"))
+        return False, None
+    state = websocket.state
+    state.auth_principal, state.user_id = principal, principal.user_id
+    state.org_ids, state.active_org_id = list(principal.org_ids or []), principal.active_org_id
+    return True, principal.user_id
 
 
 async def _audio_ws_authenticate(
     websocket: WebSocket,
-    outer_stream: Optional[Any],
     *,
     endpoint_id: str,
     ws_path: str,
@@ -852,7 +563,6 @@ async def _audio_ws_authenticate(
     """
     authenticated, user_id = await _audio_ws_authenticate_impl(
         websocket,
-        outer_stream,
         endpoint_id=endpoint_id,
         ws_path=ws_path,
         allow_initial_auth_message=allow_initial_auth_message,
