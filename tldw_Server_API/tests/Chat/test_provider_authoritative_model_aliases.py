@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from tldw_Server_API.app.api.v1.endpoints import messages
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError, ChatBadRequestError, ChatConfigurationError
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls import provider_model_inventory as inventory
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import AuditedCallPolicyTransport
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
@@ -56,8 +57,9 @@ def boundary(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) ->
             enforces_maximum_timeout=True,
         ),
     )
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
     monkeypatch.setattr(chat_service, "discover_provider_models", inventory.discover_provider_models)
+    monkeypatch.setattr(gateway, "discover_provider_models", inventory.discover_provider_models)
     monkeypatch.setattr(inventory, "_http_fetch", fetch)
     return state
 

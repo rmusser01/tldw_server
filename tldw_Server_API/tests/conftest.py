@@ -332,7 +332,7 @@ def _offline_provider_model_inventory(request, monkeypatch):
 
     monkeypatch.setattr(provider_model_inventory, "_http_fetch", live_discovery)
     for name in (
-        "tldw_Server_API.app.core.Chat.chat_service",
+        "tldw_Server_API.app.core.LLM_Calls.gateway",
         "tldw_Server_API.app.api.v1.endpoints.messages",
     ):
         module = sys.modules.get(name)

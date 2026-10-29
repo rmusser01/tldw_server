@@ -976,14 +976,16 @@ def test_chat_completion_strict_selection_accepts_a_saved_dotted_anthropic_name(
     provider_manager.circuit_breakers = {}
     # Strict selection asks Anthropic's live list (TASK-13460), which holds only the dashed ID.
     from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
     from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
 
     monkeypatch.setattr(
-        chat_service, "resolve_provider_models_base_url", lambda *_args, **_kwargs: "https://api.anthropic.com/v1",
+        gateway, "resolve_provider_models_base_url", lambda *_args, **_kwargs: "https://api.anthropic.com/v1",
     )
     monkeypatch.setattr(
         chat_service, "discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready", ("claude-sonnet-4-5",)),
     )
+    monkeypatch.setattr(gateway, "discover_provider_models", chat_service.discover_provider_models)
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call", side_effect=fake_execute_non_stream_call),
@@ -6819,6 +6821,7 @@ def test_real_openai_nonstream_auth_status_controls_oauth_refresh(
 def _real_openai_inventory_call(client, *, discover, stream: bool = False, auth_source: str | None = "oauth"):
     """POST one OpenAI chat through the real adapter; only the model list and generation transport are faked."""
     from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
     from tldw_Server_API.app.core.LLM_Calls.providers import openai_adapter
 
     generation_keys: list[str] = []
@@ -6859,8 +6862,9 @@ def _real_openai_inventory_call(client, *, discover, stream: bool = False, auth_
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
         patch.object(chat_endpoint, "_shared_is_test_mode", return_value=False),
         patch.object(chat_endpoint, "_should_enforce_strict_model_selection", return_value=False),
-        patch.object(chat_service, "resolve_provider_models_base_url", lambda *_a, **_k: "https://api.openai.com/v1"),
+        patch.object(gateway, "resolve_provider_models_base_url", lambda *_a, **_k: "https://api.openai.com/v1"),
         patch.object(chat_service, "discover_provider_models", discover),
+        patch.object(gateway, "discover_provider_models", discover),
         patch.object(openai_adapter, "http_client_factory", lambda **_kwargs: Client()),
     ):
         response = client.post("/api/v1/chat/completions", json=request_data.model_dump())

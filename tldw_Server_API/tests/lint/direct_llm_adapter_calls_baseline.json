@@ -2,7 +2,6 @@
   "api/v1/endpoints/audio/audio_streaming.py": {"references": 1, "reason": null},
   "api/v1/endpoints/media/document_insights.py": {"references": 1, "reason": null},
   "core/AuthNZ/byok_testing.py": {"references": 1, "reason": null},
-  "core/Chat/chat_service.py": {"references": 6, "reason": null},
   "core/Claims_Extraction/ingestion_claims.py": {"references": 1, "reason": null},
   "core/Data_Tables/jobs_worker.py": {"references": 1, "reason": null},
   "core/Evaluations/cli/evals_cli.py": {"references": 1, "reason": null},

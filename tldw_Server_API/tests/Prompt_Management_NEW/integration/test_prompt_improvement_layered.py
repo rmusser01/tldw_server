@@ -252,17 +252,19 @@ async def test_dispatch_rejects_unknown_provider_or_model_from_real_inventory(
     # request's credential (TASK-13460), so the server needs a key to reach it.
     # The list endpoint is pinned: Chat suites configure a loopback OpenAI base.
     from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
     from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-layered-inventory")
     monkeypatch.setattr(
-        chat_service, "resolve_provider_models_base_url", lambda *_args, **_kwargs: "https://api.openai.com/v1",
+        gateway, "resolve_provider_models_base_url", lambda *_args, **_kwargs: "https://api.openai.com/v1",
     )
     monkeypatch.setattr(
         chat_service,
         "discover_provider_models",
         lambda *_args, **_kwargs: ModelDiscoveryResult("ready", ("gpt-best", "gpt-other")),
     )
+    monkeypatch.setattr(gateway, "discover_provider_models", chat_service.discover_provider_models)
     with pytest.raises(PromptImprovementDispatchError) as captured:
         await dispatch_prompt_improvement(
             request=_request_context(),

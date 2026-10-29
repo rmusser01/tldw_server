@@ -8,7 +8,7 @@ from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints import messages
 from tldw_Server_API.app.core.Chat import chat_service
-from tldw_Server_API.app.core.LLM_Calls import provider_model_inventory
+from tldw_Server_API.app.core.LLM_Calls import gateway, provider_model_inventory
 
 pytestmark = [pytest.mark.unit, pytest.mark.provider_inventory]
 
@@ -40,6 +40,7 @@ async def test_native_messages_validate_resolved_credential_inventory(
 
     monkeypatch.setattr(messages, "provider_auth_is_resolved", lambda *args, **kwargs: True)
     monkeypatch.setattr(chat_service, "discover_provider_models", discover)
+    monkeypatch.setattr(gateway, "discover_provider_models", discover)
     monkeypatch.setattr(
         provider_model_inventory, "_http_fetch",
         lambda **_kwargs: SimpleNamespace(status_code=404, json=lambda: {}, close=lambda: None),
@@ -65,6 +66,7 @@ async def test_native_local_messages_do_not_require_cloud_inventory(monkeypatch)
         return credentials
 
     monkeypatch.setattr(chat_service, "discover_provider_models", lambda *args, **kwargs: pytest.fail("Local discovery"))
+    monkeypatch.setattr(gateway, "discover_provider_models", chat_service.discover_provider_models)
     runtime: Any = SimpleNamespace(resolve=resolve)
     assert await messages._resolve_messages_credentials(
         runtime, "llama.cpp", "local-model", operation="messages",
@@ -100,6 +102,7 @@ async def test_messages_inventory_failures_share_the_chat_public_codes(
         chat_service, "discover_provider_models",
         lambda *args, **kwargs: SimpleNamespace(status=inventory_status, models=models),
     )
+    monkeypatch.setattr(gateway, "discover_provider_models", chat_service.discover_provider_models)
     monkeypatch.setattr(
         provider_model_inventory, "_http_fetch",
         lambda **_kwargs: SimpleNamespace(status_code=404, json=lambda: {}, close=lambda: None),

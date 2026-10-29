@@ -386,7 +386,7 @@ def test_saved_kobold_sampling_reaches_actual_http_payload(resume_api, monkeypat
     import httpx
 
     from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime
-    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
 
     client, db, _, headers = resume_api
     card = db.add_character_card(
@@ -429,7 +429,7 @@ def test_saved_kobold_sampling_reaches_actual_http_payload(resume_api, monkeypat
             request=httpx.Request("POST", kwargs["url"]),
         )
 
-    adapter = chat_service._get_llm_registry().get_adapter("kobold")
+    adapter = gateway._get_llm_registry().get_adapter("kobold")
     monkeypatch.setattr(adapter, "http_fetcher", fetch)
     frozen = db.prepare_roleplay_resume_generation(cid, body["tldw_roleplay_resume_v1"], owner_client_id="1")
     response = client.post(f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
@@ -563,7 +563,7 @@ def test_resume_suppresses_current_local_tool_and_candidate_defaults_at_http_bou
     import httpx
 
     from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime
-    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
 
     client, db, cid, headers = resume_api
     body = generation_request(client, db, cid, headers)
@@ -594,7 +594,7 @@ def test_resume_suppresses_current_local_tool_and_candidate_defaults_at_http_bou
             request=httpx.Request("POST", kwargs["url"]),
         )
 
-    monkeypatch.setattr(chat_service._get_llm_registry().get_adapter("local-llm"), "http_fetcher", fetch)
+    monkeypatch.setattr(gateway._get_llm_registry().get_adapter("local-llm"), "http_fetcher", fetch)
     response = client.post(f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
     assert response.status_code == 200, response.text
     assert response.json()["saved"] is True

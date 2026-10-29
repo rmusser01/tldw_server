@@ -119,7 +119,7 @@ _CALL_ARGS = {
 @pytest.fixture
 async def call_layer(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     """Route the shared call layer to the recording provider; refuse user 7; return who was decided."""
-    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
     from tldw_Server_API.app.core.Usage import llm_accounting, llm_quota_gate, quota_resolver
     from tldw_Server_API.app.core.Usage.quota_checks import LLMQuotaRefusal
 
@@ -134,7 +134,7 @@ async def call_layer(monkeypatch: pytest.MonkeyPatch) -> list[int]:
 
     adapter = _ContextRecordingProvider()
     _ContextRecordingProvider.seen = []
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: SimpleNamespace(get_adapter=lambda _name: adapter))
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: SimpleNamespace(get_adapter=lambda _name: adapter))
     monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
     quota_resolver.invalidate_all()
     monkeypatch.setattr(llm_quota_gate, "llm_quota_refusal", _decide)
@@ -153,8 +153,9 @@ async def test_the_shared_call_layer_refuses_before_its_try_even_with_privacy_sa
     """The refusal reaches the caller as itself, not rebuilt as a provider error, and no provider runs."""
     from tldw_Server_API.app.core.Chat import chat_service
     from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+    from tldw_Server_API.app.core.LLM_Calls import gateway
 
-    monkeypatch.setattr(chat_service, "_privacy_safe_provider_errors_enabled", lambda _request: True)
+    monkeypatch.setattr(gateway, "_privacy_safe_provider_errors_enabled", lambda _request: True)
     with llm_call_context(user_id=7):
         with pytest.raises(LLMQuotaExceededError):
             await chat_service.perform_chat_api_call_async(**_CALL_ARGS)

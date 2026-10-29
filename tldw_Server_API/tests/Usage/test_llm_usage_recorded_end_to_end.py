@@ -9,6 +9,7 @@ import pytest
 
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
 from tldw_Server_API.app.core.LLM_Calls.providers.base import ChatProvider
 from tldw_Server_API.app.core.Usage import llm_accounting
@@ -58,7 +59,7 @@ async def test_one_row_is_written_for_the_scope_user(monkeypatch: pytest.MonkeyP
 
     registry = ChatProviderRegistry(include_defaults=False)
     registry.register_adapter("e2e-fake", _E2EProvider)
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
     monkeypatch.setattr(llm_accounting, "_accounting_loop", asyncio.get_running_loop())
 
     fields = await resolved_request_fields_async("e2e-fake", api_key="k", app_config={}, model="e2e-model")

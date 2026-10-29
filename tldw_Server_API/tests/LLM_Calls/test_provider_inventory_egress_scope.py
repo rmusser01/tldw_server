@@ -17,9 +17,9 @@ import pytest
 
 from tldw_Server_API.app.core.AuthNZ.byok_helpers import validate_base_url_override
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY
-from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.LLM_Calls import chat_calls
+from tldw_Server_API.app.core.LLM_Calls import gateway as llm_gateway
 from tldw_Server_API.app.core.Security import egress
 
 pytestmark = [pytest.mark.unit, pytest.mark.provider_inventory]
@@ -72,7 +72,7 @@ def test_operator_configured_localhost_gateway_is_discovered_through_real_fetch(
         "api_key": "synthetic-key",
         "app_config": gateway.server_config,
     }
-    chat_service._validate_provider_model_selection("openai", request)
+    llm_gateway._validate_provider_model_selection("openai", request)
     assert gateway.hits == ["/v1/models"]
     assert request["base_url"] == gateway.base
 
@@ -102,7 +102,7 @@ def test_byok_private_gateway_is_refused_exactly_when_generation_refuses(
         PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: SimpleNamespace(endpoint_provenance="byok", auth_source=None),
     }
     try:
-        chat_service._validate_provider_model_selection("openai", request)
+        llm_gateway._validate_provider_model_selection("openai", request)
         discovery_refuses = False
     except ChatConfigurationError:
         discovery_refuses = True
