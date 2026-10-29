@@ -160,8 +160,8 @@ core.DB_Management -> core.Admin_Webhooks: 3
 core.DB_Management -> core.Agent_Client_Protocol: 1
 core.DB_Management -> core.Agent_Orchestration: 1
 core.DB_Management -> core.AuthNZ: 24
-core.DB_Management -> core.Character_Chat: 12
-core.DB_Management -> core.Chat: 25
+core.DB_Management -> core.Character_Chat: 11
+core.DB_Management -> core.Chat: 24
 core.DB_Management -> core.CodeGraph: 1
 core.DB_Management -> core.Collections: 1
 core.DB_Management -> core.Evaluations: 1

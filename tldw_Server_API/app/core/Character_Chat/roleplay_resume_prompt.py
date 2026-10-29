@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import math
 from copy import deepcopy
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
     PROMPT_COMPLETION_SETTING_CLASSIFICATION,
@@ -27,7 +27,9 @@ from tldw_Server_API.app.core.Character_Chat.roleplay_prompt_effects import (
     insert_character_greeting,
 )
 from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import (
+    MAX_ROLEPLAY_PROMPT_BYTES,
     RoleplayResumeConflictError,
+    RoleplayResumeHistory,
     roleplay_resume_sampling_arguments,
 )
 from tldw_Server_API.app.core.Character_Chat.world_book_manager import (
@@ -46,7 +48,9 @@ from tldw_Server_API.app.core.Chat.native_fork_projection import (
     validate_closed_tool_replay,
 )
 
-MAX_ROLEPLAY_PROMPT_BYTES = 32 * 1024 * 1024
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
 _NOTE_EXTENSION_KEYS = frozenset(
     {
         "author_note",
@@ -435,3 +439,41 @@ def build_roleplay_resume_messages(
         arguments.update({"system_message": system_message, "messages_payload": remaining})
     context["provider_arguments"] = arguments
     return context, messages
+
+
+def format_roleplay_resume_messages(
+    state: dict[str, Any], history: RoleplayResumeHistory, proposed_input: str | None = None
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Format owner-read history rows (plus an optional proposed input) into the saved prompt."""
+    from tldw_Server_API.app.core.Chat.chat_service import _format_selected_history_messages
+
+    try:
+        # The projector's empty-history pass validates saved behavior before admission.
+        context, _ = build_roleplay_resume_messages(state, [])
+        history_messages = _format_selected_history_messages(
+            history.snapshot,
+            history.content,
+            context["card"],
+            user_name=context["user_name"],
+            replace_user_placeholders=False,
+        )
+        if proposed_input is not None:
+            history_messages.append({"role": "user", "content": proposed_input})
+        return build_roleplay_resume_messages(state, history_messages)
+    except HistorySelectionError as exc:
+        raise RoleplayResumeConflictError("resume_context_unsupported") from exc
+
+
+def prepare_roleplay_resume(
+    db: CharactersRAGDB, conversation_id: str, request: dict[str, Any], *, owner_client_id: str
+) -> dict[str, Any]:
+    """Freeze the owner-read rows from the store, then format the dispatch prompt here."""
+    prepared: dict[str, Any] = db.prepare_roleplay_resume_generation(  # type: ignore[attr-defined]
+        conversation_id, request, owner_client_id=owner_client_id
+    )
+    if "completed" in prepared:
+        return prepared
+    state = prepared.pop("state")
+    history = prepared.pop("history")
+    context, messages = format_roleplay_resume_messages(state, history)
+    return {**prepared, "messages": messages, "context": context}
