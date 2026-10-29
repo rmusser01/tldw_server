@@ -1828,7 +1828,11 @@ class MediaDBRetriever(BaseRetriever):
         if raw_row_count > 0:
             return documents
 
-        fallback_query = _derive_bounded_media_term_query(query)
+        # An explicit source allowlist bounds broader terms without discarding later question facets.
+        fallback_query = _derive_bounded_media_term_query(
+            query,
+            max_terms=32 if kwargs.get("allowed_media_ids") else 3,
+        )
         if not fallback_query:
             return documents
         if _sanitize_media_fts_query(fallback_query) == search_query:
