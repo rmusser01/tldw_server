@@ -87,16 +87,25 @@ export const readMigratedResearchWorkspaceId = (
   storage: Storage,
 ): string | null => readMigrationReceipts(storage)[0]?.id ?? null;
 
-/** Restore one migrated workspace atomically while its captured account lease remains live. */
+/** Restore an owned target or the latest migration while its captured account lease remains live. */
 export const restoreMigratedResearchWorkspace = async (options: {
+  workspaceId?: string;
   signal: AbortSignal;
   isCurrent?: () => boolean;
   apply: (snapshot: WorkspaceSnapshot, chatSession?: WorkspaceChatSession) => void;
   storage?: Storage;
 }): Promise<boolean> => {
+  const requestedId = options.workspaceId;
+  if (
+    requestedId !== undefined &&
+    (!requestedId.trim() || requestedId !== requestedId.trim() || requestedId.length > 128)
+  )
+    throw new Error("Invalid requested workspace");
   const storage = options.storage ?? window.localStorage;
-  const receipts = readMigrationReceipts(storage);
-  if (!receipts.length) return false;
+  const receipts = readMigrationReceipts(storage).filter(
+    (receipt) => !requestedId || receipt.id === requestedId,
+  );
+  if (!receipts.length && !requestedId) return false;
   const scope = await loadServicePromptSnapshot([], { signal: options.signal });
   const assertCurrent = () => {
     if (scope.scopeInvalidatedSignal.aborted)
@@ -114,27 +123,26 @@ export const restoreMigratedResearchWorkspace = async (options: {
     let receipt = receipts.find((value) => value.scopeKey === scope.scopeKey);
     if (!receipt) {
       const unbound = receipts.filter((value) => !value.scopeKey);
-      if (!unbound.length) return false;
-      const listed = await bgRequest<WorkspaceListApiResponse>({
-        ...request,
-        path: "/api/v1/workspaces/",
-      });
-      assertCurrent();
-      if (!Array.isArray(listed.items))
-        throw new Error("The current account's workspaces could not be listed");
-      receipt = unbound.find((value) =>
-        listed.items.some(
-          (workspace) =>
-            workspace.id === value.id &&
-            !workspace.deleted &&
-            !workspace.archived,
-        ),
-      );
-      if (!receipt) return false;
+      if (unbound.length) {
+        const listed = await bgRequest<WorkspaceListApiResponse>({
+          ...request,
+          path: "/api/v1/workspaces/",
+        });
+        assertCurrent();
+        if (!Array.isArray(listed.items))
+          throw new Error("The current account's workspaces could not be listed");
+        receipt = unbound.find((value) =>
+          listed.items.some(
+            (workspace) => workspace.id === value.id && !workspace.deleted && !workspace.archived,
+          ),
+        );
+      }
+      if (!receipt && !requestedId) return false;
     }
-    const workspaceId = receipt.id;
+    const workspaceId = requestedId ?? receipt!.id;
     const invalidateReceipt = () => {
       assertCurrent();
+      if (!receipt) return false;
       if (storage.getItem(receipt.key) !== receipt.raw)
         throw new Error("Saved workspace changed during restoration. Retry to load the current chat.");
       // Retain the migration tombstone so deleted legacy content cannot reappear.
@@ -399,7 +407,7 @@ export const restoreMigratedResearchWorkspace = async (options: {
           : source;
       });
     }
-    const chatReference = readResearchWorkspaceChatReference(receipt.value.chatReference);
+    const chatReference = readResearchWorkspaceChatReference(receipt?.value.chatReference);
     let chatSession: WorkspaceChatSession | undefined;
     if (chatReference) {
       if (chatReference.serverChatId) {
@@ -416,12 +424,14 @@ export const restoreMigratedResearchWorkspace = async (options: {
       chatSession = { messages: [], history: [], historyId: null, serverChatId: chatReference.serverChatId };
     }
     assertCurrent();
-    if (storage.getItem(receipt.key) !== receipt.raw)
-      throw new Error("Saved workspace changed during restoration. Retry to load the current chat.");
-    storage.setItem(
-      receipt.key,
-      JSON.stringify({ ...receipt.value, serverScopeKey: scope.scopeKey }),
-    );
+    if (receipt) {
+      if (storage.getItem(receipt.key) !== receipt.raw)
+        throw new Error("Saved workspace changed during restoration. Retry to load the current chat.");
+      storage.setItem(
+        receipt.key,
+        JSON.stringify({ ...receipt.value, serverScopeKey: scope.scopeKey }),
+      );
+    }
     assertCurrent();
     options.apply(snapshot, chatSession);
     return true;

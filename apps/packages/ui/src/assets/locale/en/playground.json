@@ -1,4 +1,13 @@
 {
+  "requestedWorkspace": {
+    "localWork": "Your local draft or saved Chat has been kept. Return to the account where it was created to save or export it, then retry.",
+    "account": "Check account",
+    "unavailable": "Workspace could not be opened",
+    "recovery": "Your current workspace and unsaved work have been kept. Check your account and connection, then retry.",
+    "retry": "Retry",
+    "back": "Back to Workspaces",
+    "opening": "Opening workspace…"
+  },
   "header": {
     "newTemporaryChat": "Temporary chat (on this device)",
     "shareShort": "Share"

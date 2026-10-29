@@ -255,3 +255,8 @@ Detailed execution, failed-attempt limits and source-review records are in the a
 - Next source unit: ordinary Workspaces Manager Open currently emits source_workspace_id but does not select that target. Confirm with real manager/router/store A/B and server-only cases, then reuse existing canonical restoration/store/owner leases while preserving local drafts and retiring stale results. No ADR change; ADR007/008 govern.
 
 S04 stays OPEN at40/43; URL's other three modes, Search Server/real availability, Sources adapters/private boundaries, Deep Research, cited-family integration and final cleanup/review remain. Configured public Searx currently429; do not substitute unrelated results. Original user DOM untouched/unverified, heartbeat paused, no GitHub/fetch/publication/merge, no new agent/worktree. Finish S04 before S05.
+
+
+Workspace Open unit: source repair74476b7 is locally committed, frontend build/native still30e. Shared route must resolve source_workspace_id before local Research mounts, through existing canonical owner leases; preserve local drafts and retire stale results. Causal manager/router/gate/store A/B and server-only tests precede implementation. Detailed scope and source-commit identity are in the task notes.
+
+Workspace Open source correction now covers canonical cached/active/account data, refusal without loss of unbound dirty notes/Chat, and compatibility with the existing Deep Research return handler. Causal failures, focused green cohorts, exact English mirrors, scoped quality checks and review findings are recorded in the task. Final review/hooks/local commit/build/native remain open; no full-family or historical-incident closure.
