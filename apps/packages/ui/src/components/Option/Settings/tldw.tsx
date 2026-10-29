@@ -895,22 +895,33 @@ export const TldwSettings = ({ onDirtyChange, onSavingChange, onOpenDiagnostics,
 
   const handleLogout = async () => {
     try {
-      setLoading(true)
-      await tldwAuth.logout()
-      setIsLoggedIn(false)
-      await loadConfig()
-      setConnectionStatus(null)
-      setConnectionDetail("")
-      setCoreStatus("unknown")
-      setRagStatus("unknown")
-      message.success(t('settings:tldw.logout.success', 'Logged out successfully'))
+      setLoading(true);
+      const outcome = await tldwAuth.logout();
+      setIsLoggedIn(false);
+      await loadConfig();
+      setConnectionStatus(null);
+      setConnectionDetail("");
+      setCoreStatus("unknown");
+      setRagStatus("unknown");
+      if (outcome === "unconfirmed") {
+        message.warning(
+          t(
+            "settings:tldw.logout.unconfirmed",
+            "The server did not confirm sign-out. This session may still be active.",
+          ),
+        );
+      } else {
+        message.success(
+          t("settings:tldw.logout.success", "Logged out successfully"),
+        );
+      }
     } catch (error) {
-      message.error(t('settings:tldw.logout.failed', 'Logout failed'))
-      console.error('Logout failed:', error)
+      message.error(t("settings:tldw.logout.failed", "Logout failed"));
+      console.error("Logout failed:", error);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   // ── Billing action handlers ──────────────────────────────────────
 
