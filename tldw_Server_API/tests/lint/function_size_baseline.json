@@ -55,7 +55,7 @@
   "tldw_Server_API.app.core.AuthNZ.User_DB_Handling:verify_jwt_and_fetch_user": {"lines": 436, "params": 2, "reason": null},
   "tldw_Server_API.app.core.AuthNZ.auth_principal_resolver:get_auth_principal": {"lines": 314, "params": 1, "reason": null},
   "tldw_Server_API.app.core.AuthNZ.byok_runtime:resolve_byok_credentials": {"lines": 455, "params": 12, "reason": null},
-  "tldw_Server_API.app.core.AuthNZ.migrations:get_authnz_migrations": {"lines": 441, "params": 0, "reason": null},
+  "tldw_Server_API.app.core.AuthNZ.migrations:get_authnz_migrations": {"lines": 442, "params": 0, "reason": "registers migration 104, llm_usage_log.credential_source (one line, TASK-13955)"},
   "tldw_Server_API.app.core.Character_Chat.character_conversation_factory:_materialize_roleplay_behavior_settings_once": {"lines": 446, "params": 7, "reason": null},
   "tldw_Server_API.app.core.Character_Chat.modules.character_chat:process_db_messages_to_rich_ui_history": {"lines": 350, "params": 9, "reason": null},
   "tldw_Server_API.app.core.Character_Chat.modules.character_io:extract_json_from_image_file": {"lines": 388, "params": 1, "reason": null},

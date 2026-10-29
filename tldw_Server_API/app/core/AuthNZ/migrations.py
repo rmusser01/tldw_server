@@ -6566,6 +6566,7 @@ def get_authnz_migrations() -> list[Migration]:
         ),
         Migration(102, "Add native retained chat quota reservations", migration_102_native_chat_quota_reservations),
         Migration(103, "Seed Notes graph semantic management permission", migration_103_seed_notes_graph_semantic_manage_permission),
+        Migration(104, "Add llm_usage_log.credential_source", migration_104_add_llm_usage_log_credential_source),
     ]
 
 
@@ -6707,6 +6708,21 @@ def migration_101_add_admin_perf_indexes(conn: sqlite3.Connection) -> None:
             continue
         conn.execute(index_sql)
     logger.info("Migration 101: Added admin perf indexes (sessions.created_at, org_members org_id+user_id)")
+
+
+def migration_104_add_llm_usage_log_credential_source(conn: sqlite3.Connection) -> None:
+    """Add ``llm_usage_log.credential_source``: whose key paid for the call (TASK-13955).
+
+    ``user`` marks a call made with the user's own provider key; the LLM quota
+    counters leave those rows out. Fixtures without the table skip (cf. 099).
+    """
+    if not _sqlite_table_exists(conn, "llm_usage_log"):
+        logger.info("Migration 104: llm_usage_log table not present; skipping")
+        return
+    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(llm_usage_log)").fetchall()}
+    if "credential_source" not in columns:
+        conn.execute("ALTER TABLE llm_usage_log ADD COLUMN credential_source TEXT")
+    logger.info("Migration 104: Added llm_usage_log.credential_source")
 
 
 def apply_authnz_migrations(db_path: Path, target_version: int = None) -> None:
