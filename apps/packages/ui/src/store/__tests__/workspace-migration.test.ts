@@ -524,3 +524,52 @@ describe("Research Workspace migration manifest planning", () => {
     expect(ackWorkspaceMigrationClientDelete).not.toHaveBeenCalled()
   })
 })
+
+
+it.each([false, true])(
+  "retains only the active chat location hint when migration deletes covered content (late ACK=%s)",
+  async (late) => {
+    const writes = new Map<string, string>()
+    const receipt = {
+      id: "migration-chat",
+      status: "finalized",
+      client_delete_eligible: true
+    }
+    const chatReference = {
+      referenceId: "ws-hint",
+      serverChatId: "11111111-2222-4333-8444-555555555555"
+    }
+    let currentReference = late
+      ? { ...chatReference, serverChatId: null }
+      : chatReference
+    const result = await runResearchWorkspaceMigration({
+      targetWorkspaceId: "ws-hint",
+      targetWorkspaceName: "Retained chat",
+      discoveredLocalStorageKeys: ["tldw-workspace"],
+      readLocalStorageValue: async () =>
+        JSON.stringify({ privateTranscript: "Do not retain this answer" }),
+      getChatReference: () => currentReference,
+      api: {
+        createWorkspaceMigration: vi.fn(async () => receipt),
+        putWorkspaceMigrationChunk: vi.fn(async () => ({})),
+        finalizeWorkspaceMigration: vi.fn(async () => receipt),
+        getWorkspaceMigration: vi.fn(async () => receipt),
+        ackWorkspaceMigrationClientDelete: vi.fn(async () => ({}))
+      },
+      deleteLocalStorageValue: (key) => {
+        writes.delete(key)
+        if (key === "tldw-workspace") currentReference = chatReference
+      },
+      writeLocalStorageValue: (key, value) => {
+        writes.set(key, value)
+      }
+    })
+    expect(result.status).toBe("deleted")
+    const marker = JSON.parse(
+      writes.get(buildResearchWorkspaceMigrationTombstoneKey("ws-hint"))!
+    )
+    expect(marker.chatReference).toEqual(chatReference)
+    expect(marker.serverScopeKey).toBeUndefined()
+    expect(JSON.stringify(marker)).not.toContain("Do not retain this answer")
+  }
+)

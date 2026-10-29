@@ -80,6 +80,93 @@ export interface ResearchWorkspaceMigrationTombstone
   contentRetained: false
 }
 
+export type ResearchWorkspaceChatReference = {
+  referenceId: string
+  serverChatId: string | null
+}
+
+export type ResearchWorkspaceChatReferenceOwner = {
+  scopeKey: string
+  isCurrent: () => boolean
+  clear?: boolean
+}
+
+const isChatReferenceId = (value: unknown): value is string =>
+  typeof value === "string" && /^[A-Za-z0-9._:-]{1,256}$/.test(value)
+
+export const readResearchWorkspaceChatReference = (
+  value: unknown
+): ResearchWorkspaceChatReference | undefined => {
+  if (value === undefined) return undefined
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error("Saved workspace chat reference is invalid")
+  const { referenceId, serverChatId } = value as Record<string, unknown>
+  const savedId =
+    serverChatId === null
+      ? null
+      : isChatReferenceId(serverChatId)
+        ? serverChatId
+        : undefined
+  if (!isChatReferenceId(referenceId) || savedId === undefined)
+    throw new Error("Saved workspace chat reference is invalid")
+  return { referenceId, serverChatId: savedId }
+}
+
+/** Retain only an untrusted location hint; restored content still requires scoped server reads. */
+export const saveResearchWorkspaceChatReference = (
+  workspaceId: string,
+  referenceId: string,
+  serverChatId: string | null,
+  owner: ResearchWorkspaceChatReferenceOwner
+): void => {
+  if (!owner.isCurrent() || !owner.scopeKey || (!serverChatId && !owner.clear))
+    return
+  let match: { key: string; marker: Record<string, unknown> } | undefined
+  let receipts = 0
+  for (let index = 0; index < localStorage.length; index++) {
+    const key = localStorage.key(index)
+    if (!key?.startsWith(`${RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFIX}:`))
+      continue
+    if (++receipts > 128)
+      throw new Error("Too many saved workspace migration markers")
+    const raw = localStorage.getItem(key)
+    if (!raw || raw.length > 65536) continue
+    let marker: Record<string, unknown>
+    try {
+      marker = JSON.parse(raw)
+    } catch {
+      continue
+    }
+    if (
+      !marker ||
+      typeof marker !== "object" ||
+      Array.isArray(marker) ||
+      marker.contentRetained !== false ||
+      marker.serverWorkspaceId !== workspaceId ||
+      typeof marker.legacyWorkspaceId !== "string" ||
+      key !==
+        buildResearchWorkspaceMigrationTombstoneKey(marker.legacyWorkspaceId) ||
+      typeof marker.migrationId !== "string" ||
+      !marker.migrationId ||
+      (marker.serverScopeKey && marker.serverScopeKey !== owner.scopeKey)
+    )
+      continue
+    if (match)
+      throw new Error("Saved workspace chat has ambiguous migration markers")
+    match = { key, marker }
+  }
+  if (!match) return
+  const { key, marker } = match
+  const chatReference = readResearchWorkspaceChatReference({
+    referenceId,
+    serverChatId
+  })!
+  if (!owner.isCurrent()) return
+  if (JSON.stringify(marker.chatReference) === JSON.stringify(chatReference))
+    return
+  localStorage.setItem(key, JSON.stringify({ ...marker, chatReference }))
+}
+
 export interface ResearchWorkspaceMigrationSessionResponse {
   id: string
   status: string
@@ -133,6 +220,7 @@ export interface ResearchWorkspaceMigrationRunInput
   extends ResearchWorkspaceMigrationPlanInput {
   api: ResearchWorkspaceMigrationApi
   legacyWorkspaceId?: string
+  getChatReference?: () => ResearchWorkspaceChatReference | undefined
   deleteLocalStorageValue?: (key: string) => Promise<void> | void
   writeLocalStorageValue?: (key: string, value: string) => Promise<void> | void
   deleteIndexedDbStorePayload?: (
@@ -446,6 +534,7 @@ const deleteCoveredLocalPayloads = async ({
 export const runResearchWorkspaceMigration = async ({
   api,
   legacyWorkspaceId,
+  getChatReference,
   deleteLocalStorageValue,
   writeLocalStorageValue,
   deleteIndexedDbStorePayload,
@@ -573,12 +662,15 @@ export const runResearchWorkspaceMigration = async ({
     const tombstoneKey = buildResearchWorkspaceMigrationTombstoneKey(
       tombstone.legacyWorkspaceId
     )
-    const tombstonePayload = JSON.stringify(tombstone)
+    const tombstonePayload = () => {
+      const chatReference = readResearchWorkspaceChatReference(getChatReference?.())
+      return JSON.stringify({ ...tombstone, ...(chatReference ? { chatReference } : {}) })
+    }
     const preflightKey = `${RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFLIGHT_PREFIX}:${encodeURIComponent(
       tombstone.legacyWorkspaceId
     )}`
     if (hasCoveredLocalPayloads && deleteLocalStorageValue) {
-      await writeLocalStorageValue(preflightKey, tombstonePayload)
+      await writeLocalStorageValue(preflightKey, tombstonePayload())
     }
 
     const deletedSurfaceIds = await deleteCoveredLocalPayloads({
@@ -599,7 +691,7 @@ export const runResearchWorkspaceMigration = async ({
       }
     }
 
-    await writeLocalStorageValue(tombstoneKey, tombstonePayload)
+    await writeLocalStorageValue(tombstoneKey, tombstonePayload())
     if (hasCoveredLocalPayloads && deleteLocalStorageValue) {
       await deleteLocalStorageValue(preflightKey)
     }

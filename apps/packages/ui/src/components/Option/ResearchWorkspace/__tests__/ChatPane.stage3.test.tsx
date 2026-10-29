@@ -1,3 +1,5 @@
+import { Modal } from "antd"
+import * as workspaceUndo from "../undo-manager"
 import { webcrypto } from "node:crypto"
 import { sha256Text } from "@/store/workspace-migration"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
@@ -12,6 +14,27 @@ import type { WorkspaceState } from "@/store/workspace"
 import { createSourcesSlice } from "@/store/workspace-slices/sources-slice"
 import { WebCaptureNotCurrentError } from "@/utils/research-web-capture"
 import { isWorkspaceSourceSelectable } from "@/store/workspace-source-status"
+
+// Component-only ownership boundary; connected SDK tests exercise the genuine account/Scene hooks.
+const chatOwner = vi.hoisted(() => ({ generation: 0 }))
+vi.mock("../ChatPane/useResearchActorScene", async () => {
+  const React = await vi.importActual<typeof import("react")>("react")
+  return {
+    useResearchActorScene: (workspaceId: string, referenceId: string) => ({
+      capturePrivateScene: React.useCallback(() => null, []),
+      captureChatReferenceOwner: React.useCallback(() => {
+        const generation = chatOwner.generation
+        return {
+          scopeKey: "component-owner",
+          isCurrent: () =>
+            chatOwner.generation === generation &&
+            workspaceStoreState.workspaceId === workspaceId &&
+            workspaceStoreState.workspaceChatReferenceId === referenceId
+        }
+      }, [workspaceId, referenceId])
+    })
+  }
+})
 
 let realSourcesStore: UseBoundStore<StoreApi<WorkspaceState>> | null = null
 
@@ -360,6 +383,7 @@ function renderChatPane() {
 describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    chatOwner.generation++
     realSourcesStore = null
     Object.defineProperty(globalThis, "crypto", {
       value: webcrypto,
@@ -405,6 +429,107 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     })
 
     mockGetWorkspaceChatSession.mockReturnValue(null)
+  })
+
+  it("does not clear replacement work after a held confirmation retires", async () => {
+    messageOptionState.messages = [
+      {
+        id: "old",
+        isBot: false,
+        name: "You",
+        message: "Original answer",
+        sources: []
+      }
+    ]
+    let confirm: (() => void) | undefined
+    const modal = vi.spyOn(Modal, "confirm").mockImplementation((options) => {
+      confirm = options.onOk as () => void
+      return { destroy: () => {}, update: () => {} }
+    })
+    try {
+      renderChatPane()
+      fireEvent.click(
+        screen.getByRole("button", { name: "Clear chat" })
+      )
+      expect(confirm).toBeTypeOf("function")
+      mockSetMessages.mockClear()
+      mockSetHistory.mockClear()
+      mockSetServerChatId.mockClear()
+      chatOwner.generation++
+      act(() => {
+        confirm!()
+      })
+      expect(mockSetMessages).not.toHaveBeenCalled()
+      expect(mockSetHistory).not.toHaveBeenCalled()
+      expect(mockSetServerChatId).not.toHaveBeenCalled()
+    } finally {
+      modal.mockRestore()
+      workspaceUndo.clearWorkspaceUndoActionsForTests()
+    }
+  })
+
+  it("does not Undo into a replacement account after Clear", () => {
+    messageOptionState.messages = [
+      {
+        id: "old",
+        isBot: false,
+        name: "You",
+        message: "Original answer",
+        sources: []
+      }
+    ]
+    let confirm: (() => void) | undefined
+    const modal = vi.spyOn(Modal, "confirm").mockImplementation((options) => {
+      confirm = options.onOk as () => void
+      return { destroy: () => {}, update: () => {} }
+    })
+    try {
+      renderChatPane()
+      fireEvent.click(
+        screen.getByRole("button", { name: "Clear chat" })
+      )
+      act(() => {
+        confirm!()
+      })
+      expect(mockSetMessages).toHaveBeenCalledWith([])
+      mockSetMessages.mockClear()
+      mockSetHistory.mockClear()
+      mockSetServerChatId.mockClear()
+      chatOwner.generation++
+      act(() => {
+        workspaceUndo.undoLatestWorkspaceAction()
+      })
+      expect(mockSetMessages).not.toHaveBeenCalled()
+      expect(mockSetHistory).not.toHaveBeenCalled()
+      expect(mockSetServerChatId).not.toHaveBeenCalled()
+    } finally {
+      modal.mockRestore()
+      workspaceUndo.clearWorkspaceUndoActionsForTests()
+    }
+  })
+
+  it("shows a persistence failure while keeping the acknowledged answer and avoiding another Send", async () => {
+    messageOptionState.messages = [
+      {
+        id: "saved",
+        isBot: true,
+        name: "AI",
+        message: "Keep my saved answer",
+        sources: []
+      }
+    ]
+    messageOptionState.serverChatId = "saved-chat"
+    mockSaveWorkspaceChatSession.mockImplementationOnce(() => {
+      throw new Error("Quota exceeded")
+    })
+    renderChatPane()
+    expect(
+      await screen.findByText(/saved chat could not be remembered for reload/)
+    ).toBeVisible()
+    expect(screen.getByTestId("playground-message")).toHaveTextContent(
+      "Keep my saved answer"
+    )
+    expect(mockOnSubmit).not.toHaveBeenCalled()
   })
 
   it("blocks captured stale heads at the actual Ask boundary", async () => {
