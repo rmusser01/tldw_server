@@ -1061,6 +1061,10 @@ export const useChatActions = ({
         : payload?.conversationId != null
           ? String(payload.conversationId)
           : null
+    const workspaceReferenceSave =
+      scope?.type === 'workspace' &&
+      payload?.saveToDb === false &&
+      payload.assistantMetadataExtra?.workspace_rag_sources_v1 != null;
     let payloadForLocalPersistence = payload
       ? {
           ...payload,
@@ -1118,10 +1122,12 @@ export const useChatActions = ({
         message: Record<string, unknown>
       ) => {
         throwIfScopeChanged()
+        if (workspaceReferenceSave && !sourceIsCurrent()) throw createServicePromptScopeChangedError();
         const result = mirrorOptions
           ? await tldwClient.addChatMessage(chatId, message, mirrorOptions)
           : await tldwClient.addChatMessage(chatId, message)
         throwIfScopeChanged()
+        if (workspaceReferenceSave && !sourceIsCurrent()) throw createServicePromptScopeChangedError();
         return result
       }
 
@@ -1390,7 +1396,7 @@ export const useChatActions = ({
             payload?.saveToDb === false &&
             isLocalRagDiagnosticInfo(payload?.generationInfo)
           ) &&
-          !payload?.isRegenerate &&
+          (!payload?.isRegenerate || (workspaceReferenceSave && payload?.retryFailedTurn === true)) &&
           !payload?.isContinue &&
           typeof payload?.message === "string" &&
           typeof payload?.fullText === "string"
@@ -1399,27 +1405,71 @@ export const useChatActions = ({
             const cid = resolvedServerConversationId
             const userContent = payload.message.trim()
             const assistantContent = payload.fullText.trim()
+            if (
+              workspaceReferenceSave &&
+              payload.retryFailedTurn &&
+              !payload.userServerMessageId &&
+              useStoreMessageOption.getState().serverChatId === cid &&
+              sourceIsCurrent()
+            ) {
+              const user = messages.find(
+                (row) => row.id === payload?.userMessageId && !row.isBot && row.message === payload?.message
+              );
+              if (user?.serverMessageId) {
+                payload = { ...payload, userServerMessageId: user.serverMessageId };
+                payloadForLocalPersistence = {
+                  ...payloadForLocalPersistence!,
+                  userServerMessageId: user.serverMessageId,
+                };
+              }
+            }
+            const retainReceipt = (role: 'user' | 'assistant', result: { id: unknown }) => {
+              if (!workspaceReferenceSave) return;
+              const id = typeof result?.id === 'string' ? result.id.trim() : '';
+              if (!id) throw new Error('Message save acknowledgement is missing its identity');
+              const field = role === 'user' ? 'userServerMessageId' : 'assistantServerMessageId';
+              const messageId = role === 'user' ? payload?.userMessageId : payload?.assistantMessageId;
+              const content = role === 'user' ? payload?.message : payload?.fullText;
+              payload = { ...payload!, [field]: id };
+              payloadForLocalPersistence = { ...payloadForLocalPersistence!, [field]: id };
+              if (sourceIsCurrent())
+                setMessages((rows) =>
+                  sourceIsCurrent()
+                    ? rows.map((row) =>
+                        row.id === messageId && row.isBot === (role === 'assistant') && row.message === content
+                          ? role === 'assistant'
+                            ? updateActiveVariant(row, { serverMessageId: id })
+                            : { ...row, serverMessageId: id }
+                          : row
+                      )
+                    : rows
+                );
+            };
 
             // Current-turn save receipts take precedence over capability discovery.
             if (userContent.length > 0 && !payload.userServerMessageId?.trim()) {
-              await addMirroredMessage(cid, {
-                role: "user",
-                content: userContent,
-                ...(payload.userMetadataExtra
-                  ? { metadata_extra: payload.userMetadataExtra }
-                  : {})
-              })
+              retainReceipt(
+                'user',
+                await addMirroredMessage(cid, {
+                  role: 'user',
+                  content: userContent,
+                  ...(payload.userMetadataExtra ? { metadata_extra: payload.userMetadataExtra } : {}),
+                })
+              );
             }
 
             if (
               assistantContent.length > 0 &&
               !payload.assistantServerMessageId?.trim()
             ) {
-              await addMirroredMessage(cid, {
-                role: "assistant",
-                content: assistantContent,
-                metadata_extra: payload.assistantMetadataExtra
-              })
+              retainReceipt(
+                'assistant',
+                await addMirroredMessage(cid, {
+                  role: 'assistant',
+                  content: assistantContent,
+                  metadata_extra: payload.assistantMetadataExtra,
+                })
+              );
             }
           } catch (error) {
             if (
@@ -4318,7 +4368,8 @@ export const useChatActions = ({
                 ragModeParamsWithSnapshot.historyId,
               serverChatId: workspaceServerChat.chatId,
               conversationId: workspaceServerChat.chatId,
-              ...(!isRegenerate && !isContinue ? { saveToDb: false } : {}),
+              ...(!isContinue && (!isRegenerate || decodeChatErrorPayload(regenerateFromMessage?.message || ""))
+                ? { saveToDb: false } : {}),
               saveMessageOnSuccess: (data: SaveMessageData) =>
                 saveMessageOnSuccess({
                   ...data,

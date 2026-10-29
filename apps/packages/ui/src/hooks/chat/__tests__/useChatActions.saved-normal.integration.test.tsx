@@ -3235,6 +3235,269 @@ describe("saved normal Chat pipeline with autosave", () => {
       } finally { held.resolve(); await pending; view.unmount() }
     })
 
+    it.each([false, true])(
+      'S04 retries a failed workspace query with raw question and retained citations; prior user ACK %s',
+      async (alreadyAcknowledged) => {
+        vi.spyOn(i18n, 't').mockImplementation((...args) => {
+          const [key, fallback] = args;
+          return typeof fallback === 'string' ? fallback : String(key);
+        });
+        const actualModels = await vi.importActual<typeof import('@/models')>('@/models');
+        mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel);
+        mocks.realFormatter = true;
+        mocks.realPersistence = true;
+        mocks.ragSearch.mockResolvedValue({
+          documents: [
+            {
+              content: 'Visitors enter through the east gate.',
+              metadata: { media_id: 42, title: 'Rowan report', type: 'text' },
+            },
+          ],
+        });
+        let attempt = 0;
+        mocks.streamMessage.mockImplementation(async function* (messages, options, onChunk) {
+          attempt += 1;
+          if (attempt === 2) throw new Error('Provider temporarily unavailable');
+          const answer = attempt === 1 ? 'Prior cited answer.' : 'Visitors use the east gate.';
+          if (options.saveToDb) {
+            const userId = `native-user-${attempt}`,
+              answerId = `native-answer-${attempt}`;
+            mocks.serverRows
+              .get(options.conversationId)!
+              .push(
+                { id: userId, role: 'user', content: String(messages.at(-1)!.content) },
+                { id: answerId, role: 'assistant', content: answer }
+              );
+            onChunk({
+              tldw_conversation_id: options.conversationId,
+              tldw_user_message_id: userId,
+              tldw_message_id: answerId,
+            });
+          }
+          yield answer;
+        });
+        const originalNotes = useWorkspaceStore.getState().notes;
+        useWorkspaceStore.setState({ notes: 'Retained S04 report.' });
+        const view = await mountSdkScene(
+          { type: 'workspace', workspaceId: 'sdk-original-workspace' },
+          true
+        );
+        act(() =>
+          useStoreMessageOption.setState({
+            ragMediaIds: [42],
+            fileRetrievalEnabled: true,
+            chatMode: 'rag',
+          })
+        );
+        try {
+          await act(async () => {
+            await view.send();
+          });
+          const priorRows = structuredClone(mocks.serverRows.get('chat-1')!);
+          const priorMessage = structuredClone(view.result.current.state.messages.at(-1));
+          await act(async () => {
+            await view.result.current.actions.onSubmit({ message: 'Which entrance?', image: '' });
+          });
+          const question = view.result.current.state.messages.filter((row) => !row.isBot).at(-1)!;
+          expect(view.result.current.state.messages.at(-1)?.message).toContain('__tldw_error__:');
+          expect(
+            decodeChatErrorPayload(view.result.current.state.messages.at(-1)!.message)
+          ).not.toBeNull();
+          if (alreadyAcknowledged) {
+            // A reconciled failed turn may already own its canonical user row.
+            const ack = await mocks.addChatMessage('chat-1', {
+              role: 'user',
+              content: question.message,
+            });
+            act(() =>
+              useStoreMessageOption
+                .getState()
+                .setMessages((rows) =>
+                  rows.map((row) =>
+                    row.id === question.id ? { ...row, serverMessageId: ack.id } : row
+                  )
+                )
+            );
+            const local = mocks.rows.find((row) => row.id === question.id)!;
+            local.serverMessageId = ack.id;
+          }
+          const writesBeforeRetry = mocks.addChatMessage.mock.calls.length;
+          await act(async () => {
+            await view.result.current.actions.regenerateLastMessage();
+          });
+          expect(
+            mocks.addChatMessage.mock.calls.slice(writesBeforeRetry).map((call) => call[1].role)
+          ).toEqual(alreadyAcknowledged ? ['assistant'] : ['user', 'assistant']);
+          expect(mocks.streamMessage).toHaveBeenCalledTimes(3);
+          expect(mocks.ragSearch).toHaveBeenCalledTimes(3);
+          expect(mocks.pageAssistModel.mock.calls.at(-1)![0]).toMatchObject({
+            saveToDb: false,
+            retryFailedTurn: true,
+          });
+          expect(mocks.streamMessage.mock.calls.at(-1)![1]).toMatchObject({ saveToDb: false });
+          const saved = mocks.serverRows.get('chat-1')!;
+          expect(saved.slice(0, priorRows.length)).toEqual(priorRows);
+          expect(saved.slice(priorRows.length).map((row) => [row.role, row.content])).toEqual([
+            ['user', 'Which entrance?'],
+            ['assistant', 'Visitors use the east gate.'],
+          ]);
+          expect(saved.at(-1)?.metadata_extra).toMatchObject({
+            workspace_rag_sources_v1: {
+              origin: 'knowledge_qa',
+              sources: [
+                {
+                  mediaId: 42,
+                  title: 'Rowan report',
+                  excerpt: 'Visitors enter through the east gate.',
+                },
+              ],
+            },
+          });
+          expect(
+            view.result.current.state.messages.find((row) => row.id === question.id)?.serverMessageId
+          ).toBe(saved[priorRows.length].id);
+          expect(view.result.current.state.messages.find((row) => row.id === priorMessage?.id)).toEqual(
+            priorMessage
+          );
+          expect(useWorkspaceStore.getState().notes).toBe('Retained S04 report.');
+        } finally {
+          view.unmount();
+          useWorkspaceStore.setState({ notes: originalNotes });
+        }
+      }
+    );
+
+    it.each(['account', 'workspace'] as const)(
+      'S04 retires a held manual user acknowledgement after %s replacement',
+      async (boundary) => {
+        const actualModels = await vi.importActual<typeof import('@/models')>('@/models');
+        mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel);
+        mocks.realFormatter = true;
+        mocks.ragSearch.mockResolvedValue({
+          documents: [
+            {
+              content: 'Selene is the telescope.',
+              metadata: { media_id: 42, title: 'Rowan', type: 'text' },
+            },
+          ],
+        });
+        mocks.streamMessage.mockImplementation(async function* () {
+          yield 'The telescope is Selene.';
+        });
+        const held = deferred<void>();
+        const add = mocks.addChatMessage.getMockImplementation()!;
+        mocks.addChatMessage.mockImplementationOnce(async (...args) => {
+          const ack = await add(...args);
+          await held.promise;
+          return ack;
+        });
+        const view = await mountSdkScene(
+          { type: 'workspace', workspaceId: 'sdk-original-workspace' },
+          true
+        );
+        act(() =>
+          useStoreMessageOption.setState({
+            ragMediaIds: [42],
+            fileRetrievalEnabled: true,
+            chatMode: 'rag',
+          })
+        );
+        let pending: ReturnType<typeof view.send> | undefined;
+        try {
+          act(() => {
+            pending = view.send();
+          });
+          await waitFor(() => expect(mocks.addChatMessage).toHaveBeenCalledOnce());
+          act(() => {
+            if (boundary === 'account') replaceAuthority('synthetic-b');
+            else {
+              useStoreMessageOption.getState().startNewChatDraft(false);
+              useStoreMessageOption.setState({
+                messages: [
+                  {
+                    id: 'replacement-user',
+                    isBot: false,
+                    name: 'You',
+                    message: 'Keep replacement',
+                    sources: [],
+                  },
+                ],
+              });
+            }
+          });
+          await act(async () => {
+            held.resolve();
+            await pending;
+          });
+          expect(mocks.addChatMessage).toHaveBeenCalledOnce();
+          expect(mocks.serverRows.get('chat-1')!.map((row) => row.role)).toEqual(['user']);
+          expect(view.result.current.state.messages).toEqual(
+            boundary === 'account'
+              ? []
+              : [
+                  {
+                    id: 'replacement-user',
+                    isBot: false,
+                    name: 'You',
+                    message: 'Keep replacement',
+                    sources: [],
+                  },
+                ]
+          );
+        } finally {
+          held.resolve();
+          await pending;
+          view.unmount();
+        }
+      }
+    );
+
+    it('S04 leaves healthy workspace regeneration on its existing server persistence policy', async () => {
+      const actualModels = await vi.importActual<typeof import('@/models')>('@/models');
+      mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel);
+      mocks.realFormatter = true;
+      mocks.ragSearch.mockResolvedValue({
+        documents: [
+          {
+            content: 'Selene is the telescope.',
+            metadata: { media_id: 42, title: 'Rowan', type: 'text' },
+          },
+        ],
+      });
+      mocks.streamMessage.mockImplementation(async function* () {
+        yield 'The telescope is Selene.';
+      });
+      const view = await mountSdkScene(
+        { type: 'workspace', workspaceId: 'sdk-original-workspace' },
+        true
+      );
+      act(() =>
+        useStoreMessageOption.setState({
+          ragMediaIds: [42],
+          fileRetrievalEnabled: true,
+          chatMode: 'rag',
+        })
+      );
+      try {
+        await act(async () => {
+          await view.send();
+        });
+        const saved = structuredClone(mocks.serverRows.get('chat-1')!);
+        await act(async () => {
+          await view.result.current.actions.regenerateLastMessage();
+        });
+        expect(mocks.streamMessage.mock.calls.map((call) => call[1].saveToDb)).toEqual([false, true]);
+        expect(mocks.pageAssistModel.mock.calls.at(-1)![0]).toMatchObject({
+          retryFailedTurn: false,
+          regenerateFromMessageId: saved[1].id,
+        });
+        expect(mocks.addChatMessage).toHaveBeenCalledTimes(2);
+        expect(mocks.serverRows.get('chat-1')).toEqual(saved);
+      } finally {
+        view.unmount();
+      }
+    });
+
     it("S04 retains cited workspace source references through the actual SDK model and manual server save", async () => {
       const actualModels =
         await vi.importActual<typeof import("@/models")>("@/models");
@@ -3387,6 +3650,7 @@ describe("saved normal Chat pipeline with autosave", () => {
           });
           await waitFor(() => expect(mocks.bgRequest).toHaveBeenCalledTimes(2));
           expect(getServerChatSaveStatus("chat-1")).toBe("saving");
+          expect(view.result.current.state.messages.find(row => !row.isBot)?.serverMessageId).toBe("confirmed-user")
           if (boundary === "account retired")
             act(() => replaceAuthority("synthetic-b"));
           if (boundary === "workspace retired")
@@ -3415,6 +3679,7 @@ describe("saved normal Chat pipeline with autosave", () => {
             "user",
           ]);
           if (boundary === "current") {
+            expect(mocks.rows.find(row => row.role === "user")?.serverMessageId).toBe("confirmed-user")
             const answer = view.result.current.state.messages.find(
               (row) => row.isBot,
             )!;
