@@ -7,13 +7,19 @@ from copy import deepcopy
 import pytest
 from pydantic import ValidationError
 
+from tldw_Server_API.app.core.Character_Chat import roleplay_resume_contract, roleplay_resume_prompt
 from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import create_character_conversation
+from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import (
+    RoleplayResumeConflictError,
+    RoleplayResumeHistory,
+)
+from tldw_Server_API.app.core.Character_Chat.roleplay_resume_prompt import (
+    format_roleplay_resume_messages,
+    prepare_roleplay_resume,
+)
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
-from tldw_Server_API.app.core.Character_Chat import roleplay_resume_contract, roleplay_resume_prompt
-from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import RoleplayResumeConflictError, RoleplayResumeHistory
-from tldw_Server_API.app.core.Character_Chat.roleplay_resume_prompt import format_roleplay_resume_messages, prepare_roleplay_resume
 
 
 @pytest.fixture(params=["sqlite", "postgres"])
