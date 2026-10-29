@@ -7,6 +7,7 @@ import pytest
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import create_character_conversation
 from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import roleplay_resume_fence
+from tldw_Server_API.app.core.Character_Chat.roleplay_resume_prompt import prepare_roleplay_resume
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -431,7 +432,7 @@ def test_saved_kobold_sampling_reaches_actual_http_payload(resume_api, monkeypat
 
     adapter = chat_service._get_llm_registry().get_adapter("kobold")
     monkeypatch.setattr(adapter, "http_fetcher", fetch)
-    frozen = db.prepare_roleplay_resume_generation(cid, body["tldw_roleplay_resume_v1"], owner_client_id="1")
+    frozen = prepare_roleplay_resume(db, cid, body["tldw_roleplay_resume_v1"], owner_client_id="1")
     response = client.post(f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
     assert response.status_code == 200, response.text
     assert response.json()["saved"] is True

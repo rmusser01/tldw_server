@@ -364,6 +364,8 @@ async def append_roleplay_resume_input(
     current_user: User = Depends(get_request_user),
 ):
     """Append exactly one owned global Resume input or replay its original receipt."""
+    from tldw_Server_API.app.core.Character_Chat.roleplay_resume_prompt import format_roleplay_resume_messages
+
     scope = _resolve_message_scope(scope_type, workspace_id)
     if scope.scope_type != "global" or scope.workspace_id is not None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
@@ -377,6 +379,7 @@ async def append_roleplay_resume_input(
             chat_id,
             body.model_dump(mode="json"),
             owner_client_id=str(current_user.id),
+            build_messages=format_roleplay_resume_messages,
             validate_message_count=lambda count: limiter.validate_message_limit(chat_id, count),
         )
     except RoleplayResumeConflictError as exc:

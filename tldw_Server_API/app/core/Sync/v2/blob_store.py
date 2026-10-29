@@ -21,13 +21,16 @@ from tldw_Server_API.app.core.Infrastructure.distributed_lock import (
     _acquire_platform_file_lock,
     _release_platform_file_lock,
 )
+from tldw_Server_API.app.core.Sync_Contracts.blob_keys import (
+    SyncBlobStoreError,
+    _hash_digest,
+    _storage_namespace_id,
+    legacy_storage_key,
+    namespace_storage_key,
+)
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 
 STREAM_CHUNK_SIZE = 64 * 1024
-
-
-class SyncBlobStoreError(ValueError):
-    """Raised when blob storage input or integrity checks fail."""
 
 
 class _MissingBlobDirectoryError(SyncBlobStoreError):
@@ -224,23 +227,8 @@ class LocalSyncBlobStore:
                 )
         return LocalSyncBlobStore.namespace_storage_key(namespace, payload_hash)
 
-    @staticmethod
-    def legacy_storage_key(payload_hash: str) -> str:
-        """Return the exact historical global content-addressed storage key."""
-
-        digest = _hash_digest(payload_hash)
-        return f"blobs/sha256/{digest[:2]}/{digest}.blob"
-
-    @staticmethod
-    def namespace_storage_key(
-        storage_namespace_id: str,
-        payload_hash: str,
-    ) -> str:
-        """Return a v2 path composed only from an opaque namespace and digest."""
-
-        namespace = _storage_namespace_id(storage_namespace_id)
-        digest = _hash_digest(payload_hash)
-        return f"blobs/v2/{namespace}/{digest}.blob"
+    legacy_storage_key = staticmethod(legacy_storage_key)
+    namespace_storage_key = staticmethod(namespace_storage_key)
 
     def verify_blob(
         self,
@@ -986,26 +974,6 @@ def _relocate_open_blob(
         raise SyncBlobStoreError("Sync legacy blob relocation failed") from exc
     finally:
         os.close(descriptor)
-
-
-def _hash_digest(value: str) -> str:
-    prefix = "sha256:"
-    if not value.startswith(prefix) or len(value) != len(prefix) + 64:
-        raise SyncBlobStoreError("payload_hash must be sha256:<64 hex chars>")
-    digest = value[len(prefix) :]
-    if any(character not in "0123456789abcdef" for character in digest):
-        raise SyncBlobStoreError("payload_hash digest must be lowercase hex")
-    return digest
-
-
-def _storage_namespace_id(value: str) -> str:
-    if len(value) != 32 or any(
-        character not in "0123456789abcdef" for character in value
-    ):
-        raise SyncBlobStoreError(
-            "storage_namespace_id must be 32 lowercase hexadecimal characters"
-        )
-    return value
 
 
 def _safe_segment(value: str, *, field_name: str) -> str:

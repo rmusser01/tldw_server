@@ -10,6 +10,9 @@ other module imports no DB code, which is what a contract is. Entries are keyed 
 Known limit: a target whose DB import is only inside a function is not followed, though the
 layering pairs still count that import. TASK-13950.67 empties this baseline.
 
+sync_contract_problems pins core.Sync_Contracts, the contracts DB_Management shares with core.Sync:
+it imports no core.Sync or core.DB_Management code at any level and loads no DB code.
+
     python -m tldw_Server_API.tests.lint.test_db_management_logic_imports --tighten
     python -m tldw_Server_API.tests.lint.test_db_management_logic_imports --write-baseline
 """
@@ -43,6 +46,8 @@ from tldw_Server_API.tests.lint.test_layering_contract import (
     package_of,
     rewritten,
     rule,
+    scan,
+    scan_upward_edges,
     target_modules,
     unreasoned_bumps,
 )
@@ -53,6 +58,7 @@ BASELINE = Path(__file__).resolve().with_name("db_management_logic_imports.txt")
 COMMAND = "python -m tldw_Server_API.tests.lint.test_db_management_logic_imports"
 PERSISTENCE = "core.DB_Management"
 LABEL = "loads DB code at import"
+SYNC_CONTRACTS = "core.Sync_Contracts"
 
 
 def _parents(name: str) -> list[str]:
@@ -110,6 +116,22 @@ def measure(root: Path = APP_ROOT) -> dict[Pair, Counter[str]]:
                 if target in loading and rule(PERSISTENCE, package_of(target)):
                     measured[(module, target)][module] += 1
     return dict(measured)
+
+
+def sync_contract_problems(root: Path = APP_ROOT) -> list[str]:
+    """core.Sync_Contracts imports no core.Sync or core.DB_Management code, at any level, and loads no DB code."""
+    root = root.resolve()
+    problems = [
+        f"{record.module} imports {record.target}: Sync contracts must not import core.Sync or core.DB_Management"
+        for record in scan(root)
+        if package_of(record.module) == SYNC_CONTRACTS and record.target in {"core.Sync", PERSISTENCE}
+    ]
+    problems += [
+        f"{module} imports DB code when it is imported"
+        for module in db_loading(root)
+        if package_of(module) == SYNC_CONTRACTS
+    ]
+    return sorted(problems)
 
 
 def violations(measured: Mapping[Pair, Counter[str]], baseline: Mapping[Pair, tuple[int, str]]) -> list[str]:
@@ -199,6 +221,25 @@ def test_a_fallen_but_nonzero_count_is_stale_and_asks_to_lower_it(tmp_path: Path
 def test_db_management_imports_of_db_loading_modules_only_fall() -> None:
     problems = violations(measure(), load(BASELINE))
     assert not problems, f"{len(problems)} problem(s):\n" + "\n".join(problems)
+
+
+def test_a_sync_contract_that_imports_sync_or_db_code_fails(tmp_path: Path) -> None:
+    root = _seed(tmp_path / "app", {
+        "core/Sync_Contracts/models.py": f"def f():\n    from {APP}.core.Sync.v2 import store\n",
+        "core/Sync_Contracts/errors.py": f"from {APP}.core.DB_Management import Sync_DB\n",
+        "core/Sync/v2/store.py": "",
+        "core/DB_Management/Sync_DB.py": "",
+    })
+    assert sync_contract_problems(root) == [
+        "core.Sync_Contracts.errors imports DB code when it is imported",
+        "core.Sync_Contracts.errors imports core.DB_Management: Sync contracts must not import core.Sync or core.DB_Management",
+        "core.Sync_Contracts.models imports core.Sync: Sync contracts must not import core.Sync or core.DB_Management",
+    ]
+
+
+def test_sync_contracts_import_no_sync_or_db_code_and_db_management_no_sync() -> None:
+    assert sync_contract_problems() == []
+    assert ("core.DB_Management", "core.Sync") not in scan_upward_edges()
 
 
 def test_raised_counts_carry_a_new_reason() -> None:
