@@ -737,3 +737,36 @@ The actual evidence, per stage:
   moved past the W3 base; the range check is clean).
 - Bandit: N/A — TypeScript-only batch, no Python touched (per program
   precedent).
+
+### Addendum (2026-10-29): Task 7 closes the seam; corrected final range
+
+The section above was appended at `43d49eceaa`, one commit before the
+branch's final head, and records the fakes seam-hardening as an open
+follow-up; this addendum closes that record per the doc's append-only
+protocol. The batch-final review **ruled the hooks-suite seam a pre-merge
+blocker** (W3 caused it, W3 fixes it), and Task 7 (`a2dcb23d73`,
+test-infra only, no production code changed) resolved it: the fakes in
+**eight** hooks suites were taught the Stage-1/2 schema surface — the
+`searchTokens` table (compound `[token+history_id]` PK where the fakes
+model keys) and, where the exercised paths need it, `messages`
+`bulkGet`/`bulkPut` and a `searchTokens.bulkPut` — covering the five
+itemized suites plus three the itemization missed
+(`useMessage.scene-notes` 1, `useServerChatLoader.mirror` 9,
+`chat-modes.preparation-ownership` 3). All **131 branch-caused reds
+(118 itemized + 13 discovered) → 0**, verified at head: the five suites
+**780/780 ×3** consecutive runs, the three discovered suites 92/92, full
+`src/hooks` 210 files 3658/3658, `src/db` 34 files 525/525, typecheck
+exit 0. The saved-normal suite additionally mints deterministic
+creation-ordered ids, and its five order-red assertions were re-pinned to
+the PK-order contract (exact array computed with production's own
+comparator plus the original membership assertion verbatim; one
+diagnostic located by payload instead of position) — forced by production
+minting the assistant-side row id before the user-side id
+(`useChatActions.ts:2130-2131`); the re-pins were reviewed
+**equal-or-stricter**. **Corrected final range: `617094d014..a2dcb23d73`
+(9 commits, 50 files).** The whole-branch final review also empirically
+closed the 8 out-of-scope reds (four files outside `src/hooks`/`src/db`:
+Blob-text, popover visibility ×3, router-history ×2, model-targets ×2)
+as **pre-existing at the pre-W3 base `617094d014`** by direct execution
+there — 8 failed | 134 passed, identical names and signatures — so W3
+introduces zero new reds versus its merge base.
