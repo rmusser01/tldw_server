@@ -1,3 +1,4 @@
+import { watchChatAccountChanges } from "@/services/chat-account-boundary";
 import { buildWorkspaceChatSessionKey } from "@/store/workspace-chat-session-key"
 import { useStartTutorial } from "@/hooks/useStartTutorial"
 import { useResearchWebCapture } from "@/utils/use-research-web-capture"
@@ -30,9 +31,11 @@ import {
 } from "@/store/workspace-events"
 import {
   runResearchWorkspaceMigration,
+  deleteResearchWorkspaceMigrationLocalValue,
+  buildResearchWorkspaceMigrationTombstoneKey,
   type ResearchWorkspaceIndexedDbStoreRef,
-  type ResearchWorkspaceMigrationRunResult
-} from "@/store/workspace-migration"
+  type ResearchWorkspaceMigrationRunResult,
+} from "@/store/workspace-migration";
 import {
   RESEARCH_WORKSPACE_INDEXEDDB_ARTIFACT_STORE,
   RESEARCH_WORKSPACE_INDEXEDDB_CHAT_STORE,
@@ -1245,10 +1248,6 @@ const ResearchWorkspaceBody: React.FC = () => {
 
   const lastCrossTabSyncWarningRef = React.useRef(0)
   const workspaceMigrationSignatureRef = React.useRef<string | null>(null)
-  const workspaceMigrationInFlightRef = React.useRef<{
-    signature: string
-    promise: Promise<ResearchWorkspaceMigrationRunResult>
-  } | null>(null)
   const initialWorkspaceMigrationLocalStorageKeysRef = React.useRef<
     string[] | null
   >(null)
@@ -1261,7 +1260,6 @@ const ResearchWorkspaceBody: React.FC = () => {
   }
   const retryWorkspaceMigration = React.useCallback(() => {
     workspaceMigrationSignatureRef.current = null
-    workspaceMigrationInFlightRef.current = null
     setWorkspaceMigrationResult(null)
     setWorkspaceMigrationLoading(false)
     setWorkspaceMigrationRetryNonce((value) => value + 1)
@@ -1680,10 +1678,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     }
 
     if (workspaceMigrationResult.status === "failed") {
-      return [
-        "Legacy workspace data found",
-        "Migration failed before local deletion"
-      ]
+      return ["Legacy workspace data found", workspaceMigrationResult.message];
     }
 
     if (workspaceMigrationResult.status === "deleted") {
@@ -1747,7 +1742,6 @@ const ResearchWorkspaceBody: React.FC = () => {
   useEffect(() => {
     if (!statusGuardrailsEnabled) {
       workspaceMigrationSignatureRef.current = null
-      workspaceMigrationInFlightRef.current = null
       setWorkspaceMigrationLoading(false)
       setWorkspaceMigrationResult(null)
       return
@@ -1757,7 +1751,6 @@ const ResearchWorkspaceBody: React.FC = () => {
 
     if (wasWorkspaceFreshlyInitializedInRuntime(workspaceId)) {
       workspaceMigrationSignatureRef.current = null
-      workspaceMigrationInFlightRef.current = null
       setWorkspaceMigrationLoading(false)
       setWorkspaceMigrationResult(null)
       return
@@ -1776,7 +1769,6 @@ const ResearchWorkspaceBody: React.FC = () => {
 
     if (!hasLegacyContent) {
       workspaceMigrationSignatureRef.current = null
-      workspaceMigrationInFlightRef.current = null
       setWorkspaceMigrationLoading(false)
       setWorkspaceMigrationResult(null)
       return
@@ -1792,18 +1784,25 @@ const ResearchWorkspaceBody: React.FC = () => {
       indexedDbSignature,
       workspaceMigrationRetryNonce.toString()
     ].join("::")
-    const inFlightMigration = workspaceMigrationInFlightRef.current
-    const canReuseInFlightMigration =
-      inFlightMigration?.signature === signature
-    if (
-      workspaceMigrationSignatureRef.current === signature &&
-      !canReuseInFlightMigration
-    ) {
-      return
-    }
+    if (workspaceMigrationSignatureRef.current === signature) return;
     workspaceMigrationSignatureRef.current = signature
 
-    let cancelled = false
+    let mounted = true;
+    let retired = false;
+    const isCurrent = () =>
+      mounted &&
+      !retired &&
+      useWorkspaceStore.getState().workspaceId === workspaceId;
+    const releaseAccount = watchChatAccountChanges((invalidated) => {
+      if (!invalidated || !mounted) return;
+      retired = true;
+      if (workspaceMigrationSignatureRef.current === signature)
+        workspaceMigrationSignatureRef.current = null;
+      setWorkspaceMigrationLoading(false);
+      setWorkspaceMigrationResult(null);
+    });
+    const capturedValues = new Map<string, string | null>();
+    const removedKeys = new Set<string>();
     setWorkspaceMigrationLoading(true)
 
     const migrationReferenceId = useWorkspaceStore.getState().workspaceChatReferenceId
@@ -1813,44 +1812,61 @@ const ResearchWorkspaceBody: React.FC = () => {
       const session = active.getWorkspaceChatSession(buildWorkspaceChatSessionKey(workspaceId, referenceId))
       return session ? { referenceId, serverChatId: session.serverChatId } : undefined
     }
-    const migrationPromise =
-      canReuseInFlightMigration && inFlightMigration
-        ? inFlightMigration.promise
-        : runResearchWorkspaceMigration({
-            targetWorkspaceId: workspaceId,
-            targetWorkspaceName: workspaceName || "Research Workspace",
-            getChatReference,
-            discoveredLocalStorageKeys,
-            discoveredIndexedDbStores,
-            readLocalStorageValue: async (key) => window.localStorage.getItem(key),
-            api: {
-              createWorkspaceMigration: tldwClient.createWorkspaceMigration,
-              putWorkspaceMigrationChunk: tldwClient.putWorkspaceMigrationChunk,
-              finalizeWorkspaceMigration: tldwClient.finalizeWorkspaceMigration,
-              getWorkspaceMigration: tldwClient.getWorkspaceMigration,
-              ackWorkspaceMigrationClientDelete:
-                tldwClient.ackWorkspaceMigrationClientDelete
-            },
-            deleteLocalStorageValue: (key) => window.localStorage.removeItem(key),
-            writeLocalStorageValue: (key, value) =>
-              window.localStorage.setItem(key, value),
-            now: () => new Date().toISOString()
-          })
-
-    if (!canReuseInFlightMigration) {
-      workspaceMigrationInFlightRef.current = {
-        signature,
-        promise: migrationPromise
-      }
-    }
+    const migrationPromise = runResearchWorkspaceMigration({
+      targetWorkspaceId: workspaceId,
+      targetWorkspaceName: workspaceName || "Research Workspace",
+      getChatReference,
+      isCurrent,
+      discoveredLocalStorageKeys,
+      discoveredIndexedDbStores,
+      readLocalStorageValue: async (key) => {
+        const value = window.localStorage.getItem(key);
+        capturedValues.set(key, value);
+        return value;
+      },
+      api: {
+        createWorkspaceMigration: tldwClient.createWorkspaceMigration,
+        putWorkspaceMigrationChunk: tldwClient.putWorkspaceMigrationChunk,
+        finalizeWorkspaceMigration: tldwClient.finalizeWorkspaceMigration,
+        getWorkspaceMigration: tldwClient.getWorkspaceMigration,
+        ackWorkspaceMigrationClientDelete:
+          tldwClient.ackWorkspaceMigrationClientDelete,
+      },
+      deleteLocalStorageValue: (key) => {
+        deleteResearchWorkspaceMigrationLocalValue(
+          key,
+          capturedValues.get(key),
+          isCurrent,
+        );
+        removedKeys.add(key);
+      },
+      writeLocalStorageValue: (key, value) => {
+        if (!isCurrent())
+          throw new Error(
+            "Workspace migration owner changed before local cleanup.",
+          );
+        if (
+          key === buildResearchWorkspaceMigrationTombstoneKey(workspaceId) &&
+          [...removedKeys].some(
+            (name) => window.localStorage.getItem(name) !== null,
+          )
+        )
+          throw new Error(
+            "Local workspace data reappeared during migration cleanup.",
+          );
+        window.localStorage.setItem(key, value);
+        capturedValues.set(key, value);
+      },
+      now: () => new Date().toISOString(),
+    });
 
     void migrationPromise
       .then((result) => {
-        if (cancelled) return
+        if (!isCurrent()) return;
         setWorkspaceMigrationResult(result)
       })
       .catch((error) => {
-        if (cancelled) return
+        if (!isCurrent()) return;
         setWorkspaceMigrationResult({
           status: "failed",
           migrationId: null,
@@ -1858,21 +1874,24 @@ const ResearchWorkspaceBody: React.FC = () => {
           serverMigration: null,
           localDeletionEligibility: null,
           deletedSurfaceIds: [],
-          message: "Research Workspace migration failed before local deletion.",
-          error
-        })
+          message:
+            "Research Workspace migration stopped. Review local data before retrying cleanup.",
+          error,
+        });
       })
       .finally(() => {
-        if (workspaceMigrationInFlightRef.current?.signature === signature) {
-          workspaceMigrationInFlightRef.current = null
-        }
-        if (!cancelled) {
-          setWorkspaceMigrationLoading(false)
+        releaseAccount();
+        if (mounted && !retired) {
+          setWorkspaceMigrationLoading(false);
         }
       })
 
     return () => {
-      cancelled = true
+      mounted = false;
+      retired = true;
+      releaseAccount();
+      if (workspaceMigrationSignatureRef.current === signature)
+        workspaceMigrationSignatureRef.current = null;
     }
   }, [
     isStoreHydrated,

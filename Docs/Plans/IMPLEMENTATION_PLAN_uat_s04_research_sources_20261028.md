@@ -260,3 +260,11 @@ S04 stays OPEN at40/43; URL's other three modes, Search Server/real availability
 Workspace Open unit: source repair74476b7 is locally committed, frontend build/native still30e. Shared route must resolve source_workspace_id before local Research mounts, through existing canonical owner leases; preserve local drafts and retire stale results. Causal manager/router/gate/store A/B and server-only tests precede implementation. Detailed scope and source-commit identity are in the task notes.
 
 Workspace Open source correction now covers canonical cached/active/account data, refusal without loss of unbound dirty notes/Chat, and compatibility with the existing Deep Research return handler. Causal failures, focused green cohorts, exact English mirrors, scoped quality checks and review findings are recorded in the task. Final review/hooks/local commit/build/native remain open; no full-family or historical-incident closure.
+
+## Migration marker and target-scope safety repair
+
+**Goal**: Recognize exact product-generated non-content markers and preserve unrelated or unproven local workspace payloads during target migration.
+**Success Criteria**: Actual producer-marker regression; A+B split/global/shared-store regressions retain B; malformed and unknown content stays blocking; legitimate target-only and server/local failure gates remain.
+**Tests**: Real planner/run unit regressions, affected inventory/migration/import consumers in both clients, scoped static checks and independent review; changed build/native only after source qualification.
+**ADR assessment**: Existing ADR-007/008 and current target/deletion preservation contract; no new architecture rule or metadata authority.
+**Status**: In Progress — source correction and independent actual-source review clear; final four-module verification119/UI and119/WebUI passed. Staged review/hooks/local commit, build and faithful changed-source native migration/URL checks remain.
