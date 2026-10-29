@@ -119,6 +119,7 @@ from tldw_Server_API.app.core.Chat.bounded_daemon import (
     await_bounded_sync_call,
 )
 from tldw_Server_API.app.core.config import resolve_repo_relative_path, rg_policy_path
+from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
 from tldw_Server_API.app.core.Embeddings.async_embeddings import (
     EmbeddingEndpointError,
     EmbeddingProviderError,
@@ -141,7 +142,6 @@ from tldw_Server_API.app.core.testing import (
     is_test_mode,
 )
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
-from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
 _EMBEDDINGS_NONCRITICAL_EXCEPTIONS = (
     ImportError,

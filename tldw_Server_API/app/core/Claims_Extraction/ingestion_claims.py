@@ -60,6 +60,7 @@ from tldw_Server_API.app.core.Claims_Extraction.runtime_config import (
     resolve_claims_llm_config,
 )
 from tldw_Server_API.app.core.config import settings as _settings
+from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     ensure_app_config,
@@ -69,7 +70,6 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     split_system_message,
 )
 from tldw_Server_API.app.core.Usage.llm_call_context import capture_llm_call_state, run_with_llm_call_state
-from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
 try:
     import psycopg as _psycopg

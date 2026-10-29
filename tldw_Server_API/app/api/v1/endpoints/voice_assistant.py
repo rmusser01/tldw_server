@@ -12,6 +12,7 @@ import contextlib
 import json
 import time
 import uuid
+from functools import partial
 from typing import Any, Optional
 
 import numpy as np
@@ -28,6 +29,7 @@ from fastapi import (
 )
 from loguru import logger
 from pydantic import BaseModel, Field
+from starlette.websockets import WebSocketState
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user,
@@ -76,10 +78,9 @@ from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError
 from tldw_Server_API.app.core.TTS.tts_request_resolution import (
     resolve_tts_request_defaults,
 )
-from tldw_Server_API.app.core.AuthNZ.websocket_principal import DEPRECATED_WS_CHANNEL, verify_ws_credential
-from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
-    cookie_websocket_rejection_code,
-    resolve_single_user_cookie_websocket,
+from tldw_Server_API.app.core.AuthNZ.websocket_principal import (
+    resolve_ws_principal_first_frame,
+    resolve_ws_principal_or_deprecated_query,
 )
 from tldw_Server_API.app.core.VoiceAssistant import (
     ActionType,
@@ -158,18 +159,30 @@ def _voice_command_to_info(command: VoiceCommand) -> VoiceCommandInfo:
     )
 
 
-async def _authenticate_websocket(websocket: WebSocket, token: str) -> tuple[bool, Optional[int]]:
-    """Verify an AUTH-frame token (a JWT or an API key) on the shared WebSocket path.
+# The AUTH_ERROR text the voice SDKs show, by refusal reason; anything else is "Invalid credentials".
+_AUTH_ERRORS = {"authentication_timeout": "Authentication timeout", "expected_auth_frame": "Expected AUTH message"}
 
-    ``verify_ws_credential`` hands it to HTTP's verifier as ``Authorization: Bearer``, so revocation,
-    the API key's ``read`` scope and the single-user key and IP allowlist follow HTTP (TASK-13950.7).
-    Returns ``(authenticated, user_id)``; a service token has no user and is refused.
+
+async def _authenticate_websocket(websocket: WebSocket) -> int:
+    """Return the user id of the caller's AUTH frame, ``{"type": "auth", "token": <JWT or API key>}``.
+
+    The core first-frame resolver accepts the socket, reads only that frame and verifies its token
+    on HTTP's path, so revocation, the API key's ``read`` scope and the single-user key and IP
+    allowlist follow HTTP (TASK-13950.7). It waits ``FIRST_FRAME_TIMEOUT_S`` (10 s) for the frame. A
+    frame without a token falls back to the cookie, then to a handshake credential, then to the
+    DEPRECATED ``?token=`` the voice SDKs also send (TASK-13950.61 moves them); ``?api_key=`` is not
+    read. Raises ``WebSocketException`` as the resolver does, and 4401 for a service token, which owns
+    no voice session.
     """
-    try:
-        principal = await verify_ws_credential(websocket, token=token, required_scope="read")
-    except WebSocketException:
-        return False, None
-    return principal.user_id is not None, principal.user_id
+    principal = await resolve_ws_principal_first_frame(
+        websocket,
+        required_scope="read",
+        # ``?token=`` only, the one query channel voice ever read; never the shim's ``?api_key=``.
+        tokenless_frame=partial(resolve_ws_principal_or_deprecated_query, query_params=("token",)),
+    )
+    if principal.user_id is None:
+        raise WebSocketException(code=4401, reason="user_principal_required")
+    return principal.user_id
 
 
 async def _generate_tts_audio(
@@ -971,10 +984,7 @@ def _save_session_and_load_commands(db: CharactersRAGDB, session: Any, registry:
 
 
 @ws_router.websocket("/assistant")
-async def websocket_voice_assistant(
-    websocket: WebSocket,
-    token: Optional[str] = Query(None),
-):
+async def websocket_voice_assistant(websocket: WebSocket):
     """
     WebSocket endpoint for real-time voice assistant sessions.
 
@@ -988,13 +998,6 @@ async def websocket_voice_assistant(
     7. Server sends TRANSCRIPTION, INTENT, ACTION_START, ACTION_RESULT, TTS_CHUNK*, TTS_END
     8. Repeat from step 5
     """
-    cookie_identity = await resolve_single_user_cookie_websocket(websocket)
-    cookie_close_code = cookie_websocket_rejection_code(websocket)
-    if cookie_close_code is not None:
-        await websocket.close(code=cookie_close_code)
-        return
-    await websocket.accept()
-
     user_id: Optional[int] = None
     session_id: Optional[str] = None
     db: Optional[CharactersRAGDB] = None
@@ -1002,44 +1005,16 @@ async def websocket_voice_assistant(
     transcriber = None
 
     try:
-        # Wait for authentication
-        auth_timeout = 10.0  # seconds
         try:
-            auth_data = await asyncio.wait_for(
-                websocket.receive_json(),
-                timeout=auth_timeout,
-            )
-        except asyncio.TimeoutError:
-            await websocket.send_json(
-                WSAuthErrorMessage(error="Authentication timeout").model_dump()
-            )
-            await websocket.close(code=4401)
-            return
-
-        # Process auth message
-        if auth_data.get("type") != WSMessageType.AUTH.value:
-            await websocket.send_json(
-                WSAuthErrorMessage(error="Expected AUTH message").model_dump()
-            )
-            await websocket.close(code=4400)
-            return
-
-        auth_token = auth_data.get("token")
-        if not auth_token and token:  # the voice SDKs also send it in the URL, which access logs keep
-            logger.warning(DEPRECATED_WS_CHANNEL, "query token", websocket.url.path)
-            auth_token = token
-        if auth_token:
-            authenticated, user_id = await _authenticate_websocket(websocket, auth_token)
-        elif cookie_identity is not None:
-            authenticated, user_id = True, cookie_identity.user_id
-        else:
-            authenticated, user_id = False, None
-
-        if not authenticated or user_id is None:
-            await websocket.send_json(
-                WSAuthErrorMessage(error="Invalid credentials").model_dump()
-            )
-            await websocket.close(code=4401)
+            user_id = await _authenticate_websocket(websocket)
+        except WebSocketException as refused:
+            if websocket.application_state != WebSocketState.CONNECTED:  # the cookie's Origin check
+                await websocket.close(code=refused.code)
+                return
+            error = _AUTH_ERRORS.get(refused.reason, "Invalid credentials")
+            await websocket.send_json(WSAuthErrorMessage(error=error).model_dump())
+            # As shipped: 4400 for another first frame, 4401 for any refused credential.
+            await websocket.close(code=4400 if refused.reason == "expected_auth_frame" else 4401)
             return
 
         # Create session
