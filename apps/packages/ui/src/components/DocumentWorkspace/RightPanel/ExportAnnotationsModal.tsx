@@ -196,15 +196,15 @@ export const ExportAnnotationsModal: React.FC<ExportAnnotationsModalProps> = ({
           >
             <div className="space-y-2">
               {formats.map((option) => (
-                <label
+                <Radio
                   key={option.value}
-                  className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
+                  value={option.value}
+                  className={`!m-0 !flex w-full cursor-pointer !items-start gap-3 rounded-lg border p-3 transition-colors ${
                     format === option.value
                       ? "border-primary bg-primary/5"
                       : "border-border hover:border-primary/50"
                   }`}
                 >
-                  <Radio value={option.value} className="mt-0.5" />
                   <div className="flex items-start gap-3">
                     <span className="text-text-secondary">{option.icon}</span>
                     <div>
@@ -214,7 +214,7 @@ export const ExportAnnotationsModal: React.FC<ExportAnnotationsModalProps> = ({
                       </p>
                     </div>
                   </div>
-                </label>
+                </Radio>
               ))}
             </div>
           </Radio.Group>

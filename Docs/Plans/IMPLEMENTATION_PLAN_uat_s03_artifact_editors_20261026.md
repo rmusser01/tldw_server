@@ -537,3 +537,12 @@ The repaired Tour passed its real resume/Close workflow, and Chat/render/upload2
 Actual public worker4.10.38 mismatched the shared viewer react-pdf9.2.1/PDF.js4.8.69. The existing copy step resolved an independent hoisted package. Minimal correction resolves shared UI then its react-pdf then that dependency PDF.js, accepts legacy/modern only within that package and refuses missing viewer worker. Three full-CLI isolated package-resolution cases failed then passed; actual normal copy now exactly matches the installed4.8.69worker. Script/test lint0; JS/TS Bandit N/A. No new package, dependency installation or user runtime/model change. The pending raw receipt is not independently attributed; normal repaired-build rendering and strict transport checks still required.
 
 Finish the existing saved PDF without another initial generation/upload, then continue the three unattempted deployment modes. Overall39/43/S03InProgress; historical Kanban incident stays open.
+
+
+## Document export label font inheritance — 2026-10-28
+
+Worker repair renders the existing2pagePDF; page2note saves/reloads. Two export attempts showed nonactionable format text while the dialog stayed open. A bounded actual browser style scan (1000ms/50000rules/depth8;33796rules inspected completely) found p/font-size0px/line-height0px/height0 inherited from AntdRadioGroup's actual font-size0 rule. Descriptions remained visible through explicittext-xs. No modal-close defect is claimed.
+
+The existing markup put content outside an empty AntdRadio in a second outerlabel. Minimal fix makes the existingRadio the solelabel and contentwrapper, restoring its normal typography. Four nested-label violations causally fail before correction; full7exportcontrols pass in UI/WebUI, preserving values, keyboard/group behavior and all prior export/ownership controls. Source reviewCLEAR; scopedlint0/TS-onlyBanditN/A. Normalhooks/stagedreview/commit/build and actualfont/export/workertransport acceptance remain required.
+
+Only the acknowledgedPDF1 and exactsavedpage2note may continue; no repeat initialGenerate/render/upload/annotation. Private workerreceipt observation stays failclosed, and subsequent savedDocnavigation waits for actual2pageviewer readiness before export/integrity/handback. HistoricalKanbanincident remainsopen; S03 stays39/43/InProgress beforeS04.
