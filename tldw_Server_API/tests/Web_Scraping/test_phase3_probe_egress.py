@@ -859,6 +859,7 @@ from tldw_Server_API.app.core.Web_Scraping.runtime import PolicyDecision, Runtim
 forbidden_exact = {{
     'tldw_Server_API.app.core.Web_Scraping.outbound_policy',
     'tldw_Server_API.app.core.Security.egress',
+    'tldw_Server_API.app.core.Utils.egress',
     'tldw_Server_API.app.core.http_client',
     'tldw_Server_API.app.core.Web_Scraping.preflight.adapters.http',
     'tldw_Server_API.app.core.Web_Scraping.preflight.adapters.browser',

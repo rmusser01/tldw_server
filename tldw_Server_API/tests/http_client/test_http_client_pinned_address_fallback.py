@@ -142,6 +142,20 @@ async def _afetch_httpx_bounded(seen, **kwargs):
     return await _afetch_httpx(seen, max_response_bytes=10, **kwargs)
 
 
+async def _fetch_sync_bounded(seen, *, url=_LOCAL, up=_UP, **kwargs):
+    with httpx.Client(transport=_transport(seen, up)) as client:
+        response = http_client.fetch(
+            method="GET",
+            url=url,
+            client=client,
+            configured_endpoint=_LOCAL_SCOPE,
+            retry=_ONE_ATTEMPT,
+            max_response_bytes=10,
+            **kwargs,
+        )
+        return response.content
+
+
 async def _afetch_aiohttp(seen, *, url=_LOCAL, up=_UP):
     response = await http_client._afetch_aiohttp(
         method="GET",
@@ -205,6 +219,7 @@ _RUNNERS: dict[str, tuple[Callable[..., Awaitable[bytes]], str, str | None]] = {
     "afetch-httpx-bounded": (_afetch_httpx_bounded, "localhost:8080", "localhost"),
     "afetch-aiohttp": (_afetch_aiohttp, "localhost:8080", None),
     "fetch-sync": (_fetch_sync, "localhost:8080", "localhost"),
+    "fetch-sync-bounded": (_fetch_sync_bounded, "localhost:8080", "localhost"),
     "astream-httpx": (_astream_httpx, "dual.example", "dual.example"),
     "astream-aiohttp": (_astream_aiohttp, "dual.example", "dual.example"),
     "stream-response-sync": (_stream_response_sync, "dual.example", "dual.example"),
@@ -229,7 +244,7 @@ async def test_a_refused_first_address_falls_back_to_the_next_vetted_one(dns, so
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("path", ["afetch-httpx", "afetch-httpx-bounded", "afetch-aiohttp", "fetch-sync"])
+@pytest.mark.parametrize("path", ["afetch-httpx", "afetch-httpx-bounded", "afetch-aiohttp", "fetch-sync", "fetch-sync-bounded"])
 async def test_every_vetted_address_failing_raises_one_network_error(dns, sockets, path):
     run, _host_header, _sni = _RUNNERS[path]
     seen: list[tuple[str, str, object]] = []
@@ -241,7 +256,7 @@ async def test_every_vetted_address_failing_raises_one_network_error(dns, socket
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("path", ["afetch-httpx", "afetch-aiohttp", "fetch-sync"])
+@pytest.mark.parametrize("path", ["afetch-httpx", "afetch-aiohttp", "fetch-sync", "fetch-sync-bounded"])
 async def test_an_egress_refused_answer_refuses_the_request_before_any_connect(dns, sockets, path):
     """One forbidden answer refuses the whole host, as before: no address is tried."""
     run, _host_header, _sni = _RUNNERS[path]
@@ -350,6 +365,37 @@ async def test_only_the_final_address_gets_the_full_connect_timeout_on_httpx(dns
         {"connect": capped, "read": 300.0, "write": 300.0, "pool": 300.0},
         {"connect": 300.0, "read": 300.0, "write": 300.0, "pool": 300.0},
     ]
+
+
+class _Eleven(httpx.SyncByteStream):
+    def __iter__(self):
+        yield b"x" * 11
+
+
+def test_sync_bounded_read_falls_back_with_the_connect_budget_and_the_byte_cap(dns, sockets):
+    """The sync max_response_bytes read: pinned fallback, capped non-final connect, enforced bound."""
+    timeouts: list[dict] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        timeouts.append(request.extensions["timeout"])
+        if request.url.host == "::1":
+            raise httpx.ConnectError("Connection refused", request=request)
+        return httpx.Response(200, stream=_Eleven(), request=request)
+
+    with httpx.Client(transport=httpx.MockTransport(handle), timeout=300.0) as client:
+        kwargs = {"method": "GET", "url": _LOCAL, "client": client, "configured_endpoint": _LOCAL_SCOPE}
+        kwargs |= {"retry": _ONE_ATTEMPT, "timeout": 300.0}
+        assert http_client.fetch(max_response_bytes=11, **kwargs).content == b"x" * 11
+        timeouts.clear()
+        with pytest.raises(NetworkError, match="max_response_bytes"):
+            http_client.fetch(max_response_bytes=10, **kwargs)
+
+    capped = http_client.DEFAULT_CONNECT_TIMEOUT
+    assert timeouts == [
+        {"connect": capped, "read": 300.0, "write": 300.0, "pool": 300.0},
+        {"connect": 300.0, "read": 300.0, "write": 300.0, "pool": 300.0},
+    ]
+    assert sockets == []
 
 
 @pytest.mark.asyncio

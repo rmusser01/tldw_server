@@ -354,6 +354,10 @@ def _is_strict_test_bypass_context() -> bool:
 
 
 def _looks_like_jwt(token: Optional[str]) -> bool:
+    """Whether ``token`` has a JWT's three dot-separated segments; a bearer that does not is an API key.
+
+    The one definition (TASK-13950.7): auth_principal_resolver and API_Deps.auth_deps import it.
+    """
     if not isinstance(token, str):
         return False
     return token.count(".") == 2

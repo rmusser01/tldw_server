@@ -276,6 +276,7 @@ jobs:
       # The size ratchets (TASK-13950.8) compare their baselines with the same base, so a
       # raised ceiling must carry a new reason in the PR diff.
       # The layering contract (TASK-13950.9) does the same for a raised import count.
+      # The DB_Management logic-import ratchet (TASK-13950.16) does the same for its import counts.
       # inputs.base_sha is set only on a dispatch (the merge queue passes dev's tip).
       - name: Enforce CI contracts and code ratchets
         if: needs.changes.outputs.backend_changed == 'true'
@@ -299,6 +300,7 @@ jobs:
             tldw_Server_API/tests/lint/test_charactersragdb_surface_ratchet.py \
             tldw_Server_API/tests/lint/test_http_usage_guard.py \
             tldw_Server_API/tests/lint/test_layering_contract.py \
+            tldw_Server_API/tests/lint/test_db_management_logic_imports.py \
             tldw_Server_API/tests/lint/test_core_to_api_import_boundary.py \
             tldw_Server_API/tests/lint/test_direct_llm_adapter_calls_ratchet.py \
             tldw_Server_API/tests/lint/test_llm_calls_import_isolation.py \

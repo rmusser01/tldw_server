@@ -20,10 +20,7 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Email.email_ingestion_metrics import (
-    iter_email_metric_definitions,
-)
-
+from .email_metrics import iter_email_metric_definitions
 from .stt_metrics import iter_stt_metric_definitions
 from .telemetry import OTEL_AVAILABLE, get_telemetry_manager
 
