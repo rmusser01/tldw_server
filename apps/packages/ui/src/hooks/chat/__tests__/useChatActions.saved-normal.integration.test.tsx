@@ -3108,7 +3108,7 @@ describe("saved normal Chat pipeline with autosave", () => {
           currentSource.isCurrent, account.isCurrent)!.read()
       }
       const hook = renderHook(() => {
-        const capturePrivateScene = useResearchActorScene(scope.type === "workspace" ? scope.workspaceId : null, "research-reference")
+        const { capturePrivateScene } = useResearchActorScene(scope.type === "workspace" ? scope.workspaceId : null, "research-reference")
         const current = useStoreMessageOption()
         const [controller, updateController] = React.useState<AbortController | null>(null)
         const controllerRef = React.useRef<AbortController | null>(null)

@@ -991,3 +991,379 @@ it("preserves intentional changed-head refusal when canonical recovery verifies 
   });
   expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual([]);
 });
+
+
+describe("post-migration saved chat identity", () => {
+  const chatId = "11111111-2222-4333-8444-555555555555";
+  const empty = {
+    messages: [],
+    history: [],
+    historyId: null,
+    serverChatId: chatId
+  };
+  const owner = () => {
+    const controller = boundary.controller;
+    return {
+      scopeKey: boundary.scopeKey,
+      isCurrent: () => !controller.signal.aborted
+    };
+  };
+
+  it("retains an acknowledged chat identity without restoring local transcript payloads", async () => {
+    useWorkspaceStore.setState({
+      workspaceId: "original",
+      workspaceChatReferenceId: "original"
+    });
+    useWorkspaceStore.getState().saveWorkspaceChatSession(
+      "original",
+      {
+        ...empty,
+        messages: [
+          { isBot: true, name: "AI", message: "Private answer", sources: [] }
+        ]
+      },
+      owner()
+    );
+    const receipt = JSON.parse(localStorage.getItem(receiptKey)!);
+    expect(receipt.chatReference).toEqual({
+      referenceId: "original",
+      serverChatId: chatId
+    });
+    expect(JSON.stringify(receipt)).not.toContain("Private answer");
+  });
+
+  it("does not let initial null state erase the hint, but remembers explicit Clear and Undo", () => {
+    useWorkspaceStore.setState({
+      workspaceId: "original",
+      workspaceChatReferenceId: "original"
+    });
+    const save = useWorkspaceStore.getState().saveWorkspaceChatSession;
+    save("original", empty, owner());
+    save("original", { ...empty, serverChatId: null }, owner());
+    expect(
+      JSON.parse(localStorage.getItem(receiptKey)!).chatReference.serverChatId
+    ).toBe(chatId);
+    save(
+      "original",
+      { ...empty, serverChatId: null },
+      { ...owner(), clear: true }
+    );
+    expect(
+      JSON.parse(localStorage.getItem(receiptKey)!).chatReference.serverChatId
+    ).toBeNull();
+    save("original", empty, owner());
+    expect(
+      JSON.parse(localStorage.getItem(receiptKey)!).chatReference.serverChatId
+    ).toBe(chatId);
+  });
+
+  it.each(["account", "workspace", "reference", "bound-owner"])(
+    "rejects a retired %s hint writer",
+    (change) => {
+      useWorkspaceStore.setState({
+        workspaceId: "original",
+        workspaceChatReferenceId: "original"
+      });
+      const captured = owner();
+      const before = localStorage.getItem(receiptKey);
+      if (change === "account") boundary.controller.abort();
+      if (change === "workspace")
+        useWorkspaceStore.setState({ workspaceId: "other" });
+      if (change === "reference")
+        useWorkspaceStore.setState({ workspaceChatReferenceId: "other" });
+      if (change === "bound-owner") captured.scopeKey = "other-account";
+      useWorkspaceStore
+        .getState()
+        .saveWorkspaceChatSession("original", empty, captured);
+      expect(localStorage.getItem(receiptKey)).toBe(before);
+    }
+  );
+
+  it("keeps an unbound marker unbound until canonical membership and chat validation", async () => {
+    const receipt = JSON.parse(localStorage.getItem(receiptKey)!);
+    delete receipt.serverScopeKey;
+    localStorage.setItem(receiptKey, JSON.stringify(receipt));
+    useWorkspaceStore.setState({
+      workspaceId: "original",
+      workspaceChatReferenceId: "original"
+    });
+    useWorkspaceStore
+      .getState()
+      .saveWorkspaceChatSession("original", empty, owner());
+    expect(
+      JSON.parse(localStorage.getItem(receiptKey)!).serverScopeKey
+    ).toBeUndefined();
+    const originalRequest = boundary.request.getMockImplementation()!;
+    boundary.request.mockImplementation(async (request) =>
+      request.path.startsWith("/api/v1/chats/")
+        ? {
+            id: chatId,
+            scope_type: "workspace",
+            workspace_id: "original",
+            deleted: false
+          }
+        : originalRequest(request)
+    );
+    useWorkspaceStore.setState({
+      workspaceId: "",
+      workspaceChatReferenceId: "",
+      workspaceChatSessions: {}
+    });
+    await useWorkspaceStore.persist.rehydrate();
+    expect(useWorkspaceStore.getState().workspaceId).toBe("");
+    await restore();
+    expect(
+      useWorkspaceStore.getState().getWorkspaceChatSession("original")
+    ).toEqual(empty);
+    expect(JSON.parse(localStorage.getItem(receiptKey)!).serverScopeKey).toBe(
+      "original-alice"
+    );
+    expect(boundary.request).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "/api/v1/workspaces/" })
+    );
+  });
+
+  it("retains the acknowledged in-memory ID and answer if hint storage fails", () => {
+    useWorkspaceStore.setState({
+      workspaceId: "original",
+      workspaceChatReferenceId: "original"
+    });
+    const setItem = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new Error("Quota exceeded");
+      });
+    const session = {
+      ...empty,
+      messages: [
+        { isBot: true, name: "AI", message: "Keep this answer", sources: [] }
+      ]
+    };
+    try {
+      expect(() =>
+        useWorkspaceStore
+          .getState()
+          .saveWorkspaceChatSession("original", session, owner())
+      ).toThrow("Quota exceeded");
+      expect(
+        useWorkspaceStore.getState().getWorkspaceChatSession("original")
+      ).toEqual(session);
+    } finally {
+      setItem.mockRestore();
+    }
+  });
+
+  it.each([
+    { id: "foreign" },
+    { scope_type: "global" },
+    { workspace_id: "foreign" },
+    { deleted: true }
+  ])(
+    "refuses a mismatched saved chat head %j before publishing",
+    async (wrong) => {
+      const receipt = JSON.parse(localStorage.getItem(receiptKey)!);
+      delete receipt.serverScopeKey;
+      localStorage.setItem(
+        receiptKey,
+        JSON.stringify({
+          ...receipt,
+          chatReference: { referenceId: "original", serverChatId: chatId }
+        })
+      );
+      const before = localStorage.getItem(receiptKey);
+      const originalRequest = boundary.request.getMockImplementation()!;
+      boundary.request.mockImplementation(async (request) =>
+        request.path.startsWith("/api/v1/chats/")
+          ? {
+              id: chatId,
+              scope_type: "workspace",
+              workspace_id: "original",
+              deleted: false,
+              ...wrong
+            }
+          : originalRequest(request)
+      );
+      const apply = vi.fn();
+      await expect(restore(apply)).rejects.toThrow("Saved workspace chat");
+      expect(apply).not.toHaveBeenCalled();
+      expect(localStorage.getItem(receiptKey)).toBe(before);
+    }
+  );
+
+  it("does not publish a chat head after account invalidation", async () => {
+    const receipt = JSON.parse(localStorage.getItem(receiptKey)!);
+    localStorage.setItem(
+      receiptKey,
+      JSON.stringify({
+        ...receipt,
+        chatReference: { referenceId: "original", serverChatId: chatId }
+      })
+    );
+    const originalRequest = boundary.request.getMockImplementation()!;
+    boundary.request.mockImplementation(async (request) => {
+      if (!request.path.startsWith("/api/v1/chats/"))
+        return originalRequest(request);
+      boundary.controller.abort();
+      return {
+        id: chatId,
+        scope_type: "workspace",
+        workspace_id: "original",
+        deleted: false
+      };
+    });
+    const apply = vi.fn();
+    await expect(restore(apply)).rejects.toMatchObject({ status: 412 });
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it("updates the actual legacy-key receipt when its server workspace ID differs", () => {
+    const receipt = JSON.parse(localStorage.getItem(receiptKey)!);
+    localStorage.removeItem(receiptKey);
+    const legacyKey =
+      "tldw:research-workspace:migration:tombstone:legacy-original";
+    localStorage.setItem(
+      legacyKey,
+      JSON.stringify({ ...receipt, legacyWorkspaceId: "legacy-original" })
+    );
+    useWorkspaceStore.setState({
+      workspaceId: "original",
+      workspaceChatReferenceId: "original"
+    });
+    useWorkspaceStore
+      .getState()
+      .saveWorkspaceChatSession("original", empty, owner());
+    expect(
+      JSON.parse(localStorage.getItem(legacyKey)!).chatReference.serverChatId
+    ).toBe(chatId);
+    expect(localStorage.getItem(receiptKey)).toBeNull();
+  });
+
+  it("does not overwrite a newer hint that arrives during restoration", async () => {
+    const receipt = JSON.parse(localStorage.getItem(receiptKey)!);
+    localStorage.setItem(
+      receiptKey,
+      JSON.stringify({
+        ...receipt,
+        chatReference: { referenceId: "original", serverChatId: chatId }
+      })
+    );
+    let latest = "";
+    const originalRequest = boundary.request.getMockImplementation()!;
+    boundary.request.mockImplementation(async (request) => {
+      if (!request.path.startsWith("/api/v1/chats/"))
+        return originalRequest(request);
+      latest = JSON.stringify({
+        ...receipt,
+        chatReference: { referenceId: "new-selection", serverChatId: null }
+      });
+      localStorage.setItem(receiptKey, latest);
+      return {
+        id: chatId,
+        scope_type: "workspace",
+        workspace_id: "original",
+        deleted: false
+      };
+    });
+    const apply = vi.fn();
+    await expect(restore(apply)).rejects.toThrow("changed during restoration");
+    expect(apply).not.toHaveBeenCalled();
+    expect(localStorage.getItem(receiptKey)).toBe(latest);
+  });
+
+  it("checks synchronous selection retirement before binding and publication", async () => {
+    let current = true;
+    const receipt = JSON.parse(localStorage.getItem(receiptKey)!);
+    delete receipt.serverScopeKey;
+    localStorage.setItem(
+      receiptKey,
+      JSON.stringify({
+        ...receipt,
+        chatReference: { referenceId: "original", serverChatId: chatId }
+      })
+    );
+    const before = localStorage.getItem(receiptKey);
+    const originalRequest = boundary.request.getMockImplementation()!;
+    boundary.request.mockImplementation(async (request) => {
+      if (!request.path.startsWith("/api/v1/chats/"))
+        return originalRequest(request);
+      current = false;
+      return {
+        id: chatId,
+        scope_type: "workspace",
+        workspace_id: "original",
+        deleted: false
+      };
+    });
+    const apply = vi.fn();
+    await expect(
+      restoreMigratedResearchWorkspace({
+        signal: new AbortController().signal,
+        isCurrent: () => current,
+        apply
+      })
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(apply).not.toHaveBeenCalled();
+    expect(localStorage.getItem(receiptKey)).toBe(before);
+  });
+
+  it.each([
+    null,
+    [],
+    { referenceId: "original", serverChatId: {} },
+    { referenceId: "x".repeat(257), serverChatId: chatId }
+  ])(
+    "refuses malformed reference %j without creating a replacement",
+    async (chatReference) => {
+      const receipt = JSON.parse(localStorage.getItem(receiptKey)!);
+      localStorage.setItem(
+        receiptKey,
+        JSON.stringify({ ...receipt, chatReference })
+      );
+      const apply = vi.fn();
+      await expect(restore(apply)).rejects.toThrow("reference is invalid");
+      expect(apply).not.toHaveBeenCalled();
+      expect(
+        boundary.request.mock.calls.every(
+          ([request]) => request.method === "GET"
+        )
+      ).toBe(true);
+    }
+  );
+
+  it("restores a retained empty chat through the exact account-scoped server head", async () => {
+    const receipt = JSON.parse(localStorage.getItem(receiptKey)!);
+    localStorage.setItem(
+      receiptKey,
+      JSON.stringify({
+        ...receipt,
+        chatReference: { referenceId: "original", serverChatId: chatId }
+      })
+    );
+    const originalRequest = boundary.request.getMockImplementation()!;
+    boundary.request.mockImplementation(async (request) =>
+      request.path.startsWith("/api/v1/chats/")
+        ? {
+            id: chatId,
+            scope_type: "workspace",
+            workspace_id: "original",
+            deleted: false
+          }
+        : originalRequest(request)
+    );
+    await expect(restore()).resolves.toBe(true);
+    expect(
+      useWorkspaceStore.getState().getWorkspaceChatSession("original")
+    ).toEqual(empty);
+    expect(boundary.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "GET",
+        path: `/api/v1/chats/${chatId}?scope_type=workspace&workspace_id=original`,
+        servicePromptConfig: expect.objectContaining({
+          ...boundary.config,
+          expectedUserId: "alice"
+        }),
+        headers: { "X-TLDW-Expected-User-ID": "alice" }
+      })
+    );
+  });
+});

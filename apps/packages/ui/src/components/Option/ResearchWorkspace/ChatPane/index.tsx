@@ -1258,7 +1258,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     [workspaceId]
   )
 
-  const capturePrivateScene = useResearchActorScene(workspaceId, workspaceChatReferenceId)
+  const { capturePrivateScene, captureChatReferenceOwner } = useResearchActorScene(workspaceId, workspaceChatReferenceId)
 
   // Message option hook
   const {
@@ -1386,6 +1386,33 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         workspaceChatReferenceId || workspaceId || WORKSPACE_CONVERSATION_ID
       ),
     [workspaceChatReferenceId, workspaceId]
+  )
+
+  const saveOwnedChatSession = React.useCallback(
+    (session: Parameters<typeof saveWorkspaceChatSession>[1], clear = false) => {
+      const owner = captureChatReferenceOwner()
+      if (!owner) return
+      try {
+        saveWorkspaceChatSession(workspaceSessionId, session, { ...owner, clear })
+        messageApi.destroy("research-chat-reference-save")
+      } catch {
+        messageApi.error({
+          key: "research-chat-reference-save",
+          duration: 0,
+          content: t(
+            "playground:chat.referenceSaveFailed",
+            "Your answer is retained in this session, but its saved chat could not be remembered for reload. Free browser storage before leaving this page."
+          )
+        })
+      }
+    },
+    [
+      captureChatReferenceOwner,
+      messageApi,
+      saveWorkspaceChatSession,
+      t,
+      workspaceSessionId
+    ]
   )
 
   // Smart scroll for chat messages
@@ -1918,7 +1945,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     if (!workspaceSessionId) return
     if (workspaceSessionRef.current !== workspaceSessionId) return
 
-    saveWorkspaceChatSession(workspaceSessionId, {
+    saveOwnedChatSession({
       messages,
       history,
       historyId,
@@ -1930,7 +1957,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     history,
     historyId,
     serverChatId,
-    saveWorkspaceChatSession
+    saveOwnedChatSession
   ])
 
   React.useEffect(() => {
@@ -2570,6 +2597,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   const handleClearChat = () => {
     if (!hasMessages) return
+    const owner = captureChatReferenceOwner()
+    if (!owner?.isCurrent()) return
 
     Modal.confirm({
       title: t("playground:chat.clearTitle", "Clear chat?"),
@@ -2580,6 +2609,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       okText: t("common:clear", "Clear"),
       cancelText: t("common:cancel", "Cancel"),
       onOk: () => {
+        if (!owner.isCurrent()) return
         const previousMessages = [...messages]
         const previousHistory = [...history]
         const previousHistoryId = historyId
@@ -2587,6 +2617,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
         const undoHandle = scheduleWorkspaceUndoAction({
           apply: () => {
+            if (!owner.isCurrent()) return
             setMessages([])
             setHistory([])
             setHistoryId(null, { preserveServerChatId: true })
@@ -2594,14 +2625,15 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             setStreaming(false)
             setIsProcessing(false)
             setSubmitError(null)
-            saveWorkspaceChatSession(workspaceSessionId, {
+            saveOwnedChatSession({
               messages: [],
               history: [],
               historyId: null,
               serverChatId: null
-            })
+            }, true)
           },
           undo: () => {
+            if (!owner.isCurrent()) return
             setMessages(previousMessages)
             setHistory(previousHistory)
             setHistoryId(previousHistoryId, { preserveServerChatId: true })
@@ -2609,7 +2641,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             setStreaming(false)
             setIsProcessing(false)
             setSubmitError(null)
-            saveWorkspaceChatSession(workspaceSessionId, {
+            saveOwnedChatSession({
               messages: previousMessages,
               history: previousHistory,
               historyId: previousHistoryId,
@@ -2662,6 +2694,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const handleDeleteMessageWithUndo = React.useCallback(
     async (messageIndex: number) => {
       if (!Number.isInteger(messageIndex) || messageIndex < 0) return
+      const owner = captureChatReferenceOwner()
+      if (!owner?.isCurrent()) return false
       const previousMessages = [...messages]
       const previousHistory = [...history]
       const previousHistoryId = historyId
@@ -2676,13 +2710,14 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       )
 
       const accepted = await deleteMessage(messageIndex)
-      if (accepted === false) return false
+      if (accepted === false || !owner.isCurrent()) return false
       // A canonical server tombstone cannot be undone by restoring browser rows.
       if (previousServerChatId) return true
 
       const undoHandle = scheduleWorkspaceUndoAction({
         apply: () => {
-          saveWorkspaceChatSession(workspaceSessionId, {
+          if (!owner.isCurrent()) return
+          saveOwnedChatSession({
             messages: nextMessages,
             history: nextHistory,
             historyId: previousHistoryId,
@@ -2690,6 +2725,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           })
         },
         undo: () => {
+          if (!owner.isCurrent()) return
           setMessages(previousMessages)
           setHistory(previousHistory)
           setHistoryId(previousHistoryId, { preserveServerChatId: true })
@@ -2697,7 +2733,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           setStreaming(false)
           setIsProcessing(false)
           setSubmitError(null)
-          saveWorkspaceChatSession(workspaceSessionId, {
+          saveOwnedChatSession({
             messages: previousMessages,
             history: previousHistory,
             historyId: previousHistoryId,
@@ -2748,12 +2784,13 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       }
     },
     [
+      captureChatReferenceOwner,
       deleteMessage,
       history,
       historyId,
       messageApi,
       messages,
-      saveWorkspaceChatSession,
+      saveOwnedChatSession,
       serverChatId,
       setHistory,
       setHistoryId,
@@ -2761,8 +2798,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       setMessages,
       setServerChatId,
       setStreaming,
-      t,
-      workspaceSessionId
+      t
     ]
   )
 

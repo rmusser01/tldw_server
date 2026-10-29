@@ -59,7 +59,7 @@ export const useResearchActorScene = (
       useStoreMessageOption.getState().setChatDraftAddress(address);
   }, [history, address, accountIsCurrent, workspaceId, referenceId]);
 
-  return React.useCallback(
+  const capturePrivateScene = React.useCallback(
     (commandIsCurrent: () => boolean = () => true) => {
       if (history) return captureActorSceneSend(history, commandIsCurrent);
       const draft = useStoreMessageOption.getState();
@@ -121,4 +121,21 @@ export const useResearchActorScene = (
       draftRevision,
     ],
   );
+  const captureChatReferenceOwner = React.useCallback(() => {
+    if (!requestScope || !accountIsCurrent() || !mounted.current)
+      return undefined;
+    return {
+      scopeKey: requestScope.scopeKey,
+      isCurrent: () => {
+        const active = useWorkspaceStore.getState();
+        return (
+          mounted.current &&
+          accountIsCurrent() &&
+          active.workspaceId === workspaceId &&
+          active.workspaceChatReferenceId === referenceId
+        );
+      },
+    };
+  }, [requestScope, accountIsCurrent, workspaceId, referenceId]);
+  return { capturePrivateScene, captureChatReferenceOwner };
 };

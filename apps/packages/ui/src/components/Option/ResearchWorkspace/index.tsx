@@ -1,3 +1,4 @@
+import { buildWorkspaceChatSessionKey } from "@/store/workspace-chat-session-key"
 import { useStartTutorial } from "@/hooks/useStartTutorial"
 import { useResearchWebCapture } from "@/utils/use-research-web-capture"
 import { WebArticleCaptureModal } from "./SourcesPane/WebArticleCaptureModal"
@@ -1805,12 +1806,20 @@ const ResearchWorkspaceBody: React.FC = () => {
     let cancelled = false
     setWorkspaceMigrationLoading(true)
 
+    const migrationReferenceId = useWorkspaceStore.getState().workspaceChatReferenceId
+    const getChatReference = () => {
+      const active = useWorkspaceStore.getState()
+      const referenceId = active.workspaceId === workspaceId ? active.workspaceChatReferenceId : migrationReferenceId
+      const session = active.getWorkspaceChatSession(buildWorkspaceChatSessionKey(workspaceId, referenceId))
+      return session ? { referenceId, serverChatId: session.serverChatId } : undefined
+    }
     const migrationPromise =
       canReuseInFlightMigration && inFlightMigration
         ? inFlightMigration.promise
         : runResearchWorkspaceMigration({
             targetWorkspaceId: workspaceId,
             targetWorkspaceName: workspaceName || "Research Workspace",
+            getChatReference,
             discoveredLocalStorageKeys,
             discoveredIndexedDbStores,
             readLocalStorageValue: async (key) => window.localStorage.getItem(key),
@@ -2765,8 +2774,9 @@ const ResearchWorkspaceBody: React.FC = () => {
         try {
           const restored = await restoreMigratedResearchWorkspace({
             signal: restoration.signal,
-            apply: snapshot => {
-              if (!cancelled && !currentWorkspaceIdRef.current) restoreServerWorkspace(snapshot)
+            isCurrent: () => !cancelled && !useWorkspaceStore.getState().workspaceId,
+            apply: (snapshot, chatSession) => {
+              if (!cancelled && !useWorkspaceStore.getState().workspaceId) restoreServerWorkspace(snapshot, chatSession)
             }
           })
           if (restored || cancelled || currentWorkspaceIdRef.current) return
