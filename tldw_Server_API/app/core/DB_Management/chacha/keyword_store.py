@@ -17,7 +17,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
     logger,
 )
-from tldw_Server_API.app.core.Sync.v2.notes_organization import (
+from tldw_Server_API.app.core.Sync_Contracts.notes_organization import (
     NotesOrganizationValidationError,
     new_organization_sync_id,
     validate_resource_sync_id,

@@ -153,15 +153,15 @@ from tldw_Server_API.app.core.Flashcards.scheduler_sm2 import (  # noqa: E402
 from tldw_Server_API.app.core.Flashcards.source_review import (  # noqa: E402
     build_source_review_launch_metadata,
 )
-from tldw_Server_API.app.core.Sync.v2.models import validate_notes_note_upsert_payload  # noqa: E402
-from tldw_Server_API.app.core.Sync.v2.notes_link import (  # noqa: E402
+from tldw_Server_API.app.core.Sync_Contracts.models import validate_notes_note_upsert_payload  # noqa: E402
+from tldw_Server_API.app.core.Sync_Contracts.notes_link import (  # noqa: E402
     NOTES_LINK_LABEL_MAX_CHARS,
     NOTES_LINK_WEIGHT_MAX,
     NotesLinkValidationError,
     validate_notes_link_object_id,
     validate_notes_link_properties,
 )
-from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (  # noqa: E402
+from tldw_Server_API.app.core.Sync_Contracts.notes_moodboard_studio_contract import (  # noqa: E402
     SYNC_ENVELOPE_MAX_BYTES,
     NotesMoodboardStudioContractError,
     notes_moodboard_note_object_hash,
@@ -173,13 +173,13 @@ from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (  
     placement_object_id,
     studio_result_hash,
 )
-from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
+from tldw_Server_API.app.core.Sync_Contracts.notes_moodboard_studio_contract import (
     canonical_json_bytes as canonical_moodboard_studio_json_bytes,
 )
-from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
+from tldw_Server_API.app.core.Sync_Contracts.notes_moodboard_studio_contract import (
     legacy_source_diagnostic as moodboard_studio_legacy_source_diagnostic,
 )
-from tldw_Server_API.app.core.Sync.v2.notes_task_contract import (  # noqa: E402
+from tldw_Server_API.app.core.Sync_Contracts.notes_task_contract import (  # noqa: E402
     canonical_json_bytes,
     notes_task_object_hash,
     parse_notes_task_v1,
@@ -11353,7 +11353,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Migrate organization resources to stable, unique UUIDv4 identities."""
         logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V54 to V55 for DB: {self.db_path_str}...")
         try:
-            from tldw_Server_API.app.core.Sync.v2.notes_organization import new_organization_sync_id
+            from tldw_Server_API.app.core.Sync_Contracts.notes_organization import new_organization_sync_id
 
             if "note_folders" not in self._sqlite_table_names(conn):
                 self._ensure_note_folder_schema_sqlite(conn)
@@ -11443,7 +11443,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _migrate_from_v54_to_v55_postgres(self, conn: Any) -> None:
         """Backfill stable organization identities inside the caller's transaction."""
-        from tldw_Server_API.app.core.Sync.v2.notes_organization import new_organization_sync_id
+        from tldw_Server_API.app.core.Sync_Contracts.notes_organization import new_organization_sync_id
 
         self._ensure_note_folder_sync_suppression_schema_postgres(conn)
         table_indexes = (
@@ -40583,7 +40583,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _flashcard_owned_keyword_id(self, conn: Any, text: str) -> int:
         """Resolve an owner-local PostgreSQL tag without changing generic keyword APIs."""
-        from tldw_Server_API.app.core.Sync.v2.notes_organization import new_organization_sync_id
+        from tldw_Server_API.app.core.Sync_Contracts.notes_organization import new_organization_sync_id
 
         now = self._get_current_utc_timestamp_iso()
         conn.execute(
