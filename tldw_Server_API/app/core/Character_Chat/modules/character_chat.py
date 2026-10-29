@@ -1168,6 +1168,8 @@ def post_message_to_conversation(
     image_mime_type: Optional[str] = None,
     sender_override: Optional[str] = None,
     owner_user_id: int | str | None = None,
+    *,
+    metadata_extra: dict[str, Any] | None = None,
 ) -> Optional[str]:
     """Post a new message to a specified conversation."""
 
@@ -1241,7 +1243,16 @@ def post_message_to_conversation(
                     ) from exc
                 check_message_limit(conversation_id, current_message_count + 1)
 
-            message_id = db.add_message(msg_payload)
+            if metadata_extra is None:
+                message_id = db.add_message(msg_payload)
+            else:
+                # A citation failure must not acknowledge an uncited saved answer.
+                with db.transaction() as conn:
+                    message_id = db.add_message(msg_payload, conn=conn)
+                    if not message_id or not db.set_message_metadata_extra(
+                        message_id, metadata_extra, conn=conn, _advance_history=False
+                    ):
+                        raise InputError("Failed to retain message references")
     except (CharactersRAGDBError, InputError, ConflictError) as exc:
         logger.error(
             "Error posting message from '{}' to conversation {}: {}",

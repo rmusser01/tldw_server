@@ -533,6 +533,8 @@ async def send_message(
             message_data.tldw_history_existing_input_v1,
         ))
         sync_service = _active_message_sync_service(current_user, scope)
+        if message_data.metadata_extra is not None and (scope.scope_type != "workspace" or sync_service is not None):
+            raise HTTPException(400, detail="Recorded RAG references require an unsynced workspace assistant message.")
 
         if sync_service is not None and image_data is not None:
             raise HTTPException(
@@ -547,6 +549,8 @@ async def send_message(
             from tldw_Server_API.app.core.Chat.persistence_service import native_history_owner_key
             data = {"id": message_data.id, "sender": sender_override, "content": message_data.content,
                     "image_data": image_data, "image_mime_type": image_mime_type}
+            if message_data.metadata_extra is not None:
+                data["extra_metadata"] = message_data.metadata_extra
             if "parent_message_id" in message_data.model_fields_set:
                 data["parent_message_id"] = message_data.parent_message_id
             owner = native_history_owner_key(request, current_user.id)
@@ -641,6 +645,7 @@ async def send_message(
                 image_mime_type=image_mime_type,
                 sender_override=sender_override,
                 owner_user_id=current_user.id,
+                **({"metadata_extra": message_data.metadata_extra} if message_data.metadata_extra is not None else {}),
             )
 
             if not created_id:
