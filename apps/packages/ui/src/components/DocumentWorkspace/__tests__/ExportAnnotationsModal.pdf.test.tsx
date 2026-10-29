@@ -139,3 +139,15 @@ it("refuses local annotation downloads immediately after owner retirement withou
   fireEvent.click(screen.getByRole("button", { name: "Export" }))
   expect(api.annotationDownload).not.toHaveBeenCalled()
 })
+
+
+it("uses one semantic Radio label for each sized format choice", () => {
+  draw()
+  expect(
+    screen
+      .getAllByRole("radio")
+      .map((input) =>
+        Boolean(input.closest("label")?.parentElement?.closest("label")),
+      ),
+  ).toEqual([false, false, false, false])
+})
