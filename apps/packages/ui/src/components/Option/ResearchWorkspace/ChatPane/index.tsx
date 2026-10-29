@@ -1,3 +1,4 @@
+import { useResearchActorScene } from "./useResearchActorScene"
 import { projectWorkspaceRagSources } from "@/utils/workspace-rag-sources"
 import { isChatSubmitSuccess } from "@/hooks/chat/chat-action-utils"
 import { sha256Text } from "@/store/workspace-migration"
@@ -1257,6 +1258,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     [workspaceId]
   )
 
+  const capturePrivateScene = useResearchActorScene(workspaceId, workspaceChatReferenceId)
+
   // Message option hook
   const {
     selectedModel,
@@ -1280,7 +1283,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     serverChatId,
     setServerChatId,
     selectedModelIsLoading
-  } = useMessageOption({ scope: chatScope, hydrateServerChat: true })
+  } = useMessageOption({ scope: chatScope, hydrateServerChat: true, capturePrivateScene })
 
   // RAG state from store
   const setRagMediaIds = useStoreMessageOption((s) => s.setRagMediaIds)

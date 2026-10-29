@@ -1,3 +1,5 @@
+import { useResearchActorScene } from "@/components/Option/ResearchWorkspace/ChatPane/useResearchActorScene"
+import { useWorkspaceStore } from "@/store/workspace"
 import type { MessageHistory } from "@/db/dexie/types"
 import React from "react"
 import i18n from "i18next"
@@ -32,6 +34,7 @@ import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-s
 import { resolveServicePromptScope } from "@/services/service-prompts"
 
 const mocks = vi.hoisted(() => ({
+  researchAccount: null as null | { requestScope: import("@/services/tldw/domains/service-prompts").ServicePromptRequestScope; isCurrent: () => boolean },
   capability: true as boolean | "error",
   bgRequest: vi.fn(),
   removeMessageById: vi.fn(),
@@ -72,6 +75,13 @@ const mocks = vi.hoisted(() => ({
     authMode: "single-user",
     apiKey: "synthetic-a"
   }
+}))
+
+vi.mock("@/hooks/useChatDraftOwner", () => ({
+  useChatDraftOwner: () => ({
+    requestScope: mocks.researchAccount?.requestScope ?? null,
+    isCurrent: mocks.researchAccount?.isCurrent ?? (() => false)
+  })
 }))
 
 vi.mock("@/services/background-proxy", () => ({ bgRequest: (...args: unknown[]) => mocks.bgRequest(...args), bgStream: vi.fn(), bgUpload: vi.fn() }))
@@ -948,6 +958,7 @@ describe("saved normal Chat pipeline with autosave", () => {
     mocks.getModels.mockResolvedValue([])
     mocks.ragSearch.mockReset()
     mocks.getModel.mockResolvedValue({ id: "test-model", name: "Test model", capabilities: [] })
+    mocks.researchAccount = null
     mocks.ocr.mockResolvedValue("Explicit OCR text")
     mocks.selectionRevision = 0
     mocks.serverRows.clear()
@@ -3054,18 +3065,26 @@ describe("saved normal Chat pipeline with autosave", () => {
     // No H1 provider is installed: these are legacy save_to_db/stream ACK cases.
     // Only SDK create/link and scene-read I/O are declared doubles. The real
     // mirror hook publishes the local alias into the actual option store.
-    const mountSdkScene = async (scope: ChatScope = { type: "global" }) => {
+    const mountSdkScene = async (scope: ChatScope = { type: "global" }, research = false) => {
       const state = useStoreMessageOption.getState()
       const address = state.chatDraftAddress!
-      if (address.kind !== "fresh") throw new Error("Expected a fresh SDK source")
-      state.setChatDraftAddress({ ...address, scope })
+      if (!research) {
+        if (address?.kind !== "fresh") throw new Error("Expected a fresh SDK source")
+        state.setChatDraftAddress({ ...address, scope })
+      }
       const originalAddress = useStoreMessageOption.getState().chatDraftAddress!
       const originalConfig = mocks.config
       const verifiedScope = await resolveServicePromptScope()
       const requestScope = { config: verifiedScope.config, userId: verifiedScope.userId }
       const account = { requestScope, isCurrent: () => mocks.config === originalConfig }
+      if (research) {
+        if (scope.type !== "workspace") throw new Error("Research requires a workspace")
+        mocks.researchAccount = account
+        useWorkspaceStore.setState({ workspaceId: scope.workspaceId, workspaceChatReferenceId: "research-reference" })
+        mocks.getChat.mockImplementation(async id => ({ id, scope_type: "workspace", workspace_id: scope.workspaceId }))
+      }
       const source = captureChatDraftSource(account.isCurrent)
-      const target = captureActorSettingsTarget({
+      const target = research ? null : captureActorSettingsTarget({
         address: originalAddress, requestScope, accountIsCurrent: account.isCurrent,
         isCurrent: source.isCurrent
       })!
@@ -3076,7 +3095,7 @@ describe("saved normal Chat pipeline with autosave", () => {
         target: readTarget!, settings: structuredClone(settings), originalRecord: record,
         origin: "scene", profileUnavailable: false
       }))
-      const scene = await captureActorSceneSendForTarget(target, account, source.isCurrent, account.isCurrent)!.read()
+      const scene = research ? undefined : await captureActorSceneSendForTarget(target, account, source.isCurrent, account.isCurrent)!.read()
       const captureSdkScene = async () => {
         const currentSource = captureChatDraftSource(() => account.isCurrent() &&
           useStoreMessageOption.getState().chatDraftAddress === originalAddress)
@@ -3089,6 +3108,7 @@ describe("saved normal Chat pipeline with autosave", () => {
           currentSource.isCurrent, account.isCurrent)!.read()
       }
       const hook = renderHook(() => {
+        const capturePrivateScene = useResearchActorScene(scope.type === "workspace" ? scope.workspaceId : null, "research-reference")
         const current = useStoreMessageOption()
         const [controller, updateController] = React.useState<AbortController | null>(null)
         const controllerRef = React.useRef<AbortController | null>(null)
@@ -3103,6 +3123,7 @@ describe("saved normal Chat pipeline with autosave", () => {
         })
         const actions = useRawChatActions({
           ...createHookOptions(), ...current, scope,
+          capturePrivateScene: research ? capturePrivateScene : undefined,
           abortController: controller, setAbortController: setController,
           getAbortController: getController,
           ensureServerChatHistoryId: mirror.ensureServerChatHistoryId
@@ -3110,10 +3131,68 @@ describe("saved normal Chat pipeline with autosave", () => {
         return { actions, state: current }
       })
       const send = () => hook.result.current.actions.onSubmit({
-        message: "SDK original question", image: "", actorSceneSend: scene
+        message: "SDK original question", image: "", ...(research ? {} : { actorSceneSend: scene })
       })
       return { ...hook, send, captureSdkScene, scene, target, record, originalAddress, requestScope }
     }
+
+    it.each(["missing", "foreign"] as const)("S04 standalone Research retains its real private Scene across first Send, next turn and cold reload with %s draft state", async cold => {
+      const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
+      mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
+      mocks.realFormatter = true
+      mocks.ragSearch.mockResolvedValue({ documents: [{ content: "Selene is the telescope.", metadata: { media_id: 42, title: "Rowan", type: "text" } }] })
+      mocks.streamMessage.mockImplementation(async function* () { yield "The telescope is Selene." })
+      const scope = { type: "workspace", workspaceId: "sdk-original-workspace" } as const
+      act(() => useStoreMessageOption.setState({ chatDraftAddress: null }))
+      let view = await mountSdkScene(scope, true)
+      expect(mocks.getActorScene).not.toHaveBeenCalled()
+      act(() => useStoreMessageOption.setState({ ragMediaIds: [42], fileRetrievalEnabled: true, chatMode: "rag" }))
+      try {
+        let outcome: unknown
+        await act(async () => { outcome = await view.send() })
+        expect(outcome, JSON.stringify(outcome)).toMatchObject({ status: "submitted" })
+        const originalKey = mocks.getActorScene.mock.calls.at(-1)![0].target!.key
+        await act(async () => { expect(await view.send()).toMatchObject({ status: "submitted" }) })
+        expect(mocks.getActorScene.mock.calls.at(-1)![0].target!.key).toBe(originalKey)
+        view.unmount()
+        act(() => useStoreMessageOption.setState({ chatDraftAddress: cold === "missing" ? null : { kind: "native", id: "foreign-chat", ownerKey: "foreign-owner", scope: { type: "global" } } }))
+        view = await mountSdkScene(scope, true)
+        expect(view.result.current.state.serverChatId).toBe("chat-1")
+        await act(async () => { expect(await view.send()).toMatchObject({ status: "submitted" }) })
+        expect(mocks.getActorScene.mock.calls.at(-1)![0].target!.key).toBe(originalKey)
+        expect(mocks.createChat).toHaveBeenCalledOnce()
+        expect(mocks.ragSearch).toHaveBeenCalledTimes(3)
+        expect(mocks.streamMessage).toHaveBeenCalledTimes(3)
+        expect(mocks.serverRows.get("chat-1")).toHaveLength(6)
+      } finally { view.unmount() }
+    })
+
+    it.each(["New reference", "workspace", "account", "selection", "unmount"] as const)("S04 retires a held Research scene before inference on %s", async boundary => {
+      const view = await mountSdkScene({ type: "workspace", workspaceId: "sdk-original-workspace" }, true)
+      act(() => useStoreMessageOption.setState({ ragMediaIds: [42], fileRetrievalEnabled: true, chatMode: "rag" }))
+      const held = deferred<void>()
+      mocks.getActorScene.mockClear()
+      mocks.getActorScene.mockImplementationOnce(async ({ target }) => {
+        await held.promise
+        return { target: target!, settings: createDefaultActorSettings(), originalRecord: null, origin: "default", profileUnavailable: false }
+      })
+      let pending!: ReturnType<typeof view.send>
+      try {
+        act(() => { pending = view.send() })
+        await waitFor(() => expect(mocks.getActorScene).toHaveBeenCalledOnce())
+        act(() => {
+          if (boundary === "New reference") useWorkspaceStore.setState({ workspaceChatReferenceId: "replacement-reference" })
+          if (boundary === "workspace") useWorkspaceStore.setState({ workspaceId: "replacement-workspace" })
+          if (boundary === "selection") useWorkspaceStore.setState({ selectedSourceIds: ["replacement-source"] })
+          if (boundary === "account") replaceAuthority("synthetic-b")
+          if (boundary === "unmount") view.unmount()
+        })
+        await act(async () => { held.resolve(); expect(await pending).not.toMatchObject({ status: "submitted" }) })
+        expect(mocks.ragSearch).not.toHaveBeenCalled()
+        expect(mocks.pageAssistModel).not.toHaveBeenCalled()
+        expect(mocks.createChat).not.toHaveBeenCalled()
+      } finally { held.resolve(); await pending; view.unmount() }
+    })
 
     it("S04 retains cited workspace source references through the actual SDK model and manual server save", async () => {
       const actualModels =
