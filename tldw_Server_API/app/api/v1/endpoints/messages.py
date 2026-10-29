@@ -2120,6 +2120,7 @@ async def _handle_messages(
                             credentials,
                         ),
                         started,
+                        credential_source=getattr(credentials, "credential_source", None),
                     ),
                     media_type="text/event-stream",
                 )
@@ -2135,7 +2136,9 @@ async def _handle_messages(
             )
             if not _native_message_payload_is_semantic(data):
                 raise_detached_error(_messages_upstream_http_exception())
-            record_direct_response(provider, payload, data, started)
+            record_direct_response(
+                provider, payload, data, started, credential_source=getattr(credentials, "credential_source", None)
+            )
             response = JSONResponse(data)
             await await_owned_worker(
                 _mark_messages_credential_used(

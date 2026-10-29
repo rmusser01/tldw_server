@@ -384,3 +384,29 @@ async def test_a_streamed_batch_reply_is_costed_at_half_price(costed_rows, monke
     (row,) = costed_rows
     assert row["prompt_cost_usd"] == pytest.approx((3 * 0.005 + 60000 * 0.0005 + 2000 * 0.00625) / 1000 * 0.5)
     assert row["completion_cost_usd"] == pytest.approx(100 * 0.025 / 1000 * 0.5)
+
+
+class _UserKeyRuntime(_Runtime):
+    """Resolves the user's own key."""
+
+    async def resolve(self, provider: str, *, model: str | None = None) -> Any:
+        """Credentials whose source is the user's own key."""
+        del model
+        return SimpleNamespace(
+            provider=provider, api_key="k", app_config={}, credentials_resolved=True, credential_source="user"
+        )
+
+
+@pytest.mark.parametrize("stream", [False, True])
+async def test_a_native_call_on_the_users_own_key_is_recorded_as_such(rows, monkeypatch, stream) -> None:
+    """The row says the user's own key paid, so the LLM quota counters leave it out (TASK-13955)."""
+    monkeypatch.setattr(messages_endpoint, "ProviderCredentialRuntime", _UserKeyRuntime)
+    if stream:
+        row = await _stream_row(monkeypatch, rows, STREAM_FRAMES)
+    else:
+        monkeypatch.setattr(messages_endpoint, "_native_post_json", _native_reply(NATIVE_RESPONSE["usage"]))
+        with scoped_context(user_id=5):
+            assert (await _call("anthropic/claude-3-5-haiku-latest", stream=False)).status_code == 200
+        await llm_accounting.drain_accounting()
+        (row,) = rows
+    assert row["credential_source"] == "user"

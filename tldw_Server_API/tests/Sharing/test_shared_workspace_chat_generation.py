@@ -472,3 +472,63 @@ async def test_trimmed_evidence_is_the_only_source_for_labels_and_quotes(
     assert [citation["source_id"] for citation in result.citations] == ["source-1"]
     assert "FORBIDDEN_TAIL" not in result.citations[0]["quote"]
     assert result.budgeted_evidence[0].content != full_text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["user", "team"])
+async def test_generation_names_whose_key_its_call_runs_on(monkeypatch, generation_stubs, source: str) -> None:
+    """The provider call runs with the credential's source in the call context, so the LLM quota sees it (TASK-13955)."""
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
+
+    byok, _captured = generation_stubs
+    byok.source = source
+    seen: list[str | None] = []
+
+    async def _perform(**_kwargs):
+        seen.append(current_llm_call_context().credential_source)
+        return _provider_response('{"answer":"Grounded","citations":["E1"]}')
+
+    monkeypatch.setattr(shared_chat, "perform_chat_api_call_async", _perform)
+    monkeypatch.setattr(shared_chat, "load_server_config_snapshot", dict)  # no base URL leaked from the environment
+    result = await _service().generate_grounded_answer(
+        query="Question?",
+        evidence=(_evidence(),),
+        target=ResolvedChatTarget("openai", "gpt-model"),
+        recipient_user_id=41,
+        share_scope_type="team",
+        share_scope_id=73,
+        request=SimpleNamespace(),
+    )
+    assert result.answer == "Grounded"
+    assert seen == [source]
+
+@pytest.mark.asyncio
+async def test_generation_on_an_operator_base_url_from_the_server_config_counts_the_users_key(
+    monkeypatch, generation_stubs
+) -> None:
+    """An environment base URL lands in the server snapshot, not the app_config; the rule reads both (TASK-13955)."""
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
+
+    byok, _captured = generation_stubs
+    byok.source = "user"
+    seen: list[str | None] = []
+
+    async def _perform(**_kwargs):
+        seen.append(current_llm_call_context().credential_source)
+        return _provider_response('{"answer":"Grounded","citations":["E1"]}')
+
+    monkeypatch.setattr(shared_chat, "perform_chat_api_call_async", _perform)
+    monkeypatch.setattr(
+        shared_chat, "load_server_config_snapshot",
+        lambda: {"openai_api": {"api_base_url": "http://operator-gpu.internal:8000/v1"}},
+    )
+    await _service().generate_grounded_answer(
+        query="Question?",
+        evidence=(_evidence(),),
+        target=ResolvedChatTarget("openai", "gpt-model"),
+        recipient_user_id=41,
+        share_scope_type="team",
+        share_scope_id=73,
+        request=SimpleNamespace(),
+    )
+    assert seen == ["user_unmetered"]

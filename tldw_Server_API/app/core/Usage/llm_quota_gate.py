@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.config import usage_quotas_enabled
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.Usage.llm_accounting import get_accounting_loop
 from tldw_Server_API.app.core.Usage.llm_call_context import (
+    USER_KEY_SOURCE,
     current_llm_call_context,
     current_llm_user_id,
     in_accounted_call,
@@ -46,15 +47,15 @@ def _warn_once(key: str, message: str) -> None:
     logger.warning(message)
 
 
-def user_to_check() -> int | None:
+def user_to_check(credential_source: str | None = None) -> int | None:
     """The user this call is checked for, or None when it is not checked.
 
-    Not checked: no user, an exempt or admitted (``prechecked``) context, a call
-    nested in an accounted call, quotas off, or a user whose cached limits set
-    no LLM key.
+    Not checked: a call on the user's own key (``credential_source`` ``user``),
+    no user, an exempt or admitted (``prechecked``) context, a call nested in an
+    accounted call, quotas off, or a user whose cached limits set no LLM key.
     """
     try:
-        if in_accounted_call():
+        if credential_source == USER_KEY_SOURCE or in_accounted_call():
             return None
         context = current_llm_call_context()
         if context.exempt or context.prechecked:
@@ -160,14 +161,14 @@ async def check_user_async(user_id: int) -> None:
     _raise_if_refused(refusal)
 
 
-def check_llm_call_sync() -> bool:
+def check_llm_call_sync(credential_source: str | None = None) -> bool:
     """Check the current call from synchronous code. False when it could not be checked here."""
-    user_id = user_to_check()
+    user_id = user_to_check(credential_source)
     return True if user_id is None else check_user_sync(user_id)
 
 
-async def check_llm_call_async() -> None:
+async def check_llm_call_async(credential_source: str | None = None) -> None:
     """Check the current call from a coroutine."""
-    user_id = user_to_check()
+    user_id = user_to_check(credential_source)
     if user_id is not None:
         await check_user_async(user_id)
