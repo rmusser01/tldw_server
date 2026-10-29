@@ -8,16 +8,16 @@ from typing import Any, Callable
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
 )
-from tldw_Server_API.app.core.Chat.Chat_Deps import (
+from tldw_Server_API.app.core.config import load_settings
+from tldw_Server_API.app.core.exceptions import (
     ChatAuthenticationError,
     ChatBadRequestError,
     ChatConfigurationError,
     ChatProviderError,
     ChatRateLimitError,
+    EgressPolicyError,
+    raise_detached_error,
 )
-from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
-from tldw_Server_API.app.core.config import load_settings
-from tldw_Server_API.app.core.exceptions import EgressPolicyError, raise_detached_error
 from tldw_Server_API.app.core.http_client import (
     RetryPolicy as _HC_RetryPolicy,
 )
@@ -44,6 +44,7 @@ from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
 from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import (
     resolve_trusted_provider_endpoint,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_results import extract_response_content
 from tldw_Server_API.app.core.LLM_Calls.sse import (
     finalize_stream,
     is_done_line,

@@ -25,15 +25,6 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
     ProviderCallCredentials,
 )
-from tldw_Server_API.app.core.Chat.Chat_Deps import (
-    ChatAPIError,
-    ChatAuthenticationError,
-    ChatBadRequestError,
-    ChatConfigurationError,
-    ChatRateLimitError,
-)
-from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
-from tldw_Server_API.app.core.Chat.streaming_utils import _extract_text_from_upstream_sse
 
 #
 # Import Local
@@ -44,7 +35,15 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_name,
     custom_openai_provider_number,
 )
-from tldw_Server_API.app.core.exceptions import EgressPolicyError, NetworkError
+from tldw_Server_API.app.core.exceptions import (
+    ChatAPIError,
+    ChatAuthenticationError,
+    ChatBadRequestError,
+    ChatConfigurationError,
+    ChatRateLimitError,
+    EgressPolicyError,
+    NetworkError,
+)
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     bind_provider_call_credentials,
@@ -55,6 +54,10 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     resolve_provider_section,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+from tldw_Server_API.app.core.LLM_Calls.provider_results import (
+    _extract_text_from_upstream_sse,
+    extract_response_content,
+)
 from tldw_Server_API.app.core.Utils.Utils import logging
 
 #
