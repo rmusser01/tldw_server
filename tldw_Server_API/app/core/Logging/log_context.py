@@ -17,19 +17,44 @@ the fields) and returns a bound logger for convenience.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
+import uuid
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
 
 from loguru import logger
-
-from tldw_Server_API.app.core.Security.request_id_middleware import _clean_request_id
 
 try:
     # Optional import for FastAPI Request type annotation
     from fastapi import Request  # type: ignore
 except ImportError:  # pragma: no cover - typing aid only
     Request = None  # type: ignore
+
+SAFE_REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+MAX_REQUEST_ID_LENGTH = 128
+
+
+def _generate_request_id() -> str:
+    return str(uuid.uuid4())
+
+
+def _clean_id(value: str | None, generator: Callable[[], str]) -> str:
+    if not value:
+        return generator()
+
+    candidate = value.strip()
+    if not candidate:
+        return generator()
+
+    if len(candidate) > MAX_REQUEST_ID_LENGTH or not SAFE_REQUEST_ID_PATTERN.fullmatch(candidate):
+        return generator()
+
+    return candidate
+
+
+def _clean_request_id(value: str | None) -> str:
+    return _clean_id(value, _generate_request_id)
+
 
 _LOG_CONTEXT_NONCRITICAL_EXCEPTIONS = (
     AttributeError,

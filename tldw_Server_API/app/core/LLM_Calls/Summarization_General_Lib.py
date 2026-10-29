@@ -39,6 +39,7 @@ from tldw_Server_API.app.core.Chat.streaming_utils import _extract_text_from_ups
 # Import Local
 from tldw_Server_API.app.core.Chunking import improved_chunking_process
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_name,
     custom_openai_provider_number,
@@ -54,7 +55,6 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     resolve_provider_section,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
-from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 from tldw_Server_API.app.core.Utils.Utils import logging
 
 #

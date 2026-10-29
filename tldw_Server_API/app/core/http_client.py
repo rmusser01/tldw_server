@@ -128,17 +128,10 @@ from tldw_Server_API.app.core.exceptions import (  # noqa: E402
     StreamingProtocolError,
     raise_detached_error,
 )
-from tldw_Server_API.app.core.Metrics import (  # noqa: E402
-    MetricDefinition,
-    MetricType,
-    get_metrics_registry,
-)
-from tldw_Server_API.app.core.Metrics.traces import get_tracing_manager  # noqa: E402
-from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope  # noqa: E402
-from tldw_Server_API.app.core.stt_observability_context import (
+from tldw_Server_API.app.core.Logging.stt_observability_context import (
     OPAQUE_STT_ENDPOINT_ID as _OPAQUE_STT_ENDPOINT_ID,
 )
-from tldw_Server_API.app.core.stt_observability_context import (
+from tldw_Server_API.app.core.Logging.stt_observability_context import (
     get_opaque_stt_endpoint_id,
 )
 from tldw_Server_API.app.core.testing import (
@@ -147,6 +140,7 @@ from tldw_Server_API.app.core.testing import (
     is_test_mode,
     is_truthy,
 )
+from tldw_Server_API.app.core.Utils.egress import ConfiguredEndpointScope  # noqa: E402
 
 
 class _TerminalHTTPStatusError(Exception):
@@ -691,61 +685,58 @@ async def _capture_error_body_hook_async(response: httpx.Response) -> None:
         pass
 
 
-_HTTP_CLIENT_METRICS_REGISTERED = False
+class _NoObservability:
+    """Metrics registry and tracing manager stand-in until core.Metrics installs the real ones.
+
+    core.http_client is foundation and cannot import core.Metrics (TASK-13950.12), so
+    metrics and tracing are best-effort: every method this module calls on either is a
+    no-op here, and ``span``/``async_span`` open the context every request runs in.
+    """
+
+    def increment(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    def observe(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    def set_attributes(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    def add_event(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+    def get_baggage(self, key: str) -> None:
+        return None
+
+    def span(self, *args: Any, **kwargs: Any) -> nullcontext[None]:
+        return nullcontext()
+
+    def async_span(self, *args: Any, **kwargs: Any) -> nullcontext[None]:
+        return nullcontext()
 
 
-def _register_http_client_metrics_once() -> None:
-    global _HTTP_CLIENT_METRICS_REGISTERED
-    if _HTTP_CLIENT_METRICS_REGISTERED:
-        return
-    try:
-        reg = get_metrics_registry()
-    except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-        return
-    # Register http-client-specific metrics if not present
-    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
-        reg.register_metric(
-            MetricDefinition(
-                name="http_client_requests_total",
-                type=MetricType.COUNTER,
-                description="Total number of outbound HTTP client requests",
-                labels=["method", "host", "status"],
-            )
-        )
-    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
-        reg.register_metric(
-            MetricDefinition(
-                name="http_client_request_duration_seconds",
-                type=MetricType.HISTOGRAM,
-                description="Outbound HTTP client request duration (seconds)",
-                unit="s",
-                labels=["method", "host"],
-                buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
-            )
-        )
-    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
-        reg.register_metric(
-            MetricDefinition(
-                name="http_client_retries_total",
-                type=MetricType.COUNTER,
-                description="Total retries attempted by HTTP client",
-                labels=["reason"],
-            )
-        )
-    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
-        reg.register_metric(
-            MetricDefinition(
-                name="http_client_egress_denials_total",
-                type=MetricType.COUNTER,
-                description="Total egress policy denials for outbound HTTP",
-                labels=["reason"],
-            )
-        )
-    _HTTP_CLIENT_METRICS_REGISTERED = True
+_NO_OBSERVABILITY = _NoObservability()
+_metrics_registry_getter: Callable[[], Any] | None = None
+_tracing_manager_getter: Callable[[], Any] | None = None
 
-# Ensure metrics are registered on import
-with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
-    _register_http_client_metrics_once()
+
+def install_observability(*, metrics_registry: Callable[[], Any], tracing_manager: Callable[[], Any]) -> None:
+    """Route this module's metrics and tracing through the given getters (core.Metrics calls this)."""
+    global _metrics_registry_getter, _tracing_manager_getter
+    _metrics_registry_getter = metrics_registry
+    _tracing_manager_getter = tracing_manager
+
+
+def get_metrics_registry() -> Any:
+    """The installed metrics registry, or a no-op until core.Metrics is imported."""
+    getter = _metrics_registry_getter
+    return _NO_OBSERVABILITY if getter is None else getter()
+
+
+def get_tracing_manager() -> Any:
+    """The installed tracing manager, or a no-op until core.Metrics is imported."""
+    getter = _tracing_manager_getter
+    return _NO_OBSERVABILITY if getter is None else getter()
 
 
 # --------------------------------------------------------------------------------------
@@ -1641,7 +1632,7 @@ def _parse_host_from_url(url: str) -> str:
 
 
 def _normalize_dns_pin_host(host: str) -> str:
-    from tldw_Server_API.app.core.Security.egress import (
+    from tldw_Server_API.app.core.Utils.egress import (
         _canonical_ip_literal,
         _normalize_hostname,
     )
@@ -1961,7 +1952,7 @@ def _validate_egress_or_raise(
 ) -> None:
     from urllib.parse import urlparse as _urlparse
 
-    from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
+    from tldw_Server_API.app.core.Utils.egress import evaluate_url_policy
 
     sensitive_observability = _effective_sensitive_observability(
         sensitive_observability
@@ -2064,7 +2055,7 @@ def _is_url_allowed(url: str) -> bool:
     Delegates to the central egress policy evaluator and returns a boolean.
     """
     try:
-        from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
+        from tldw_Server_API.app.core.Utils.egress import evaluate_url_policy
         if _effective_sensitive_observability():
             res = evaluate_url_policy(url, sensitive_observability=True)
         else:
@@ -2819,7 +2810,7 @@ def _instantiate_client(factory: Callable[..., _Client], kwargs: dict[str, Any])
     """
     import re as _re
 
-    from tldw_Server_API.app.core.Security.egress import public_url_policy_active
+    from tldw_Server_API.app.core.Utils.egress import public_url_policy_active
 
     while True:
         try:
@@ -5150,7 +5141,7 @@ def fetch(*args, **kwargs):
         if type(max_response_bytes) is not int or max_response_bytes <= 0:
             raise ValueError("max_response_bytes must be a positive integer")
 
-    from tldw_Server_API.app.core.Security.egress import public_url_policy_active
+    from tldw_Server_API.app.core.Utils.egress import public_url_policy_active
 
     public_capture = public_url_policy_active()
     dns_pin_cache: dict[str, tuple[str, ...]] = {}

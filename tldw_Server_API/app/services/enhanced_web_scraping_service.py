@@ -20,6 +20,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.Chunking.chunker import Chunker
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
 from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
@@ -33,7 +34,6 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import (
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.testing import is_truthy
-from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import is_content_page
 from tldw_Server_API.app.core.Web_Scraping.content import ContentMetadataHandler
 

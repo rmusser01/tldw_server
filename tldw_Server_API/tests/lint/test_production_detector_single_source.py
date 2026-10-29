@@ -69,7 +69,7 @@ ALLOWLIST: dict[str, tuple[str, frozenset[str]]] = {
         "dev label only: the MCTS canary runs when ENVIRONMENT/APP_ENV/ENV names a dev tier",
         _ENV_LABELS,
     ),
-    "tldw_Server_API/app/core/Security/egress.py": (
+    "tldw_Server_API/app/core/Utils/egress.py": (
         "owner decision pending: the default egress profile is strict only for "
         "ENVIRONMENT/APP_ENV/ENV=prod|production; routing it through runtime_environment() "
         "would deny every non-allowlisted outbound host for tldw_production=true deploys "

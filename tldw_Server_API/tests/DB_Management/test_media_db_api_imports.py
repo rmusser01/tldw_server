@@ -92,7 +92,7 @@ from tldw_Server_API.app.core.Sync import Sync_Client as sync_client_module
 from tldw_Server_API.app.services import ingestion_sources_worker
 from tldw_Server_API.app.core.MCP_unified.modules.implementations import quizzes_module
 from tldw_Server_API.app.core.MCP_unified.modules.implementations import slides_module
-from tldw_Server_API.app.core.Utils import metadata_utils
+from tldw_Server_API.app.core.DB_Management.media_db.runtime import safe_metadata_write_ops
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib
 from tldw_Server_API.app.core.Watchlists import pipeline as watchlists_pipeline
 from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
@@ -2157,8 +2157,8 @@ def test_database_retrievers_import_media_db_factory_and_errors_outside_shim(mon
     assert module.MediaDatabaseError is media_db_errors.DatabaseError
 
 
-def test_metadata_utils_imports_database_error_from_media_db_errors():
-    source = inspect.getsource(metadata_utils)
+def test_safe_metadata_write_ops_imports_database_error_from_media_db_errors():
+    source = inspect.getsource(safe_metadata_write_ops)
 
     assert "core.DB_Management.Media_DB_v2" not in source
     assert "core.DB_Management.media_db.errors" in source
