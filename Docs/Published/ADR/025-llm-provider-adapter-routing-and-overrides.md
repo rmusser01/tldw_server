@@ -39,7 +39,7 @@ This ADR is intentionally bounded. It covers the Chat adapter-request boundary a
 
 ## Consequences
 
-New LLM provider integrations should register adapters in the provider registry and use registry alias resolution for dispatch. Callers should use Chat service entrypoints instead of wiring endpoint code directly to provider helper functions.
+New LLM provider integrations should register adapters in the provider registry and use registry alias resolution for dispatch. Callers should use the LLM gateway (`tldw_Server_API/app/core/LLM_Calls/gateway.py`) instead of wiring code directly to provider adapters or helper functions.
 
 Provider adapters must preserve the OpenAI-compatible response and SSE contract expected by the Chat API. Provider-native data can be exposed as extension metadata only when it does not replace the normalized envelope.
 
@@ -58,3 +58,47 @@ Adding a new local provider should update the registry-owned local-provider clas
 - Use this ADR as the covering record for INV-027.
 - Keep `Docs/ADR/inventory/2026-06-04-llm-provider-integration-confirmation-audit.md` as the evidence and caveat record for this backfill.
 - Consider separate ADRs if provider-specific response preservation becomes a stable public API guarantee, if local endpoint URLs become request-configurable, or if sync/async provider call paths are unified under a new provider runtime policy.
+
+## Amendment (2026-10-29): the LLM gateway is the call boundary and the policy hook
+
+TASK-13950.13 moved `perform_chat_api_call`, `perform_chat_api_call_async`, provider and model resolution
+(`resolve_provider_and_model`) and provider key resolution (`resolve_provider_api_key`) from
+`core/Chat/chat_service.py` into `core/LLM_Calls/gateway.py`, and moved `get_api_keys` from the chat request
+schemas into `core/config_llm_providers.py`. The old paths re-export them until their callers move. LLM_Calls no
+longer imports the Chat package, and key resolution no longer reads `API_KEYS` from the API layer under pytest.
+
+The gateway runs registered policy hooks around every provider call: `add_policy_hooks(pre_call=..., post_call=...)`.
+None is registered by default. A pre-call hook sees a `GatewayCall` (surface, provider, adapter request, stream,
+and the user the call is for) and may replace request values or refuse the call. A post-call hook receives the
+result, or the stream iterator, and returns what the caller gets. Callers name their surface with the reserved
+`llm_surface` keyword, which never reaches a provider; `/chat/completions` sends `chat.completions`.
+
+The hook contract:
+- Refuse only with `LLMPolicyRefusal(detail)` (`core/exceptions.py`, always HTTP 400), and only from a pre-call
+  hook. Chat treats any other exception (an `HTTPException` included) as a provider failure, and a 401 enters
+  OpenAI OAuth refresh. A registered hook must be sync while chat calls `perform_chat_api_call`; an async hook
+  fails every `/chat/completions` call. Any other exception from a pre-call hook still refuses the call
+  (fail-closed); a hook that wants fail-open catches its own errors.
+- On the unqueued paths, `/chat/completions` returns the refusal to its client unchanged, streamed or not. With
+  opt-in queued execution (`CHAT_QUEUED_EXECUTION`), a streamed refusal reaches the client as a 200 SSE
+  `provider_unavailable` frame instead.
+- A refusal of a tool auto-continuation is fatal: the client gets 400, as for a quota refusal.
+- A refused fallback call is recorded as the fallback provider's failure (`record_failure`) before the refusal is
+  re-raised, at three sites in `chat_service.py` (queued stream, direct stream, non-stream). This matters only
+  for a provider-dependent hook, and matches quota behaviour today.
+- `detail` is client-safe text the hook author writes. It never echoes the request, the system prompt or retrieved
+  context, and never names the provider, model or endpoint.
+- A post-call hook never raises: the provider has already answered and billed. To block or redact output it
+  returns a replacement that keeps the provider's `usage`, or a stream wrapper that passes the provider's usage
+  chunk through and ends the stream itself, so the call's real tokens are still recorded. A chunk the wrapper
+  has already yielded cannot be recalled, so a match that can span chunks needs a bounded holdback buffer, as
+  chat's `MODERATION_STREAM_BUFFER_CHARS` does today.
+- Hooks run in registration order, with no re-entrancy guard. A hook must not call the gateway.
+- `GatewayCall.request` carries the API key, the app config and the credential handle. Hooks must not log or
+  persist it. A hook replaces values rather than mutating nested items, because the messages list aliases the
+  caller's payload.
+- `GatewayCall.user_id` is the user the call is for, read when the gateway is entered. A stream wrapper reads the user
+  from the call, because it runs later and in another thread. Guardian's chat type is TASK-13950.27's to add.
+
+Moderation (TASK-13950.27) registers here, from its own package, so LLM_Calls imports neither Chat nor Moderation.
+Direct adapter calls outside the gateway are frozen by `tldw_Server_API/tests/lint/test_direct_llm_adapter_calls_ratchet.py`.
