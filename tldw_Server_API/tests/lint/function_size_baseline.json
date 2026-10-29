@@ -15,7 +15,7 @@
   "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions:persist_streamed_assistant_message": {"lines": 366, "params": 5, "reason": null},
   "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions:prompt_assembly_preview": {"lines": 315, "params": 4, "reason": null},
   "tldw_Server_API.app.api.v1.endpoints.character_messages:get_chat_messages": {"lines": 373, "params": 15, "reason": null},
-  "tldw_Server_API.app.api.v1.endpoints.chat:create_chat_completion": {"lines": 2897, "params": 14, "reason": null},
+  "tldw_Server_API.app.api.v1.endpoints.chat:create_chat_completion": {"lines": 2907, "params": 14, "reason": "a request whose provider runs on the user's own key skips the hosted plan's pre-check and names its provider to enforce_llm_quota (BYOK quota exemption, owner decision 2026-10-26, TASK-13955)"},
   "tldw_Server_API.app.api.v1.endpoints.chat_documents:generate_document": {"lines": 466, "params": 5, "reason": null},
   "tldw_Server_API.app.api.v1.endpoints.chatbooks:import_chatbook": {"lines": 303, "params": 16, "reason": null},
   "tldw_Server_API.app.api.v1.endpoints.chunking:process_text_for_chunking_json": {"lines": 544, "params": 4, "reason": null},

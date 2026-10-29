@@ -1,7 +1,7 @@
 """Chat 402 on the monthly LLM-token quota: Retry-After header, no dispatch (spec 2 review A7)."""
 
 import pytest
-from fastapi import status
+from fastapi import HTTPException, status
 
 pytestmark = pytest.mark.integration
 
@@ -114,3 +114,121 @@ def test_chat_completions_402_on_daily_llm_cost_quota(
     assert response.json()["detail"]["category"] == "llm_cost_day"
     assert 1 <= int(response.headers["Retry-After"]) <= 86400
     assert dispatch_calls == []
+
+
+def test_chat_completions_admits_an_over_limit_user_whose_provider_runs_on_their_own_key(
+    client, auth_token, mock_chacha_db, setup_dependencies, configure_for_mock_server, monkeypatch
+):
+    """Past the monthly token allowance, a user with their own key for the provider still gets a reply (TASK-13955)."""
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work
+
+    dispatched: list[str] = []
+
+    async def _own_key(_uid, provider):
+        """Stands in for the lookup answering True for the request's provider (the boundary is under test)."""
+        return provider == "local-llm"
+
+    def _dispatch(**kwargs):
+        """Answer the call."""
+        dispatched.append(str(kwargs.get("api_endpoint")))
+        return {
+            "id": "chatcmpl-own-key",
+            "object": "chat.completion",
+            "created": 0,
+            "model": "local-llm",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
+        }
+
+    refuse_llm_work(monkeypatch)
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
+    monkeypatch.setattr(chat_ep, "perform_chat_api_call", _dispatch)
+    monkeypatch.setitem(chat_ep.API_KEYS, "local-llm", "dummy-key")
+
+    request_data = ChatCompletionRequest(
+        model="local-llm",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello, how are you?")],
+        api_provider="local-llm",
+    )
+    settings = get_settings()
+    headers = {"X-CSRF-Token": client.csrf_token}
+    if settings.AUTH_MODE == "multi_user":
+        headers["Authorization"] = auth_token
+    else:
+        headers["X-API-KEY"] = auth_token
+
+    response = client.post("/api/v1/chat/completions", json=request_data.model_dump(), headers=headers)
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert response.json()["choices"][0]["message"]["content"] == "hi"
+    assert dispatched == ["local-llm"]
+
+
+class _PlanSpent:
+    """The hosted billing plan's LLM token check, with the org's plan already spent."""
+
+    def __init__(self, *_args, **_kwargs):
+        """Any org, category and estimate."""
+
+    async def __aenter__(self):
+        """Refuse, as LimitEnforcer does past the plan's llm_tokens_month."""
+        raise HTTPException(status_code=402, detail={"error": "limit_exceeded", "category": "llm_tokens_month"})
+
+
+def _on_a_spent_hosted_plan(client, monkeypatch) -> None:
+    """Billing checks on for org 7, whose plan refuses every LLM request (the hosted product)."""
+    monkeypatch.setattr(chat_ep, "enforcement_enabled", lambda: True)
+    monkeypatch.setattr(chat_ep, "LimitEnforcer", _PlanSpent)
+    monkeypatch.setitem(client.app.dependency_overrides, chat_ep.get_billing_org_id, lambda: 7)
+
+
+@pytest.mark.parametrize("own_key", [True, False], ids=["own-key", "server-key"])
+def test_the_hosted_plan_does_not_check_a_request_on_the_users_own_key(
+    client, auth_token, mock_chacha_db, setup_dependencies, configure_for_mock_server, monkeypatch, own_key
+):
+    """A spent org plan refuses a server-key request but not one whose provider runs on the user's own key (TASK-13955)."""
+    dispatched: list[str] = []
+
+    async def _own_key(_uid, provider):
+        """Stands in for the lookup: the request's provider runs on the user's own key, or not."""
+        return own_key and provider == "local-llm"
+
+    def _dispatch(**kwargs):
+        """Answer the call."""
+        dispatched.append(str(kwargs.get("api_endpoint")))
+        return {
+            "id": "chatcmpl-plan",
+            "object": "chat.completion",
+            "created": 0,
+            "model": "local-llm",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
+        }
+
+    _on_a_spent_hosted_plan(client, monkeypatch)
+    monkeypatch.setattr(chat_ep, "users_own_key_serves", _own_key)
+    monkeypatch.setattr(chat_ep, "perform_chat_api_call", _dispatch)
+    monkeypatch.setitem(chat_ep.API_KEYS, "local-llm", "dummy-key")
+
+    request_data = ChatCompletionRequest(
+        model="local-llm",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello, how are you?")],
+        api_provider="local-llm",
+    )
+    settings = get_settings()
+    headers = {"X-CSRF-Token": client.csrf_token}
+    if settings.AUTH_MODE == "multi_user":
+        headers["Authorization"] = auth_token
+    else:
+        headers["X-API-KEY"] = auth_token
+
+    response = client.post("/api/v1/chat/completions", json=request_data.model_dump(), headers=headers)
+
+    if own_key:
+        assert response.status_code == status.HTTP_200_OK, response.text
+        assert dispatched == ["local-llm"]
+    else:
+        assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED, response.text
+        assert response.json()["detail"]["category"] == "llm_tokens_month"
+        assert dispatched == []

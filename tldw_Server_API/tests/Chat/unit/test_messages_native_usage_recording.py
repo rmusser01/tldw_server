@@ -410,3 +410,38 @@ async def test_a_native_call_on_the_users_own_key_is_recorded_as_such(rows, monk
         await llm_accounting.drain_accounting()
         (row,) = rows
     assert row["credential_source"] == "user"
+
+
+async def test_a_native_call_let_through_at_the_boundary_is_still_checked_when_not_on_the_users_key(
+    monkeypatch,
+) -> None:
+    """The boundary admits an over-limit user on their own key; a native call on another key is refused (TASK-13955)."""
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_calls
+
+    calls: list[str] = []
+
+    async def _own_key(_uid: Any, _provider: str) -> bool:
+        """The boundary believes the provider runs on the user's own key."""
+        return True
+
+    async def _post(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        """The provider call, which must not happen."""
+        calls.append("native")
+        return NATIVE_RESPONSE
+
+    _stub_endpoint(monkeypatch)
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
+    monkeypatch.setattr(messages_endpoint, "_native_post_json", _post)
+    refuse_llm_calls(monkeypatch)
+    with scoped_context(user_id=5), pytest.raises(LLMQuotaExceededError) as refused:
+        await messages_endpoint._handle_messages(
+            AnthropicMessagesRequest(model="anthropic/claude-3-5-haiku-latest", messages=[{"role": "user", "content": "hi"}]),
+            current_user=SimpleNamespace(id=5, id_int=5),
+            request=SimpleNamespace(),
+            anthropic_version=None,
+            anthropic_beta=None,
+        )
+    assert refused.value.detail["category"] == "llm_tokens_month"
+    assert calls == []

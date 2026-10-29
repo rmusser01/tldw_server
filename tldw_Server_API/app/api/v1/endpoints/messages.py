@@ -17,7 +17,7 @@ from loguru import logger
 from starlette.responses import JSONResponse, StreamingResponse
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, check_rate_limit, get_request_user
-from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import require_llm_quota
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.schemas.anthropic_messages import (
     AnthropicCountTokensRequest,
     AnthropicMessagesRequest,
@@ -69,6 +69,7 @@ from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_ant
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.LLM_Calls.usage_accounting import accounted_direct_stream, record_direct_response
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
+from tldw_Server_API.app.core.Usage.llm_quota_gate import check_llm_call_async
 
 router = APIRouter()
 public_router = APIRouter()
@@ -2073,6 +2074,8 @@ async def _handle_messages(
 ) -> JSONResponse | StreamingResponse:
     """Handle an Anthropic-compatible Messages request."""
     provider, model = _resolve_provider_and_model_for_request(request_data)
+    # Usage quotas (LLM usage accounting spec §4a), before any LLM work. Inline, not a dependency, to name the provider.
+    await enforce_llm_quota(getattr(current_user, "id", None), provider=provider)
     credential_runtime = _new_messages_credential_runtime(current_user, request)
     runtime_owned_by_stream = False
     try:
@@ -2099,6 +2102,8 @@ async def _handle_messages(
                 anthropic_beta=anthropic_beta,
             )
             stream = _extract_stream_flag(request_data.stream)
+            # No ChatProvider on this path, so it gets the adapters' check at the call (a no-op once admitted).
+            await check_llm_call_async(getattr(credentials, "credential_source", None))
             started = time.monotonic()
             if stream:
                 stream_iter = await _prepare_native_stream_iterator(
@@ -2278,7 +2283,7 @@ async def _handle_count_tokens(
 @router.post(
     "/messages",
     summary="Anthropic-compatible Messages API",
-    dependencies=[Depends(check_rate_limit), Depends(require_llm_quota)],
+    dependencies=[Depends(check_rate_limit)],
     responses={
         status.HTTP_200_OK: {
             "description": "Anthropic-compatible messages JSON response or SSE stream.",
@@ -2309,7 +2314,7 @@ async def create_messages(
 @public_router.post(
     "/v1/messages",
     summary="Anthropic-compatible Messages API",
-    dependencies=[Depends(check_rate_limit), Depends(require_llm_quota)],
+    dependencies=[Depends(check_rate_limit)],
     responses={
         status.HTTP_200_OK: {
             "description": "Anthropic-compatible messages JSON response or SSE stream.",
