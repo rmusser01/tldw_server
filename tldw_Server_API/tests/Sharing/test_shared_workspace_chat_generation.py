@@ -502,6 +502,7 @@ async def test_generation_names_whose_key_its_call_runs_on(monkeypatch, generati
     assert result.answer == "Grounded"
     assert seen == [source]
 
+
 @pytest.mark.asyncio
 async def test_generation_on_an_operator_base_url_from_the_server_config_counts_the_users_key(
     monkeypatch, generation_stubs
@@ -522,7 +523,7 @@ async def test_generation_on_an_operator_base_url_from_the_server_config_counts_
         shared_chat, "load_server_config_snapshot",
         lambda: {"openai_api": {"api_base_url": "http://operator-gpu.internal:8000/v1"}},
     )
-    await _service().generate_grounded_answer(
+    result = await _service().generate_grounded_answer(
         query="Question?",
         evidence=(_evidence(),),
         target=ResolvedChatTarget("openai", "gpt-model"),
@@ -531,4 +532,5 @@ async def test_generation_on_an_operator_base_url_from_the_server_config_counts_
         share_scope_id=73,
         request=SimpleNamespace(),
     )
+    assert result.answer == "Grounded"
     assert seen == ["user_unmetered"]

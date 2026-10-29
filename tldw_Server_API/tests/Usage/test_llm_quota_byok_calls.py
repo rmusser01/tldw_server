@@ -498,6 +498,7 @@ async def test_prompt_improvement_names_whose_key_its_call_runs_on(monkeypatch) 
     assert (result.provider, result.model) == ("moonshot", "kimi-k2")
     assert seen == ["user"]
 
+
 async def test_prompt_improvement_on_an_operator_base_url_from_the_server_config_counts_the_users_key(monkeypatch) -> None:
     """The raw-key dispatcher also reads the server config snapshot, where an environment base URL lands."""
     from tldw_Server_API.app.core.LLM_Calls.routing import InMemoryRoutingDecisionStore
@@ -530,9 +531,10 @@ async def test_prompt_improvement_on_an_operator_base_url_from_the_server_config
         dispatch, "load_server_config_snapshot",
         lambda: {"moonshot_api": {"api_base_url": "http://operator-gpu.internal:8000/v1"}},
     )
-    await dispatch.dispatch_prompt_improvement(
+    result = await dispatch.dispatch_prompt_improvement(
         request=_request_context(), current_user=_route_user(), routing_decision_store=InMemoryRoutingDecisionStore(),
         selected_model="moonshot/kimi-k2", provider_hint=None, messages=[{"role": "user", "content": "draft"}],
         request_id="byok-dispatch-operator", configured_providers_getter=_provider_listing,
     )
+    assert (result.provider, result.model) == ("moonshot", "kimi-k2")
     assert seen == ["user_unmetered"]
