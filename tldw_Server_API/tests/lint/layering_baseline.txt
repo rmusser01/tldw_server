@@ -160,8 +160,8 @@ core.DB_Management -> core.Admin_Webhooks: 2
 core.DB_Management -> core.Agent_Client_Protocol: 1
 core.DB_Management -> core.Agent_Orchestration: 1
 core.DB_Management -> core.AuthNZ: 24
-core.DB_Management -> core.Character_Chat: 12
-core.DB_Management -> core.Chat: 25
+core.DB_Management -> core.Character_Chat: 11
+core.DB_Management -> core.Chat: 24
 core.DB_Management -> core.CodeGraph: 1
 core.DB_Management -> core.Collections: 1
 core.DB_Management -> core.Evaluations: 1
@@ -178,7 +178,7 @@ core.DB_Management -> core.Prompt_Management: 7
 core.DB_Management -> core.RAG: 6
 core.DB_Management -> core.RPG: 6
 core.DB_Management -> core.Sharing: 5
-core.DB_Management -> core.Sync: 30
+core.DB_Management -> core.Sync_Contracts: 29  # bump: Sync contracts moved out of core.Sync so DB_Management no longer imports the Sync package; not DB-loading, pinned by test_db_management_logic_imports (TASK-13950.16)
 core.DB_Management -> core.VN_Assets: 1
 core.DB_Management -> core.Visual_Identities: 1
 core.DB_Management -> core.Watchlists: 2
@@ -228,7 +228,7 @@ core.Slides -> services: 1
 core.Storage -> services: 1
 core.Streaming -> api.v1.schemas: 2
 core.StudyPacks -> api.v1.schemas: 3
-core.Sync -> api.v1.schemas: 1
+core.Sync_Contracts -> api.v1.schemas: 1  # bump: moved from core.Sync with personal_context_ongoing_contract; TASK-13950.15 S9 removes it (TASK-13950.16)
 core.TTS -> api.v1.schemas: 3
 core.TTS -> services: 1
 core.UserProfiles -> services: 1

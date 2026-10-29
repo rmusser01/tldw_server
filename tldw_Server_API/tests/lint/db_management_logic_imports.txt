@@ -14,10 +14,7 @@ core.DB_Management.VNPolicy_DB -> core.AuthNZ.database: 1
 core.DB_Management.VisualIdentity_DB -> core.Visual_Identities.source_context: 1
 core.DB_Management.admin_retention_preview_counts -> core.AuthNZ.database: 1
 core.DB_Management.admin_webhooks_repository -> core.AuthNZ.database: 1
-core.DB_Management.chacha.conversation_resume_store -> core.Character_Chat.roleplay_resume_prompt: 1
-core.DB_Management.chacha.conversation_resume_store -> core.Chat.chat_service: 1
 core.DB_Management.chacha.message_store -> core.Chat.history_context: 1
-core.DB_Management.chacha.native_chat_asset_store -> core.Sync.v2.blob_store: 2
 core.DB_Management.chacha.native_fork_store -> core.Chat.native_fork_projection: 4
 core.DB_Management.chacha.persona_state_store -> core.Personalization.companion_activity: 1
 core.DB_Management.jobs_failed_requeue -> core.Jobs.operations.postgres.admission: 1

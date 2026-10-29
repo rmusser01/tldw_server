@@ -18,8 +18,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
-from tldw_Server_API.app.core.Sync.v2.models import normalize_sync_timestamp
-from tldw_Server_API.app.core.Sync.v2.notes_link import (
+from tldw_Server_API.app.core.Sync_Contracts.models import normalize_sync_timestamp
+from tldw_Server_API.app.core.Sync_Contracts.notes_link import (
     NotesLinkValidationError,
     parse_notes_link_payload,
     validate_notes_link_object_id,

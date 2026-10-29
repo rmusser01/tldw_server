@@ -64,7 +64,7 @@ from tldw_Server_API.app.core.Personalization.personal_context_repository_models
     ProfileStorageLockedError,
     ProfileUnsupportedSchemaError,
 )
-from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import (
+from tldw_Server_API.app.core.Sync_Contracts.personal_context_ongoing_contract import (
     PersonalContextExchangeProof,
 )
 
