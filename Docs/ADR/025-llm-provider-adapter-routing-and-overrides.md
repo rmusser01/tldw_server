@@ -73,6 +73,9 @@ and the user the call is for) and may replace request values or refuse the call.
 result, or the stream iterator, and returns what the caller gets. Callers name their surface with the reserved
 `llm_surface` keyword, which never reaches a provider; `/chat/completions` sends `chat.completions`.
 
+Each call snapshots the registered hooks once, at entry, and runs both stages from that snapshot, so a hook
+added or removed mid-call gets neither stage or both.
+
 The hook contract:
 - Refuse only with `LLMPolicyRefusal(detail)` (`core/exceptions.py`, always HTTP 400), and only from a pre-call
   hook. Chat treats any other exception (an `HTTPException` included) as a provider failure, and a 401 enters
