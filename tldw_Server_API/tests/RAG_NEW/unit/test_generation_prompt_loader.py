@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.Claims_Extraction.analyze_types import ClaimsAnalyzeCallable
+from tldw_Server_API.app.core.Context_Integrity import prompt_loader as prompt_loader_mod
 from tldw_Server_API.app.core.Context_Integrity.models import ContextIntegrityBootState
 from tldw_Server_API.app.core.Context_Integrity.resolver import (
     ContextIntegrityResolver,
@@ -19,7 +20,6 @@ from tldw_Server_API.app.core.Context_Integrity.resolver import (
 )
 from tldw_Server_API.app.core.RAG.rag_service import generation as generation_mod
 from tldw_Server_API.app.core.RAG.rag_service.generation import PromptTemplates
-from tldw_Server_API.app.core.Utils import prompt_loader as prompt_loader_mod
 
 pytestmark = pytest.mark.unit
 

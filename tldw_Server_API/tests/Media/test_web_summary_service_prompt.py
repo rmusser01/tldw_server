@@ -16,10 +16,10 @@ from tldw_Server_API.app.api.v1.endpoints.media import ingest_web_content as ing
 from tldw_Server_API.app.api.v1.endpoints.media import process_web_scraping as endpoint
 from tldw_Server_API.app.api.v1.schemas.media_request_models import IngestWebContentRequest
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.Context_Integrity import prompt_loader
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
 from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as summary
 from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
-from tldw_Server_API.app.core.Utils import prompt_loader
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as legacy
 from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping as scraper_mod
 from tldw_Server_API.app.services import enhanced_web_scraping_service as enhanced

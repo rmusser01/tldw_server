@@ -50,6 +50,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_search_repository import (
     append_sqlite_media_visibility,
 )
+from tldw_Server_API.app.core.Kanban.vector_search import create_kanban_vector_search
 from tldw_Server_API.app.core.RAG.exceptions import RAGDatabaseError
 from tldw_Server_API.app.core.testing import is_production_like_env
 
@@ -3287,7 +3288,9 @@ class KanbanDBRetriever(BaseRetriever):
         self.kanban_db = kanban_db
         self.user_id = self._resolve_user_id(user_id)
         if self.kanban_db is None and self.db_path is not None:
-            self.kanban_db = KanbanDB(db_path=str(self.db_path), user_id=self.user_id)
+            self.kanban_db = KanbanDB(
+                db_path=str(self.db_path), user_id=self.user_id, vector_search_factory=create_kanban_vector_search
+            )
             self._owns_db = True
 
     @staticmethod
@@ -3299,7 +3302,9 @@ class KanbanDBRetriever(BaseRetriever):
         if self.kanban_db is None:
             if self.db_path is None:
                 raise MissingDatabasePathError()
-            self.kanban_db = KanbanDB(db_path=str(self.db_path), user_id=self.user_id)
+            self.kanban_db = KanbanDB(
+                db_path=str(self.db_path), user_id=self.user_id, vector_search_factory=create_kanban_vector_search
+            )
             self._owns_db = True
         return self.kanban_db
 

@@ -1422,6 +1422,7 @@ def test_backend_required_enforces_size_ratchets(ratchet: str) -> None:
     "ratchet",
     [
         "tldw_Server_API/tests/lint/test_layering_contract.py",
+        "tldw_Server_API/tests/lint/test_db_management_logic_imports.py",
         "tldw_Server_API/tests/lint/test_core_to_api_import_boundary.py",
     ],
 )

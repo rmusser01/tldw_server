@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
     KanbanDBError,
     NotFoundError,
 )
+from tldw_Server_API.app.core.Kanban.vector_search import create_kanban_vector_search
 from tldw_Server_API.app.core.exceptions import AdapterError
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
 from tldw_Server_API.app.core.Workflows.adapters._common import resolve_context_user_id
@@ -223,7 +224,7 @@ async def run_kanban_adapter(config: dict[str, Any], context: dict[str, Any]) ->
         user_id_int = user_id
 
     db_path = DatabasePaths.get_kanban_db_path(user_id_int)
-    db = KanbanDB(db_path=str(db_path), user_id=user_id)
+    db = KanbanDB(db_path=str(db_path), user_id=user_id, vector_search_factory=create_kanban_vector_search)
 
     try:
         if action == "board.list":

@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.Sync.v2.errors import (
+from tldw_Server_API.app.core.Sync_Contracts.errors import (
     SyncConflictNotFoundError,
     SyncDatasetNotFoundError,
     SyncHeadConflictError,
@@ -28,7 +28,7 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncMaterializationPredecessorError,
     SyncStoreError,
 )
-from tldw_Server_API.app.core.Sync.v2.models import (
+from tldw_Server_API.app.core.Sync_Contracts.models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
     MEDIA_SYNC_DOMAINS,
@@ -91,10 +91,10 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     normalize_sync_timestamp,
     resolve_personal_context_ingress_result_revision,
 )
-from tldw_Server_API.app.core.Sync.v2.mutation_group_validation import (
+from tldw_Server_API.app.core.Sync_Contracts.mutation_group_validation import (
     SYNC_MUTATION_GROUP_MAX_SIZE,
 )
-from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_readiness import (
+from tldw_Server_API.app.core.Sync_Contracts.notes_moodboard_studio_readiness import (
     NOTES_MOODBOARD_STUDIO_READINESS_REASON_CODES_BY_KEY,
     NOTES_MOODBOARD_STUDIO_READINESS_STATES,
     NOTES_MOODBOARD_STUDIO_SERVER_METADATA_KEYS,
@@ -102,7 +102,7 @@ from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_readiness import (
     default_notes_moodboard_studio_readiness_record,
     parse_notes_moodboard_studio_readiness_record,
 )
-from tldw_Server_API.app.core.Sync.v2.notes_task_readiness import (
+from tldw_Server_API.app.core.Sync_Contracts.notes_task_readiness import (
     NOTES_TASK_READINESS_REASON_CODES_BY_KEY,
     NOTES_TASK_READINESS_STATES,
     NOTES_TASK_SERVER_METADATA_KEYS,
@@ -8144,7 +8144,7 @@ class SyncDatabase:
             return
         overlay = planned_heads or {}
         if envelope.domain == "notes.provenance":
-            from tldw_Server_API.app.core.Sync.v2.notes_provenance_contract import notes_provenance_object_hash
+            from tldw_Server_API.app.core.Sync_Contracts.notes_provenance_contract import notes_provenance_object_hash
             row = self._require_dataset(envelope.dataset_id, connection=connection)
             readiness = decode_json(row.get("metadata_json"), default={}).get("notes_provenance_v1", {})
             if readiness.get("state") != "ready" and not (verified_bootstrap and readiness.get("state") == "initializing"):
