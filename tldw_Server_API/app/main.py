@@ -1316,6 +1316,9 @@ async def lifespan(app: FastAPI):
     _run_startup_config_validation()
 
     try:
+        from tldw_Server_API.app.services.startup_openapi import warm_openapi_schema
+
+        await warm_openapi_schema(app)
         yield
     finally:
         # Forced ASGI shutdown cancels this suspended lifespan. Owned workers
