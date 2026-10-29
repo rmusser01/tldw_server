@@ -2771,7 +2771,8 @@
     },
     "logout": {
       "success": "Logged out successfully",
-      "failed": "Logout failed"
+      "failed": "Logout failed",
+      "unconfirmed": "The server did not confirm sign-out. This session may still be active."
     },
     "defaultKeyWarning": {
       "title": "Default demo API key in use",

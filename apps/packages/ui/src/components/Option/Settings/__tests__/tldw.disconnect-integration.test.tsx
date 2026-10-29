@@ -168,3 +168,55 @@ it.each([false, true])("removes the settled Disconnect indicator with transition
   }
   await waitFor(() => expect(disconnect.querySelector("svg")).toBeNull())
 })
+
+
+it.each([false, true])(
+  "distinguishes multi-user local sign-out after remote failure=%s",
+  async (fail) => {
+    const serverUrl = "https://logout.example.test";
+    await tldwClient.updateConfig({
+      serverUrl,
+      authMode: "multi-user",
+      apiKey: undefined,
+      accessToken: "synthetic-logout-access",
+      refreshToken: "synthetic-logout-refresh",
+    });
+    mocks.bgRequest.mockImplementation(async ({ path }: { path: string }) => {
+      if (path === "/api/v1/auth/logout") {
+        if (fail) throw new TypeError("Declared remote sign-out failure");
+        return { message: "Successfully logged out" };
+      }
+      if (path === "/api/v1/auth/me")
+        return { id: 1, username: "alice", role: "user" };
+      return {};
+    });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    render(
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <App>
+          <TldwSettings />
+        </App>
+      </ConfigProvider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Logout" }));
+    await screen.findByText(
+      fail
+        ? "The server did not confirm sign-out. This session may still be active."
+        : "Logged out successfully",
+      { exact: true },
+    );
+    if (fail)
+      expect(
+        screen.queryByText("Logged out successfully", { exact: true }),
+      ).not.toBeInTheDocument();
+    const config = await tldwClient.getConfig();
+    expect(config?.accessToken).toBeUndefined();
+    expect(config?.refreshToken).toBeUndefined();
+    expect(config?.serverUrl).toBe(serverUrl);
+    expect(
+      mocks.bgRequest.mock.calls.filter(
+        ([request]) => request.path === "/api/v1/auth/logout",
+      ),
+    ).toHaveLength(1);
+  },
+);
