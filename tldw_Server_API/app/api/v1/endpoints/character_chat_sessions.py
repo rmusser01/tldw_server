@@ -9800,12 +9800,15 @@ async def export_lorebook_diagnostics(
         "asc",
         description="Sort order for turns by assistant turn number",
     ),
+    scope_type: Literal["global", "workspace"] | None = Query(None, description="Conversation scope type"),
+    workspace_id: str | None = Query(None, description="Workspace ID when scope_type='workspace'"),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
 ):
     """Iterate assistant messages and collect lorebook_diagnostics from message metadata."""
+    scope = _resolve_chat_scope(scope_type, workspace_id)
     conversation = db.get_conversation_by_id(chat_id)
-    _verify_chat_ownership(conversation, current_user.id, chat_id)
+    _verify_chat_ownership(conversation, current_user.id, chat_id, scope)
 
     character_id = conversation.get("character_id")
     settings_row = db.get_conversation_settings(chat_id)
@@ -9846,9 +9849,12 @@ async def export_lorebook_diagnostics(
             continue
 
         content = msg.get("content") or ""
+        timestamp = msg.get("timestamp")
+        if isinstance(timestamp, datetime):
+            timestamp = timestamp.isoformat()
         turns_with_diags.append(DiagnosticTurnEntry(
             message_id=msg["id"],
-            timestamp=msg.get("timestamp"),
+            timestamp=timestamp,
             turn_number=turn_counter,
             message_preview=content[:120],
             diagnostics=diags,
