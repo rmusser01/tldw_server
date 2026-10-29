@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
+from tldw_Server_API.app.core.RAG.rag_schemas_unified import UnifiedRAGResponse
 
 from .result_model import RAGResult
 from .trust_contracts import EVIDENCE_TEXT_KEYS, classify_knowledge_answer_trust
