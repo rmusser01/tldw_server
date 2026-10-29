@@ -45,6 +45,7 @@ vi.mock("@/db/dexie/schema", () => {
       messages: table(),
       modelNickname: table(),
       sessionFiles: table(),
+      searchTokens: table(),
       transaction: vi.fn().mockImplementation(async (_mode, _tables, operation) => operation())
     },
     PageAssistDexieDB: vi.fn()

@@ -106,7 +106,9 @@ const physical = vi.hoisted(() => {
             ]
           : name === "sessionFiles"
             ? row.sessionId
-            : row.id
+            : name === "searchTokens"
+              ? [row.token, row.history_id]
+              : row.id
       )
     const collection = (matches: (row: Row) => boolean): Collection => ({
       toArray: async () => structuredClone([...rows.values()].filter(matches)),
@@ -137,6 +139,8 @@ const physical = vi.hoisted(() => {
       bulkPut: async (values: Row[]) => {
         values.forEach((row) => rows.set(key(row), structuredClone(row)))
       },
+      bulkGet: async (ids: unknown[]) =>
+        ids.map((id) => structuredClone(rows.get(JSON.stringify(id)))),
       update: async (id: unknown, patch: Row) => {
         const encoded = JSON.stringify(id)
         if (rows.has(encoded))
@@ -164,7 +168,8 @@ const physical = vi.hoisted(() => {
     "historySelections",
     "historyProjections",
     "compareStates",
-    "forkOperations"
+    "forkOperations",
+    "searchTokens"
   ])
     tables[name] = table(name)
   let transactionTail = Promise.resolve()

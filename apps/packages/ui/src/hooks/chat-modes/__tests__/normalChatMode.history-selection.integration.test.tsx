@@ -42,11 +42,12 @@ const storage = vi.hoisted(() => {
     beforeHistoryAdd: undefined as (() => Promise<void>) | undefined,
     beforeMessageAdd: undefined as (() => Promise<void>) | undefined
   }
-  for (const name of ["chatHistories", "messages", "userSettings", "sessionFiles", "compareStates", "historySelections", "historyProjections", "forkOperations", "modelNickname", "prompts"]) {
+  for (const name of ["chatHistories", "messages", "userSettings", "sessionFiles", "compareStates", "historySelections", "historyProjections", "forkOperations", "modelNickname", "prompts", "searchTokens"]) {
     const rows = new Map<string, Row>()
     const key = (row: Row) => JSON.stringify(name === "historySelections"
       ? [row.profile_id, row.client_session_id, row.owner_key, row.conversation_id]
-      : name === "forkOperations" ? [row.owner_key, row.operation_id] : row.id)
+      : name === "forkOperations" ? [row.owner_key, row.operation_id]
+      : name === "searchTokens" ? [row.token, row.history_id] : row.id)
     const collection = (matches: (row: Row) => boolean): Collection => ({
       toArray: async () => structuredClone([...rows.values()].filter(matches)),
       and: predicate => collection(row => matches(row) && predicate(row)),

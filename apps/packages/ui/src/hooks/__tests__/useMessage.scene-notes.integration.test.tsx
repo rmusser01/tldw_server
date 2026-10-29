@@ -97,7 +97,9 @@ const physical = vi.hoisted(() => {
               row.owner_key,
               row.conversation_id
             ]
-          : row.id
+          : name === "searchTokens"
+            ? [row.token, row.history_id]
+            : row.id
       )
     const collection = (matches: (row: Row) => boolean): Collection => ({
       toArray: async () => structuredClone([...rows.values()].filter(matches)),
@@ -148,7 +150,8 @@ const physical = vi.hoisted(() => {
     "historySelections",
     "historyProjections",
     "compareStates",
-    "forkOperations"
+    "forkOperations",
+    "searchTokens"
   ])
     tables[name] = table(name)
   let transactionTail = Promise.resolve()
