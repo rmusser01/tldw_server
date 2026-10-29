@@ -1,3 +1,4 @@
+import { WORKSPACE_RAG_SOURCES_KEY, restoreWorkspaceRagSources } from "@/utils/workspace-rag-sources"
 import { readSavedRoleplayPresentation } from "@/services/tldw/roleplay-resume"
 import { useHistorySelectionContext } from "./useHistorySelection"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
@@ -460,7 +461,7 @@ export const mapServerChatMessagesToPlaygroundMessages = ({
       message: mirroredImageEvent || (m.role === "user" && m.version === 1 &&
         metadataExtra?.content_placeholder_reason === "image_attachment" && m.images?.length &&
         m.content === `<Image attachment x${m.images.length}>`) ? "" : m.content,
-      sources: [],
+      sources: m.role === "assistant" ? restoreWorkspaceRagSources(metadataExtra?.[WORKSPACE_RAG_SOURCES_KEY]) : [],
       images: mirroredImageDataUrl ? [mirroredImageDataUrl] : m.images || [],
       generationInfo,
       id: String(m.id),

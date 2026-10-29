@@ -521,7 +521,8 @@ const replaceAuthority = (apiKey: string) => {
   mocks.config = { ...mocks.config, apiKey }
   window.dispatchEvent(new Event("tldw:auth-credentials-changed"))
   for (const watch of mocks.watches)
-    watch.tldwConfig({ newValue: mocks.config })
+    if (typeof watch.tldwConfig === "function")
+      watch.tldwConfig({ newValue: mocks.config })
 }
 
 const seedLocalDraft = () =>
@@ -3154,6 +3155,207 @@ describe("saved normal Chat pipeline with autosave", () => {
       })
       return { ...hook, send, captureSdkScene, scene, target, record, originalAddress, requestScope }
     }
+
+    it("S04 retains cited workspace source references through the actual SDK model and manual server save", async () => {
+      const actualModels =
+        await vi.importActual<typeof import("@/models")>("@/models");
+      mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel);
+      mocks.realFormatter = true;
+      mocks.ragSearch.mockResolvedValue({
+        documents: [
+          {
+            content: "Selene is the telescope.",
+            metadata: {
+              media_id: 42,
+              title: "Rowan field report",
+              type: "text",
+              secret_unknown: "must-not-persist",
+            },
+          },
+        ],
+      });
+      mocks.streamMessage.mockImplementation(
+        async function* (messages, options, onChunk) {
+          if (options.saveToDb) {
+            mocks.serverRows
+              .get(options.conversationId)!
+              .push(
+                {
+                  id: "native-source-user",
+                  role: "user",
+                  content: String(messages.at(-1)!.content),
+                },
+                {
+                  id: "native-source-answer",
+                  role: "assistant",
+                  content: "The telescope is Selene.",
+                },
+              );
+            onChunk({
+              tldw_conversation_id: options.conversationId,
+              tldw_user_message_id: "native-source-user",
+              tldw_message_id: "native-source-answer",
+            });
+          }
+          yield "The telescope is Selene.";
+        },
+      );
+      const view = await mountSdkScene({
+        type: "workspace",
+        workspaceId: "sdk-original-workspace",
+      });
+      act(() =>
+        useStoreMessageOption.setState({
+          ragMediaIds: [42],
+          fileRetrievalEnabled: true,
+          chatMode: "rag",
+        }),
+      );
+      try {
+        let result: unknown;
+        await act(async () => {
+          result = await view.send();
+        });
+        expect(result, JSON.stringify(result)).toMatchObject({
+          status: "submitted",
+        });
+        expect(mocks.streamMessage).toHaveBeenCalledOnce();
+        expect(mocks.pageAssistModel.mock.calls[0][0]).toMatchObject({
+          conversationId: "chat-1",
+          saveToDb: false,
+        });
+        expect(mocks.streamMessage.mock.calls[0][1]).toMatchObject({
+          saveToDb: false,
+        });
+        expect(mocks.addChatMessage).toHaveBeenCalledTimes(2);
+        const saved = mocks.serverRows.get("chat-1")!;
+        expect(saved.map((row) => [row.role, row.content])).toEqual([
+          ["user", "SDK original question"],
+          ["assistant", "The telescope is Selene."],
+        ]);
+        expect(saved[1].metadata_extra).toMatchObject({
+          workspace_rag_sources_v1: {
+            origin: "knowledge_qa",
+            sources: [
+              {
+                mediaId: 42,
+                title: "Rowan field report",
+                excerpt: "Selene is the telescope.",
+              },
+            ],
+          },
+        });
+        expect(JSON.stringify(saved[1].metadata_extra)).not.toContain(
+          "must-not-persist",
+        );
+      } finally {
+        view.unmount();
+      }
+    });
+
+    it.each(["current", "account retired", "workspace retired"] as const)(
+      "S04 keeps a partial server save truthful when %s",
+      async (boundary) => {
+        const { getServerChatSaveStatus, resetServerChatSaveStatus } =
+          await import("@/store/server-chat-save-status");
+        resetServerChatSaveStatus();
+        const actualModels =
+          await vi.importActual<typeof import("@/models")>("@/models");
+        mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel);
+        mocks.realFormatter = true;
+        mocks.ragSearch.mockResolvedValue({
+          documents: [
+            {
+              content: "Selene is the telescope.",
+              metadata: { media_id: 42, title: "Rowan", type: "text" },
+            },
+          ],
+        });
+        mocks.streamMessage.mockImplementation(async function* () {
+          yield "The telescope is Selene.";
+        });
+        const held = deferred<void>();
+        const client = {
+          invalidateChatMessagesCache: vi.fn(),
+        } as unknown as import("@/services/tldw/TldwApiClient").TldwApiClientCore;
+        mocks.addChatMessage.mockImplementation((id, row, options) =>
+          chatRagMethods.addChatMessage.call(client, id, row, options),
+        );
+        mocks.bgRequest.mockImplementation(async (request) => {
+          if (request.body.role === "assistant") {
+            await held.promise;
+            throw new Error("Assistant save acknowledgement lost");
+          }
+          const row = { ...request.body, id: "confirmed-user", version: 1 };
+          mocks.serverRows.get("chat-1")!.push(row);
+          return row;
+        });
+        const view = await mountSdkScene({
+          type: "workspace",
+          workspaceId: "sdk-original-workspace",
+        });
+        act(() =>
+          useStoreMessageOption.setState({
+            ragMediaIds: [42],
+            fileRetrievalEnabled: true,
+            chatMode: "rag",
+          }),
+        );
+        let pending!: ReturnType<typeof view.send>;
+        try {
+          act(() => {
+            pending = view.send();
+          });
+          await waitFor(() => expect(mocks.bgRequest).toHaveBeenCalledTimes(2));
+          expect(getServerChatSaveStatus("chat-1")).toBe("saving");
+          if (boundary === "account retired")
+            act(() => replaceAuthority("synthetic-b"));
+          if (boundary === "workspace retired")
+            act(() => {
+              useStoreMessageOption.getState().startNewChatDraft(false);
+              useStoreMessageOption.setState({
+                messages: [
+                  {
+                    id: "new-draft",
+                    isBot: false,
+                    name: "You",
+                    message: "Keep replacement",
+                    sources: [],
+                  },
+                ],
+              });
+            });
+          await act(async () => {
+            held.resolve();
+            await pending;
+          });
+          expect(getServerChatSaveStatus("chat-1")).toBe("failed");
+          expect(mocks.bgRequest).toHaveBeenCalledTimes(2);
+          expect(mocks.streamMessage).toHaveBeenCalledOnce();
+          expect(mocks.serverRows.get("chat-1")!.map((row) => row.role)).toEqual([
+            "user",
+          ]);
+          if (boundary === "current") {
+            const answer = view.result.current.state.messages.find(
+              (row) => row.isBot,
+            )!;
+            expect(answer.message).toBe("The telescope is Selene.");
+            expect(answer.metadataExtra).toMatchObject({
+              workspace_rag_sources_v1: { sources: [{ mediaId: 42 }] },
+            });
+            expect(answer.sources).toHaveLength(1);
+          } else if (boundary === "workspace retired")
+            expect(
+              view.result.current.state.messages.map((row) => row.message),
+            ).toEqual(["Keep replacement"]);
+          else expect(view.result.current.state.messages).toEqual([]);
+        } finally {
+          held.resolve();
+          await pending;
+          view.unmount();
+        }
+      },
+    );
 
     it.each([
       { type: "global" } as const,

@@ -4313,6 +4313,7 @@ export const useChatActions = ({
                 ragModeParamsWithSnapshot.historyId,
               serverChatId: workspaceServerChat.chatId,
               conversationId: workspaceServerChat.chatId,
+              ...(!isRegenerate && !isContinue ? { saveToDb: false } : {}),
               saveMessageOnSuccess: (data: SaveMessageData) =>
                 saveMessageOnSuccess({
                   ...data,
