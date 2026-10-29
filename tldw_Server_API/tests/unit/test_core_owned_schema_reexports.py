@@ -32,6 +32,8 @@ CORE_OWNED: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("synthetic_eval_schemas", "Evaluations.synthetic_eval_schemas", ("SyntheticEvalDraftSampleCreate", "SyntheticEvalPromotionCreate", "SyntheticEvalProvenance", "SyntheticEvalReviewActionCreate", "SyntheticEvalReviewActionType", "SyntheticEvalReviewState")),
     ("rag_schemas_unified", "RAG.rag_schemas_unified", ("KnowledgeSourceEmbeddingStatus", "KnowledgeSourceHealthEntry", "KnowledgeSourceHealthResponse", "KnowledgeSourceIndexStatus", "UnifiedBatchRequest", "UnifiedRAGRequest", "UnifiedRAGResponse")),
     ("_compat", "Utils.pydantic_compat", ("Field",)),
+    ("audio_schemas", "TTS.speech_schemas", ("NormalizationOptions", "OpenAISpeechRequest")),
+    ("audio_schemas", "Streaming.speech_chat_schemas", ("SpeechChatLLMConfig", "SpeechChatRequest", "SpeechChatResponse", "SpeechChatSTTConfig", "SpeechChatTTSConfig", "SpeechChatTiming", "SpeechChatTokenUsage")),
 )
 
 

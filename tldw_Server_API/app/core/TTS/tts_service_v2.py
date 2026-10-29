@@ -20,13 +20,14 @@ from typing import Any, Optional
 import numpy as np
 from loguru import logger
 
-#
-# Local Imports
-from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
 from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.Logging.log_context import new_request_id
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.Metrics.metrics_manager import MetricDefinition, MetricType
+
+#
+# Local Imports
+from tldw_Server_API.app.core.TTS.speech_schemas import OpenAISpeechRequest
 
 from . import adapter_registry
 from .adapter_registry import (

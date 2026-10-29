@@ -134,8 +134,6 @@ core.Admin_Webhooks -> api.v1.API_Deps: 1
 core.Admin_Webhooks -> services: 2
 core.Agent_Client_Protocol -> api.v1.endpoints.sandbox: 1
 core.Agent_Client_Protocol -> services: 4
-core.Audio -> api.v1.schemas: 1
-core.Audio_Studio -> api.v1.schemas: 1
 core.Audiobooks -> api.v1.schemas: 3
 core.Audit -> api.v1.API_Deps: 1
 core.Audit -> core.AuthNZ: 1
@@ -206,14 +204,14 @@ core.LLM_Calls -> core.Chat: 2  # bump: #3191 lazy import of Chat.chat_service i
 core.Local_LLM -> api.v1.schemas: 4
 core.MCP_unified -> services: 11
 core.Monitoring -> api.v1.schemas: 1
-core.Persona -> api.v1.schemas: 2
+core.Persona -> api.v1.schemas: 1
 core.PrivilegeMaps -> api.v1.utils: 2
 core.PrivilegeMaps -> main: 1
 core.Prompt_Management -> api.v1.endpoints.prompt_studio: 2
 core.Prompt_Management -> api.v1.schemas: 1
 core.Research -> api.v1.schemas: 2
 core.Research_Workspace -> api.v1.API_Deps: 2
-core.Research_Workspace -> api.v1.schemas: 5
+core.Research_Workspace -> api.v1.schemas: 4
 core.Security -> services: 1
 core.Setup -> api.v1.endpoints.audio: 1
 core.Setup -> api.v1.schemas: 2
@@ -222,17 +220,16 @@ core.Sharing -> api.v1.schemas: 2
 core.Skills -> api.v1.schemas: 1
 core.Slides -> services: 1
 core.Storage -> services: 1
-core.Streaming -> api.v1.schemas: 2
+core.Streaming -> api.v1.schemas: 1
 core.StudyPacks -> api.v1.schemas: 3
 core.Sync_Contracts -> api.v1.schemas: 1  # bump: moved from core.Sync with personal_context_ongoing_contract; TASK-13950.15 S9 removes it (TASK-13950.16)
-core.TTS -> api.v1.schemas: 3
 core.TTS -> services: 1
 core.UserProfiles -> services: 1
 core.VN_Assets -> api.v1.schemas: 2
 core.VN_Assets -> services: 2
 core.VN_Play -> api.v1.schemas: 2
 core.Watchlists -> services: 5
-core.Workflows -> api.v1.schemas: 3
+core.Workflows -> api.v1.schemas: 1
 core.Workflows -> services: 2
 core.Workspaces -> api.v1.schemas: 2
 core.Workspaces -> services: 1
