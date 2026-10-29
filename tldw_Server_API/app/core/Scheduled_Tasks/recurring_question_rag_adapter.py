@@ -6,8 +6,8 @@ import inspect
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGRequest, UnifiedRAGResponse
 from tldw_Server_API.app.core.exceptions import RecurringQuestionRAGError
+from tldw_Server_API.app.core.RAG.rag_schemas_unified import UnifiedRAGRequest, UnifiedRAGResponse
 
 _PRIVATE_KEY_PARTS = (
     "api_key",

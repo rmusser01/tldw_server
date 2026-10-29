@@ -1443,6 +1443,16 @@ def test_backend_required_enforces_layering_ratchets(ratchet: str) -> None:
 
 
 @pytest.mark.unit
+def test_backend_required_unit_smoke_runs_the_unit_tests() -> None:
+    """TASK-13950.15: the core-owned schema re-export test lives in tests/unit; this step is its required gate."""
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    steps = workflow["jobs"]["backend-required"]["steps"]
+    gate = next(step for step in steps if step.get("name") == "Backend unit smoke")
+    assert not gate.get("continue-on-error", False)  # nosec B101 - regression assertion
+    assert "tldw_Server_API/tests/unit" in shlex.split(gate["run"].replace("\\\n", " "), comments=True)  # nosec B101
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "guard",
     [
