@@ -18,7 +18,11 @@ import {
   Command,
   Loader2
 } from "lucide-react"
-import { createWorkspaceStorage, useWorkspaceStore } from "@/store/workspace"
+import {
+  createWorkspaceStorage,
+  flushWorkspacePersistence,
+  useWorkspaceStore
+} from "@/store/workspace"
 import {
   WORKSPACE_CONFLICT_NOTICE_THROTTLE_MS,
   WORKSPACE_STORAGE_CHANNEL_NAME,
@@ -35,6 +39,7 @@ import {
   buildResearchWorkspaceMigrationTombstoneKey,
   type ResearchWorkspaceIndexedDbStoreRef,
   type ResearchWorkspaceMigrationRunResult,
+  type ResearchWorkspaceMigrationRunInput,
 } from "@/store/workspace-migration";
 import {
   RESEARCH_WORKSPACE_INDEXEDDB_ARTIFACT_STORE,
@@ -1739,6 +1744,11 @@ const ResearchWorkspaceBody: React.FC = () => {
     })
   }, [activeWorkspaceOperations, statusGuardrailsEnabled, workspaceId])
 
+  const workspaceMigrationReady =
+    workspaceProjectedSourceStatusByMediaIdRef.current.workspaceId ===
+      workspaceId &&
+    workspaceProjectedSourceStatusByMediaIdRef.current.fallbackReady;
+
   useEffect(() => {
     if (!statusGuardrailsEnabled) {
       workspaceMigrationSignatureRef.current = null
@@ -1746,7 +1756,7 @@ const ResearchWorkspaceBody: React.FC = () => {
       setWorkspaceMigrationResult(null)
       return
     }
-    if (!isStoreHydrated || !workspaceId) return
+    if (!isStoreHydrated || !workspaceId || !workspaceMigrationReady) return
     if (typeof window === "undefined") return
 
     if (wasWorkspaceFreshlyInitializedInRuntime(workspaceId)) {
@@ -1812,7 +1822,7 @@ const ResearchWorkspaceBody: React.FC = () => {
       const session = active.getWorkspaceChatSession(buildWorkspaceChatSessionKey(workspaceId, referenceId))
       return session ? { referenceId, serverChatId: session.serverChatId } : undefined
     }
-    const migrationPromise = runResearchWorkspaceMigration({
+    const migrationInput: ResearchWorkspaceMigrationRunInput = {
       targetWorkspaceId: workspaceId,
       targetWorkspaceName: workspaceName || "Research Workspace",
       getChatReference,
@@ -1858,11 +1868,39 @@ const ResearchWorkspaceBody: React.FC = () => {
         capturedValues.set(key, value);
       },
       now: () => new Date().toISOString(),
-    });
+    };
+    const migrationPromise = (async () => {
+      // Capture after initial source hydration and its queued durable writes settle.
+      await flushWorkspacePersistence();
+      if (!isCurrent()) return null;
+      const currentKeys = [
+        ...new Set([
+          ...discoveredLocalStorageKeys,
+          ...collectResearchWorkspaceLegacyLocalStorageKeys(),
+        ]),
+      ].sort();
+      const currentStores =
+        collectResearchWorkspaceLegacyIndexedDbStores(currentKeys);
+      for (const store of discoveredIndexedDbStores) {
+        if (
+          !currentStores.some(
+            (current) =>
+              current.databaseName === store.databaseName &&
+              current.storeName === store.storeName,
+          )
+        )
+          currentStores.push(store);
+      }
+      return runResearchWorkspaceMigration({
+        ...migrationInput,
+        discoveredLocalStorageKeys: currentKeys,
+        discoveredIndexedDbStores: currentStores,
+      });
+    })();
 
     void migrationPromise
       .then((result) => {
-        if (!isCurrent()) return;
+        if (!isCurrent() || !result) return;
         setWorkspaceMigrationResult(result)
       })
       .catch((error) => {
@@ -1898,6 +1936,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     statusGuardrailsEnabled,
     workspaceId,
     workspaceMigrationRetryNonce,
+    workspaceMigrationReady,
     workspaceName
   ])
 
