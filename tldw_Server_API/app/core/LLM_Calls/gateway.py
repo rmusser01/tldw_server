@@ -9,8 +9,8 @@ import inspect
 import json as _json
 import os
 import time
-from collections.abc import AsyncIterator, Awaitable, Iterator, Mapping
-from dataclasses import replace
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
+from dataclasses import dataclass, replace
 from functools import lru_cache, partial
 from pathlib import Path
 from typing import Any, NoReturn
@@ -56,7 +56,7 @@ from tldw_Server_API.app.core.LLM_Calls.provider_results import sanitized_provid
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 from tldw_Server_API.app.core.testing import is_truthy as _shared_is_truthy
-from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
+from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_user_id, llm_call_context
 from tldw_Server_API.app.core.Usage.llm_quota_gate import check_llm_call_async, check_llm_call_sync
 from tldw_Server_API.app.core.Usage.pricing_catalog import get_pricing_catalog, list_provider_models
 
@@ -925,6 +925,7 @@ def _build_adapter_request_from_chat_args(chat_args: dict[str, Any]) -> tuple[st
         "history_message_limit",
         "history_message_order",
         "slash_command_injection_mode",
+        "llm_surface",
     }
     for key, value in chat_args.items():
         if key in skip_keys or key.startswith("_chat_") or key == "_endpoint_provenance" or value is None:
@@ -1172,15 +1173,131 @@ def _call_policy_after_model_discovery(
     return remaining_policy
 
 
+CHAT_COMPLETIONS_SURFACE = "chat.completions"
+
+
+@dataclass
+class GatewayCall:
+    """One provider call as the policy hooks see it."""
+
+    surface: str | None  # the caller's llm_surface kwarg; "chat.completions" for /chat/completions, else None until .27
+    provider: str
+    # the adapter request (messages, system_message, model, stream, ...); a pre-call hook may replace values
+    request: dict[str, Any]
+    stream: bool
+    user_id: int | None  # current_llm_user_id() when the gateway was entered; never the client's OpenAI "user" field
+
+
+PreCallHook = Callable[[GatewayCall], Any]
+PostCallHook = Callable[[GatewayCall, Any], Any]
+
+_POLICY_HOOKS: list[tuple[PreCallHook | None, PostCallHook | None]] = []
+
+
+def add_policy_hooks(
+    *, pre_call: PreCallHook | None = None, post_call: PostCallHook | None = None
+) -> Callable[[], None]:
+    """Run pre_call before and post_call after every provider call; return a function that removes them.
+
+    The contract (TASK-13950.13; ADR-025 repeats it):
+
+    - Order: hooks run in registration order, over a snapshot of the registry.
+    - Refusal (pre-call only): a pre-call hook refuses by raising ``LLMPolicyRefusal(detail)``
+      (``core.exceptions``, always HTTP 400). Pre-call hooks run after the adapter lookup and before
+      the ``try`` that maps provider errors, so the exception reaches the caller unchanged and the
+      provider is not called. Any other exception refuses the call too (fail-closed); a hook that
+      wants fail-open catches its own errors. Nothing has been spent.
+    - Refusal text: ``detail`` is client-safe text the hook author writes. It never echoes the
+      request, the system prompt, a character card, world-book entries or retrieved context, and
+      never names the provider, model or endpoint. Chat returns it to the client as is.
+    - Re-entrancy: no guard. A hook must not call the gateway: it would run every hook again.
+    - Secrets: ``call.request`` carries ``api_key``, ``app_config`` and the credential handle.
+      Hooks must not log or persist it.
+    - Editing: a pre-call hook replaces values (``call.request["messages"] = [...]``) rather than
+      mutating nested items, which alias the caller's payload. The adapter receives ``call.request``.
+    - Post-call (never raises): each post-call hook receives the previous hook's return value, and
+      the last value is returned. The provider has answered and billed by then, so a post-call hook
+      never raises (an exception propagates and that call's usage goes unrecorded). To block or
+      redact output it returns a replacement that keeps the provider's ``usage``, or a stream
+      wrapper that replaces content chunks, passes the provider's usage chunk through and ends the
+      stream itself.
+    - Streams: for a stream the value is the stream iterator, sync in ``perform_chat_api_call`` and
+      async in ``perform_chat_api_call_async``. A wrapper runs when the caller iterates, possibly in
+      another thread, so it reads the user from ``call.user_id``, not from context. A chunk already
+      yielded cannot be recalled: a match that can span chunks needs a bounded holdback buffer.
+    - User: ``call.user_id`` is ``current_llm_user_id()`` when the gateway was entered.
+    - Async hooks: ``perform_chat_api_call_async`` awaits an awaitable return value;
+      ``perform_chat_api_call`` closes it and raises ``TypeError``.
+    - No hook: the result is the same object the adapter path returned.
+    - ``llm_surface`` is read from the call's kwargs and is never part of the adapter request.
+    """
+    entry = (pre_call, post_call)
+    _POLICY_HOOKS.append(entry)
+
+    def remove() -> None:
+        with contextlib.suppress(ValueError):
+            _POLICY_HOOKS.remove(entry)
+
+    return remove
+
+
+def _pre_call_hooks() -> list[PreCallHook]:
+    """The pre-call hooks in registration order, from a snapshot taken before any of them runs."""
+    return [pre_call for pre_call, _ in tuple(_POLICY_HOOKS) if pre_call is not None]
+
+
+def _post_call_hooks() -> list[PostCallHook]:
+    """The post-call hooks in registration order, from a snapshot taken before any of them runs."""
+    return [post_call for _, post_call in tuple(_POLICY_HOOKS) if post_call is not None]
+
+
+def _gateway_call(kwargs: dict[str, Any], provider: str, request: dict[str, Any]) -> GatewayCall:
+    return GatewayCall(
+        surface=kwargs.get("llm_surface"),
+        provider=provider,
+        request=request,
+        stream=bool(request.get("stream")),
+        user_id=current_llm_user_id(),
+    )
+
+
+def _sync_hook_value(hook: Callable[..., Any], value: Any) -> Any:
+    """A sync call cannot await a hook: close its awaitable and refuse the call."""
+    if not inspect.isawaitable(value):
+        return value
+    close = getattr(value, "close", None)
+    if callable(close):
+        close()
+    raise TypeError(f"policy hook {getattr(hook, '__qualname__', hook)} is async; perform_chat_api_call is sync")
+
+
+async def _async_hook_value(value: Any) -> Any:
+    return await value if inspect.isawaitable(value) else value
+
+
 def perform_chat_api_call(**kwargs: Any) -> Any:
-    """Adapter-backed replacement for chat_orchestrator.chat_api_call."""
-    # LLM usage accounting spec §4b: refuse before the try below, which can rebuild any error as a provider error.
+    """Adapter-backed replacement for chat_orchestrator.chat_api_call, run through the policy hooks."""
+    # LLM usage accounting spec §4b: refuse before _call_adapter's try, which can rebuild any error
+    # as a provider error.
     checked = check_llm_call_sync()
     provider, request, internal = _build_adapter_request_from_chat_args(kwargs)
     registry = _get_llm_registry()
     adapter = registry.get_adapter(provider)
     if adapter is None:
         raise ChatConfigurationError(provider=provider, message="LLM adapter unavailable.")
+    call = _gateway_call(kwargs, provider, request)
+    for pre_call in _pre_call_hooks():
+        _sync_hook_value(pre_call, pre_call(call))
+    result = _call_adapter(registry, adapter, provider, call.request, internal, checked=checked)
+    for post_call in _post_call_hooks():
+        result = _sync_hook_value(post_call, post_call(call, result))
+    return result
+
+
+def _call_adapter(
+    registry: Any, adapter: Any, provider: str, request: dict[str, Any], internal: dict[str, Any], *, checked: bool
+) -> Any:
+    """Call the provider with the final request; provider errors are mapped here."""
     _attach_internal_http_hooks(adapter, request, internal)
     timeout = internal.get("timeout")
     timeout_kwargs = {"timeout": timeout} if timeout is not None else {}
@@ -1209,14 +1326,28 @@ def perform_chat_api_call(**kwargs: Any) -> Any:
 
 
 async def perform_chat_api_call_async(**kwargs: Any) -> Any:
-    """Async adapter-backed replacement for chat_orchestrator.chat_api_call_async."""
-    # LLM usage accounting spec §4b: refuse before the try below, which can rebuild any error as a provider error.
+    """Async adapter-backed replacement for chat_orchestrator.chat_api_call_async, run through the policy hooks."""
+    # LLM usage accounting spec §4b: refuse before _call_adapter_async's try, which can rebuild any error
+    # as a provider error.
     await check_llm_call_async()
     provider, request, internal = _build_adapter_request_from_chat_args(kwargs)
     registry = _get_llm_registry()
     adapter = registry.get_adapter(provider)
     if adapter is None:
         raise ChatConfigurationError(provider=provider, message="LLM adapter unavailable.")
+    call = _gateway_call(kwargs, provider, request)
+    for pre_call in _pre_call_hooks():
+        await _async_hook_value(pre_call(call))
+    result = await _call_adapter_async(registry, adapter, provider, call.request, internal)
+    for post_call in _post_call_hooks():
+        result = await _async_hook_value(post_call(call, result))
+    return result
+
+
+async def _call_adapter_async(
+    registry: Any, adapter: Any, provider: str, request: dict[str, Any], internal: dict[str, Any]
+) -> Any:
+    """Call the provider with the final request; provider errors are mapped here."""
     _attach_internal_http_hooks(adapter, request, internal)
     timeout = internal.get("timeout")
     timeout_kwargs = {"timeout": timeout} if timeout is not None else {}

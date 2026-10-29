@@ -178,7 +178,8 @@ from tldw_Server_API.app.core.LLM_Calls.gateway import (  # noqa: F401 - re-expo
 )
 
 # isort: split
-from tldw_Server_API.app.core.LLM_Calls.gateway import (  # used by known_models_for_provider_cached / is_model_known_for_provider
+from tldw_Server_API.app.core.LLM_Calls.gateway import (  # used by build_call_params_from_request and the known-models helpers
+    CHAT_COMPLETIONS_SURFACE,
     _provider_inventory_endpoint,
     _raise_inventory_failure,
 )
@@ -1740,6 +1741,7 @@ def build_call_params_from_request(
             "messages_payload": templated_llm_payload,
             "system_message": final_system_message,
             "streaming": getattr(request_data, "stream", False),
+            "llm_surface": CHAT_COMPLETIONS_SURFACE,
         }
     )
     if app_config is not None:
