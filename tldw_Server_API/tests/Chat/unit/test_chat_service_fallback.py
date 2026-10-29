@@ -7299,15 +7299,23 @@ def test_merge_api_keys_prefers_dynamic_over_module():
     assert normalized_anthropic == "module-anthropic"
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("queued", [False, True])
-async def test_execute_non_stream_call_quota_refusal_is_not_a_provider_failure(monkeypatch, queued):
-    """An LLM quota refusal reaches the caller as its 402, records no provider failure and starts no fallback (§4b)."""
-    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+def _refusals():
+    """A quota refusal (§4b) and a gateway policy refusal (TASK-13950.13): the user's, not the provider's."""
+    from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal, LLMQuotaExceededError
 
-    refusal = LLMQuotaExceededError(
-        category="llm_tokens_month", current=10, limit=10, message="Monthly LLM token limit reached", retry_after=60
-    )
+    return [
+        LLMQuotaExceededError(
+            category="llm_tokens_month", current=10, limit=10, message="Monthly LLM token limit reached", retry_after=60
+        ),
+        LLMPolicyRefusal("Input violates moderation policy"),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refusal", _refusals(), ids=["quota", "policy"])
+@pytest.mark.parametrize("queued", [False, True])
+async def test_execute_non_stream_call_quota_refusal_is_not_a_provider_failure(monkeypatch, queued, refusal):
+    """An LLM quota or policy refusal reaches the caller as is, records no provider failure and starts no fallback (§4b)."""
     metrics = _DummyMetrics()
     provider_manager = _DummyProviderManager()
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: _ProcessorQueue() if queued else None)
@@ -7315,7 +7323,7 @@ async def test_execute_non_stream_call_quota_refusal_is_not_a_provider_failure(m
     def refused_llm_call():
         raise refusal
 
-    with pytest.raises(LLMQuotaExceededError) as captured:
+    with pytest.raises(type(refusal)) as captured:
         await execute_non_stream_call(
             **_nonstream_call_kwargs(
                 llm_call_func=refused_llm_call,
@@ -7326,20 +7334,15 @@ async def test_execute_non_stream_call_quota_refusal_is_not_a_provider_failure(m
             )
         )
 
-    assert captured.value.status_code == 402
-    assert captured.value.detail["error"] == "limit_exceeded"
+    assert (captured.value.status_code, captured.value.detail) == (refusal.status_code, refusal.detail)
     assert provider_manager.failure_records == []
     assert provider_manager.fallback_requests == []
 
 
 @pytest.mark.asyncio
-async def test_execute_streaming_call_quota_refusal_is_raised_not_an_error_frame(monkeypatch):
-    """A streamed chat call's LLM quota refusal is the caller's 402, not a provider-style error frame (§4b)."""
-    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
-
-    refusal = LLMQuotaExceededError(
-        category="llm_tokens_month", current=10, limit=10, message="Monthly LLM token limit reached", retry_after=60
-    )
+@pytest.mark.parametrize("refusal", _refusals(), ids=["quota", "policy"])
+async def test_execute_streaming_call_quota_refusal_is_raised_not_an_error_frame(monkeypatch, refusal):
+    """A streamed chat call's quota or policy refusal is the caller's own status, not a provider-style error frame (§4b)."""
     metrics = _DummyMetrics()
     provider_manager = _DummyProviderManager()
     refund_calls = []
@@ -7362,7 +7365,7 @@ async def test_execute_streaming_call_quota_refusal_is_raised_not_an_error_frame
         state=SimpleNamespace(user_id=None, api_key_id=None),
     )
 
-    with pytest.raises(LLMQuotaExceededError) as captured:
+    with pytest.raises(type(refusal)) as captured:
         await execute_streaming_call(
             current_loop=asyncio.get_running_loop(),
             cleaned_args={
@@ -7395,7 +7398,7 @@ async def test_execute_streaming_call_quota_refusal_is_raised_not_an_error_frame
             rg_refund_cb=rg_refund_cb,
         )
 
-    assert captured.value.status_code == 402
+    assert captured.value.status_code == refusal.status_code
     assert provider_manager.failure_records == []
     assert provider_manager.fallback_requests == []
     assert refund_calls == [{"cancelled": False, "error": True}]

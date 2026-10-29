@@ -164,6 +164,7 @@ from tldw_Server_API.app.core.custom_openai_providers import (
 )
 from tldw_Server_API.app.core.exceptions import (
     ChatModelNotAvailableError,
+    LLMPolicyRefusal,
     LLMQuotaExceededError,
     raise_detached_error,
 )
@@ -2281,9 +2282,10 @@ def _is_trusted_local_chat_http_exception(exc: BaseException) -> bool:
 
     An LLM quota refusal is trusted: it is the user's limit, not a provider failure,
     and reaches the caller as its own 402 (LLM usage accounting spec §4b).
+    A policy refusal is trusted too: the hook's decision, not a provider failure (TASK-13950.13).
     """
 
-    return isinstance(exc, (UnsupportedMultiChoiceToolAutoexecError, LLMQuotaExceededError)) or (
+    return isinstance(exc, (UnsupportedMultiChoiceToolAutoexecError, LLMQuotaExceededError, LLMPolicyRefusal)) or (
         isinstance(exc, HTTPException)
         and trusted_local_chat_signal_kind(exc) is not None
     )
@@ -4298,7 +4300,7 @@ async def execute_streaming_call(
                                 queued=True,
                             )
                     return result
-                except LLMQuotaExceededError:
+                except (LLMQuotaExceededError, LLMPolicyRefusal):
                     raise  # the user's limit, not the provider's health: no failure, no fallback
                 except Exception as proc_error:  # noqa: BLE001 - adapter trust boundary
                     latency = time.time() - local_start
@@ -4550,7 +4552,7 @@ async def execute_streaming_call(
                 "message": "Prompt cost guardrail blocked request before provider dispatch.",
             }
         await _maybe_refund_streaming_rg(rg_refund_cb, cancelled=False, error=True)
-        if isinstance(he, LLMQuotaExceededError):
+        if isinstance(he, (LLMQuotaExceededError, LLMPolicyRefusal)):
             raise  # the user's limit: the caller gets the 402, not a provider-style error frame (spec §4b)
         response = StreamingResponse(
             _terminal_stream_error(error_payload),
@@ -5915,7 +5917,7 @@ async def _execute_non_stream_call_impl(
                                 queued=True,
                             )
                     return result
-                except LLMQuotaExceededError:
+                except (LLMQuotaExceededError, LLMPolicyRefusal):
                     raise  # the user's limit, not the provider's health: no failure, no fallback
                 except _CHAT_NONCRITICAL_EXCEPTIONS as proc_error:
                     latency = time.time() - local_start
@@ -6426,7 +6428,7 @@ async def _execute_non_stream_call_impl(
                             success=False,
                             error_type=type(bounded_error).__name__,
                         )
-                        if provider_manager:
+                        if provider_manager and not isinstance(continuation_error, LLMPolicyRefusal):
                             provider_manager.record_failure(
                                 selected_provider,
                                 sanitized_provider_stream_exception(bounded_error),
