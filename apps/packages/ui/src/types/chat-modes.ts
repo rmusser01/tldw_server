@@ -96,6 +96,8 @@ export interface HistorySendTurn {
       createdAt: number
       outcome?: HistoryTurnOutcome
       interruptionReason?: string
+      /** The user stopped the turn before any text arrived (CM-02). */
+      stoppedBeforeReply?: boolean
     },
     error: unknown
   ) => Promise<void>

@@ -21,7 +21,8 @@ import { executeSlashCommand } from "@/hooks/playground/useSlashCommands"
 import type { ComposerDraftOwnership } from "@/components/Chat/composer/hooks/useComposerText"
 import {
   isChatSubmitSuccess,
-  normalizeChatSubmitResult
+  normalizeChatSubmitResult,
+  shouldRestoreDraftAfterSubmit
 } from "@/hooks/chat/chat-action-utils"
 import type { ChatResearchContext } from "@/services/tldw/TldwApiClient"
 import {
@@ -827,7 +828,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
             if (messageForModel && pageContextRevisionRef.current.revision === pageContextRevision) {
               clearImportedSidepanelContext?.()
             }
-          } else if (outcome.status === "skipped" || (outcome.status === "failed" && outcome.restoreDraft)) {
+          } else if (shouldRestoreDraftAfterSubmit(outcome)) {
             restorePromptAssistAttempt(promptAssistAttemptId)
           }
         },

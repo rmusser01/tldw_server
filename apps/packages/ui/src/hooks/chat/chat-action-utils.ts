@@ -76,7 +76,9 @@ export type ChatSubmitResult =
   | { status: "submitted" }
   // Only a refusal before any input admission may restore the composer.
   | { status: "failed"; errorMessage: string; restoreDraft?: true }
-  | { status: "skipped"; reason: string };
+  // questionKept: the question stays in the transcript (a Stop before the
+  // first token), so the composer must not get it back as well (CM-02).
+  | { status: "skipped"; reason: string; questionKept?: true };
 
 // A detached reply owns request locks, but does not make any saved row active.
 export const withDetachedHistoryResponse =
@@ -120,10 +122,19 @@ export const chatSubmitFailed = (errorMessage: string): ChatSubmitResult => ({
   errorMessage,
 });
 
-export const chatSubmitSkipped = (reason: string): ChatSubmitResult => ({
+export const chatSubmitSkipped = (
+  reason: string,
+  options: { questionKept?: boolean } = {},
+): ChatSubmitResult => ({
   status: "skipped",
   reason,
+  ...(options.questionKept ? { questionKept: true as const } : {}),
 });
+
+/** Whether a send that did not complete should put its text back in the composer. */
+export const shouldRestoreDraftAfterSubmit = (result: ChatSubmitResult) =>
+  (result.status === "skipped" && !result.questionKept) ||
+  (result.status === "failed" && result.restoreDraft === true);
 
 export const isChatSubmitSuccess = (result: ChatSubmitResult) =>
   result.status === "submitted";

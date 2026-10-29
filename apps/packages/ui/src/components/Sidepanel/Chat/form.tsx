@@ -206,7 +206,7 @@ import {
 } from "@/services/chat-document-processing"
 import {
   isChatSubmitSuccess,
-  normalizeChatSubmitResult,
+  normalizeChatSubmitResult, shouldRestoreDraftAfterSubmit,
   throwIfChatSubmitUnsuccessful
 } from "@/hooks/chat/chat-action-utils"
 
@@ -2449,7 +2449,7 @@ export const SidepanelForm = ({
               if (knowledgeMentionRevision.current === submittedKnowledgeMentionRevision) setKnowledgeMentionActive(false)
             }
           } else if (promptAssistAttemptId !== null &&
-            (outcome.status === "skipped" || (outcome.status === "failed" && outcome.restoreDraft))) {
+            shouldRestoreDraftAfterSubmit(outcome)) {
             restorePromptAssistAttempt(promptAssistAttemptId)
           }
         },

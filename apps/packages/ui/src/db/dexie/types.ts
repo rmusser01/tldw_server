@@ -315,6 +315,8 @@ export type HistoryTurnRecovery = {
   failure_reason?: string;
   /** The recovery the failure points to, e.g. choosing another model (CC-02). */
   failure_action?: "open-model-selector";
+  /** The user stopped the turn before any text arrived; its question is kept (CM-02). */
+  stopped_before_reply?: true;
   /** The reply was already written to the owner; only the view must follow it. */
   settled_message_id?: string;
   /** Display identity of the model that wrote the reply. */
