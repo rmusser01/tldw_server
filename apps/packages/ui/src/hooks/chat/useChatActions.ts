@@ -437,6 +437,7 @@ const characterIdsMatch = (
 }
 
 type UseChatActionsOptions = {
+  capturePrivateScene?: (commandIsCurrent: () => boolean) => ReturnType<typeof captureActorSceneSend>
   t: TFunction
   notification: NotificationInstance
   abortController: AbortController | null
@@ -620,9 +621,13 @@ export const useChatActions = ({
   inheritedPersonaMemoryMode,
   clearMessageSteering,
   visualIdentityManualExpressionOverride,
-  setVisualIdentityManualExpressionOverride
+  setVisualIdentityManualExpressionOverride,
+  capturePrivateScene
 }: UseChatActionsOptions) => {
   const historySelection = useHistorySelectionContext()
+  const captureSceneForCommand = (isCurrent: () => boolean) => historySelection
+    ? captureActorSceneSend(historySelection, isCurrent)
+    : capturePrivateScene?.(isCurrent) ?? null
   const renderedDraftRevision = useStoreMessageOption.getState().chatDraftRevision
   const renderedSettingsDraft = useStoreMessageOption.getState().chatDraftAddress
   const renderedContinuationFence = historySelection?.fence()
@@ -3587,7 +3592,7 @@ export const useChatActions = ({
       serverChatId: serverChatIdOverride || serverChatId
     })
     const historyOriginIsCurrent = historySelection?.fence()
-    const sceneSendCapture = requestedActorSceneSend ? null : captureActorSceneSend(historySelection, () => actionsMountedRef.current &&
+    const sceneSendCapture = requestedActorSceneSend ? null : captureSceneForCommand(() => actionsMountedRef.current &&
       useStoreMessageOption.getState().chatDraftRevision === renderedDraftRevision && (historyOriginIsCurrent?.() ?? true))
     const commandSession = usePlaygroundSessionStore.getState()
     const commandSessionIsCurrent = () => {
@@ -5137,7 +5142,7 @@ export const useChatActions = ({
     }
 
     const historyIsCurrent = historySelection?.fence()
-    const sceneSendCapture = captureActorSceneSend(historySelection, () => actionsMountedRef.current &&
+    const sceneSendCapture = captureSceneForCommand(() => actionsMountedRef.current &&
       useStoreMessageOption.getState().chatDraftRevision === renderedDraftRevision && (historyIsCurrent?.() ?? true))
     const selectionSource = { model: "explicit", toolChoice: "global" } as const
     const dispatchIsCurrent = captureChatDispatchSource({ selectedModel: modelId, toolChoice, selectionSource })
@@ -5747,7 +5752,7 @@ export const useChatActions = ({
       if (!dispatchIsCurrent()) throw new Error("actor_settings_scope_changed")
     } }
     const capture = selectedHistoryForActions || dispatch?.actorSceneSend ? null :
-      captureActorSceneSend(historySelection, () => actionsMountedRef.current &&
+      captureSceneForCommand(() => actionsMountedRef.current &&
         dispatchIsCurrent() && useStoreMessageOption.getState().chatDraftRevision === renderedDraftRevision)
     try {
       dispatch?.controller?.signal.throwIfAborted()

@@ -43,7 +43,8 @@ vi.mock("@/utils/research-web-capture", async () => ({
   )),
   assertWebCaptureHeadCurrent: (...args: unknown[]) => mockCaptureHead(...args)
 }))
-vi.mock("@/services/service-prompts", () => ({
+vi.mock("@/services/service-prompts", async () => ({
+  ...(await vi.importActual<typeof import("@/services/service-prompts")>("@/services/service-prompts")),
   loadServicePromptSnapshot: (...args: unknown[]) => mockScope(...args)
 }))
 const mockSetRagMediaIds = vi.fn()
