@@ -9,7 +9,7 @@ All paths under `tldw_Server_API/` unless noted.
 | Concern | File | Key symbols |
 | --- | --- | --- |
 | Routes | `app/api/v1/endpoints/rag_unified.py` | all `/api/v1/rag/*`; the unified search endpoint, ablation, capabilities |
-| Schemas | `app/api/v1/schemas/rag_schemas_unified.py` | `UnifiedRAGRequest/Response`, batch variants |
+| Schemas | `app/core/RAG/rag_schemas_unified.py`, re-exported by `app/api/v1/schemas/rag_schemas_unified.py` | `UnifiedRAGRequest/Response`, batch variants |
 | Pipeline | `app/core/RAG/rag_service/unified_pipeline.py` | `unified_rag_pipeline`, `unified_batch_pipeline`, `simple_search` / `advanced_search`, `UnifiedSearchResult` |
 | Retrieval | `rag_service/database_retrievers.py` | FTS and vector legs, `retrieve_hybrid`, weighted reciprocal-rank fusion |
 | Reranking | `rag_service/advanced_reranking.py` | strategies: flashrank (default), cross_encoder, hybrid, llama_cpp, llm_scoring, two_tier, none |

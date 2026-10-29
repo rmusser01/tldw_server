@@ -30,6 +30,8 @@ CORE_OWNED: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("evaluation_recipe_schemas", "Evaluations.evaluation_recipe_schemas", ("ConfidenceSummary", "RecipeManifest", "RecipeRunRecord", "RecommendationSlot", "ReviewState")),
     ("embeddings_abtest_schemas", "Evaluations.embeddings_abtest_schemas", ("ABTestArm", "ABTestChunking", "ABTestCleanupPolicy", "ABTestLimits", "ABTestQuery", "ABTestReRanker", "ABTestRetrieval", "EmbeddingsABTestConfig")),
     ("synthetic_eval_schemas", "Evaluations.synthetic_eval_schemas", ("SyntheticEvalDraftSampleCreate", "SyntheticEvalPromotionCreate", "SyntheticEvalProvenance", "SyntheticEvalReviewActionCreate", "SyntheticEvalReviewActionType", "SyntheticEvalReviewState")),
+    ("rag_schemas_unified", "RAG.rag_schemas_unified", ("KnowledgeSourceEmbeddingStatus", "KnowledgeSourceHealthEntry", "KnowledgeSourceHealthResponse", "KnowledgeSourceIndexStatus", "UnifiedBatchRequest", "UnifiedRAGRequest", "UnifiedRAGResponse")),
+    ("_compat", "Utils.pydantic_compat", ("Field",)),
 )
 
 

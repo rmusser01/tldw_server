@@ -194,7 +194,6 @@ core.Embeddings -> api.v1.endpoints.media_embeddings: 1
 core.Embeddings -> api.v1.utils: 1
 core.Evaluations -> api.v1.API_Deps: 1
 core.Evaluations -> api.v1.endpoints.embeddings_v5_production_enhanced: 3
-core.Evaluations -> api.v1.schemas: 1
 core.File_Artifacts -> api.v1.schemas: 2
 core.Flashcards -> api.v1.schemas: 2
 core.Infrastructure -> core.DB_Management: 3
@@ -205,7 +204,6 @@ core.Ingestion_Sources -> services: 1
 core.LLM_Calls -> core.AuthNZ: 7
 core.LLM_Calls -> core.Chat: 48  # bump: #3191 lazy import of Chat.chat_service in LLM_Calls/providers/base.py; removed by TASK-13950.13's gateway
 core.Local_LLM -> api.v1.schemas: 4
-core.MCP_unified -> api.v1.schemas: 1
 core.MCP_unified -> services: 11
 core.Monitoring -> api.v1.schemas: 1
 core.Persona -> api.v1.schemas: 2
@@ -213,11 +211,9 @@ core.PrivilegeMaps -> api.v1.utils: 2
 core.PrivilegeMaps -> main: 1
 core.Prompt_Management -> api.v1.endpoints.prompt_studio: 2
 core.Prompt_Management -> api.v1.schemas: 1
-core.RAG -> api.v1.schemas: 5
 core.Research -> api.v1.schemas: 2
 core.Research_Workspace -> api.v1.API_Deps: 2
 core.Research_Workspace -> api.v1.schemas: 5
-core.Scheduled_Tasks -> api.v1.schemas: 1
 core.Security -> services: 1
 core.Setup -> api.v1.endpoints.audio: 1
 core.Setup -> api.v1.schemas: 2

@@ -2673,7 +2673,7 @@ async def unified_rag_pipeline(
         timings = {"total": 0.0}
         # Consistent contract: return UnifiedRAGResponse for all outcomes
         try:
-            from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
+            from tldw_Server_API.app.core.RAG.rag_schemas_unified import UnifiedRAGResponse
 
             return UnifiedRAGResponse(
                 documents=[],
@@ -9151,7 +9151,7 @@ async def unified_rag_pipeline(
 
     # Convert to Pydantic response
     try:
-        from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
+        from tldw_Server_API.app.core.RAG.rag_schemas_unified import UnifiedRAGResponse
 
         doc_dicts = [_serialize_result_document(d) for d in (result.documents or [])]
         return UnifiedRAGResponse(
