@@ -29915,6 +29915,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     entity="workspaces",
                     entity_id=workspace_id,
                 ) from exc
+            if isinstance(exc, UniqueConstraintError):
+                # RLS can hide a conflicting ID; do not disclose its owner or row.
+                raise NotFoundError("Workspace not found") from exc  # noqa: TRY003
             raise CharactersRAGDBError("Workspace creation failed.") from exc  # noqa: TRY003
         return self.get_workspace(workspace_id)  # type: ignore[return-value]
 
