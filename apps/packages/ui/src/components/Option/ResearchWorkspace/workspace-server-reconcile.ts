@@ -196,9 +196,21 @@ export const reconcileResearchWorkspaceServerState = async ({
     }
   }
 
-  if (Array.isArray(selectedSourceIds) && client.updateWorkspaceSourceSelection) {
+  if (
+    Array.isArray(selectedSourceIds) &&
+    client.updateWorkspaceSourceSelection &&
+    (result.addedSourceIds.length > 0 ||
+      existingSources.filter((source) => source.selected).length !==
+        selectedSourceIdSet?.size ||
+      existingSources.some(
+        (source) => source.selected !== selectedSourceIdSet?.has(source.id)
+      ))
+  ) {
     try {
-      await client.updateWorkspaceSourceSelection(workspaceId, selectedSourceIds)
+      await client.updateWorkspaceSourceSelection(
+        workspaceId,
+        selectedSourceIds
+      )
     } catch (error) {
       appendReconcileError(
         result,
