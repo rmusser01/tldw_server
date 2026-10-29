@@ -1312,6 +1312,7 @@ async def test_kanban_adapter_missing_action():
 @pytest.mark.asyncio
 async def test_kanban_adapter_board_list(monkeypatch):
     """Test Kanban adapter list boards action."""
+    from tldw_Server_API.app.core.Kanban.vector_search import create_kanban_vector_search
     from tldw_Server_API.app.core.Workflows.adapters.integration import run_kanban_adapter
 
     mock_db = MagicMock()
@@ -1321,7 +1322,7 @@ async def test_kanban_adapter_board_list(monkeypatch):
     with patch(
         "tldw_Server_API.app.core.Workflows.adapters.integration.messaging.KanbanDB",
         return_value=mock_db,
-    ):
+    ) as kanban_db_cls:
         with patch(
             "tldw_Server_API.app.core.Workflows.adapters.integration.messaging.DatabasePaths.get_kanban_db_path",
             return_value=Path("/tmp/kanban.db"),  # nosec B108
@@ -1332,6 +1333,7 @@ async def test_kanban_adapter_board_list(monkeypatch):
             result = await run_kanban_adapter(config, context)
             assert "boards" in result
             assert result.get("total") == 1
+            assert kanban_db_cls.call_args.kwargs["vector_search_factory"] is create_kanban_vector_search
 
 
 @pytest.mark.asyncio

@@ -82,6 +82,11 @@ a local run defaults to origin/dev) and HEAD. The bump is then reviewed in the P
 count must equal the code, a raise cannot reserve headroom. The same rule as _ceilings.py,
 for a text baseline.
 
+Since TASK-13950.12, foundation and core.Metrics have no baseline entries, and
+test_foundation_and_metrics_import_only_foundation and
+test_foundation_and_metrics_load_only_foundation_at_import_time pin them at zero,
+statically and at import time, with no ``# bump:`` exception.
+
 Commands:
     python -m tldw_Server_API.tests.lint.test_layering_contract                    # report
     python -m tldw_Server_API.tests.lint.test_layering_contract --tighten          # cuts only
@@ -97,9 +102,11 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
 import os
 import re
 import subprocess
+import sys
 import textwrap
 from collections import Counter, defaultdict
 from collections.abc import Iterator, Mapping, Sequence
@@ -142,6 +149,7 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("main", ("main", "app")),
 )
 SIBLING_BANS = frozenset({("core.LLM_Calls", "core.Chat"), ("core.LLM_Calls", "core.AuthNZ")})
+FOUNDATION_ONLY_IMPORTERS = frozenset({"core.Metrics"})  # platform, but pinned like foundation (TASK-13950.12)
 ROUTER_ASSEMBLY = frozenset({"api.v1.router_groups", "api.v1.router_registry", "api.v2.router"})
 ASSEMBLERS = frozenset({"main", "api.v1.router_registry"})  # the only importers of ROUTER_ASSEMBLY
 _SHARE = "Move the code (don't re-export it) into api/v1/utils or a core/service module."
@@ -263,11 +271,11 @@ def _walk(
                 yield from _walk(body, inner, guarded or (catches and scope == "body"), type_checking)
 
 
-def _targets(node: ast.Import | ast.ImportFrom, module: str, is_package: bool, known: frozenset[str]) -> set[str]:
-    """The app packages one import statement reads from."""
+def target_modules(node: ast.Import | ast.ImportFrom, module: str, is_package: bool, known: frozenset[str]) -> set[str]:
+    """The app-relative modules (or packages) one import statement reads from."""
     if isinstance(node, ast.Import):
         names = [_app_relative(alias.name) for alias in node.names]
-        return {package_of(name) for name in names if name is not None}
+        return {name for name in names if name is not None}
     if node.level:
         parts = module.split(".") if module else []
         parts = parts if is_package else parts[:-1]
@@ -281,8 +289,13 @@ def _targets(node: ast.Import | ast.ImportFrom, module: str, is_package: bool, k
         name = _app_relative(f"{base}.{alias.name}")
         name = name if name in known else _app_relative(base)
         if name is not None:
-            targets.add(package_of(name))
+            targets.add(name)
     return targets
+
+
+def _targets(node: ast.Import | ast.ImportFrom, module: str, is_package: bool, known: frozenset[str]) -> set[str]:
+    """The app packages one import statement reads from."""
+    return {package_of(name) for name in target_modules(node, module, is_package, known)}
 
 
 def scan(root: Path = APP_ROOT) -> tuple[Import, ...]:
@@ -291,10 +304,17 @@ def scan(root: Path = APP_ROOT) -> tuple[Import, ...]:
 
 
 @cache
+def module_names(root: Path) -> tuple[Mapping[Path, str], frozenset[str]]:
+    """Per-file app-relative module names, and every module and package prefix."""
+    names = {path: _module_name(path.relative_to(root)) for path in parse_tree(root)}
+    known = frozenset(".".join(n.split(".")[:i]) for n in names.values() for i in range(n.count(".") + 2))
+    return names, known
+
+
+@cache
 def _scan(root: Path) -> tuple[Import, ...]:
     trees = parse_tree(root)
-    names = {path: _module_name(path.relative_to(root)) for path in trees}
-    known = frozenset(".".join(n.split(".")[:i]) for n in names.values() for i in range(n.count(".") + 2))
+    names, known = module_names(root)
     records = []
     for path, tree in trees.items():
         module = names[path]
@@ -360,6 +380,49 @@ def package_scc_sizes(root: Path = APP_ROOT) -> dict[str, int]:
     module_level = {(package_of(r.module), r.target) for r in records if not r.function_level}
     every = {(package_of(r.module), r.target) for r in records}
     return {"module_level": _largest_scc(module_level), "with_function_level": _largest_scc(every)}
+
+
+def foundation_breaches(records: Sequence[Import]) -> list[str]:
+    """``<importer> -> <target> (<module>)`` for each import from foundation or core.Metrics into a higher layer."""
+    breaches: set[str] = set()
+    for record in records:
+        importer = package_of(record.module)
+        from_pinned = layer_of(importer) == 0 or importer in FOUNDATION_ONLY_IMPORTERS
+        if from_pinned and layer_of(record.target) > 0:
+            breaches.add(f"{importer} -> {record.target} ({record.module})")
+    return sorted(breaches)
+
+
+def foundation_modules(root: Path = APP_ROOT) -> list[str]:
+    """Every foundation module, app-relative and sorted; in-app ``tests`` packages are skipped, as in _scan."""
+    names = (
+        _module_name(path.relative_to(root))
+        for path in root.rglob("*.py")
+        if "tests" not in path.relative_to(root).parts[:-1]
+    )
+    return sorted(name for name in names if layer_of(package_of(name)) == 0)
+
+
+def upper_layer_loads(modules: Sequence[str]) -> dict[str, list[str]]:
+    """Import ``modules`` in a fresh interpreter: the imports that failed, and the packages above foundation loaded."""
+    script = textwrap.dedent(
+        f"""
+        import importlib, json, sys
+        failed = []
+        for module in {list(modules)!r}:
+            try:
+                importlib.import_module({APP!r} + "." + module)
+            except Exception as exc:
+                failed.append(f"{{module}}: {{type(exc).__name__}}: {{exc}}")
+        print(json.dumps({{"failed": failed, "loaded": sorted(sys.modules)}}))
+        """
+    )
+    result = subprocess.run(  # fixed argv, no shell
+        [sys.executable, "-c", script], cwd=REPO_ROOT, check=True, capture_output=True, text=True, timeout=300
+    )
+    report = json.loads(result.stdout.splitlines()[-1])
+    loaded = {package_of(name) for name in map(_app_relative, report["loaded"]) if name is not None}
+    return {"failed": report["failed"], "upper": sorted(p for p in loaded - {"app", "core"} if layer_of(p) > 0)}
 
 
 # --- The baseline -------------------------------------------------------------------------------
@@ -450,7 +513,10 @@ def violations(measured: Mapping[Pair, Counter[str]], baseline: Mapping[Pair, tu
 
 
 def unreasoned_bumps(
-    baseline: Mapping[Pair, tuple[int, str]], base: Mapping[Pair, tuple[int, str]] | None
+    baseline: Mapping[Pair, tuple[int, str]],
+    base: Mapping[Pair, tuple[int, str]] | None,
+    *,
+    path: Path = BASELINE,
 ) -> list[str]:
     """Pairs added or raised since ``base`` without a new reason; ``base`` None means no check."""
     if base is None:
@@ -463,7 +529,7 @@ def unreasoned_bumps(
         if reason and reason != old_reason and _REFERENCE.search(reason) and not _UNFILLED.search(reason):
             continue
         problems.append(
-            f"{pair[0]} -> {pair[1]}: raised to {count} without a new reason in {_shown(BASELINE)}. Give one that "
+            f"{pair[0]} -> {pair[1]}: raised to {count} without a new reason in {_shown(path)}. Give one that "
             f"cites the task or PR; the raise and its reason are reviewed in the PR:\n"
             f"    {pair[0]} -> {pair[1]}: {count}  # bump: {REASON_PLACEHOLDER}"
         )
@@ -797,6 +863,25 @@ def test_the_reason_check_reads_the_baseline_at_the_merge_base(tmp_path: Path) -
     assert unreasoned_bumps(load(path), base_version(path, "adds-baseline", repo))
 
 
+def test_a_seeded_foundation_or_metrics_breach_is_reported_even_inside_a_function(tmp_path: Path) -> None:
+    files = {
+        "core/Utils/x.py": f"def f():\n    from {APP}.core.Security import egress\n",
+        "core/Metrics/y.py": f"from {APP}.core.Security import egress\n",
+        "core/Metrics/z.py": f"from {APP}.core.Utils import x\n",
+    }
+    assert foundation_breaches(scan(_seed(tmp_path / "app", files))) == [
+        "core.Metrics -> core.Security (core.Metrics.y)",
+        "core.Utils -> core.Security (core.Utils.x)",
+    ]
+
+
+def test_upper_layer_loads_reports_upper_packages_and_failed_imports() -> None:
+    assert upper_layer_loads(["core.Context_Integrity.canonicalization", "core.no_such_module"]) == {
+        "failed": [f"core.no_such_module: ModuleNotFoundError: No module named '{APP}.core.no_such_module'"],
+        "upper": ["core.Context_Integrity"],
+    }
+
+
 # --- The ratchet --------------------------------------------------------------------------------
 
 
@@ -815,6 +900,21 @@ def test_raised_counts_carry_a_new_reason() -> None:
         pytest.skip(f"cannot find the merge base with {base}; fetch it or set {BASE_ENV} to a base commit ({exc})")
     problems = unreasoned_bumps(load(BASELINE), old)
     assert not problems, "\n".join(problems)
+
+
+def test_foundation_and_metrics_import_only_foundation() -> None:
+    breaches = foundation_breaches(scan())
+    assert not breaches, (
+        "Foundation packages and core.Metrics import only foundation (TASK-13950.12); no `# bump:` "
+        "admits one. Move the shared code down or inject it from above:\n" + "\n".join(breaches)
+    )
+
+
+def test_foundation_and_metrics_load_only_foundation_at_import_time() -> None:
+    modules = foundation_modules()
+    assert {"core.http_client", "core.Utils.egress"} <= set(modules)  # the pin is not vacuous
+    assert upper_layer_loads(modules) == {"failed": [], "upper": []}
+    assert upper_layer_loads(["core.Metrics"]) == {"failed": [], "upper": ["core.Metrics"]}
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -49,7 +49,6 @@
   "tldw_Server_API.app.api.v1.router_groups.minimal:iter_minimal_optional_router_specs": {"lines": 869, "params": 0, "reason": null},
   "tldw_Server_API.app.core.Admin_Webhooks.delivery:AdminWebhookDeliveryService.redeliver_webhook": {"lines": 329, "params": 3, "reason": null},
   "tldw_Server_API.app.core.Admin_Webhooks.worker:AdminWebhookPreparedHandler.__call__": {"lines": 308, "params": 3, "reason": null},
-  "tldw_Server_API.app.core.Audio.streaming_service:_audio_ws_authenticate_impl": {"lines": 455, "params": 5, "reason": null},
   "tldw_Server_API.app.core.Audit.unified_audit_service:UnifiedAuditService.export_events": {"lines": 366, "params": 19, "reason": null},
   "tldw_Server_API.app.core.Audit.unified_audit_service:UnifiedAuditService.replay_fallback_queue": {"lines": 353, "params": 2, "reason": null},
   "tldw_Server_API.app.core.AuthNZ.User_DB_Handling:authenticate_api_key_user": {"lines": 442, "params": 2, "reason": null},

@@ -16,7 +16,8 @@ untrusted URLs or sensitive configuration.
   covers the shared AES-GCM JSON envelope helper portion of this module.
 - Architecture decision: `Docs/ADR/028-security-restricted-legacy-pickle-compatibility.md`
   covers the restricted legacy pickle compatibility helper portion of this module.
-- Egress/SSRF controls: `egress.py` and `url_validation.py`.
+- Egress/SSRF controls: `egress.py` (an alias of `core/Utils/egress.py`, moved by
+  TASK-13950.12) and `url_validation.py`.
 - HTTP and request middlewares: `middleware.py`, `request_id_middleware.py`,
   `setup_access_guard.py`, `setup_csp.py`, and `drain_gate_middleware.py`.
 - Secrets and crypto: `secret_manager.py`, `crypto.py`, and `safe_pickle.py`.
@@ -35,8 +36,9 @@ untrusted URLs or sensitive configuration.
 
 ## Module Map
 
-- `egress.py` evaluates URL allow/deny/private-IP/port policies, DNS drift
-  checks for reused resolutions, and tenant webhook rules.
+- `egress.py` is an alias of `core/Utils/egress.py` (moved by TASK-13950.12), which
+  evaluates URL allow/deny/private-IP/port policies, DNS drift checks for reused
+  resolutions, and tenant webhook rules.
 - `url_validation.py` exposes endpoint-friendly safe-URL assertions.
 - `middleware.py` adds response hardening headers.
 - `request_id_middleware.py` sanitizes or creates `X-Request-ID`.

@@ -15,7 +15,7 @@ Nothing in this document is a release blocker. Each future definition must be re
 ## Governing references
 
 - [User-Customizable Service Prompts Design](../superpowers/specs/2026-07-12-user-customizable-service-prompts-design.md)
-- [`prompt_loader.py`](../../tldw_Server_API/app/core/Utils/prompt_loader.py)
+- [`prompt_loader.py`](../../tldw_Server_API/app/core/Context_Integrity/prompt_loader.py)
 
 ## Eligibility rubric
 
@@ -384,7 +384,7 @@ All Jobs rows below have a finite definition/selector set and can consume one at
 ### File-backed inventory notes
 
 - Historical Task 2 counts before Task 4 topology validation: **36 atomic definitions**, representing **57 underlying YAML keys/Markdown prompt sections**; **14 eligible**, **5 deferred**, and **17 excluded**. Current post-validation file-backed counts are **5 eligible, 14 deferred, and 17 excluded**. Coordinated pairs and exact aliases share a row and one eventual definition ID.
-- `tldw_Server_API/app/core/Utils/prompt_loader.py:160-217` is the loader definition, not a model consumer. It resolves environment file → YAML/YML → JSON → Markdown and returns `None` when unresolved. Every consumer-specific fallback is recorded in its row.
+- `tldw_Server_API/app/core/Context_Integrity/prompt_loader.py:160-217` is the loader definition, not a model consumer. It resolves environment file → YAML/YML → JSON → Markdown and returns `None` when unresolved. Every consumer-specific fallback is recorded in its row.
 - `tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py:708-711` is only a compatibility wrapper around the loader; its concrete `retrieval_guidance` call is mapped in the RAG retrieval row.
 - `tldw_Server_API/app/core/MCP_unified/modules/implementations/prompts_catalog.py:596-625` is intentionally dynamic over operator-configured `module`/`key`. Packaged `config_prompts.entries` is empty, so it proves no additional current key mapping; unresolved content becomes `config_prompt_unavailable`. The three MCP-authored sections have explicit rows, and non-MCP rows note this path only where it clarifies an otherwise unused key.
 - `tldw_Server_API/app/core/RAG/rag_service/generation.py:142-186` is dynamic over the requested/configured RAG template name. Accordingly, every RAG key row records that consumer and its hard-coded-default or generation-level fallback behavior.

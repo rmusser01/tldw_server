@@ -30,6 +30,7 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
 # Import Local
 from tldw_Server_API.app.core.Chunking import improved_chunking_process
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_name,
     custom_openai_provider_number,
@@ -57,7 +58,6 @@ from tldw_Server_API.app.core.LLM_Calls.provider_results import (
     _extract_text_from_upstream_sse,
     extract_response_content,
 )
-from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 from tldw_Server_API.app.core.Utils.Utils import logging
 
 #

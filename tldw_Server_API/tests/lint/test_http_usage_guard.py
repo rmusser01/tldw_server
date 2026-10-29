@@ -237,7 +237,6 @@ def test_outbound_http_goes_through_core_http_client() -> None:
 # ``setdefault("configured_endpoint", ...)`` is. Known limits: dict comprehensions and ``dict([...])``
 # pairs that spell the key are not seen. Other scope carriers (``required_endpoint_scope=``, ``TrustedProviderEndpoint(scope=...)``,
 # ``provider_credential_runtime``) are gated through the allowlisted adapters they feed.
-# Group A's MCP transports (sse.py, streamable_http.py) join this set when that branch merges.
 SCOPE_ALLOWLIST: dict[str, str] = {
     "tldw_Server_API/app/api/v1/endpoints/llm_providers.py": (
         "scope built from the configured provider endpoint URL for the provider calls it makes."
@@ -272,7 +271,9 @@ SCOPE_ALLOWLIST: dict[str, str] = {
         "scope from the operator-configured audio.cpp server origin, passed to afetch through request_kwargs."
     ),
     "tldw_Server_API/app/core/Slides/standalone_html_provider.py": (
-        "scope from the code-owned loopback adapter catalog (llama.cpp / Ollama); never a request URL."
+        "scope from the code-owned loopback adapter catalog (llama.cpp / Ollama), and for the official OpenAI and "
+        "Anthropic HTTPS origins the discovery call policy (required_endpoint_scope, built from the catalog's "
+        "endpoint_identity); never a request URL. Generation keeps the public-only policy for those origins."
     ),
     "tldw_Server_API/app/core/Agent_Client_Protocol/adapters/mcp_transports/sse.py": (
         "scope from the operator-configured MCP SSE origin (sse_url, allow_private_network) via "
