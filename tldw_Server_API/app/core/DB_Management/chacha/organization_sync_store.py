@@ -14,8 +14,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
-from tldw_Server_API.app.core.Sync.v2.models import SyncDomain, SyncOperation
-from tldw_Server_API.app.core.Sync.v2.notes_organization import (
+from tldw_Server_API.app.core.Sync_Contracts.models import SyncDomain, SyncOperation
+from tldw_Server_API.app.core.Sync_Contracts.notes_organization import (
     NotesOrganizationValidationError,
     organization_link_id,
     parse_notes_organization_payload,
