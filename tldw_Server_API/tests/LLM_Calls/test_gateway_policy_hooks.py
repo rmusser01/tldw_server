@@ -112,6 +112,39 @@ async def test_a_pre_call_refusal_reaches_the_caller_unchanged_and_skips_the_pro
     assert raised.value is refusal
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["sync", "async"])
+async def test_a_hook_registered_during_a_call_gets_neither_stage_of_it(fake_provider, mode):
+    late = []
+    late_removers = []
+
+    def register_late(call):
+        if not late_removers:
+            late_removers.append(gateway.add_policy_hooks(
+                pre_call=lambda c: late.append("pre"),
+                post_call=lambda c, result: (late.append("post"), result)[1],
+            ))
+
+    async def call_gateway():
+        if mode == "sync":
+            return gateway.perform_chat_api_call(**_CALL)
+        return await gateway.perform_chat_api_call_async(**_CALL)
+
+    remove = gateway.add_policy_hooks(pre_call=register_late)
+    try:
+        first = await call_gateway()
+        during_first = list(late)
+        await call_gateway()
+    finally:
+        remove()
+        for remove_late in late_removers:
+            remove_late()
+
+    assert first["choices"][0]["message"]["content"] == '{"intent": "factual"}'
+    assert during_first == []
+    assert late == ["pre", "post"]
+
+
 def test_a_post_call_hook_can_wrap_a_sync_stream(fake_provider):
     remove = gateway.add_policy_hooks(post_call=lambda call, result: (chunk.upper() for chunk in result))
     try:

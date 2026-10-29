@@ -4301,7 +4301,7 @@ async def execute_streaming_call(
                             )
                     return result
                 except (LLMQuotaExceededError, LLMPolicyRefusal):
-                    raise  # the user's limit, not the provider's health: no failure, no fallback
+                    raise  # the user's limit or a policy refusal, not the provider's health: no failure, no fallback
                 except Exception as proc_error:  # noqa: BLE001 - adapter trust boundary
                     latency = time.time() - local_start
                     metrics.track_llm_call(
@@ -4553,7 +4553,7 @@ async def execute_streaming_call(
             }
         await _maybe_refund_streaming_rg(rg_refund_cb, cancelled=False, error=True)
         if isinstance(he, (LLMQuotaExceededError, LLMPolicyRefusal)):
-            raise  # the user's limit: the caller gets the 402, not a provider-style error frame (spec §4b)
+            raise  # quota (§4b) or policy refusal: the caller gets its 402/400, not a provider-style error frame
         response = StreamingResponse(
             _terminal_stream_error(error_payload),
             media_type="text/event-stream",
@@ -5918,7 +5918,7 @@ async def _execute_non_stream_call_impl(
                             )
                     return result
                 except (LLMQuotaExceededError, LLMPolicyRefusal):
-                    raise  # the user's limit, not the provider's health: no failure, no fallback
+                    raise  # the user's limit or a policy refusal, not the provider's health: no failure, no fallback
                 except _CHAT_NONCRITICAL_EXCEPTIONS as proc_error:
                     latency = time.time() - local_start
                     metrics.track_llm_call(

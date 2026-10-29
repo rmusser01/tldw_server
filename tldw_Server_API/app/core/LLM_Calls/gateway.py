@@ -1191,7 +1191,8 @@ class GatewayCall:
 PreCallHook = Callable[[GatewayCall], Any]
 PostCallHook = Callable[[GatewayCall, Any], Any]
 
-_POLICY_HOOKS: list[tuple[PreCallHook | None, PostCallHook | None]] = []
+_HookPair = tuple[PreCallHook | None, PostCallHook | None]
+_POLICY_HOOKS: list[_HookPair] = []
 
 
 def add_policy_hooks(
@@ -1201,12 +1202,16 @@ def add_policy_hooks(
 
     The contract (TASK-13950.13; ADR-025 repeats it):
 
-    - Order: hooks run in registration order, over a snapshot of the registry.
+    - Order: hooks run in registration order, from one snapshot of the registry taken when the
+      gateway is entered. A hook added or removed during a call takes effect from the next call.
     - Refusal (pre-call only): a pre-call hook refuses by raising ``LLMPolicyRefusal(detail)``
       (``core.exceptions``, always HTTP 400). Pre-call hooks run after the adapter lookup and before
       the ``try`` that maps provider errors, so the exception reaches the caller unchanged and the
       provider is not called. Any other exception refuses the call too (fail-closed); a hook that
       wants fail-open catches its own errors. Nothing has been spent.
+    - Chat: refuse only with ``LLMPolicyRefusal``; chat treats any other exception (an
+      ``HTTPException`` included) as a provider failure, and a 401 enters OpenAI OAuth refresh. A
+      registered hook must be sync while chat calls ``perform_chat_api_call``.
     - Refusal text: ``detail`` is client-safe text the hook author writes. It never echoes the
       request, the system prompt, a character card, world-book entries or retrieved context, and
       never names the provider, model or endpoint. Chat returns it to the client as is.
@@ -1241,14 +1246,14 @@ def add_policy_hooks(
     return remove
 
 
-def _pre_call_hooks() -> list[PreCallHook]:
-    """The pre-call hooks in registration order, from a snapshot taken before any of them runs."""
-    return [pre_call for pre_call, _ in tuple(_POLICY_HOOKS) if pre_call is not None]
+def _pre_call_hooks(hooks: tuple[_HookPair, ...]) -> list[PreCallHook]:
+    """The pre-call hooks in registration order, from the snapshot the entrypoint took on entry."""
+    return [pre_call for pre_call, _ in hooks if pre_call is not None]
 
 
-def _post_call_hooks() -> list[PostCallHook]:
-    """The post-call hooks in registration order, from a snapshot taken before any of them runs."""
-    return [post_call for _, post_call in tuple(_POLICY_HOOKS) if post_call is not None]
+def _post_call_hooks(hooks: tuple[_HookPair, ...]) -> list[PostCallHook]:
+    """The post-call hooks in registration order, from the same snapshot as the pre-call hooks."""
+    return [post_call for _, post_call in hooks if post_call is not None]
 
 
 def _gateway_call(kwargs: dict[str, Any], provider: str, request: dict[str, Any]) -> GatewayCall:
@@ -1277,6 +1282,7 @@ async def _async_hook_value(value: Any) -> Any:
 
 def perform_chat_api_call(**kwargs: Any) -> Any:
     """Adapter-backed replacement for chat_orchestrator.chat_api_call, run through the policy hooks."""
+    hooks = tuple(_POLICY_HOOKS)  # one snapshot: a hook registered mid-call gets neither stage
     # LLM usage accounting spec §4b: refuse before _call_adapter's try, which can rebuild any error
     # as a provider error.
     checked = check_llm_call_sync()
@@ -1286,10 +1292,10 @@ def perform_chat_api_call(**kwargs: Any) -> Any:
     if adapter is None:
         raise ChatConfigurationError(provider=provider, message="LLM adapter unavailable.")
     call = _gateway_call(kwargs, provider, request)
-    for pre_call in _pre_call_hooks():
+    for pre_call in _pre_call_hooks(hooks):
         _sync_hook_value(pre_call, pre_call(call))
     result = _call_adapter(registry, adapter, provider, call.request, internal, checked=checked)
-    for post_call in _post_call_hooks():
+    for post_call in _post_call_hooks(hooks):
         result = _sync_hook_value(post_call, post_call(call, result))
     return result
 
@@ -1327,6 +1333,7 @@ def _call_adapter(
 
 async def perform_chat_api_call_async(**kwargs: Any) -> Any:
     """Async adapter-backed replacement for chat_orchestrator.chat_api_call_async, run through the policy hooks."""
+    hooks = tuple(_POLICY_HOOKS)  # one snapshot: a hook registered mid-call gets neither stage
     # LLM usage accounting spec §4b: refuse before _call_adapter_async's try, which can rebuild any error
     # as a provider error.
     await check_llm_call_async()
@@ -1336,10 +1343,10 @@ async def perform_chat_api_call_async(**kwargs: Any) -> Any:
     if adapter is None:
         raise ChatConfigurationError(provider=provider, message="LLM adapter unavailable.")
     call = _gateway_call(kwargs, provider, request)
-    for pre_call in _pre_call_hooks():
+    for pre_call in _pre_call_hooks(hooks):
         await _async_hook_value(pre_call(call))
     result = await _call_adapter_async(registry, adapter, provider, call.request, internal)
-    for post_call in _post_call_hooks():
+    for post_call in _post_call_hooks(hooks):
         result = await _async_hook_value(post_call(call, result))
     return result
 
