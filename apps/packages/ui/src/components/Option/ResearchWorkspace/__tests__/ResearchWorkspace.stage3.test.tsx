@@ -179,9 +179,13 @@ vi.mock("@/services/background-proxy", () => ({
   bgRequest: mockBgRequest
 }))
 
-vi.mock("@/store/workspace-migration", () => ({
+vi.mock("@/store/workspace-migration", async (original) => ({
+  readResearchWorkspaceChatReference: (
+    await original<typeof import("@/store/workspace-migration")>()
+  ).readResearchWorkspaceChatReference,
   runResearchWorkspaceMigration: mockRunResearchWorkspaceMigration,
-  RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFIX: "tldw:research-workspace:migration:tombstone"
+  RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFIX:
+    "tldw:research-workspace:migration:tombstone"
 }))
 
 vi.mock("@/services/service-prompts", () => ({
@@ -436,10 +440,19 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       partial_errors: []
     } : path.includes("/api/v1/notes/search/") ? { notes: [] } : [])
     render(<ResearchWorkspace />)
-    await waitFor(() => expect(testState.restoreServerWorkspace).toHaveBeenCalledWith(expect.objectContaining({
-      workspaceId: "workspace-original", workspaceName: "Saved Research",
-      sources: [expect.objectContaining({ id: "source-original", mediaId: 7 })], selectedSourceIds: ["source-original"]
-    })))
+    await waitFor(() =>
+      expect(testState.restoreServerWorkspace).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspaceId: "workspace-original",
+          workspaceName: "Saved Research",
+          sources: [
+            expect.objectContaining({ id: "source-original", mediaId: 7 })
+          ],
+          selectedSourceIds: ["source-original"]
+        }),
+        undefined
+      )
+    )
     expect(mockReadResearchWebCaptures).toHaveBeenCalledWith(
       expect.stringContaining(":auth:multi-user:org:none:user:alice"), "workspace-original"
     )
