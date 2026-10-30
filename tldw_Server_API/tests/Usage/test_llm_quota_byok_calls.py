@@ -419,6 +419,64 @@ async def test_a_failover_reply_is_recorded_with_the_fallback_providers_key(monk
     assert [(row["provider"], row["credential_source"]) for row in logged] == [("anthropic", "server_default")]
 
 
+async def test_a_streamed_failover_reply_is_recorded_with_the_fallback_providers_key(monkeypatch) -> None:
+    """The user's own key fails over to a server key on a stream: the row that counts is the server key's."""
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
+    from tldw_Server_API.tests.Chat.unit.test_streaming_structured_events import _collect_sse_chunks
+
+    logged: list[dict[str, Any]] = []
+    server_handle = await _handle("server_default")
+    primary_error = ChatProviderError(provider="openai", message="primary unavailable", status_code=502)
+    primary_error.upstream_dispatched = False
+    primary_error.output_emitted = False
+    primary_error.allow_non_stream_fallback = True
+
+    async def _log(**kwargs: Any) -> None:
+        """Keep the row."""
+        logged.append(kwargs)
+
+    def _fail_primary() -> None:
+        """The user's provider is down before dispatch."""
+        raise primary_error
+
+    def _fallback_call(**kwargs: Any) -> Iterable[str]:
+        """The fallback provider streams on the server's key."""
+        assert kwargs[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] is server_handle
+        return iter([
+            'data: {"choices":[{"delta":{"content":"hi"}}],"usage":{"prompt_tokens":5,"completion_tokens":2}}\n\n',
+            "data: [DONE]\n\n",
+        ])
+
+    def _refresh(provider: str) -> tuple[dict[str, Any], str]:
+        """The fallback provider's arguments, with the server key."""
+        args = {"api_endpoint": provider, "messages_payload": [], "model": "claude-x", "streaming": True}
+        return {**args, PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: server_handle}, "claude-x"
+
+    monkeypatch.setattr(chat_service, "log_llm_usage", _log)
+    monkeypatch.setattr(chat_service, "get_topic_monitoring_service", lambda: None)
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: False)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call", _fallback_call)
+    cleaned_args = {
+        "api_endpoint": "openai", "messages_payload": [], "model": "gpt-4o-mini", "streaming": True,
+        PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: await _handle("user"),
+    }
+    kwargs = _executor_kwargs(cleaned_args, _fail_primary)
+    kwargs.update(
+        enable_provider_fallback=True,
+        refresh_provider_params=_refresh,
+        provider_manager=SimpleNamespace(
+            get_available_provider=lambda exclude=None: "anthropic",
+            record_failure=lambda *_args: None,
+            record_success=lambda *_args: None,
+        ),
+    )
+    response = await chat_service.execute_streaming_call(**kwargs)
+    chunks = await _collect_sse_chunks(response)
+    assert any('"hi"' in chunk for chunk in chunks)
+    assert [(row["provider"], row["credential_source"]) for row in logged] == [("anthropic", "server_default")]
+
+
 async def test_a_refused_failover_does_not_mark_the_fallback_provider_unhealthy(refused, monkeypatch) -> None:
     """An over-limit user's own key fails over to a server key: the 402 reaches the caller, and the fallback is not blamed."""
     from tldw_Server_API.app.core.Chat import chat_service
