@@ -66,7 +66,8 @@ class SynthesisProvider:
             "Return a JSON object with keys: outline_sections, claims, report_sections, "
             "unresolved_questions, summary.\n"
             "Each outline section must contain title, focus_area, source_ids, note_ids.\n"
-            "Each claim must contain text, focus_area, source_ids, citations, confidence.\n"
+            "Each claim must contain text, focus_area, source_ids, citations, confidence. "
+            "Confidence must be a JSON number between 0 and 1, never a qualitative label.\n"
             "Each report section must contain title and markdown."
         )
         thinking = config.get("llamacpp_enable_thinking")
