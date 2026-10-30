@@ -68,9 +68,15 @@ async def test_provider_credential_tables_keep_their_rls_posture_postgres(test_d
         ensure_byok_validation_runs_table_pg,
     ):
         assert await ensure(test_db_pool) is True
-    names = ", ".join(f"'{table}'" for table in PROVIDER_TABLES)  # constants, not input
     rows = await test_db_pool.fetchall(
-        f"SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class WHERE relkind = 'r' AND relname IN ({names})"  # nosec B608
+        "SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class WHERE relkind = 'r' AND relname IN "
+        "('byok_oauth_state', 'byok_validation_runs', 'llm_provider_overrides', 'org_provider_secrets', 'user_provider_secrets')"
     )
     assert {row["relname"]: (row["relrowsecurity"], row["relforcerowsecurity"]) for row in rows} == dict.fromkeys(PROVIDER_TABLES, (False, False))
-    assert await test_db_pool.fetchall(f"SELECT tablename FROM pg_policies WHERE tablename IN ({names})") == []  # nosec B608
+    assert (
+        await test_db_pool.fetchall(
+            "SELECT tablename FROM pg_policies WHERE tablename IN "
+            "('byok_oauth_state', 'byok_validation_runs', 'llm_provider_overrides', 'org_provider_secrets', 'user_provider_secrets')"
+        )
+        == []
+    )
