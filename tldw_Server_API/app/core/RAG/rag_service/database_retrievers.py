@@ -4751,6 +4751,7 @@ class MultiDatabaseRetriever:
         user_id: str = "0",
         *,
         media_db: Optional[Any] = None,
+        media_config: Optional[RetrievalConfig] = None,
         chacha_db: Optional[Any] = None,
         prompts_db: Optional[Any] = None,
         sql_retriever: Optional[BaseRetriever] = None,
@@ -4762,6 +4763,7 @@ class MultiDatabaseRetriever:
         Args:
             db_paths: Mapping of database names to paths
             user_id: User ID for vector store access
+            media_config: Media retrieval policy applied before optional vector-store initialization.
         """
         self.retrievers: dict[DataSource, BaseRetriever] = {}
         self.credential_runtime = credential_runtime
@@ -4771,6 +4773,7 @@ class MultiDatabaseRetriever:
         if media_db_path is not None or media_db is not None:
             self.retrievers[DataSource.MEDIA_DB] = MediaDBRetriever(
                 media_db_path,
+                config=media_config,
                 user_id=user_id,
                 media_db=media_db,
                 credential_runtime=credential_runtime,

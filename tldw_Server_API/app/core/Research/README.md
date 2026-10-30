@@ -72,3 +72,8 @@ Research implements deep research run orchestration and provider-backed collecti
 - Artifact reads are allowlisted by name in `ResearchService`.
 - Checkpoint approval is blocked while a run is paused, pause-requested, cancel-requested, or cancelled.
 - Provider-backed collection and synthesis fall back to test-mode simulations only when test mode is active.
+
+
+### Local FTS without embedding models
+
+Set `[Search-Agent] deep_research_local_use_vector = false` in config.txt to collect local full-text evidence without constructing a Media vector adapter or generating query embeddings. The default is `true`; standard ConfigParser boolean spellings are accepted and invalid values fail explicitly. Per-run provider overrides cannot override this operator choice. FTS remains enabled. See `Docs/Design/RESEARCH_FTS_ONLY_CONFIGURATION_20261030.md`.

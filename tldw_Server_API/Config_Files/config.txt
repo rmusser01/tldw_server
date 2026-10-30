@@ -780,6 +780,9 @@ precomputed_spans_retention_days = 30
 implicit_feedback_enabled = true
 
 [Search-Agent]
+# Set false for Deep Research local FTS without embedding/vector initialization.
+deep_research_local_use_vector = true
+
 # Enable LLM-based query classification before search (routes queries intelligently)
 # Env override: SEARCH_QUERY_CLASSIFICATION=true|false (default false)
 search_query_classification = false
