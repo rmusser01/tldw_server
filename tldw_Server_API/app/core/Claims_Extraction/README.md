@@ -15,7 +15,7 @@ signals and evidence while an answer is being produced.
 - Review/monitoring/clustering: `review_assignment.py`, `monitoring.py`,
   `claims_clustering.py`, `claims_embeddings.py`, and `claims_notifications.py`.
 - API endpoint and schemas: `app/api/v1/endpoints/claims.py` and
-  `app/api/v1/schemas/claims_schemas.py` (the FVA result models live in `claims_schemas.py` here and are re-exported from it).
+  `app/api/v1/schemas/claims_schemas.py` (the FVA result models are defined in this package's `claims_schemas.py`; the api module re-exports them).
 - Tests: `tests/Claims/`.
 
 ## Responsibilities
