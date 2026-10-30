@@ -31,6 +31,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_db_transaction,
     verify_jwt_and_fetch_user,
 )
+from tldw_Server_API.app.api.v1.API_Deps.mcp_deps import get_mcp_server_dep
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import ToolCatalogResponse
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
@@ -52,7 +53,7 @@ from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
     resolve_single_user_cookie_websocket,
 )
 from tldw_Server_API.app.core.feature_flags import is_mcp_hub_policy_enforcement_enabled
-from tldw_Server_API.app.core.MCP_unified import MCPRequest, MCPResponse, get_config, get_mcp_server
+from tldw_Server_API.app.core.MCP_unified import MCPRequest, MCPResponse, MCPServer, get_config, get_mcp_server
 from tldw_Server_API.app.core.MCP_unified.auth import UserRole
 from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import TokenData, get_jwt_manager
 from tldw_Server_API.app.core.MCP_unified.jsonrpc_transport import (
@@ -973,6 +974,7 @@ async def mcp_request(
     mcp_session_id: Optional[str] = Header(None, alias="mcp-session-id"),
     config: Optional[str] = Query(None, description="Base64-encoded JSON safe config for this request"),
     _guard: None = Depends(enforce_http_security),
+    server: MCPServer = Depends(get_mcp_server_dep),
 ):
     """
     Process an MCP request via HTTP.
@@ -991,7 +993,6 @@ async def mcp_request(
             request_plan.error or invalid_request_response("Invalid request", request_id=None)
         )
 
-    server = get_mcp_server()
 
     # Ensure server is initialized
     if not server.initialized:
@@ -1071,6 +1072,7 @@ async def mcp_request_batch(
     mcp_session_id: Optional[str] = Header(None, alias="mcp-session-id"),
     config: Optional[str] = Query(None, description="Base64-encoded JSON safe config for this request"),
     _guard: None = Depends(enforce_http_security),
+    server: MCPServer = Depends(get_mcp_server_dep),
 ):
     """
     Process a batch of MCP requests via HTTP.
@@ -1088,7 +1090,6 @@ async def mcp_request_batch(
 
     batch_plan = prepare_jsonrpc_batch(payload)
 
-    server = get_mcp_server()
     if not server.initialized:
         await server.initialize()
 
@@ -1163,6 +1164,7 @@ async def mcp_request_batch(
 async def get_server_status(
     _guard: None = Depends(enforce_http_security),
     _auth: McpAuthContext = Depends(get_mcp_auth_context),
+    server: MCPServer = Depends(get_mcp_server_dep),
 ):
     """
     Get MCP server status.
@@ -1173,7 +1175,6 @@ async def get_server_status(
     - Connection statistics
     - Module health summary
     """
-    server = get_mcp_server()
 
     # Ensure server is initialized
     if not server.initialized:
@@ -1187,6 +1188,7 @@ async def get_server_status(
 async def get_server_metrics(
     _principal: AuthPrincipal = Depends(RequirePermission(SYSTEM_LOGS)),
     _guard: None = Depends(enforce_http_security),
+    server: MCPServer = Depends(get_mcp_server_dep),
 ):
     """
     Get detailed server metrics (requires `system.logs` permission or admin).
@@ -1197,7 +1199,6 @@ async def get_server_metrics(
     - Error rates
     - Latency statistics
     """
-    server = get_mcp_server()
 
     if not server.initialized:
         await server.initialize()
@@ -1265,6 +1266,7 @@ async def list_tools(
     catalog_fail_open: Optional[bool] = Query(None, description="Fail open unless catalog_strict=true"),
     auth: McpAuthContext = Depends(get_mcp_auth_context),
     _guard: None = Depends(enforce_http_security),
+    server: MCPServer = Depends(get_mcp_server_dep),
 ):
     """
     List available MCP tools.
@@ -1294,7 +1296,6 @@ async def list_tools(
         params["catalog_fail_open"] = catalog_fail_open
     request = MCPRequest(method="tools/list", params=params, id="http-tools-list")
 
-    server = get_mcp_server()
     if not server.initialized:
         await server.initialize()
 
@@ -1436,6 +1437,7 @@ async def execute_tool(
     http_request: Request,
     auth: McpAuthContext = Depends(get_mcp_auth_context),
     _guard: None = Depends(enforce_http_security),
+    server: MCPServer = Depends(get_mcp_server_dep),
 ):
     """
     Execute a specific tool (requires authentication).
@@ -1452,7 +1454,6 @@ async def execute_tool(
         id=f"http-tools-execute:{request.tool_name}",
     )
 
-    server = get_mcp_server()
     if not server.initialized:
         await server.initialize()
 
@@ -1553,6 +1554,7 @@ async def list_modules(
     http_request: Request,
     auth: McpAuthContext = Depends(get_mcp_auth_context),
     _guard: None = Depends(enforce_http_security),
+    server: MCPServer = Depends(get_mcp_server_dep),
 ):
     """
     List registered MCP modules.
@@ -1561,7 +1563,6 @@ async def list_modules(
     """
     request = MCPRequest(method="modules/list", id="http-modules-list")
 
-    server = get_mcp_server()
     if not server.initialized:
         await server.initialize()
 
@@ -1605,6 +1606,7 @@ async def get_modules_health(
     http_request: Request,
     principal: AuthPrincipal = Depends(RequirePermission(SYSTEM_LOGS)),
     _guard: None = Depends(enforce_http_security),
+    server: MCPServer = Depends(get_mcp_server_dep),
 ):
     """
     Get detailed health status of all modules; requires `system.logs` permission (or admin).
@@ -1613,7 +1615,6 @@ async def get_modules_health(
     """
     request = MCPRequest(method="modules/health", id="http-modules-health")
 
-    server = get_mcp_server()
     if not server.initialized:
         await server.initialize()
 
@@ -1653,6 +1654,7 @@ async def list_resources(
     http_request: Request,
     auth: McpAuthContext = Depends(get_mcp_auth_context),
     _guard: None = Depends(enforce_http_security),
+    server: MCPServer = Depends(get_mcp_server_dep),
 ):
     """
     List available MCP resources.
@@ -1661,7 +1663,6 @@ async def list_resources(
     """
     request = MCPRequest(method="resources/list", id="http-resources-list")
 
-    server = get_mcp_server()
     if not server.initialized:
         await server.initialize()
 
@@ -1698,6 +1699,7 @@ async def list_prompts(
     cursor: str | None = Query(None, description="Opaque MCP prompt list cursor"),
     auth: McpAuthContext = Depends(get_mcp_auth_context),
     _guard: None = Depends(enforce_http_security),
+    server: MCPServer = Depends(get_mcp_server_dep),
 ) -> dict[str, Any]:
     """
     List available MCP prompts.
@@ -1707,7 +1709,6 @@ async def list_prompts(
     params = {"cursor": cursor} if cursor is not None else None
     request = MCPRequest(method="prompts/list", params=params, id="http-prompts-list")
 
-    server = get_mcp_server()
     if not server.initialized:
         await server.initialize()
 
@@ -1849,13 +1850,13 @@ async def refresh_token(
 @router.get("/health")
 async def health_check(
     _guard: None = Depends(enforce_http_security),
+    server: MCPServer = Depends(get_mcp_server_dep),
 ):
     """
     Health check endpoint for load balancers.
 
     Returns 200 if server is healthy, 503 if not.
     """
-    server = get_mcp_server()
 
     if not server.initialized:
         raise HTTPException(

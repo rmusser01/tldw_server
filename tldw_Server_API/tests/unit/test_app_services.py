@@ -189,3 +189,43 @@ def test_get_jwt_service_fills_the_slot_once_across_threads(fresh_services, monk
     assert len(built) == 1
     assert len(results) == 8
     assert all(r is fresh_services.jwt_service for r in results)
+
+
+async def test_heavy_init_returns_the_container_mcp_server(fresh_services, monkeypatch) -> None:
+    from tldw_Server_API.app.core.MCP_unified import server as mcp_server_mod
+    from tldw_Server_API.app.services import startup_heavy_init
+
+    class _FakeMCPServer:
+        initialized = False
+
+        async def initialize(self) -> None:
+            self.initialized = True
+
+    monkeypatch.setattr(mcp_server_mod, "MCPServer", _FakeMCPServer)
+    handle = await startup_heavy_init._init_mcp_server(SimpleNamespace(state=SimpleNamespace()), deferred=False)
+    assert handle is fresh_services.mcp_server
+    assert handle.initialized is True
+
+
+def test_mcp_routes_take_the_server_from_the_container(fresh_services, monkeypatch) -> None:
+    import inspect
+
+    from fastapi.testclient import TestClient
+
+    from tldw_Server_API.app.api.v1.API_Deps.mcp_deps import get_mcp_server_dep
+    from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint as mcp_ep
+
+    class _FakeServer:
+        initialized = True
+
+        async def get_status(self) -> dict:
+            return {"status": "healthy"}
+
+    monkeypatch.setattr(app_services(), "mcp_server", _FakeServer())
+    app = FastAPI()
+    app.include_router(mcp_ep.router)
+    app.dependency_overrides[mcp_ep.enforce_http_security] = lambda: None
+    resp = TestClient(app).get("/mcp/health")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "healthy"}
+    assert inspect.signature(mcp_ep.health_check).parameters["server"].default.dependency is get_mcp_server_dep

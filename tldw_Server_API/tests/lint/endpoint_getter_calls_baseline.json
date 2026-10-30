@@ -51,7 +51,7 @@
   "api/v1/endpoints/jobs_admin.py": {"calls": 2, "reason": null},
   "api/v1/endpoints/llm_providers.py": {"calls": 8, "reason": null},
   "api/v1/endpoints/mcp_hub_management.py": {"calls": 11, "reason": null},
-  "api/v1/endpoints/mcp_unified_endpoint.py": {"calls": 22, "reason": null},
+  "api/v1/endpoints/mcp_unified_endpoint.py": {"calls": 11, "reason": null},
   "api/v1/endpoints/media/document_figures.py": {"calls": 1, "reason": null},
   "api/v1/endpoints/media/document_insights.py": {"calls": 1, "reason": null},
   "api/v1/endpoints/media/document_outline.py": {"calls": 1, "reason": null},

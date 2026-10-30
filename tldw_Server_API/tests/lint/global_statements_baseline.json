@@ -121,7 +121,6 @@
   "core/MCP_unified/auth/rbac.py": {"globals": 1, "reason": null},
   "core/MCP_unified/modules/registry.py": {"globals": 2, "reason": null},
   "core/MCP_unified/monitoring/metrics.py": {"globals": 1, "reason": null},
-  "core/MCP_unified/server.py": {"globals": 2, "reason": null},
   "core/Metrics/metrics_manager.py": {"globals": 1, "reason": null},
   "core/Metrics/telemetry.py": {"globals": 3, "reason": null},
   "core/Metrics/traces.py": {"globals": 1, "reason": null},

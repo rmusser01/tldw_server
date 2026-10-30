@@ -70,7 +70,7 @@ async def test_fresh_services_gives_a_fresh_session_init_lock():
 
 
 def test_get_mcp_server_single_instance_across_threads(monkeypatch):
-    monkeypatch.setattr(mcp_server, "_server", None)
+    monkeypatch.setattr(app_services(), "mcp_server", None)
     built = []
 
     class SlowServer:
@@ -91,3 +91,4 @@ def test_get_mcp_server_single_instance_across_threads(monkeypatch):
     [t.join() for t in threads]
     assert len(built) == 1
     assert len({id(r) for r in results}) == 1
+    assert results[0] is app_services().mcp_server

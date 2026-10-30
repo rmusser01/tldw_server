@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.AuthNZ.settings import get_settings, is_single_use
 from tldw_Server_API.app.core.Slides.standalone_html_validation_pool import (
     STANDALONE_HTML_VALIDATION_POOL_METADATA_KEY,
 )
+from tldw_Server_API.app.core.Utils.app_services import app_services
 
 from .auth.rate_limiter import RateLimitExceeded
 from .config import get_config, get_config_warnings, validate_config
@@ -2311,28 +2312,27 @@ class MCPServer:
         }
 
 
-# Singleton instance management
-_server: Optional[MCPServer] = None
+# Serializes first-time creation of the container's ``mcp_server`` slot.
 _server_lock = threading.Lock()
 
 
 def get_mcp_server() -> MCPServer:
-    """Get or create MCP server singleton"""
-    global _server
-    if _server is None:
+    """Get the MCP server from the app-service container, creating it on first use."""
+    services = app_services()
+    if services.mcp_server is None:
         with _server_lock:
-            if _server is None:
-                _server = MCPServer()
-    return _server
+            if services.mcp_server is None:
+                services.mcp_server = MCPServer()
+    return services.mcp_server
 
 
 async def reset_mcp_server() -> None:
-    """Reset MCP server singleton for test environments."""
-    global _server
-    if _server is not None:
+    """Shut down the container's MCP server, empty the slot, and reset the module registry."""
+    services = app_services()
+    taken, services.mcp_server = services.mcp_server, None
+    if taken is not None:
         with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
-            await _server.shutdown()
-    _server = None
+            await taken.shutdown()
     try:
         from .modules.registry import reset_module_registry
 
