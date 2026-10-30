@@ -9,8 +9,10 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     ChatCompletionRequest,
     ChatCompletionUserMessageParam,
 )
+from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
+from tldw_Server_API.tests.helpers.provider_keys import api_keys_source
 
 
 def _post(client, auth_token, *, stream: bool):
@@ -49,7 +51,7 @@ def test_chat_completions_marks_its_provider_call_as_self_recorded(
         }
 
     monkeypatch.setattr(chat_ep, "perform_chat_api_call", _dispatch)
-    monkeypatch.setitem(chat_ep.API_KEYS, "local-llm", "dummy-key")
+    monkeypatch.setattr(config_llm_providers, "get_api_keys", api_keys_source({"local-llm": "dummy-key"}))
 
     response = _post(client, auth_token, stream=False)
 
@@ -69,7 +71,7 @@ def test_chat_completions_streaming_marks_its_provider_call_as_self_recorded(
         return iter(['data: {"choices":[{"delta":{"content":"hi"}}]}\n\n', "data: [DONE]\n\n"])
 
     monkeypatch.setattr(chat_ep, "perform_chat_api_call", _dispatch)
-    monkeypatch.setitem(chat_ep.API_KEYS, "local-llm", "dummy-key")
+    monkeypatch.setattr(config_llm_providers, "get_api_keys", api_keys_source({"local-llm": "dummy-key"}))
 
     response = _post(client, auth_token, stream=True)
 

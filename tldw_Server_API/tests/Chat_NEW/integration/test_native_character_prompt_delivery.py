@@ -37,6 +37,7 @@ from tldw_Server_API.app.core.Chat.persistence_service import (
     prepare_native_history_message,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
 
 
@@ -148,7 +149,7 @@ async def test_saved_testbot_instruction_reaches_first_ollama_system_message(
     adapter = registry.get_adapter("ollama")
     assert adapter is not None  # nosec B101
     adapter.http_streamer = capture_stream
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
     try:
         call_params[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = await credentials_runtime.resolve("ollama", model=model)
         chunks = list(chat_service.perform_chat_api_call(**call_params))

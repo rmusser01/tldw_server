@@ -15,7 +15,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
-from tldw_Server_API.app.core.LLM_Calls import capability_registry
+from tldw_Server_API.app.core.LLM_Calls import capability_registry, gateway
 from tldw_Server_API.app.core.LLM_Calls.providers import base as base_module
 from tldw_Server_API.app.core.LLM_Calls.providers import (
     cohere_adapter as cohere_adapter_module,
@@ -484,7 +484,7 @@ async def test_privacy_safe_policy_removes_echoed_body_from_logs_and_exception(
     )
     adapter = MoonshotAdapter()
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_get_llm_registry",
         lambda: SimpleNamespace(get_adapter=lambda _provider: adapter),
     )
@@ -515,6 +515,7 @@ async def test_deepseek_policy_uses_one_post_without_logging_echoed_body(
     from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
 
     monkeypatch.setattr(chat_service, "discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready", ("deepseek-chat",)))
+    monkeypatch.setattr(gateway, "discover_provider_models", chat_service.discover_provider_models)
     request = httpx.Request(
         "POST", "https://provider.invalid/v1/chat/completions"
     )
@@ -543,7 +544,7 @@ async def test_deepseek_policy_uses_one_post_without_logging_echoed_body(
     )
     adapter = DeepSeekAdapter()
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_get_llm_registry",
         lambda: SimpleNamespace(get_adapter=lambda _provider: adapter),
     )
@@ -577,6 +578,7 @@ async def test_cohere_policy_does_not_log_malformed_success_body(
     from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
 
     monkeypatch.setattr(chat_service, "discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready", ("command-r",)))
+    monkeypatch.setattr(gateway, "discover_provider_models", chat_service.discover_provider_models)
     emitted: list[str] = []
 
     class FakeSession:
@@ -591,7 +593,7 @@ async def test_cohere_policy_does_not_log_malformed_success_body(
         lambda **_kwargs: FakeSession(),
     )
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_get_llm_registry",
         lambda: SimpleNamespace(get_adapter=lambda _provider: CohereAdapter()),
     )
@@ -628,7 +630,7 @@ async def test_kobold_policy_does_not_log_or_embed_unexpected_response_body(
         fake_fetch,
     )
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_get_llm_registry",
         lambda: SimpleNamespace(get_adapter=lambda _provider: KoboldAdapter()),
     )
@@ -679,7 +681,7 @@ async def test_base_normalization_policy_does_not_log_or_embed_generic_error(
     emitted: list[str] = []
 
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_get_llm_registry",
         lambda: SimpleNamespace(get_adapter=lambda _provider: adapter),
     )
@@ -708,7 +710,7 @@ async def test_base_normalization_without_policy_sanitizes_error_detail(
     adapter = _BaseNormalizationAdapter()
     emitted: list[str] = []
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_get_llm_registry",
         lambda: SimpleNamespace(get_adapter=lambda _provider: adapter),
     )

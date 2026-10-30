@@ -42,6 +42,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     PROVIDER_STREAM_ERROR_MESSAGES,
 )
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
 from tldw_Server_API.tests.provider_credential_test_helpers import (
     resolved_request_fields_async,
@@ -375,6 +376,7 @@ def _install_real_http_validation_boundary(
             "discover_provider_models",
             MagicMock(return_value=ModelDiscoveryResult("ready", ("gpt-validation",))),
         )
+        monkeypatch.setattr(gateway, "discover_provider_models", chat_service.discover_provider_models)
 
     def fake_httpx_request_io(**kwargs: Any) -> _ProviderValidationHTTPResponse:
         calls.append(
@@ -1285,8 +1287,9 @@ class TestValidateProviderKey:
         )
         monkeypatch.setattr(config_info_mod, "_VALIDATION_TIMEOUT_SECONDS", 1.0)
         monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
+        monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
         monkeypatch.setattr(
-            chat_service,
+            gateway,
             "_get_llm_registry",
             lambda: types.SimpleNamespace(get_adapter=lambda _provider: chat_adapter),
         )
@@ -1294,6 +1297,7 @@ class TestValidateProviderKey:
             return_value=ModelDiscoveryResult("ready", ("foreground-chat-model",)),
         )
         monkeypatch.setattr(chat_service, "discover_provider_models", discovery)
+        monkeypatch.setattr(gateway, "discover_provider_models", discovery)
 
         validations = [
             asyncio.create_task(
@@ -1728,9 +1732,10 @@ class TestValidateProviderKey:
             return_value=ModelDiscoveryResult("ready", ("hf-validation-model",)),
         )
         monkeypatch.setattr(chat_service, "discover_provider_models", discovery)
+        monkeypatch.setattr(gateway, "discover_provider_models", discovery)
         # This synthetic router tests egress precedence, not supported inventory URLs.
         inventory_base = MagicMock(return_value=router_base_url)
-        monkeypatch.setattr(chat_service, "resolve_provider_models_base_url", inventory_base)
+        monkeypatch.setattr(gateway, "resolve_provider_models_base_url", inventory_base)
         monkeypatch.setattr(
             huggingface_adapter,
             "http_client_factory",

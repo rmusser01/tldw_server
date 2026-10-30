@@ -41,6 +41,7 @@ from tldw_Server_API.app.core.Chat.chat_service import (
 )
 from tldw_Server_API.app.core.Chat.request_queue import RateLimitedQueue, RequestQueue
 from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.tests.provider_credential_test_helpers import (
     resolved_request_fields,
     resolved_request_fields_async,
@@ -2997,7 +2998,7 @@ async def test_execute_non_stream_async_fallback_provider_cancellation_is_saniti
     registry = SimpleNamespace(
         get_adapter=lambda _provider: CancelledFallbackAdapter()
     )
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
 
     def failing_primary_call() -> None:
@@ -3057,6 +3058,7 @@ async def test_execute_non_stream_cancellation_drains_provider_before_usage_and_
     drain_entered = _install_owned_worker_drain_probe(monkeypatch)
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
 
     def blocked_call() -> dict[str, object]:
         entered.set()
@@ -3148,6 +3150,7 @@ async def test_execute_non_stream_starts_without_default_executor_and_drains_can
     default_blocker = loop.run_in_executor(None, block_default_executor)
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
     try:
         await _wait_for_thread_event(default_entered)
         kwargs = _nonstream_call_kwargs(
@@ -3208,6 +3211,7 @@ async def test_execute_non_stream_saturation_fails_closed_before_dispatch(
     pool = BoundedDaemonPool(capacity=1)
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
 
     def blocked_call() -> dict[str, object]:
         entered.set()
@@ -3305,12 +3309,13 @@ async def test_real_queue_and_direct_chat_share_one_sync_adapter_capacity_cap(
 
     monkeypatch.setattr(adapter, "chat", adapter_chat)
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_get_llm_registry",
         lambda: SimpleNamespace(get_adapter=lambda _provider: adapter),
     )
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: queue)
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
     monkeypatch.setattr(
         request_queue_module,
         "SYNC_ADAPTER_CALL_POOL",
@@ -3510,12 +3515,13 @@ async def test_real_queued_chat_cancellation_classifies_late_adapter_result_befo
 
     monkeypatch.setattr(adapter, "chat", adapter_chat)
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_get_llm_registry",
         lambda: SimpleNamespace(get_adapter=lambda _provider: adapter),
     )
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: queue)
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
     monkeypatch.setattr(
         request_queue_module,
         "SYNC_ADAPTER_CALL_POOL",
@@ -3601,12 +3607,13 @@ async def test_real_queued_chat_stop_drains_adapter_before_runtime_close(
 
     monkeypatch.setattr(adapter, "chat", adapter_chat)
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_get_llm_registry",
         lambda: SimpleNamespace(get_adapter=lambda _provider: adapter),
     )
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: queue)
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
     monkeypatch.setattr(
         request_queue_module,
         "SYNC_ADAPTER_CALL_POOL",
@@ -3826,7 +3833,7 @@ async def test_perform_async_chat_genuine_caller_cancellation_stays_prompt(
                 cancellation_observed.set()
 
     registry = SimpleNamespace(get_adapter=lambda _provider: BlockingAdapter())
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
     resolved_fields = await resolved_request_fields_async(
         "openai",
         api_key="resolved-key",
@@ -3874,8 +3881,9 @@ async def test_perform_async_chat_requires_explicit_native_async_opt_in(
             return {"choices": [{"message": {"content": "unbounded"}}]}
 
     registry = SimpleNamespace(get_adapter=lambda _provider: UnmarkedAdapter())
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
 
     resolved_fields = await resolved_request_fields_async(
         "openai",
@@ -3916,7 +3924,7 @@ async def test_perform_async_chat_cancellation_drains_sync_adapter(
             return {"choices": [{"message": {"content": "completed"}}]}
 
     registry = SimpleNamespace(get_adapter=lambda _provider: BlockingSyncAdapter())
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
     resolved_fields = await resolved_request_fields_async(
         "openai",
         api_key="resolved-key",
@@ -4029,8 +4037,9 @@ async def test_perform_async_chat_starts_without_default_executor_and_drains_can
     registry = SimpleNamespace(get_adapter=lambda _provider: BlockingAdapter())
     loop.set_default_executor(default_executor)
     default_blocker = loop.run_in_executor(None, block_default_executor)
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
     try:
         await _wait_for_thread_event(default_entered)
         resolved_fields = await resolved_request_fields_async(
@@ -4107,13 +4116,14 @@ async def test_perform_async_chat_cancellation_drains_builtin_sync_worker(
             return await asyncio.to_thread(self.chat, request)
 
     registry = SimpleNamespace(get_adapter=lambda _provider: BlockingBuiltInAdapter())
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
     monkeypatch.setattr(
         chat_service,
         "SYNC_ADAPTER_CALL_POOL",
         pool,
         raising=False,
     )
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
     resolved_fields = await resolved_request_fields_async(
         "openai",
         api_key="resolved-key",
@@ -4173,13 +4183,14 @@ async def test_perform_async_chat_saturation_fails_closed_before_dispatch(
             return await asyncio.to_thread(self.chat, request)
 
     registry = SimpleNamespace(get_adapter=lambda _provider: SaturatedBuiltInAdapter())
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
     monkeypatch.setattr(
         chat_service,
         "SYNC_ADAPTER_CALL_POOL",
         pool,
         raising=False,
     )
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
     first_resolved_fields = await resolved_request_fields_async(
         "openai",
         api_key="first-key",
@@ -5492,6 +5503,7 @@ async def test_factory_handoff_timeout_closes_delivered_stream_exactly_once(
         "time",
         SimpleNamespace(time=real_time.time, monotonic=clock.monotonic),
     )
+    monkeypatch.setattr(gateway, "time", chat_service.time)
     task = asyncio.create_task(
         chat_service._call_stream_factory_bounded(
             CloseCountingStream,
@@ -7287,15 +7299,23 @@ def test_merge_api_keys_prefers_dynamic_over_module():
     assert normalized_anthropic == "module-anthropic"
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("queued", [False, True])
-async def test_execute_non_stream_call_quota_refusal_is_not_a_provider_failure(monkeypatch, queued):
-    """An LLM quota refusal reaches the caller as its 402, records no provider failure and starts no fallback (§4b)."""
-    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+def _refusals():
+    """A quota refusal (§4b) and a gateway policy refusal (TASK-13950.13): the user's, not the provider's."""
+    from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal, LLMQuotaExceededError
 
-    refusal = LLMQuotaExceededError(
-        category="llm_tokens_month", current=10, limit=10, message="Monthly LLM token limit reached", retry_after=60
-    )
+    return [
+        LLMQuotaExceededError(
+            category="llm_tokens_month", current=10, limit=10, message="Monthly LLM token limit reached", retry_after=60
+        ),
+        LLMPolicyRefusal("Input violates moderation policy"),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refusal", _refusals(), ids=["quota", "policy"])
+@pytest.mark.parametrize("queued", [False, True])
+async def test_execute_non_stream_call_quota_refusal_is_not_a_provider_failure(monkeypatch, queued, refusal):
+    """An LLM quota or policy refusal reaches the caller as is, records no provider failure and starts no fallback (§4b)."""
     metrics = _DummyMetrics()
     provider_manager = _DummyProviderManager()
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: _ProcessorQueue() if queued else None)
@@ -7303,7 +7323,7 @@ async def test_execute_non_stream_call_quota_refusal_is_not_a_provider_failure(m
     def refused_llm_call():
         raise refusal
 
-    with pytest.raises(LLMQuotaExceededError) as captured:
+    with pytest.raises(type(refusal)) as captured:
         await execute_non_stream_call(
             **_nonstream_call_kwargs(
                 llm_call_func=refused_llm_call,
@@ -7314,20 +7334,15 @@ async def test_execute_non_stream_call_quota_refusal_is_not_a_provider_failure(m
             )
         )
 
-    assert captured.value.status_code == 402
-    assert captured.value.detail["error"] == "limit_exceeded"
+    assert (captured.value.status_code, captured.value.detail) == (refusal.status_code, refusal.detail)
     assert provider_manager.failure_records == []
     assert provider_manager.fallback_requests == []
 
 
 @pytest.mark.asyncio
-async def test_execute_streaming_call_quota_refusal_is_raised_not_an_error_frame(monkeypatch):
-    """A streamed chat call's LLM quota refusal is the caller's 402, not a provider-style error frame (§4b)."""
-    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
-
-    refusal = LLMQuotaExceededError(
-        category="llm_tokens_month", current=10, limit=10, message="Monthly LLM token limit reached", retry_after=60
-    )
+@pytest.mark.parametrize("refusal", _refusals(), ids=["quota", "policy"])
+async def test_execute_streaming_call_quota_refusal_is_raised_not_an_error_frame(monkeypatch, refusal):
+    """A streamed chat call's quota or policy refusal is the caller's own status, not a provider-style error frame (§4b)."""
     metrics = _DummyMetrics()
     provider_manager = _DummyProviderManager()
     refund_calls = []
@@ -7350,7 +7365,7 @@ async def test_execute_streaming_call_quota_refusal_is_raised_not_an_error_frame
         state=SimpleNamespace(user_id=None, api_key_id=None),
     )
 
-    with pytest.raises(LLMQuotaExceededError) as captured:
+    with pytest.raises(type(refusal)) as captured:
         await execute_streaming_call(
             current_loop=asyncio.get_running_loop(),
             cleaned_args={
@@ -7383,7 +7398,7 @@ async def test_execute_streaming_call_quota_refusal_is_raised_not_an_error_frame
             rg_refund_cb=rg_refund_cb,
         )
 
-    assert captured.value.status_code == 402
+    assert captured.value.status_code == refusal.status_code
     assert provider_manager.failure_records == []
     assert provider_manager.fallback_requests == []
     assert refund_calls == [{"cancelled": False, "error": True}]

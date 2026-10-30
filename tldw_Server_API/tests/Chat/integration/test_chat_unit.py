@@ -9,6 +9,8 @@ from fastapi import status
 from unittest.mock import patch, MagicMock
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME
+from tldw_Server_API.app.core import config_llm_providers
+from tldw_Server_API.tests.helpers.provider_keys import api_keys_source
 
 # Fixtures are automatically discovered from conftest.py
 
@@ -97,9 +99,7 @@ class TestChatUnit:
         }
 
         # Remove the provider from mock keys to simulate missing key
-        with patch.dict(
-            "tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "sk-mock-key-12345"}, clear=True
-        ):
+        with patch.object(config_llm_providers, "get_api_keys", lambda: {"openai": "sk-mock-key-12345"}):
             response = unit_test_client.post_with_auth("/api/v1/chat/completions", json_data=request_data)
 
         assert response.status_code >= status.HTTP_400_BAD_REQUEST
@@ -289,7 +289,7 @@ class TestChatErrorHandling:
 
                 with (
                     patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_perform,
-                    patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+                    patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
                 ):
                     mock_perform.side_effect = Exception("LLM API Error")
 

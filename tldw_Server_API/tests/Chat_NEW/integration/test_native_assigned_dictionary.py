@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.Chat.history_selection import resolve_history_sele
 from tldw_Server_API.app.core.Chat.persistence_service import prepare_native_history_message
 from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import build_materialized_behavior_settings
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
 from tldw_Server_API.tests.AuthNZ.integration.test_single_user_cookie_session import _mint
 from tldw_Server_API.tests.AuthNZ.integration.test_single_user_cookie_session import (
@@ -53,6 +54,7 @@ def dictionary_chat(single_user_cookie_client, chacha_db, monkeypatch):
     monkeypatch.setattr(character_conversation_factory, "ensure_app_config", lambda: deepcopy(CONFIG))
     monkeypatch.setattr(chat_service, "load_comprehensive_config", lambda: deepcopy(CONFIG))
     monkeypatch.setattr(chat_service, "list_provider_models", lambda _provider: [MODEL])
+    monkeypatch.setattr(gateway, "list_provider_models", chat_service.list_provider_models)
     created = client.post("/api/v1/chat/dictionaries", headers=auth_headers, json={"name": "TokenSwap"})
     assert created.status_code == 201, created.text  # nosec B101 - pytest contract
     dictionary_id = created.json()["id"]
@@ -156,12 +158,12 @@ async def transport(request, system, messages):
     params = chat_service.build_call_params_from_request(request, "ollama", None, messages, system, app_config=CONFIG)
     params[PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] = await credentials.resolve("ollama", model=MODEL)
     # perform_chat_api_call accepts the explicit real adapter registry at this seam.
-    previous = chat_service._get_llm_registry
-    chat_service._get_llm_registry = lambda: registry
+    previous = gateway._get_llm_registry
+    gateway._get_llm_registry = lambda: registry
     try:
         list(chat_service.perform_chat_api_call(**params))
     finally:
-        chat_service._get_llm_registry = previous
+        gateway._get_llm_registry = previous
         await credentials.close()
     return captured[0]["messages"]
 

@@ -36,6 +36,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatRateLimitError,
     SanitizedProviderStreamError,
 )
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     bind_provider_call_credentials,
 )
@@ -623,8 +624,9 @@ def _install_shared_admin_chat_boundary(
         pool,
         raising=False,
     )
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: chat_registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: chat_registry)
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
 
 
 async def _run_shared_admin_validation(

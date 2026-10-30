@@ -144,12 +144,13 @@ async def test_a_refused_llm_call_fails_the_step_and_the_run_records_it(tmp_path
     from typing import Any
 
     from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
     from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_calls
 
     refuse_llm_calls(monkeypatch)
     provider_calls: list[dict[str, Any]] = []
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_get_llm_registry",
         lambda: SimpleNamespace(get_adapter=lambda _name: SimpleNamespace(chat=provider_calls.append)),
     )

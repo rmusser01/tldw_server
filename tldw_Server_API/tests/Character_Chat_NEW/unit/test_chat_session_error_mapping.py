@@ -19,6 +19,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     CharacterChatStreamPersistRequest,
     ChatSessionUpdate,
 )
+from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
@@ -2238,11 +2239,9 @@ async def test_complete_v2_dispatch_keeps_one_static_credential_snapshot(
         captured.update(kwargs)
         return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
 
-    from tldw_Server_API.app.api.v1.schemas import chat_request_schemas
-
     monkeypatch.setenv("ENABLE_LOCAL_LLM_PROVIDER", "true")
     monkeypatch.setattr(
-        chat_request_schemas,
+        config_llm_providers,
         "get_api_keys",
         lambda: {"local-llm": current_key["value"]},
     )

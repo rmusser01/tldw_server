@@ -74,7 +74,6 @@ ALLOWLIST: dict[str, tuple[str, tuple[str, ...]]] = {
             "core/AuthNZ/migrations.py",
             "core/AuthNZ/session_manager.py",
             "core/AuthNZ/virtual_keys.py",
-            "core/Chat/chat_service.py",
             "core/Chat/conversation_enrichment.py",
             "core/Chatbooks/quota_manager.py",
             "core/Chunking/chunker.py",

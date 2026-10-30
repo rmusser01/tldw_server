@@ -52,7 +52,6 @@ from tldw_Server_API.app.core.Chat.bounded_daemon import (
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError, ChatBadRequestError, ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_service import (
-    _validate_provider_model_selection,
     perform_chat_api_call_async,
     resolve_provider_and_model,
 )
@@ -66,6 +65,7 @@ from tldw_Server_API.app.core.exceptions import ChatModelNotAvailableError, LLMQ
 from tldw_Server_API.app.core.http_client import create_async_client as async_http_client_factory
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
 from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
+from tldw_Server_API.app.core.LLM_Calls.gateway import _validate_provider_model_selection
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.LLM_Calls.usage_accounting import accounted_direct_stream, record_direct_response
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy

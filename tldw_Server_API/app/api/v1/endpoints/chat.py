@@ -244,7 +244,12 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.transaction_utils import (
     db_transaction,
 )
-from tldw_Server_API.app.core.exceptions import ChatModelNotAvailableError, LLMQuotaExceededError, raise_detached_error
+from tldw_Server_API.app.core.exceptions import (
+    ChatModelNotAvailableError,
+    LLMPolicyRefusal,
+    LLMQuotaExceededError,
+    raise_detached_error,
+)
 from tldw_Server_API.app.core.LLM_Calls.routing import (
     InMemoryRoutingDecisionStore,
     RouterRequest,
@@ -1301,6 +1306,8 @@ def _sanitize_provider_stream_call(
         error_state["prime_raw_counting"] = True
         try:
             stream = call_func()
+        except LLMPolicyRefusal:
+            raise
         except Exception as exc:
             sanitized_error = sanitized_provider_stream_exception(exc)
             _record_provider_stream_error(sanitized_error, error_state)

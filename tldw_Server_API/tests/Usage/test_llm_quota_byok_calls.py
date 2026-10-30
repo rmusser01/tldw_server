@@ -208,16 +208,16 @@ def test_a_request_that_cannot_be_read_is_an_unknown_source() -> None:
 @pytest.mark.parametrize("layer", ["sync", "async"])
 async def test_the_shared_call_layer_does_not_check_a_call_on_the_users_own_key(refused, monkeypatch, layer) -> None:
     """perform_chat_api_call (what /chat/completions runs) and its async twin read the handle before they check."""
-    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway as llm_gateway
 
     async def _call(**kwargs: Any) -> Any:
         """The layer under test; the sync one in a worker thread, where its check can run."""
         if layer == "async":
-            return await chat_service.perform_chat_api_call_async(**kwargs)
-        return await asyncio.to_thread(chat_service.perform_chat_api_call, **kwargs)
+            return await llm_gateway.perform_chat_api_call_async(**kwargs)
+        return await asyncio.to_thread(llm_gateway.perform_chat_api_call, **kwargs)
 
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: SimpleNamespace(get_adapter=lambda _name: _Provider()))
-    monkeypatch.setattr(chat_service, "has_model_listing", lambda _provider: False)  # no model discovery request
+    monkeypatch.setattr(llm_gateway, "_get_llm_registry", lambda: SimpleNamespace(get_adapter=lambda _name: _Provider()))
+    monkeypatch.setattr(llm_gateway, "has_model_listing", lambda _provider: False)  # no model discovery request
     args = {
         "api_provider": "openai", "messages": [{"role": "user", "content": "hi"}], "model": "gpt-4o-mini",
         "credentials_resolved": True, PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: await _handle("user"),
@@ -477,10 +477,16 @@ async def test_a_streamed_failover_reply_is_recorded_with_the_fallback_providers
     assert [(row["provider"], row["credential_source"]) for row in logged] == [("anthropic", "server_default")]
 
 
-async def test_a_refused_failover_does_not_mark_the_fallback_provider_unhealthy(refused, monkeypatch) -> None:
-    """An over-limit user's own key fails over to a server key: the 402 reaches the caller, and the fallback is not blamed."""
+@pytest.mark.parametrize("refusal", ["quota", "policy"])
+async def test_a_refused_failover_does_not_mark_the_fallback_provider_unhealthy(
+    refused, request, monkeypatch, refusal
+) -> None:
+    """The user's own key fails over to a server key: the fallback call's refusal (an over-limit user's 402, or a
+    gateway policy hook's 400) reaches the caller, and the fallback is not blamed (TASK-13955, ADR-025)."""
     from tldw_Server_API.app.core.Chat import chat_service
     from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
+    from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
+    from tldw_Server_API.app.core.LLM_Calls import gateway as llm_gateway
 
     failures: list[str] = []
     server_handle = await _handle("server_default")
@@ -499,7 +505,7 @@ async def test_a_refused_failover_does_not_mark_the_fallback_provider_unhealthy(
         return {**args, "streaming": False, PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: server_handle}, "m"
 
     monkeypatch.setattr(chat_service, "get_topic_monitoring_service", lambda: None)
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: SimpleNamespace(get_adapter=lambda _name: _Provider()))
+    monkeypatch.setattr(llm_gateway, "_get_llm_registry", lambda: SimpleNamespace(get_adapter=lambda _name: _Provider()))
     cleaned_args = {
         "api_endpoint": "openai", "messages_payload": [], "model": "gpt-4o-mini", "streaming": False,
         PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: await _handle("user"),
@@ -514,9 +520,18 @@ async def test_a_refused_failover_does_not_mark_the_fallback_provider_unhealthy(
             record_success=lambda *_args: None,
         ),
     )
-    with llm_call_context(user_id=7), pytest.raises(LLMQuotaExceededError) as refusal:
+    user_id, expected = 7, LLMQuotaExceededError  # `refused` refuses user 7 only
+    if refusal == "policy":
+        def _refuse(_call: Any) -> None:
+            """A pre-call policy hook that refuses every call."""
+            raise LLMPolicyRefusal("Input violates policy")
+
+        request.addfinalizer(llm_gateway.add_policy_hooks(pre_call=_refuse))
+        user_id, expected = 8, LLMPolicyRefusal
+    with llm_call_context(user_id=user_id), pytest.raises(expected) as raised:
         await chat_service.execute_non_stream_call(**kwargs)
-    assert refusal.value.detail["category"] == "llm_tokens_month"
+    if refusal == "quota":
+        assert raised.value.detail["category"] == "llm_tokens_month"
     assert failures == ["openai"]
 
 

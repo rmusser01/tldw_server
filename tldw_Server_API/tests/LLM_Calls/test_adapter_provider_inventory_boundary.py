@@ -7,6 +7,7 @@ import pytest
 
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
 from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
@@ -21,8 +22,9 @@ def test_direct_adapter_retired_model_never_reaches_generation(monkeypatch: pyte
         chat_service, "discover_provider_models",
         lambda *_args, **_kwargs: SimpleNamespace(status="ready", models=("current-model",)),
     )
+    monkeypatch.setattr(gateway, "discover_provider_models", chat_service.discover_provider_models)
     monkeypatch.setattr(
-        chat_service, "resolve_provider_models_base_url",
+        gateway, "resolve_provider_models_base_url",
         lambda *_args, **_kwargs: "https://provider.example.invalid/v1",
     )
     def unexpected_generation(*_args: Any, **_kwargs: Any) -> None:
@@ -48,8 +50,9 @@ async def test_direct_async_adapter_retired_model_never_reaches_generation(monke
         chat_service, "discover_provider_models",
         lambda *_args, **_kwargs: SimpleNamespace(status="ready", models=("current-model",)),
     )
+    monkeypatch.setattr(gateway, "discover_provider_models", chat_service.discover_provider_models)
     monkeypatch.setattr(
-        chat_service, "resolve_provider_models_base_url",
+        gateway, "resolve_provider_models_base_url",
         lambda *_args, **_kwargs: "https://provider.example.invalid/v1",
     )
     adapter = OpenAIAdapter()
@@ -66,7 +69,7 @@ async def test_direct_async_adapter_retired_model_never_reaches_generation(monke
 def test_direct_adapter_discovery_consumes_call_policy_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.LLM_Calls.providers import base
 
-    monkeypatch.setattr(chat_service, "_validate_provider_model_selection", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(gateway, "_validate_provider_model_selection", lambda *_args, **_kwargs: None)
     clock = iter([10.0, 12.0])
     monkeypatch.setattr(base.time, "monotonic", lambda: next(clock, 12.0))
     monkeypatch.setenv("LLM_ADAPTERS_NATIVE_HTTP_OPENAI", "1")
@@ -124,6 +127,7 @@ def test_legacy_functional_adapter_freezes_actual_config_and_key(
         return SimpleNamespace(status="ready", models=("current-model",))
 
     monkeypatch.setattr(chat_service, "discover_provider_models", discover)
+    monkeypatch.setattr(gateway, "discover_provider_models", discover)
     generation: list[dict[str, Any]] = []
     _record_generation_requests(monkeypatch, generation)
     adapter = getattr(module, "CohereAdapter" if provider == "cohere" else "MoonshotAdapter")()
@@ -145,6 +149,7 @@ def test_legacy_cohere_nested_api_uses_same_inventory_endpoint(monkeypatch: pyte
         return SimpleNamespace(status="ready", models=("current-model",))
 
     monkeypatch.setattr(chat_service, "discover_provider_models", discover)
+    monkeypatch.setattr(gateway, "discover_provider_models", discover)
     generation: list[dict[str, Any]] = []
     _record_generation_requests(monkeypatch, generation)
     config = {"API": {"cohere": {"api_key": "nested-key", "model": "current-model",
@@ -165,6 +170,7 @@ def test_adapter_boundary_defers_for_providers_without_a_model_list(monkeypatch,
         raise AssertionError("discovery for a provider without a model list")
 
     monkeypatch.setattr(chat_service, "discover_provider_models", no_discovery)
+    monkeypatch.setattr(gateway, "discover_provider_models", no_discovery)
     request: dict[str, Any] = {"model": "provider-side-model", "api_key": "synthetic-key", "app_config": {}}
     fake_adapter: Any = SimpleNamespace(name=provider)
     ChatProvider._validate_model_inventory(fake_adapter, request)
