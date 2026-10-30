@@ -54,6 +54,7 @@ Ingestion_Sources manages persistent sync sources that feed Media DB or Notes fr
 - Local-directory, archive, and Git repository sources share the same diff and sink path after snapshot loading. Source-specific code should produce normalized relative paths and item metadata before reaching `diffing.py`.
 - Archive sources stage a snapshot and artifact first; `_process_sync_job` either promotes those staged records to success or marks them failed with sanitized metadata.
 - Scheduled syncs are APScheduler timers that enqueue Jobs work. They do not bypass the Jobs lifecycle or worker path.
+- Set `INGESTION_SOURCES_WORKER_ENABLED=1` to run the sync consumer in the API process. It is opt-in, requires the `ingestion-sources` routes, and remains disabled when `TLDW_WORKERS_SIDECAR_MODE=1`. The lifecycle owns its stop event and retires it during job-poller quiescence; a queued acknowledgement alone does not mean the sync has completed.
 
 ### State And Data
 
