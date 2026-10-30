@@ -291,6 +291,7 @@ async def test_planning_phase_offloads_artifact_writes_from_event_loop(monkeypat
 @pytest.mark.asyncio
 async def test_research_worker_resolves_per_user_paths_when_no_override(monkeypatch, tmp_path):
     from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+    from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
     from tldw_Server_API.app.core.config import settings
     from tldw_Server_API.app.core.Research import jobs_worker
 
@@ -311,7 +312,7 @@ async def test_research_worker_resolves_per_user_paths_when_no_override(monkeypa
                 {
                     "id": 1,
                     "owner_user_id": "7",
-                    "payload": {"session_id": "rs_1", "phase": "drafting_plan"},
+                    "payload": {"session_id": session.id, "phase": "drafting_plan"},
                 }
             )
 
@@ -329,6 +330,13 @@ async def test_research_worker_resolves_per_user_paths_when_no_override(monkeypa
 
     expected_research_db_path = DatabasePaths.get_research_sessions_db_path("7")
     expected_outputs_dir = DatabasePaths.get_user_outputs_dir("7")
+    session = ResearchSessionsDB(expected_research_db_path).create_session(
+        owner_user_id="7",
+        query="Rowan Observatory",
+        source_policy="local_only",
+        autonomy_mode="checkpointed",
+        limits_json={},
+    )
     try:
         await jobs_worker.run_research_jobs_worker()
     finally:
