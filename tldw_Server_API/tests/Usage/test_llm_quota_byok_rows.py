@@ -21,17 +21,14 @@ async def _fresh_pool(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.sqlite'}")
     monkeypatch.setenv("LLM_USAGE_ENABLED", "1")
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
     reset_settings()
-    await reset_db_pool()
-    await reset_session_manager()
     return await get_db_pool()
 
 
-async def test_the_quota_counters_leave_out_calls_paid_by_the_users_own_key(monkeypatch, tmp_path) -> None:
+async def test_the_quota_counters_leave_out_calls_paid_by_the_users_own_key(monkeypatch, tmp_path, fresh_services) -> None:
     """Team, org, server, operator-endpoint and unknown-source rows count; the user's own key's row does not."""
     pool = await _fresh_pool(monkeypatch, tmp_path)
     rows = (
@@ -51,7 +48,7 @@ async def test_the_quota_counters_leave_out_calls_paid_by_the_users_own_key(monk
     assert await repo.sum_user_llm_cost_since(user_id=1, since=since) == pytest.approx(1.05)
 
 
-async def test_a_call_on_the_users_own_key_is_recorded_with_its_real_tokens_and_cost(monkeypatch, tmp_path) -> None:
+async def test_a_call_on_the_users_own_key_is_recorded_with_its_real_tokens_and_cost(monkeypatch, tmp_path, fresh_services) -> None:
     """The row keeps its tokens and its catalog cost, and says whose key paid."""
     pool = await _fresh_pool(monkeypatch, tmp_path)
     await log_llm_usage(
@@ -67,7 +64,7 @@ async def test_a_call_on_the_users_own_key_is_recorded_with_its_real_tokens_and_
     assert row["total_cost_usd"] > 0
 
 
-async def test_a_table_without_the_column_still_records_counts_and_refuses(monkeypatch, tmp_path) -> None:
+async def test_a_table_without_the_column_still_records_counts_and_refuses(monkeypatch, tmp_path, fresh_services) -> None:
     """A schema from before the column keeps the row without its source, counts every row, and still refuses."""
     from tldw_Server_API.app.core.Usage import quota_checks
 

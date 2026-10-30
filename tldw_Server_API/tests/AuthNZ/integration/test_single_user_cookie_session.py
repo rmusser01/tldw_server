@@ -13,10 +13,9 @@ from tldw_Server_API.app.api.v1.schemas.auth_schemas import (
     SingleUserSessionResponse,
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import shutdown_audit_service
-from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import SessionError, SessionRevokedException
 from tldw_Server_API.app.core.AuthNZ.initialize import bootstrap_single_user_profile
-from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager, reset_session_manager
+from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 from tldw_Server_API.app.core.DB_Management.Users_DB import reset_users_db
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
@@ -27,7 +26,7 @@ pytestmark = pytest.mark.integration
 
 
 @pytest_asyncio.fixture
-async def single_user_cookie_client(tmp_path, monkeypatch):
+async def single_user_cookie_client(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / "authnz_single_user_cookie.db"
     api_key = "test_single_user_cookie_api_key_123"
     monkeypatch.setenv("AUTH_MODE", "single_user")
@@ -40,8 +39,6 @@ async def single_user_cookie_client(tmp_path, monkeypatch):
     monkeypatch.setenv("TEST_MODE", "true")
     monkeypatch.setenv("AUTHNZ_FORCE_REAL_SESSION_MANAGER", "1")
 
-    await reset_db_pool()
-    await reset_session_manager()
     reset_settings()
     await reset_registration_service()
     await shutdown_audit_service()
@@ -58,8 +55,6 @@ async def single_user_cookie_client(tmp_path, monkeypatch):
     with TestClient(app) as client:
         yield client, get_settings().SINGLE_USER_API_KEY
 
-    await reset_db_pool()
-    await reset_session_manager()
     reset_settings()
     await reset_registration_service()
     await shutdown_audit_service()

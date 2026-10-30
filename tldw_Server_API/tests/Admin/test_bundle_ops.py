@@ -43,13 +43,9 @@ def _setup_env(tmp_path):
 
 
 async def _reset_state():
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
 
     # Reset module-level rate limit state so tests are isolated
     from tldw_Server_API.app.services import admin_bundle_service
@@ -432,7 +428,7 @@ async def test_delete_bundle_sanitizes_noncritical_failure_log(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_bundle_authnz_only(tmp_path):
+async def test_create_bundle_authnz_only(tmp_path, fresh_services):
     """Create a bundle with only the authnz dataset."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -453,7 +449,7 @@ async def test_create_bundle_authnz_only(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_create_bundle_subset(tmp_path):
+async def test_create_bundle_subset(tmp_path, fresh_services):
     """Create a bundle with a subset of datasets."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -473,7 +469,7 @@ async def test_create_bundle_subset(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_create_bundle_unknown_dataset(tmp_path):
+async def test_create_bundle_unknown_dataset(tmp_path, fresh_services):
     """Unknown dataset should return 400."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -488,7 +484,7 @@ async def test_create_bundle_unknown_dataset(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_create_bundle_vector_store_rejected(tmp_path):
+async def test_create_bundle_vector_store_rejected(tmp_path, fresh_services):
     """include_vector_store=True should return 422."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -504,7 +500,7 @@ async def test_create_bundle_vector_store_rejected(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_list_bundles_empty(tmp_path):
+async def test_list_bundles_empty(tmp_path, fresh_services):
     """List bundles when none exist."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -524,7 +520,7 @@ async def test_list_bundles_empty(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_list_bundles_after_create(tmp_path):
+async def test_list_bundles_after_create(tmp_path, fresh_services):
     """List bundles after creating one."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -545,7 +541,7 @@ async def test_list_bundles_after_create(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_list_bundles_pagination(tmp_path):
+async def test_list_bundles_pagination(tmp_path, fresh_services):
     """Pagination should work with limit/offset."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -581,7 +577,7 @@ async def test_list_bundles_pagination(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_get_bundle_metadata(tmp_path):
+async def test_get_bundle_metadata(tmp_path, fresh_services):
     """Get metadata for a specific bundle."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -603,7 +599,7 @@ async def test_get_bundle_metadata(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_get_bundle_metadata_404(tmp_path):
+async def test_get_bundle_metadata_404(tmp_path, fresh_services):
     """Get metadata for non-existent bundle returns 404."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -615,7 +611,7 @@ async def test_get_bundle_metadata_404(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_download_bundle(tmp_path):
+async def test_download_bundle(tmp_path, fresh_services):
     """Download returns application/zip content-type."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -637,7 +633,7 @@ async def test_download_bundle(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_download_bundle_404(tmp_path):
+async def test_download_bundle_404(tmp_path, fresh_services):
     """Download non-existent bundle returns 404."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -654,7 +650,7 @@ async def test_download_bundle_404(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_delete_bundle(tmp_path):
+async def test_delete_bundle(tmp_path, fresh_services):
     """Delete bundle and verify 404 on re-access."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -680,7 +676,7 @@ async def test_delete_bundle(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_delete_bundle_nonexistent(tmp_path):
+async def test_delete_bundle_nonexistent(tmp_path, fresh_services):
     """Delete non-existent bundle returns 404."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -697,7 +693,7 @@ async def test_delete_bundle_nonexistent(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_import_dry_run(tmp_path):
+async def test_import_dry_run(tmp_path, fresh_services):
     """Dry-run import validates without restoring."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -719,7 +715,7 @@ async def test_import_dry_run(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_import_dry_run_includes_rollback_failures_field(tmp_path):
+async def test_import_dry_run_includes_rollback_failures_field(tmp_path, fresh_services):
     """Dry-run import responses should include rollback_failures as an empty list."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -741,7 +737,7 @@ async def test_import_dry_run_includes_rollback_failures_field(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_import_response_propagates_rollback_failures(tmp_path, monkeypatch):
+async def test_import_response_propagates_rollback_failures(tmp_path, monkeypatch, fresh_services):
     """Endpoint should propagate rollback_failures from service result payload."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -776,7 +772,7 @@ async def test_import_response_propagates_rollback_failures(tmp_path, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_import_tampered_checksum(tmp_path):
+async def test_import_tampered_checksum(tmp_path, fresh_services):
     """Import with tampered checksum should fail."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -795,7 +791,7 @@ async def test_import_tampered_checksum(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_import_unsupported_manifest_version(tmp_path):
+async def test_import_unsupported_manifest_version(tmp_path, fresh_services):
     """Import with future manifest version should fail."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -817,7 +813,7 @@ async def test_import_unsupported_manifest_version(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_import_schema_newer_than_current(tmp_path):
+async def test_import_schema_newer_than_current(tmp_path, fresh_services):
     """Import with schema version newer than current for a dataset that has one."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -844,7 +840,7 @@ async def test_import_schema_newer_than_current(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_import_allow_downgrade(tmp_path):
+async def test_import_allow_downgrade(tmp_path, fresh_services):
     """Import with allow_downgrade=True should succeed even with newer schema."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -873,7 +869,7 @@ async def test_import_allow_downgrade(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_import_real_restore(tmp_path):
+async def test_import_real_restore(tmp_path, fresh_services):
     """Full import (non-dry-run) should restore datasets."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -894,7 +890,7 @@ async def test_import_real_restore(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_import_restore_failure_returns_structured_detail(tmp_path, monkeypatch):
+async def test_import_restore_failure_returns_structured_detail(tmp_path, monkeypatch, fresh_services):
     """Restore failures should return structured details with rollback diagnostics."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -932,7 +928,7 @@ async def test_import_restore_failure_returns_structured_detail(tmp_path, monkey
 @pytest.mark.asyncio
 async def test_import_error_detail_shape_contract_restore_failed_vs_checksum(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ):
     """Contract: restore_failed uses dict detail; checksum failures use string detail."""
     _setup_env(tmp_path)
@@ -1068,7 +1064,7 @@ def test_import_restore_failure_exposes_error_code_and_rollback_failures(
 
 
 @pytest.mark.asyncio
-async def test_concurrency_lock_busy(tmp_path, monkeypatch):
+async def test_concurrency_lock_busy(tmp_path, monkeypatch, fresh_services):
     """Simulating a locked bundle operation should return 409."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -1187,7 +1183,7 @@ async def test_create_bundle_async_releases_lock_after_exception(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_rate_limit_exceeded(tmp_path, monkeypatch):
+async def test_rate_limit_exceeded(tmp_path, monkeypatch, fresh_services):
     """Simulating rate limit exceeded should return 429."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -1442,7 +1438,7 @@ def test_check_import_disk_space_checks_temp_upload_and_live_dirs(tmp_path, monk
 
 
 @pytest.mark.asyncio
-async def test_import_returns_507_when_live_db_dir_lacks_space(tmp_path, monkeypatch):
+async def test_import_returns_507_when_live_db_dir_lacks_space(tmp_path, monkeypatch, fresh_services):
     """Import should return 507 when live DB target partition lacks free space."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -1488,7 +1484,7 @@ async def test_import_returns_507_when_live_db_dir_lacks_space(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_create_bundle_retention_hours_prunes_old_bundles_in_scope(tmp_path):
+async def test_create_bundle_retention_hours_prunes_old_bundles_in_scope(tmp_path, fresh_services):
     """Creating a bundle with retention_hours should prune old scoped bundles."""
     _setup_env(tmp_path)
     await _reset_state()
@@ -1532,7 +1528,7 @@ async def test_create_bundle_retention_hours_prunes_old_bundles_in_scope(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_create_bundle_all_datasets_default(tmp_path):
+async def test_create_bundle_all_datasets_default(tmp_path, fresh_services):
     """Omitting 'datasets' should default to all 6 datasets."""
     _setup_env(tmp_path)
     await _reset_state()

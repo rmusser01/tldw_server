@@ -19,9 +19,7 @@ async def _init_authnz_sqlite(db_path, monkeypatch) -> None:
     # the tokens/day ledger tests require log_llm_usage to write entries.
     monkeypatch.setenv("LLM_USAGE_ENABLED", "1")
     try:
-        from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
         from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-        await reset_db_pool()
         reset_settings()
     except Exception:
         _ = None
@@ -47,7 +45,7 @@ async def _init_authnz_sqlite(db_path, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_tokens_daily_cap_denies_when_exceeded(tmp_path, monkeypatch):
+async def test_tokens_daily_cap_denies_when_exceeded(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / "authnz_tokens.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
 
@@ -106,7 +104,7 @@ route_map: {}
 
 
 @pytest.mark.asyncio
-async def test_daily_cap_reserve_consumes_headroom_idempotently(tmp_path, monkeypatch):
+async def test_daily_cap_reserve_consumes_headroom_idempotently(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / "authnz_tokens_reserve.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
 
@@ -169,7 +167,7 @@ async def test_daily_cap_consume_fails_open_on_authnz_database_error(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_log_llm_usage_writes_every_call_to_ledger(tmp_path, monkeypatch):
+async def test_log_llm_usage_writes_every_call_to_ledger(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / "authnz_tokens_idem.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
 
@@ -218,7 +216,7 @@ async def test_log_llm_usage_writes_every_call_to_ledger(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_backfill_legacy_tokens_to_ledger_idempotent(tmp_path, monkeypatch):
+async def test_backfill_legacy_tokens_to_ledger_idempotent(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / "authnz_tokens_backfill.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
 
@@ -265,7 +263,7 @@ async def test_backfill_legacy_tokens_to_ledger_idempotent(tmp_path, monkeypatch
 @pytest.mark.parametrize("backend", ["memory", "redis"])
 @pytest.mark.parametrize("daily_cap", [200, 600])
 async def test_oversized_token_reservation_preserves_daily_quota(
-    backend, daily_cap, tmp_path, monkeypatch,
+    backend, daily_cap, tmp_path, monkeypatch, fresh_services,
 ):
     """Minute-window relief must not reduce durable daily-token charges."""
     from types import SimpleNamespace

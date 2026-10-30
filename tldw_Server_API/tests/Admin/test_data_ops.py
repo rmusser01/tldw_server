@@ -123,16 +123,12 @@ async def test_restore_backup_sanitizes_generic_failure_log(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_admin_data_ops_backups_and_exports(tmp_path):
+async def test_admin_data_ops_backups_and_exports(tmp_path, fresh_services):
     _setup_env(tmp_path)
 
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
 
     headers = {"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}
 
@@ -173,16 +169,12 @@ async def test_admin_data_ops_backups_and_exports(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_admin_retention_policy_update(tmp_path):
+async def test_admin_retention_policy_update(tmp_path, fresh_services):
     _setup_env(tmp_path)
 
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
 
     headers = {"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}
 
@@ -224,16 +216,12 @@ async def test_admin_retention_policy_update(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_admin_data_ops_requires_user_id_for_per_user_datasets(tmp_path):
+async def test_admin_data_ops_requires_user_id_for_per_user_datasets(tmp_path, fresh_services):
     _setup_env(tmp_path)
 
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
 
     headers = {"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}
 
@@ -258,17 +246,13 @@ async def test_admin_data_ops_requires_user_id_for_per_user_datasets(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_admin_data_ops_per_user_backup_success(tmp_path):
+async def test_admin_data_ops_per_user_backup_success(tmp_path, fresh_services):
     _setup_env(tmp_path)
 
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
 
     user_id = DatabasePaths.get_single_user_id()
     media_db_path = DatabasePaths.get_media_db_path(user_id)
@@ -302,18 +286,14 @@ async def test_admin_data_ops_per_user_backup_success(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_admin_unfiltered_backup_list_includes_per_user_backups(tmp_path):
+async def test_admin_unfiltered_backup_list_includes_per_user_backups(tmp_path, fresh_services):
     """Unfiltered admin listing must include user_<id>/ backups (#2921)."""
     _setup_env(tmp_path)
 
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
 
     user_id = DatabasePaths.get_single_user_id()
     media_db_path = DatabasePaths.get_media_db_path(user_id)

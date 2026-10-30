@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 
 @pytest.mark.asyncio
-async def test_chat_budget_guard_dependency_returns_principal(tmp_path):
+async def test_chat_budget_guard_dependency_returns_principal(tmp_path, fresh_services):
     """
     Drive the enforce_llm_budget dependency (not middleware) through a real HTTP request
     and assert the returned 402 includes AuthGovernor principal details.
@@ -19,12 +19,11 @@ async def test_chat_budget_guard_dependency_returns_principal(tmp_path):
     db_path = tmp_path / "users.db"
     os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
@@ -87,5 +86,4 @@ async def test_chat_budget_guard_dependency_returns_principal(tmp_path):
             await pool.close()
         except Exception:
             _ = None
-        await reset_db_pool()
         reset_settings()

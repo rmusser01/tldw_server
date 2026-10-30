@@ -7,7 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints.admin import _load_bulk_user_candidates
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.initialize import ensure_authnz_schema_ready_once
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     add_org_member,
@@ -53,13 +53,12 @@ async def test_profile_admin_scope_allows_single_user_principal_outside_enterpri
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_team_admin_scope_bulk_candidates(tmp_path, monkeypatch) -> None:
+async def test_team_admin_scope_bulk_candidates(tmp_path, monkeypatch, fresh_services) -> None:
     db_path = tmp_path / "users.db"
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
     await ensure_authnz_schema_ready_once()
 
     pool = await get_db_pool()

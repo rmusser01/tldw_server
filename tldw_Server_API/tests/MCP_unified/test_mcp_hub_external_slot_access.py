@@ -12,8 +12,8 @@ pytest_plugins = ("tldw_Server_API.tests._plugins.authnz_full_fixtures",)
 
 
 @pytest.mark.asyncio
-async def test_external_access_resolver_is_slot_aware(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_external_access_resolver_is_slot_aware(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.services.mcp_hub_external_access_resolver import (
@@ -25,7 +25,6 @@ async def test_external_access_resolver_is_slot_aware(tmp_path, monkeypatch) -> 
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
 
@@ -147,8 +146,8 @@ async def test_external_access_resolver_is_slot_aware(tmp_path, monkeypatch) -> 
 
 
 @pytest.mark.asyncio
-async def test_external_access_resolver_marks_missing_slot_secret(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_external_access_resolver_marks_missing_slot_secret(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.services.mcp_hub_external_access_resolver import (
@@ -160,7 +159,6 @@ async def test_external_access_resolver_marks_missing_slot_secret(tmp_path, monk
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
 
@@ -243,8 +241,8 @@ async def test_external_access_resolver_marks_missing_slot_secret(tmp_path, monk
 
 
 @pytest.mark.asyncio
-async def test_external_access_resolver_reports_requested_slot_bundle_state(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_external_access_resolver_reports_requested_slot_bundle_state(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.services.mcp_hub_external_access_resolver import (
@@ -256,7 +254,6 @@ async def test_external_access_resolver_reports_requested_slot_bundle_state(tmp_
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
 
@@ -366,9 +363,9 @@ async def test_external_access_resolver_reports_requested_slot_bundle_state(tmp_
 @pytest.mark.asyncio
 async def test_external_access_resolver_treats_expired_managed_secret_ref_as_missing_without_backend_lookup(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services
 ) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.managed_secret_refs_repo import (
         ManagedSecretRefsRepo,
@@ -385,7 +382,6 @@ async def test_external_access_resolver_treats_expired_managed_secret_ref_as_mis
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
 
@@ -506,9 +502,9 @@ async def test_external_access_resolver_treats_expired_managed_secret_ref_as_mis
 @pytest.mark.asyncio
 async def test_external_access_resolver_caches_managed_secret_readiness_per_ref(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services
 ) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.managed_secret_refs_repo import (
         ManagedSecretRefsRepo,
@@ -533,7 +529,6 @@ async def test_external_access_resolver_caches_managed_secret_readiness_per_ref(
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
 

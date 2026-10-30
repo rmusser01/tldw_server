@@ -71,7 +71,7 @@ def _restore_auth_capture(app: FastAPI, original_get_auth_principal: Any) -> Non
 
 
 @pytest.mark.asyncio
-async def test_llm_budget_guard_overage_preserves_principal_state_alignment(tmp_path):
+async def test_llm_budget_guard_overage_preserves_principal_state_alignment(tmp_path, fresh_services):
     """
     Drive enforce_llm_budget via the chat completions endpoint and assert that,
     when the virtual key is over budget (402), the AuthPrincipal and request
@@ -84,12 +84,11 @@ async def test_llm_budget_guard_overage_preserves_principal_state_alignment(tmp_
     db_path = tmp_path / "users_budget_invariants.db"
     os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
@@ -166,5 +165,4 @@ async def test_llm_budget_guard_overage_preserves_principal_state_alignment(tmp_
             await pool.close()
         except Exception:
             _ = None
-        await reset_db_pool()
         reset_settings()

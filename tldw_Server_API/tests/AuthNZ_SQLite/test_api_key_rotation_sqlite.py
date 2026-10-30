@@ -8,7 +8,7 @@ from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_tes
 
 
 @pytest.mark.asyncio
-async def test_api_key_rotation_marks_old_key_and_links():
+async def test_api_key_rotation_marks_old_key_and_links(fresh_services):
     # Snapshot relevant environment so we can restore after the test.
     prev_auth_mode = os.environ.get("AUTH_MODE")
     prev_jwt_secret = os.environ.get("JWT_SECRET_KEY")
@@ -24,13 +24,12 @@ async def test_api_key_rotation_marks_old_key_and_links():
     os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager, APIKeyStatus
 
     # Initialize AuthNZ singletons for this test configuration
     reset_settings()
-    await reset_db_pool()
 
     try:
         pool = await get_db_pool()
@@ -97,4 +96,3 @@ async def test_api_key_rotation_marks_old_key_and_links():
 
         # Reset settings and DB pool so subsequent tests see the restored configuration
         reset_settings()
-        await reset_db_pool()

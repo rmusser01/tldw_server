@@ -26,9 +26,9 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint as mcp_ep
 from tldw_Server_API.app.core.MCP_unified.protocol import MCPResponse
 from tldw_Server_API.app.core.MCP_unified.server import MCPServer
+from tldw_Server_API.app.core.Utils.app_services import app_services
 from tldw_Server_API.app.main import app
 
 pytestmark = pytest.mark.integration
@@ -75,7 +75,7 @@ def _connect_once(client: TestClient, client_id: str) -> None:
 
 def test_disconnect_drains_the_connection_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     server = _build_server()
-    monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
     client = TestClient(app)
 
     _connect_once(client, "release-probe")
@@ -101,7 +101,7 @@ def test_repeated_connects_do_not_exhaust_the_per_ip_cap(
     """
     server = _build_server()
     server.config.ws_max_connections_per_ip = 2
-    monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
     client = TestClient(app)
 
     for attempt in range(4):

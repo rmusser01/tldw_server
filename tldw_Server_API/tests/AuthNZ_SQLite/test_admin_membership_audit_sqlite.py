@@ -10,7 +10,7 @@ from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_tes
 
 @pytest.mark.real_audit
 @pytest.mark.asyncio
-async def test_admin_org_membership_audit_events_sqlite(tmp_path, real_audit_service):
+async def test_admin_org_membership_audit_events_sqlite(tmp_path, real_audit_service, fresh_services):
     # Configure single-user mode with API key and user DB base
     os.environ['AUTH_MODE'] = 'single_user'
     os.environ['SINGLE_USER_API_KEY'] = 'audit-key-123'
@@ -22,10 +22,9 @@ async def test_admin_org_membership_audit_events_sqlite(tmp_path, real_audit_ser
 
     # Reset singletons and init schema
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))

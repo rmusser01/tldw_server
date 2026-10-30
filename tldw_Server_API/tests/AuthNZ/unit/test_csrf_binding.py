@@ -5,9 +5,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.csrf_protection import CSRFTokenManager
-from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService, reset_jwt_service
+from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.AuthNZ.single_user_session import SingleUserSessionIdentity
+from tldw_Server_API.app.core.Utils.app_services import app_services
 
 
 def _dummy_request(user_id: int | None):
@@ -181,6 +182,7 @@ async def test_csrf_binding_resolves_single_user_cookie_before_dependencies(monk
 def test_csrf_middleware_rotates_unbound_cookie(monkeypatch):
     from fastapi import FastAPI, Request
     from fastapi.testclient import TestClient
+
     from tldw_Server_API.app.core.AuthNZ.csrf_protection import CSRFProtectionMiddleware
     from tldw_Server_API.app.core.config import settings as global_settings
 
@@ -227,12 +229,13 @@ def test_csrf_middleware_rotates_unbound_cookie(monkeypatch):
 async def test_csrf_binding_ignores_revoked_jwt(monkeypatch):
     from fastapi import FastAPI
     from starlette.requests import Request
+
     from tldw_Server_API.app.core.AuthNZ.csrf_protection import CSRFProtectionMiddleware
 
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("JWT_SECRET_KEY", "test-csrf-secret-1234567890-abcdef")
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
 
     jwt_service = JWTService()
     token = jwt_service.create_access_token(user_id=1, username="user", role="user")
@@ -263,4 +266,4 @@ async def test_csrf_binding_ignores_revoked_jwt(monkeypatch):
 
     assert user_id is None
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None

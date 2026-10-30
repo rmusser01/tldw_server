@@ -32,9 +32,9 @@ async def test_reset_password_integration_success(monkeypatch):
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-key-for-testing-only-needs-32-chars-minimum")
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
+    from tldw_Server_API.app.core.Utils.app_services import app_services
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
 
     # Reload a fresh app instance (router mounts use the stubbed module)
     app = reload_app_main().app
@@ -104,7 +104,7 @@ async def test_reset_password_integration_success(monkeypatch):
 
     app.dependency_overrides.clear()
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
 
 
 @pytest.mark.asyncio

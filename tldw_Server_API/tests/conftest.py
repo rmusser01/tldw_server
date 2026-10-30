@@ -11,6 +11,7 @@ pytest_plugins = [
     "tldw_Server_API.tests._plugins.singleton_guard",
     # Opt-in `reset_embeddings_singletons` fixture (not autouse).
     "tldw_Server_API.tests._plugins.singleton_reset_fixtures",
+    "tldw_Server_API.tests._plugins.app_services_fixtures",
 ]
 
 from collections.abc import Callable
@@ -208,6 +209,9 @@ def _run_coro_sync_best_effort(coro):
     if loop is not None and not loop.is_closed():
         try:
             if loop.is_running():
+                from loguru import logger
+
+                logger.debug("_run_coro_sync_best_effort: loop is running; cleanup skipped")
                 return None
             return loop.run_until_complete(coro)
         except Exception:
@@ -381,14 +385,14 @@ def _restore_auth_env_and_singletons():
     This fixture restores a small set of high-impact environment keys to their
     baseline values and resets key singletons used by the auth/jobs stacks.
     """
+    from tldw_Server_API.app.core.Utils.app_services import app_services
+    from tldw_Server_API.tests._plugins.app_services_fixtures import close_app_service
+
+    session_before = app_services().session_manager
+
     # Defensive pre-test reset: avoid stale singleton state inherited from
     # collection-time imports or prior tests.
-    try:
-        from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
-
-        reset_jwt_service()
-    except Exception:
-        _ = None
+    app_services().jwt_service = None
 
     yield
 
@@ -398,6 +402,11 @@ def _restore_auth_env_and_singletons():
         else:
             os.environ[key] = baseline_value
 
+    # A manager the test published is shut down; the slot goes back to what the test found.
+    _run_coro_sync_best_effort(close_app_service("session_manager", restore=session_before))
+    # Per-test lock: it never stays bound to a previous test's event loop.
+    app_services().session_manager_lock = asyncio.Lock()
+
     # Ensure subsequent tests rebuild Settings from the restored environment.
     try:
         from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -405,12 +414,7 @@ def _restore_auth_env_and_singletons():
         reset_settings()
     except Exception:
         _ = None
-    try:
-        from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
-
-        reset_jwt_service()
-    except Exception:
-        _ = None
+    app_services().jwt_service = None
 
     # Avoid leaking the process-wide jobs acquisition gate across tests.
     try:

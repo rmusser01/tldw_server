@@ -13,7 +13,7 @@ from tldw_Server_API.app.api.v1.schemas.notes_graph import (
     NoteLinkRestore,
     NoteLinkUpdate,
 )
-from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService, reset_jwt_service
+from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
     SyncServerOriginBatchAppendError,
     SyncServerOriginBatchMaterializationError,
 )
+from tldw_Server_API.app.core.Utils.app_services import app_services
 
 pytestmark = pytest.mark.integration
 
@@ -60,7 +61,7 @@ def test_app(monkeypatch) -> FastAPI:
     monkeypatch.setenv("JWT_ALGORITHM", "HS256")
     monkeypatch.setenv("JWT_SECRET_KEY", "graph_rbac_tests_secret_1234567890")
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
 
     app = FastAPI()
     app.include_router(notes_graph_module.router, prefix="/api/v1/notes")

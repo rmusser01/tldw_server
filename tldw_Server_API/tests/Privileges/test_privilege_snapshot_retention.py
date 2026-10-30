@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 from tldw_Server_API.app.core.AuthNZ.scheduler import AuthNZScheduler
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -35,13 +35,12 @@ def _same_iso_week_across_rough_bucket_boundary(
 
 
 @pytest.mark.asyncio
-async def test_privilege_snapshot_retention_job(tmp_path, monkeypatch):
+async def test_privilege_snapshot_retention_job(tmp_path, monkeypatch, fresh_services):
     db_path = tmp_path / "users.db"
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("JWT_SECRET_KEY", "unit-test-secret-key-priv-snapshots-1234567890")
     reset_settings()
-    await reset_db_pool()
     ensure_authnz_tables(Path(db_path))
 
     pool = await get_db_pool()
@@ -108,5 +107,4 @@ async def test_privilege_snapshot_retention_job(tmp_path, monkeypatch):
     assert gauge_values, "Snapshot row gauge should record the latest count"
     assert gauge_values[-1].value == len(remaining_ids)
 
-    await reset_db_pool()
     reset_settings()

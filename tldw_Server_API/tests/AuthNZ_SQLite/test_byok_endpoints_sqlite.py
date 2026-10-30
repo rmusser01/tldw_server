@@ -86,7 +86,6 @@ async def _setup_byok_sqlite(tmp_path, monkeypatch):
         monkeypatch.setitem(sys.modules, "pyotp", pyotp_stub)
 
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
         add_org_member,
@@ -97,9 +96,10 @@ async def _setup_byok_sqlite(tmp_path, monkeypatch):
     from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB, reset_users_db
+    from tldw_Server_API.app.core.Utils.app_services import app_services
 
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
     await reset_db_pool()
     await reset_users_db()
 
@@ -576,8 +576,8 @@ async def test_gateway_byok_endpoints_sqlite(tmp_path, monkeypatch):
         decrypt_byok_payload,
         loads_envelope,
     )
-    from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
     from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+    from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
     from tldw_Server_API.app.main import app
 
     specs = {
