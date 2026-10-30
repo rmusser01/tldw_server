@@ -68,7 +68,11 @@ class SynthesisProvider:
             "Each outline section must contain title, focus_area, source_ids, note_ids.\n"
             "Each claim must contain text, focus_area, source_ids, citations, confidence. "
             "Confidence must be a JSON number between 0 and 1, never a qualitative label.\n"
-            "Each report section must contain title and markdown."
+            "Each report section must contain title and markdown, both strings. "
+            "source_ids and note_ids must be arrays of strings; "
+            "citations must be an array of objects with a source_id from Available sources. "
+            "unresolved_questions must be an array of strings; "
+            "summary must be a JSON object (use {} when there is no additional summary metadata)."
         )
         thinking = config.get("llamacpp_enable_thinking")
         if thinking is not None and not isinstance(thinking, bool):

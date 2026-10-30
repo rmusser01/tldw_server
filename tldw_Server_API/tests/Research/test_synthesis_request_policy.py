@@ -146,3 +146,36 @@ def test_qualitative_confidence_is_not_coerced_into_a_probability():
             source_registry=[],
             evidence_notes=[],
         )
+
+
+@pytest.mark.asyncio
+async def test_provider_prompt_declares_nested_json_shapes():
+    calls = []
+    await invoke(
+        {"provider": "llama.cpp", "model": "controlled"},
+        {"choices": [{"finish_reason": "stop", "message": {"content": "{}"}}]},
+        calls,
+    )
+    prompt = calls[0]["messages"][0]["content"]
+    assert all(
+        phrase in prompt
+        for phrase in (  # nosec B101 # Outgoing types must match the actual parser contract.
+            "summary must be a JSON object",
+            "source_ids and note_ids must be arrays of strings",
+            "citations must be an array of objects with a source_id",
+            "unresolved_questions must be an array of strings",
+        )
+    )
+
+
+@pytest.mark.parametrize("summary", ["Narrative summary", [], [["a", 1]], 1, True])
+def test_synthesis_summary_refuses_non_object_json(summary):
+    from tldw_Server_API.app.core.Research.synthesizer import ResearchSynthesizer
+
+    with pytest.raises(ValueError, match="synthesis_summary_must_be_object"):
+        ResearchSynthesizer()._build_provider_result(
+            payload={"outline_sections": [], "claims": [], "report_sections": [], "summary": summary},
+            plan=SimpleNamespace(query="Controlled", focus_areas=[]),
+            source_registry=[],
+            evidence_notes=[],
+        )
