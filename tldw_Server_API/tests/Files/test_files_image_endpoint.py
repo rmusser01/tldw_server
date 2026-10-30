@@ -518,6 +518,11 @@ def test_create_image_inline_export_rejects_missing_reference_file(
     cfg = replace(cfg, reference_image_supported_models={"modelstudio": ["qwen-image-edit"]})
     monkeypatch.setattr(image_adapter_module, "get_image_generation_config", lambda: cfg)
 
+    # The lookup must hit an initialized media DB, or it fails as invalid instead of not found;
+    # no earlier test's cached handle may stand in for it.
+    media_db = MediaDatabase(db_path=str(DatabasePaths.get_media_db_path(321)), client_id="321")
+    media_db.initialize_db()
+    media_db.close_connection()
     storage = FileSystemStorage(Path.cwd() / "Databases" / "test_user_dbs_files_image" / "reference_storage_missing")
     with patch(
         "tldw_Server_API.app.core.Image_Generation.reference_images.get_storage_backend",

@@ -46,7 +46,7 @@ pytestmark = pytest.mark.integration
 async def full_account_user(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fresh_services) -> AsyncIterator[str]:
     """Seed the profile required by a full export in a private AuthNZ database."""
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
-    reset_settings()  # the removed reset_db_pool() also dropped the cached settings
+    reset_settings()  # the removed pool reset also dropped the cached settings
     pool = await get_db_pool()
     await create_authnz_test_user(
         pool,
