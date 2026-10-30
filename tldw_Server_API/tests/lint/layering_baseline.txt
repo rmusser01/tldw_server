@@ -224,9 +224,7 @@ core.StudyPacks -> api.v1.schemas: 3
 core.Sync_Contracts -> api.v1.schemas: 1  # bump: moved from core.Sync with personal_context_ongoing_contract; TASK-13950.15 S9 removes it (TASK-13950.16)
 core.TTS -> services: 1
 core.UserProfiles -> services: 1
-core.VN_Assets -> api.v1.schemas: 2
 core.VN_Assets -> services: 2
-core.VN_Play -> api.v1.schemas: 2
 core.Watchlists -> services: 5
 core.Workflows -> api.v1.schemas: 1
 core.Workflows -> services: 2

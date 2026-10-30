@@ -11,7 +11,7 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
+from tldw_Server_API.app.core.VN_Assets.vn_asset_schemas import (
     VALID_REVIEW_STATUSES,
     VNAssetBulkReviewRequest,
     VNAssetCleanupRequest,

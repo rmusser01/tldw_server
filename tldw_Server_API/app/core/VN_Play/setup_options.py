@@ -8,11 +8,11 @@ from typing import Any, Mapping
 
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
+from tldw_Server_API.app.core.VN_Assets.vn_asset_schemas import (
     VNAssetPackResponse,
     VNAssetReadinessResponse,
 )
-from tldw_Server_API.app.api.v1.schemas.vn_play_schemas import (
+from tldw_Server_API.app.core.VN_Play.vn_play_schemas import (
     VNPlayMode,
     VNPlaySetupAssetPackOption,
     VNPlaySetupCharacterOption,
