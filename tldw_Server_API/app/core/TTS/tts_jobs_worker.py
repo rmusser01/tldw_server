@@ -17,7 +17,6 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
 from tldw_Server_API.app.core.Audio.tts_service import (
     _infer_tts_provider_from_model,
     _resolve_tts_byok,
@@ -59,6 +58,7 @@ from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int as _coerce_int
 from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env as _jobs_manager
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.TTS.gateway_preflight import gateway_route_provenance
+from tldw_Server_API.app.core.TTS.speech_schemas import OpenAISpeechRequest
 from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError, is_retryable_error
 from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
 from tldw_Server_API.app.core.TTS.utils import (
