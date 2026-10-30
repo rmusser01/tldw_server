@@ -41,11 +41,11 @@ class CharacterBase(BaseModel):
     message_example: Optional[str] = Field(None, examples=["<START>\nUSER: Hello\nASSISTANT: Hi there!\n<END>"], max_length=MAX_MESSAGE_EXAMPLE_LENGTH)
     creator_notes: Optional[str] = Field(None, max_length=MAX_CREATOR_NOTES_LENGTH)
     alternate_greetings: Union[list[str], str, None] = Field(None,
-                                                                 description="List of strings or a JSON string representation of a list.",
-                                                                 examples=[["Hello!", "Good day!"]])
+                                                             description="List of strings or a JSON string representation of a list.",
+                                                             examples=[["Hello!", "Good day!"]])
     tags: Union[list[str], str, None] = Field(None,
-                                                  description="List of strings or a JSON string representation of a list.",
-                                                  examples=[["fantasy", "knight"]])
+                                              description="List of strings or a JSON string representation of a list.",
+                                              examples=[["fantasy", "knight"]])
     creator: Optional[str] = Field(None, max_length=MAX_CREATOR_LENGTH)
     character_version: Optional[str] = Field(None, max_length=MAX_VERSION_LENGTH)
     extensions: Optional[Union[dict[str, Any], str]] = Field(None,
