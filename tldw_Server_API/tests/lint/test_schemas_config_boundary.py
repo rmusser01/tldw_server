@@ -23,7 +23,10 @@ that is no longer found fails as stale (delete it); every reason must cite
 
 Known limits: a config load reached through an imported non-config helper is not seen
 (importing ``core.LLM_Calls.routing.models`` loads config today); ``importlib``,
-``getattr`` and module rebinding are not seen either.
+``getattr`` and module rebinding are not seen either. Only calls count: a bare read
+such as ``X = settings.FOO`` or ``settings["a"]`` at import time is not flagged (no
+schema does that today), and method calls on call results (``M().g()``) or a shadowed
+name are not followed.
 
 ``python -m tldw_Server_API.tests.lint.test_schemas_config_boundary`` prints both
 measurements; it is the committed counter.
