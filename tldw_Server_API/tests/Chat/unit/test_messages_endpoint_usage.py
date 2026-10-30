@@ -19,6 +19,7 @@ from tldw_Server_API.app.api.v1.schemas.anthropic_messages import (
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ResolvedByokCredentials
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.streaming_utils import MAX_TOOL_ARGUMENT_LENGTH
+from tldw_Server_API.app.core.LLM_Calls import gateway
 
 
 @pytest.fixture(autouse=True)
@@ -28,6 +29,7 @@ def current_inventory_for_usage_fixtures(monkeypatch):
     monkeypatch.setattr(chat_service, "discover_provider_models", lambda *args, **kwargs: SimpleNamespace(
         status="ready", models=("claude-3-5-sonnet", "claude-3-5-haiku-latest", "claude-opus-4-8", "gpt-4o-mini", "gpt-test"),
     ))
+    monkeypatch.setattr(gateway, "discover_provider_models", chat_service.discover_provider_models)
 
 
 def _resolved_credentials(
@@ -4526,7 +4528,7 @@ async def test_converted_adapter_eof_without_finish_reason_cannot_synthesize_ter
     from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
         ProviderCredentialRuntime,
     )
-    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
     from tldw_Server_API.app.core.LLM_Calls.providers import (
         openai_adapter as openai_adapter_module,
     )
@@ -4598,7 +4600,7 @@ async def test_converted_adapter_eof_without_finish_reason_cannot_synthesize_ter
             return adapter
 
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_get_llm_registry",
         lambda: _Registry(),
     )

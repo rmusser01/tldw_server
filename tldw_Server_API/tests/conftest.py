@@ -332,7 +332,7 @@ def _offline_provider_model_inventory(request, monkeypatch):
 
     monkeypatch.setattr(provider_model_inventory, "_http_fetch", live_discovery)
     for name in (
-        "tldw_Server_API.app.core.Chat.chat_service",
+        "tldw_Server_API.app.core.LLM_Calls.gateway",
         "tldw_Server_API.app.api.v1.endpoints.messages",
     ):
         module = sys.modules.get(name)
@@ -927,15 +927,27 @@ def healthy_no_override_tts_credential_snapshot():
             llm_provider_overrides._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS
         )
 
-    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests({})
+    # Bound now: a test may patch this setter, and its monkeypatch can be undone after this teardown.
+    set_overrides_cache = llm_provider_overrides.set_llm_provider_overrides_cache_for_tests
+    set_overrides_cache({})
     try:
         yield
     finally:
-        llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+        set_overrides_cache(
             original_overrides,
             healthy=original_healthy,
             ttl_enabled=not original_ttl_disabled,
         )
+
+
+@pytest.fixture(autouse=True)
+def _healthy_empty_llm_provider_override_store(request):
+    """Every test starts with the healthy, empty override store app startup gives production (TASK-13950.13).
+
+    Mark a test ``ambient_llm_provider_override_store`` to see the import-time (unloaded, unhealthy) store instead.
+    """
+    if request.node.get_closest_marker("ambient_llm_provider_override_store") is None:
+        request.getfixturevalue("healthy_no_override_tts_credential_snapshot")
 
 
 @pytest.fixture()

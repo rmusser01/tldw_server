@@ -265,11 +265,13 @@ def _install_openai_adapter(
     adapter: OpenAIAdapter,
 ) -> None:
     from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
     from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
 
     monkeypatch.setattr(chat_service, "discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready", ("gpt-test",)))
+    monkeypatch.setattr(gateway, "discover_provider_models", chat_service.discover_provider_models)
     monkeypatch.setattr(
-        chat_service, "resolve_provider_models_base_url",
+        gateway, "resolve_provider_models_base_url",
         lambda _provider, config=None, **kwargs: kwargs.get("base_url") or (config or {}).get("openai_api", {}).get("api_base_url"),
     )
     registry = ChatProviderRegistry(include_defaults=False)

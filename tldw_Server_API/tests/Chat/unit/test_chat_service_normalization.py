@@ -6,6 +6,7 @@ import pytest
 
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+from tldw_Server_API.app.core.LLM_Calls import gateway
 
 pytestmark = pytest.mark.unit
 
@@ -24,9 +25,11 @@ def scoped_inventory(monkeypatch):
         calls.append((provider, api_key, base_url))
         return result
 
-    monkeypatch.setattr(chat_service, "resolve_provider_models_base_url", resolve)
+    monkeypatch.setattr(gateway, "resolve_provider_models_base_url", resolve)
     monkeypatch.setattr(chat_service, "discover_provider_models", discover)
+    monkeypatch.setattr(gateway, "discover_provider_models", discover)
     monkeypatch.setattr(chat_service, "list_provider_models", lambda _provider: ["retired-model"])
+    monkeypatch.setattr(gateway, "list_provider_models", chat_service.list_provider_models)
     monkeypatch.setattr(chat_service, "_configured_models_for_provider", lambda _provider: ("retired-model",))
     return SimpleNamespace(result=result, calls=calls, resolutions=resolutions)
 
@@ -54,7 +57,7 @@ def test_openrouter_strips_redundant_openrouter_prefix():
 
 
 def test_openrouter_does_not_have_implicit_pytest_dummy_alias(monkeypatch):
-    monkeypatch.setattr(chat_service, "_load_alias_overrides_cached", lambda: {})
+    monkeypatch.setattr(gateway, "_load_alias_overrides_cached", lambda: {})
     request = SimpleNamespace(api_provider="openrouter", model="dummy")
     assert chat_service.normalize_request_provider_and_model(request, "openrouter") == "openrouter"
     assert request.model == "dummy"
@@ -138,8 +141,8 @@ def test_together_preserves_namespaced_model():
 
 @pytest.mark.parametrize("model", ["vendor/model", "anthropic/local-model", "../../models/local.gguf"])
 def test_local_normalization_preserves_opaque_model_paths(monkeypatch, model):
-    monkeypatch.setattr(chat_service, "_load_alias_overrides_cached", lambda: {})
-    monkeypatch.setattr(chat_service, "_load_models_with_case_cached", lambda _provider: ())
+    monkeypatch.setattr(gateway, "_load_alias_overrides_cached", lambda: {})
+    monkeypatch.setattr(gateway, "_load_models_with_case_cached", lambda _provider: ())
     request = SimpleNamespace(api_provider="ollama", model=model)
     assert chat_service.normalize_request_provider_and_model(request, "ollama") == "ollama"
     assert request.model == model
@@ -147,7 +150,7 @@ def test_local_normalization_preserves_opaque_model_paths(monkeypatch, model):
 
 def test_local_normalization_preserves_configured_aliases(monkeypatch):
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_load_alias_overrides_cached",
         lambda: {"ollama": {"friendly": "local-model"}},
     )
@@ -157,8 +160,8 @@ def test_local_normalization_preserves_configured_aliases(monkeypatch):
 
 
 def test_local_normalization_preserves_case_insensitive_catalog_match(monkeypatch):
-    monkeypatch.setattr(chat_service, "_load_alias_overrides_cached", lambda: {})
-    monkeypatch.setattr(chat_service, "_load_models_with_case_cached", lambda _provider: ("Local-Canonical",))
+    monkeypatch.setattr(gateway, "_load_alias_overrides_cached", lambda: {})
+    monkeypatch.setattr(gateway, "_load_models_with_case_cached", lambda _provider: ("Local-Canonical",))
     request = SimpleNamespace(api_provider="ollama", model="local-canonical")
     assert chat_service.normalize_request_provider_and_model(request, "ollama") == "ollama"
     assert request.model == "Local-Canonical"
@@ -169,6 +172,7 @@ def test_local_availability_preserves_configured_and_catalog_models_without_clou
     monkeypatch,
 ):
     monkeypatch.setattr(chat_service, "list_provider_models", lambda _provider: ["Catalog-Local"])
+    monkeypatch.setattr(gateway, "list_provider_models", chat_service.list_provider_models)
     monkeypatch.setattr(chat_service, "_configured_models_for_provider", lambda _provider: ("Configured-Local",))
     assert chat_service.known_models_for_provider_cached("ollama") == ("Catalog-Local", "Configured-Local")
     assert chat_service.is_model_known_for_provider("ollama", "catalog-local") is True
@@ -180,6 +184,7 @@ def test_local_availability_preserves_configured_and_catalog_models_without_clou
 
 def test_local_availability_without_inventory_still_defers(scoped_inventory, monkeypatch):
     monkeypatch.setattr(chat_service, "list_provider_models", lambda _provider: [])
+    monkeypatch.setattr(gateway, "list_provider_models", chat_service.list_provider_models)
     monkeypatch.setattr(chat_service, "_configured_models_for_provider", lambda _provider: ())
     assert chat_service.is_model_known_for_provider("ollama", "local-model") is None
     assert scoped_inventory.calls == []

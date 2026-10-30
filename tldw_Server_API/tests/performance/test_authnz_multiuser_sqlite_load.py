@@ -10,6 +10,9 @@ import pytest
 from cryptography.fernet import Fernet
 from httpx import ASGITransport, AsyncClient
 
+from tldw_Server_API.app.core import config_llm_providers
+from tldw_Server_API.tests.helpers.provider_keys import api_keys_source
+
 
 def _perf_enabled() -> bool:
     return os.getenv("PERF", "0").lower() in {"1", "true", "yes", "y", "on"}
@@ -226,7 +229,7 @@ async def test_multi_user_sqlite_register_login_load(tmp_path, monkeypatch):
             return mock_response
 
         with (
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-openai-key-12345"}),
+            patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-openai-key-12345"})),
             patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", side_effect=_mock_chat_call),
             patch("tldw_Server_API.app.core.Chat.chat_orchestrator.chat_api_call", side_effect=_mock_chat_call),
         ):
@@ -386,7 +389,7 @@ async def test_multi_user_sqlite_streaming_chat_worst_case(tmp_path, monkeypatch
         tokens = {i: token for (i, token) in login_results}  # type: ignore[misc]
 
         with (
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-openai-key-12345"}),
+            patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-openai-key-12345"})),
             patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", side_effect=_mock_chat_call),
             patch("tldw_Server_API.app.core.Chat.chat_orchestrator.chat_api_call", side_effect=_mock_chat_call),
         ):

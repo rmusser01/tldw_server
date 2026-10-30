@@ -2155,3 +2155,19 @@ class LLMQuotaExceededError(HTTPException):
         self.current = current
         self.limit = limit
         self.retry_after = int(retry_after)
+
+
+class LLMPolicyRefusal(HTTPException):
+    """A gateway pre-call policy hook refused an LLM call: always HTTP 400 (TASK-13950.13).
+
+    An ``HTTPException``, like ``LLMQuotaExceededError`` and for the same reason: endpoints report
+    a ``ChatAPIError`` as a provider failure, and most let an ``HTTPException`` through unchanged.
+    ``detail`` is client-safe text the hook author writes. It never echoes the request, the system
+    prompt or retrieved context.
+    """
+
+    retryable = False  # job workers read these, as for LLMQuotaExceededError
+    failure_code = "llm_policy_refused"
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(status_code=400, detail=detail)
