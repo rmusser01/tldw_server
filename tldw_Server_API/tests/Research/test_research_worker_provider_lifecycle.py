@@ -5,13 +5,14 @@ import asyncio
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides as overrides
+from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Research import jobs_worker
 
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 
 
 @pytest.mark.parametrize("outcome", ["completed", "error", "cancelled", "store-unavailable"])
-async def test_standalone_research_owns_provider_policy_lifecycle(monkeypatch, outcome):
+async def test_standalone_research_owns_provider_policy_lifecycle(monkeypatch, tmp_path, outcome):
     events = []
     overrides.set_llm_provider_overrides_cache_for_tests({}, healthy=False)
 
@@ -50,7 +51,7 @@ async def test_standalone_research_owns_provider_policy_lifecycle(monkeypatch, o
                 raise asyncio.CancelledError
 
     monkeypatch.setattr(jobs_worker, "get_db_pool", get_pool)
-    monkeypatch.setattr(jobs_worker, "_jobs_manager", lambda: object())
+    monkeypatch.setattr(jobs_worker, "_jobs_manager", lambda: JobManager(tmp_path / "jobs.db", backend="sqlite"))
     monkeypatch.setattr(jobs_worker, "WorkerSDK", SDK)
     monkeypatch.setattr(overrides, "AuthnzLLMProviderOverridesRepo", Repository)
     try:

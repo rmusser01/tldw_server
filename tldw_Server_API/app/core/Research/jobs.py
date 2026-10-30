@@ -7,7 +7,7 @@ import time
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
 from tldw_Server_API.app.core.Research.artifact_store import ResearchArtifactStore
@@ -26,6 +26,8 @@ from tldw_Server_API.app.core.Research.providers.config import resolve_provider_
 from tldw_Server_API.app.core.Research.providers.local import LocalResearchProvider
 from tldw_Server_API.app.core.Research.providers.web import WebResearchProvider
 from tldw_Server_API.app.core.Research.synthesizer import ResearchSynthesizer
+
+from .phase_dispatch import PHASES, new_phase_dispatch, read_phase_dispatch
 
 RESEARCH_DOMAIN = "research"
 RESEARCH_JOB_TYPE = "research_phase"
@@ -137,6 +139,8 @@ def enqueue_research_phase_job(
     payload_overrides: dict[str, Any] | None = None,
     policy_version: int = 1,
     priority: int = 5,
+    phase_dispatch: dict[str, Any] | None = None,
+    continuation: bool = False,
 ) -> dict[str, Any]:
     """Create a core Jobs entry for a research session phase."""
     payload = {
@@ -146,6 +150,32 @@ def enqueue_research_phase_job(
         "owner_user_id": str(owner_user_id),
         "policy_version": int(policy_version),
     }
+    suffix = ""
+    admission = {}
+    if phase_dispatch is not None:
+        dispatch = read_phase_dispatch(phase_dispatch)
+        if dispatch["phase"] != phase or payload_overrides:
+            raise ValueError("research_phase_dispatch_invalid")
+        payload.update(
+            {
+                key: dispatch[key]
+                for key in (
+                    "dispatch_id",
+                    "checkpoint_id",
+                    "policy_version",
+                    "approved_outline_locked",
+                )
+            }
+        )
+        checkpoint_id = dispatch["checkpoint_id"]
+        policy_version = dispatch["policy_version"]
+        suffix = ":" + dispatch["dispatch_id"]
+        if continuation:
+            if not dispatch["predecessor_job_uuid"]:
+                raise ValueError("research_continuation_requires_predecessor")
+            admission = {"fair_share_exempt": True, "quota_exempt": True}
+    elif continuation:
+        raise ValueError("research_continuation_requires_dispatch")
     if isinstance(payload_overrides, dict):
         payload.update(payload_overrides)
     return jm.create_job(
@@ -155,7 +185,8 @@ def enqueue_research_phase_job(
         payload=payload,
         owner_user_id=str(owner_user_id),
         priority=priority,
-        idempotency_key=f"research:{session_id}:{phase}:{checkpoint_id or 'none'}:{policy_version}",
+        idempotency_key=f"research:{session_id}:{phase}:{checkpoint_id or 'none'}:{policy_version}{suffix}",
+        **admission,
     )
 
 
@@ -166,6 +197,7 @@ async def handle_research_phase_job(
     outputs_dir: str | Path,
     broker: ResearchBroker | None = None,
     synthesizer: ResearchSynthesizer | None = None,
+    lease_check: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Advance a single research phase job."""
     payload = job.get("payload") or {}
@@ -184,6 +216,8 @@ async def handle_research_phase_job(
     if session is None:
         raise KeyError(session_id)
 
+    if lease_check is not None:
+        db.bind_phase_writer(session, lease_check)
     artifact_store = ResearchArtifactStore(base_dir=outputs_dir, db=db)
     job_id = str(job.get("id")) if job.get("id") is not None else None
 
@@ -296,6 +330,8 @@ async def _handle_planning_phase(
     return _finalize_phase_transition(
         db=db,
         session_id=session.id,
+        expected_session=session,
+        expected_job_id=job_id,
         next_phase=next_phase,
         next_status=next_status,
         checkpoint_id=checkpoint_id,
@@ -512,6 +548,8 @@ async def _handle_collecting_phase(
     return _finalize_phase_transition(
         db=db,
         session_id=session.id,
+        expected_session=session,
+        expected_job_id=job_id,
         next_phase=next_phase,
         next_status=next_status,
         checkpoint_id=checkpoint_id,
@@ -796,6 +834,8 @@ async def _handle_synthesizing_phase(
     return _finalize_phase_transition(
         db=db,
         session_id=session.id,
+        expected_session=session,
+        expected_job_id=job_id,
         next_phase=next_phase,
         next_status=next_status,
         checkpoint_id=checkpoint_id,
@@ -876,6 +916,8 @@ async def _handle_packaging_phase(
     transition = _finalize_phase_transition(
         db=db,
         session_id=session.id,
+        expected_session=session,
+        expected_job_id=job_id,
         next_phase="completed",
         next_status="completed",
         checkpoint_id=None,
@@ -923,6 +965,23 @@ def _halt_for_control_before_phase(*, db: ResearchSessionsDB, session_id: str) -
     if session.control_state == "cancel_requested":
         return _cancel_session(db=db, session_id=session_id)
     if session.control_state in {"pause_requested", "paused"}:
+        if session.phase_dispatch_json:
+            updated = db.compare_and_set_phase(
+                session,
+                phase=session.phase,
+                status=session.status,
+                control_state="paused",
+                active_job_id=None,
+                phase_dispatch_json=session.phase_dispatch_json,
+            )
+            return {
+                "session_id": session.id,
+                "phase": session.phase,
+                "checkpoint_id": session.latest_checkpoint_id,
+                "artifacts_written": 0,
+                "paused": updated is not None,
+                "retry_delivery": updated is None,
+            }
         updated, _ = db.update_control_state_with_event(
             session_id,
             control_state="paused",
@@ -1010,6 +1069,8 @@ def _finalize_phase_transition(
     *,
     db: ResearchSessionsDB,
     session_id: str,
+    expected_session: Any,
+    expected_job_id: str | None,
     next_phase: str,
     next_status: str,
     checkpoint_id: str | None,
@@ -1019,6 +1080,48 @@ def _finalize_phase_transition(
     current = db.get_session(session_id)
     if current is None:
         raise KeyError(session_id)
+    if expected_session.phase_dispatch_json:
+        original = read_phase_dispatch(expected_session.phase_dispatch_json)
+        if (
+            current.owner_user_id != expected_session.owner_user_id
+            or current.phase != expected_session.phase
+            or current.active_job_id != expected_job_id
+            or current.phase_dispatch_json != original
+        ):
+            return {"session_id": current.id, "phase": current.phase, "artifacts_written": 0, "obsolete": True}
+        control = current.control_state
+        if control == "cancel_requested":
+            next_phase, next_status, control, completed_at = current.phase, "cancelled", "cancelled", _utc_now()
+        elif control in {"pause_requested", "paused"} and next_phase != "completed":
+            control = "paused"
+        elif next_phase == "completed":
+            control = "running"
+        dispatch = original if next_status == "waiting_human" else {}
+        if next_phase in PHASES and next_status == "queued":
+            dispatch = new_phase_dispatch(
+                next_phase,
+                authorization="continuation",
+                checkpoint_id=original["checkpoint_id"],
+                policy_version=original["policy_version"],
+                approved_outline_locked=original["approved_outline_locked"],
+                predecessor_job_uuid=original["job_uuid"],
+            )
+        updated = db.compare_and_set_phase(
+            current,
+            phase=next_phase,
+            status=next_status,
+            control_state=control,
+            active_job_id=None,
+            phase_dispatch_json=dispatch,
+            completed_at=completed_at,
+        )
+        return {
+            "session_id": current.id,
+            "phase": updated.phase if updated else current.phase,
+            "checkpoint_id": checkpoint_id,
+            "artifacts_written": artifacts_written if updated else 0,
+            "obsolete": updated is None,
+        }
     if current.control_state == "cancel_requested":
         return _cancel_session(db=db, session_id=session_id)
     if current.control_state in {"pause_requested", "paused"} and next_phase != "completed":

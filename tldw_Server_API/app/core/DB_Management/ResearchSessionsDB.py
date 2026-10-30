@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 _UNSET = object()
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
@@ -28,6 +28,17 @@ def _parse_json_dict(raw: Any) -> dict[str, Any]:
             return {}
         return parsed if isinstance(parsed, dict) else {}
     return {}
+
+
+def _parse_phase_dispatch_json(raw: Any) -> dict[str, Any]:
+    """Never confuse corrupt dispatch authority with an empty legacy descriptor."""
+    try:
+        parsed = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError) as error:
+        raise ValueError("research_phase_dispatch_corrupt") from error
+    if not isinstance(parsed, dict):
+        raise ValueError("research_phase_dispatch_corrupt")
+    return parsed
 
 
 @dataclass(frozen=True)
@@ -51,6 +62,7 @@ class ResearchSessionRow:
     updated_at: str
     completed_at: str | None
     chat_id: str | None = None
+    phase_dispatch_json: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -132,6 +144,12 @@ class ResearchChatLinkedRunRow:
     updated_at: str
 
 
+class ResearchPhaseChangedError(ValueError):
+    """A worker's captured phase no longer authorizes canonical publication."""
+
+    retryable = False
+
+
 class ResearchSessionsDB:
     """SQLite-backed storage for research sessions and related metadata."""
 
@@ -139,6 +157,46 @@ class ResearchSessionsDB:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_schema()
+        self._phase_writer: ResearchSessionRow | None = None
+        self._phase_lease_check: Callable[[], None] | None = None
+
+    def bind_phase_writer(self, expected: ResearchSessionRow, lease_check: Callable[[], None]) -> None:
+        """Bind one worker instance to its captured phase and externally owned Job lease."""
+        self._phase_writer = expected
+        self._phase_lease_check = lease_check
+
+    def _assert_phase_writer(self, conn: sqlite3.Connection) -> None:
+        expected = self._phase_writer
+        if expected is None:
+            return
+        if not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
+        if self._phase_lease_check is None:
+            raise ResearchPhaseChangedError("research_phase_lease_unbound")
+        self._phase_lease_check()
+        current = self._session_from_row(
+            conn.execute(
+                "SELECT * FROM research_sessions WHERE id = ?",
+                (expected.id,),
+            ).fetchone()
+        )
+        if (
+            current is None
+            or current.owner_user_id != expected.owner_user_id
+            or current.phase != expected.phase
+            or current.status != expected.status
+            or current.active_job_id != expected.active_job_id
+            or current.latest_checkpoint_id != expected.latest_checkpoint_id
+            or current.phase_dispatch_json != expected.phase_dispatch_json
+            or current.control_state not in {"running", "pause_requested"}
+        ):
+            raise ResearchPhaseChangedError("research_phase_changed")
+
+    def assert_phase_writer(self) -> None:
+        """Check before functional file work; the manifest write checks again under its lock."""
+        if self._phase_writer is not None:
+            with self._connect() as conn:
+                self._assert_phase_writer(conn)
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -255,6 +313,8 @@ class ResearchSessionsDB:
                 """
             )
             columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info('research_sessions')").fetchall()}
+            if "phase_dispatch_json" not in columns:
+                conn.execute("ALTER TABLE research_sessions ADD COLUMN phase_dispatch_json TEXT NOT NULL DEFAULT '{}'")
             if "provider_overrides_json" not in columns:
                 conn.execute(
                     "ALTER TABLE research_sessions ADD COLUMN provider_overrides_json TEXT NOT NULL DEFAULT '{}'"
@@ -286,6 +346,9 @@ class ResearchSessionsDB:
                 _parse_json_dict(row["provider_overrides_json"]) if "provider_overrides_json" in keys else {}
             ),
             follow_up_json=(_parse_json_dict(row["follow_up_json"]) if "follow_up_json" in keys else {}),
+            phase_dispatch_json=_parse_phase_dispatch_json(row["phase_dispatch_json"])
+            if "phase_dispatch_json" in keys
+            else {},
             control_state=(
                 str(row["control_state"]) if "control_state" in keys and row["control_state"] is not None else "running"
             ),
@@ -785,6 +848,223 @@ class ResearchSessionsDB:
             )
         return bool(cursor.rowcount)
 
+    def compare_and_set_phase(
+        self,
+        expected: ResearchSessionRow,
+        *,
+        phase: str,
+        status: str,
+        control_state: str,
+        active_job_id: str | None,
+        phase_dispatch_json: dict[str, Any],
+        completed_at: str | None = None,
+        progress_message: str | None | object = _UNSET,
+    ) -> ResearchSessionRow | None:
+        """Commit a still-owned phase, its dispatch descriptor and status event together."""
+        with self._connect() as conn:
+            return self._compare_and_set_phase(
+                conn,
+                expected,
+                phase=phase,
+                status=status,
+                control_state=control_state,
+                active_job_id=active_job_id,
+                phase_dispatch_json=phase_dispatch_json,
+                completed_at=completed_at,
+                progress_message=progress_message,
+            )
+
+    def _compare_and_set_phase(
+        self,
+        conn: sqlite3.Connection,
+        expected: ResearchSessionRow,
+        *,
+        phase: str,
+        status: str,
+        control_state: str,
+        active_job_id: str | None,
+        phase_dispatch_json: dict[str, Any],
+        completed_at: str | None = None,
+        progress_message: str | None | object = _UNSET,
+    ) -> ResearchSessionRow | None:
+        """Apply the conditional transition inside the caller's transaction."""
+        now = _utc_now()
+        message = expected.progress_message if progress_message is _UNSET else progress_message
+        if message is not None and not isinstance(message, str):
+            raise ValueError("research_progress_message_invalid")
+        dispatch = json.dumps(phase_dispatch_json, sort_keys=True, allow_nan=False)
+        previous_dispatch = json.dumps(expected.phase_dispatch_json, sort_keys=True, allow_nan=False)
+        self._assert_phase_writer(conn)
+        changed = conn.execute(
+            """
+            UPDATE research_sessions
+            SET phase = ?, status = ?, control_state = ?, active_job_id = ?,
+                phase_dispatch_json = ?, completed_at = ?, progress_message = ?, updated_at = ?
+            WHERE id = ? AND owner_user_id = ? AND phase = ? AND status = ?
+                AND control_state = ? AND active_job_id IS ? AND latest_checkpoint_id IS ?
+                AND phase_dispatch_json = ?
+            """,
+            (
+                phase,
+                status,
+                control_state,
+                active_job_id,
+                dispatch,
+                completed_at,
+                message,
+                now,
+                expected.id,
+                expected.owner_user_id,
+                expected.phase,
+                expected.status,
+                expected.control_state,
+                expected.active_job_id,
+                expected.latest_checkpoint_id,
+                previous_dispatch,
+            ),
+        )
+        if changed.rowcount != 1:
+            return None
+        payload = json.dumps(
+            {
+                "id": expected.id,
+                "status": status,
+                "phase": phase,
+                "control_state": control_state,
+                "active_job_id": active_job_id,
+                "latest_checkpoint_id": expected.latest_checkpoint_id,
+                "completed_at": completed_at,
+            },
+            sort_keys=True,
+        )
+        for event_type in ("status", "terminal") if status in {"completed", "failed", "cancelled"} else ("status",):
+            self._record_run_event_with_conn(
+                conn,
+                owner_user_id=expected.owner_user_id,
+                session_id=expected.id,
+                event_type=event_type,
+                event_payload_json=payload,
+                phase=phase,
+                job_id=expected.active_job_id,
+                created_at=now,
+                check_phase_writer=False,
+            )
+        row = conn.execute("SELECT * FROM research_sessions WHERE id = ?", (expected.id,)).fetchone()
+        return self._session_from_row(row)
+
+    def commit_checkpoint_approval(
+        self,
+        expected: ResearchSessionRow,
+        checkpoint: ResearchCheckpointRow,
+        *,
+        next_phase: str,
+        dispatch: dict[str, Any],
+        resolution: str,
+        patch_payload: dict[str, Any],
+        artifact: dict[str, Any],
+    ) -> tuple[ResearchArtifactRow, ResearchRunEventRow]:
+        """Commit the winning approval, immutable artifact and next dispatch together."""
+        now = _utc_now()
+        artifact_id = f"ra_{uuid.uuid4().hex[:12]}"
+        if (
+            artifact["session_id"] != expected.id
+            or artifact["owner_user_id"] != expected.owner_user_id
+            or artifact["phase"] != next_phase
+            or artifact["job_id"] is not None
+            or artifact["event_type"] != "artifact"
+        ):
+            raise ValueError("research_checkpoint_artifact_invalid")
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            current_checkpoint = self._checkpoint_from_row(
+                conn.execute(
+                    "SELECT * FROM research_checkpoints WHERE id = ?",
+                    (checkpoint.id,),
+                ).fetchone()
+            )
+            if (
+                current_checkpoint != checkpoint
+                or checkpoint.session_id != expected.id
+                or checkpoint.status != "pending"
+                or expected.latest_checkpoint_id != checkpoint.id
+                or expected.status != "waiting_human"
+                or expected.control_state != "running"
+            ):
+                raise ResearchPhaseChangedError("checkpoint_approval_not_allowed")
+            conn.execute(
+                """UPDATE research_checkpoints SET status = 'resolved', resolution = ?,
+                   user_patch_payload = ?, resolved_at = ? WHERE id = ? AND status = 'pending'""",
+                (resolution, json.dumps(patch_payload, sort_keys=True), now, checkpoint.id),
+            )
+            self._record_artifact_with_conn(
+                conn,
+                artifact_id=artifact_id,
+                session_id=expected.id,
+                artifact_name=artifact["artifact_name"],
+                artifact_version=artifact["artifact_version"],
+                storage_path=artifact["storage_path"],
+                content_type=artifact["content_type"],
+                byte_size=artifact["byte_size"],
+                checksum=artifact["checksum"],
+                phase=next_phase,
+                job_id=None,
+                created_at=now,
+            )
+            self._record_run_event_with_conn(
+                conn,
+                owner_user_id=expected.owner_user_id,
+                session_id=expected.id,
+                event_type="checkpoint",
+                event_payload_json=json.dumps(
+                    {
+                        "checkpoint_id": checkpoint.id,
+                        "checkpoint_type": checkpoint.checkpoint_type,
+                        "status": "resolved",
+                        "resolution": resolution,
+                        "phase": expected.phase,
+                        "has_proposed_payload": bool(checkpoint.proposed_payload),
+                    },
+                    sort_keys=True,
+                ),
+                phase=expected.phase,
+                job_id=None,
+                created_at=now,
+            )
+            event_id = self._record_run_event_with_conn(
+                conn,
+                owner_user_id=expected.owner_user_id,
+                session_id=expected.id,
+                event_type="artifact",
+                event_payload_json=json.dumps(artifact["event_payload"], sort_keys=True),
+                phase=next_phase,
+                job_id=None,
+                created_at=now,
+            )
+            advanced = self._compare_and_set_phase(
+                conn,
+                expected,
+                phase=next_phase,
+                status="queued",
+                control_state="running",
+                active_job_id=None,
+                phase_dispatch_json=dispatch,
+            )
+            if advanced is None:
+                raise ResearchPhaseChangedError("research_run_changed")
+            artifact_row = self._artifact_from_row(
+                conn.execute(
+                    "SELECT * FROM research_artifacts WHERE id = ?",
+                    (artifact_id,),
+                ).fetchone()
+            )
+            event = self._run_event_from_row(
+                conn.execute(
+                    "SELECT * FROM research_run_events WHERE id = ?",
+                    (event_id,),
+                ).fetchone()
+            )
+        return artifact_row, event
+
     def update_phase(
         self,
         session_id: str,
@@ -1116,6 +1396,7 @@ class ResearchSessionsDB:
         params: tuple[Any, ...],
     ) -> ResearchSessionRow:
         with self._connect() as conn:
+            self._assert_phase_writer(conn)
             conn.execute(sql, params)
         session = self.get_session(session_id)
         if session is None:
@@ -1134,6 +1415,7 @@ class ResearchSessionsDB:
         now = _utc_now()
         proposed_json = json.dumps(proposed_payload or {}, sort_keys=True)
         with self._connect() as conn:
+            self._assert_phase_writer(conn)
             conn.execute(
                 """
                 INSERT INTO research_checkpoints (
@@ -1159,6 +1441,8 @@ class ResearchSessionsDB:
                 """,
                 (checkpoint_id, now, session_id),
             )
+        if self._phase_writer is not None:
+            self._phase_writer = replace(self._phase_writer, latest_checkpoint_id=checkpoint_id)
         checkpoint = self.get_checkpoint(checkpoint_id)
         if checkpoint is None:
             raise RuntimeError("failed_to_create_research_checkpoint")
@@ -1251,6 +1535,7 @@ class ResearchSessionsDB:
         job_id: str | None,
         created_at: str,
     ) -> None:
+        self._assert_phase_writer(conn)
         conn.execute(
             """
             INSERT INTO research_artifacts (
@@ -1364,7 +1649,10 @@ class ResearchSessionsDB:
         phase: str | None,
         job_id: str | None,
         created_at: str,
+        check_phase_writer: bool = True,
     ) -> int:
+        if check_phase_writer:
+            self._assert_phase_writer(conn)
         cursor = conn.execute(
             """
             INSERT INTO research_run_events (
