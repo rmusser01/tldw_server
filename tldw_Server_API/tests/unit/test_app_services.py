@@ -143,20 +143,16 @@ async def test_get_session_manager_fills_the_slot_once_under_concurrency(fresh_s
     assert calls == 1
 
 
-async def test_root_autouse_empties_the_session_slot(fresh_services, monkeypatch) -> None:
-    """Exercises ``close_app_service``, the helper the root fixture's teardown calls."""
+def test_root_autouse_empties_the_session_slot(fresh_services) -> None:
+    """Drive the root autouse fixture's generator: setup, a test publishes a manager, teardown."""
+    from tldw_Server_API.tests import conftest as root_conftest
+
+    fixture = root_conftest._restore_auth_env_and_singletons
+    gen = (getattr(fixture, "__wrapped__", None) or fixture._get_wrapped_function())()
+    next(gen)  # setup: the slot is empty here, so teardown restores it to None
     stub = _StubManager()
-    monkeypatch.setattr(fresh_services, "session_manager", stub)
-    await close_app_service("session_manager")
+    fresh_services.session_manager = stub  # published by "the test", without monkeypatch
+    with pytest.raises(StopIteration):
+        next(gen)  # teardown
     assert stub.shutdowns == 1
     assert fresh_services.session_manager is None
-
-    monkeypatch.setattr(fresh_services, "session_manager", _StubManager(fail=True))
-    await close_app_service("session_manager")
-    assert fresh_services.session_manager is None
-
-    keep = _StubManager()
-    monkeypatch.setattr(fresh_services, "session_manager", keep)
-    await close_app_service("session_manager", restore=keep)
-    assert keep.shutdowns == 0
-    assert fresh_services.session_manager is keep

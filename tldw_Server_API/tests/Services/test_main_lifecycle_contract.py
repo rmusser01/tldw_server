@@ -1130,7 +1130,6 @@ def test_lifespan_startup_delegates_auth_runtime(
 
     async def _fake_initialize_auth_runtime_services(**kwargs):
         recorded_calls.append(kwargs)
-        return SimpleNamespace()
 
     monkeypatch.setattr(
         startup_auth_runtime,

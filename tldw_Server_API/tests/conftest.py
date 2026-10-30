@@ -209,6 +209,9 @@ def _run_coro_sync_best_effort(coro):
     if loop is not None and not loop.is_closed():
         try:
             if loop.is_running():
+                from loguru import logger
+
+                logger.debug("_run_coro_sync_best_effort: loop is running; cleanup skipped")
                 return None
             return loop.run_until_complete(coro)
         except Exception:
@@ -406,6 +409,8 @@ def _restore_auth_env_and_singletons():
 
     # A manager the test published is shut down; the slot goes back to what the test found.
     _run_coro_sync_best_effort(close_app_service("session_manager", restore=session_before))
+    # Per-test lock: it never stays bound to a previous test's event loop.
+    app_services().session_manager_lock = asyncio.Lock()
 
     # Ensure subsequent tests rebuild Settings from the restored environment.
     try:

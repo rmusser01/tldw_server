@@ -4,15 +4,9 @@ Post-auth startup runtime orchestration extracted from the application lifespan.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from tldw_Server_API.app.services.startup_auth import AuthStartupError
-
-
-@dataclass
-class AuthRuntimeHandles:
-    """Nothing is stored here: the session manager lives in ``app_services()``."""
 
 
 async def initialize_auth_runtime_services(
@@ -20,9 +14,7 @@ async def initialize_auth_runtime_services(
     app: Any,
     logger: Any,
     startup_guard_exceptions: tuple[type[BaseException], ...],
-) -> AuthRuntimeHandles:
-    handles = AuthRuntimeHandles()
-
+) -> None:
     try:
         db_pool = await _init_auth_services()
         if db_pool is None:
@@ -48,8 +40,6 @@ async def initialize_auth_runtime_services(
         raise
     except startup_guard_exceptions as exc:
         logger.exception(f"App Startup: Security alert validation / auth services init failed: {exc}")
-
-    return handles
 
 
 async def _init_auth_services() -> Any:

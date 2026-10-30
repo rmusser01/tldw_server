@@ -22,7 +22,6 @@ async def test_initialize_startup_core_components_runs_helpers_in_order_and_retu
 
     async def _record_auth_runtime_services(**kwargs):
         calls.append(("auth_runtime", kwargs))
-        return SimpleNamespace()
 
     async def _record_chacha_warmup(**kwargs):
         calls.append(("chacha", kwargs))
