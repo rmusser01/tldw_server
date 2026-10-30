@@ -93,3 +93,5 @@ Ingestion_Sources manages persistent sync sources that feed Media DB or Notes fr
 - Archive uploads reject traversal, symlink, encrypted ZIP, and unsupported member cases.
 - Local-directory snapshots only include configured suffixes and skip symlinks.
 - There is no module-specific job status endpoint; sync progress is surfaced through the shared Jobs path and ingestion source item state.
+
+The worker executes content operations in the persisted job owner's non-admin authorization scope, restoring the prior context afterward. Missing or invalid persisted owners fail the acquired job without using payload identity as authority. Source lookup still requires the matching owner.
