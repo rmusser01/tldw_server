@@ -870,6 +870,29 @@ def test_policy_scope_mismatch_is_rejected_even_with_warm_cache(inventory):
     assert len(fetcher.calls) == 1
 
 
+def test_policy_without_a_scope_keeps_the_configured_endpoint_scope(inventory):
+    """Only a policy's own scope replaces the server-owned one; its other limits still apply."""
+    from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
+    from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+
+    base = "http://127.0.0.1:4000/v1"
+    scope = ConfiguredEndpointScope.from_url(base)
+    policy = ProviderCallPolicy(allow_streaming=False, maximum_timeout_seconds=0.75)
+    fetcher = Fetcher(
+        Response({"data": [{"id": "claude-current-20990101"}], "has_more": False}),
+        Response({"id": "claude-current-20990101"}),
+    )
+    listed = inventory.discover_provider_models(
+        "anthropic", "synthetic-key", base_url=base, call_policy=policy, configured_endpoint=scope, fetch_fn=fetcher,
+    )
+    assert inventory.resolve_provider_model_selection(
+        "anthropic", "synthetic-key", "claude-current", base_url=base, inventory=listed,
+        call_policy=policy, configured_endpoint=scope, fetch_fn=fetcher,
+    ) == ModelDiscoveryResult("ready", ("claude-current",))
+    assert [call["configured_endpoint"] for call in fetcher.calls] == [scope, scope]
+    assert all(0 < call["timeout"] <= 0.75 for call in fetcher.calls)
+
+
 def test_one_attempt_policy_does_not_disable_readonly_pagination(inventory):
     from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
 

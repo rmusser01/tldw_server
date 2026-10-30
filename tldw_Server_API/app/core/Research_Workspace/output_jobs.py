@@ -17,7 +17,7 @@ from pydantic import ValidationError
 
 from tldw_Server_API.app.core.TTS.speech_schemas import OpenAISpeechRequest
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
-from tldw_Server_API.app.api.v1.schemas.research_workspace_outputs import (
+from tldw_Server_API.app.core.Research_Workspace.research_workspace_outputs import (
     ResearchWorkspaceOutputArtifactType,
     ResearchWorkspaceOutputSettings,
     ResearchWorkspaceOutputStatus,
@@ -25,7 +25,7 @@ from tldw_Server_API.app.api.v1.schemas.research_workspace_outputs import (
     ResearchWorkspaceOutputSubmitRequest,
     ResearchWorkspaceOutputSubmitResponse,
 )
-from tldw_Server_API.app.api.v1.schemas.workspace_schemas import WorkspaceArtifactResponse
+from tldw_Server_API.app.core.Workspaces.workspace_schemas import WorkspaceArtifactResponse
 from tldw_Server_API.app.core.exceptions import (
     FileArtifactsError,
     FileArtifactsValidationError,

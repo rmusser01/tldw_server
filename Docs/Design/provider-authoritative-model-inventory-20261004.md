@@ -33,7 +33,9 @@ these IDs and fuzzy date-stripped aliases. This can display and call retired mod
   endpoints), so an operator's localhost or private gateway is discoverable. A
   BYOK or per-request base, or any base that is not the server's, keeps the
   default policy its base_url was admitted under, never a wider scope. A call
-  policy's own scope replaces both. Cached results are keyed by that scope. A
+  policy's own scope replaces both when it has one; a policy without a scope
+  (capabilities only) keeps the server's scope, as generation does. Cached
+  results are keyed by that scope. A
   failure logs one line with provider, status and endpoint host only.
 - Failures map to the errors endpoints already handle: `auth_failed` is a 401
   authentication error (refresh-and-retry safe for OAuth credentials, since no
