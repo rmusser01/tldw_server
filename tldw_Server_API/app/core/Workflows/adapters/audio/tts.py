@@ -10,7 +10,7 @@ import uuid
 from typing import Any
 
 try:
-    from tldw_Server_API.app.api.v1.schemas.audio_schemas import (  # type: ignore
+    from tldw_Server_API.app.core.TTS.speech_schemas import (  # type: ignore
         NormalizationOptions,
         OpenAISpeechRequest,
     )
