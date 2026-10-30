@@ -39,19 +39,16 @@ class _E2EProvider(ChatProvider):
         return iter(())
 
 
-async def test_one_row_is_written_for_the_scope_user(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+async def test_one_row_is_written_for_the_scope_user(monkeypatch: pytest.MonkeyPatch, tmp_path, fresh_services) -> None:
     """RAG-style usage: scope set, no explicit context, call made through perform_chat_api_call_async."""
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "ut-key-" + uuid.uuid4().hex)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.sqlite'}")
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
     reset_settings()
-    await reset_db_pool()
-    await reset_session_manager()
     pool = await get_db_pool()
     await _ensure_llm_tables(pool)
     await _ensure_llm_cache_columns(pool)

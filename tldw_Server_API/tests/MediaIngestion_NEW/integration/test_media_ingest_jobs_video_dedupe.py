@@ -258,7 +258,7 @@ async def test_media_ingest_job_second_submit_reuses_existing_media_id_without_r
 @pytest.mark.asyncio
 async def test_media_ingest_cross_user_dedupe_reuses_transcript_without_reprocessing(
     monkeypatch,
-    tmp_path,
+    tmp_path, fresh_services
 ):
     from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
     from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -384,13 +384,13 @@ async def test_media_ingest_cross_user_dedupe_reuses_transcript_without_reproces
         )
         assert analyze_calls == ["Reusable transcript content.|None"]
     finally:
-        await reset_db_pool()
+        pass
 
 
 @pytest.mark.asyncio
 async def test_media_ingest_dedupe_skips_missing_source_db_path(
     monkeypatch,
-    tmp_path,
+    tmp_path, fresh_services
 ):
     from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
     from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
@@ -495,13 +495,13 @@ async def test_media_ingest_dedupe_skips_missing_source_db_path(
         assert processor_calls == [source_url]
         assert not missing_source_db.exists()
     finally:
-        await reset_db_pool()
+        pass
 
 
 @pytest.mark.asyncio
 async def test_media_ingest_dedupe_falls_back_when_stored_source_db_path_is_stale(
     monkeypatch,
-    tmp_path,
+    tmp_path, fresh_services
 ):
     from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
     from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
@@ -634,13 +634,13 @@ async def test_media_ingest_dedupe_falls_back_when_stored_source_db_path_is_stal
         assert not stale_source_db.exists()
         assert processor_calls == [source_url]
     finally:
-        await reset_db_pool()
+        pass
 
 
 @pytest.mark.asyncio
 async def test_media_ingest_cross_user_dedupe_prefers_transcript_artifact_over_media_content(
     monkeypatch,
-    tmp_path,
+    tmp_path, fresh_services
 ):
     from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
     from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -748,13 +748,13 @@ async def test_media_ingest_cross_user_dedupe_prefers_transcript_artifact_over_m
         assert captured_details[0]["content"]["text"] == "media row content that should not be reused"
         assert captured_details[1]["content"]["text"] == "canonical transcript artifact text"
     finally:
-        await reset_db_pool()
+        pass
 
 
 @pytest.mark.asyncio
 async def test_media_ingest_cross_user_dedupe_skips_reuse_when_clip_options_differ(
     monkeypatch,
-    tmp_path,
+    tmp_path, fresh_services
 ):
     from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
     from tldw_Server_API.app.core.Jobs.manager import JobManager
@@ -862,7 +862,7 @@ async def test_media_ingest_cross_user_dedupe_skips_reuse_when_clip_options_diff
 
         assert processor_calls == [source_url, source_url]
     finally:
-        await reset_db_pool()
+        pass
 
 
 @pytest.fixture

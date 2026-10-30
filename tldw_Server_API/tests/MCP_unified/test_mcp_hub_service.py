@@ -52,8 +52,8 @@ def test_normalize_shared_workspace_root_accepts_paths_under_symlinked_allowed_b
 
 
 @pytest.mark.asyncio
-async def test_set_external_secret_encrypts_and_never_returns_plaintext(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_set_external_secret_encrypts_and_never_returns_plaintext(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.services.mcp_hub_service import McpHubService
@@ -64,7 +64,6 @@ async def test_set_external_secret_encrypts_and_never_returns_plaintext(tmp_path
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -98,8 +97,8 @@ async def test_set_external_secret_encrypts_and_never_returns_plaintext(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_service_emits_audit_event_on_external_server_update(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_service_emits_audit_event_on_external_server_update(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.services.mcp_hub_service import McpHubService
@@ -110,7 +109,6 @@ async def test_service_emits_audit_event_on_external_server_update(tmp_path, mon
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -146,8 +144,8 @@ async def test_service_emits_audit_event_on_external_server_update(tmp_path, mon
 
 
 @pytest.mark.asyncio
-async def test_create_external_server_raises_conflict_without_allow_existing(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_create_external_server_raises_conflict_without_allow_existing(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.services.mcp_hub_service import McpHubConflictError, McpHubService
@@ -158,7 +156,6 @@ async def test_create_external_server_raises_conflict_without_allow_existing(tmp
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -192,8 +189,8 @@ async def test_create_external_server_raises_conflict_without_allow_existing(tmp
 
 
 @pytest.mark.asyncio
-async def test_service_can_import_legacy_external_server(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_service_can_import_legacy_external_server(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.services.mcp_hub_service import McpHubService
@@ -204,7 +201,6 @@ async def test_service_can_import_legacy_external_server(tmp_path, monkeypatch) 
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -241,8 +237,8 @@ async def test_service_can_import_legacy_external_server(tmp_path, monkeypatch) 
 
 
 @pytest.mark.asyncio
-async def test_service_resolves_effective_external_access_with_assignment_disable(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_service_resolves_effective_external_access_with_assignment_disable(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.services.mcp_hub_service import McpHubService
@@ -253,7 +249,6 @@ async def test_service_resolves_effective_external_access_with_assignment_disabl
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -325,8 +320,8 @@ async def test_service_resolves_effective_external_access_with_assignment_disabl
 
 
 @pytest.mark.asyncio
-async def test_service_lists_legacy_inventory_from_config_and_hides_imported_duplicates(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_service_lists_legacy_inventory_from_config_and_hides_imported_duplicates(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.services.mcp_hub_external_legacy_inventory import (
@@ -356,7 +351,6 @@ async def test_service_lists_legacy_inventory_from_config_and_hides_imported_dup
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
 
@@ -379,8 +373,8 @@ async def test_service_lists_legacy_inventory_from_config_and_hides_imported_dup
 
 
 @pytest.mark.asyncio
-async def test_service_rejects_cross_scope_assignment_binding(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_service_rejects_cross_scope_assignment_binding(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.exceptions import BadRequestError
@@ -392,7 +386,6 @@ async def test_service_rejects_cross_scope_assignment_binding(tmp_path, monkeypa
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
 
@@ -433,8 +426,8 @@ async def test_service_rejects_cross_scope_assignment_binding(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_service_lists_slot_summary_for_managed_external_server(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_service_lists_slot_summary_for_managed_external_server(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.services.mcp_hub_service import McpHubService
@@ -445,7 +438,6 @@ async def test_service_lists_slot_summary_for_managed_external_server(tmp_path, 
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
 
@@ -499,8 +491,8 @@ async def test_service_lists_slot_summary_for_managed_external_server(tmp_path, 
 
 
 @pytest.mark.asyncio
-async def test_service_rejects_server_secret_alias_for_multislot_server(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_service_rejects_server_secret_alias_for_multislot_server(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.exceptions import BadRequestError
@@ -512,7 +504,6 @@ async def test_service_rejects_server_secret_alias_for_multislot_server(tmp_path
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
 
@@ -575,8 +566,8 @@ async def test_service_rejects_server_secret_alias_for_multislot_server(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_service_rejects_unknown_slot_privilege_class(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_service_rejects_unknown_slot_privilege_class(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.exceptions import BadRequestError
@@ -588,7 +579,6 @@ async def test_service_rejects_unknown_slot_privilege_class(tmp_path, monkeypatc
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
 
@@ -620,8 +610,8 @@ async def test_service_rejects_unknown_slot_privilege_class(tmp_path, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_service_audits_slot_binding_with_privilege_metadata(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_service_audits_slot_binding_with_privilege_metadata(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.services.mcp_hub_service import McpHubService
@@ -632,7 +622,6 @@ async def test_service_audits_slot_binding_with_privilege_metadata(tmp_path, mon
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
 
@@ -695,8 +684,8 @@ async def test_service_audits_slot_binding_with_privilege_metadata(tmp_path, mon
 
 
 @pytest.mark.asyncio
-async def test_service_rejects_binding_managed_secret_ref_from_different_scope(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_service_rejects_binding_managed_secret_ref_from_different_scope(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.secret_backends.local_encrypted import LocalEncryptedSecretBackend
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -708,7 +697,6 @@ async def test_service_rejects_binding_managed_secret_ref_from_different_scope(t
     monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
 

@@ -122,9 +122,8 @@ def _assert_sqlite_uses_ts_index(db_path: Path, sql: str, params: tuple[Any, ...
 
 
 @pytest.mark.asyncio
-async def test_tokens_today_reads_llm_usage_log(tmp_path, monkeypatch) -> None:
+async def test_tokens_today_reads_llm_usage_log(tmp_path, monkeypatch, fresh_services) -> None:
     """tokens_today must sum only rows stamped today from llm_usage_log."""
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
 
     pool = await _make_authnz_pool(tmp_path, monkeypatch)
     try:
@@ -137,13 +136,12 @@ async def test_tokens_today_reads_llm_usage_log(tmp_path, monkeypatch) -> None:
         assert stats.tokens_today is not None
         assert stats.tokens_today.model_dump() == {"prompt": 100, "completion": 50, "total": 150}
     finally:
-        await reset_db_pool()
+        pass
 
 
 @pytest.mark.asyncio
-async def test_tokens_today_query_is_sargable(tmp_path, monkeypatch) -> None:
+async def test_tokens_today_query_is_sargable(tmp_path, monkeypatch, fresh_services) -> None:
     """The tokens-today WHERE clause must not wrap ts in date()/datetime()."""
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
 
     pool = await _make_authnz_pool(tmp_path, monkeypatch)
     try:
@@ -164,13 +162,12 @@ async def test_tokens_today_query_is_sargable(tmp_path, monkeypatch) -> None:
         plan_detail = _assert_sqlite_uses_ts_index(Path(pool.db_path), tokens_sql, ())
         assert "idx_llm_usage_log_ts" in plan_detail
     finally:
-        await reset_db_pool()
+        pass
 
 
 @pytest.mark.asyncio
-async def test_cost_attribution_groups_by_user(tmp_path, monkeypatch) -> None:
+async def test_cost_attribution_groups_by_user(tmp_path, monkeypatch, fresh_services) -> None:
     """group_by=user aggregates per-user sums from llm_usage_log, ordered, limited."""
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
 
     pool = await _make_authnz_pool(tmp_path, monkeypatch)
     now = _utc_iso()
@@ -211,11 +208,11 @@ async def test_cost_attribution_groups_by_user(tmp_path, monkeypatch) -> None:
         assert items[1]["total_tokens"] == 165
         assert items[2]["total_tokens"] == 50
     finally:
-        await reset_db_pool()
+        pass
 
 
 @pytest.mark.asyncio
-async def test_cost_attribution_org_scoped_uses_semi_join(tmp_path, monkeypatch) -> None:
+async def test_cost_attribution_org_scoped_uses_semi_join(tmp_path, monkeypatch, fresh_services) -> None:
     """Org scoping filters to org members via a semi-join (SQLite).
 
     group_by=user must not plain-JOIN org_members: that emits one row per
@@ -223,7 +220,6 @@ async def test_cost_attribution_org_scoped_uses_semi_join(tmp_path, monkeypatch)
     the semi-join as an IN-subquery because the planner keeps an indexed
     (user_id, ts) search for it, unlike an EXISTS (full index scan).
     """
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
 
     pool = await _make_authnz_pool(tmp_path, monkeypatch)
     now = _utc_iso()
@@ -275,12 +271,12 @@ async def test_cost_attribution_org_scoped_uses_semi_join(tmp_path, monkeypatch)
         )
         assert "SCAN om" not in plan_detail
     finally:
-        await reset_db_pool()
+        pass
 
 
 @pytest.mark.asyncio
 async def test_cost_attribution_org_scoped_multi_org_user_not_double_counted(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, fresh_services
 ) -> None:
     """group_by=user must count each usage row once for multi-org members.
 
@@ -288,7 +284,6 @@ async def test_cost_attribution_org_scoped_multi_org_user_not_double_counted(
     twice per row under the previous INNER JOIN (one row per membership).
     group_by=org must keep the row-per-org attribution instead (TASK-13647).
     """
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
 
     pool = await _make_authnz_pool(tmp_path, monkeypatch)
     now = _utc_iso()
@@ -341,7 +336,7 @@ async def test_cost_attribution_org_scoped_multi_org_user_not_double_counted(
         assert org_items[20]["request_count"] == 3
         assert org_items[20]["total_tokens"] == 215
     finally:
-        await reset_db_pool()
+        pass
 
 
 class _PgTokensDb:

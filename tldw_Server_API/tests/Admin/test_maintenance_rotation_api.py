@@ -287,14 +287,14 @@ async def test_maintenance_rotation_create_preserves_domain_scope_enforcement(
 @pytest.mark.asyncio
 async def test_maintenance_rotation_list_applies_domain_visibility_before_pagination(
     monkeypatch,
-    tmp_path,
+    tmp_path, fresh_services
 ) -> None:
     _setup_env(monkeypatch, user_db_base=str(tmp_path / "user_dbs"))
     monkeypatch.setenv("JOBS_DOMAIN_SCOPED_RBAC", "true")
     monkeypatch.setenv("JOBS_DOMAIN_ALLOWLIST_41", "visible-domain")
 
     from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.maintenance_rotation_runs_repo import (
         AuthnzMaintenanceRotationRunsRepo,
@@ -310,7 +310,6 @@ async def test_maintenance_rotation_list_applies_domain_visibility_before_pagina
     )
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(Path(os.environ["DATABASE_URL"].removeprefix("sqlite:///")))))
     repo = AuthnzMaintenanceRotationRunsRepo(pool)
