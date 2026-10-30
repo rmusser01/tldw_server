@@ -13,15 +13,15 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pydantic import ValidationError
 
-from tldw_Server_API.app.api.v1.schemas.shared_workspace_recipient_schemas import (
+from tldw_Server_API.app.core.Jobs.operations.contracts import (
+    CreateJobCommand,
+    IdempotentOperationCommand,
+)
+from tldw_Server_API.app.core.Sharing.shared_workspace_recipient_schemas import (
     SharedWorkspaceCloneError,
     SharedWorkspaceCloneOperationResponse,
     SharedWorkspaceCloneProgress,
     SharedWorkspaceCloneResult,
-)
-from tldw_Server_API.app.core.Jobs.operations.contracts import (
-    CreateJobCommand,
-    IdempotentOperationCommand,
 )
 
 CLONE_DOMAIN = "sharing"

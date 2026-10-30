@@ -58,5 +58,5 @@ def test_importing_does_not_load(module: str, forbidden: str) -> None:
 
 
 def test_the_guard_sees_a_forbidden_load() -> None:
-    # chat_loop_store imports api.v1.schemas.chat_loop_schemas: a known violator.
-    assert forbidden_loads("tldw_Server_API.app.core.Chat.chat_loop_store", "tldw_Server_API.app.api")
+    # chat_target_resolution imports api.v1.schemas.chat_request_schemas: a known violator.
+    assert forbidden_loads("tldw_Server_API.app.core.Chat.chat_target_resolution", "tldw_Server_API.app.api")

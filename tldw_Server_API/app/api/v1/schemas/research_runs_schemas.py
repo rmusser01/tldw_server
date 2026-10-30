@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+# Core-owned since TASK-13950.15; re-exported for the API layer.
+from tldw_Server_API.app.core.Research.research_runs_schemas import (  # noqa: F401 - re-exported (TASK-13950.15)
+    ResearchArtifactManifestEntry,
+    ResearchCheckpointSummary,
+    ResearchRunResponse,
+    ResearchRunSnapshotResponse,
+)
 
 MAX_RESEARCH_FOLLOW_UP_QUESTION_LENGTH = 4000
 MAX_RESEARCH_FOLLOW_UP_OUTLINE_ITEMS = 7
@@ -109,23 +116,6 @@ class ResearchCheckpointPatchApproveRequest(BaseModel):
     patch_payload: dict[str, Any] | None = None
 
 
-class ResearchRunResponse(BaseModel):
-    """Current state returned for research session operations."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    status: str
-    phase: str
-    control_state: str = "running"
-    progress_percent: float | None = None
-    progress_message: str | None = None
-    active_job_id: str | None = None
-    latest_checkpoint_id: str | None = None
-    completed_at: str | None = None
-    chat_id: str | None = None
-
-
 class ResearchRunListItemResponse(ResearchRunResponse):
     """List item returned for recent deep research run queries."""
 
@@ -138,35 +128,6 @@ class ResearchRunDeleteResponse(BaseModel):
     """Envelope returned after deleting a deep research run."""
 
     deleted: bool
-
-
-class ResearchCheckpointSummary(BaseModel):
-    """Current checkpoint summary included in research stream snapshots."""
-
-    checkpoint_id: str
-    checkpoint_type: str
-    status: str
-    proposed_payload: dict[str, Any]
-    resolution: str | None = None
-
-
-class ResearchArtifactManifestEntry(BaseModel):
-    """Latest-version artifact metadata for research stream snapshots."""
-
-    artifact_name: str
-    artifact_version: int
-    content_type: str
-    phase: str
-    job_id: str | None = None
-
-
-class ResearchRunSnapshotResponse(BaseModel):
-    """Reconnect-safe snapshot for live research progress streams."""
-
-    run: ResearchRunResponse
-    latest_event_id: int = 0
-    checkpoint: ResearchCheckpointSummary | None = None
-    artifacts: list[ResearchArtifactManifestEntry] = Field(default_factory=list)
 
 
 class ResearchArtifactResponse(BaseModel):

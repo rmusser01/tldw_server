@@ -11,13 +11,13 @@ from typing import Any
 from loguru import logger
 from pydantic import ValidationError as PydanticValidationError
 
-from tldw_Server_API.app.api.v1.schemas.evaluation_recipe_schemas import (
+from tldw_Server_API.app.core.Evaluations.evaluation_recipe_schemas import (
     ConfidenceSummary,
     RecommendationSlot,
     RecipeManifest,
     RecipeRunRecord,
 )
-from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import RunStatus
+from tldw_Server_API.app.core.Evaluations.run_state import RunStatus
 from tldw_Server_API.app.core.AuthNZ.settings import is_single_user_mode
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     decrypt_byok_payload,

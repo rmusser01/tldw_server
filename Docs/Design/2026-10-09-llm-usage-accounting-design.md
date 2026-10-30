@@ -9,7 +9,7 @@
 
 1. **A general LLM cost quota replaces the evaluation-only cost caps.** The new keys are `limits.llm_cost_per_day_usd` and `limits.llm_cost_per_month_usd`. They cover every LLM path, evaluations included. The dead evaluation cost caps are deleted.
 2. **Embeddings do not count against the LLM quotas.** One document ingest must not use up a chat budget. If an embeddings quota is needed later, it gets its own key.
-3. **BYOK calls are gated too, for now.** This matches `/chat/completions` today. Most providers don't mark BYOK credentials on the request, so exempting them needs new plumbing. That is a follow-up.
+3. **BYOK calls are gated too, for now.** This matches `/chat/completions` today. Most providers don't mark BYOK credentials on the request, so exempting them needs new plumbing. That is a follow-up. *Superseded on 2026-10-26 by ADR-083: a call on the user's own key is recorded but neither counted nor checked.*
 
 ## Owner decisions (2026-10-12)
 

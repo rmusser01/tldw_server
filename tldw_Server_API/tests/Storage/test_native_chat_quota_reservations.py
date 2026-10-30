@@ -750,7 +750,7 @@ async def main():
                 sentinel = await pool.fetchone('SELECT uuid,storage_used_mb FROM users WHERE id = ?', 41)
                 assert sentinel['uuid'] == '22222222222242228222222222222222' and sentinel['storage_used_mb'] == 12
             if os.environ['NATIVE_QUOTA_BACKEND'] == 'sqlite':
-                assert (await pool.fetchone('SELECT MAX(version) AS version FROM schema_migrations'))['version'] == 103
+                assert (await pool.fetchone('SELECT MAX(version) AS version FROM schema_migrations'))['version'] == 104
                 indexes = await pool.fetchall("SELECT name FROM sqlite_master WHERE type = 'index' AND name IN ('idx_sessions_created_at', 'idx_org_members_org_user')")
                 assert {row['name'] for row in indexes} == {'idx_sessions_created_at', 'idx_org_members_org_user'}
             if prior == 'preview101':

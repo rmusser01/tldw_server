@@ -31,13 +31,6 @@ import soundfile as sf
 from fastapi import HTTPException, status
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
-    OpenAISpeechRequest,
-    SpeechChatRequest,
-    SpeechChatResponse,
-    SpeechChatTiming,
-    SpeechChatTokenUsage,
-)
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     DEFAULT_LLM_PROVIDER,
 )
@@ -92,7 +85,14 @@ from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requir
 from tldw_Server_API.app.core.MCP_unified.modules.registry import get_module_registry
 from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
+from tldw_Server_API.app.core.Streaming.speech_chat_schemas import (
+    SpeechChatRequest,
+    SpeechChatResponse,
+    SpeechChatTiming,
+    SpeechChatTokenUsage,
+)
 from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.core.TTS.speech_schemas import OpenAISpeechRequest
 from tldw_Server_API.app.core.TTS.tts_exceptions import (
     TTSAuthenticationError,
     TTSError,

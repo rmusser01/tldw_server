@@ -11,7 +11,7 @@ Research implements deep research run orchestration and provider-backed collecti
 - `broker.py` selects local, academic, and web collection lanes and normalizes source and evidence records.
 - `synthesizer.py` builds deterministic or provider-backed synthesis outputs.
 - Related API surface: `tldw_Server_API/app/api/v1/endpoints/research_runs.py` and `tldw_Server_API/app/api/v1/endpoints/research.py`.
-- Related schemas: `tldw_Server_API/app/api/v1/schemas/research_runs_schemas.py` and `tldw_Server_API/app/api/v1/schemas/research_schemas.py`.
+- Related schemas: `tldw_Server_API/app/api/v1/schemas/research_runs_schemas.py` and `tldw_Server_API/app/api/v1/schemas/research_schemas.py`. The run models are defined in this package's `research_runs_schemas.py`; the api module re-exports them.
 - Related tests: `tldw_Server_API/tests/Research/` and `tldw_Server_API/tests/e2e/test_deep_research_runs.py`.
 
 ## Responsibilities

@@ -56,7 +56,11 @@ from tldw_Server_API.app.core.LLM_Calls.provider_results import sanitized_provid
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 from tldw_Server_API.app.core.testing import is_truthy as _shared_is_truthy
-from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_user_id, llm_call_context
+from tldw_Server_API.app.core.Usage.llm_call_context import (
+    call_credential_source,
+    current_llm_user_id,
+    llm_call_context,
+)
 from tldw_Server_API.app.core.Usage.llm_quota_gate import check_llm_call_async, check_llm_call_sync
 from tldw_Server_API.app.core.Usage.pricing_catalog import get_pricing_catalog, list_provider_models
 
@@ -1048,8 +1052,9 @@ def _provider_inventory_endpoint(
 ) -> tuple[str, dict[str, Any]]:
     """Resolve the discovery base and the discovery options carrying generation's egress decision for it.
 
-    Unavailable scoped configuration never falls back to global discovery. A call policy's scope wins, as it
-    does for generation; otherwise ``inventory_endpoint_scope`` decides from the endpoint's provenance.
+    Unavailable scoped configuration never falls back to global discovery. ``inventory_endpoint_scope`` decides
+    from the endpoint's provenance; a call policy goes along, and its own scope, when it has one, wins in
+    discovery as it does for generation.
     """
     from tldw_Server_API.app.core.LLM_Calls.adapter_utils import PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY
 
@@ -1062,13 +1067,14 @@ def _provider_inventory_endpoint(
         raise ChatConfigurationError(
             provider=provider, message="Provider model inventory endpoint is unavailable.",
         )
-    policy = request.get("call_policy")
-    if isinstance(policy, ProviderCallPolicy):
-        return base_url, {"call_policy": policy}
     credentials = request.get(PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY)
     provenance = request.get("_endpoint_provenance") or getattr(credentials, "endpoint_provenance", None)
     scope = inventory_endpoint_scope(provider, base_url, endpoint_provenance=provenance)
-    return base_url, ({"configured_endpoint": scope} if scope is not None else {})
+    options: dict[str, Any] = {"configured_endpoint": scope} if scope is not None else {}
+    policy = request.get("call_policy")
+    if isinstance(policy, ProviderCallPolicy):
+        options["call_policy"] = policy
+    return base_url, options
 
 
 _INVENTORY_OUTAGES = frozenset({"unreachable", "server_error"})
@@ -1143,7 +1149,7 @@ def _validate_provider_model_selection(
             if remaining <= 0:
                 _raise_inventory_failure(provider, "unreachable")
             selection_policy = replace(selection_policy, maximum_timeout_seconds=remaining)
-        selection_options = {"call_policy": selection_policy} if selection_policy is not None else discovery_options
+        selection_options = {**discovery_options, "call_policy": selection_policy}
         selection = resolve_provider_model_selection(
             provider, request.get("api_key"), model,
             base_url=base_url, inventory=result, **selection_options,
@@ -1285,7 +1291,7 @@ def perform_chat_api_call(**kwargs: Any) -> Any:
     hooks = tuple(_POLICY_HOOKS)  # one snapshot: a hook registered mid-call gets neither stage
     # LLM usage accounting spec §4b: refuse before _call_adapter's try, which can rebuild any error
     # as a provider error.
-    checked = check_llm_call_sync()
+    checked = check_llm_call_sync(call_credential_source(kwargs))
     provider, request, internal = _build_adapter_request_from_chat_args(kwargs)
     registry = _get_llm_registry()
     adapter = registry.get_adapter(provider)
@@ -1336,7 +1342,7 @@ async def perform_chat_api_call_async(**kwargs: Any) -> Any:
     hooks = tuple(_POLICY_HOOKS)  # one snapshot: a hook registered mid-call gets neither stage
     # LLM usage accounting spec §4b: refuse before _call_adapter_async's try, which can rebuild any error
     # as a provider error.
-    await check_llm_call_async()
+    await check_llm_call_async(call_credential_source(kwargs))
     provider, request, internal = _build_adapter_request_from_chat_args(kwargs)
     registry = _get_llm_registry()
     adapter = registry.get_adapter(provider)

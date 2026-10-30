@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import is_trusted_base_url_request
+from tldw_Server_API.app.core.AuthNZ.byok_helpers import is_trusted_base_url_request, load_server_config_snapshot
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import resolve_byok_credentials
 from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call_async,
@@ -42,6 +42,7 @@ from tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver import (
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
     unified_rag_pipeline,
 )
+from tldw_Server_API.app.core.Usage.llm_call_context import billed_credential_source, llm_call_context
 from tldw_Server_API.app.core.Workspaces.status_projection import (
     build_source_status_projection,
 )
@@ -710,17 +711,26 @@ class SharedWorkspaceChatService:
             raise SharedWorkspaceNoProviderConfigured() from None
 
         try:
-            response = await perform_chat_api_call_async(
-                api_endpoint=target.provider,
-                model=target.model,
-                messages_payload=messages,
-                api_key=credentials.api_key,
-                app_config=credentials.app_config,
-                streaming=False,
-                temperature=0,
-                max_tokens=prompt_budget.max_output_tokens,
-                user_identifier=str(recipient_user_id),
+            # Whose key and whose endpoint decide whether the call counts toward the user's LLM quota. The adapter
+            # takes a raw key here, so its base URL is the app_config's or else the environment's (in the snapshot).
+            credential_source = billed_credential_source(
+                target.provider,
+                getattr(credentials, "source", None),
+                getattr(credentials, "app_config", None),
+                load_server_config_snapshot(),
             )
+            with llm_call_context(credential_source=credential_source):
+                response = await perform_chat_api_call_async(
+                    api_endpoint=target.provider,
+                    model=target.model,
+                    messages_payload=messages,
+                    api_key=credentials.api_key,
+                    app_config=credentials.app_config,
+                    streaming=False,
+                    temperature=0,
+                    max_tokens=prompt_budget.max_output_tokens,
+                    user_identifier=str(recipient_user_id),
+                )
             answer, labels = _parse_grounded_response(response, budgeted)
             citations = _materialize_citations(labels, budgeted)
             return SharedWorkspaceGeneratedAnswer(

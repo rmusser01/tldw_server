@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tldw_Server_API.app.api.v1.schemas.setup_schemas import (
+from tldw_Server_API.app.core.Setup.setup_schemas import (
     SetupProviderCatalogEntry,
     SetupProviderCatalogResponse,
     SetupProviderType,

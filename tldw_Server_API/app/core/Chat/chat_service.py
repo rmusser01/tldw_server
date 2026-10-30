@@ -219,6 +219,7 @@ from tldw_Server_API.app.core.Persona.conversation_admission import require_curr
 from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
+from tldw_Server_API.app.core.Usage.llm_call_context import call_credential_source
 from tldw_Server_API.app.core.Usage.llm_usage_normalizer import normalize_llm_usage, usage_with_service_tier
 from tldw_Server_API.app.core.Usage.pricing_catalog import (
     list_provider_models,
@@ -4156,6 +4157,7 @@ async def execute_streaming_call(
     - usage logging and audit success
     """
     llm_start_time = time.time()
+    usage_credential_source = call_credential_source(cleaned_args)  # whose key the reply ran on, for the usage row
     factory_budget_seconds = (
         PROVIDER_STREAM_FACTORY_TIMEOUT_SECONDS
         if provider_factory_timeout is None
@@ -4283,6 +4285,7 @@ async def execute_streaming_call(
 
             def _queued_processor():
                 nonlocal selected_provider, model, llm_call_func, stream_failure_recorded, structured_request_context
+                nonlocal usage_credential_source
                 local_start = time.time()
                 try:
                     result = _call_stream_factory_from_isolated_worker(
@@ -4391,6 +4394,7 @@ async def execute_streaming_call(
                                     if not hasattr(result, "__aiter__") and hasattr(result, "__iter__"):
                                         result = wrap_sync_stream(result)
                                     selected_provider = fallback_provider
+                                    usage_credential_source = call_credential_source(refreshed_args)
                                     # Update run-first metric context to reflect fallback provider/model
                                     if run_first_metric_context is not None:
                                         run_first_metric_context["provider"] = str(fallback_provider or "").strip() or "unknown"
@@ -4404,6 +4408,8 @@ async def execute_streaming_call(
                                             queued=True,
                                         )
                                     return result
+                                except LLMQuotaExceededError:
+                                    raise  # the user's limit, not the fallback provider's health (TASK-13955)
                                 except _CHAT_NONCRITICAL_EXCEPTIONS as fallback_error:
                                     provider_manager.record_failure(
                                         fallback_provider,
@@ -4652,6 +4658,7 @@ async def execute_streaming_call(
                             },
                         )
                     cleaned_args = refreshed_args
+                    usage_credential_source = call_credential_source(cleaned_args)
                     model = refreshed_model or model
                     fallback_start_time = time.time()
                     def llm_call_func_fb():
@@ -4682,6 +4689,8 @@ async def execute_streaming_call(
                                 streaming=True,
                                 queued=False,
                             )
+                    except LLMQuotaExceededError:
+                        raise  # the user's limit, not the fallback provider's health (TASK-13955)
                     except _CHAT_NONCRITICAL_EXCEPTIONS as fallback_error:
                         provider_manager.record_failure(
                             fallback_provider,
@@ -5170,6 +5179,7 @@ async def execute_streaming_call(
                 usage_metadata=provider_usage if reported else None,
                 estimated=None if reported_prompt and reported_completion else True,
                 estimate_source=None if reported else "stream_estimate",
+                credential_source=usage_credential_source,
             )
         except _CHAT_NONCRITICAL_EXCEPTIONS:
             pass
@@ -5789,6 +5799,7 @@ async def _execute_non_stream_call_impl(
                     usage_metadata=usage if isinstance(usage, dict) else None,
                     choice_count=normalized_usage.choice_count,
                     estimate_source=normalized_usage.estimate_source,
+                    credential_source=call_credential_source(cleaned_args),
                 )
             except _CHAT_NONCRITICAL_EXCEPTIONS:
                 pass
@@ -5845,6 +5856,7 @@ async def _execute_non_stream_call_impl(
                 ),
                 estimated=True,
                 estimate_source="missing_usage",
+                credential_source=call_credential_source(cleaned_args),
             )
         except _CHAT_NONCRITICAL_EXCEPTIONS:
             pass
@@ -6147,6 +6159,13 @@ async def _execute_non_stream_call_impl(
                                 streaming=False,
                                 queued=False,
                             )
+                    except LLMQuotaExceededError:
+                        _emit_chat_run_first_completion_metric(
+                            metrics,
+                            context=run_first_metric_context,
+                            outcome="error",
+                        )
+                        raise  # the user's limit, not the fallback provider's health (TASK-13955)
                     except Exception as fallback_error:  # noqa: BLE001 - adapter trust boundary
                         fallback_latency = time.time() - fallback_start_time
                         bounded_error = _bound_provider_invocation_exception(

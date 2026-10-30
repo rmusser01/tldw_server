@@ -192,3 +192,78 @@ def test_the_dependency_refuses_with_402_before_the_body(monkeypatch: pytest.Mon
     assert response.status_code == 402
     assert response.json()["detail"]["category"] == "llm_cost_month"
     assert int(response.headers["Retry-After"]) >= 1
+
+
+async def test_an_over_limit_user_whose_provider_runs_on_their_own_key_is_let_through_unmarked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With their own key for the provider, the boundary admits without the mark; without it, it refuses (TASK-13955)."""
+    asked: list[tuple[object, str]] = []
+
+    async def _own_key(user_id: object, provider: str) -> bool:
+        """The user has their own key for openai only."""
+        asked.append((user_id, provider))
+        return provider == "openai"
+
+    async def _enforce(provider: str | None) -> bool:
+        await usage_quota_deps.enforce_llm_quota(7, provider=provider)
+        return current_llm_call_context().prechecked
+
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
+    _set_limits(monkeypatch, tokens=0)
+    assert await asyncio.create_task(_enforce("openai")) is False
+    for provider in ("anthropic", None):
+        with pytest.raises(LLMQuotaExceededError):
+            await usage_quota_deps.enforce_llm_quota(7, provider=provider)
+    _set_limits(monkeypatch)
+    assert await asyncio.create_task(_enforce("openai")) is True
+    assert asked == [(7, "openai"), (7, "anthropic")]
+
+
+@pytest.mark.parametrize(
+    ("requested", "byok_on", "allowlisted", "row", "base_url", "expected"),
+    [
+        ("OpenAI", True, True, {"id": 1}, None, True),
+        ("OpenAI", True, True, None, None, False),
+        ("OpenAI", False, True, {"id": 1}, None, False),
+        ("OpenAI", True, False, {"id": 1}, None, False),
+        ("OpenAI", True, True, RuntimeError("store down"), None, False),
+        ("custom-openai-api", True, True, {"id": 1}, None, False),
+        ("ollama", True, True, {"id": 1}, None, False),
+        ("OpenAI", True, True, {"id": 1}, "https://api.openai.com/v1", True),
+        ("OpenAI", True, True, {"id": 1}, "http://operator-gpu.internal:8000/v1", False),
+    ],
+    ids=[
+        "own-key", "no-key", "byok-off", "not-allowlisted", "lookup-fails", "operator-endpoint", "local-server",
+        "vendor-base-url", "operator-base-url",
+    ],
+)
+async def test_users_own_key_serves_mirrors_the_first_test_of_credential_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+    requested: str,
+    byok_on: bool,
+    allowlisted: bool,
+    row: object,
+    base_url: str | None,
+    expected: bool,
+) -> None:
+    """A billed provider on its vendor's host, BYOK on, the provider allowlisted and an active key; else False."""
+    from tldw_Server_API.app.core.AuthNZ import byok_helpers
+    from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import AuthnzUserProviderSecretsRepo
+
+    async def _pool() -> object:
+        return object()
+
+    async def _fetch(_self: object, user_id: int, provider: str, **_kwargs: object) -> object:
+        assert (user_id, provider) == (7, requested.lower())
+        if isinstance(row, Exception):
+            raise row
+        return row
+
+    snapshot = {"openai_api": {"api_base_url": base_url}} if base_url else {}
+    monkeypatch.setattr(byok_helpers, "is_byok_enabled", lambda: byok_on)
+    monkeypatch.setattr(byok_helpers, "is_provider_allowlisted", lambda _provider: allowlisted)
+    monkeypatch.setattr(byok_helpers, "load_server_config_snapshot", lambda: snapshot)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _pool)
+    monkeypatch.setattr(AuthnzUserProviderSecretsRepo, "fetch_secret_for_active_user", _fetch)
+    assert await usage_quota_deps.users_own_key_serves("7", requested) is expected

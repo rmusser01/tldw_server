@@ -467,7 +467,6 @@ class ReadingService:
             }
 
         try:
-            from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
             from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
             from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter import (
                 resolve_default_transcription_model,
@@ -476,6 +475,7 @@ class ReadingService:
                 prepare_chunking_options_dict,
             )
             from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import TempDirManager
+            from tldw_Server_API.app.core.Ingestion_Media_Processing.media_request_models import AddMediaForm
             from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
                 process_document_like_item,
             )

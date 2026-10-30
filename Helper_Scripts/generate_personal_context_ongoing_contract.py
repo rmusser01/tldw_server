@@ -12,7 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import (  # noqa: E402
+from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (  # noqa: E402
     export_personal_context_ongoing_contract,
 )
 
