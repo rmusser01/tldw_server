@@ -63,6 +63,15 @@ def _default_provider_config() -> dict[str, Any]:
     except KeyError:
         raise ValueError("deep_research_local_use_vector must be a boolean") from None
 
+    raw_thinking = get_config_value("Search-Agent", "deep_research_llamacpp_enable_thinking", default=None)
+    thinking_text = "" if raw_thinking is None else str(raw_thinking).strip().lower()
+    enable_thinking = None
+    if thinking_text:
+        try:
+            enable_thinking = configparser.ConfigParser.BOOLEAN_STATES[thinking_text]
+        except KeyError:
+            raise ValueError("deep_research_llamacpp_enable_thinking must be a boolean or blank") from None
+
     return {
         "local": {
             "use_vector": use_vector,
@@ -93,6 +102,7 @@ def _default_provider_config() -> dict[str, Any]:
             ),
         },
         "synthesis": {
+            "llamacpp_enable_thinking": enable_thinking,
             "provider": (get_config_value("Search-Agent", "deep_research_synthesis_provider", default=None) or None),
             "model": (get_config_value("Search-Agent", "deep_research_synthesis_model", default=None) or None),
             "temperature": _coerce_float(
