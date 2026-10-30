@@ -477,10 +477,15 @@ async def test_a_streamed_failover_reply_is_recorded_with_the_fallback_providers
     assert [(row["provider"], row["credential_source"]) for row in logged] == [("anthropic", "server_default")]
 
 
-async def test_a_refused_failover_does_not_mark_the_fallback_provider_unhealthy(refused, monkeypatch) -> None:
-    """An over-limit user's own key fails over to a server key: the 402 reaches the caller, and the fallback is not blamed."""
+@pytest.mark.parametrize("refusal", ["quota", "policy"])
+async def test_a_refused_failover_does_not_mark_the_fallback_provider_unhealthy(
+    refused, request, monkeypatch, refusal
+) -> None:
+    """The user's own key fails over to a server key: the fallback call's refusal (an over-limit user's 402, or a
+    gateway policy hook's 400) reaches the caller, and the fallback is not blamed (TASK-13955, ADR-025)."""
     from tldw_Server_API.app.core.Chat import chat_service
     from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
+    from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
     from tldw_Server_API.app.core.LLM_Calls import gateway as llm_gateway
 
     failures: list[str] = []
@@ -515,9 +520,18 @@ async def test_a_refused_failover_does_not_mark_the_fallback_provider_unhealthy(
             record_success=lambda *_args: None,
         ),
     )
-    with llm_call_context(user_id=7), pytest.raises(LLMQuotaExceededError) as refusal:
+    user_id, expected = 7, LLMQuotaExceededError  # `refused` refuses user 7 only
+    if refusal == "policy":
+        def _refuse(_call: Any) -> None:
+            """A pre-call policy hook that refuses every call."""
+            raise LLMPolicyRefusal("Input violates policy")
+
+        request.addfinalizer(llm_gateway.add_policy_hooks(pre_call=_refuse))
+        user_id, expected = 8, LLMPolicyRefusal
+    with llm_call_context(user_id=user_id), pytest.raises(expected) as raised:
         await chat_service.execute_non_stream_call(**kwargs)
-    assert refusal.value.detail["category"] == "llm_tokens_month"
+    if refusal == "quota":
+        assert raised.value.detail["category"] == "llm_tokens_month"
     assert failures == ["openai"]
 
 

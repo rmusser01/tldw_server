@@ -86,9 +86,9 @@ The hook contract:
   opt-in queued execution (`CHAT_QUEUED_EXECUTION`), a streamed refusal reaches the client as a 200 SSE
   `provider_unavailable` frame instead.
 - A refusal of a tool auto-continuation is fatal: the client gets 400, as for a quota refusal.
-- A refused fallback call is recorded as the fallback provider's failure (`record_failure`) before the refusal is
-  re-raised, at three sites in `chat_service.py` (queued stream, direct stream, non-stream). This matters only
-  for a provider-dependent hook, and matches quota behaviour today.
+- A refused fallback call, quota or policy, re-raises without marking the fallback provider unhealthy (no
+  `record_failure`), at three sites in `chat_service.py` (queued stream, direct stream, non-stream). The refusal is
+  the user's, not the provider's, as ADR-083 states for quota (TASK-13955).
 - `detail` is client-safe text the hook author writes. It never echoes the request, the system prompt or retrieved
   context, and never names the provider, model or endpoint.
 - A post-call hook never raises: the provider has already answered and billed. To block or redact output it
@@ -100,6 +100,9 @@ The hook contract:
 - `GatewayCall.request` carries the API key, the app config and the credential handle. Hooks must not log or
   persist it. A hook replaces values rather than mutating nested items, because the messages list aliases the
   caller's payload.
+- A hook must not change who pays for the call: the credential (API key, credential handle, `base_url`) or the
+  user it is charged to. The gateway takes the quota decision, ADR-083's own-key exemption included, from the
+  caller's credential source and user at entry, before the hooks run.
 - `GatewayCall.user_id` is the user the call is for, read when the gateway is entered. A stream wrapper reads the user
   from the call, because it runs later and in another thread. Guardian's chat type is TASK-13950.27's to add.
 

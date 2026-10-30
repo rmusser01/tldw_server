@@ -4408,8 +4408,8 @@ async def execute_streaming_call(
                                             queued=True,
                                         )
                                     return result
-                                except LLMQuotaExceededError:
-                                    raise  # the user's limit, not the fallback provider's health (TASK-13955)
+                                except (LLMQuotaExceededError, LLMPolicyRefusal):
+                                    raise  # the user's refusal, not the fallback provider's health (TASK-13955)
                                 except _CHAT_NONCRITICAL_EXCEPTIONS as fallback_error:
                                     provider_manager.record_failure(
                                         fallback_provider,
@@ -4689,8 +4689,8 @@ async def execute_streaming_call(
                                 streaming=True,
                                 queued=False,
                             )
-                    except LLMQuotaExceededError:
-                        raise  # the user's limit, not the fallback provider's health (TASK-13955)
+                    except (LLMQuotaExceededError, LLMPolicyRefusal):
+                        raise  # the user's refusal, not the fallback provider's health (TASK-13955)
                     except _CHAT_NONCRITICAL_EXCEPTIONS as fallback_error:
                         provider_manager.record_failure(
                             fallback_provider,
@@ -6159,13 +6159,13 @@ async def _execute_non_stream_call_impl(
                                 streaming=False,
                                 queued=False,
                             )
-                    except LLMQuotaExceededError:
+                    except (LLMQuotaExceededError, LLMPolicyRefusal):
                         _emit_chat_run_first_completion_metric(
                             metrics,
                             context=run_first_metric_context,
                             outcome="error",
                         )
-                        raise  # the user's limit, not the fallback provider's health (TASK-13955)
+                        raise  # the user's refusal, not the fallback provider's health (TASK-13955)
                     except Exception as fallback_error:  # noqa: BLE001 - adapter trust boundary
                         fallback_latency = time.time() - fallback_start_time
                         bounded_error = _bound_provider_invocation_exception(

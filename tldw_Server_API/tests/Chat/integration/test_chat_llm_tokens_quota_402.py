@@ -146,7 +146,6 @@ def test_chat_completions_admits_an_over_limit_user_whose_provider_runs_on_their
     refuse_llm_work(monkeypatch)
     monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
     monkeypatch.setattr(chat_ep, "perform_chat_api_call", _dispatch)
-    monkeypatch.setitem(chat_ep.API_KEYS, "local-llm", "dummy-key")
 
     request_data = ChatCompletionRequest(
         model="local-llm",
@@ -180,7 +179,6 @@ def test_chat_completions_answers_402_when_the_call_itself_is_refused(
         )
 
     monkeypatch.setattr(chat_ep, "perform_chat_api_call", _refused_at_the_call)
-    monkeypatch.setitem(chat_ep.API_KEYS, "local-llm", "dummy-key")
 
     request_data = ChatCompletionRequest(
         model="local-llm",
@@ -244,7 +242,6 @@ def test_the_hosted_plan_does_not_check_a_request_on_the_users_own_key(
     _on_a_spent_hosted_plan(client, monkeypatch)
     monkeypatch.setattr(chat_ep, "users_own_key_serves", _own_key)
     monkeypatch.setattr(chat_ep, "perform_chat_api_call", _dispatch)
-    monkeypatch.setitem(chat_ep.API_KEYS, "local-llm", "dummy-key")
 
     request_data = ChatCompletionRequest(
         model="local-llm",
