@@ -653,7 +653,16 @@ def test_postgres_v2_import_ignores_owner_and_provenance_claims(
 
 
 def test_db_import_fails_closed_on_an_unvalidated_mapping(quizzes_db: CharactersRAGDB) -> None:
+    quizzes_db.create_quiz(name="Existing quiz")
+
+    def counts() -> dict[str, int]:
+        return {
+            table: quizzes_db.execute_query(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"]  # nosec B608
+            for table in ("quizzes", "osce_stations")
+        }
+
+    before = counts()
     with pytest.raises(AttributeError):
         quizzes_db.import_osce_quiz_entry_atomic(_osce_entry(_station_export()))  # type: ignore[arg-type]
-    for table in ("quizzes", "osce_stations"):
-        assert quizzes_db.execute_query(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"] == 0  # nosec B608
+    assert before["quizzes"] == 1
+    assert counts() == before
