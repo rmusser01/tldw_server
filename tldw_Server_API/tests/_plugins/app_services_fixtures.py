@@ -55,6 +55,7 @@ async def discard_app_services() -> None:
     except Exception as exc:
         logger.debug("discard_app_services: ignoring reset_db_pool error: {}", exc)
     await close_app_service("session_manager")
+    await close_app_service("chacha_runtime")
     _set_defaults(app_services())
 
 

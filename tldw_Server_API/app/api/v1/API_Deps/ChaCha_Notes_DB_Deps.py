@@ -1,18 +1,12 @@
 # tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py
 import asyncio
-import faulthandler
 import inspect
 import json
-import os
 import sqlite3
-import sys
-import threading
-import time
-from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
 from typing import Any, Optional
 
-from cachetools import LRUCache
 from fastapi import Depends, HTTPException, status
 from loguru import logger
 
@@ -22,15 +16,18 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management import sqlite_policy
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
-from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
-from tldw_Server_API.app.core.DB_Management.chacha.health import probe_chacha_connection
-from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (
-    chacha_operation,
-    current_operation_holds_connection,
-)
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.DB_Management.chacha.runtime import (
-    ChaChaRuntimeManager,
+    _CHACHA_CORRUPTION_ERROR_DETAIL,
+    _CHACHA_INIT_TIMEOUT_DETAIL,
+    _CHACHA_SHUTDOWN_INIT_ERROR_DETAIL,
+    ChaChaDatabaseCorruptionError,
+    ChaChaInitFailedError,
+    ChaChaInitTimeoutError,
     ChaChaRuntimeUnavailableError,
+    _is_sqlite_corruption_error,
+    _sanitize_chacha_db_identifier,
+    get_chacha_runtime,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -46,293 +43,13 @@ from tldw_Server_API.app.core.exceptions import BuiltinCharacterSeedError
 #######################################################################################################################
 
 
-# --- Configuration ---
-_CHACHA_EXECUTOR: ThreadPoolExecutor | None = None
-_CHACHA_EXECUTOR_SHUTDOWN: bool = False
-_CHACHA_EXECUTOR_LOCK = threading.Lock()
-_CHACHA_EXECUTOR_MAX_WORKERS = max(1, int(os.getenv("CHACHA_EXECUTOR_MAX_WORKERS", "4")))
-_CHACHA_WATCHDOG_SECS = float(os.getenv("CHACHA_INIT_WATCHDOG_SECS", "5"))
-_CHACHA_INIT_TIMEOUT_SECS = float(os.getenv("CHACHA_INIT_TIMEOUT_SECS", "30"))
-_CHACHA_SHUTDOWN_INIT_ERROR_DETAIL = "ChaChaNotes shutdown in progress"
-_CHACHA_CORRUPTION_ERROR_DETAIL = "ChaChaNotes DB corruption detected; repair or restore required"
-_CHACHA_RECOVERY_DOC = "Docs/Operations/ChaChaNotes_DB_Recovery.md"
-_CHACHA_RECOVERY_MESSAGE = "Restore the affected ChaChaNotes DB from backup or move it aside before retrying."
-_SQLITE_CORRUPTION_SIGNATURES = (
-    "database disk image is malformed",
-    "malformed database schema",
-    "file is not a database",
-)
-_CHACHA_HEALTH_LOCK = threading.Lock()
-_CHACHA_HEALTH: dict[str, Any] = {
-    "init_attempts": 0,
-    "init_failures": 0,
-    "last_init_ms": None,
-    "last_error": None,
-    "last_init_success": None,
-    "last_warn_dump": None,
-    "cached_instances": 0,
-    "consecutive_failures": 0,
-    "default_char_ensures": 0,
-    "default_char_failures": 0,
-    "warm_startups": 0,
-    "last_failure": None,
-}
-_CHACHA_SHUTTING_DOWN = False
-_CHACHA_SHUTDOWN_LOCK = threading.Lock()
-_CHACHA_RUNTIME = ChaChaRuntimeManager()
-
-
-class ChaChaDatabaseCorruptionError(CharactersRAGDBError):
-    """Raised when an existing ChaChaNotes SQLite DB fails integrity preflight."""
-
-    def __init__(
-        self,
-        detail: str = _CHACHA_CORRUPTION_ERROR_DETAIL,
-        *,
-        user_id: int | None = None,
-        db_path: Path | None = None,
-        reason_code: str = "sqlite_corruption",
-    ) -> None:
-        super().__init__(detail)
-        self.user_id = user_id
-        self.db_path = db_path
-        self.reason_code = reason_code
-
-
-def _is_sqlite_corruption_error(error: Exception | None) -> bool:
-    if isinstance(error, ChaChaDatabaseCorruptionError):
-        return True
-    text = str(error or "").strip().lower()
-    if not text:
-        return False
-    return any(signature in text for signature in _SQLITE_CORRUPTION_SIGNATURES)
-
-
-def _safe_chacha_health_error(error: Exception | None) -> str:
-    if _is_sqlite_corruption_error(error):
-        return "sqlite_corruption"
-    return type(error).__name__ if error else "unknown error"
-
-
-def _sanitize_chacha_db_identifier(user_id: int | None, db_path: Path | None = None) -> str:
-    """Return a public-safe DB label for ChaChaNotes health payloads.
-
-    Aggregate health is unauthenticated, so the default label must not expose
-    numeric user IDs, absolute paths, or nonstandard filenames. The context
-    arguments are accepted only so callers can pass corruption context
-    consistently; they are intentionally not encoded in the returned value.
-
-    Args:
-        user_id: Optional owner id from a corruption exception. Ignored to avoid
-            leaking per-user identifiers in public health responses.
-        db_path: Optional filesystem path from a corruption exception. Ignored
-            to avoid leaking path or filename details.
-
-    Returns:
-        The constant public label ``"ChaChaNotes.db"``. For example, both
-        ``user_id=42`` and ``db_path=/private/user/42/ChaChaNotes.db`` return
-        ``"ChaChaNotes.db"``.
-    """
-    return "ChaChaNotes.db"
-
-
-def _build_chacha_failure_details(error: Exception | None) -> dict[str, Any] | None:
-    """Build sanitized recovery metadata for current ChaChaNotes failures.
-
-    Args:
-        error: Exception raised while opening a ChaChaNotes database. Only
-            exceptions recognized by ``_is_sqlite_corruption_error`` are exposed.
-
-    Returns:
-        ``None`` for non-corruption failures so generic runtime errors are not
-        copied into health responses. For corruption failures, returns a dict
-        with ``reason_code`` from the exception or ``"sqlite_corruption"``,
-        ``affected_db`` from ``_sanitize_chacha_db_identifier``, and ``recovery``
-        containing ``automatic_repair=False``, ``documentation`` from
-        ``_CHACHA_RECOVERY_DOC``, and ``message`` from
-        ``_CHACHA_RECOVERY_MESSAGE``. The payload avoids raw exception text,
-        filesystem paths, and user identifiers.
-    """
-    if not _is_sqlite_corruption_error(error):
-        return None
-
-    user_id = getattr(error, "user_id", None)
-    db_path = getattr(error, "db_path", None)
-    reason_code = getattr(error, "reason_code", "sqlite_corruption")
-    return {
-        "reason_code": str(reason_code or "sqlite_corruption"),
-        "affected_db": _sanitize_chacha_db_identifier(user_id, db_path),
-        "recovery": {
-            "automatic_repair": False,
-            "documentation": _CHACHA_RECOVERY_DOC,
-            "message": _CHACHA_RECOVERY_MESSAGE,
-        },
-    }
-
-
-def _copy_chacha_failure_details(failure: Any) -> dict[str, Any] | None:
-    """Copy stored failure metadata while preserving public redaction rules.
-
-    Args:
-        failure: Candidate failure dict from shared health state.
-
-    Returns:
-        ``None`` when the input is not a dict. Otherwise returns a new dict with
-        a string ``reason_code``, a re-sanitized ``affected_db`` fallback of
-        ``"ChaChaNotes.db"``, and a shallow copy of the ``recovery`` dict. The
-        copy prevents callers from mutating shared health state and also
-        normalizes dictionaries seeded directly by tests or older in-process
-        state.
-    """
-    if not isinstance(failure, dict):
-        return None
-
-    recovery = failure.get("recovery")
-    recovery_details = dict(recovery) if isinstance(recovery, dict) else {}
-    affected_db = failure.get("affected_db")
-    safe_db = _sanitize_chacha_db_identifier(None, Path(str(affected_db))) if affected_db else "ChaChaNotes.db"
-    return {
-        "reason_code": str(failure.get("reason_code") or "unknown"),
-        "affected_db": safe_db,
-        "recovery": recovery_details,
-    }
-
-
-def _get_chacha_cached_instance_count() -> int:
-    """Return the cached DB instance count under the cache lock."""
-    with _chacha_db_lock:
-        return len(_chacha_db_instances)
-
-
-def _set_chacha_shutting_down(value: bool) -> None:
-    global _CHACHA_SHUTTING_DOWN
-    with _CHACHA_SHUTDOWN_LOCK:
-        _CHACHA_SHUTTING_DOWN = value
-
-
-def _is_chacha_shutting_down() -> bool:
-    with _CHACHA_SHUTDOWN_LOCK:
-        return _CHACHA_SHUTTING_DOWN
-
-
-def _get_chacha_init_timeout_secs() -> float:
-    """Return the hard ChaChaNotes initialization timeout."""
-    return max(_CHACHA_INIT_TIMEOUT_SECS, _CHACHA_WATCHDOG_SECS * 3, 5)
-
-
 def reset_chacha_shutdown_state() -> None:
-    _set_chacha_shutting_down(False)
-    _CHACHA_RUNTIME.reset_for_tests()
-
-
-def _get_chacha_executor() -> ThreadPoolExecutor:
-    """
-    Return a live executor for ChaChaNotes DB work.
-
-    The main FastAPI app shuts down this executor during application shutdown.
-    In test suites, startup/shutdown can happen repeatedly within the same
-    Python process; recreating the executor on-demand avoids order-dependent
-    failures like "cannot schedule new futures after shutdown".
-    """
-    global _CHACHA_EXECUTOR, _CHACHA_EXECUTOR_SHUTDOWN
-    with _CHACHA_EXECUTOR_LOCK:
-        if _CHACHA_EXECUTOR is None or _CHACHA_EXECUTOR_SHUTDOWN:
-            _CHACHA_EXECUTOR = ThreadPoolExecutor(
-                max_workers=_CHACHA_EXECUTOR_MAX_WORKERS,
-                thread_name_prefix="chacha-db",
-            )
-            _CHACHA_EXECUTOR_SHUTDOWN = False
-        return _CHACHA_EXECUTOR
-
-
-def _record_init(duration_ms: float, success: bool, error: Exception | None = None) -> None:
-    """Record one ChaChaNotes initialization attempt and current health state."""
-    cached_count = _get_chacha_cached_instance_count()
-    with _CHACHA_HEALTH_LOCK:
-        _CHACHA_HEALTH["init_attempts"] += 1
-        _CHACHA_HEALTH["last_init_ms"] = duration_ms
-        _CHACHA_HEALTH["cached_instances"] = cached_count
-        _CHACHA_HEALTH["last_init_success"] = success
-        if success:
-            _CHACHA_HEALTH["last_error"] = None
-            _CHACHA_HEALTH["last_failure"] = None
-            _CHACHA_HEALTH["consecutive_failures"] = 0
-        else:
-            _CHACHA_HEALTH["init_failures"] += 1
-            _CHACHA_HEALTH["consecutive_failures"] = int(_CHACHA_HEALTH.get("consecutive_failures") or 0) + 1
-            _CHACHA_HEALTH["last_error"] = _safe_chacha_health_error(error)
-            _CHACHA_HEALTH["last_failure"] = _build_chacha_failure_details(error)
-
-
-def _record_default_character(success: bool) -> None:
-    with _CHACHA_HEALTH_LOCK:
-        if success:
-            _CHACHA_HEALTH["default_char_ensures"] += 1
-        else:
-            _CHACHA_HEALTH["default_char_failures"] += 1
-
-
-def _maybe_dump_traceback(reason: str) -> None:
-    now = time.time()
-    last_dump = _CHACHA_HEALTH.get("last_warn_dump")
-    # Rate limit dumps to avoid log spam
-    if last_dump and now - float(last_dump) < 300:
-        return
-    with _CHACHA_HEALTH_LOCK:
-        _CHACHA_HEALTH["last_warn_dump"] = now
-    try:
-        logger.warning(f"ChaChaNotes watchdog dump triggered: {reason}")
-        faulthandler.dump_traceback(file=sys.stderr)
-    except (OSError, RuntimeError, ValueError) as dump_err:
-        logger.debug("Faulthandler dump failed ({})", type(dump_err).__name__)
-
-
-def _track_default_character_future(future: asyncio.Future) -> None:
-    def _cleanup(_future: asyncio.Future) -> None:
-        with _chacha_default_char_futures_lock:
-            _chacha_default_char_futures.discard(_future)
-
-    with _chacha_default_char_futures_lock:
-        _chacha_default_char_futures.add(future)
-    future.add_done_callback(_cleanup)
+    get_chacha_runtime().resume()
 
 
 def get_chacha_health_snapshot() -> dict[str, Any]:
-    """Return current ChaChaNotes health plus lifetime counters.
-
-    `status` reflects the latest/current initialization state, not the lifetime
-    failure counter. `init_failures` remains a monotonic diagnostic counter while
-    `consecutive_failures` and `last_init_success` drive recovery back to healthy
-    after an operator fixes the database and a later init succeeds.
-    """
-    with _CHACHA_HEALTH_LOCK:
-        init_attempts = _CHACHA_HEALTH.get("init_attempts")
-        init_failures = _CHACHA_HEALTH.get("init_failures")
-        last_init_ms = _CHACHA_HEALTH.get("last_init_ms")
-        last_error = _CHACHA_HEALTH.get("last_error")
-        last_init_success = _CHACHA_HEALTH.get("last_init_success")
-        consecutive_failures = int(_CHACHA_HEALTH.get("consecutive_failures") or 0)
-        default_char_ensures = _CHACHA_HEALTH.get("default_char_ensures")
-        default_char_failures = _CHACHA_HEALTH.get("default_char_failures")
-        warm_startups = _CHACHA_HEALTH.get("warm_startups")
-        last_failure = _copy_chacha_failure_details(_CHACHA_HEALTH.get("last_failure"))
-    cached_instances = _get_chacha_cached_instance_count()
-
-    status = "degraded" if consecutive_failures else "healthy"
-    return {
-        "status": status,
-        "init_attempts": init_attempts,
-        "init_failures": init_failures,
-        "last_init_ms": last_init_ms,
-        "last_error": last_error,
-        "last_init_success": last_init_success,
-        "consecutive_failures": consecutive_failures,
-        "last_failure": last_failure,
-        "cached_instances": cached_instances,
-        "default_char_ensures": default_char_ensures,
-        "default_char_failures": default_char_failures,
-        "warm_startups": warm_startups,
-    }
+    """Return current ChaChaNotes health plus lifetime counters (see ``ChaChaRuntimeManager.health_snapshot``)."""
+    return get_chacha_runtime().health_snapshot()
 
 
 def resolve_chacha_user_base_dir() -> Path:
@@ -355,34 +72,15 @@ from tldw_Server_API.app.core.Character_Chat.constants import (  # noqa: E402 - 
     DEFAULT_CHARACTER_NAME,
 )
 
-# --- Global Cache for ChaChaNotes DB Instances ---
-MAX_CACHED_CHACHA_DB_INSTANCES = int(settings.get("MAX_CACHED_CHACHA_DB_INSTANCES", "20"))
-
-_chacha_db_instances: LRUCache = LRUCache(maxsize=MAX_CACHED_CHACHA_DB_INSTANCES)
-logger.info(f"Using LRUCache for ChaChaNotes DB instances (maxsize={MAX_CACHED_CHACHA_DB_INSTANCES}).")
-
-_chacha_db_lock = threading.Lock()
-_chacha_db_init_events: dict[str, threading.Event] = {}
-_chacha_db_init_errors: dict[str, Exception] = {}
-_chacha_default_char_tasks: set[asyncio.Task] = set()
-_chacha_default_char_futures: set[asyncio.Future] = set()
-_chacha_default_char_futures_lock = threading.Lock()
-
 
 def snapshot_cached_chacha_db_instances() -> tuple[CharactersRAGDB, ...]:
     """Return a lock-protected snapshot of authenticated cached DB instances."""
-
-    with _chacha_db_lock:
-        return tuple(_chacha_db_instances.values())
+    return get_chacha_runtime().cached_instances()
 
 
 #######################################################################################################################
 
 # --- Helper Functions ---
-
-
-class _ChaChaInitializationAborted(RuntimeError):
-    """Internal sentinel used to wake blocked waiters during shutdown."""
 
 
 def _get_chacha_db_path_for_user(user_id: int) -> Path:
@@ -450,16 +148,6 @@ def _apply_sqlite_tuning(db_instance: CharactersRAGDB) -> None:
 
 
 @chacha_operation(independent=True)
-def _health_check_instance(db_instance: CharactersRAGDB) -> bool:
-    try:
-        probe_chacha_connection(db_instance)
-        return True
-    except (BackendDatabaseError, CharactersRAGDBError, sqlite3.Error, OSError, RuntimeError, ValueError) as e:
-        logger.warning("ChaChaNotes health probe failed ({})", type(e).__name__)
-        return False
-
-
-@chacha_operation(independent=True)
 def _create_and_prepare_db(user_id: int, client_id: str) -> CharactersRAGDB:
     """Prepare an owner database and seed its bundled content before publication."""
     db_path: Optional[Path] = None
@@ -499,17 +187,18 @@ def _create_and_prepare_db(user_id: int, client_id: str) -> CharactersRAGDB:
 
 
 async def _ensure_default_character_async(db_instance: CharactersRAGDB, user_id: int) -> None:
+    runtime = get_chacha_runtime()
     loop = asyncio.get_running_loop()
     try:
-        future = loop.run_in_executor(_get_chacha_executor(), _ensure_default_character_owned, db_instance)
-        _track_default_character_future(future)
+        future = loop.run_in_executor(runtime.executor(), _ensure_default_character_owned, db_instance)
+        runtime.track(future)
         await asyncio.wait_for(
             asyncio.shield(future),
             timeout=5,
         )
-        _record_default_character(True)
+        runtime.count("default_char_ensures")
     except asyncio.TimeoutError:
-        _record_default_character(False)
+        runtime.count("default_char_failures")
         logger.warning(f"Timed out ensuring default character for user {user_id}; will retry on next access.")
     except (
         CharactersRAGDBError,
@@ -521,7 +210,7 @@ async def _ensure_default_character_async(db_instance: CharactersRAGDB, user_id:
         RuntimeError,
         ValueError,
     ) as e:
-        _record_default_character(False)
+        runtime.count("default_char_failures")
         logger.warning(
             "Error ensuring default character ({}); continuing; will retry on next access.",
             type(e).__name__,
@@ -601,17 +290,6 @@ def _ensure_default_character(db_instance: CharactersRAGDB) -> Optional[int]:
         return None
 
 
-async def _is_instance_healthy(db_instance: CharactersRAGDB) -> bool:
-    try:
-        result = await asyncio.wait_for(
-            asyncio.to_thread(_health_check_instance, db_instance),
-            timeout=1.0,
-        )
-        return bool(result)
-    except (asyncio.TimeoutError, OSError, RuntimeError):
-        return False
-
-
 def _map_chacha_init_db_error(exc: Exception) -> HTTPException:
     from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
@@ -630,160 +308,58 @@ def _map_chacha_init_db_error(exc: Exception) -> HTTPException:
     )
 
 
-async def _get_or_init_db_instance(user_id: int, client_id: str) -> CharactersRAGDB:
-    """Return a cached owner database or serialize and publish its initialization."""
-    user_dir = DatabasePaths.get_user_base_directory(user_id)
-    cache_key = str(user_dir)
-    with _chacha_db_lock:
-        db_instance = _chacha_db_instances.get(cache_key)
-    if db_instance:
-        # A connection this operation already holds proves the instance usable.
-        # Re-probing could evict it mid-request (the probe has a 1s deadline)
-        # and hand a nested accessor a different instance, splitting one request
-        # across two connections that cannot see each other's pending writes.
-        if current_operation_holds_connection(db_instance) or await _is_instance_healthy(db_instance):
-            return db_instance
-        logger.warning(f"ChaChaNotes cached instance unhealthy for user {user_id}; evicting and rebuilding.")
-        with _chacha_db_lock:
-            if _chacha_db_instances.get(cache_key) is db_instance:
-                _chacha_db_instances.pop(cache_key, None)
 
-    wait_for_existing_init = False
-    with _chacha_db_lock:
-        cached_instance = _chacha_db_instances.get(cache_key)
-        cached_count = len(_chacha_db_instances)
-        if cached_instance is None:
-            init_event = _chacha_db_init_events.get(cache_key)
-            if init_event is None:
-                init_event = threading.Event()
-                _chacha_db_init_events[cache_key] = init_event
-            else:
-                wait_for_existing_init = True
-    if cached_instance is not None:
-        with _CHACHA_HEALTH_LOCK:
-            _CHACHA_HEALTH["cached_instances"] = cached_count
-        return cached_instance
 
-    if wait_for_existing_init:
-        wait_timeout = _get_chacha_init_timeout_secs()
-        try:
-            completed = await asyncio.wait_for(
-                asyncio.to_thread(init_event.wait),
-                timeout=wait_timeout,
-            )
-        except asyncio.TimeoutError as e:
-            _record_init(wait_timeout * 1000, False, e)
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="ChaChaNotes initialization timed out",
-            ) from e
-        if not completed:
-            _record_init(wait_timeout * 1000, False)
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="ChaChaNotes initialization timed out",
-            )
-        with _chacha_db_lock:
-            cached_instance = _chacha_db_instances.get(cache_key)
-            init_error = _chacha_db_init_errors.get(cache_key)
-        if cached_instance is not None:
-            return cached_instance
-        if init_error is not None:
-            if isinstance(init_error, _ChaChaInitializationAborted):
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail=_CHACHA_SHUTDOWN_INIT_ERROR_DETAIL,
-                ) from init_error
-            if _is_sqlite_corruption_error(init_error):
-                raise _map_chacha_init_db_error(init_error) from init_error
-            if isinstance(init_error, (CharactersRAGDBError, InputError)):
-                raise _map_chacha_init_db_error(init_error) from init_error
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Could not initialize character & notes database for user",
-            ) from init_error
-        raise HTTPException(
+def _to_http(exc: Exception) -> HTTPException:
+    """Map a runtime error to its HTTP response. No detail includes ``str(exc)``."""
+    # ChaChaInitAbortedError subclasses ChaChaRuntimeUnavailableError: both are the shutdown 503.
+    if isinstance(exc, ChaChaRuntimeUnavailableError):
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_CHACHA_SHUTDOWN_INIT_ERROR_DETAIL,
+        )
+    if isinstance(exc, ChaChaInitTimeoutError):
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_CHACHA_INIT_TIMEOUT_DETAIL,
+        )
+    cause = exc.__cause__ if isinstance(exc.__cause__, Exception) else None
+    if cause is None:
+        return HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not initialize character & notes database for user: unknown error",
         )
+    if _is_sqlite_corruption_error(cause) or isinstance(cause, (CharactersRAGDBError, InputError)):
+        return _map_chacha_init_db_error(cause)
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Could not initialize character & notes database for user",
+    )
 
-    loop = asyncio.get_running_loop()
-    start = time.perf_counter()
-    init_timeout = _get_chacha_init_timeout_secs()
+
+async def _get_or_init_db_instance(user_id: int, client_id: str) -> CharactersRAGDB:
+    """Return the owner's cached database, initializing it through the runtime; errors become HTTP."""
     try:
-        db_instance = await asyncio.wait_for(
-            loop.run_in_executor(_get_chacha_executor(), _create_and_prepare_db, user_id, client_id),
-            timeout=init_timeout,
+        return await get_chacha_runtime().get_db(
+            str(DatabasePaths.get_user_base_directory(user_id)),
+            partial(_create_and_prepare_db, user_id, client_id),
+            user_id=user_id,
         )
-        duration_ms = (time.perf_counter() - start) * 1000
-        _record_init(duration_ms, True)
-        if duration_ms / 1000 > _CHACHA_WATCHDOG_SECS:
-            _maybe_dump_traceback(f"ChaChaNotes init exceeded {_CHACHA_WATCHDOG_SECS}s for user {user_id}")
-    except asyncio.TimeoutError as e:
-        _record_init(init_timeout * 1000, False, e)
-        _maybe_dump_traceback(f"ChaChaNotes init timed out for user {user_id}")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="ChaChaNotes initialization timed out",
-        ) from e
-    except (
-        BuiltinCharacterSeedError,
-        CharactersRAGDBError,
-        sqlite3.Error,
-        OSError,
-        RuntimeError,
-        ValueError,
-        TypeError,
-    ) as e:
-        duration_ms = (time.perf_counter() - start) * 1000
-        _record_init(duration_ms, False, e)
-        with _chacha_db_lock:
-            _chacha_db_init_errors[cache_key] = e
-        if _is_sqlite_corruption_error(e) or isinstance(e, (CharactersRAGDBError, InputError)):
-            raise _map_chacha_init_db_error(e) from e
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not initialize character & notes database for user",
-        ) from e
-    else:
-        with _chacha_db_lock:
-            _chacha_db_instances[cache_key] = db_instance
-            _chacha_db_init_errors.pop(cache_key, None)
-            cached_count = len(_chacha_db_instances)
-        with _CHACHA_HEALTH_LOCK:
-            _CHACHA_HEALTH["cached_instances"] = cached_count
-        return db_instance
-    finally:
-        with _chacha_db_lock:
-            init_event = _chacha_db_init_events.pop(cache_key, None)
-        if init_event is not None:
-            init_event.set()
-
-
-async def _get_or_init_db_instance_from_runtime(user_id: int, client_id: str) -> CharactersRAGDB:
-    """Return a DB instance through the runtime lifecycle gate."""
-    try:
-        return await _CHACHA_RUNTIME.get_or_create(_get_or_init_db_instance, user_id, client_id)
-    except ChaChaRuntimeUnavailableError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc) or _CHACHA_SHUTDOWN_INIT_ERROR_DETAIL,
-        ) from exc
+    except (ChaChaRuntimeUnavailableError, ChaChaInitTimeoutError, ChaChaInitFailedError) as exc:
+        raise _to_http(exc) from exc
 
 
 async def warm_chacha_db_for_user(user_id: int, client_id: str | None = None) -> None:
-    if _is_chacha_shutting_down():
+    if get_chacha_runtime().shutting_down:
         logger.debug("ChaChaNotes shutdown in progress; skipping warmup for user {}", user_id)
         return
     try:
-        db_instance = await _get_or_init_db_instance_from_runtime(
+        db_instance = await _get_or_init_db_instance(
             user_id, _tenant_client_id(user_id, client_id)
         )
-        with _CHACHA_HEALTH_LOCK:
-            _CHACHA_HEALTH["warm_startups"] += 1
-        task = asyncio.create_task(_ensure_default_character_async(db_instance, user_id))
-        _chacha_default_char_tasks.add(task)
-        task.add_done_callback(_chacha_default_char_tasks.discard)
+        runtime = get_chacha_runtime()
+        runtime.count("warm_startups")
+        runtime.track(asyncio.create_task(_ensure_default_character_async(db_instance, user_id)))
     except (HTTPException, OSError, RuntimeError, ValueError, TypeError) as e:
         logger.warning("Warm-up for ChaChaNotes failed ({})", type(e).__name__)
 
@@ -830,13 +406,12 @@ async def get_chacha_db_for_user_id(user_id: int, client_id: str | None = None) 
             detail="Invalid owner_user_id.",
         )
 
-    db_instance = await _get_or_init_db_instance_from_runtime(
+    db_instance = await _get_or_init_db_instance(
         user_id, _tenant_client_id(user_id, client_id)
     )
-    if not _is_chacha_shutting_down():
-        task = asyncio.create_task(_ensure_default_character_async(db_instance, user_id))
-        _chacha_default_char_tasks.add(task)
-        task.add_done_callback(_chacha_default_char_tasks.discard)
+    runtime = get_chacha_runtime()
+    if not runtime.shutting_down:
+        runtime.track(asyncio.create_task(_ensure_default_character_async(db_instance, user_id)))
     return db_instance
 
 
@@ -877,13 +452,12 @@ async def get_chacha_db_for_user(current_user: User = Depends(get_request_user))
         )
 
     user_id = current_user.id
-    db_instance = await _get_or_init_db_instance_from_runtime(
+    db_instance = await _get_or_init_db_instance(
         user_id, _tenant_client_id(user_id, None)
     )
-    if not _is_chacha_shutting_down():
-        task = asyncio.create_task(_ensure_default_character_async(db_instance, user_id))
-        _chacha_default_char_tasks.add(task)
-        task.add_done_callback(_chacha_default_char_tasks.discard)
+    runtime = get_chacha_runtime()
+    if not runtime.shutting_down:
+        runtime.track(asyncio.create_task(_ensure_default_character_async(db_instance, user_id)))
     return db_instance
 
 
@@ -899,126 +473,24 @@ async def get_chacha_db_for_owner(owner_user_id: int) -> CharactersRAGDB:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid owner_user_id.",
         )
-    return await _get_or_init_db_instance_from_runtime(
+    return await _get_or_init_db_instance(
         owner_user_id, _tenant_client_id(owner_user_id, None)
     )
 
 
 def close_all_chacha_db_instances():
     """Closes all cached ChaChaNotesDB connections. Useful for application shutdown."""
-    pending_init_events: list[threading.Event] = []
-    pending_shutdown_errors: dict[str, Exception] = {}
-    with _chacha_db_lock:
-        logger.info(f"Closing all cached ChaChaNotesDB instances ({len(_chacha_db_instances)})...")
-        for user_id, db_instance in list(_chacha_db_instances.items()):
-            try:
-                db_instance.close_all_connections()
-                logger.info(f"Closed ChaChaNotesDB instance for user {user_id}.")
-            except (CharactersRAGDBError, OSError, RuntimeError, ValueError, TypeError) as e:
-                logger.error("Error closing ChaChaNotesDB instance ({})", type(e).__name__)
-        pending_init_events = list(_chacha_db_init_events.values())
-        pending_shutdown_errors = {
-            cache_key: _ChaChaInitializationAborted(_CHACHA_SHUTDOWN_INIT_ERROR_DETAIL)
-            for cache_key in _chacha_db_init_events
-        }
-        _chacha_db_instances.clear()
-        _chacha_db_init_events.clear()
-        _chacha_db_init_errors.clear()
-        _chacha_db_init_errors.update(pending_shutdown_errors)
-        logger.info("All ChaChaNotesDB instances closed and cache cleared.")
-    for init_event in pending_init_events:
-        init_event.set()
-
-
-def _on_closed_loop(awaitable: asyncio.Future) -> bool:
-    """True when the task/future's event loop is closed, so it can never finish.
-
-    Waiting on one only burns the full drain timeout (and cancelling a task on a
-    closed loop raises), on every shutdown for the rest of the process.
-    """
-    try:
-        return awaitable.get_loop().is_closed()
-    except (AttributeError, RuntimeError):
-        return False
-
-
-async def _drain_default_character_tasks(timeout: float = 5.0) -> None:
-    stale = [task for task in list(_chacha_default_char_tasks) if _on_closed_loop(task)]
-    _chacha_default_char_tasks.difference_update(stale)
-    tasks = [task for task in list(_chacha_default_char_tasks) if not task.done()]
-    if not tasks:
-        return
-    done, pending = await asyncio.wait(tasks, timeout=timeout)
-    if pending:
-        logger.warning(
-            "ChaChaNotes shutdown: {} default-character tasks still running; cancelling.",
-            len(pending),
-        )
-        for task in pending:
-            task.cancel()
-        await asyncio.wait(pending, timeout=1.0)
-    _chacha_default_char_tasks.difference_update(done)
-    _chacha_default_char_tasks.difference_update(pending)
-
-
-async def _drain_default_character_futures(timeout: float = 5.0) -> None:
-    with _chacha_default_char_futures_lock:
-        stale = [future for future in list(_chacha_default_char_futures) if _on_closed_loop(future)]
-        _chacha_default_char_futures.difference_update(stale)
-        futures = [future for future in list(_chacha_default_char_futures) if not future.done()]
-    if not futures:
-        return
-    done, pending = await asyncio.wait(futures, timeout=timeout)
-    if pending:
-        logger.warning(
-            "ChaChaNotes shutdown: {} default-character futures still running; waiting on executor shutdown.",
-            len(pending),
-        )
-    with _chacha_default_char_futures_lock:
-        for future in done:
-            _chacha_default_char_futures.discard(future)
+    get_chacha_runtime().close_all()
 
 
 async def shutdown_chacha_resources(wait_timeout: float = 5.0) -> None:
     """Drain ChaChaNotes tasks and close resources without racing active threads."""
-    _set_chacha_shutting_down(True)
-    _CHACHA_RUNTIME.shutdown()
-    await _drain_default_character_tasks(timeout=wait_timeout)
-    await _drain_default_character_futures(timeout=wait_timeout)
-    # Block the shutdown path until worker threads complete to avoid closing
-    # SQLite connections mid-query during test teardown.
-    shutdown_chacha_executor(wait=True)
-    close_all_chacha_db_instances()
+    await get_chacha_runtime().aclose(wait_timeout)
 
 
 def shutdown_chacha_executor(wait: bool = False) -> None:
-    """
-    Shut down the ChaChaNotes executor to avoid lingering threads on shutdown.
-
-    Captures the current executor under lock, clears the global reference,
-    marks shutdown, then releases the lock before shutting down the captured
-    executor. This pattern avoids deadlock and allows _get_chacha_executor()
-    to safely create a new executor if called again (e.g., in test scenarios).
-
-    Args:
-        wait: If True, block until all pending futures complete. If False,
-            return immediately after cancelling pending futures.
-
-    Note:
-        Uses cancel_futures=True to aggressively terminate pending work.
-        Safe to call multiple times; subsequent calls are no-ops.
-    """
-    global _CHACHA_EXECUTOR, _CHACHA_EXECUTOR_SHUTDOWN
-    with _CHACHA_EXECUTOR_LOCK:
-        executor = _CHACHA_EXECUTOR
-        _CHACHA_EXECUTOR = None
-        _CHACHA_EXECUTOR_SHUTDOWN = True
-    if executor is None:
-        return
-    try:
-        executor.shutdown(wait=wait, cancel_futures=True)
-    except (RuntimeError, OSError, ValueError) as e:
-        logger.debug("ChaChaNotes executor shutdown error ({})", type(e).__name__)
+    """Shut down the ChaChaNotes executor; the next use recreates it."""
+    get_chacha_runtime().shutdown_executor(wait=wait)
 
 
 # Example of how to register for shutdown event in FastAPI:

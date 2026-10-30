@@ -13,6 +13,7 @@ from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
 from tldw_Server_API.app.api.v1.endpoints import notes, persona
 from tldw_Server_API.app.core.Buddy.service import BuddyService
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.runtime import get_chacha_runtime
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 
 pytestmark = pytest.mark.integration
@@ -152,7 +153,7 @@ def test_actual_shell_chain_allows_replacement_initialization(pg_shell, tmp_path
 def test_actual_default_maintenance_executor_releases_existing_card_read(pg_shell, tmp_path, monkeypatch):
     f, config = pg_shell
     with ThreadPoolExecutor(max_workers=1) as executor:
-        monkeypatch.setattr(deps, "_get_chacha_executor", lambda: executor)
+        monkeypatch.setattr(get_chacha_runtime(), "executor", lambda: executor)
         try:
             asyncio.run(deps._ensure_default_character_async(f.db, 1))
             raw = executor.submit(f.db._get_thread_connection).result()

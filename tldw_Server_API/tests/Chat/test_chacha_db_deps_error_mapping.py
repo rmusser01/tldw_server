@@ -7,6 +7,8 @@ from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.chacha import runtime as runtime_module
+from tldw_Server_API.app.core.DB_Management.chacha.runtime import get_chacha_runtime
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDBError,
     ConflictError,
@@ -79,9 +81,10 @@ def _seed_existing_chacha_init_failure(monkeypatch, tmp_path: Path, user_id: int
     )
     init_event = threading.Event()
     init_event.set()
-    with deps._chacha_db_lock:
-        deps._chacha_db_init_events[str(user_dir)] = init_event
-        deps._chacha_db_init_errors[str(user_dir)] = exc
+    runtime = get_chacha_runtime()
+    with runtime._cache_lock:
+        runtime._init_events[str(user_dir)] = init_event
+        runtime._init_errors[str(user_dir)] = exc
 
 
 @pytest.mark.asyncio
@@ -223,9 +226,9 @@ def test_chacha_health_probe_sanitizes_failure_log(monkeypatch):
         def get_connection(self):
             raise RuntimeError("chacha backend exploded at /private/db/path SECRET_TOKEN")
 
-    monkeypatch.setattr(deps, "logger", logger_stub)
+    monkeypatch.setattr(runtime_module, "logger", logger_stub)
 
-    assert deps._health_check_instance(_DBInstance()) is False
+    assert get_chacha_runtime()._probe(_DBInstance()) is False
     _assert_log_omits_raw_exception(
         logger_stub,
         "warning",
@@ -240,9 +243,10 @@ def test_close_all_chacha_db_instances_sanitizes_close_failure_log(monkeypatch):
         def close_all_connections(self):
             raise RuntimeError("chacha backend exploded at /private/db/path SECRET_TOKEN")
 
-    monkeypatch.setattr(deps, "logger", logger_stub)
-    with deps._chacha_db_lock:
-        deps._chacha_db_instances["/private/db/path/chacha.db"] = _DBInstance()
+    monkeypatch.setattr(runtime_module, "logger", logger_stub)
+    runtime = get_chacha_runtime()
+    with runtime._cache_lock:
+        runtime._instances["/private/db/path/chacha.db"] = _DBInstance()
 
     deps.close_all_chacha_db_instances()
 
@@ -260,9 +264,10 @@ def test_shutdown_chacha_executor_sanitizes_shutdown_failure_log(monkeypatch):
         def shutdown(self, **_kwargs):
             raise RuntimeError("chacha backend exploded at /private/db/path SECRET_TOKEN")
 
-    monkeypatch.setattr(deps, "logger", logger_stub)
-    monkeypatch.setattr(deps, "_CHACHA_EXECUTOR", _Executor())
-    monkeypatch.setattr(deps, "_CHACHA_EXECUTOR_SHUTDOWN", False)
+    runtime = get_chacha_runtime()
+    monkeypatch.setattr(runtime_module, "logger", logger_stub)
+    monkeypatch.setattr(runtime, "_executor", _Executor())
+    monkeypatch.setattr(runtime, "_executor_shutdown", False)
 
     deps.shutdown_chacha_executor(wait=False)
 
@@ -300,11 +305,12 @@ def test_maybe_dump_traceback_sanitizes_dump_failure_log(monkeypatch):
     def fail_dump_traceback(*_args, **_kwargs):
         raise RuntimeError("chacha backend exploded at /private/db/path SECRET_TOKEN")
 
-    monkeypatch.setattr(deps, "logger", logger_stub)
-    monkeypatch.setattr(deps.faulthandler, "dump_traceback", fail_dump_traceback)
-    monkeypatch.setitem(deps._CHACHA_HEALTH, "last_warn_dump", None)
+    runtime = get_chacha_runtime()
+    monkeypatch.setattr(runtime_module, "logger", logger_stub)
+    monkeypatch.setattr(runtime_module.faulthandler, "dump_traceback", fail_dump_traceback)
+    monkeypatch.setitem(runtime._health, "last_warn_dump", None)
 
-    deps._maybe_dump_traceback("watchdog test")
+    runtime._maybe_dump_traceback("watchdog test")
 
     _assert_log_omits_raw_exception(
         logger_stub,
@@ -453,8 +459,9 @@ def test_ensure_default_character_sanitizes_unexpected_failure_log(monkeypatch):
 
 
 def test_chacha_health_last_error_uses_safe_error_type():
-    with deps._CHACHA_HEALTH_LOCK:
-        deps._CHACHA_HEALTH.update(
+    runtime = get_chacha_runtime()
+    with runtime._health_lock:
+        runtime._health.update(
             {
                 "init_attempts": 0,
                 "init_failures": 0,
@@ -471,7 +478,7 @@ def test_chacha_health_last_error_uses_safe_error_type():
             }
         )
 
-    deps._record_init(
+    runtime._record_init(
         9.5,
         False,
         RuntimeError("chacha backend exploded at /private/db/path SECRET_TOKEN"),

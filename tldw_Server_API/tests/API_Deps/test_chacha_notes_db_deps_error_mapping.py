@@ -6,6 +6,8 @@ import pytest
 from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
+from tldw_Server_API.app.core.DB_Management.chacha import runtime as runtime_module
+from tldw_Server_API.app.core.DB_Management.chacha.runtime import ChaChaInitAbortedError, get_chacha_runtime
 
 
 pytestmark = pytest.mark.unit
@@ -13,12 +15,13 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture(autouse=True)
 def clear_chacha_dependency_state() -> Iterator[None]:
-    with chacha_deps._chacha_db_lock:
-        chacha_deps._chacha_db_instances.clear()
-        chacha_deps._chacha_db_init_events.clear()
-        chacha_deps._chacha_db_init_errors.clear()
-    with chacha_deps._CHACHA_HEALTH_LOCK:
-        chacha_deps._CHACHA_HEALTH.update(
+    runtime = get_chacha_runtime()
+    with runtime._cache_lock:
+        runtime._instances.clear()
+        runtime._init_events.clear()
+        runtime._init_errors.clear()
+    with runtime._health_lock:
+        runtime._health.update(
             {
                 "init_attempts": 0,
                 "init_failures": 0,
@@ -35,10 +38,10 @@ def clear_chacha_dependency_state() -> Iterator[None]:
             }
         )
     yield
-    with chacha_deps._chacha_db_lock:
-        chacha_deps._chacha_db_instances.clear()
-        chacha_deps._chacha_db_init_events.clear()
-        chacha_deps._chacha_db_init_errors.clear()
+    with runtime._cache_lock:
+        runtime._instances.clear()
+        runtime._init_events.clear()
+        runtime._init_errors.clear()
 
 
 @pytest.mark.asyncio
@@ -57,14 +60,15 @@ async def test_chacha_init_uses_hard_timeout_headroom_beyond_watchdog(monkeypatc
         return await awaitable
 
     monkeypatch.setattr(chacha_deps.DatabasePaths, "get_user_base_directory", lambda _user_id: user_dir)
-    monkeypatch.setattr(chacha_deps, "_CHACHA_WATCHDOG_SECS", 5.0)
+    runtime = get_chacha_runtime()
+    monkeypatch.setattr(runtime, "watchdog_secs", 5.0)
     monkeypatch.setattr(chacha_deps, "_create_and_prepare_db", _create_db)
-    monkeypatch.setattr(chacha_deps.asyncio, "wait_for", _record_wait_for)
+    monkeypatch.setattr(runtime_module.asyncio, "wait_for", _record_wait_for)
 
     db = await chacha_deps._get_or_init_db_instance(42, "client-42")
 
     assert isinstance(db, _FakeDB)
-    assert recorded_timeouts == [chacha_deps._CHACHA_INIT_TIMEOUT_SECS]
+    assert recorded_timeouts == [runtime.init_timeout_secs]
 
 
 @pytest.mark.asyncio
@@ -147,7 +151,8 @@ def test_chacha_health_recovers_current_status_after_success(tmp_path):
         db_path=corrupt_db,
     )
 
-    chacha_deps._record_init(1.0, False, corruption_error)
+    runtime = get_chacha_runtime()
+    runtime._record_init(1.0, False, corruption_error)
     failed_snapshot = chacha_deps.get_chacha_health_snapshot()
 
     assert failed_snapshot["status"] == "degraded"
@@ -156,7 +161,7 @@ def test_chacha_health_recovers_current_status_after_success(tmp_path):
     assert failed_snapshot["last_init_success"] is False
     assert failed_snapshot["last_failure"]["reason_code"] == "sqlite_corruption"
 
-    chacha_deps._record_init(2.0, True)
+    runtime._record_init(2.0, True)
     recovered_snapshot = chacha_deps.get_chacha_health_snapshot()
 
     assert recovered_snapshot["status"] == "healthy"
@@ -174,9 +179,10 @@ async def test_chacha_waiter_sanitizes_cached_init_errors(monkeypatch, tmp_path)
     init_event.set()
 
     monkeypatch.setattr(chacha_deps.DatabasePaths, "get_user_base_directory", lambda _user_id: user_dir)
-    with chacha_deps._chacha_db_lock:
-        chacha_deps._chacha_db_init_events[str(user_dir)] = init_event
-        chacha_deps._chacha_db_init_errors[str(user_dir)] = RuntimeError(
+    runtime = get_chacha_runtime()
+    with runtime._cache_lock:
+        runtime._init_events[str(user_dir)] = init_event
+        runtime._init_errors[str(user_dir)] = RuntimeError(
             "chacha backend exploded at /private/db/path"
         )
 
@@ -194,9 +200,10 @@ async def test_chacha_waiter_classifies_cached_sqlite_corruption(monkeypatch, tm
     init_event.set()
 
     monkeypatch.setattr(chacha_deps.DatabasePaths, "get_user_base_directory", lambda _user_id: user_dir)
-    with chacha_deps._chacha_db_lock:
-        chacha_deps._chacha_db_init_events[str(user_dir)] = init_event
-        chacha_deps._chacha_db_init_errors[str(user_dir)] = sqlite3.DatabaseError(
+    runtime = get_chacha_runtime()
+    with runtime._cache_lock:
+        runtime._init_events[str(user_dir)] = init_event
+        runtime._init_errors[str(user_dir)] = sqlite3.DatabaseError(
             "malformed database schema at /private/db/path"
         )
 
@@ -215,9 +222,10 @@ async def test_chacha_waiter_normalizes_shutdown_abort_detail(monkeypatch, tmp_p
     init_event.set()
 
     monkeypatch.setattr(chacha_deps.DatabasePaths, "get_user_base_directory", lambda _user_id: user_dir)
-    with chacha_deps._chacha_db_lock:
-        chacha_deps._chacha_db_init_events[str(user_dir)] = init_event
-        chacha_deps._chacha_db_init_errors[str(user_dir)] = chacha_deps._ChaChaInitializationAborted(
+    runtime = get_chacha_runtime()
+    with runtime._cache_lock:
+        runtime._init_events[str(user_dir)] = init_event
+        runtime._init_errors[str(user_dir)] = ChaChaInitAbortedError(
             "shutdown sentinel leaked /private/db/path"
         )
 

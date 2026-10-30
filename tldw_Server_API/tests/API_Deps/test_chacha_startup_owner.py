@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_chat import (
     list_character_conversations,
 )
 from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, decode_assistant_startup
+from tldw_Server_API.app.core.DB_Management.chacha.runtime import get_chacha_runtime
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 from tldw_Server_API.app.core.Workspaces import assistant_defaults
 
@@ -211,7 +212,7 @@ async def test_concurrent_rest_waiter_receives_owner_bound_tenant_handle(
     tasks = [first]
     try:
         assert await asyncio.to_thread(created.wait, 30)
-        event = deps._chacha_db_init_events[str(deps.DatabasePaths.get_user_base_directory(42))]
+        event = get_chacha_runtime()._init_events[str(deps.DatabasePaths.get_user_base_directory(42))]
         original_wait = event.wait
 
         def observed_wait(timeout: float | None = None) -> bool:

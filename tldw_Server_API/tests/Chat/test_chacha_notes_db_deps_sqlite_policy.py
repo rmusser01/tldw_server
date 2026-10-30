@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 import threading
 from pathlib import Path
 
@@ -9,6 +8,7 @@ import pytest
 from fastapi import HTTPException, status
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.chacha.runtime import get_chacha_runtime
 
 
 class _DummyConnection:
@@ -31,7 +31,7 @@ class _DummySQLiteDB:
 
 
 @pytest.mark.unit
-def test_chacha_dependency_tuning_uses_shared_sqlite_policy_helper(monkeypatch):
+def test_chacha_dependency_tuning_uses_shared_sqlite_policy_helper(fresh_services, monkeypatch):
     import tldw_Server_API.app.core.DB_Management.sqlite_policy as sqlite_policy
     import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as deps
 
@@ -43,7 +43,6 @@ def test_chacha_dependency_tuning_uses_shared_sqlite_policy_helper(monkeypatch):
         calls.append(kwargs)
 
     monkeypatch.setattr(sqlite_policy, "configure_sqlite_connection", fake_configure)
-    deps = importlib.reload(deps)
 
     deps._apply_sqlite_tuning(_DummySQLiteDB(conn))
 
@@ -59,9 +58,8 @@ def test_chacha_dependency_tuning_uses_shared_sqlite_policy_helper(monkeypatch):
 
 
 @pytest.mark.unit
-def test_chacha_dependency_health_check_uses_shared_sqlite_policy_helper(monkeypatch):
+def test_chacha_dependency_health_check_uses_shared_sqlite_policy_helper(fresh_services, monkeypatch):
     import tldw_Server_API.app.core.DB_Management.sqlite_policy as sqlite_policy
-    import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as deps
 
     calls: list[dict[str, object]] = []
     conn = _DummyConnection()
@@ -71,9 +69,8 @@ def test_chacha_dependency_health_check_uses_shared_sqlite_policy_helper(monkeyp
         calls.append(kwargs)
 
     monkeypatch.setattr(sqlite_policy, "configure_sqlite_connection", fake_configure)
-    deps = importlib.reload(deps)
 
-    assert deps._health_check_instance(_DummySQLiteDB(conn)) is True
+    assert get_chacha_runtime()._probe(_DummySQLiteDB(conn)) is True
 
     assert calls == [
         {
@@ -88,11 +85,10 @@ def test_chacha_dependency_health_check_uses_shared_sqlite_policy_helper(monkeyp
 
 
 @pytest.mark.unit
-def test_chacha_integrity_preflight_uses_db_management_quick_check(monkeypatch, tmp_path):
+def test_chacha_integrity_preflight_uses_db_management_quick_check(fresh_services, monkeypatch, tmp_path):
     import tldw_Server_API.app.core.DB_Management.sqlite_policy as sqlite_policy
     import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as deps
 
-    deps = importlib.reload(deps)
     db_path = tmp_path / "ChaChaNotes.db"
     db_path.write_text("sqlite placeholder")
     calls: list[dict[str, object]] = []
@@ -138,10 +134,10 @@ async def test_get_chacha_db_for_user_id_rejects_bool_and_non_positive_ids(monke
 
 
 @pytest.mark.unit
-def test_close_all_chacha_db_instances_closes_instances_and_clears_stale_state():
+def test_close_all_chacha_db_instances_closes_instances_and_clears_stale_state(fresh_services):
     import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as deps
 
-    deps = importlib.reload(deps)
+    runtime = get_chacha_runtime()
 
     class _FakeDB:
         def __init__(self) -> None:
@@ -152,23 +148,23 @@ def test_close_all_chacha_db_instances_closes_instances_and_clears_stale_state()
 
     fake_db = _FakeDB()
 
-    deps._chacha_db_instances["user-1"] = fake_db
-    deps._chacha_db_init_errors["stale-key"] = RuntimeError("stale init failure")
+    runtime._instances["user-1"] = fake_db
+    runtime._init_errors["stale-key"] = RuntimeError("stale init failure")
 
     deps.close_all_chacha_db_instances()
 
     assert fake_db.closed == 1
-    assert deps._chacha_db_instances == {}
-    assert deps._chacha_db_init_errors == {}
-    assert deps._chacha_db_init_events == {}
+    assert runtime._instances == {}
+    assert runtime._init_errors == {}
+    assert runtime._init_events == {}
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_close_all_chacha_db_instances_wakes_waiters_with_shutdown_error(monkeypatch):
+async def test_close_all_chacha_db_instances_wakes_waiters_with_shutdown_error(fresh_services, monkeypatch):
     import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as deps
 
-    deps = importlib.reload(deps)
+    runtime = get_chacha_runtime()
 
     class _BlockingInitEvent:
         def __init__(self) -> None:
@@ -190,7 +186,7 @@ async def test_close_all_chacha_db_instances_wakes_waiters_with_shutdown_error(m
         "get_user_base_directory",
         lambda user_id: Path(cache_key),
     )
-    deps._chacha_db_init_events[cache_key] = blocking_event
+    runtime._init_events[cache_key] = blocking_event
 
     waiter_task = asyncio.create_task(deps._get_or_init_db_instance(1, "client-1"))
     await asyncio.to_thread(blocking_event.wait_called.wait, 1.0)
@@ -202,15 +198,15 @@ async def test_close_all_chacha_db_instances_wakes_waiters_with_shutdown_error(m
 
     assert exc_info.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
     assert exc_info.value.detail == deps._CHACHA_SHUTDOWN_INIT_ERROR_DETAIL
-    assert isinstance(deps._chacha_db_init_errors[cache_key], RuntimeError)
+    assert isinstance(runtime._init_errors[cache_key], RuntimeError)
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_shutdown_waiter_keeps_abort_sentinel_when_fresh_init_starts(monkeypatch):
+async def test_shutdown_waiter_keeps_abort_sentinel_when_fresh_init_starts(fresh_services, monkeypatch):
     import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as deps
 
-    deps = importlib.reload(deps)
+    runtime = get_chacha_runtime()
 
     class _DeferredReleaseInitEvent:
         def __init__(self) -> None:
@@ -252,15 +248,15 @@ async def test_shutdown_waiter_keeps_abort_sentinel_when_fresh_init_starts(monke
         assert release_fresh_init.wait(1.0)
         return _FreshDB()
 
-    deps._chacha_db_init_events[cache_key] = initial_event
+    runtime._init_events[cache_key] = initial_event
     monkeypatch.setattr(deps, "_create_and_prepare_db", _blocking_create)
 
     old_waiter_task = asyncio.create_task(deps._get_or_init_db_instance(1, "client-1"))
     await asyncio.to_thread(initial_event.wait_called.wait, 1.0)
 
     deps.close_all_chacha_db_instances()
-    assert cache_key in deps._chacha_db_init_errors
-    assert isinstance(deps._chacha_db_init_errors[cache_key], RuntimeError)
+    assert cache_key in runtime._init_errors
+    assert isinstance(runtime._init_errors[cache_key], RuntimeError)
 
     fresh_init_task = asyncio.create_task(deps._get_or_init_db_instance(1, "client-1-fresh"))
     await asyncio.to_thread(fresh_init_started.wait, 1.0)
