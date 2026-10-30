@@ -1958,7 +1958,8 @@ _CREATE_USAGE_TABLES = [
             prompt_fingerprint TEXT,
             prompt_fingerprint_version TEXT,
             world_book_fingerprint TEXT,
-            raw_usage_metadata_json TEXT
+            raw_usage_metadata_json TEXT,
+            credential_source TEXT
         )
         """,
         (),
@@ -1978,6 +1979,7 @@ _CREATE_USAGE_TABLES = [
     ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS prompt_fingerprint_version TEXT", ()),
     ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS world_book_fingerprint TEXT", ()),
     ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS raw_usage_metadata_json TEXT", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS credential_source TEXT", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_ts ON llm_usage_log(ts)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user ON llm_usage_log(user_id)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user_ts ON llm_usage_log(user_id, ts)", ()),
@@ -4191,7 +4193,9 @@ async def ensure_usage_tables_pg(pool: DatabasePool | None = None) -> bool:
             try:
                 await db_pool.execute(sql, *params)
             except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"PG ensure usage tables DDL failed: {exc}")
+                # Every statement is idempotent, so a failure is a real schema gap (a missing
+                # llm_usage_log.credential_source makes the LLM limits count own-key calls).
+                logger.warning(f"PG ensure usage tables DDL failed: {exc}")
         logger.info("Ensured PostgreSQL usage tables (usage_log, usage_daily, llm_usage_log, llm_usage_daily)")
         return True
     except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:

@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import (
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+from tldw_Server_API.app.core.Usage.llm_call_context import billed_credential_source
 
 _Resolver = Callable[..., Awaitable[ResolvedByokCredentials]]
 _FallbackResolver = Callable[[str], str | ServerFallbackCredentials | None]
@@ -180,6 +181,7 @@ class ProviderCallCredentials:
             "_runtime_generation",
             "_runtime_identity",
             "_credential_identity",
+            "credential_source",
         }
     )
 
@@ -191,6 +193,7 @@ class ProviderCallCredentials:
         "_runtime_generation",
         "_runtime_identity",
         "_credential_identity",
+        "credential_source",
     )
 
     def __init__(
@@ -205,6 +208,7 @@ class ProviderCallCredentials:
         credential_identity: object,
         endpoint_provenance: str = "server_config",
         trusted_endpoint: TrustedProviderEndpoint | None = None,
+        credential_source: str | None = None,
         _issued_token: object | None = None,
     ) -> None:
         self._transport_snapshot = _ProviderCallTransportSnapshot(
@@ -219,6 +223,8 @@ class ProviderCallCredentials:
         self._runtime_generation = runtime_generation
         self._runtime_identity = runtime_identity
         self._credential_identity = credential_identity
+        # Whose key this is (``user``, ``team``, ``org``, ``server_default``); usage accounting reads it.
+        self.credential_source = credential_source
 
     def __setattr__(self, name: str, value: object) -> None:
         if name in self._IMMUTABLE_SLOT_NAMES and hasattr(self, name):
@@ -868,6 +874,7 @@ class ProviderCredentialRuntime:
                 provider,
                 app_config,
             ),
+            credential_source=billed_credential_source(provider, resolution.source, app_config),
             _issued_token=_RUNTIME_ISSUED_CREDENTIAL_TOKEN,
         )
         self._issued_entries[entry.identity] = entry
