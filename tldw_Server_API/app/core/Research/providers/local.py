@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic_core import to_jsonable_python
+
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
     MultiDatabaseRetriever,
@@ -107,7 +109,7 @@ class LocalResearchProvider:
 
     @staticmethod
     def _normalize_document(document: Document) -> dict[str, Any]:
-        metadata = dict(document.metadata or {})
+        metadata = to_jsonable_python(dict(document.metadata or {}))
         title = str(
             metadata.get("title")
             or metadata.get("document_title")
