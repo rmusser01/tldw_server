@@ -12,6 +12,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
 )
 from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
 from tldw_Server_API.app.core.DB_Management.scope_context import get_scope, scoped_context
+from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Research import jobs_worker
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -24,6 +25,31 @@ def _session(tmp_path, owner):
         source_policy="local_only",
         autonomy_mode="checkpointed",
         limits_json={},
+    )
+
+
+def _leased_job(manager, session, config, *, research_path, payload_owner):
+    """Scope tests still enter through a real, currently bound persisted Job lease."""
+    db = ResearchSessionsDB(research_path)
+    job = manager.create_job(
+        domain="research",
+        queue="default",
+        job_type="research_phase",
+        owner_user_id=session.owner_user_id,
+        payload={
+            "session_id": session.id,
+            "phase": session.phase,
+            "checkpoint_id": None,
+            "policy_version": 1,
+            "owner_user_id": payload_owner,
+        },
+    )
+    db.update_phase(session.id, phase=session.phase, status="queued", active_job_id=str(job["id"]))
+    return manager.acquire_next_job(
+        domain="research",
+        queue="default",
+        lease_seconds=60,
+        worker_id=config.worker_id,
     )
 
 
@@ -51,15 +77,17 @@ async def test_research_worker_reads_only_persisted_owner_media(
 
         class OneJobSDK:
             def __init__(self, manager, config):
-                pass
+                self.manager, self.config = manager, config
 
             async def run(self, *, handler, **kwargs):
                 await handler(
-                    {
-                        "id": 41,
-                        "owner_user_id": "1",
-                        "payload": {"session_id": session.id, "phase": "collecting", "owner_user_id": "2"},
-                    }
+                    _leased_job(
+                        self.manager,
+                        session,
+                        self.config,
+                        research_path=tmp_path / "research.db",
+                        payload_owner="2",
+                    )
                 )
 
         async def read_content(job, **kwargs):
@@ -71,7 +99,7 @@ async def test_research_worker_reads_only_persisted_owner_media(
             return {"owner_only": True}
 
         monkeypatch.setattr(jobs_worker, "WorkerSDK", OneJobSDK)
-        monkeypatch.setattr(jobs_worker, "_jobs_manager", lambda: object())
+        monkeypatch.setattr(jobs_worker, "_jobs_manager", lambda: JobManager(tmp_path / "jobs.db", backend="sqlite"))
         monkeypatch.setattr(jobs_worker, "handle_research_phase_job", read_content)
         context = scoped_context(user_id=999, is_admin=True) if inherited_admin else nullcontext()
         with context:
@@ -126,7 +154,7 @@ async def test_research_worker_refuses_invalid_persisted_owner(monkeypatch, tmp_
         return {}
 
     monkeypatch.setattr(jobs_worker, "WorkerSDK", OneJobSDK)
-    monkeypatch.setattr(jobs_worker, "_jobs_manager", lambda: object())
+    monkeypatch.setattr(jobs_worker, "_jobs_manager", lambda: JobManager(tmp_path / "jobs.db", backend="sqlite"))
     monkeypatch.setattr(jobs_worker, "handle_research_phase_job", phase)
     with scoped_context(user_id=999, is_admin=True):
         before = get_scope()
@@ -147,17 +175,25 @@ async def test_research_worker_restores_scope_after_phase_error(monkeypatch, tmp
 
     class OneJobSDK:
         def __init__(self, manager, config):
-            pass
+            self.manager, self.config = manager, config
 
         async def run(self, *, handler, **kwargs):
-            await handler({"id": 41, "owner_user_id": 7, "payload": {"owner_user_id": "999", "session_id": session.id}})
+            await handler(
+                _leased_job(
+                    self.manager,
+                    session,
+                    self.config,
+                    research_path=tmp_path / "research.db",
+                    payload_owner="999",
+                )
+            )
 
     async def phase(job, **kwargs):
         assert (get_scope().user_id, get_scope().is_admin) == (7, False)  # nosec B101 -- Regression assertion checks worker authorization or cleanup.
         raise failure
 
     monkeypatch.setattr(jobs_worker, "WorkerSDK", OneJobSDK)
-    monkeypatch.setattr(jobs_worker, "_jobs_manager", lambda: object())
+    monkeypatch.setattr(jobs_worker, "_jobs_manager", lambda: JobManager(tmp_path / "jobs.db", backend="sqlite"))
     monkeypatch.setattr(jobs_worker, "handle_research_phase_job", phase)
     with scoped_context(user_id=999, is_admin=True):
         before = get_scope()
@@ -194,7 +230,7 @@ async def test_research_worker_refuses_foreign_session_with_explicit_paths(monke
         return {}
 
     monkeypatch.setattr(jobs_worker, "WorkerSDK", OneJobSDK)
-    monkeypatch.setattr(jobs_worker, "_jobs_manager", lambda: object())
+    monkeypatch.setattr(jobs_worker, "_jobs_manager", lambda: JobManager(tmp_path / "jobs.db", backend="sqlite"))
     monkeypatch.setattr(jobs_worker, "handle_research_phase_job", phase)
     await jobs_worker.run_research_jobs_worker(
         research_db_path=tmp_path / "research.db", outputs_dir=tmp_path / "outputs"

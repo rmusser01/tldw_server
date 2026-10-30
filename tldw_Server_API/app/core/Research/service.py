@@ -31,7 +31,8 @@ from tldw_Server_API.app.core.config import settings
 from .artifact_store import ResearchArtifactStore
 from .checkpoint_service import apply_checkpoint_patch
 from .exporter import build_final_package
-from .jobs import enqueue_research_phase_job
+from .phase_dispatch import new_phase_dispatch, read_phase_dispatch
+from .phase_jobs import dispatch_pending_phase, recover_owned_phase
 
 _EXECUTABLE_PHASES = {"drafting_plan", "collecting", "synthesizing", "packaging"}
 _CHECKPOINT_PHASES = {
@@ -321,27 +322,19 @@ class ResearchService:
                 ),
             )
 
-        try:
-            job = enqueue_research_phase_job(
-                jm=self._job_manager_for_session(),
-                session_id=session.id,
-                phase=session.phase,
-                owner_user_id=session.owner_user_id,
-            )
-        except Exception:
-            try:
-                db.delete_session_cascade(session.id)
-            except Exception as cleanup_exc:
-                logger.warning(
-                    "Failed to clean up research session {} after enqueue failure: {}",
-                    session.id,
-                    cleanup_exc,
-                )
-            raise
-        return db.attach_active_job(
-            session.id,
-            self._job_identifier(job),
+        dispatch = new_phase_dispatch(session.phase)
+        pending = db.compare_and_set_phase(
+            session,
+            phase=session.phase,
+            status=session.status,
+            control_state=session.control_state,
+            active_job_id=None,
+            phase_dispatch_json=dispatch,
         )
+        if pending is None:
+            raise ValueError("research_run_changed")
+        # Keep the durable intent if admission acknowledgement is lost; recovery uses this same key.
+        return dispatch_pending_phase(self._job_manager_for_session(), db, pending)
 
     def record_run_event(
         self,
@@ -421,24 +414,7 @@ class ResearchService:
             proposed_payload=checkpoint.proposed_payload,
             patch_payload=patch_payload or {},
         )
-        db.resolve_checkpoint(
-            checkpoint_id,
-            resolution="patched" if patch_payload else "approved",
-            user_patch_payload=patch_payload or {},
-        )
-        self.record_run_event(
-            owner_user_id=owner_user_id,
-            session_id=session_id,
-            event_type="checkpoint",
-            event_payload=self._checkpoint_event_payload(
-                checkpoint=db.get_checkpoint(checkpoint_id) or checkpoint,
-                phase=session.phase,
-            ),
-            phase=session.phase,
-            job_id=None,
-        )
-
-        next_phase, should_enqueue = self._next_phase_for_checkpoint(checkpoint.checkpoint_type)
+        next_phase, _should_enqueue = self._next_phase_for_checkpoint(checkpoint.checkpoint_type)
         enqueue_payload_overrides: dict[str, Any] = {}
         if checkpoint.checkpoint_type == "sources_review":
             recollect = patch_result.artifact_payload.get("recollect")
@@ -447,6 +423,27 @@ class ResearchService:
         elif checkpoint.checkpoint_type == "outline_review" and patch_payload:
             next_phase = "synthesizing"
             enqueue_payload_overrides["approved_outline_locked"] = True
+
+        previous = read_phase_dispatch(session.phase_dispatch_json) if session.phase_dispatch_json else None
+        dispatch = new_phase_dispatch(
+            next_phase,
+            authorization="checkpoint",
+            checkpoint_id=checkpoint.id,
+            policy_version=previous["policy_version"] if previous else 1,
+            approved_outline_locked=bool(enqueue_payload_overrides.get("approved_outline_locked")),
+            predecessor_job_uuid=previous["job_uuid"] if previous else None,
+        )
+
+        def register_approval(**artifact: Any) -> tuple[ResearchArtifactRow, ResearchRunEventRow]:
+            return db.commit_checkpoint_approval(
+                session,
+                checkpoint,
+                next_phase=next_phase,
+                dispatch=dispatch,
+                resolution="patched" if patch_payload else "approved",
+                patch_payload=patch_payload or {},
+                artifact=artifact,
+            )
 
         artifact_store = ResearchArtifactStore(
             base_dir=self._outputs_dir_for_user(owner_user_id),
@@ -459,37 +456,13 @@ class ResearchService:
             payload=patch_result.artifact_payload,
             phase=next_phase,
             job_id=None,
+            register=register_approval,
         )
 
-        job = enqueue_research_phase_job(
-            jm=self._job_manager_for_session(),
-            session_id=session.id,
-            phase=next_phase,
-            owner_user_id=session.owner_user_id,
-            checkpoint_id=checkpoint.id,
-            payload_overrides=enqueue_payload_overrides,
-        )
-        updated, _ = db.update_phase_with_event(
-            session_id,
-            phase=next_phase,
-            status="queued",
-            control_state=session.control_state,
-            active_job_id=self._job_identifier(job),
-            owner_user_id=owner_user_id,
-            event_type="status",
-            event_payload=self._status_event_payload(
-                session_id=session.id,
-                status="queued",
-                phase=next_phase,
-                control_state=session.control_state,
-                active_job_id=self._job_identifier(job),
-                latest_checkpoint_id=session.latest_checkpoint_id,
-                completed_at=session.completed_at,
-            ),
-            event_phase=next_phase,
-            event_job_id=self._job_identifier(job),
-        )
-        return updated
+        pending = db.get_session(session.id)
+        if pending is None:
+            raise KeyError(session.id)
+        return dispatch_pending_phase(self._job_manager_for_session(), db, pending)
 
     def build_package(
         self,
@@ -561,6 +534,9 @@ class ResearchService:
         db = self._db_for_user(owner_user_id)
         session = self._get_owned_session(db=db, owner_user_id=owner_user_id, session_id=session_id)
 
+        if session.phase_dispatch_json:
+            session = recover_owned_phase(self._job_manager_for_session(), db, session)
+
         checkpoint_summary: ResearchCheckpointSummary | None = None
         if session.latest_checkpoint_id:
             checkpoint = db.get_checkpoint(session.latest_checkpoint_id)
@@ -593,13 +569,17 @@ class ResearchService:
         session_id: str | None = None,
     ) -> list[ResearchSessionRow]:
         db = self._db_for_user(owner_user_id)
-        return db.list_sessions(
+        rows = db.list_sessions(
             owner_user_id,
             limit=limit,
             offset=offset,
             status=status,
             session_id=session_id,
         )
+        if any(row.phase_dispatch_json for row in rows):
+            manager = self._job_manager_for_session()
+            rows = [recover_owned_phase(manager, db, row) for row in rows]
+        return [row for row in rows if status is None or row.status == status]
 
     def list_chat_linked_runs(
         self,
@@ -618,6 +598,8 @@ class ResearchService:
     def get_session(self, *, owner_user_id: str, session_id: str) -> ResearchSessionRow:
         db = self._db_for_user(owner_user_id)
         session = self._get_owned_session(db=db, owner_user_id=owner_user_id, session_id=session_id)
+        if session.phase_dispatch_json:
+            session = recover_owned_phase(self._job_manager_for_session(), db, session)
         handoff = db.get_chat_handoff(session_id)
         chat_id = None
         if handoff is not None:
@@ -726,82 +708,53 @@ class ResearchService:
     def resume_run(self, *, owner_user_id: str, session_id: str) -> ResearchSessionRow:
         db = self._db_for_user(owner_user_id)
         session = self._get_owned_session(db=db, owner_user_id=owner_user_id, session_id=session_id)
-        if session.control_state != "paused":
-            raise ValueError("resume_not_allowed")
-        if self._is_terminal(session):
+        if session.control_state != "paused" or self._is_terminal(session):
             raise ValueError("resume_not_allowed")
         if self._is_checkpoint_phase(session.phase):
-            updated, _ = db.update_phase_with_event(
-                session.id,
+            updated = db.compare_and_set_phase(
+                session,
                 phase=session.phase,
                 status="waiting_human",
                 control_state="running",
                 active_job_id=None,
-                owner_user_id=owner_user_id,
-                event_type="status",
-                event_payload=self._status_event_payload(
-                    session_id=session.id,
-                    status="waiting_human",
-                    phase=session.phase,
-                    control_state="running",
-                    active_job_id=None,
-                    latest_checkpoint_id=session.latest_checkpoint_id,
-                    completed_at=session.completed_at,
-                ),
-                event_phase=session.phase,
-                event_job_id=None,
+                phase_dispatch_json=session.phase_dispatch_json,
             )
+            if updated is None:
+                raise ValueError("research_run_changed")
             return updated
         if not self._is_executable_phase(session.phase):
             raise ValueError("resume_not_allowed")
-        if session.active_job_id:
-            updated, _ = db.update_control_state_with_event(
-                session.id,
-                control_state="running",
-                owner_user_id=owner_user_id,
-                event_type="status",
-                event_payload=self._status_event_payload(
-                    session_id=session.id,
-                    status=session.status,
-                    phase=session.phase,
-                    control_state="running",
-                    active_job_id=session.active_job_id,
-                    latest_checkpoint_id=session.latest_checkpoint_id,
-                    completed_at=session.completed_at,
-                ),
-                event_phase=session.phase,
-                event_job_id=session.active_job_id,
-            )
-            return updated
-
-        job = enqueue_research_phase_job(
-            jm=self._job_manager_for_session(),
-            session_id=session.id,
-            phase=session.phase,
-            owner_user_id=session.owner_user_id,
-        )
-        job_id = self._job_identifier(job)
-        updated, _ = db.update_phase_with_event(
-            session.id,
+        dispatch = session.phase_dispatch_json
+        if session.active_job_id is None:
+            if not dispatch:
+                raise ValueError("research_phase_recovery_ambiguous")
+            dispatch = read_phase_dispatch(dispatch)
+            if dispatch["phase"] != session.phase:
+                raise ValueError("research_phase_recovery_ambiguous")
+            if dispatch["job_uuid"] is not None:
+                # Resume is a new delivery of the same approved checkpoint/policy, never a new outline.
+                dispatch = new_phase_dispatch(
+                    session.phase,
+                    authorization="resume",
+                    checkpoint_id=dispatch["checkpoint_id"],
+                    policy_version=dispatch["policy_version"],
+                    approved_outline_locked=dispatch["approved_outline_locked"],
+                    predecessor_job_uuid=dispatch["job_uuid"],
+                )
+            else:
+                # Keep a possibly admitted unknown-ACK candidate, but retire its predecessor's authority.
+                dispatch = read_phase_dispatch({**dispatch, "authorization": "resume"})
+        updated = db.compare_and_set_phase(
+            session,
             phase=session.phase,
             status="queued",
             control_state="running",
-            active_job_id=job_id,
-            owner_user_id=owner_user_id,
-            event_type="status",
-            event_payload=self._status_event_payload(
-                session_id=session.id,
-                status="queued",
-                phase=session.phase,
-                control_state="running",
-                active_job_id=job_id,
-                latest_checkpoint_id=session.latest_checkpoint_id,
-                completed_at=session.completed_at,
-            ),
-            event_phase=session.phase,
-            event_job_id=job_id,
+            active_job_id=session.active_job_id,
+            phase_dispatch_json=dispatch,
         )
-        return updated
+        if updated is None:
+            raise ValueError("research_run_changed")
+        return dispatch_pending_phase(self._job_manager_for_session(), db, updated)
 
     def cancel_run(self, *, owner_user_id: str, session_id: str) -> ResearchSessionRow:
         db = self._db_for_user(owner_user_id)
