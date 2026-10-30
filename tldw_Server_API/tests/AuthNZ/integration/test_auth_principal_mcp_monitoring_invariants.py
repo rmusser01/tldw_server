@@ -73,7 +73,6 @@ def _restore_auth_capture(app: FastAPI, original_get_auth_principal: Any) -> Non
 
 def test_mcp_modules_health_jwt_principal_and_state_alignment(isolated_test_environment, monkeypatch):
 
-
     """
     Multi-user JWT happy path for MCP modules health:
 
@@ -176,7 +175,6 @@ def test_mcp_modules_health_jwt_principal_and_state_alignment(isolated_test_envi
 
 
 def test_monitoring_watchlists_jwt_principal_and_state_alignment(isolated_test_environment, monkeypatch):
-
 
     """
     Multi-user JWT happy path for monitoring watchlists:

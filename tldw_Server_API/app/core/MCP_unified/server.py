@@ -2317,7 +2317,11 @@ _server_lock = threading.Lock()
 
 
 def get_mcp_server() -> MCPServer:
-    """Get the MCP server from the app-service container, creating it on first use."""
+    """Get the MCP server from the app-service container, creating it on first use.
+
+    Fallback for code with no request or constructor argument; request handlers take it via
+    ``Depends(get_mcp_server_dep)``.
+    """
     services = app_services()
     if services.mcp_server is None:
         with _server_lock:

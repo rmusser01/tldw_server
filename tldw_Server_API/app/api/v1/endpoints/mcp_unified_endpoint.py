@@ -993,7 +993,6 @@ async def mcp_request(
             request_plan.error or invalid_request_response("Invalid request", request_id=None)
         )
 
-
     # Ensure server is initialized
     if not server.initialized:
         await server.initialize()

@@ -18,7 +18,6 @@ def rg_backend(request) -> str:
 
 def _repo_policy_path() -> str:
 
-
      # tldw_Server_API/tests/Resource_Governance → tldw_Server_API
     return str(Path(__file__).resolve().parents[2] / "Config_Files" / "resource_governor_policies.yaml")
 
@@ -56,7 +55,6 @@ def _with_rg_middleware(app):
 
 
 def _reset_rg_state(app) -> None:
-
 
     """
     Ensure each test starts with a fresh ResourceGovernor / policy loader.
@@ -363,7 +361,6 @@ async def test_e2e_mcp_headers_route_map(monkeypatch, rg_backend):
     monkeypatch.setenv("RG_POLICY_STORE", "file")
     monkeypatch.setenv("RG_POLICY_PATH", _repo_policy_path())
     monkeypatch.setenv("RG_POLICY_RELOAD_ENABLED", "false")
-
 
     class _StubMCP:
         initialized = True

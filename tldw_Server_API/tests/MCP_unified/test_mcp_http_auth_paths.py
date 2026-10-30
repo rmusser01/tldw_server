@@ -13,7 +13,6 @@ from starlette.requests import Request
 from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint as mcp_ep
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.MCP_unified.auth import UserRole
-from tldw_Server_API.app.core.MCP_unified.server import get_mcp_server
 from tldw_Server_API.app.core.Utils.app_services import app_services
 from tldw_Server_API.app.main import app
 
@@ -202,7 +201,7 @@ def test_mcp_get_client_ip_sanitizes_resolution_failure_log(monkeypatch):
 async def test_mcp_initialize_session_id_logs_are_sanitized(monkeypatch):
     logger_stub = _LoggerStub()
     monkeypatch.setattr(mcp_ep, "logger", logger_stub)
-    _install_dummy_server(monkeypatch)
+    server = _install_dummy_server(monkeypatch)
 
     original_import = builtins.__import__
 
@@ -215,7 +214,7 @@ async def test_mcp_initialize_session_id_logs_are_sanitized(monkeypatch):
     auth = mcp_ep.McpAuthContext(user=None, principal=None, api_key_info=None, raw_api_key=None)
 
     await mcp_ep.mcp_request(
-        server=get_mcp_server(),
+        server=server,
         http_request=_json_request({"jsonrpc": "2.0", "method": "initialize", "id": 1}),
         response=Response(),
         client_id=None,
@@ -225,7 +224,7 @@ async def test_mcp_initialize_session_id_logs_are_sanitized(monkeypatch):
         _guard=None,
     )
     await mcp_ep.mcp_request_batch(
-        server=get_mcp_server(),
+        server=server,
         http_request=_json_request([{"jsonrpc": "2.0", "method": "initialize", "id": 2}]),
         response=Response(),
         client_id=None,

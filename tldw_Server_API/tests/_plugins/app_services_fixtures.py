@@ -78,6 +78,12 @@ async def fresh_app_services() -> AsyncIterator[AppServices]:
 
 
 @pytest_asyncio.fixture
-async def fresh_services() -> AsyncIterator[AppServices]:
+async def fresh_services(monkeypatch) -> AsyncIterator[AppServices]:
+    # monkeypatch is set up before this fixture (root autouse fixtures request it), so its undo
+    # runs after this one exits. Registering each slot's current value makes that undo write the
+    # snapshot back instead of the emptied value a later monkeypatch.setattr in the test records.
+    services = app_services()
+    for f in fields(services):
+        monkeypatch.setattr(services, f.name, getattr(services, f.name))
     async with fresh_app_services() as services:
         yield services

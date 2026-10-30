@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -229,3 +230,42 @@ def test_mcp_routes_take_the_server_from_the_container(fresh_services, monkeypat
     assert resp.status_code == 200
     assert resp.json() == {"status": "healthy"}
     assert inspect.signature(mcp_ep.health_check).parameters["server"].default.dependency is get_mcp_server_dep
+
+
+def test_fresh_services_leaves_monkeypatched_slots_at_their_snapshot(tmp_path) -> None:
+    import subprocess
+    import sys
+    import textwrap
+    from pathlib import Path
+
+    (tmp_path / "test_probe.py").write_text(
+        textwrap.dedent("""
+        import pytest
+        from tldw_Server_API.app.core.Utils.app_services import app_services
+        from tldw_Server_API.tests._plugins.app_services_fixtures import fresh_services  # noqa: F401
+
+        SENTINEL = object()
+
+        @pytest.fixture(autouse=True)
+        def _autouse_uses_monkeypatch(monkeypatch):  # like the root autouse fixtures: monkeypatch is set up first
+            yield
+
+        def test_seed():
+            app_services().mcp_server = SENTINEL
+
+        def test_swap(fresh_services, monkeypatch):
+            monkeypatch.setattr(app_services(), "mcp_server", object())
+
+        def test_check():
+            after = app_services().mcp_server
+            app_services().mcp_server = None
+            assert after is SENTINEL
+        """)
+    )
+    repo_root = Path(__file__).resolve().parents[3]
+    env = {**os.environ, "PYTHONPATH": str(repo_root), "PYTHONDONTWRITEBYTECODE": "1"}
+    done = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_probe.py"],
+        cwd=tmp_path, env=env, capture_output=True, text=True, timeout=120,
+    )
+    assert "3 passed" in done.stdout, done.stdout[-1500:]
