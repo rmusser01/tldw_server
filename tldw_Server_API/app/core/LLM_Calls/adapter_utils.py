@@ -4,7 +4,7 @@ import copy
 import os
 from typing import Any
 
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
     ProviderCallCredentials,
     is_runtime_issued_provider_call_credentials,

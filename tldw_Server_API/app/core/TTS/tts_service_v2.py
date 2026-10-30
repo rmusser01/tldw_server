@@ -4255,7 +4255,7 @@ async def get_tts_service_v2(config: Optional[dict[str, Any]] = None) -> TTSServ
                 # Get circuit breaker manager
                 circuit_manager = await get_circuit_manager(circuit_config)
 
-                from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+                from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
                     resolve_gateway_byok_credentials,
                 )
 

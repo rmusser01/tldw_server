@@ -20,7 +20,7 @@ from typing import Any, Optional
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     ProviderCallCredentials,
 )
 from tldw_Server_API.app.core.Chat.bounded_daemon import (

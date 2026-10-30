@@ -21,7 +21,7 @@ import re
 from collections.abc import Generator
 from typing import Any, Callable, Optional, Union
 
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
     ProviderCallCredentials,
 )

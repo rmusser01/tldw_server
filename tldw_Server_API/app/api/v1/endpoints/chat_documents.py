@@ -37,18 +37,18 @@ from tldw_Server_API.app.api.v1.schemas.document_generator_schemas import (
     DocumentType as DocType,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
     derive_trusted_credential_scope,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
     record_byok_missing_credentials,
 )
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
     capture_provider_override_call_snapshot,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     ProviderCredentialRuntime,
 )
 from tldw_Server_API.app.core.Chat.bounded_daemon import (

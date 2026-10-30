@@ -85,7 +85,7 @@ def bind_openai_embedding_credentials(
 ) -> tuple[str | None, str | None, dict[str, Any]]:
     """Consume an authentic OpenAI capability into one atomic transport tuple."""
 
-    from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
         PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
     )
     from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (

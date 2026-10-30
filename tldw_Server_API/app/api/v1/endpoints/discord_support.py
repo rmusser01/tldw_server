@@ -14,9 +14,9 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager as _global_get_job_manager
 from tldw_Server_API.app.api.v1.endpoints._in_memory_limits import SlidingWindowLimiter, TTLReceiptStore
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-from tldw_Server_API.app.core.AuthNZ.repos.byok_oauth_state_repo import AuthnzByokOAuthStateRepo
-from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import AuthnzUserProviderSecretsRepo
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+from tldw_Server_API.app.core.Provider_Credentials.repos.byok_oauth_state_repo import AuthnzByokOAuthStateRepo
+from tldw_Server_API.app.core.Provider_Credentials.repos.user_provider_secrets_repo import AuthnzUserProviderSecretsRepo
+from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
     decrypt_byok_payload,
     dumps_envelope,
     encrypt_byok_payload,

@@ -29,7 +29,7 @@ from typing import Any, Literal
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.DB_Management.media_db.api import (

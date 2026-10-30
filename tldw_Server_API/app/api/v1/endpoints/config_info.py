@@ -33,22 +33,22 @@ from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import (
 )
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
-from tldw_Server_API.app.core.AuthNZ.byok_config import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_config import (
     PROVIDER_APP_CONFIG_KEYS,
     is_runtime_base_url_override,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
     load_server_config_snapshot,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     merge_server_fallback_snapshot,
     resolve_static_server_fallback_from_snapshot,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_testing import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_testing import (
     provider_validation_public_error,
     test_provider_credentials,
 )
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     configured_provider_model_from_snapshot,
 )
 from tldw_Server_API.app.core.Chat.streaming_utils import (

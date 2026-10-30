@@ -69,10 +69,10 @@ from tldw_Server_API.app.api.v1.schemas.telegram_schemas import (
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos import get_workspace_provider_installations_repo
-from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import AuthnzOrgProviderSecretsRepo
-from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import AuthnzUserProviderSecretsRepo
+from tldw_Server_API.app.core.Provider_Credentials.repos.org_provider_secrets_repo import AuthnzOrgProviderSecretsRepo
+from tldw_Server_API.app.core.Provider_Credentials.repos.user_provider_secrets_repo import AuthnzUserProviderSecretsRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import key_hint_for_api_key
+from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import key_hint_for_api_key
 from tldw_Server_API.app.services.integrations_control_plane_service import IntegrationsControlPlaneService
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])

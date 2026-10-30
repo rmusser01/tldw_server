@@ -30,8 +30,8 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
 from tldw_Server_API.app.core.Audio.error_payloads import _http_error_detail
 from tldw_Server_API.app.core.Audio.tts_service import _raise_for_tts_error, _sanitize_speech_request
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import derive_trusted_credential_scope
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import derive_trusted_credential_scope
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.AuthNZ.exceptions import QuotaExceededError, StorageError
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.config import settings

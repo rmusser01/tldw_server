@@ -12,10 +12,10 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
-from tldw_Server_API.app.core.AuthNZ.byok_config import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_config import (
     runtime_base_url_override_provenance,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionStatus,
     ResolvedByokCredentials,
     resolve_byok_credentials,

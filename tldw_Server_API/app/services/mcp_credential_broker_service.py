@@ -15,7 +15,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import (
 from tldw_Server_API.app.core.AuthNZ.secret_backends.registry import (
     get_secret_backend,
 )
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
     decrypt_byok_payload,
     loads_envelope,
 )

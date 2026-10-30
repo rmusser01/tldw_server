@@ -42,7 +42,7 @@ from tldw_Server_API.app.core.Chat.orchestrator.provider_resolution import (
 from tldw_Server_API.app.core.Chat.orchestrator.stream_execution import (
     execute_stream,
 )
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
     ProviderCallCredentials,
 )

@@ -31,7 +31,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import (
     McpHubRepo,
     encode_managed_secret_credential_ref,
 )
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
     build_secret_payload,
     dumps_envelope,
     encrypt_byok_payload,

@@ -10,19 +10,19 @@ from typing import Any, Protocol, TypedDict
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import load_server_config_snapshot
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import load_server_config_snapshot
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
     _extract_runtime_api_key,
     _extract_runtime_auth_source,
     merge_server_fallback_snapshot,
     resolve_static_server_fallback_from_snapshot,
 )
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     configured_provider_model_from_snapshot,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
     decrypt_byok_payload,
     loads_envelope,
 )
@@ -185,7 +185,7 @@ def build_byok_validation_idempotency_key(*, run_id: str) -> str:
 async def _get_repo() -> ValidationRunsRepoProtocol:
     """Build the BYOK validation run repository for worker execution."""
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-    from tldw_Server_API.app.core.AuthNZ.repos.byok_validation_runs_repo import (
+    from tldw_Server_API.app.core.Provider_Credentials.repos.byok_validation_runs_repo import (
         AuthnzByokValidationRunsRepo,
     )
 
@@ -197,7 +197,7 @@ async def _get_repo() -> ValidationRunsRepoProtocol:
 
 def _per_provider_limit() -> int:
     """Return the max concurrent validation calls per provider."""
-    from tldw_Server_API.app.core.AuthNZ.byok_testing import (
+    from tldw_Server_API.app.core.Provider_Credentials.byok_testing import (
         provider_credential_validation_per_provider_capacity,
     )
 
@@ -566,7 +566,7 @@ async def handle_byok_validation_job(
     test_provider_credentials_fn: Callable[..., Awaitable[Any]] | None = None,
 ) -> dict[str, Any]:
     """Execute one authoritative BYOK validation run from the Jobs queue."""
-    from tldw_Server_API.app.core.AuthNZ.byok_testing import test_provider_credentials
+    from tldw_Server_API.app.core.Provider_Credentials.byok_testing import test_provider_credentials
 
     payload = job.get("payload") or {}
     run_id = str(payload.get("run_id") or "").strip()

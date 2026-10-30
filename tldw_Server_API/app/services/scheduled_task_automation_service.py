@@ -30,7 +30,7 @@ from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_automation_schemas impor
     ScheduledTaskRunNowResponse,
     ScheduledTaskRunResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
     apply_llm_provider_overrides_to_listing,
     validate_provider_override,
 )

@@ -190,7 +190,6 @@ core.Infrastructure -> core.DB_Management: 3
 core.Ingestion_Media_Processing -> api.v1.endpoints.media_embeddings: 1
 core.Ingestion_Media_Processing -> services: 6
 core.Ingestion_Sources -> services: 1
-core.LLM_Calls -> core.AuthNZ: 9  # bump: gateway._resolve_base_url_override, moved from chat_service, keeps its byok_helpers lookup; TASK-13950.17 cuts LLM_Calls -> AuthNZ to 0 (TASK-13950.13)
 core.MCP_unified -> services: 11
 core.PrivilegeMaps -> api.v1.utils: 2
 core.PrivilegeMaps -> main: 1

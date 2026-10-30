@@ -56,7 +56,7 @@ from tldw_Server_API.app.api.v1.utils.shared_workspace_recipient_route import (
     SharedWorkspaceRecipientRoute,
     recipient_error_detail,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import resolve_byok_credentials
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import resolve_byok_credentials
 from tldw_Server_API.app.core.Chat.chat_service import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_target_resolution import (
     resolve_chat_provider_identity,

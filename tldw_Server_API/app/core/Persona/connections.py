@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
     build_secret_payload,
     decrypt_byok_payload,
     encrypt_byok_payload,

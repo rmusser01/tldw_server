@@ -30,7 +30,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import HTTPException, status
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import key_hint_for_api_key
+from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import key_hint_for_api_key
 
 __all__ = [
     "ChatOpsOAuthProvider",

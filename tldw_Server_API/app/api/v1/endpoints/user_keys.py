@@ -42,7 +42,7 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventCategory,
     AuditEventType,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
     derive_trusted_credential_scope,
     get_byok_gateway_spec,
     is_byok_enabled,
@@ -53,27 +53,27 @@ from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
     validate_base_url_override,
     validate_credential_fields,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
     openai_credential_mutation_lock,
     openai_oauth_refresh_state_generation,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_testing import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_testing import (
     probe_gateway_credentials,
     provider_validation_public_error,
     test_provider_credentials,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.repos.byok_oauth_state_repo import AuthnzByokOAuthStateRepo
-from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
+from tldw_Server_API.app.core.Provider_Credentials.repos.byok_oauth_state_repo import AuthnzByokOAuthStateRepo
+from tldw_Server_API.app.core.Provider_Credentials.repos.org_provider_secrets_repo import (
     AuthnzOrgProviderSecretsRepo,
 )
-from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
+from tldw_Server_API.app.core.Provider_Credentials.repos.user_provider_secrets_repo import (
     AuthnzUserProviderSecretsRepo,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
     ProviderCredentialAliasConflictError,
     build_secret_payload,
     decrypt_byok_payload,

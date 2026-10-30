@@ -11,8 +11,8 @@ from typing import Any, Literal
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import is_trusted_base_url_request, load_server_config_snapshot
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import resolve_byok_credentials
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import is_trusted_base_url_request, load_server_config_snapshot
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import resolve_byok_credentials
 from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call_async,
     resolve_model_context_window,

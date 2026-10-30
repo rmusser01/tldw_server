@@ -13,10 +13,10 @@ from typing import Any, Protocol
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
     capture_provider_override_call_snapshot,
 )
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
     ProviderCredentialRuntime,
 )

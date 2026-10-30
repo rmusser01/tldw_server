@@ -21,8 +21,8 @@ from typing import Any
 import numpy as np
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError

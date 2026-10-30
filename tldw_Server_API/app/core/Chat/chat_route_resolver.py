@@ -9,8 +9,8 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import resolve_byok_credentials
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import resolve_byok_credentials
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
     apply_llm_provider_overrides_to_listing,
     get_override_model_priority,
 )

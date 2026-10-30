@@ -11,13 +11,13 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     DEFAULT_LLM_PROVIDER,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import load_server_config_snapshot
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import load_server_config_snapshot
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
     get_llm_provider_override,
     get_override_default_model,
     validate_provider_override,
 )
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     configured_provider_model_from_snapshot,
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError

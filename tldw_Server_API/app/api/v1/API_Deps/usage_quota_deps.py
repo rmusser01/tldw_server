@@ -58,13 +58,13 @@ async def users_own_key_serves(user_id: Any, provider: str) -> bool:
     (a custom OpenAI-compatible slot, a local server, a billed provider whose
     base URL is not its vendor's) answers False, as does a failed lookup.
     """
-    from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+    from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
         is_byok_enabled,
         is_provider_allowlisted,
         load_server_config_snapshot,
     )
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-    from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import AuthnzUserProviderSecretsRepo
+    from tldw_Server_API.app.core.Provider_Credentials.repos.user_provider_secrets_repo import AuthnzUserProviderSecretsRepo
     from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 
     uid = as_quota_user_id(user_id)

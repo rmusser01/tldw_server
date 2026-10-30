@@ -12,11 +12,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
     is_provider_allowlisted,
     load_server_config_snapshot,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     resolve_static_server_fallback_from_snapshot,
 )
 from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (

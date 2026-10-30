@@ -1165,7 +1165,7 @@ def exponential_backoff(max_retries: int = 3, base_delay: int = 1):
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+            from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
                 PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
             )
 

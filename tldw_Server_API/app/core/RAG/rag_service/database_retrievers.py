@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any, Literal, Optional
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
     ChatAuthenticationError,

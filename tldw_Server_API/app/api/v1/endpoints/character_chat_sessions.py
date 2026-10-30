@@ -110,18 +110,18 @@ from tldw_Server_API.app.api.v1.utils.chat_message_images import (
 from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import derive_trusted_credential_scope
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import derive_trusted_credential_scope
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
     record_byok_missing_credentials,
 )
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
     apply_llm_provider_overrides_to_listing,
     capture_provider_override_call_snapshot,
     get_llm_provider_overrides_snapshot,
     get_override_model_priority,
 )
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
     ProviderCredentialRuntime,
 )

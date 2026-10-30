@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 from loguru import logger
 
-from ....core.AuthNZ.provider_credential_runtime import (
+from ....core.Provider_Credentials.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
     ProviderCallCredentials,
     is_runtime_issued_provider_call_credentials,

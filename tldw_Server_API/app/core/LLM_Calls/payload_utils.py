@@ -138,7 +138,7 @@ def resolve_runtime_embedding_base_url(
     provider: str,
 ) -> str | None:
     """Return the server-proven request endpoint or reject an incomplete contract."""
-    from tldw_Server_API.app.core.AuthNZ.byok_config import (
+    from tldw_Server_API.app.core.Provider_Credentials.byok_config import (
         is_runtime_base_url_override,
     )
     from tldw_Server_API.app.core.exceptions import ChatConfigurationError

@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Any, Callable, Literal, Optional, Protocol, Ty
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     SYNC_ADAPTER_CALL_POOL,
     await_bounded_sync_call,

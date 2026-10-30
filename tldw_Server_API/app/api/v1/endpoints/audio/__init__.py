@@ -34,7 +34,7 @@ from tldw_Server_API.app.core.Audio.tts_service import (
     _sanitize_speech_request,
     _tts_fallback_resolver,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import resolve_byok_credentials
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import resolve_byok_credentials
 from tldw_Server_API.app.core.Chat.chat_helpers import (
     get_or_create_character_context,
     get_or_create_conversation,

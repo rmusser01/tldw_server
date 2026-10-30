@@ -110,11 +110,11 @@ check_rate_limit = check_rate_limit
 from tldw_Server_API.app.core.Audio.tts_service import (
     _tts_fallback_resolver,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
     ResolvedByokCredentials,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     resolve_byok_credentials as _default_resolve_byok_credentials,
 )
 from tldw_Server_API.app.core.config import load_comprehensive_config as _load_comprehensive_config

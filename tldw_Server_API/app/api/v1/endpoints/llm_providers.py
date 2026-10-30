@@ -18,12 +18,12 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     ALL_SUPPORTED_PROVIDER_NAMES_LIST,
     get_api_keys,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
     ServerFallbackCredentials,
     resolve_static_server_fallback,
 )
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
     ProviderOverrideCallSnapshot,
     apply_llm_provider_overrides_to_listing,
     get_llm_provider_overrides_snapshot,

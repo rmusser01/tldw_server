@@ -19,7 +19,7 @@ from tldw_Server_API.app.core.Evaluations.evaluation_recipe_schemas import (
 )
 from tldw_Server_API.app.core.Evaluations.run_state import RunStatus
 from tldw_Server_API.app.core.AuthNZ.settings import is_single_user_mode
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
     decrypt_byok_payload,
     encrypt_byok_payload,
 )

@@ -317,9 +317,9 @@ def build_default_realtime_pipeline(
     from types import SimpleNamespace
 
     from tldw_Server_API.app.core.Audio.tts_service import tts_provider_credential_scope
-    from tldw_Server_API.app.core.AuthNZ.byok_helpers import derive_trusted_credential_scope
-    from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import capture_provider_override_call_snapshot
-    from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import derive_trusted_credential_scope
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import capture_provider_override_call_snapshot
+    from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
         PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
         ProviderCredentialRuntime,
     )

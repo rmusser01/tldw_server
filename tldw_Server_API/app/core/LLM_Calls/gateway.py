@@ -120,7 +120,7 @@ def resolve_provider_api_key(
     override_value = None
     if include_override:
         try:
-            from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import get_llm_provider_override
+            from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import get_llm_provider_override
 
             override = get_llm_provider_override(provider_key)
             override_value = override.api_key if override else None
@@ -709,7 +709,7 @@ def _resolve_base_url_override(provider: str, chat_args: dict[str, Any]) -> str 
     if base_url is None:
         return None
     provider_key = (provider or "").strip().lower()
-    from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+    from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
         is_trusted_base_url_request,
         resolve_byok_base_url_allowlist,
         validate_base_url_override,

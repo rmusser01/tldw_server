@@ -34,7 +34,7 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventType,
     MandatoryAuditWriteError,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import replace_placeholders
 from tldw_Server_API.app.core.Character_Chat.constants import DEFAULT_CHARACTER_NAME
 from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
@@ -1507,7 +1507,7 @@ def resolve_model_context_window(provider: str, model: str) -> Any:
     if not normalized_provider or not normalized_model:
         return None
     try:
-        from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+        from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
             get_llm_provider_override,
         )
 

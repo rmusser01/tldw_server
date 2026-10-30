@@ -5,7 +5,7 @@ import json
 from collections.abc import AsyncIterator, Iterable
 from typing import Any, Callable
 
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
 )
 from tldw_Server_API.app.core.config import load_settings

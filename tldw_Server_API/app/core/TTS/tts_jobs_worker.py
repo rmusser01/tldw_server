@@ -21,12 +21,12 @@ from tldw_Server_API.app.core.Audio.tts_service import (
     _infer_tts_provider_from_model,
     _resolve_tts_byok,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import is_trusted_base_url_principal
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import is_trusted_base_url_principal
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
     resolve_byok_credentials,
 )
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
     refresh_llm_provider_overrides,
     shutdown_llm_provider_override_recovery,
     start_llm_provider_override_refresh_service,

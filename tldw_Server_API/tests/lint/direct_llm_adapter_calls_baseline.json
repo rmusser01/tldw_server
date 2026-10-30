@@ -1,7 +1,6 @@
 {
   "api/v1/endpoints/audio/audio_streaming.py": {"references": 1, "reason": null},
   "api/v1/endpoints/media/document_insights.py": {"references": 1, "reason": null},
-  "core/AuthNZ/byok_testing.py": {"references": 1, "reason": null},
   "core/Claims_Extraction/ingestion_claims.py": {"references": 1, "reason": null},
   "core/Data_Tables/jobs_worker.py": {"references": 1, "reason": null},
   "core/Evaluations/cli/evals_cli.py": {"references": 1, "reason": null},
@@ -18,6 +17,7 @@
   "core/Prompt_Management/prompt_studio/prompt_generator.py": {"references": 1, "reason": null},
   "core/Prompt_Management/prompt_studio/prompt_improver.py": {"references": 1, "reason": null},
   "core/Prompt_Management/prompt_studio/test_runner.py": {"references": 1, "reason": null},
+  "core/Provider_Credentials/byok_testing.py": {"references": 1, "reason": "moved from core/AuthNZ/byok_testing.py (TASK-13950.17)"},
   "core/Streaming/speech_chat_service.py": {"references": 3, "reason": null},
   "core/WebSearch/Web_Search.py": {"references": 1, "reason": null},
   "core/Web_Scraping/WebSearch_APIs.py": {"references": 1, "reason": null},
