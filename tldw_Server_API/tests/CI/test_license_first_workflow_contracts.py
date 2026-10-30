@@ -1399,6 +1399,7 @@ def test_backend_required_enforces_http_usage_guard() -> None:
     [
         "tldw_Server_API/tests/lint/test_function_size_ratchet.py",
         "tldw_Server_API/tests/lint/test_charactersragdb_surface_ratchet.py",
+        "tldw_Server_API/tests/lint/test_service_singleton_ratchet.py",
     ],
 )
 def test_backend_required_enforces_size_ratchets(ratchet: str) -> None:
