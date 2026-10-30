@@ -14,11 +14,9 @@ async def _setup_isolated_authnz(monkeypatch, db_path: Path):
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("AUTH_MODE", "single_user")
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 
     reset_settings()
-    await reset_db_pool()
     ensure_authnz_tables(db_path)
 
 
@@ -65,7 +63,7 @@ def _reset_app_lifecycle(app) -> None:
 
 
 @pytest.mark.asyncio
-async def test_admin_create_team_conflict_returns_409(monkeypatch, tmp_path):
+async def test_admin_create_team_conflict_returns_409(monkeypatch, tmp_path, fresh_services):
     base_dir = tmp_path / "admin_conflict_team"
     base_dir.mkdir(parents=True, exist_ok=True)
     db_path = base_dir / "authnz_admin.db"
@@ -91,7 +89,7 @@ async def test_admin_create_team_conflict_returns_409(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_admin_create_role_conflict_returns_409(monkeypatch, tmp_path):
+async def test_admin_create_role_conflict_returns_409(monkeypatch, tmp_path, fresh_services):
     base_dir = tmp_path / "admin_conflict_role"
     base_dir.mkdir(parents=True, exist_ok=True)
     db_path = base_dir / "authnz_admin.db"
@@ -111,7 +109,7 @@ async def test_admin_create_role_conflict_returns_409(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_admin_create_permission_conflict_returns_409(monkeypatch, tmp_path):
+async def test_admin_create_permission_conflict_returns_409(monkeypatch, tmp_path, fresh_services):
     base_dir = tmp_path / "admin_conflict_perm"
     base_dir.mkdir(parents=True, exist_ok=True)
     db_path = base_dir / "authnz_admin.db"

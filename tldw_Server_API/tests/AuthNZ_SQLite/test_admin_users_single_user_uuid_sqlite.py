@@ -13,7 +13,6 @@ import pytest_asyncio
 from tldw_Server_API.app.core.AuthNZ.database import (
     DatabasePool,
     get_db_pool,
-    reset_db_pool,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -23,7 +22,7 @@ pytestmark = pytest.mark.unit
 
 @pytest_asyncio.fixture
 async def sqlite_pool(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, fresh_services
 ) -> AsyncIterator[DatabasePool]:
     """Yield a fresh SQLite AuthNZ pool and reset shared state afterwards.
 
@@ -39,12 +38,10 @@ async def sqlite_pool(
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     try:
         yield pool
     finally:
-        await reset_db_pool()
         reset_settings()
 
 

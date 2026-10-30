@@ -13,7 +13,7 @@ from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import shutdown_all_audit
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.AuthNZ import api_key_manager as manager_module
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager, reset_api_key_manager
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -26,7 +26,7 @@ pytestmark = pytest.mark.integration
 async def rotation_context(
     request: pytest.FixtureRequest,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, fresh_services,
 ) -> AsyncIterator[tuple[APIKeyManager, int]]:
     backend = request.param
     db_url = (
@@ -39,7 +39,6 @@ async def rotation_context(
     monkeypatch.setenv("JWT_SECRET_KEY", uuid.uuid4().hex + uuid.uuid4().hex)
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_databases"))
     await reset_api_key_manager()
-    await reset_db_pool()
     await shutdown_all_audit_services()
     reset_settings()
     pool = await get_db_pool()
@@ -58,7 +57,6 @@ async def rotation_context(
     finally:
         await shutdown_all_audit_services()
         await reset_api_key_manager()
-        await reset_db_pool()
         reset_settings()
 
 

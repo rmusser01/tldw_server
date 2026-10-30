@@ -106,10 +106,8 @@ async def _init_authnz_sqlite(db_path, monkeypatch) -> None:
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     try:
-        from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
         from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-        await reset_db_pool()
         reset_settings()
     except Exception:
         _ = None
@@ -167,7 +165,7 @@ async def _create_user_and_key(*, username: str, email: str, role: str = "user")
 
 
 @pytest.mark.asyncio
-async def test_e2e_chat_headers_tokens_and_requests(monkeypatch, tmp_path, rg_backend):
+async def test_e2e_chat_headers_tokens_and_requests(monkeypatch, tmp_path, rg_backend, fresh_services):
     db_path = tmp_path / "authnz_chat_headers.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
     user_id, api_key = await _create_user_and_key(username="chat-headers-user", email="chat-headers-user@example.com")
@@ -220,7 +218,7 @@ async def test_e2e_chat_headers_tokens_and_requests(monkeypatch, tmp_path, rg_ba
 
 
 @pytest.mark.asyncio
-async def test_e2e_chat_deny_headers_retry_after(monkeypatch, tmp_path, rg_backend):
+async def test_e2e_chat_deny_headers_retry_after(monkeypatch, tmp_path, rg_backend, fresh_services):
     """
     Verify that when RGSimpleMiddleware denies /api/v1/chat/completions
     via a low-RPM policy, the response includes Retry-After and
@@ -276,7 +274,7 @@ async def test_e2e_chat_deny_headers_retry_after(monkeypatch, tmp_path, rg_backe
 
 
 @pytest.mark.asyncio
-async def test_e2e_embeddings_headers_route_map(monkeypatch, tmp_path, rg_backend):
+async def test_e2e_embeddings_headers_route_map(monkeypatch, tmp_path, rg_backend, fresh_services):
     db_path = tmp_path / "authnz_embeddings_headers.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
     _user_id, api_key = await _create_user_and_key(
@@ -305,7 +303,7 @@ async def test_e2e_embeddings_headers_route_map(monkeypatch, tmp_path, rg_backen
 
 
 @pytest.mark.asyncio
-async def test_e2e_embeddings_deny_headers_retry_after(monkeypatch, tmp_path, rg_backend):
+async def test_e2e_embeddings_deny_headers_retry_after(monkeypatch, tmp_path, rg_backend, fresh_services):
     db_path = tmp_path / "authnz_embeddings_deny.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
     _user_id, api_key = await _create_user_and_key(
@@ -384,7 +382,7 @@ async def test_e2e_mcp_headers_route_map(monkeypatch, rg_backend):
 
 
 @pytest.mark.asyncio
-async def test_e2e_audio_websocket_streams_limit(monkeypatch, tmp_path, rg_backend):
+async def test_e2e_audio_websocket_streams_limit(monkeypatch, tmp_path, rg_backend, fresh_services):
     db_path = tmp_path / "authnz_audio_ws.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
     _user_id, api_key = await _create_user_and_key(username="audio-ws-user", email="audio-ws-user@example.com")
@@ -443,7 +441,7 @@ async def test_e2e_audio_websocket_streams_limit(monkeypatch, tmp_path, rg_backe
 
 
 @pytest.mark.asyncio
-async def test_e2e_audio_transcriptions_headers_and_mocked_stt(monkeypatch, tmp_path, rg_backend):
+async def test_e2e_audio_transcriptions_headers_and_mocked_stt(monkeypatch, tmp_path, rg_backend, fresh_services):
     db_path = tmp_path / "authnz_audio_transcriptions.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
     _user_id, api_key = await _create_user_and_key(

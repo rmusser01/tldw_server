@@ -15,10 +15,8 @@ async def _init_authnz_sqlite(db_path, monkeypatch) -> None:
     """Point AuthNZ at a throwaway SQLite DB and reset cached pools."""
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("AUTH_MODE", "multi_user")
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
     from tldw_Server_API.app.core.AuthNZ.initialize import (
         ensure_authnz_schema_ready_once,
@@ -61,7 +59,7 @@ async def _create_admin_api_key(*, username: str, email: str) -> str:
 
 
 @pytest.mark.asyncio
-async def test_coverage_endpoint_forwards_limit(monkeypatch, tmp_path):
+async def test_coverage_endpoint_forwards_limit(monkeypatch, tmp_path, fresh_services):
     """limit is forwarded: larger limits return longer (uncapped) lists."""
     db_path = tmp_path / "authnz_rg_coverage_limit.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
@@ -97,7 +95,7 @@ async def test_coverage_endpoint_forwards_limit(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_coverage_endpoint_rejects_out_of_bounds_limit(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, fresh_services
 ):
     """The FastAPI query bounds (1-5000) reject invalid limits."""
     db_path = tmp_path / "authnz_rg_coverage_bounds.db"

@@ -177,7 +177,7 @@ async def _seed_reference_image_asset(
 
 
 @pytest.fixture()
-def client_with_user(monkeypatch):
+def client_with_user(monkeypatch, fresh_services):
     async def override_user():
         return User(id=321, username="tester", email=None, is_active=True)
 
@@ -198,12 +198,12 @@ def client_with_user(monkeypatch):
     app = None
     try:
         from importlib import import_module, reload
-        from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
         from tldw_Server_API.app.core.AuthNZ.initialize import ensure_single_user_rbac_seed_if_needed
         from tldw_Server_API.app.core.DB_Management.Users_DB import reset_users_db
+        from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
         # Ensure settings/pools pick up the test database and seed the single-user row at id=321.
-        asyncio.run(reset_db_pool())
+        reset_settings()
         asyncio.run(reset_users_db())
         asyncio.run(ensure_single_user_rbac_seed_if_needed())
 

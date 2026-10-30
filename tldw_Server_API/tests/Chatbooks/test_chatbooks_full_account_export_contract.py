@@ -12,7 +12,8 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import chatbooks as chatbooks_endpoints
 from tldw_Server_API.app.api.v1.schemas.chatbook_schemas import CreateChatbookRequest
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.Chat.document_generator import (
     DocumentGeneratorService,
@@ -42,21 +43,18 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-async def full_account_user(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[str]:
+async def full_account_user(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fresh_services) -> AsyncIterator[str]:
     """Seed the profile required by a full export in a private AuthNZ database."""
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
-    await reset_db_pool()
-    try:
-        pool = await get_db_pool()
-        await create_authnz_test_user(
-            pool,
-            user_id=1,
-            username="account-export",
-            email="account-export@example.test",
-        )
-        yield "account-export@example.test"
-    finally:
-        await reset_db_pool()
+    reset_settings()  # the removed reset_db_pool() also dropped the cached settings
+    pool = await get_db_pool()
+    await create_authnz_test_user(
+        pool,
+        user_id=1,
+        username="account-export",
+        email="account-export@example.test",
+    )
+    yield "account-export@example.test"
 
 
 class _DummyAuditService:

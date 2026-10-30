@@ -13,7 +13,7 @@ import pytest
 
 
 async def _make_repo(tmp_path: Path, monkeypatch: Any):
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -23,7 +23,6 @@ async def _make_repo(tmp_path: Path, monkeypatch: Any):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -146,7 +145,7 @@ class _FakeGitTrustService:
 @pytest.mark.asyncio
 async def test_governance_pack_trust_service_enforces_local_root_allowlist(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_trust_service import (
         McpHubGovernancePackTrustService,
@@ -182,7 +181,7 @@ async def test_governance_pack_trust_service_enforces_local_root_allowlist(
 @pytest.mark.asyncio
 async def test_governance_pack_trust_service_enforces_git_repo_and_ref_policy(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_trust_service import (
         McpHubGovernancePackTrustService,
@@ -229,7 +228,7 @@ async def test_governance_pack_trust_service_enforces_git_repo_and_ref_policy(
 @pytest.mark.asyncio
 async def test_governance_pack_trust_policy_persists_as_deployment_wide_config(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_trust_service import (
         McpHubGovernancePackTrustService,
@@ -265,7 +264,7 @@ async def test_governance_pack_trust_policy_persists_as_deployment_wide_config(
 @pytest.mark.asyncio
 async def test_governance_pack_trust_service_normalizes_structured_signers_and_legacy_fingerprints(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_trust_service import (
         McpHubGovernancePackTrustService,
@@ -325,7 +324,7 @@ async def test_governance_pack_trust_service_normalizes_structured_signers_and_l
 @pytest.mark.asyncio
 async def test_governance_pack_trust_service_updates_legacy_policy_rows_without_false_stale_conflicts(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_trust_service import (
         McpHubGovernancePackTrustService,
@@ -386,7 +385,7 @@ async def test_governance_pack_trust_service_updates_legacy_policy_rows_without_
 @pytest.mark.asyncio
 async def test_governance_pack_trust_service_keeps_structured_signer_status_authoritative_over_legacy_fingerprints(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_trust_service import (
         McpHubGovernancePackTrustService,
@@ -429,7 +428,7 @@ async def test_governance_pack_trust_service_keeps_structured_signer_status_auth
 @pytest.mark.asyncio
 async def test_governance_pack_trust_service_rejects_duplicate_structured_signer_fingerprints(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_trust_service import (
         McpHubGovernancePackTrustService,
@@ -466,7 +465,7 @@ async def test_governance_pack_trust_service_rejects_duplicate_structured_signer
 @pytest.mark.asyncio
 async def test_governance_pack_trust_service_rejects_invalid_structured_signer_status(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_trust_service import (
         McpHubGovernancePackTrustService,
@@ -498,7 +497,7 @@ async def test_governance_pack_trust_service_rejects_invalid_structured_signer_s
 @pytest.mark.asyncio
 async def test_governance_pack_trust_service_rejects_blank_repo_binding(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_trust_service import (
         McpHubGovernancePackTrustService,
@@ -530,7 +529,7 @@ async def test_governance_pack_trust_service_rejects_blank_repo_binding(
 @pytest.mark.asyncio
 async def test_governance_pack_trust_service_rejects_empty_structured_repo_bindings(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_trust_service import (
         McpHubGovernancePackTrustService,
@@ -562,7 +561,7 @@ async def test_governance_pack_trust_service_rejects_empty_structured_repo_bindi
 @pytest.mark.asyncio
 async def test_governance_pack_trust_service_rejects_blank_legacy_fingerprint(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_trust_service import (
         McpHubGovernancePackTrustService,
@@ -588,7 +587,7 @@ async def test_governance_pack_trust_service_rejects_blank_legacy_fingerprint(
 @pytest.mark.asyncio
 async def test_governance_pack_trust_service_rejects_invalid_legacy_fingerprint_type(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_trust_service import (
         McpHubGovernancePackTrustService,
@@ -614,7 +613,7 @@ async def test_governance_pack_trust_service_rejects_invalid_legacy_fingerprint_
 @pytest.mark.asyncio
 async def test_governance_pack_trust_service_denies_git_evaluation_when_persisted_policy_is_invalid(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_trust_service import (
         McpHubGovernancePackTrustService,
@@ -649,7 +648,7 @@ async def test_governance_pack_trust_service_denies_git_evaluation_when_persiste
 @pytest.mark.asyncio
 async def test_governance_pack_trust_service_rejects_stale_write_after_precheck_race(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_trust_service import (
         GovernancePackTrustPolicyStaleError,
@@ -728,7 +727,7 @@ async def test_governance_pack_trust_service_rejects_stale_write_after_precheck_
 @pytest.mark.asyncio
 async def test_governance_pack_trust_service_filters_signers_by_repo_bindings_when_evaluating_git_sources(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_trust_service import (
         McpHubGovernancePackTrustService,
@@ -804,7 +803,7 @@ async def test_governance_pack_trust_service_filters_signers_by_repo_bindings_wh
 @pytest.mark.asyncio
 async def test_governance_pack_trust_service_excludes_inactive_and_revoked_signers_from_git_evaluation(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_trust_service import (
         McpHubGovernancePackTrustService,
@@ -861,7 +860,7 @@ async def test_governance_pack_trust_service_excludes_inactive_and_revoked_signe
 @pytest.mark.asyncio
 async def test_distribution_service_resolves_allowed_local_pack_and_digest(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_distribution_service import (
         McpHubGovernancePackDistributionService,
@@ -897,7 +896,7 @@ async def test_distribution_service_resolves_allowed_local_pack_and_digest(
 @pytest.mark.asyncio
 async def test_distribution_service_resolve_local_path_uses_thread_offload(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services import mcp_hub_governance_pack_distribution_service as distribution_module
     from tldw_Server_API.app.services.mcp_hub_governance_pack_distribution_service import (
@@ -940,7 +939,7 @@ async def test_distribution_service_resolve_local_path_uses_thread_offload(
 @pytest.mark.asyncio
 async def test_distribution_service_rejects_local_pack_outside_allowlist(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_distribution_service import (
         McpHubGovernancePackDistributionService,
@@ -1309,7 +1308,7 @@ def test_distribution_service_verify_git_revision_sync_reports_unsupported_signa
 @pytest.mark.asyncio
 async def test_distribution_service_uses_canonicalized_repo_for_trust_matching(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_distribution_service import (
         McpHubGovernancePackDistributionService,
@@ -1543,7 +1542,7 @@ async def test_distribution_service_derives_summary_fields_from_structured_verif
 @pytest.mark.asyncio
 async def test_distribution_service_revalidates_prepared_candidate_with_revoked_signer(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch, fresh_services,
 ) -> None:
     from tldw_Server_API.app.services.mcp_hub_governance_pack_distribution_service import (
         McpHubGovernancePackDistributionService,

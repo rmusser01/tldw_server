@@ -4,7 +4,6 @@ import pytest
 
 
 async def _make_workspace_provider_installations_repo(tmp_path, monkeypatch):
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.repos import get_workspace_provider_installations_repo as get_repo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
@@ -13,12 +12,11 @@ async def _make_workspace_provider_installations_repo(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
     return await get_repo()
 
 
 @pytest.mark.asyncio
-async def test_upsert_and_list_workspace_installations_round_trip(tmp_path, monkeypatch):
+async def test_upsert_and_list_workspace_installations_round_trip(tmp_path, monkeypatch, fresh_services):
     repo = await _make_workspace_provider_installations_repo(tmp_path, monkeypatch)
 
     await repo.upsert_installation(
@@ -38,7 +36,7 @@ async def test_upsert_and_list_workspace_installations_round_trip(tmp_path, monk
 
 
 @pytest.mark.asyncio
-async def test_disable_and_delete_workspace_installation(tmp_path, monkeypatch):
+async def test_disable_and_delete_workspace_installation(tmp_path, monkeypatch, fresh_services):
     repo = await _make_workspace_provider_installations_repo(tmp_path, monkeypatch)
 
     await repo.upsert_installation(

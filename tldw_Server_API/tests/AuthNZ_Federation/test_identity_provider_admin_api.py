@@ -7,7 +7,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
-from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.federation import oidc_service as oidc_module
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
@@ -20,7 +19,7 @@ pytestmark = pytest.mark.integration
 @pytest.fixture
 def admin_identity_client(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    tmp_path: Path, fresh_services,
 ):
     db_path = tmp_path / "admin_identity_providers.db"
     monkeypatch.setenv("AUTH_MODE", "multi_user")
@@ -34,7 +33,6 @@ def admin_identity_client(
         raising=False,
     )
 
-    asyncio.run(reset_db_pool())
     reset_settings()
 
     from tldw_Server_API.app.main import app as fastapi_app
@@ -69,7 +67,6 @@ def admin_identity_client(
             yield client
     finally:
         fastapi_app.dependency_overrides.pop(get_auth_principal, None)
-        asyncio.run(reset_db_pool())
         reset_settings()
 
 
