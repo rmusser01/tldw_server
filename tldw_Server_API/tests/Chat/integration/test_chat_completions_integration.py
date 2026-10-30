@@ -187,17 +187,17 @@ def valid_auth_token() -> str:
 # --- Provider lists and helpers defined locally for this test file ---
 try:
     # These are used to determine which providers are configured and have keys.
-    # The actual APP_API_KEYS should be loaded by your application's schema/config logic.
+    # The keys come from config_llm_providers.get_api_keys(), read once at import.
     from tldw_Server_API.app.core.config_llm_providers import get_api_keys
     from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 
-    APP_API_KEYS_FROM_SCHEMA = get_api_keys()
+    APP_API_KEYS_FROM_CONFIG = get_api_keys()
     ALL_CONFIGURED_PROVIDERS_FROM_APP = get_registry().list_providers()
 except ImportError:
-    APP_API_KEYS_FROM_SCHEMA = {}
+    APP_API_KEYS_FROM_CONFIG = {}
     ALL_CONFIGURED_PROVIDERS_FROM_APP = []
     print(
-        "Warning: Could not import APP_API_KEYS_FROM_SCHEMA or adapter registry for integration test parametrization."
+        "Warning: Could not import get_api_keys or the adapter registry for integration test parametrization."
     )
 
 
@@ -225,7 +225,7 @@ def get_commercial_providers_with_keys_integration():
     providers_with_keys = []
     for p in potentially_commercial:
         # Only require the presence of a non-empty key
-        api_key = APP_API_KEYS_FROM_SCHEMA.get(p)
+        api_key = APP_API_KEYS_FROM_CONFIG.get(p)
         if api_key:
             providers_with_keys.append(p)
     return providers_with_keys
@@ -791,12 +791,12 @@ def test_local_provider_non_streaming_no_template(
         "custom-openai-api-2": "CUSTOM_OPENAI_API_IP_2",
     }
     required_env_var = config_var_map.get(provider_name)
-    # Skip if the URL env var is not set AND the provider isn't one that might have its URL in APP_API_KEYS_FROM_SCHEMA (less common)
+    # Skip if the URL env var is not set AND the provider isn't one that might have its URL in APP_API_KEYS_FROM_CONFIG (less common)
     if required_env_var and not os.getenv(required_env_var):
         # Some "local" providers might have their full URL defined in config_llm_providers.get_api_keys if they are hosted
         # For truly local dev instances, checking the env var is more typical.
         # This skip logic might need refinement based on how you manage local endpoint URLs.
-        is_url_in_app_config = APP_API_KEYS_FROM_SCHEMA.get(provider_name, "").startswith("http")
+        is_url_in_app_config = APP_API_KEYS_FROM_CONFIG.get(provider_name, "").startswith("http")
         if not is_url_in_app_config:
             pytest.skip(
                 f"Environment variable like '{required_env_var}' for {provider_name} URL not set, and not found in app config. Skipping."
