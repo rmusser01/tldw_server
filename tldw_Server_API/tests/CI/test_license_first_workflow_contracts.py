@@ -1425,10 +1425,11 @@ def test_backend_required_enforces_size_ratchets(ratchet: str) -> None:
         "tldw_Server_API/tests/lint/test_layering_contract.py",
         "tldw_Server_API/tests/lint/test_db_management_logic_imports.py",
         "tldw_Server_API/tests/lint/test_core_to_api_import_boundary.py",
+        "tldw_Server_API/tests/lint/test_schemas_config_boundary.py",
     ],
 )
 def test_backend_required_enforces_layering_ratchets(ratchet: str) -> None:
-    """TASK-13950.9: the layering contract and its core -> api view run in a required step."""
+    """TASK-13950.9 and .14: the layering contract, its core -> api view and the schemas guard run in a required step."""
     import shlex
 
     from tldw_Server_API.tests.lint.test_layering_contract import BASE_ENV
