@@ -34,6 +34,11 @@ CORE_OWNED: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("_compat", "Utils.pydantic_compat", ("Field",)),
     ("audio_schemas", "TTS.speech_schemas", ("NormalizationOptions", "OpenAISpeechRequest")),
     ("audio_schemas", "Streaming.speech_chat_schemas", ("SpeechChatLLMConfig", "SpeechChatRequest", "SpeechChatResponse", "SpeechChatSTTConfig", "SpeechChatTTSConfig", "SpeechChatTiming", "SpeechChatTokenUsage")),
+    ("research_workspace_capabilities", "Research_Workspace.research_workspace_capabilities", ("ResearchWorkspaceCapabilitiesResponse", "ResearchWorkspaceCapability", "ResearchWorkspaceCapabilityId", "ResearchWorkspaceCapabilityMode", "ResearchWorkspaceCapabilityStatus", "ResearchWorkspaceOverallStatus")),
+    ("research_workspace_outputs", "Research_Workspace.research_workspace_outputs", ("ResearchWorkspaceOutputArtifactType", "ResearchWorkspaceOutputSettings", "ResearchWorkspaceOutputStatus", "ResearchWorkspaceOutputStatusResponse", "ResearchWorkspaceOutputSubmitRequest", "ResearchWorkspaceOutputSubmitResponse")),
+    ("workspace_schemas", "Workspaces.workspace_schemas", ("WorkspaceArtifactRedaction", "WorkspaceArtifactResponse", "WorkspaceArtifactReviewState", "WorkspaceAssistantDefaultDegradedReason", "WorkspaceAssistantDefaults", "WorkspaceAssistantKind", "WorkspaceEffectiveAssistantDefault", "WorkspaceEffectiveAssistantDefaultSource", "WorkspaceEffectiveAssistantDefaultStatus", "WorkspaceOperationBase", "WorkspaceOperationStatus", "WorkspacePersonaMemoryMode")),
+    ("chat_session_schemas", "Workspaces.chat_session_schemas", ("ALLOWED_ASSISTANT_KINDS", "ALLOWED_PERSONA_MEMORY_MODES", "ChatSessionCreate")),
+    ("shared_workspace_recipient_schemas", "Sharing.shared_workspace_recipient_schemas", ("CloneWarningCode", "SharedWorkspaceCloneCounts", "SharedWorkspaceCloneError", "SharedWorkspaceCloneOperationResponse", "SharedWorkspaceCloneProgress", "SharedWorkspaceCloneReadiness", "SharedWorkspaceCloneResult", "SharedWorkspaceCloneWarning", "ShortCode", "_RecipientModel")),
 )
 
 
