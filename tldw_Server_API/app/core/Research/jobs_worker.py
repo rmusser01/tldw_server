@@ -10,6 +10,12 @@ from pathlib import Path
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+    refresh_llm_provider_overrides,
+    shutdown_llm_provider_override_recovery,
+    start_llm_provider_override_refresh_service,
+)
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
@@ -100,5 +106,19 @@ async def run_research_jobs_worker(
                 await _stop_watcher_task
 
 
+async def main(stop_event: asyncio.Event | None = None) -> None:
+    """Own standalone provider policy initialization and its event-loop resources."""
+    pool = await get_db_pool()
+    try:
+        await refresh_llm_provider_overrides(pool, force=True)
+        start_llm_provider_override_refresh_service()
+        await run_research_jobs_worker(stop_event)
+    finally:
+        try:
+            await shutdown_llm_provider_override_recovery()
+        finally:
+            await pool.close()
+
+
 if __name__ == "__main__":
-    asyncio.run(run_research_jobs_worker())
+    asyncio.run(main())
