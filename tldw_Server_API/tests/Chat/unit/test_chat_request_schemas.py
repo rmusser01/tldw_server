@@ -376,3 +376,11 @@ def test_function_definition_type_array():
     with pytest.raises(ValidationError) as exc_info:
         FunctionDefinition(name="invalid_union", parameters=invalid_union_params)
     assert "Invalid JSON Schema type" in str(exc_info.value)
+
+
+def test_api_keys_maps_are_gone():
+    from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+    from tldw_Server_API.app.api.v1.schemas import chat_request_schemas
+
+    assert not hasattr(chat_request_schemas, "API_KEYS")
+    assert not hasattr(chat_endpoint, "API_KEYS")

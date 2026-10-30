@@ -117,9 +117,6 @@ from tldw_Server_API.app.api.v1.schemas.chat_knowledge_schemas import (
     KnowledgeSaveResponse,
 )
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
-    API_KEYS as SCHEMAS_API_KEYS,
-)
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     DEFAULT_LLM_PROVIDER,
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -428,11 +425,6 @@ def _request_has_endpoint_override(request_data: Any) -> bool:
 # ---------------------------------------------------------------------------
 # Constants & helpers
 # ---------------------------------------------------------------------------
-# Backward-compatibility for tests that patch API_KEYS directly (in schemas module).
-# This map is for test overrides/transitional compatibility; prefer get_api_keys()
-# / resolve_provider_api_key for new code paths.
-API_KEYS = SCHEMAS_API_KEYS
-
 router = APIRouter()
 conversations_alias_router = APIRouter()
 

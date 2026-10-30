@@ -626,7 +626,7 @@ def test_missing_api_key_for_required_provider(
     labels = {"provider": "openai", "operation": "chat"}
     before = reg.get_metric_stats("byok_missing_credentials_total", labels=labels).get("count", 0)
 
-    # Ensure endpoint prefers module-level API_KEYS for this test to avoid env/interference
+    # Ensure endpoint reads no real provider keys for this test to avoid env/interference
     # Do NOT enable TEST_MODE here, since TEST_MODE enables auto-mock for some providers and bypasses 503.
     monkeypatch.delenv("TEST_MODE", raising=False)
     monkeypatch.setattr(

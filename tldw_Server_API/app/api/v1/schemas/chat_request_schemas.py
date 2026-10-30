@@ -197,11 +197,6 @@ def _get_setting(env_var, section, key, default=""):
 from tldw_Server_API.app.core.config_llm_providers import ALL_SUPPORTED_PROVIDER_NAMES_LIST, get_api_keys  # noqa: F401 - re-exported until TASK-13950.14 retargets importers
 
 
-# Keep API_KEYS for backward compatibility but make it compute on first access.
-# This map is for test overrides and transitional compatibility; new code should
-# use get_api_keys() / resolve_provider_api_key.
-API_KEYS = get_api_keys()
-
 # Runtime validation below enforces provider ids; keep this Python 3.10-safe.
 SUPPORTED_API_ENDPOINTS = str
 
