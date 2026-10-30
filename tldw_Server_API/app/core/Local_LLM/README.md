@@ -13,7 +13,8 @@ offline or self-hosted model deployments.
 - llama.cpp control plane: `llamacpp_*` modules.
 - API endpoint and schemas: `app/api/v1/endpoints/llamacpp.py`,
   `app/api/v1/schemas/llamacpp_schemas.py`, and
-  `app/api/v1/schemas/llamacpp_admin_schemas.py`.
+  `app/api/v1/schemas/llamacpp_admin_schemas.py`, which re-exports the models defined in this package's
+  `llamacpp_admin_schemas.py`.
 - Tests: `tests/LLM_Local/`.
 
 ## Responsibilities

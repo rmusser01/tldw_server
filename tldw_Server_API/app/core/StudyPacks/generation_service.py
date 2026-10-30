@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
-from tldw_Server_API.app.api.v1.schemas.study_packs import StudyPackCreateJobRequest
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError, ConflictError
 from tldw_Server_API.app.core.Flashcards.scheduler_sm2 import get_default_scheduler_settings
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
@@ -25,6 +24,7 @@ from tldw_Server_API.app.core.StudyPacks.provenance import (
     normalize_citations_for_persistence,
 )
 from tldw_Server_API.app.core.StudyPacks.source_resolver import StudySourceResolver
+from tldw_Server_API.app.core.StudyPacks.study_pack_schemas import StudyPackCreateJobRequest
 from tldw_Server_API.app.core.StudyPacks.types import (
     StudyCitationDraft,
     StudyPackCardDraft,
