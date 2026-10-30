@@ -7,8 +7,8 @@ Three counts, each frozen per module in its own baseline JSON as a ceiling
     tldw_Server_API/app. Modules in an in-app ``tests`` package directory are skipped.
   * getters (endpoint_getter_calls_baseline.json): in modules under ``api/<version>/endpoints/``
     (any depth), the distinct calls inside a function body (at any nesting) whose callee is a bare
-    name matching ``get_\\w+`` and that take no arguments. Module-level calls, decorators and
-    defaults do not count, nor do attribute calls (``mod.get_x()``).
+    name matching ``get_\\w+`` and that take no arguments. Module-level calls and the decorators and
+    defaults of nested defs do not count, but calls inside lambdas do; nor do attribute calls (``mod.get_x()``).
   * state (api_deps_module_state_baseline.json): in the direct children of
     ``api/<version>/API_Deps/``, the module-level ``Assign``/``AnnAssign`` statements whose value is
     a call to a STATE_CONSTRUCTORS name (``Lock()`` or ``threading.Lock()``). Module-level means
@@ -107,17 +107,28 @@ def _is_bare_getter(node: ast.AST) -> bool:
     )
 
 
+def _body_nodes(node: ast.AST):
+    """``node`` and its descendants; a nested def contributes its body only, not decorators or defaults."""
+    yield node
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        children = node.body
+    else:
+        children = ast.iter_child_nodes(node)
+    for child in children:
+        yield from _body_nodes(child)
+
+
 def measure_getter_calls(root: Path = APP_ROOT) -> dict[str, dict[str, int]]:
     """``{endpoint module: {"calls": n}}`` for modules with bare getter calls in function bodies."""
     found = {}
     for key, tree in _modules(root):
         if not _ENDPOINTS.match(key):
             continue
-        calls: set[int] = set()  # ast.walk visits a nested function's calls once per enclosing function
+        calls: set[int] = set()  # a nested function's calls are reached once per enclosing function
         for func in ast.walk(tree):
             if isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 for stmt in func.body:
-                    calls.update(id(node) for node in ast.walk(stmt) if _is_bare_getter(node))
+                    calls.update(id(node) for node in _body_nodes(stmt) if _is_bare_getter(node))
         if calls:
             found[key] = {"calls": len(calls)}
     return found
@@ -131,6 +142,8 @@ def _module_level(body: list[ast.stmt]):
             yield from _module_level(stmt.body + stmt.orelse)
         elif isinstance(stmt, (ast.With, ast.AsyncWith)):
             yield from _module_level(stmt.body)
+        elif isinstance(stmt, ast.Match):
+            yield from _module_level([s for case in stmt.cases for s in case.body])
         elif isinstance(stmt, (ast.Try, getattr(ast, "TryStar", ast.Try))):
             handlers = [s for h in stmt.handlers for s in h.body]
             yield from _module_level(stmt.body + handlers + stmt.orelse + stmt.finalbody)
@@ -191,6 +204,7 @@ def test_each_counter_counts_its_shape(tmp_path: Path) -> None:
             "    return get_q()\n"
         ),
         "api/v1/endpoints/sub/f.py": "def h():\n    return get_mcp_server()\n",
+        "api/v1/endpoints/nest.py": "def h():\n    @get_deco()\n    def inner(x=get_dflt()):\n        return get_body()\n",
         "api/v1/API_Deps/d.py": (
             "import threading\nfrom cachetools import LRUCache\n"
             "_lock = threading.Lock()\n"
@@ -198,14 +212,16 @@ def test_each_counter_counts_its_shape(tmp_path: Path) -> None:
             "_plain = {}\n"
             "def f():\n    lock = threading.Lock()\n"
             "class C:\n    lock = threading.RLock()\n"
+            "match 1:\n    case 1:\n        _m = threading.Event()\n"
         ),
     })
     assert measure_globals(root) == {"core/X/a.py": {"globals": 2}}
     assert measure_getter_calls(root) == {
         "api/v1/endpoints/e.py": {"calls": 3},  # get_db_pool, get_w (nested), get_q
         "api/v1/endpoints/sub/f.py": {"calls": 1},
+        "api/v1/endpoints/nest.py": {"calls": 1},  # get_body only; the decorator and default are not counted
     }
-    assert measure_module_state(root) == {"api/v1/API_Deps/d.py": {"state": 2}}
+    assert measure_module_state(root) == {"api/v1/API_Deps/d.py": {"state": 3}}
 
 
 @pytest.mark.parametrize(("ratchet", "measure", "field"), [(GLOBALS, measure_globals, "globals"), (GETTERS, measure_getter_calls, "calls"), (STATE, measure_module_state, "state")])
