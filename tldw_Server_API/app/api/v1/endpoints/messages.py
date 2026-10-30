@@ -62,7 +62,7 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     normalize_provider_stream_error,
 )
 from tldw_Server_API.app.core.config import loaded_config_data
-from tldw_Server_API.app.core.exceptions import ChatModelNotAvailableError, raise_detached_error
+from tldw_Server_API.app.core.exceptions import ChatModelNotAvailableError, LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.http_client import create_async_client as async_http_client_factory
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
 from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
@@ -2167,7 +2167,7 @@ async def _handle_messages(
         if stream:
             try:
                 stream_iter = await perform_chat_api_call_async(**call_params)
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, LLMQuotaExceededError):
                 raise
             except Exception:  # noqa: BLE001 - arbitrary adapter failures are untrusted
                 raise_detached_error(_messages_upstream_http_exception())
@@ -2203,7 +2203,7 @@ async def _handle_messages(
             if converted_payload is None:
                 raise ValueError("Invalid converted-provider response")
             converted_response = JSONResponse(converted_payload)
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, LLMQuotaExceededError):
             raise
         except Exception:  # noqa: BLE001 - arbitrary adapter failures are untrusted
             raise_detached_error(_messages_upstream_http_exception())

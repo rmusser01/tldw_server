@@ -6172,6 +6172,7 @@ async def create_chat_completion(
                     status.HTTP_403_FORBIDDEN,
                     status.HTTP_404_NOT_FOUND,
                     status.HTTP_409_CONFLICT,
+                    status.HTTP_402_PAYMENT_REQUIRED,
                     status.HTTP_413_CONTENT_TOO_LARGE,
                     status.HTTP_429_TOO_MANY_REQUESTS,
                     status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints import messages as messages_endpoint
 from tldw_Server_API.app.api.v1.schemas.anthropic_messages import AnthropicMessagesRequest
@@ -445,3 +446,32 @@ async def test_a_native_call_let_through_at_the_boundary_is_still_checked_when_n
         )
     assert refused.value.detail["category"] == "llm_tokens_month"
     assert calls == []
+
+
+@pytest.mark.parametrize("stream", [False, True], ids=["json", "stream"])
+async def test_an_adapter_call_refused_at_the_call_after_an_own_key_admission_answers_402(
+    monkeypatch, stream: bool
+) -> None:
+    """The real adapter dispatch refuses a server-key call the boundary let through; the client sees 402, not 502 (TASK-13955)."""
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_calls
+
+    async def _own_key(_uid: Any, _provider: str) -> bool:
+        """The boundary believes the provider runs on the user's own key."""
+        return True
+
+    _stub_endpoint(monkeypatch)
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
+    refuse_llm_calls(monkeypatch)
+    with scoped_context(user_id=5), pytest.raises(HTTPException) as refused:
+        await messages_endpoint._handle_messages(
+            AnthropicMessagesRequest(
+                model="openai/gpt-4", messages=[{"role": "user", "content": "hi"}], max_tokens=10, stream=stream
+            ),
+            current_user=SimpleNamespace(id=5, id_int=5),
+            request=SimpleNamespace(),
+            anthropic_version=None,
+            anthropic_beta=None,
+        )
+    assert refused.value.status_code == 402
+    assert refused.value.detail["category"] == "llm_tokens_month"

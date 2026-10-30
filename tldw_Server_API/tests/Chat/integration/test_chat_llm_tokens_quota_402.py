@@ -165,6 +165,39 @@ def test_chat_completions_admits_an_over_limit_user_whose_provider_runs_on_their
     assert dispatched == ["local-llm"]
 
 
+def test_chat_completions_answers_402_when_the_call_itself_is_refused(
+    client, auth_token, mock_chacha_db, setup_dependencies, configure_for_mock_server, monkeypatch
+):
+    """A refusal raised at the call, as after an unmarked own-key admission, reaches the client as 402, not 500 (TASK-13955)."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    def _refused_at_the_call(**_kwargs):
+        """What the adapters' check at the call raises for a call not on the user's own key."""
+        raise LLMQuotaExceededError(
+            category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+        )
+
+    monkeypatch.setattr(chat_ep, "perform_chat_api_call", _refused_at_the_call)
+    monkeypatch.setitem(chat_ep.API_KEYS, "local-llm", "dummy-key")
+
+    request_data = ChatCompletionRequest(
+        model="local-llm",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello, how are you?")],
+        api_provider="local-llm",
+    )
+    settings = get_settings()
+    headers = {"X-CSRF-Token": client.csrf_token}
+    if settings.AUTH_MODE == "multi_user":
+        headers["Authorization"] = auth_token
+    else:
+        headers["X-API-KEY"] = auth_token
+
+    response = client.post("/api/v1/chat/completions", json=request_data.model_dump(), headers=headers)
+
+    assert response.status_code == status.HTTP_402_PAYMENT_REQUIRED, response.text
+    assert response.json()["detail"]["category"] == "llm_tokens_month"
+
+
 class _PlanSpent:
     """The hosted billing plan's LLM token check, with the org's plan already spent."""
 
