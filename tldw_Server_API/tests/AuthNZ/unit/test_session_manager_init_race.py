@@ -8,12 +8,14 @@ import pytest
 
 from tldw_Server_API.app.core.AuthNZ import session_manager as sm
 from tldw_Server_API.app.core.MCP_unified import server as mcp_server
+from tldw_Server_API.app.core.Utils.app_services import app_services
+from tldw_Server_API.tests._plugins.app_services_fixtures import fresh_app_services
 
 
 @pytest.fixture
 def fresh_state(monkeypatch):
-    monkeypatch.setattr(sm, "_session_manager", None)
-    monkeypatch.setattr(sm, "_session_manager_lock", asyncio.Lock(), raising=False)
+    monkeypatch.setattr(app_services(), "session_manager", None)
+    monkeypatch.setattr(app_services(), "session_manager_lock", asyncio.Lock())
     yield
 
 
@@ -53,17 +55,18 @@ async def test_failed_initialize_publishes_nothing(fresh_state, monkeypatch):
 
     with pytest.raises(RuntimeError):
         await sm.get_session_manager()
-    assert sm._session_manager is None
+    assert app_services().session_manager is None
 
     m = await sm.get_session_manager()
     assert m._initialized and attempts == 2
 
 
 @pytest.mark.asyncio
-async def test_reset_recreates_lock(fresh_state):
-    old = sm._session_manager_lock
-    await sm.reset_session_manager()
-    assert sm._session_manager_lock is not old
+async def test_fresh_services_gives_a_fresh_session_init_lock():
+    async with fresh_app_services() as s:
+        first = s.session_manager_lock
+    async with fresh_app_services() as s:
+        assert s.session_manager_lock is not first
 
 
 def test_get_mcp_server_single_instance_across_threads(monkeypatch):

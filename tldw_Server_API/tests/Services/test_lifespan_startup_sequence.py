@@ -50,7 +50,6 @@ async def test_run_lifespan_startup_sequence_runs_helpers_in_order_and_updates_r
     async def _fake_initialize_startup_core_components(**kwargs):
         calls.append(("core", kwargs))
         return SimpleNamespace(
-            session_manager="session-manager",
             heavy_startup_handles="heavy-handles",
         )
 
@@ -107,7 +106,6 @@ async def test_run_lifespan_startup_sequence_runs_helpers_in_order_and_updates_r
     assert calls[2][1]["test_mode"] is True
     assert "publish_shutdown_job_poller_inventory" not in calls[2][1]
     assert calls[2][1]["startup_api_key_log_value"] == "api-key-log-value"
-    assert handles.session_manager == "session-manager"
     assert handles.heavy_startup_handles == "heavy-handles"
     assert not hasattr(worker_runtime, "cleanup_task")
     assert worker_runtime.worker_lifecycle_session is worker_lifecycle_session
@@ -145,7 +143,6 @@ async def test_startup_initializes_registry_and_runs_sandbox_producer(
 
     async def _fake_initialize_startup_core_components(**kwargs):
         return SimpleNamespace(
-            session_manager="session-manager",
             heavy_startup_handles="heavy-handles",
             startup_sandbox_orchestrator="orch-sentinel",
         )
@@ -239,7 +236,6 @@ async def test_startup_blocks_on_protocol_mismatch_warning(
 
     async def _fake_initialize_startup_core_components(**kwargs):
         return SimpleNamespace(
-            session_manager="session-manager",
             heavy_startup_handles="heavy-handles",
             startup_sandbox_orchestrator="orch-sentinel",
         )
@@ -334,7 +330,6 @@ async def test_startup_warning_registry_is_available_on_app_state(
 
     async def _fake_initialize_startup_core_components(**kwargs):
         return SimpleNamespace(
-            session_manager="session-manager",
             heavy_startup_handles="heavy-handles",
             startup_sandbox_orchestrator="orch-sentinel",
         )

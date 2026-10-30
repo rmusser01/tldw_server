@@ -382,6 +382,11 @@ def _restore_auth_env_and_singletons():
     This fixture restores a small set of high-impact environment keys to their
     baseline values and resets key singletons used by the auth/jobs stacks.
     """
+    from tldw_Server_API.app.core.Utils.app_services import app_services
+    from tldw_Server_API.tests._plugins.app_services_fixtures import close_app_service
+
+    session_before = app_services().session_manager
+
     # Defensive pre-test reset: avoid stale singleton state inherited from
     # collection-time imports or prior tests.
     try:
@@ -398,6 +403,9 @@ def _restore_auth_env_and_singletons():
             os.environ.pop(key, None)
         else:
             os.environ[key] = baseline_value
+
+    # A manager the test published is shut down; the slot goes back to what the test found.
+    _run_coro_sync_best_effort(close_app_service("session_manager", restore=session_before))
 
     # Ensure subsequent tests rebuild Settings from the restored environment.
     try:

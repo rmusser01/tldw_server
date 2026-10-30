@@ -22,7 +22,7 @@ async def test_initialize_startup_core_components_runs_helpers_in_order_and_retu
 
     async def _record_auth_runtime_services(**kwargs):
         calls.append(("auth_runtime", kwargs))
-        return SimpleNamespace(session_manager="session-manager")
+        return SimpleNamespace()
 
     async def _record_chacha_warmup(**kwargs):
         calls.append(("chacha", kwargs))
@@ -85,7 +85,6 @@ async def test_initialize_startup_core_components_runs_helpers_in_order_and_retu
     assert calls[4][1]["import_exceptions"] == (ImportError,)
     assert calls[5][1]["app"] == "app"
     assert calls[5][1]["defer_heavy"] is True
-    assert handles.session_manager == "session-manager"
     assert handles.heavy_startup_handles == "heavy-startup-handles"
 
 

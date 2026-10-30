@@ -1306,7 +1306,6 @@ async def lifespan(app: FastAPI):
         startup_guard_exceptions=_STARTUP_GUARD_EXCEPTIONS,
         import_exceptions=_IMPORT_EXCEPTIONS,
     )
-    session_manager = startup_sequence_handles.session_manager
     heavy_startup_handles = startup_sequence_handles.heavy_startup_handles
 
     # Note: Audit service now uses dependency injection
@@ -1329,7 +1328,7 @@ async def lifespan(app: FastAPI):
             worker_runtime=worker_runtime,
             readiness_state=READINESS_STATE,
             db_pool=services.db_pool,
-            session_manager=session_manager,
+            session_manager=services.session_manager,
             heavy_startup_handles=heavy_startup_handles,
             build_legacy_shutdown_context=_build_legacy_shutdown_context,
             apply_shutdown_transition_gate=_apply_shutdown_transition_gate,

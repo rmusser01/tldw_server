@@ -12,7 +12,7 @@ from tldw_Server_API.app.services.startup_auth import AuthStartupError
 
 @dataclass
 class AuthRuntimeHandles:
-    session_manager: Any | None = None
+    """Nothing is stored here: the session manager lives in ``app_services()``."""
 
 
 async def initialize_auth_runtime_services(
@@ -31,7 +31,7 @@ async def initialize_auth_runtime_services(
         await _warn_if_plan_limits_unenforced()
         _warn_if_llm_quotas_defeated()
         _validate_auth_rg_startup_guards(app)
-        handles.session_manager = await _get_session_manager()
+        await _get_session_manager()  # warms the container's session_manager slot
         logger.info("App Startup: Session manager initialized")
 
         try:

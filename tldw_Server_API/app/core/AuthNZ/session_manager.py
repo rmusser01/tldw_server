@@ -60,6 +60,7 @@ from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
 from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
+from tldw_Server_API.app.core.Utils.app_services import app_services
 
 _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS = (
     asyncio.TimeoutError,
@@ -2072,34 +2073,31 @@ class SessionManager:
 #
 # Module Functions
 
-# Global instance
-_session_manager: Optional[SessionManager] = None
-# Serializes first-time init; recreated by reset_session_manager() so it never
-# stays bound to a previous event loop.
-_session_manager_lock = asyncio.Lock()
-
-
 async def get_session_manager() -> SessionManager:
-    """Get session manager singleton instance"""
-    global _session_manager
-    if _session_manager:
-        return _session_manager
-    async with _session_manager_lock:
-        if not _session_manager:
+    """Return the app's session manager, creating it on first use.
+
+    Fallback for code with no request or constructor argument; request handlers
+    take it via ``get_session_manager_dep``.
+    """
+    services = app_services()
+    if services.session_manager:
+        return services.session_manager
+    async with services.session_manager_lock:
+        if not services.session_manager:
             manager = SessionManager()
             await manager.initialize()
             # Publish only after initialize() succeeds; a failure leaves nothing behind.
-            _session_manager = manager
-    return _session_manager
+            services.session_manager = manager
+    return services.session_manager
 
 
 async def reset_session_manager():
     """Reset session manager (for testing)"""
-    global _session_manager, _session_manager_lock
-    if _session_manager:
-        await _session_manager.shutdown()
-    _session_manager = None
-    _session_manager_lock = asyncio.Lock()
+    services = app_services()
+    if services.session_manager:
+        await services.session_manager.shutdown()
+    services.session_manager = None
+    services.session_manager_lock = asyncio.Lock()
 
 
 #

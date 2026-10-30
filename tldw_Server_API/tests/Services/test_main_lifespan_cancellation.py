@@ -26,7 +26,7 @@ async def test_main_lifespan_releases_worker_and_preserves_exit(
 
     stop = threading.Event()
     worker = threading.Thread(target=stop.wait, name="uat287-owned-worker", daemon=False)
-    handles = SimpleNamespace(session_manager=object(), heavy_startup_handles=object())
+    handles = SimpleNamespace(heavy_startup_handles=object())
     entered = asyncio.Event()
 
     async def startup(**_kwargs: object) -> SimpleNamespace:
@@ -67,7 +67,6 @@ async def test_main_lifespan_releases_worker_and_preserves_exit(
 
         assert not worker.is_alive(), "lifespan skipped shutdown and left its owned worker running"
         shutdown_spy.assert_awaited_once()
-        assert shutdown_spy.call_args.kwargs["session_manager"] is handles.session_manager
     finally:
         # Red regressions must not hang the pytest interpreter itself.
         if not task.done():

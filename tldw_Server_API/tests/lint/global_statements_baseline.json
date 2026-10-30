@@ -41,7 +41,6 @@
   "core/AuthNZ/rate_limiter.py": {"globals": 2, "reason": null},
   "core/AuthNZ/rbac.py": {"globals": 2, "reason": null},
   "core/AuthNZ/scheduler.py": {"globals": 3, "reason": null},
-  "core/AuthNZ/session_manager.py": {"globals": 2, "reason": null},
   "core/AuthNZ/settings.py": {"globals": 3, "reason": null},
   "core/AuthNZ/token_blacklist.py": {"globals": 2, "reason": null},
   "core/Billing/enforcement.py": {"globals": 3, "reason": null},

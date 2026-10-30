@@ -54,6 +54,7 @@ async def discard_app_services() -> None:
         await reset_db_pool()  # pool, MCP server, API-key manager, UsersDB, RBAC and MCP caches
     except Exception as exc:
         logger.debug("discard_app_services: ignoring reset_db_pool error: {}", exc)
+    await close_app_service("session_manager")
     _set_defaults(app_services())
 
 

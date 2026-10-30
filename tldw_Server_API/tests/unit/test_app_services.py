@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -9,7 +10,9 @@ import pytest
 from fastapi import FastAPI
 
 from tldw_Server_API.app import main
+from tldw_Server_API.app.core.AuthNZ import session_manager as sm
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.Utils.app_services import app_services
 from tldw_Server_API.app.services import lifespan_shutdown_sequence, lifespan_startup_sequence
@@ -78,8 +81,8 @@ async def test_close_app_service_closes_and_empties_the_slot(fresh_services) -> 
     assert fresh_services.db_pool is None
 
 
-async def test_close_app_service_swallows_a_failing_close(fresh_services) -> None:
-    fresh_services.db_pool = _StubManager(fail=True)
+async def test_close_app_service_swallows_a_failing_close(fresh_services, monkeypatch) -> None:
+    monkeypatch.setattr(fresh_services, "db_pool", _StubManager(fail=True))
     await close_app_service("db_pool")
     assert fresh_services.db_pool is None
 
@@ -102,20 +105,58 @@ async def test_close_app_service_closes_a_close_only_object(fresh_services) -> N
 
 async def test_lifespan_publishes_the_container_and_shuts_down_what_it_holds(monkeypatch, fresh_services) -> None:
     pool = object()
+    manager = object()
 
     async def _fill_slot(**_kwargs):
-        app_services().db_pool = pool  # startup fills the slot; shutdown must see it
-        return SimpleNamespace(heavy_startup_handles=None, session_manager=None)
+        app_services().db_pool = pool  # startup fills the slots; shutdown must see them
+        app_services().session_manager = manager
+        return SimpleNamespace(heavy_startup_handles=None)
 
-    # main.py still reads .session_manager from the startup handles until Task 4.
     startup = AsyncMock(side_effect=_fill_slot)
     shutdown_spy = AsyncMock()
     monkeypatch.setattr(lifespan_startup_sequence, "run_lifespan_startup_sequence", startup)
     monkeypatch.setattr(lifespan_shutdown_sequence, "run_lifespan_shutdown_sequence", shutdown_spy)
     monkeypatch.setattr(main, "_run_startup_config_validation", lambda: None)
     assert fresh_services.db_pool is None
+    assert fresh_services.session_manager is None
     app = FastAPI()
     async with main.lifespan(app):
         assert app.state.services is app_services()
     assert startup.call_args.kwargs["app"] is app
     assert shutdown_spy.call_args.kwargs["db_pool"] is pool
+    assert shutdown_spy.call_args.kwargs["session_manager"] is manager
+
+
+async def test_get_session_manager_fills_the_slot_once_under_concurrency(fresh_services, monkeypatch) -> None:
+    calls = 0
+
+    async def slow_init(self):
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.01)
+        self._initialized = True
+
+    monkeypatch.setattr(sm.SessionManager, "initialize", slow_init)
+    managers = await asyncio.gather(*(get_session_manager() for _ in range(20)))
+    assert len({id(m) for m in managers}) == 1
+    assert fresh_services.session_manager is managers[0]
+    assert calls == 1
+
+
+async def test_root_autouse_empties_the_session_slot(fresh_services, monkeypatch) -> None:
+    """Exercises ``close_app_service``, the helper the root fixture's teardown calls."""
+    stub = _StubManager()
+    monkeypatch.setattr(fresh_services, "session_manager", stub)
+    await close_app_service("session_manager")
+    assert stub.shutdowns == 1
+    assert fresh_services.session_manager is None
+
+    monkeypatch.setattr(fresh_services, "session_manager", _StubManager(fail=True))
+    await close_app_service("session_manager")
+    assert fresh_services.session_manager is None
+
+    keep = _StubManager()
+    monkeypatch.setattr(fresh_services, "session_manager", keep)
+    await close_app_service("session_manager", restore=keep)
+    assert keep.shutdowns == 0
+    assert fresh_services.session_manager is keep

@@ -14,7 +14,6 @@ from typing import Any, Callable
 class StartupCoreInitializationHandles:
     """Handles returned from the core startup initialization block."""
 
-    session_manager: Any | None = None
     heavy_startup_handles: Any | None = None
     startup_sandbox_orchestrator: Any | None = None
 
@@ -33,7 +32,7 @@ async def initialize_startup_core_components(
     await _run_startup_validations()
 
     logger.info("App Startup: Initializing authentication services...")
-    auth_runtime_handles = await _initialize_auth_runtime_services(
+    await _initialize_auth_runtime_services(
         app=app,
         logger=logger,
         startup_guard_exceptions=startup_guard_exceptions,
@@ -71,7 +70,6 @@ async def initialize_startup_core_components(
         )
 
     return StartupCoreInitializationHandles(
-        session_manager=auth_runtime_handles.session_manager,
         heavy_startup_handles=heavy_startup_handles,
         startup_sandbox_orchestrator=startup_sandbox_orchestrator,
     )
