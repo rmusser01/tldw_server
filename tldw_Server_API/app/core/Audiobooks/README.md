@@ -9,7 +9,7 @@ Audiobooks contains the text parsing, chapter/tag interpretation, subtitle gener
 - `subtitle_parser.py` normalizes existing subtitle or plain-text inputs.
 - `alignment_utils.py` applies timing anchors, scales payloads for playback speed, and stitches alignment payloads.
 - Related API surface: `tldw_Server_API/app/api/v1/endpoints/audio/audiobooks.py`, declared under `/audiobooks`.
-- Related schemas: `tldw_Server_API/app/api/v1/schemas/audiobook_schemas.py`.
+- Related schemas: `tldw_Server_API/app/api/v1/schemas/audiobook_schemas.py`; the alignment and subtitle models (`AlignmentPayload`, `AlignmentWord`, `ChapterPreview`, subtitle literals) live in `audiobook_schemas.py` here and are re-exported from it.
 - Related tests: `tldw_Server_API/tests/Audiobooks/`.
 
 ## Responsibilities

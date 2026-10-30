@@ -134,7 +134,6 @@ core.Admin_Webhooks -> api.v1.API_Deps: 1
 core.Admin_Webhooks -> services: 2
 core.Agent_Client_Protocol -> api.v1.endpoints.sandbox: 1
 core.Agent_Client_Protocol -> services: 4
-core.Audiobooks -> api.v1.schemas: 3
 core.Audit -> api.v1.API_Deps: 1
 core.Audit -> core.AuthNZ: 1
 core.Audit -> core.DB_Management: 4
@@ -148,10 +147,8 @@ core.Chat -> api.v1.endpoints.llm_providers: 1
 core.Chat -> api.v1.schemas: 6
 core.Chat_Macros -> api.v1.API_Deps: 1
 core.Chunking -> api.v1.schemas: 1
-core.Claims_Extraction -> api.v1.schemas: 1
 core.Claims_Extraction -> api.v1.utils: 1
 core.CodeGraph -> services: 1
-core.Collections -> api.v1.schemas: 1
 core.Collections -> services: 1
 core.DB_Management -> core.Admin_Webhooks: 2
 core.DB_Management -> core.Agent_Client_Protocol: 1
@@ -194,7 +191,6 @@ core.Evaluations -> api.v1.endpoints.embeddings_v5_production_enhanced: 3
 core.File_Artifacts -> api.v1.schemas: 2
 core.Infrastructure -> core.DB_Management: 3
 core.Ingestion_Media_Processing -> api.v1.endpoints.media_embeddings: 1
-core.Ingestion_Media_Processing -> api.v1.schemas: 1
 core.Ingestion_Media_Processing -> services: 6
 core.Ingestion_Sources -> services: 1
 core.LLM_Calls -> core.AuthNZ: 7

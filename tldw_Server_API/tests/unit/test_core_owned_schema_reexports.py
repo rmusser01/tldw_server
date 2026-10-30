@@ -43,6 +43,10 @@ CORE_OWNED: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("vn_play_schemas", "VN_Play.vn_play_schemas", ("VNPlayMode", "VNPlaySetupAssetPackOption", "VNPlaySetupCharacterOption", "VNPlaySetupCompatibility", "VNPlaySetupCompatibilityStatus", "VNPlaySetupDefaults", "VNPlaySetupEmptyState", "VNPlaySetupEmptyStateScope", "VNPlaySetupOptionsResponse", "VNPlaySetupPagination", "VNPlaySetupPaginationSet", "VNPlaySetupScriptVersionOption", "VNPlaySetupTrustLevel", "VNPlaySetupTrustSource", "VNPlaySetupWarning", "VNPlaySetupWarningSeverity", "VNPlaySetupWarningSummary")),
     ("flashcards", "Flashcards.flashcard_schemas", ("FlashcardCardType", "FlashcardGenerateRequest", "FlashcardGenerationType", "FlashcardPlanItem")),
     ("study_packs", "StudyPacks.study_pack_schemas", ("StudyPackCreateJobRequest", "StudyPackSourceSelection", "StudyPackSourceType")),
+    ("document_upload_processing", "Ingestion_Media_Processing.document_upload_processing", ("DocumentModeCapability", "DocumentProcessingMode", "DocumentProcessingStatus", "DocumentUploadPreflightFile", "DocumentUploadPreflightItem")),
+    ("media_request_models", "Ingestion_Media_Processing.media_request_models", ("AddMediaForm", "AudioVideoOptions", "AutoChunkingGoal", "ChunkMethod", "ChunkingMode", "ChunkingOptions", "MediaType", "OcrMode", "PdfEngine", "PdfOptions")),
+    ("claims_schemas", "Claims_Extraction.claims_schemas", ("FVAAdjudicationResult", "FVAClaimResult", "FVAEvidenceItem")),
+    ("audiobook_schemas", "Audiobooks.audiobook_schemas", ("AlignmentEngine", "AlignmentPayload", "AlignmentWord", "ChapterPreview", "SubtitleFormat", "SubtitleMode", "SubtitleVariant")),
 )
 
 
