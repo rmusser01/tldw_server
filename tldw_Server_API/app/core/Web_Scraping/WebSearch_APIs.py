@@ -1857,9 +1857,15 @@ def process_web_search_results(search_results: dict, search_engine: str) -> dict
 
 def parse_html_search_results_generic(soup):
     results = []
-    for result in soup.find_all('div', class_='result'):
-        title = result.find('h3').text if result.find('h3') else ''
-        url = result.find('a', class_='url')['href'] if result.find('a', class_='url') else ''
+    for result in soup.select("div.result, article.result"):
+        heading = result.find("h3")
+        link = result.find("a", class_="url")
+        if link is None and heading is not None:
+            link = heading.find("a", href=True)
+        url = link.get("href", "") if link is not None else ""
+        if not url:
+            continue
+        title = heading.text if heading is not None else ""
         content = result.find('p', class_='content').text if result.find('p', class_='content') else ''
         published_date = result.find('span', class_='published_date').text if result.find('span',
                                                                                           class_='published_date') else ''
