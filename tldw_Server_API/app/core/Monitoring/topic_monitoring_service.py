@@ -29,7 +29,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.Character_Chat.regex_safety import validate_regex_safety
-from tldw_Server_API.app.api.v1.schemas.monitoring_schemas import Watchlist, WatchlistRule
+from tldw_Server_API.app.core.Monitoring.monitoring_schemas import Watchlist, WatchlistRule
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.DB_Management.TopicMonitoring_DB import (
     TopicAlert,

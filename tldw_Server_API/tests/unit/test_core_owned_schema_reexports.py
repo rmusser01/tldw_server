@@ -47,6 +47,16 @@ CORE_OWNED: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("media_request_models", "Ingestion_Media_Processing.media_request_models", ("AddMediaForm", "AudioVideoOptions", "AutoChunkingGoal", "ChunkMethod", "ChunkingMode", "ChunkingOptions", "MediaType", "OcrMode", "PdfEngine", "PdfOptions")),
     ("claims_schemas", "Claims_Extraction.claims_schemas", ("FVAAdjudicationResult", "FVAClaimResult", "FVAEvidenceItem")),
     ("audiobook_schemas", "Audiobooks.audiobook_schemas", ("AlignmentEngine", "AlignmentPayload", "AlignmentWord", "ChapterPreview", "SubtitleFormat", "SubtitleMode", "SubtitleVariant")),
+    ("llamacpp_admin_schemas", "Local_LLM.llamacpp_admin_schemas", ("LlamaCppAcquisitionJobListResponse", "LlamaCppAcquisitionJobResponse", "LlamaCppAsset", "LlamaCppAssetDownloadRequest", "LlamaCppAssetImportPreviewResponse", "LlamaCppAssetMetadata", "LlamaCppAssetsResponse", "LlamaCppInventoryItem", "LlamaCppInventoryResponse", "LlamaCppModelMetadata")),
+    ("buddies", "Buddy.buddy_schemas", ("BuddyCreate", "BuddyModel", "BuddyName", "PersonaPackSource", "ResourceId", "StarterSource")),
+    ("buddy_turns", "Buddy.buddy_schemas", ("BuddyTurnCreate",)),
+    ("archetype_schemas", "Persona.archetype_schemas", ("ArchetypeBuddyDefaults", "ArchetypeMCPConfig", "ArchetypePersonaDefaults", "ArchetypePolicyDefaults", "ArchetypeStarterCommand", "ArchetypeSummary", "ArchetypeTemplate", "ArchetypeToolOverride")),
+    ("persona", "Persona.archetype_schemas", ("PersonaConfirmationMode",)),
+    ("research_runs_schemas", "Research.research_runs_schemas", ("ResearchArtifactManifestEntry", "ResearchCheckpointSummary", "ResearchRunResponse", "ResearchRunSnapshotResponse")),
+    ("setup_schemas", "Setup.setup_schemas", ("SetupProviderCatalogEntry", "SetupProviderCatalogResponse", "SetupProviderType", "SetupProviderValidationResponse")),
+    ("monitoring_schemas", "Monitoring.monitoring_schemas", ("Watchlist", "WatchlistRule")),
+    ("file_artifacts_schemas", "File_Artifacts.file_artifacts_schemas", ("AsyncMode", "ExportFormat", "ExportMode", "FileArtifact", "FileCreateOptions", "FileCreateRequest", "FileExportInfo", "FileExportRequest", "FileType", "FileValidationIssue", "FileValidationResult")),
+    ("chat_loop_schemas", "Chat.chat_loop_schemas", ("ChatLoopEvent", "ChatLoopEventType")),
 )
 
 

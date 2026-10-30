@@ -7,10 +7,10 @@ from typing import Any
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from tldw_Server_API.app.api.v1.schemas.setup_schemas import SetupProviderValidationResponse
 from tldw_Server_API.app.core.exceptions import EgressPolicyError, NetworkError, RetryExhaustedError
 from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+from tldw_Server_API.app.core.Setup.setup_schemas import SetupProviderValidationResponse
 
 VALIDATION_STATUS_READY = "ready"
 VALIDATION_STATUS_ACCEPTED = "accepted"
