@@ -152,7 +152,40 @@ def test_root_autouse_empties_the_session_slot(fresh_services) -> None:
     next(gen)  # setup: the slot is empty here, so teardown restores it to None
     stub = _StubManager()
     fresh_services.session_manager = stub  # published by "the test", without monkeypatch
+    fresh_services.jwt_service = object()
     with pytest.raises(StopIteration):
         next(gen)  # teardown
     assert stub.shutdowns == 1
     assert fresh_services.session_manager is None
+    assert fresh_services.jwt_service is None
+
+
+def test_get_jwt_service_fills_the_slot_once_across_threads(fresh_services, monkeypatch) -> None:
+    import threading
+    import time
+
+    from tldw_Server_API.app.core.AuthNZ import jwt_service as jwt_mod
+
+    built: list[object] = []
+
+    class _SlowJWT:
+        def __init__(self) -> None:
+            time.sleep(0.05)
+            built.append(self)
+
+    monkeypatch.setattr(jwt_mod, "JWTService", _SlowJWT)
+    barrier = threading.Barrier(8)
+    results: list[object] = []
+
+    def _worker() -> None:
+        barrier.wait()
+        results.append(jwt_mod.get_jwt_service())
+
+    threads = [threading.Thread(target=_worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(built) == 1
+    assert len(results) == 8
+    assert all(r is fresh_services.jwt_service for r in results)

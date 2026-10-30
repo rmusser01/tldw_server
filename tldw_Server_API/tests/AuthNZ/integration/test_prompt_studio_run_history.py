@@ -6,10 +6,11 @@ import httpx
 import pytest
 
 from tldw_Server_API.app.api.v1.API_Deps import prompt_studio_deps
-from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service, reset_jwt_service
+from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.DB_Management.Users_DB import create_user
 from tldw_Server_API.app.core.LLM_Calls.providers.local_adapters import OllamaAdapter
+from tldw_Server_API.app.core.Utils.app_services import app_services
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.tests.AuthNZ.integration.test_single_user_cookie_session import (
     single_user_cookie_client as single_user_cookie_client,
@@ -37,7 +38,7 @@ def history_accounts(private_history_paths, single_user_cookie_client, monkeypat
     monkeypatch.setenv("TLDW_TEST_MODE", "false")
     monkeypatch.setenv("BYOK_ENABLED", "false")
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
 
     async def accounts():
         return {name: await create_user(name, f"{name}@history.test", "unused-test-hash", is_verified=True)

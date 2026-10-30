@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+    from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
     from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
 
 
@@ -23,6 +24,7 @@ class AppServices:
 
     db_pool: DatabasePool | None = None
     session_manager: SessionManager | None = None
+    jwt_service: JWTService | None = None
     # Serializes first-time session-manager init; a fresh container gets a fresh lock.
     session_manager_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 

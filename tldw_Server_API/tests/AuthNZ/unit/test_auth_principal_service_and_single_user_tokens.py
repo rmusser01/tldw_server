@@ -8,10 +8,11 @@ from starlette.requests import Request
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.core.AuthNZ import User_DB_Handling, auth_principal_resolver
-from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService, reset_jwt_service
+from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.AuthNZ.single_user_session import SingleUserSessionIdentity
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
+from tldw_Server_API.app.core.Utils.app_services import app_services
 
 
 def _build_request(headers: dict[str, str], client_host: str = "127.0.0.1") -> Request:
@@ -142,7 +143,7 @@ async def test_get_auth_principal_accepts_service_token(monkeypatch):
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("JWT_SECRET_KEY", "test-service-secret-1234567890-abcdef")
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
 
     jwt_service = JWTService()
     token = jwt_service.create_service_account_token(
@@ -158,7 +159,7 @@ async def test_get_auth_principal_accepts_service_token(monkeypatch):
     assert "tools.execute:foo" in principal.permissions
     assert principal.is_admin is True
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
 
 
 @pytest.mark.asyncio
@@ -166,7 +167,7 @@ async def test_get_auth_principal_rejects_service_token_from_nonlocal(monkeypatc
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("JWT_SECRET_KEY", "test-service-secret-1234567890-abcdef")
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
 
     jwt_service = JWTService()
     token = jwt_service.create_service_account_token(
@@ -183,7 +184,7 @@ async def test_get_auth_principal_rejects_service_token_from_nonlocal(monkeypatc
 
     assert exc.value.status_code == 403
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
 
 
 @pytest.mark.asyncio

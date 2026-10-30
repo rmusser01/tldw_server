@@ -31,7 +31,6 @@
   "core/AuthNZ/email_service.py": {"globals": 1, "reason": null},
   "core/AuthNZ/initialize.py": {"globals": 1, "reason": null},
   "core/AuthNZ/input_validation.py": {"globals": 1, "reason": null},
-  "core/AuthNZ/jwt_service.py": {"globals": 2, "reason": null},
   "core/AuthNZ/llm_provider_overrides.py": {"globals": 34, "reason": null},
   "core/AuthNZ/lockout_tracker.py": {"globals": 2, "reason": null},
   "core/AuthNZ/mfa_service.py": {"globals": 1, "reason": null},

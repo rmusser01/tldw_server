@@ -392,12 +392,7 @@ def _restore_auth_env_and_singletons():
 
     # Defensive pre-test reset: avoid stale singleton state inherited from
     # collection-time imports or prior tests.
-    try:
-        from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
-
-        reset_jwt_service()
-    except Exception:
-        _ = None
+    app_services().jwt_service = None
 
     yield
 
@@ -419,12 +414,7 @@ def _restore_auth_env_and_singletons():
         reset_settings()
     except Exception:
         _ = None
-    try:
-        from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
-
-        reset_jwt_service()
-    except Exception:
-        _ = None
+    app_services().jwt_service = None
 
     # Avoid leaking the process-wide jobs acquisition gate across tests.
     try:

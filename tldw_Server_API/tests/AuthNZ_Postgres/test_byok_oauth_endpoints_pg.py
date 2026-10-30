@@ -442,7 +442,6 @@ async def test_openai_oauth_endpoints_postgres(test_db_pool, monkeypatch):
         monkeypatch.setitem(sys.modules, "pyotp", pyotp_stub)
 
     from tldw_Server_API.app.api.v1.endpoints import user_keys as user_keys_endpoints
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
     from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
         add_org_member,
         add_team_member,
@@ -457,10 +456,11 @@ async def test_openai_oauth_endpoints_postgres(test_db_pool, monkeypatch):
         ProviderCredentialAliasConflictError,
     )
     from tldw_Server_API.app.core.config import settings as app_settings
+    from tldw_Server_API.app.core.Utils.app_services import app_services
     from tldw_Server_API.app.main import app
 
     reset_auth_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
     app_settings["CSRF_ENABLED"] = False
 
     name_suffix = uuid.uuid4().hex[:12]

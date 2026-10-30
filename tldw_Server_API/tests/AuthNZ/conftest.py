@@ -484,7 +484,7 @@ async def reset_singletons(request):
     from tldw_Server_API.app.core.Billing.enforcement import reset_billing_enforcer
     from tldw_Server_API.app.core.Billing.subscription_service import reset_subscription_service
     from tldw_Server_API.app.core.Audit.unified_audit_service import shutdown_audit_service
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
+    from tldw_Server_API.app.core.Utils.app_services import app_services
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import reset_api_key_manager
     from tldw_Server_API.app.core.DB_Management.Users_DB import reset_users_db
     from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import close_all_chacha_db_instances
@@ -503,7 +503,7 @@ async def reset_singletons(request):
     await reset_rate_limiter()
     await reset_lockout_tracker()
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
     await reset_registration_service()
     await reset_invite_service()
     await reset_subscription_service()
@@ -611,7 +611,7 @@ async def reset_singletons(request):
         await reset_rate_limiter()
         await reset_lockout_tracker()
         reset_settings()
-        reset_jwt_service()
+        app_services().jwt_service = None
         await reset_registration_service()
         await reset_invite_service()
         await reset_subscription_service()
@@ -1354,7 +1354,7 @@ async def isolated_test_environment(monkeypatch, tmp_path):
     from tldw_Server_API.app.services.registration_service import reset_registration_service
     from tldw_Server_API.app.core.Audit.unified_audit_service import shutdown_audit_service
     from tldw_Server_API.app.core.DB_Management.Users_DB import reset_users_db
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
+    from tldw_Server_API.app.core.Utils.app_services import app_services
     from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
         ensure_billing_tables_pg,
         ensure_identity_federation_tables_pg,
@@ -1366,7 +1366,7 @@ async def isolated_test_environment(monkeypatch, tmp_path):
     await reset_rate_limiter()
     await reset_lockout_tracker()
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
     await reset_registration_service()
     await shutdown_audit_service()
     await reset_users_db()

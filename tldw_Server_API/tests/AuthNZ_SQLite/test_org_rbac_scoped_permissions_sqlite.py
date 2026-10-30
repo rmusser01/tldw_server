@@ -407,7 +407,7 @@ async def test_org_rbac_scoped_permissions_jwt_active_org_claims(tmp_path, monke
     monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-jwt-key-please-change-1234567890")
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
+    from tldw_Server_API.app.core.Utils.app_services import app_services
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
@@ -415,7 +415,7 @@ async def test_org_rbac_scoped_permissions_jwt_active_org_claims(tmp_path, monke
     from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
     await reset_db_pool()
     await reset_users_db()
 
@@ -494,7 +494,7 @@ async def test_org_rbac_scoped_permissions_active_org_includes_team_perms(tmp_pa
     monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-jwt-key-please-change-1234567890")
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
+    from tldw_Server_API.app.core.Utils.app_services import app_services
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import (
@@ -505,7 +505,7 @@ async def test_org_rbac_scoped_permissions_active_org_includes_team_perms(tmp_pa
     from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
     await reset_db_pool()
     await reset_users_db()
 
@@ -596,7 +596,7 @@ async def test_org_rbac_scoped_permissions_jwt_active_team_derives_org(tmp_path,
     monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-jwt-key-please-change-1234567890")
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
+    from tldw_Server_API.app.core.Utils.app_services import app_services
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
@@ -604,7 +604,7 @@ async def test_org_rbac_scoped_permissions_jwt_active_team_derives_org(tmp_path,
     from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
     await reset_db_pool()
     await reset_users_db()
 
@@ -676,7 +676,7 @@ async def test_org_rbac_scoped_permissions_jwt_require_active_fallback(tmp_path,
     monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-jwt-key-please-change-1234567890")
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
+    from tldw_Server_API.app.core.Utils.app_services import app_services
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
@@ -684,7 +684,7 @@ async def test_org_rbac_scoped_permissions_jwt_require_active_fallback(tmp_path,
     from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
     await reset_db_pool()
     await reset_users_db()
 

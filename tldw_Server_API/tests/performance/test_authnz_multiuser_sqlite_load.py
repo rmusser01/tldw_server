@@ -56,7 +56,7 @@ async def _build_app(tmp_path, monkeypatch):
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
+    from tldw_Server_API.app.core.Utils.app_services import app_services
     from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
     from tldw_Server_API.app.core.AuthNZ.initialize import ensure_authnz_schema_ready_once
     # Service-layer singletons cache the db pool at first use; without these
@@ -89,7 +89,7 @@ async def _build_app(tmp_path, monkeypatch):
     await reset_rate_limiter()
     await reset_lockout_tracker()
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
     await reset_registration_service()
     await reset_invite_service()
     await reset_subscription_service()
