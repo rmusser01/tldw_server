@@ -150,56 +150,6 @@ def validate_client_personal_context_metadata(
         raise ValueError("client envelope cannot claim home authority")
 
 
-def export_personal_context_ongoing_contract() -> dict[str, object]:
-    """Export the version-one API contract without importing API models at startup."""
-
-    from pydantic.json_schema import models_json_schema
-
-    from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
-        PersonalContextSyncCapabilitiesResponse,
-        SyncConflictListResponse,
-        SyncConflictResolveRequest,
-        SyncConflictResolveResponse,
-        SyncPersonalContextActivationAcknowledgeRequest,
-        SyncPersonalContextActivationAcknowledgeResponse,
-        SyncPersonalContextBootstrapRequest,
-        SyncPersonalContextBootstrapResponse,
-        SyncPersonalContextPurgeRequest,
-        SyncPersonalContextPurgeResponse,
-        SyncPullResponse,
-        SyncPushRequest,
-        SyncPushResponse,
-    )
-
-    model_classes = (
-        PersonalContextCleanupAck,
-        PersonalContextSyncCapabilitiesResponse,
-        SyncPersonalContextBootstrapRequest,
-        SyncPersonalContextBootstrapResponse,
-        SyncPersonalContextActivationAcknowledgeRequest,
-        SyncPersonalContextActivationAcknowledgeResponse,
-        SyncPushRequest,
-        SyncPushResponse,
-        SyncPullResponse,
-        SyncConflictListResponse,
-        SyncConflictResolveRequest,
-        SyncConflictResolveResponse,
-        SyncPersonalContextPurgeRequest,
-        SyncPersonalContextPurgeResponse,
-    )
-    _, schema = models_json_schema(
-        [(model, "validation") for model in model_classes],
-        title="tldw Personal Context ongoing sync v1",
-    )
-    return {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$id": "urn:tldw:personal-context:ongoing-sync:v1",
-        "x-tldw-contract-version": 1,
-        "x-tldw-endpoints": PERSONAL_CONTEXT_ONGOING_ENDPOINTS,
-        **schema,
-    }
-
-
 __all__ = [
     "PERSONAL_CONTEXT_ONGOING_ENDPOINTS",
     "PersonalContextActivationReceipt",
@@ -208,6 +158,5 @@ __all__ = [
     "PersonalContextExchangeProof",
     "PersonalContextPurgeReceipt",
     "PersonalContextRelayContinuation",
-    "export_personal_context_ongoing_contract",
     "validate_client_personal_context_metadata",
 ]
