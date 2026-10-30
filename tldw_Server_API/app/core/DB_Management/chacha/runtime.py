@@ -8,16 +8,15 @@ from __future__ import annotations
 
 import asyncio
 import faulthandler
-import inspect
 import os
 import sqlite3
 import sys
 import threading
 import time
-from collections.abc import Awaitable, Callable, MutableMapping
+from collections.abc import Callable, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Literal, TypeVar
+from typing import Any, Literal
 
 from cachetools import LRUCache
 from loguru import logger
@@ -32,8 +31,6 @@ from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 from tldw_Server_API.app.core.exceptions import BuiltinCharacterSeedError
 from tldw_Server_API.app.core.Utils.app_services import app_services
-
-T = TypeVar("T")
 
 _CHACHA_SHUTDOWN_INIT_ERROR_DETAIL = "ChaChaNotes shutdown in progress"
 _CHACHA_INIT_TIMEOUT_DETAIL = "ChaChaNotes initialization timed out"
@@ -237,22 +234,6 @@ class ChaChaRuntimeManager:
         self._futures: set[asyncio.Future[Any]] = set()
         self._futures_lock = threading.Lock()
 
-    async def get_or_create(
-        self,
-        factory: Callable[..., T | Awaitable[T]],
-        *args: Any,
-        **kwargs: Any,
-    ) -> T:
-        """Run a DB factory unless the runtime is shutting down."""
-        with self._lock:
-            if self._shutting_down:
-                raise ChaChaRuntimeUnavailableError("ChaChaNotes shutdown in progress")
-
-        result = factory(*args, **kwargs)
-        if inspect.isawaitable(result):
-            return await result
-        return result
-
     def shutdown(self) -> None:
         """Stop accepting new ChaChaNotes initialization work."""
         with self._lock:
@@ -267,11 +248,6 @@ class ChaChaRuntimeManager:
     def shutting_down(self) -> bool:
         with self._lock:
             return self._shutting_down
-
-    def snapshot(self) -> dict[str, Any]:
-        """Return the runtime lifecycle state for diagnostics."""
-        with self._lock:
-            return {"shutting_down": self._shutting_down}
 
     def executor(self) -> ThreadPoolExecutor:
         """

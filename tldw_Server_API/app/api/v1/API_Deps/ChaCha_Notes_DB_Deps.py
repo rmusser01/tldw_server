@@ -308,10 +308,11 @@ def _map_chacha_init_db_error(exc: Exception) -> HTTPException:
     )
 
 
-
-
 def _to_http(exc: Exception) -> HTTPException:
-    """Map a runtime error to its HTTP response. No detail includes ``str(exc)``."""
+    """Map a runtime error to its HTTP response; this function adds no ``str(exc)`` to a detail.
+
+    A DB-error cause goes through ``_map_chacha_init_db_error``, whose details are unchanged.
+    """
     # ChaChaInitAbortedError subclasses ChaChaRuntimeUnavailableError: both are the shutdown 503.
     if isinstance(exc, ChaChaRuntimeUnavailableError):
         return HTTPException(
@@ -339,8 +340,12 @@ def _to_http(exc: Exception) -> HTTPException:
 
 async def _get_or_init_db_instance(user_id: int, client_id: str) -> CharactersRAGDB:
     """Return the owner's cached database, initializing it through the runtime; errors become HTTP."""
+    runtime = get_chacha_runtime()
     try:
-        return await get_chacha_runtime().get_db(
+        # Refuse before resolving the user directory: resolving it creates it.
+        if runtime.shutting_down:
+            raise ChaChaRuntimeUnavailableError(_CHACHA_SHUTDOWN_INIT_ERROR_DETAIL)
+        return await runtime.get_db(
             str(DatabasePaths.get_user_base_directory(user_id)),
             partial(_create_and_prepare_db, user_id, client_id),
             user_id=user_id,
