@@ -782,6 +782,8 @@ implicit_feedback_enabled = true
 [Search-Agent]
 # Set false for Deep Research local FTS without embedding/vector initialization.
 deep_research_local_use_vector = true
+# Optional llama.cpp chat-template control; blank preserves the provider default.
+deep_research_llamacpp_enable_thinking =
 
 # Enable LLM-based query classification before search (routes queries intelligently)
 # Env override: SEARCH_QUERY_CLASSIFICATION=true|false (default false)
