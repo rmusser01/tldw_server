@@ -6,7 +6,7 @@ Research_Workspace currently owns the capability-readiness contract for the Rese
 
 - `capabilities.py` builds and collects Research Workspace capability readiness.
 - Related API surface: `tldw_Server_API/app/api/v1/endpoints/research_workspace.py`.
-- Related schemas: `tldw_Server_API/app/api/v1/schemas/research_workspace_capabilities.py`.
+- Related schemas: `tldw_Server_API/app/core/Research_Workspace/research_workspace_capabilities.py` and `research_workspace_outputs.py` (core-owned; `api/v1/schemas` re-exports them).
 - Related tests: `tldw_Server_API/tests/Research_Workspace/test_capability_derivation.py` and `tldw_Server_API/tests/Research_Workspace/test_capability_endpoint.py`.
 
 ## Responsibilities
