@@ -263,9 +263,10 @@ def test_fresh_services_leaves_monkeypatched_slots_at_their_snapshot(tmp_path) -
         """)
     )
     repo_root = Path(__file__).resolve().parents[3]
-    env = {**os.environ, "PYTHONPATH": str(repo_root), "PYTHONDONTWRITEBYTECODE": "1"}
+    # the CI plugin mode, whatever the parent run used: autoload off, the asyncio plugin named explicitly
+    env = {**os.environ, "PYTHONPATH": str(repo_root), "PYTHONDONTWRITEBYTECODE": "1", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}
     done = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_probe.py"],
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "test_probe.py"],
         cwd=tmp_path, env=env, capture_output=True, text=True, timeout=120,
     )
     assert "3 passed" in done.stdout, done.stdout[-1500:]
