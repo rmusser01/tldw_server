@@ -14,7 +14,6 @@ from typing import Any, Callable
 class StartupCoreInitializationHandles:
     """Handles returned from the core startup initialization block."""
 
-    db_pool: Any | None = None
     session_manager: Any | None = None
     heavy_startup_handles: Any | None = None
     startup_sandbox_orchestrator: Any | None = None
@@ -72,7 +71,6 @@ async def initialize_startup_core_components(
         )
 
     return StartupCoreInitializationHandles(
-        db_pool=auth_runtime_handles.db_pool,
         session_manager=auth_runtime_handles.session_manager,
         heavy_startup_handles=heavy_startup_handles,
         startup_sandbox_orchestrator=startup_sandbox_orchestrator,

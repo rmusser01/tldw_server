@@ -18,7 +18,6 @@ from tldw_Server_API.app.services.startup_warning_registry import StartupWarning
 class LifespanStartupSequenceHandles:
     """Startup handles that remain needed after the helper returns."""
 
-    db_pool: Any | None = None
     session_manager: Any | None = None
     heavy_startup_handles: Any | None = None
 
@@ -107,7 +106,6 @@ async def run_lifespan_startup_sequence(
     )
 
     return LifespanStartupSequenceHandles(
-        db_pool=startup_core_handles.db_pool,
         session_manager=startup_core_handles.session_manager,
         heavy_startup_handles=startup_core_handles.heavy_startup_handles,
     )

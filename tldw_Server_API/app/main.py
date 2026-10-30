@@ -1274,11 +1274,14 @@ async def lifespan(app: FastAPI):
     from tldw_Server_API.app.core.Usage.llm_roots import ensure_llm_state_executor
 
     ensure_llm_state_executor(asyncio.get_running_loop())
+    from tldw_Server_API.app.core.Utils.app_services import app_services
     from tldw_Server_API.app.services.lifespan_worker_runtime_state import (
         LifespanWorkerRuntimeState,
     )
 
     worker_runtime = LifespanWorkerRuntimeState()
+    services = app_services()
+    app.state.services = services
     # Fail fast if the assembled app contains duplicate method+path route registrations.
     _fail_on_duplicate_route_method_pairs(app, context="lifespan startup")
     from tldw_Server_API.app.services.lifespan_startup_sequence import (
@@ -1303,7 +1306,6 @@ async def lifespan(app: FastAPI):
         startup_guard_exceptions=_STARTUP_GUARD_EXCEPTIONS,
         import_exceptions=_IMPORT_EXCEPTIONS,
     )
-    db_pool = startup_sequence_handles.db_pool
     session_manager = startup_sequence_handles.session_manager
     heavy_startup_handles = startup_sequence_handles.heavy_startup_handles
 
@@ -1326,7 +1328,7 @@ async def lifespan(app: FastAPI):
             app=app,
             worker_runtime=worker_runtime,
             readiness_state=READINESS_STATE,
-            db_pool=db_pool,
+            db_pool=services.db_pool,
             session_manager=session_manager,
             heavy_startup_handles=heavy_startup_handles,
             build_legacy_shutdown_context=_build_legacy_shutdown_context,

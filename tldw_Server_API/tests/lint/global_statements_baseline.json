@@ -28,7 +28,6 @@
   "core/AuthNZ/alerting.py": {"globals": 2, "reason": null},
   "core/AuthNZ/api_key_manager.py": {"globals": 2, "reason": null},
   "core/AuthNZ/auth_governor.py": {"globals": 1, "reason": null},
-  "core/AuthNZ/database.py": {"globals": 2, "reason": null},
   "core/AuthNZ/email_service.py": {"globals": 1, "reason": null},
   "core/AuthNZ/initialize.py": {"globals": 1, "reason": null},
   "core/AuthNZ/input_validation.py": {"globals": 1, "reason": null},

@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.sessions_repo import AuthnzSessionsRe
 from tldw_Server_API.app.core.AuthNZ.repos.token_blacklist_repo import AuthnzTokenBlacklistRepo
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, reset_settings
+from tldw_Server_API.app.core.Utils.app_services import app_services
 
 
 @dataclass
@@ -70,7 +71,7 @@ async def refresh_harness(tmp_path, monkeypatch):
     monkeypatch.setattr(token_blacklist, "get_settings", lambda: settings)
     pool = database.DatabasePool(settings=settings)
     await pool.initialize()
-    monkeypatch.setattr(database, "_db_pool", pool)
+    monkeypatch.setattr(app_services(), "db_pool", pool)
     # Keep the route's real dependency, forcing its production transaction branch.
     monkeypatch.setattr(auth_deps, "_is_test_mode", lambda: False)
     monkeypatch.setattr(auth, "_is_test_mode", lambda: False)

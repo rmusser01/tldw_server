@@ -11,6 +11,7 @@ pytest_plugins = [
     "tldw_Server_API.tests._plugins.singleton_guard",
     # Opt-in `reset_embeddings_singletons` fixture (not autouse).
     "tldw_Server_API.tests._plugins.singleton_reset_fixtures",
+    "tldw_Server_API.tests._plugins.app_services_fixtures",
 ]
 
 from collections.abc import Callable

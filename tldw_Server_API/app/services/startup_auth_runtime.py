@@ -12,7 +12,6 @@ from tldw_Server_API.app.services.startup_auth import AuthStartupError
 
 @dataclass
 class AuthRuntimeHandles:
-    db_pool: Any | None = None
     session_manager: Any | None = None
 
 
@@ -28,7 +27,6 @@ async def initialize_auth_runtime_services(
         db_pool = await _init_auth_services()
         if db_pool is None:
             raise AuthStartupError("AUTHNZ_DB_POOL_STARTUP_RETURNED_NONE")
-        handles.db_pool = db_pool
         await _init_resource_governor(app)
         await _warn_if_plan_limits_unenforced()
         _warn_if_llm_quotas_defeated()

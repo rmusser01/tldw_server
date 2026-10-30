@@ -63,6 +63,7 @@ from tldw_Server_API.app.core.exceptions import (
     exception_type_chain,
 )
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime, is_test_mode
+from tldw_Server_API.app.core.Utils.app_services import app_services
 
 _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS = (
     OSError,
@@ -1759,8 +1760,6 @@ class DatabasePool:
 #
 # Dependency Injection
 
-# Global database pool instance
-_db_pool: DatabasePool | None = None
 _db_pool_lifecycle_lock = threading.Lock()
 
 
@@ -1788,13 +1787,14 @@ async def _create_initialized_db_pool(settings: Settings) -> DatabasePool:
 
 
 async def _get_db_pool_locked(current_settings: Settings) -> DatabasePool:
-    global _db_pool
+    services = app_services()
+    pool = services.db_pool
 
-    if _db_pool is None or not _db_pool._initialized:
-        _db_pool = await _create_initialized_db_pool(current_settings)
-        return _db_pool
+    if pool is None or not pool._initialized:
+        services.db_pool = await _create_initialized_db_pool(current_settings)
+        return services.db_pool
 
-    previous_settings: Settings | None = getattr(_db_pool, "settings", None)
+    previous_settings: Settings | None = getattr(pool, "settings", None)
     if previous_settings:
         auth_mode_changed = previous_settings.AUTH_MODE != current_settings.AUTH_MODE
         db_url_changed = previous_settings.DATABASE_URL != current_settings.DATABASE_URL
@@ -1810,19 +1810,19 @@ async def _get_db_pool_locked(current_settings: Settings) -> DatabasePool:
                 _database_url_backend_label(current_settings.DATABASE_URL),
             )
             try:
-                await _db_pool.close()
+                await pool.close()
             except _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS as exc:
                 logger.bind(exception_type=type(exc).__name__).debug(
                     "Ignoring error while closing pool during config change"
                 )
-            _db_pool = await _create_initialized_db_pool(current_settings)
-            return _db_pool
+            services.db_pool = await _create_initialized_db_pool(current_settings)
+            return services.db_pool
     else:
-        _db_pool.settings = current_settings
+        pool.settings = current_settings
 
-    if _db_pool.settings is not current_settings:
+    if pool.settings is not current_settings:
         # Keep pool's settings reference in sync with latest resolved Settings object
-        _db_pool.settings = current_settings
+        pool.settings = current_settings
 
     # Ensure the pool is compatible with the current running loop (Postgres path)
     try:
@@ -1830,15 +1830,16 @@ async def _get_db_pool_locked(current_settings: Settings) -> DatabasePool:
     except RuntimeError:
         current_loop = None
     # If an existing Postgres pool is bound to a different loop, recreate it
-    if getattr(_db_pool, 'pool', None) is not None and getattr(_db_pool, '_loop', None) is not None:
-        if _db_pool._loop is not None and current_loop is not None and _db_pool._loop is not current_loop:
+    if getattr(pool, 'pool', None) is not None and getattr(pool, '_loop', None) is not None:
+        if pool._loop is not None and current_loop is not None and pool._loop is not current_loop:
             logger.info("Detected DB pool bound to a different event loop; recreating for current loop")
             try:
-                await _db_pool.close()
+                await pool.close()
             except _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"Ignoring error while closing incompatible pool: {e}")
-            _db_pool = await _create_initialized_db_pool(current_settings)
-    return _db_pool
+            pool = await _create_initialized_db_pool(current_settings)
+            services.db_pool = pool
+    return pool
 
 
 async def get_db_pool() -> DatabasePool:
@@ -1864,7 +1865,7 @@ def _database_url_backend_label(database_url: object) -> str:
 
 async def reset_db_pool():
     """Reset database pool (mainly for testing)"""
-    global _db_pool
+    services = app_services()
     async with _db_pool_lifecycle():
         # Ensure subsequent get_db_pool() picks up environment changes.
         try:
@@ -1883,7 +1884,7 @@ async def reset_db_pool():
                 cfg.reset()
         except _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS as e:
             logger.debug(f"reset_db_pool: ignoring AuthDatabaseConfig reset error: {e}")
-        pool_to_close = _db_pool
+        pool_to_close = services.db_pool
         if pool_to_close:
             try:
                 await pool_to_close.close()
@@ -1891,8 +1892,8 @@ async def reset_db_pool():
                 # The loop might already be closed by a TestClient.
                 logger.debug(f"reset_db_pool: ignoring close error: {e}")
             finally:
-                if _db_pool is pool_to_close:
-                    _db_pool = None
+                if services.db_pool is pool_to_close:
+                    services.db_pool = None
     try:
         from tldw_Server_API.app.core.MCP_unified.auth.authnz_rbac import reset_rbac_policy as _reset_rbac_policy
         _reset_rbac_policy()
