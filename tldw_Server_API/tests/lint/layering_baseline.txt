@@ -153,7 +153,6 @@ core.Claims_Extraction -> api.v1.utils: 1
 core.CodeGraph -> services: 1
 core.Collections -> api.v1.schemas: 1
 core.Collections -> services: 1
-core.DB_Management -> api.v1.schemas: 1
 core.DB_Management -> core.Admin_Webhooks: 2
 core.DB_Management -> core.Agent_Client_Protocol: 1
 core.DB_Management -> core.Agent_Orchestration: 1
@@ -193,7 +192,6 @@ core.Embeddings -> api.v1.utils: 1
 core.Evaluations -> api.v1.API_Deps: 1
 core.Evaluations -> api.v1.endpoints.embeddings_v5_production_enhanced: 3
 core.File_Artifacts -> api.v1.schemas: 2
-core.Flashcards -> api.v1.schemas: 2
 core.Infrastructure -> core.DB_Management: 3
 core.Ingestion_Media_Processing -> api.v1.endpoints.media_embeddings: 1
 core.Ingestion_Media_Processing -> api.v1.schemas: 1
@@ -220,7 +218,7 @@ core.Skills -> api.v1.schemas: 1
 core.Slides -> services: 1
 core.Storage -> services: 1
 core.Streaming -> api.v1.schemas: 1
-core.StudyPacks -> api.v1.schemas: 3
+core.StudyPacks -> api.v1.schemas: 1
 core.Sync_Contracts -> api.v1.schemas: 1  # bump: moved from core.Sync with personal_context_ongoing_contract; TASK-13950.15 S9 removes it (TASK-13950.16)
 core.TTS -> services: 1
 core.UserProfiles -> services: 1

@@ -650,3 +650,10 @@ def test_postgres_v2_import_ignores_owner_and_provenance_claims(
         TestConfig.reset_settings()
         attacker.close_all_connections()
         owner.close_all_connections()
+
+
+def test_db_import_fails_closed_on_an_unvalidated_mapping(quizzes_db: CharactersRAGDB) -> None:
+    with pytest.raises(AttributeError):
+        quizzes_db.import_osce_quiz_entry_atomic(_osce_entry(_station_export()))  # type: ignore[arg-type]
+    for table in ("quizzes", "osce_stations"):
+        assert quizzes_db.execute_query(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"] == 0  # nosec B608
