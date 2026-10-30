@@ -178,6 +178,9 @@ export const isServicePromptRequestPath = (
     return ["GET", "POST"].includes(requestMethod)
   if (/^\/api\/v1\/workspaces\/[^/]+\/source-views\/[^/]+$/.test(pathname))
     return ["PATCH", "DELETE"].includes(requestMethod)
+  if (/^\/api\/v1\/workspaces\/[^/]+\/artifacts$/.test(pathname)) return ["GET", "POST"].includes(requestMethod)
+  if (/^\/api\/v1\/workspaces\/[^/]+\/artifacts\/[^/]+$/.test(pathname)) return requestMethod === "PUT"
+  if (/^\/api\/v1\/research\/runs\/[^/]+\/bundle$/.test(pathname)) return requestMethod === "GET"
   if (pathname === "/api/v1/users/storage") return requestMethod === "GET"
   if (pathname === "/api/v1/users/me/profile") return ["GET", "PATCH"].includes(requestMethod)
   if (pathname === "/api/v1/audio/transcriptions") return requestMethod === "POST"

@@ -1,3 +1,4 @@
+import { readWorkspaceArtifactClientPayload } from "./workspace-artifact-codec"
 /**
  * API-first workspace state helpers.
  * These functions enable server hydration and optimistic mutation
@@ -415,10 +416,11 @@ const mapServerSourceToLocal = (
   ...mapServerSourceReviewFields(source)
 })
 
-const mapServerArtifactToLocal = (
+export const mapServerArtifactToLocal = (
   artifact: WorkspaceArtifactApiResponse
 ): GeneratedArtifact => {
   const exportRefs = normalizeExportRefs(artifact.export_refs)
+  const client = readWorkspaceArtifactClientPayload(artifact.version_metadata)
 
   return {
     id: artifact.id,
@@ -431,8 +433,6 @@ const mapServerArtifactToLocal = (
     contentType: artifact.content_type || undefined,
     previewText: artifact.preview_text || undefined,
     summary: artifact.summary || undefined,
-    totalTokens: artifact.total_tokens ?? undefined,
-    totalCostUsd: artifact.total_cost_usd ?? undefined,
     ownerScope: artifact.owner_scope || undefined,
     ownerId: artifact.owner_id || undefined,
     projectId: artifact.project_id || undefined,
@@ -453,7 +453,12 @@ const mapServerArtifactToLocal = (
     createdAt: new Date(artifact.created_at),
     completedAt: artifact.completed_at
       ? new Date(artifact.completed_at)
-      : undefined
+      : undefined,
+    ...client,
+    totalTokens: artifact.total_tokens ?? client.totalTokens,
+    totalCostUsd: artifact.total_cost_usd ?? client.totalCostUsd,
+    workspaceArtifactId: artifact.id,
+    workspaceArtifactVersion: artifact.version
   }
 }
 
@@ -474,7 +479,8 @@ export async function hydrateWorkspaceFromServer(
     selectedSourceIds: serverSources
       .filter((source) => source.selected === true)
       .map((source) => source.id),
-    artifacts: (server.artifacts ?? []).map(mapServerArtifactToLocal),
+    artifacts: (server.artifacts ?? []).map(mapServerArtifactToLocal)
+      .filter(artifact => !(artifact.reviewStatus === "archived" && artifact.removedFromStudio)),
     notes: server.notes ?? [],
     version: server.version,
   }

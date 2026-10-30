@@ -1,3 +1,4 @@
+import { bindWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec";
 import { createElement } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -38,12 +39,14 @@ import {
   buildResearchWorkspaceMigrationTombstone,
   buildResearchWorkspaceMigrationTombstoneKey,
 } from "@/store/workspace-migration";
-import { useWorkspaceStore } from "@/store/workspace";
+import { flushWorkspacePersistence, useWorkspaceStore } from "@/store/workspace";
 import {
   readMigratedResearchWorkspaceId,
   restoreMigratedResearchWorkspace,
 } from "../workspace-server-restore";
 import { isServicePromptRequestPath } from "@/services/tldw/service-prompt-scope-error";
+import { persistWorkspaceArtifact } from "@/services/workspace-artifact-persistence";
+import { loadServicePromptSnapshot } from "@/services/service-prompts";
 
 const receiptKey = "tldw:research-workspace:migration:tombstone:original";
 const context = () => ({
@@ -126,6 +129,46 @@ beforeEach(() => {
 });
 
 describe("migrated Research Workspace restoration", () => {
+
+  it("retains a newly imported report through a tombstoned cold restore", async () => {
+    const originalRequest = boundary.request.getMockImplementation()!;
+    let saved: Record<string, unknown> | undefined;
+    boundary.request.mockImplementation(async (input) => {
+      if (input.method === "POST" && input.path === "/api/v1/workspaces/original/artifacts") {
+        saved = { ...input.body, workspace_id: "original", version: 1,
+          created_at: "2026-10-30T00:00:00Z", completed_at: null, total_tokens: null, total_cost_usd: null };
+        return saved;
+      }
+      if (input.path === "/api/v1/workspaces/original/artifacts") return saved ? [saved] : [];
+      return originalRequest(input);
+    });
+    await expect(restore()).resolves.toBe(true);
+    const draft = useWorkspaceStore.getState().addArtifact({
+      type: "report",
+      status: "completed",
+      title: "Deep Research: rs_owned",
+      content: "The telescope is Selene. Friday tours start at 18:00.",
+      producerMetadata: { producerType: "deep_research_bundle_import", runId: "rs_owned" },
+      data: { deepResearch: { researchRunId: "rs_owned", selectedImportedSources: [{ sourceId: "src_1" }] } },
+    });
+    const scope = await loadServicePromptSnapshot([]);
+    try {
+      bindWorkspaceArtifactOrigin(draft, scope.scopeKey, "original");
+      const retained = await persistWorkspaceArtifact(draft, {
+        workspaceId: "original", scope,
+        isCurrent: () => useWorkspaceStore.getState().workspaceId === "original",
+      });
+      useWorkspaceStore.getState().updateArtifactStatus(draft.id, draft.status, retained);
+    } finally { scope.release(); }
+    await flushWorkspacePersistence();
+    useWorkspaceStore.setState({ generatedArtifacts: [], workspaceSnapshots: {} });
+    await expect(restore()).resolves.toBe(true);
+    expect(useWorkspaceStore.getState().generatedArtifacts).toContainEqual(
+      expect.objectContaining({ id: draft.id, title: draft.title, content: draft.content,
+        producerMetadata: draft.producerMetadata, data: draft.data }),
+    );
+    expect(JSON.parse(localStorage.getItem(receiptKey)!)).toMatchObject({ contentRetained: false });
+  });
   it.each([
     "jobs_unavailable",
     "media_db_unavailable",
@@ -329,11 +372,11 @@ describe("migrated Research Workspace restoration", () => {
   });
 
   it.each(["context", "artifacts", "notes"])(
-    "permits scoped restoration GET for %s without permitting mutations",
+    "permits scoped restoration GET for %s with only the explicit artifact-create mutation",
     (resource) => {
       const path = `/api/v1/workspaces/original/${resource}`;
       expect(isServicePromptRequestPath(path, "GET")).toBe(true);
-      expect(isServicePromptRequestPath(path, "POST")).toBe(false);
+      expect(isServicePromptRequestPath(path, "POST")).toBe(resource === "artifacts");
       expect(isServicePromptRequestPath(path, "PUT")).toBe(false);
       expect(
         isServicePromptRequestPath(
