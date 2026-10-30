@@ -208,6 +208,17 @@ def test_alias_lookup_respects_audited_endpoint_and_deadline(boundary: SimpleNam
         assert 0 < call["timeout"] <= 0.5
 
 
+def test_alias_lookup_keeps_the_operator_scope_under_a_scopeless_policy(
+    boundary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A policy with no endpoint scope leaves the server-owned gateway's scope on list and lookup alike."""
+    gateway = "http://127.0.0.1:4000/v1"
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", gateway)
+    _generate(boundary, "anthropic", "claude-current-alias", call_policy=ProviderCallPolicy(allow_tools=False))
+    assert len(boundary.adapter.calls) == 1
+    assert [call["configured_endpoint"] for call in boundary.http] == [ConfiguredEndpointScope.from_url(gateway)] * 2
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("operation", ("messages", "count_tokens"))
 @pytest.mark.parametrize("lookup_status,resolved,expected_status", (

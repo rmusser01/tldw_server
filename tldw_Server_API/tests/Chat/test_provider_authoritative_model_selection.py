@@ -490,7 +490,7 @@ def test_audited_discovery_receives_policy_and_generation_shares_deadline(bounda
     )
     policies = []
 
-    def discover(_provider, _key, *, base_url, call_policy):
+    def discover(_provider, _key, *, base_url, call_policy, configured_endpoint=None):
         policies.append(call_policy)
         clock[0] += 2
         return boundary.result
@@ -514,7 +514,7 @@ def test_audited_discovery_over_deadline_never_generates(boundary, monkeypatch):
         required_endpoint_scope=ConfiguredEndpointScope.from_url("https://api.openai.com/v1"),
     )
 
-    def discover(_provider, _key, *, base_url, call_policy):
+    def discover(_provider, _key, *, base_url, call_policy, configured_endpoint=None):
         clock[0] += 1
         return boundary.result
 
@@ -549,7 +549,7 @@ async def test_async_audited_deadline_includes_discovery_dispatch_elapsed(
         clock[0] += queued_elapsed
         return await dispatch(call, **kwargs)
 
-    def discover(_provider, _key, *, base_url, call_policy):
+    def discover(_provider, _key, *, base_url, call_policy, configured_endpoint=None):
         discovery_threads.append(threading.get_ident())
         clock[0] += 1
         return boundary.result
@@ -575,7 +575,7 @@ def test_attempt_only_policy_allows_current_model_generation(boundary, monkeypat
     policies = []
     policy = ProviderCallPolicy(max_transport_attempts=1)
 
-    def discover(_provider, _key, *, base_url, call_policy):
+    def discover(_provider, _key, *, base_url, call_policy, configured_endpoint=None):
         policies.append(call_policy)
         return boundary.result
 
