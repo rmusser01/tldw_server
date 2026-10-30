@@ -9,3 +9,5 @@ Add one optional operator setting, Search-Agent.deep_research_llamacpp_enable_th
 Causal tests precede implementation: configured boolean policy, zero/default temperature, exact llama.cpp extension and other-provider behavior, truncated empty/partial completions and normal structured responses. Then affected resolver checks, security, review, package and live model-backed synthesis are required.
 
 ADR assessment: no new durable integration rule. ADR-025 provider adapter routing and ADR-030 configured local origins remain governing; this uses their existing request extension path and introduces no service, dependency or endpoint.
+
+The subsequent normal-worker run retained the false thinking policy and temperature zero, then reached a final structured response with qualitative confidence "high". Its prompt had named the confidence field without specifying its numeric type. State the numeric zero-to-one probability contract explicitly; keep qualitative values rejected rather than invent a conversion. Causal outgoing-contract and negative parsing controls precede this narrow correction; actual model validation remains required.
