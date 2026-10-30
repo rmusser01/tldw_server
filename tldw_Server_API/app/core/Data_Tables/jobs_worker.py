@@ -37,7 +37,7 @@ from typing import Any, Callable
 from cachetools import LRUCache
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
+from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import resolve_user_id_value
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
@@ -1073,7 +1073,7 @@ async def _handle_job(job: dict[str, Any], jm: JobManager) -> dict[str, Any]:
             db.update_data_table(table_id, status="cancelled", last_error=None, owner_user_id=user_id)
             return {"cancelled": True, "table_id": table_id}
 
-        provider = (DEFAULT_LLM_PROVIDER or "openai").strip().lower()
+        provider = (get_default_provider() or "openai").strip().lower()
         api_key, _debug = resolve_provider_api_key(provider, prefer_module_keys_in_tests=True)
         if provider_requires_api_key(provider) and not api_key:
             raise DataTablesJobError(f"missing_api_key:{provider}", retryable=False)

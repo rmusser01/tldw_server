@@ -11,7 +11,7 @@ from typing import Any
 from loguru import logger
 from pydantic import ValidationError
 
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
+from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.api.v1.schemas.osce import (
     OsceCitation,
     OsceCitationSourceType,
@@ -740,7 +740,7 @@ async def generate_osce_stations_from_sources(
     if len(stations) != num_stations:
         raise OsceMalformedOutputError()
 
-    generation_provider = api_provider or DEFAULT_LLM_PROVIDER
+    generation_provider = api_provider or get_default_provider()
     try:
         verification_result = await _verify_stations(
             stations=stations,

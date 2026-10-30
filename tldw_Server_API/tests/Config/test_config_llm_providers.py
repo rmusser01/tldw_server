@@ -39,3 +39,11 @@ def test_default_provider_is_read_at_call_time(monkeypatch):
 def test_chat_target_resolution_reexports_the_core_resolvers():
     assert chat_target_resolution.get_default_provider is config_llm_providers.get_default_provider
     assert chat_target_resolution.config_default_llm_provider is config_llm_providers.config_default_llm_provider
+
+
+def test_core_importer_reads_default_at_call_time(monkeypatch):
+    from tldw_Server_API.app.core.Chunking import auto_boundary_assistant
+
+    monkeypatch.setattr(config_llm_providers, "load_and_log_configs", lambda: {})
+    monkeypatch.setenv("DEFAULT_LLM_PROVIDER", "late-env")
+    assert auto_boundary_assistant._configured_default_provider({}) == "late-env"

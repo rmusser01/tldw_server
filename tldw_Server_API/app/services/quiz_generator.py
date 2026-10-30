@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
+from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.api.v1.schemas.osce import OsceStationAuthoringResponse
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
@@ -1504,7 +1504,7 @@ async def _call_quiz_generation_llm(
     api_provider: str | None = None,
     max_tokens: int = 2000,
 ) -> Any:
-    provider = (api_provider or DEFAULT_LLM_PROVIDER or "openai").strip().lower()
+    provider = (api_provider or get_default_provider() or "openai").strip().lower()
     api_key, _debug = resolve_provider_api_key(provider, prefer_module_keys_in_tests=True)
     if provider_requires_api_key(provider) and not api_key:
         raise ValueError(f"Provider '{provider}' requires an API key.")
@@ -1920,7 +1920,7 @@ async def generate_quiz_from_sources(
             claim_verification = await _verify_quiz_questions_against_sources(
                 questions=questions,
                 evidence=evidence,
-                generation_provider=api_provider or DEFAULT_LLM_PROVIDER,
+                generation_provider=api_provider or get_default_provider(),
                 generation_model=model,
                 verification_provider=claims_verification_provider,
                 verification_model=claims_verification_model,
@@ -2008,7 +2008,7 @@ async def generate_quiz_from_sources(
         claim_verification = await _verify_quiz_questions_against_sources(
             questions=questions,
             evidence=evidence,
-            generation_provider=api_provider or DEFAULT_LLM_PROVIDER,
+            generation_provider=api_provider or get_default_provider(),
             generation_model=model,
             verification_provider=claims_verification_provider,
             verification_model=claims_verification_model,

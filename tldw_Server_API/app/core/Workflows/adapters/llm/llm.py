@@ -49,7 +49,7 @@ async def run_llm_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
       - metadata: token_usage/cost if available
       - response: raw provider response (optional)
     """
-    from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
+    from tldw_Server_API.app.core.config_llm_providers import get_default_provider
     from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
     from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
@@ -76,7 +76,7 @@ async def run_llm_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
         config.get("provider")
         or config.get("api_provider")
         or config.get("api_endpoint")
-        or DEFAULT_LLM_PROVIDER
+        or get_default_provider()
     )
     provider = str(_render_str(provider_raw) or "").strip().lower()
     if not provider:

@@ -60,19 +60,11 @@ IMPORT_TIME_CONFIG_ALLOWLIST: dict[str, str] = {
         "constant; config reads move to call time under TASK-13950.21"
     ),
 }
-_DEFAULT_PROVIDER = "reads DEFAULT_LLM_PROVIDER from the schema; slice 2 of TASK-13950.14 retargets it"
 _SCHEMA_MODELS = "imports schema models; TASK-13950.15 moves them to core"
 CHAT_REQUEST_SCHEMAS_CORE_IMPORTERS: dict[str, str] = {
     "core.Chat.chat_helpers": _SCHEMA_MODELS,
     "core.Chat.chat_service": _SCHEMA_MODELS,
     "core.Prompt_Management.prompt_improvement_dispatch": _SCHEMA_MODELS,
-    "core.Chunking.auto_boundary_assistant": _DEFAULT_PROVIDER,
-    "core.Data_Tables.jobs_worker": _DEFAULT_PROVIDER,
-    "core.Research_Workspace.output_jobs": _DEFAULT_PROVIDER,
-    "core.Skills.skill_executor": _DEFAULT_PROVIDER,
-    "core.Streaming.speech_chat_service": _DEFAULT_PROVIDER,
-    "core.StudyPacks.generation_service": _DEFAULT_PROVIDER,
-    "core.Workflows.adapters.llm.llm": _DEFAULT_PROVIDER,
 }
 
 
