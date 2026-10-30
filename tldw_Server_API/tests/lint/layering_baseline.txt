@@ -142,7 +142,7 @@ core.AuthNZ -> api.v1.API_Deps: 3
 core.AuthNZ -> services: 1
 core.Chat -> api.v1.API_Deps: 1
 core.Chat -> api.v1.endpoints.llm_providers: 1
-core.Chat -> api.v1.schemas: 3
+core.Chat -> api.v1.schemas: 2
 core.Chat_Macros -> api.v1.API_Deps: 1
 core.Chunking -> api.v1.schemas: 1
 core.Claims_Extraction -> api.v1.utils: 1

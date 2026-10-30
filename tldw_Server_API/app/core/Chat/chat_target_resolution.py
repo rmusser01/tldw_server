@@ -8,9 +8,6 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
-    DEFAULT_LLM_PROVIDER,
-)
 from tldw_Server_API.app.core.AuthNZ.byok_helpers import load_server_config_snapshot
 from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     get_llm_provider_override,
@@ -22,13 +19,13 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_and_model
-from tldw_Server_API.app.core.config import (
-    load_and_log_configs,
-    load_comprehensive_config,
+from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.config_llm_providers import (
+    config_default_llm_provider,
+    get_default_provider,
 )
 from tldw_Server_API.app.core.LLM_Calls import adapter_registry as _adapter_registry
 from tldw_Server_API.app.core.LLM_Calls.gateway import _split_inline_provider_model
-from tldw_Server_API.app.core.testing import is_test_mode
 
 
 @dataclass(frozen=True)
@@ -49,43 +46,6 @@ class _TargetRequest:
 class _CandidateChatTarget:
     provider: str
     model: str | None
-
-
-def config_default_llm_provider(
-    config_data: dict[str, Any] | None = None,
-) -> str | None:
-    """Return the configured default provider without applying fallbacks."""
-
-    cfg = load_and_log_configs() if config_data is None else config_data
-    if not isinstance(cfg, dict):
-        return None
-    for section in ("llm_api_settings", "API"):
-        section_data = cfg.get(section)
-        if not isinstance(section_data, dict):
-            continue
-        value = section_data.get("default_api")
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-
-def get_default_provider(
-    *,
-    config_resolver: Callable[[], str | None] = config_default_llm_provider,
-    test_mode_resolver: Callable[[], bool] = is_test_mode,
-    fallback_provider: str = DEFAULT_LLM_PROVIDER,
-) -> str:
-    """Resolve the server default provider using the ordinary chat precedence."""
-
-    configured = config_resolver()
-    if isinstance(configured, str) and configured.strip():
-        return configured.strip()
-    environment = os.getenv("DEFAULT_LLM_PROVIDER")
-    if isinstance(environment, str) and environment.strip():
-        return environment.strip()
-    if test_mode_resolver():
-        return "local-llm"
-    return str(fallback_provider or "").strip()
 
 
 def get_default_model_for_provider(
