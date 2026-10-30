@@ -4476,12 +4476,14 @@ export class TldwApiClientBase {
   }
 
   async getResearchBundle(
-    run_id: string | number
+    run_id: string | number,
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope; timeoutMs?: number }
   ): Promise<ResearchBundleResponse> {
     const rid = String(run_id)
     return await bgRequest<ResearchBundleResponse>({
+      ...requestScopeFields(options?.requestScope),
       path: `/api/v1/research/runs/${encodeURIComponent(rid)}/bundle`,
-      method: "GET"
+      method: "GET", abortSignal: options?.signal, timeoutMs: options?.timeoutMs
     })
   }
 

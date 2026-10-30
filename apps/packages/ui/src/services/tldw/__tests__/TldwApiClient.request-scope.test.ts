@@ -51,6 +51,21 @@ const expectedScopeFields = {
 }
 
 describe("TldwApiClient captured request scope", () => {
+  it("pins Deep Research bundle reads to the captured owner and retains the plain caller", async () => {
+    const client = new TldwApiClient()
+    const signal = new AbortController().signal
+    mocks.bgRequest.mockResolvedValue({ report_markdown: "Rowan" })
+    await client.getResearchBundle("rs_owned", { requestScope, signal, timeoutMs: 1200 })
+    expect(mocks.bgRequest.mock.calls[0][0]).toMatchObject({
+      path: "/api/v1/research/runs/rs_owned/bundle", method: "GET", abortSignal: signal, timeoutMs: 1200,
+      headers: { "X-TLDW-Expected-User-ID": "42" }, servicePromptConfig: expectedScopeFields.servicePromptConfig,
+    })
+    await client.getResearchBundle("rs_owned")
+    expect(mocks.bgRequest.mock.calls[1][0]).toMatchObject({
+      path: "/api/v1/research/runs/rs_owned/bundle", method: "GET",
+    })
+    expect(mocks.bgRequest.mock.calls[1][0].servicePromptConfig).toBeUndefined()
+  })
   it.each(["base", "domain"])("pins document annotations and progress in the %s implementation", async implementation => {
     const client = new TldwApiClientBase()
     const methods = implementation === "base" ? TldwApiClientBase.prototype : mediaMethods

@@ -1,3 +1,4 @@
+import { bindWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec";
 import { recoverWebCapturePin, WebCaptureNotCurrentError } from "@/utils/research-web-capture";
 import {
   getResearchWorkspaceOwner,
@@ -321,7 +322,7 @@ export const restoreMigratedResearchWorkspace = async (options: {
             ),
         ),
     );
-    snapshot.generatedArtifacts = local.artifacts;
+    snapshot.generatedArtifacts = local.artifacts.map(artifact => bindWorkspaceArtifactOrigin(artifact, scope.scopeKey, workspaceId));
     snapshot.workspaceBanner = {
       ...snapshot.workspaceBanner,
       title: workspace.banner_title || "",

@@ -1,3 +1,7 @@
+import { bindWorkspaceArtifactOrigin, hasWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec";
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts";
+import { persistWorkspaceArtifact } from "@/services/workspace-artifact-persistence";
+import { hasResearchWorkspaceMigrationTombstone } from "@/store/workspace";
 import { watchChatAccountChanges } from "@/services/chat-account-boundary";
 import { buildWorkspaceChatSessionKey } from "@/store/workspace-chat-session-key"
 import { useStartTutorial } from "@/hooks/useStartTutorial"
@@ -2550,10 +2554,42 @@ const ResearchWorkspaceBody: React.FC = () => {
     const returnContext = activeDeepResearchReturnContext
     const returnContextKey = activeDeepResearchReturnKey
     const originWorkspaceId = returnContext.sourceWorkspaceId
-    const canContinueImport = () =>
-      isMountedRef.current &&
+    const controller = new AbortController()
+    const deadline = performance.now() + 15000
+    let timedOut = false
+    let accountRetired = false
+    let scope: ServicePromptSnapshot | undefined
+    const ownsImport = () => !accountRetired && isMountedRef.current &&
       deepResearchBundleImportRequestSeqRef.current === importRequestId &&
       useWorkspaceStore.getState().workspaceId === originWorkspaceId
+    const timeoutMessage = "Import could not finish within 15 seconds. Retry importing the bundle."
+    const timeout = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+      scope?.release()
+      if (ownsImport()) setDeepResearchBundleImportState({
+        contextKey: returnContextKey, status: "failed", message: timeoutMessage,
+      })
+    }, 15000)
+    const releaseAccount = watchChatAccountChanges((changed) => {
+      if (!changed) return
+      const wasCurrent = ownsImport()
+      accountRetired = true
+      controller.abort()
+      if (wasCurrent) setDeepResearchBundleImportState({
+        contextKey: returnContextKey, status: "failed",
+        message: "The account or server changed. Reopen this bundle in the current account.",
+      })
+    })
+    const canContinueImport = () => {
+      if (!ownsImport()) return false
+      if (timedOut || performance.now() >= deadline) {
+        timedOut = true
+        controller.abort()
+        throw new DOMException(timeoutMessage, "TimeoutError")
+      }
+      return !controller.signal.aborted
+    }
 
     setDeepResearchBundleImportState({
       contextKey: returnContextKey,
@@ -2561,21 +2597,34 @@ const ResearchWorkspaceBody: React.FC = () => {
     })
 
     try {
-      const bundle = await tldwClient.getResearchBundle(
-        returnContext.researchRunId
-      )
+      if (hasResearchWorkspaceMigrationTombstone(originWorkspaceId))
+        scope = await loadServicePromptSnapshot([], { signal: controller.signal })
+      if (!canContinueImport()) return
+      const bundle = scope
+        ? await tldwClient.getResearchBundle(returnContext.researchRunId, {
+          requestScope: scope.requestScope, signal: controller.signal,
+          timeoutMs: Math.max(1, Math.ceil(deadline - performance.now())),
+        })
+        : await tldwClient.getResearchBundle(returnContext.researchRunId)
       if (!canContinueImport()) return
 
+      if (!scope && hasResearchWorkspaceMigrationTombstone(originWorkspaceId))
+        scope = await loadServicePromptSnapshot([], { signal: controller.signal })
+      if (!canContinueImport()) return
       const currentArtifacts = useWorkspaceStore.getState().generatedArtifacts
       const sourceArtifact = returnContext.sourceArtifactId
         ? (currentArtifacts.find(
             (artifact: GeneratedArtifact) =>
-              artifact.id === returnContext.sourceArtifactId
+              artifact.id === returnContext.sourceArtifactId &&
+              (!scope || hasWorkspaceArtifactOrigin(artifact, scope.scopeKey, originWorkspaceId))
           ) ?? null)
         : null
       const artifactPayload = buildDeepResearchBundleArtifactPayload({
         bundle,
-        returnContext,
+        returnContext: scope && !sourceArtifact
+          ? { sourceWorkspaceId: originWorkspaceId, researchRunId: returnContext.researchRunId,
+              sourceArtifactId: null, sourceArtifactTemplate: null, sourceArtifactTitle: null }
+          : returnContext,
         sourceArtifact
       })
       const importedDeepResearchData = artifactPayload.data?.deepResearch as
@@ -2588,7 +2637,24 @@ const ResearchWorkspaceBody: React.FC = () => {
         : 0
 
       if (!canContinueImport()) return
-      addArtifact(artifactPayload)
+      const retainedDraft = scope ? currentArtifacts.find((artifact) =>
+        hasWorkspaceArtifactOrigin(artifact, scope!.scopeKey, originWorkspaceId) &&
+        artifact.producerMetadata?.producerType === "deep_research_bundle_import" &&
+        artifact.producerMetadata.runId === returnContext.researchRunId) : undefined
+      const draft = retainedDraft ?? addArtifact(artifactPayload)
+      const isCurrentDraft = () => canContinueImport() &&
+        useWorkspaceStore.getState().generatedArtifacts.find((artifact) => artifact.id === draft.id) === draft
+      if (!scope && (draft.workspaceArtifactId || hasResearchWorkspaceMigrationTombstone(originWorkspaceId)))
+        scope = await loadServicePromptSnapshot([], { signal: controller.signal })
+      if (scope) {
+        if (!retainedDraft) bindWorkspaceArtifactOrigin(draft, scope.scopeKey, originWorkspaceId)
+        const saved = await persistWorkspaceArtifact(draft, {
+          workspaceId: originWorkspaceId, scope, isCurrent: isCurrentDraft, deadline,
+        })
+        if (!isCurrentDraft()) return
+        useWorkspaceStore.getState().updateArtifactStatus(draft.id, draft.status, saved)
+      }
+      await flushWorkspacePersistence()
       if (!canContinueImport()) return
       setDeepResearchBundleImportState({
         contextKey: returnContextKey,
@@ -2607,9 +2673,10 @@ const ResearchWorkspaceBody: React.FC = () => {
       })
       focusWorkspacePane("studio")
     } catch (error) {
-      if (!canContinueImport()) return
-      const message =
-        error instanceof DeepResearchBundleImportError || error instanceof Error
+      if (!ownsImport()) return
+      const message = timedOut
+        ? timeoutMessage
+        : error instanceof DeepResearchBundleImportError || error instanceof Error
           ? error.message
           : t(
               "playground:studio.deepResearchBundleImportFailed",
@@ -2620,6 +2687,11 @@ const ResearchWorkspaceBody: React.FC = () => {
         status: "failed",
         message
       })
+    } finally {
+      clearTimeout(timeout)
+      scope?.release()
+      releaseAccount()
+      controller.abort()
     }
   }, [
     activeDeepResearchReturnContext,

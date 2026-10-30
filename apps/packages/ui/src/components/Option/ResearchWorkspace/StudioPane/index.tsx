@@ -1357,6 +1357,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
   } = quizParsing
 
   const artifactExport = useArtifactExport({
+    workspaceId,
     messageApi,
     isMobile,
     generatedArtifacts,

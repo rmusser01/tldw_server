@@ -1,3 +1,8 @@
+import { hasWorkspaceArtifactOriginEvidence } from "@/store/workspace-artifact-codec"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import { loadServicePromptSnapshot } from "@/services/service-prompts"
+import { persistWorkspaceArtifact } from "@/services/workspace-artifact-persistence"
+import { useWorkspaceStore } from "@/store/workspace"
 import React from "react"
 import { Button, Modal } from "antd"
 import type { MessageInstance } from "antd/es/message/interface"
@@ -124,6 +129,7 @@ export const getResponsiveArtifactModalProps = (
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface UseArtifactExportDeps {
+  workspaceId?: string | null
   messageApi: MessageInstance
   isMobile: boolean
   generatedArtifacts: GeneratedArtifact[]
@@ -139,6 +145,7 @@ export interface UseArtifactExportDeps {
 
 export function useArtifactExport(deps: UseArtifactExportDeps) {
   const {
+    workspaceId,
     messageApi,
     isMobile,
     generatedArtifacts,
@@ -148,6 +155,32 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
     t,
   } = deps
 
+  const mounted = React.useRef(true)
+  React.useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+
+  const persistRemoval = React.useCallback(async (
+    artifact: GeneratedArtifact, removed: boolean, allowAbsent = false,
+  ) => {
+    if (!workspaceId) throw new Error("Select the original workspace before changing this output.")
+    const deadline = performance.now() + 15000
+    const scope = await loadServicePromptSnapshot([], { signal: AbortSignal.timeout(15000) })
+    const isCurrent = () => mounted.current && useWorkspaceStore.getState().workspaceId === workspaceId &&
+      (allowAbsent ? !useWorkspaceStore.getState().generatedArtifacts.some(item => item.id === artifact.id)
+        : useWorkspaceStore.getState().generatedArtifacts.find(item => item.id === artifact.id) === artifact)
+    try {
+      const current = artifact.workspaceArtifactId ? artifact : await persistWorkspaceArtifact(artifact, {
+        workspaceId, scope, isCurrent, deadline,
+      })
+      return await persistWorkspaceArtifact({ ...current, removedFromStudio: removed,
+        reviewStatus: removed ? "archived" : artifact.reviewStatus ?? "draft" }, {
+        workspaceId, scope, isCurrent, deadline, reviewChangeOnly: true,
+      })
+    } finally { scope.release() }
+  }, [workspaceId])
+
   const handleDeleteArtifact = React.useCallback(
     (artifact: GeneratedArtifact) => {
       const artifactIndex = generatedArtifacts.findIndex(
@@ -155,20 +188,46 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
       )
       Modal.confirm({
         title: t("playground:studio.deleteOutputTitle", "Delete output?"),
-        content: t(
-          "playground:studio.deleteOutputDescription",
-          "This generated output will be permanently removed."
-        ),
+        content: artifact.workspaceArtifactId
+          ? "Remove this saved output from Studio? Its version history is retained, and you can undo for ten seconds."
+          : t("playground:studio.deleteOutputDescription", "This generated output will be permanently removed."),
         okText: t("common:delete", "Delete"),
         cancelText: t("common:cancel", "Cancel"),
         okButtonProps: { danger: true },
-        onOk: () => {
+        onOk: async () => {
+          const canonical = Boolean(artifact.workspaceArtifactId || hasWorkspaceArtifactOriginEvidence(artifact))
+          let archived: GeneratedArtifact | undefined
+          let retired = false
+          const releaseAccount = watchChatAccountChanges(changed => { retired ||= changed })
+          try {
+            if (canonical) archived = await persistRemoval(artifact, true)
+            if (canonical && (retired || !mounted.current || useWorkspaceStore.getState().workspaceId !== workspaceId ||
+              useWorkspaceStore.getState().generatedArtifacts.find(item => item.id === artifact.id) !== artifact))
+              throw new Error("The output's account or workspace changed before removal completed.")
+          } catch (error) {
+            messageApi.error(error instanceof Error ? error.message : "Output removal could not be saved.")
+            throw error
+          } finally { releaseAccount() }
           const undoHandle = scheduleWorkspaceUndoAction({
             apply: () => {
               removeArtifact(artifact.id)
             },
             undo: () => {
-              restoreArtifact(artifact, { index: artifactIndex })
+              if (!archived) { restoreArtifact(artifact, { index: artifactIndex }); return }
+              void (async () => {
+                let retired = false
+                const releaseAccount = watchChatAccountChanges(changed => { retired ||= changed })
+                try {
+                  const restored = await persistRemoval({ ...archived!, reviewStatus: artifact.reviewStatus ?? "draft" }, false, true)
+                  if (retired || !mounted.current || useWorkspaceStore.getState().workspaceId !== workspaceId ||
+                    useWorkspaceStore.getState().generatedArtifacts.some(item => item.id === artifact.id))
+                    throw new Error("The output's account or workspace changed before Undo completed.")
+                  restoreArtifact(restored, { index: artifactIndex })
+                  messageApi.success(t("playground:studio.outputRestored", "Output restored"))
+                } catch (error) {
+                  messageApi.error(error instanceof Error ? error.message : "Output could not be restored. Reload saved outputs.")
+                } finally { releaseAccount() }
+              })()
             }
           })
 
@@ -189,7 +248,7 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
                 size="small"
                 type="link"
                 onClick={() => {
-                  if (undoWorkspaceAction(undoHandle.id)) {
+                  if (undoWorkspaceAction(undoHandle.id) && !canonical) {
                     messageApi.success(
                       t("playground:studio.outputRestored", "Output restored")
                     )
@@ -214,7 +273,7 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
         }
       })
     },
-    [generatedArtifacts, messageApi, removeArtifact, restoreArtifact, t]
+    [generatedArtifacts, messageApi, removeArtifact, restoreArtifact, persistRemoval, workspaceId, t]
   )
 
   const handleDiscussArtifact = React.useCallback(
