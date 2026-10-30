@@ -2620,8 +2620,9 @@ def _provider_inventory_endpoint(
 ) -> tuple[str, dict[str, Any]]:
     """Resolve the discovery base and the discovery options carrying generation's egress decision for it.
 
-    Unavailable scoped configuration never falls back to global discovery. A call policy's scope wins, as it
-    does for generation; otherwise ``inventory_endpoint_scope`` decides from the endpoint's provenance.
+    Unavailable scoped configuration never falls back to global discovery. ``inventory_endpoint_scope`` decides
+    from the endpoint's provenance; a call policy goes along, and its own scope, when it has one, wins in
+    discovery as it does for generation.
     """
     base_url = resolve_provider_models_base_url(
         provider, request.get("app_config"),
@@ -2632,13 +2633,14 @@ def _provider_inventory_endpoint(
         raise ChatConfigurationError(
             provider=provider, message="Provider model inventory endpoint is unavailable.",
         )
-    policy = request.get("call_policy")
-    if isinstance(policy, ProviderCallPolicy):
-        return base_url, {"call_policy": policy}
     credentials = request.get(PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY)
     provenance = request.get("_endpoint_provenance") or getattr(credentials, "endpoint_provenance", None)
     scope = inventory_endpoint_scope(provider, base_url, endpoint_provenance=provenance)
-    return base_url, ({"configured_endpoint": scope} if scope is not None else {})
+    options: dict[str, Any] = {"configured_endpoint": scope} if scope is not None else {}
+    policy = request.get("call_policy")
+    if isinstance(policy, ProviderCallPolicy):
+        options["call_policy"] = policy
+    return base_url, options
 
 
 _INVENTORY_OUTAGES = frozenset({"unreachable", "server_error"})
@@ -2711,7 +2713,7 @@ def _validate_provider_model_selection(
             if remaining <= 0:
                 _raise_inventory_failure(provider, "unreachable")
             selection_policy = replace(selection_policy, maximum_timeout_seconds=remaining)
-        selection_options = {"call_policy": selection_policy} if selection_policy is not None else discovery_options
+        selection_options = {**discovery_options, "call_policy": selection_policy}
         selection = resolve_provider_model_selection(
             provider, request.get("api_key"), model,
             base_url=base_url, inventory=result, **selection_options,
