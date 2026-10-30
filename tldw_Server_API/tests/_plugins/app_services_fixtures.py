@@ -6,6 +6,7 @@ teardown closes whatever the test put there and restores the snapshot.
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import MISSING, fields
@@ -28,11 +29,14 @@ async def close_app_service(slot: str, *, restore: object = None) -> None:
         return
     setattr(services, slot, restore)
     try:
-        for name in ("aclose", "shutdown"):
+        for name in ("aclose", "shutdown", "close"):
             closer = getattr(taken, name, None)
             if callable(closer):
-                await closer()
+                result = closer()
+                if inspect.isawaitable(result):
+                    await result
                 return
+        logger.debug("close_app_service({}): {!r} has no aclose/shutdown/close", slot, taken)
     except Exception as exc:  # teardown must not mask the test's own failure
         logger.debug("close_app_service({}): ignoring close error: {}", slot, exc)
 
@@ -61,13 +65,15 @@ async def fresh_app_services() -> AsyncIterator[AppServices]:
     services = app_services()
     snapshot = {f.name: getattr(services, f.name) for f in fields(services)}
     _set_defaults(services)
-    await reset_db_pool()  # slot is empty: this only drops the caches
     try:
+        await reset_db_pool()  # slot is empty: this only drops the caches
         yield services
     finally:
-        await discard_app_services()
-        for name, value in snapshot.items():
-            setattr(services, name, value)
+        try:
+            await discard_app_services()
+        finally:
+            for name, value in snapshot.items():
+                setattr(services, name, value)
 
 
 @pytest_asyncio.fixture

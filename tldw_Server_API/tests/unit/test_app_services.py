@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -12,7 +13,7 @@ from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.Utils.app_services import app_services
 from tldw_Server_API.app.services import lifespan_shutdown_sequence, lifespan_startup_sequence
-from tldw_Server_API.tests._plugins.app_services_fixtures import fresh_app_services
+from tldw_Server_API.tests._plugins.app_services_fixtures import close_app_service, fresh_app_services
 
 pytestmark = pytest.mark.unit
 
@@ -50,17 +51,69 @@ async def test_fresh_app_services_empties_slots_then_closes_and_restores(monkeyp
     assert pool._initialized is False
 
 
-async def test_lifespan_publishes_the_container_and_shuts_down_what_it_holds(monkeypatch) -> None:
-    from types import SimpleNamespace
+class _StubManager:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.shutdowns = 0
+
+    async def shutdown(self) -> None:
+        self.shutdowns += 1
+        if self.fail:
+            raise RuntimeError("boom")
+
+
+class _CloseOnly:
+    def __init__(self) -> None:
+        self.closed = 0
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+async def test_close_app_service_closes_and_empties_the_slot(fresh_services) -> None:
+    stub = _StubManager()
+    fresh_services.db_pool = stub
+    await close_app_service("db_pool")
+    assert stub.shutdowns == 1
+    assert fresh_services.db_pool is None
+
+
+async def test_close_app_service_swallows_a_failing_close(fresh_services) -> None:
+    fresh_services.db_pool = _StubManager(fail=True)
+    await close_app_service("db_pool")
+    assert fresh_services.db_pool is None
+
+
+async def test_close_app_service_is_a_no_op_when_the_slot_holds_restore(fresh_services) -> None:
+    keep = _StubManager()
+    fresh_services.db_pool = keep
+    await close_app_service("db_pool", restore=keep)
+    assert keep.shutdowns == 0
+    assert fresh_services.db_pool is keep
+
+
+async def test_close_app_service_closes_a_close_only_object(fresh_services) -> None:
+    obj = _CloseOnly()
+    fresh_services.db_pool = obj
+    await close_app_service("db_pool")
+    assert obj.closed == 1
+    assert fresh_services.db_pool is None
+
+
+async def test_lifespan_publishes_the_container_and_shuts_down_what_it_holds(monkeypatch, fresh_services) -> None:
+    pool = object()
+
+    async def _fill_slot(**_kwargs):
+        app_services().db_pool = pool  # startup fills the slot; shutdown must see it
+        return SimpleNamespace(heavy_startup_handles=None, session_manager=None)
 
     # main.py still reads .session_manager from the startup handles until Task 4.
-    startup = AsyncMock(return_value=SimpleNamespace(heavy_startup_handles=None, session_manager=None))
+    startup = AsyncMock(side_effect=_fill_slot)
     shutdown_spy = AsyncMock()
     monkeypatch.setattr(lifespan_startup_sequence, "run_lifespan_startup_sequence", startup)
     monkeypatch.setattr(lifespan_shutdown_sequence, "run_lifespan_shutdown_sequence", shutdown_spy)
     monkeypatch.setattr(main, "_run_startup_config_validation", lambda: None)
-    pool = object()
-    monkeypatch.setattr(app_services(), "db_pool", pool)
+    assert fresh_services.db_pool is None
     app = FastAPI()
     async with main.lifespan(app):
         assert app.state.services is app_services()

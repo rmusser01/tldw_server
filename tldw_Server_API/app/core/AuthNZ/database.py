@@ -1843,7 +1843,11 @@ async def _get_db_pool_locked(current_settings: Settings) -> DatabasePool:
 
 
 async def get_db_pool() -> DatabasePool:
-    """Get the process-wide database pool singleton instance."""
+    """Get the process-wide database pool.
+
+    Fallback for code with no request or constructor argument; request handlers
+    read ``request.app.state.services.db_pool``.
+    """
     async with _db_pool_lifecycle():
         return await _get_db_pool_locked(get_settings())
 
