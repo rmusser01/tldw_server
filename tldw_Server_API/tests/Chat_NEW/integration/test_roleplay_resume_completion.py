@@ -9,7 +9,9 @@ from tldw_Server_API.app.core.Character_Chat.character_conversation_factory impo
 from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import roleplay_resume_fence
 from tldw_Server_API.app.core.Character_Chat.roleplay_resume_prompt import prepare_roleplay_resume
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.tests.LLM_Calls.test_provider_inventory_egress_scope import gateway  # noqa: F401 - fixture
+from tldw_Server_API.tests.LLM_Calls.test_provider_inventory_egress_scope import (  # noqa: F401 - fixture, renamed so it cannot shadow the gateway module
+    gateway as loopback_gateway,
+)
 
 
 @pytest.fixture
@@ -687,14 +689,14 @@ def test_resume_suppresses_unsaved_sampling_modifiers_at_vendor_http_boundary(re
 
 
 @pytest.mark.provider_inventory
-def test_resume_reaches_the_env_configured_loopback_gateway(resume_api, gateway, monkeypatch):  # noqa: F811
+def test_resume_reaches_the_env_configured_loopback_gateway(resume_api, loopback_gateway, monkeypatch):  # noqa: F811 - pytest fixture
     """#3191 E2E regression: Resume's capability-only call policy keeps the operator's loopback scope.
 
     Real model discovery, egress policy and generation against ``OPENAI_API_BASE_URL``, as in the E2E workflow.
     """
     client, db, _, headers = resume_api
     monkeypatch.setenv("OPENAI_API_KEY", "sk-roleplay-test-only-key")
-    monkeypatch.setenv("OPENAI_API_BASE_URL", gateway.base)
+    monkeypatch.setenv("OPENAI_API_BASE_URL", loopback_gateway.base)
     card = db.add_character_card({"name": "Gateway Ava"})
     cid = create_character_conversation(
         db,
@@ -706,8 +708,8 @@ def test_resume_reaches_the_env_configured_loopback_gateway(resume_api, gateway,
     response = client.post(f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
     assert response.status_code == 200, response.text
     assert response.json()["assistant_content"] == "gateway reply"
-    assert gateway.hits[0] == "/v1/models"
-    assert "/v1/chat/completions" in gateway.hits
+    assert loopback_gateway.hits[0] == "/v1/models"
+    assert "/v1/chat/completions" in loopback_gateway.hits
 
 
 _RESUME_FEATURES = {
