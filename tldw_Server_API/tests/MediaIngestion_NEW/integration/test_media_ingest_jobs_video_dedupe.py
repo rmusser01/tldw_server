@@ -335,56 +335,53 @@ async def test_media_ingest_cross_user_dedupe_reuses_transcript_without_reproces
     job_manager = JobManager()
     captured_details: list[dict[str, object]] = []
 
-    try:
-        for user_id in ("1", "2"):
-            row = job_manager.create_job(
-                domain="media_ingest",
-                queue="default",
-                job_type="media_ingest_item",
-                payload={
-                    "batch_id": f"batch-cross-{user_id}",
+    for user_id in ("1", "2"):
+        row = job_manager.create_job(
+            domain="media_ingest",
+            queue="default",
+            job_type="media_ingest_item",
+            payload={
+                "batch_id": f"batch-cross-{user_id}",
+                "media_type": "video",
+                "source": source_url,
+                "source_kind": "url",
+                "input_ref": source_url,
+                "options": {
                     "media_type": "video",
-                    "source": source_url,
-                    "source_kind": "url",
-                    "input_ref": source_url,
-                    "options": {
-                        "media_type": "video",
-                        "transcription_model": "whisper-test",
-                        "perform_analysis": True,
-                        "api_name": "openai",
-                        "custom_prompt": "Summarize this transcript.",
-                        "perform_chunking": False,
-                    },
+                    "transcription_model": "whisper-test",
+                    "perform_analysis": True,
+                    "api_name": "openai",
+                    "custom_prompt": "Summarize this transcript.",
+                    "perform_chunking": False,
                 },
-                owner_user_id=user_id,
-            )
-            job = job_manager.get_job(int(row.get("id")))
-            assert job is not None
-            result = await worker._handle_job(job, job_manager, worker._ProgressState())
-            assert result.get("media_id")
-
-            db = create_media_database(
-                client_id=f"test-user-{user_id}",
-                db_path=str(DatabasePaths.get_media_db_path(user_id)),
-            )
-            try:
-                details = get_full_media_details_rich(db, int(result["media_id"]))
-                assert details is not None
-                captured_details.append(details)
-            finally:
-                db.close_connection()
-
-        assert processor_calls == [source_url]
-        assert captured_details[0]["processing"]["safe_metadata"]["video_lite"]["summary"] == (
-            "processor summary 1"
+            },
+            owner_user_id=user_id,
         )
-        assert captured_details[1]["content"]["text"] == "Reusable transcript content."
-        assert captured_details[1]["processing"]["safe_metadata"]["video_lite"]["summary"] == (
-            "generated fresh summary"
+        job = job_manager.get_job(int(row.get("id")))
+        assert job is not None
+        result = await worker._handle_job(job, job_manager, worker._ProgressState())
+        assert result.get("media_id")
+
+        db = create_media_database(
+            client_id=f"test-user-{user_id}",
+            db_path=str(DatabasePaths.get_media_db_path(user_id)),
         )
-        assert analyze_calls == ["Reusable transcript content.|None"]
-    finally:
-        pass
+        try:
+            details = get_full_media_details_rich(db, int(result["media_id"]))
+            assert details is not None
+            captured_details.append(details)
+        finally:
+            db.close_connection()
+
+    assert processor_calls == [source_url]
+    assert captured_details[0]["processing"]["safe_metadata"]["video_lite"]["summary"] == (
+        "processor summary 1"
+    )
+    assert captured_details[1]["content"]["text"] == "Reusable transcript content."
+    assert captured_details[1]["processing"]["safe_metadata"]["video_lite"]["summary"] == (
+        "generated fresh summary"
+    )
+    assert analyze_calls == ["Reusable transcript content.|None"]
 
 
 @pytest.mark.asyncio
@@ -467,35 +464,32 @@ async def test_media_ingest_dedupe_skips_missing_source_db_path(
     )
 
     job_manager = JobManager()
-    try:
-        row = job_manager.create_job(
-            domain="media_ingest",
-            queue="default",
-            job_type="media_ingest_item",
-            payload={
-                "batch_id": "batch-missing-source-db",
+    row = job_manager.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={
+            "batch_id": "batch-missing-source-db",
+            "media_type": "video",
+            "source": source_url,
+            "source_kind": "url",
+            "input_ref": source_url,
+            "options": {
                 "media_type": "video",
-                "source": source_url,
-                "source_kind": "url",
-                "input_ref": source_url,
-                "options": {
-                    "media_type": "video",
-                    "transcription_model": "whisper-test",
-                    "perform_analysis": False,
-                    "perform_chunking": False,
-                },
+                "transcription_model": "whisper-test",
+                "perform_analysis": False,
+                "perform_chunking": False,
             },
-            owner_user_id="1",
-        )
-        job = job_manager.get_job(int(row.get("id")))
-        assert job is not None
-        result = await worker._handle_job(job, job_manager, worker._ProgressState())
+        },
+        owner_user_id="1",
+    )
+    job = job_manager.get_job(int(row.get("id")))
+    assert job is not None
+    result = await worker._handle_job(job, job_manager, worker._ProgressState())
 
-        assert result.get("media_id")
-        assert processor_calls == [source_url]
-        assert not missing_source_db.exists()
-    finally:
-        pass
+    assert result.get("media_id")
+    assert processor_calls == [source_url]
+    assert not missing_source_db.exists()
 
 
 @pytest.mark.asyncio
@@ -565,76 +559,73 @@ async def test_media_ingest_dedupe_falls_back_when_stored_source_db_path_is_stal
         perform_chunking=False,
     )
 
-    try:
-        row1 = job_manager.create_job(
-            domain="media_ingest",
-            queue="default",
-            job_type="media_ingest_item",
-            payload={
-                "batch_id": "batch-stale-source-db-1",
+    row1 = job_manager.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={
+            "batch_id": "batch-stale-source-db-1",
+            "media_type": "video",
+            "source": source_url,
+            "source_kind": "url",
+            "input_ref": source_url,
+            "options": {
                 "media_type": "video",
-                "source": source_url,
-                "source_kind": "url",
-                "input_ref": source_url,
-                "options": {
-                    "media_type": "video",
-                    "transcription_model": "whisper-test",
-                    "perform_analysis": False,
-                    "perform_chunking": False,
-                },
+                "transcription_model": "whisper-test",
+                "perform_analysis": False,
+                "perform_chunking": False,
             },
-            owner_user_id="1",
+        },
+        owner_user_id="1",
+    )
+    job1 = job_manager.get_job(int(row1.get("id")))
+    assert job1 is not None
+    first_result = await worker._handle_job(job1, job_manager, worker._ProgressState())
+
+    repo = await persistence._get_media_ingest_dedupe_repo()
+    for key_type, key_value in persistence._shared_transcript_dedupe_candidates(
+        source_path_or_url=source_url,
+        source_hash=None,
+        form_data=seed_form,
+    ):
+        await repo.upsert_source(
+            dedupe_key=f"{key_type}:{key_value}",
+            key_type=key_type,
+            media_type="video",
+            source_user_id=1,
+            source_media_id=int(first_result["media_id"]),
+            source_url=source_url,
+            source_db_path=str(stale_source_db),
         )
-        job1 = job_manager.get_job(int(row1.get("id")))
-        assert job1 is not None
-        first_result = await worker._handle_job(job1, job_manager, worker._ProgressState())
 
-        repo = await persistence._get_media_ingest_dedupe_repo()
-        for key_type, key_value in persistence._shared_transcript_dedupe_candidates(
-            source_path_or_url=source_url,
-            source_hash=None,
-            form_data=seed_form,
-        ):
-            await repo.upsert_source(
-                dedupe_key=f"{key_type}:{key_value}",
-                key_type=key_type,
-                media_type="video",
-                source_user_id=1,
-                source_media_id=int(first_result["media_id"]),
-                source_url=source_url,
-                source_db_path=str(stale_source_db),
-            )
-
-        row2 = job_manager.create_job(
-            domain="media_ingest",
-            queue="default",
-            job_type="media_ingest_item",
-            payload={
-                "batch_id": "batch-stale-source-db-2",
+    row2 = job_manager.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={
+            "batch_id": "batch-stale-source-db-2",
+            "media_type": "video",
+            "source": source_url,
+            "source_kind": "url",
+            "input_ref": source_url,
+            "options": {
                 "media_type": "video",
-                "source": source_url,
-                "source_kind": "url",
-                "input_ref": source_url,
-                "options": {
-                    "media_type": "video",
-                    "transcription_model": "whisper-test",
-                    "perform_analysis": False,
-                    "perform_chunking": False,
-                },
+                "transcription_model": "whisper-test",
+                "perform_analysis": False,
+                "perform_chunking": False,
             },
-            owner_user_id="2",
-        )
-        job2 = job_manager.get_job(int(row2.get("id")))
-        assert job2 is not None
-        second_result = await worker._handle_job(job2, job_manager, worker._ProgressState())
+        },
+        owner_user_id="2",
+    )
+    job2 = job_manager.get_job(int(row2.get("id")))
+    assert job2 is not None
+    second_result = await worker._handle_job(job2, job_manager, worker._ProgressState())
 
-        default_source_db = DatabasePaths.get_media_db_path("1")
-        assert second_result.get("media_id")
-        assert default_source_db.exists()
-        assert not stale_source_db.exists()
-        assert processor_calls == [source_url]
-    finally:
-        pass
+    default_source_db = DatabasePaths.get_media_db_path("1")
+    assert second_result.get("media_id")
+    assert default_source_db.exists()
+    assert not stale_source_db.exists()
+    assert processor_calls == [source_url]
 
 
 @pytest.mark.asyncio
@@ -707,48 +698,45 @@ async def test_media_ingest_cross_user_dedupe_prefers_transcript_artifact_over_m
     job_manager = JobManager()
     captured_details: list[dict[str, object]] = []
 
-    try:
-        for user_id in ("1", "2"):
-            row = job_manager.create_job(
-                domain="media_ingest",
-                queue="default",
-                job_type="media_ingest_item",
-                payload={
-                    "batch_id": f"batch-artifact-{user_id}",
+    for user_id in ("1", "2"):
+        row = job_manager.create_job(
+            domain="media_ingest",
+            queue="default",
+            job_type="media_ingest_item",
+            payload={
+                "batch_id": f"batch-artifact-{user_id}",
+                "media_type": "video",
+                "source": source_url,
+                "source_kind": "url",
+                "input_ref": source_url,
+                "options": {
                     "media_type": "video",
-                    "source": source_url,
-                    "source_kind": "url",
-                    "input_ref": source_url,
-                    "options": {
-                        "media_type": "video",
-                        "transcription_model": "whisper-test",
-                        "perform_analysis": False,
-                        "perform_chunking": False,
-                    },
+                    "transcription_model": "whisper-test",
+                    "perform_analysis": False,
+                    "perform_chunking": False,
                 },
-                owner_user_id=user_id,
-            )
-            job = job_manager.get_job(int(row.get("id")))
-            assert job is not None
-            result = await worker._handle_job(job, job_manager, worker._ProgressState())
-            assert result.get("media_id")
+            },
+            owner_user_id=user_id,
+        )
+        job = job_manager.get_job(int(row.get("id")))
+        assert job is not None
+        result = await worker._handle_job(job, job_manager, worker._ProgressState())
+        assert result.get("media_id")
 
-            db = create_media_database(
-                client_id=f"artifact-user-{user_id}",
-                db_path=str(DatabasePaths.get_media_db_path(user_id)),
-            )
-            try:
-                details = get_full_media_details_rich(db, int(result["media_id"]))
-                assert details is not None
-                captured_details.append(details)
-            finally:
-                db.close_connection()
+        db = create_media_database(
+            client_id=f"artifact-user-{user_id}",
+            db_path=str(DatabasePaths.get_media_db_path(user_id)),
+        )
+        try:
+            details = get_full_media_details_rich(db, int(result["media_id"]))
+            assert details is not None
+            captured_details.append(details)
+        finally:
+            db.close_connection()
 
-        assert processor_calls == [source_url]
-        assert captured_details[0]["content"]["text"] == "media row content that should not be reused"
-        assert captured_details[1]["content"]["text"] == "canonical transcript artifact text"
-    finally:
-        pass
+    assert processor_calls == [source_url]
+    assert captured_details[0]["content"]["text"] == "media row content that should not be reused"
+    assert captured_details[1]["content"]["text"] == "canonical transcript artifact text"
 
 
 @pytest.mark.asyncio
@@ -807,62 +795,59 @@ async def test_media_ingest_cross_user_dedupe_skips_reuse_when_clip_options_diff
 
     job_manager = JobManager()
 
-    try:
-        row1 = job_manager.create_job(
-            domain="media_ingest",
-            queue="default",
-            job_type="media_ingest_item",
-            payload={
-                "batch_id": "batch-clip-1",
+    row1 = job_manager.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={
+            "batch_id": "batch-clip-1",
+            "media_type": "video",
+            "source": source_url,
+            "source_kind": "url",
+            "input_ref": source_url,
+            "options": {
                 "media_type": "video",
-                "source": source_url,
-                "source_kind": "url",
-                "input_ref": source_url,
-                "options": {
-                    "media_type": "video",
-                    "transcription_model": "whisper-test",
-                    "perform_analysis": False,
-                    "perform_chunking": False,
-                    "start_time": "0",
-                    "end_time": "60",
-                    "timestamp_option": False,
-                },
+                "transcription_model": "whisper-test",
+                "perform_analysis": False,
+                "perform_chunking": False,
+                "start_time": "0",
+                "end_time": "60",
+                "timestamp_option": False,
             },
-            owner_user_id="1",
-        )
-        job1 = job_manager.get_job(int(row1.get("id")))
-        assert job1 is not None
-        await worker._handle_job(job1, job_manager, worker._ProgressState())
+        },
+        owner_user_id="1",
+    )
+    job1 = job_manager.get_job(int(row1.get("id")))
+    assert job1 is not None
+    await worker._handle_job(job1, job_manager, worker._ProgressState())
 
-        row2 = job_manager.create_job(
-            domain="media_ingest",
-            queue="default",
-            job_type="media_ingest_item",
-            payload={
-                "batch_id": "batch-clip-2",
+    row2 = job_manager.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={
+            "batch_id": "batch-clip-2",
+            "media_type": "video",
+            "source": source_url,
+            "source_kind": "url",
+            "input_ref": source_url,
+            "options": {
                 "media_type": "video",
-                "source": source_url,
-                "source_kind": "url",
-                "input_ref": source_url,
-                "options": {
-                    "media_type": "video",
-                    "transcription_model": "whisper-test",
-                    "perform_analysis": False,
-                    "perform_chunking": False,
-                    "start_time": "10",
-                    "end_time": "60",
-                    "timestamp_option": False,
-                },
+                "transcription_model": "whisper-test",
+                "perform_analysis": False,
+                "perform_chunking": False,
+                "start_time": "10",
+                "end_time": "60",
+                "timestamp_option": False,
             },
-            owner_user_id="2",
-        )
-        job2 = job_manager.get_job(int(row2.get("id")))
-        assert job2 is not None
-        await worker._handle_job(job2, job_manager, worker._ProgressState())
+        },
+        owner_user_id="2",
+    )
+    job2 = job_manager.get_job(int(row2.get("id")))
+    assert job2 is not None
+    await worker._handle_job(job2, job_manager, worker._ProgressState())
 
-        assert processor_calls == [source_url, source_url]
-    finally:
-        pass
+    assert processor_calls == [source_url, source_url]
 
 
 @pytest.fixture

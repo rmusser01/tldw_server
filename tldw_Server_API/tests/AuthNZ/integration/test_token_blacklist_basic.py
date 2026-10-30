@@ -39,7 +39,6 @@ async def test_blacklist_rebinds_pool_after_database_switch(tmp_path, monkeypatc
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_a}")
     reset_settings()
     await reset_token_blacklist()
-    reset_settings()
 
     bl = get_token_blacklist()
     await bl.initialize()
