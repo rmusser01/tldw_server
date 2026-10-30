@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import RegistrationError
 from tldw_Server_API.app.services.registration_service import RegistrationService
 
@@ -22,7 +22,7 @@ class _PasswordService:
 async def test_unknown_registration_code_role_rolls_back_every_postgres_write(
     isolated_test_environment,
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services
 ) -> None:
     _client, _db_name = isolated_test_environment
     pool = await get_db_pool()
@@ -83,14 +83,14 @@ async def test_unknown_registration_code_role_rolls_back_every_postgres_write(
 
         assert (user_count, membership_count, times_used) == (0, 0, 0)
     finally:
-        await reset_db_pool()
+        pass
 
 
 @pytest.mark.asyncio
 async def test_privileged_registration_writes_storage_quota_override_postgres(
     isolated_test_environment,
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services
 ) -> None:
     """The privileged path writes limits.storage_quota_mb in the registration transaction; a plain signup writes none."""
     _client, _db_name = isolated_test_environment
@@ -129,4 +129,4 @@ async def test_privileged_registration_writes_storage_quota_override_postgres(
         assert str(await pool.fetchval(sql, int(privileged["user_id"]))) == "250"
         assert await pool.fetchval(sql, int(plain["user_id"])) is None
     finally:
-        await reset_db_pool()
+        pass

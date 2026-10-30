@@ -9,11 +9,11 @@ pytest_plugins = ("tldw_Server_API.tests._plugins.authnz_full_fixtures",)
 
 
 @pytest.mark.asyncio
-async def test_authnz_sessions_repo_basic_crud_sqlite(tmp_path, monkeypatch):
+async def test_authnz_sessions_repo_basic_crud_sqlite(tmp_path, monkeypatch, fresh_services):
     """AuthnzSessionsRepo should handle basic create/revoke/list/cleanup on SQLite."""
     from pathlib import Path
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.sessions_repo import AuthnzSessionsRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -24,7 +24,6 @@ async def test_authnz_sessions_repo_basic_crud_sqlite(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -129,11 +128,11 @@ async def test_authnz_sessions_repo_basic_crud_sqlite(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_authnz_sessions_repo_validation_and_refresh_sqlite(tmp_path, monkeypatch):
+async def test_authnz_sessions_repo_validation_and_refresh_sqlite(tmp_path, monkeypatch, fresh_services):
     """AuthnzSessionsRepo validation/refresh helpers should behave on SQLite."""
     from pathlib import Path
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.sessions_repo import AuthnzSessionsRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -144,7 +143,6 @@ async def test_authnz_sessions_repo_validation_and_refresh_sqlite(tmp_path, monk
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -265,11 +263,11 @@ async def test_authnz_sessions_repo_validation_and_refresh_sqlite(tmp_path, monk
 
 
 @pytest.mark.asyncio
-async def test_authnz_sessions_repo_bulk_revocation_sqlite(tmp_path, monkeypatch):
+async def test_authnz_sessions_repo_bulk_revocation_sqlite(tmp_path, monkeypatch, fresh_services):
     """AuthnzSessionsRepo bulk revocation helpers should behave on SQLite."""
     from pathlib import Path
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.sessions_repo import AuthnzSessionsRepo
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -280,7 +278,6 @@ async def test_authnz_sessions_repo_bulk_revocation_sqlite(tmp_path, monkeypatch
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
