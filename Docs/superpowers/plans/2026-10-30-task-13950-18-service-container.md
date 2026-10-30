@@ -4,7 +4,7 @@
 
 **Goal:** Freeze the module-singleton patterns with AST ratchets, then move the AuthNZ DB pool, session manager, JWT service, MCP server and ChaCha runtime into one `AppServices` container that the lifespan publishes as `app.state.services`, so tests swap services through a fresh-container fixture instead of `reset_*` helpers, and ChaCha's per-user DB cache and executor leave the API layer.
 
-**Architecture:** `core/Utils/app_services.py` (foundation layer, imports nothing above it at run time) holds one `AppServices` dataclass per process with one slot per service. Each existing getter (`get_db_pool()`, `get_session_manager()`, `get_jwt_service()`, `get_mcp_server()`, `get_chacha_runtime()`) keeps its name and get-or-create logic but reads and fills its slot instead of a module global, so `get_x() is app_services().x` always holds and there is never a second instance. The lifespan publishes the container before startup and shuts down what the container holds, in ADR-021's existing order (pinned by a test before any slot moves). Tests get `fresh_services` (fixture) and `fresh_app_services()` (async context manager): empty slots, then close what the test built and restore the previous slots. ChaCha's executor, LRU cache, init coordination and health move into `ChaChaRuntimeManager`; its per-user DB factory and the worker-facing accessors move to `core/Character_Chat/chacha_db_provider.py`; `ChaCha_Notes_DB_Deps.py` keeps only the FastAPI dependency and the HTTP error mapping.
+**Architecture:** `core/Utils/app_services.py` (foundation layer, imports nothing above it at run time) holds one `AppServices` dataclass per process with one slot per service. Each existing getter (`get_db_pool()`, `get_session_manager()`, `get_jwt_service()`, `get_mcp_server()`) keeps its name and get-or-create logic but reads and fills its slot instead of a module global, and the new `get_chacha_runtime()` (Task 9) does the same for the ChaCha runtime, so `get_x() is app_services().x` always holds and there is never a second instance. The lifespan publishes the container before startup and shuts down what the container holds, in ADR-021's existing order (pinned by a test before any slot moves). Tests get `fresh_services` (fixture) and `fresh_app_services()` (async context manager): empty slots, then close what the test built and restore the previous slots. ChaCha's executor, LRU cache, init coordination and health move into `ChaChaRuntimeManager`; its per-user DB factory and the worker-facing accessors move to `core/Character_Chat/chacha_db_provider.py`; `ChaCha_Notes_DB_Deps.py` keeps only the FastAPI dependency and the HTTP error mapping.
 
 **Tech Stack:** Python 3.12/3.13, FastAPI lifespan, pytest + pytest-asyncio 1.4 (`asyncio_mode = "auto"`, function-scoped loops), AST lint ratchets under `tldw_Server_API/tests/lint/` sharing `_ast_cache.py` and `_ceilings.py`, SQLite and PostgreSQL (`TLDW_TEST_POSTGRES_REQUIRED=1`).
 
@@ -42,7 +42,7 @@ Where each service lives today:
 | Session manager | `core/AuthNZ/session_manager.py:2076`, init lock :2079 | `get_session_manager()` :2082 | `reset_session_manager()` :2096 (tests only) | `services/startup_auth_runtime.py:36` | `shutdown_resource_cleanup._shutdown_session_manager` |
 | JWT service | `core/AuthNZ/jwt_service.py:1160` | `get_jwt_service()` :1164 | `reset_jwt_service()` :1179 (tests only) | first use | none |
 | MCP server | `core/MCP_unified/server.py:2315` | `get_mcp_server()` :2319 | `reset_mcp_server()` :2329 (called by `reset_db_pool`) | `services/startup_heavy_init.py:180` | `shutdown_resource_cleanup._shutdown_mcp_server` (only when heavy init succeeded) |
-| ChaCha runtime | `api/v1/API_Deps/ChaCha_Notes_DB_Deps.py:50-82, 361-369` | `_CHACHA_RUNTIME`, `_get_or_init_db_instance` | `reset_chacha_shutdown_state()` (startup) and `ChaChaRuntimeManager.reset_for_tests()` | `services/startup_chacha_warmup.py` | `shutdown_resource_cleanup._shutdown_chacha_resources` |
+| ChaCha runtime | `api/v1/API_Deps/ChaCha_Notes_DB_Deps.py:50-82, 359-369` | `_CHACHA_RUNTIME`, `_get_or_init_db_instance` | `reset_chacha_shutdown_state()` (startup) and `ChaChaRuntimeManager.reset_for_tests()` | `services/startup_chacha_warmup.py` | `shutdown_resource_cleanup._shutdown_chacha_resources` |
 
 The final shutdown tail today (`shutdown_cleanup_timed_segments` then `shutdown_resource_cleanup`) closes: DB pool, session manager, MCP server (then waits for its deferred modules), MCP rate limiter, TTS service, TTS resource manager, HTTP client, ChaCha, Prompts, chat workflows, provider manager, request queue, local LLM manager, then the evaluations, unified audit, executors, CPU pools and telemetry segments.
 
@@ -119,7 +119,7 @@ Task-specific:
   - Fakes go in through `monkeypatch.setattr(app_services(), "<slot>", fake)` or call arguments, never `obj.attr = _Fake()`.
   - A test whose only assert compares a collector list also asserts a real return value.
 - **Codemod output is generated.** Tasks 7 and 8 report their hand-written and generated lines separately. Reviewers re-run Task 7's script on the PR base and diff the result.
-- **Fixture order.** A test that installs a fake with `monkeypatch.setattr(app_services(), "<slot>", fake)` lists `fresh_services` before `monkeypatch` in its parameters. The fixture's exit then runs before the monkeypatch undo, and the slot ends at its snapshot.
+- **Fixture order.** A test that only installs a fake with `monkeypatch.setattr(app_services(), "<slot>", fake)` needs no fixture: monkeypatch puts the slot back. A test that does that *and* requests `fresh_services` lists `fresh_services` before `monkeypatch` in its parameters. Pytest tears fixtures down in reverse order, so the monkeypatch undo runs first (the slot goes back to the emptied value) and `fresh_app_services` then restores the snapshot. The fake is never passed to `discard_app_services`, so it is not closed. The tests in Tasks 3-6 that patch a slot without `fresh_services` follow the first case.
 
 ## Review Focus
 
@@ -231,8 +231,13 @@ if SITES is None:
 - **Getters.** Same names, same signatures, same locks (`_db_pool_lifecycle_lock`, `_jwt_service_lock`, `_server_lock` stay module-level threading locks). The only change is where the object is stored. Each docstring says: "Fallback for code with no request or constructor argument; request handlers take it via `<provider>`."
 - **Lifespan.** `main.lifespan` runs `services = app_services(); app.state.services = services` right after `worker_runtime = LifespanWorkerRuntimeState()` (`main.py:1281`), and its `finally` passes `db_pool=services.db_pool, session_manager=services.session_manager`. The startup handle chain stops carrying `db_pool` and `session_manager`.
 - **Tests.** `tests/_plugins/app_services_fixtures.py` (registered in `tests/conftest.py:8-14`) provides:
+  - `async close_app_service(slot: str, *, restore: object = None) -> None`: the one helper that closes a slot's object.
+    - If the slot already holds `restore`, it does nothing.
+    - Otherwise it sets the slot to `restore` and then awaits the taken object's `aclose()` if it has one, else its `shutdown()`. The ChaCha runtime has both, and `aclose()` is the one that closes.
+    - Errors are logged at debug and swallowed.
+    - Used by `discard_app_services`, the root autouse fixture's session-slot reset (Task 4) and the root conftest's three ChaCha after-test blocks (Task 9).
   - `async discard_app_services() -> None`: closes what every slot holds and empties it, then resets the caches built on the pool.
-    - The steps run in this order: `reset_db_pool()` (pool, MCP server, API-key manager, UsersDB, RBAC and MCP caches), the session manager's `shutdown()`, the ChaCha runtime's `aclose()`, then every slot back to its default.
+    - The steps run in this order: `reset_db_pool()` (pool, MCP server, API-key manager, UsersDB, RBAC and MCP caches), `close_app_service("session_manager")`, `close_app_service("chacha_runtime")`, then every slot back to its default. Whichever of Tasks 4 and 9 lands second inserts its step at this position.
     - Teardown errors are logged at debug and swallowed, as `reset_db_pool` already does.
     - Fixtures that today reset singletons before and after each test call it (Task 8b).
   - `fresh_app_services()`, an async context manager:
@@ -250,7 +255,7 @@ if SITES is None:
 |---|---|---|---|---|
 | A | 1, 2 | dev | ~330: ratchet ~230, shutdown pin ~90, wiring 3 | 3 baselines (231 + 103 + 11 entries) |
 | B | 3 | A | ~260 | none |
-| C | 4 | B | ~110 | none |
+| C | 4 | B | ~140 | none |
 | D | 5 | C | ~90 (27 call sites become slot clears) | none |
 | E | 6 | D | ~170 | none |
 | F1a | 7 (AuthNZ* dirs) | E | 0 | codemod: 45 files, ~530 lines |
@@ -261,10 +266,12 @@ if SITES is None:
 | G2 | 10 | G1 | ~240, including about 60 test uses retargeted | ~230 moved into `chacha_db_provider.py` |
 | H | 11 | all | ~40 (ADR-021 amendment, backlog) | `Docs/Published` mirror |
 
-C, D and E edit adjacent lines of `app_services.py` and the fixture plugin, so they merge in order. F2b needs every `reset_session_manager` caller converted. G1 can run beside C-F. C7 applies to B, C, D, E, F1a, F1b, F2a, F2b, G1 and G2, i.e. every slice that changes a fixture, a conftest or the fixture plugin; E also deletes a global that 6 tests patch.
+C, D and E edit adjacent lines of `app_services.py` (C also edits the fixture plugin and the root conftest, D the root conftest), so they merge in order. F2b needs every `reset_session_manager` caller converted. G1 can run beside C-F. C7 applies to B, C, D, E, F1a, F1b, F2a, F2b, G1 and G2, i.e. every slice that changes a fixture, a conftest or the fixture plugin; E also deletes a global that 6 tests patch.
 
 C6 applies to:
 - B, C and F2b (AuthNZ on Postgres);
+- F2a, on the AuthNZ files in Task 8a's table;
+- G1 and G2 (the ChaCha Postgres files named in Task 9 Step 5);
 - F1a (every converted AuthNZ* file, including `AuthNZ/integration/test_registration_role_membership_postgres.py`, `test_single_user_bootstrap_postgres.py` and `test_single_user_claims_permissions.py`);
 - F1b on `tests/Usage/test_usage_tracker_sqlite.py` (its `[postgres]` case uses `pg_temp_db`) and `tests/Usage/test_usage_aggregator.py::test_aggregate_postgres_branch` (it runs only with a `postgresql` `DATABASE_URL`).
 
@@ -272,8 +279,8 @@ C6 applies to:
 
 | Sibling | Overlap | If it lands first | If this lands first |
 |---|---|---|---|
-| `.13` C1 #3369 (then C2 #3370, D #3373, D2 #3374, stacked) | `backend-required.yml` and `test_license_first_workflow_contracts.py` (one ratchet line each; PR A); `tests/conftest.py` (C1 adds an autouse override-store fixture after `healthy_no_override_tts_credential_snapshot`, around :927-950; PR B edits `pytest_plugins` at :8-14, D edits :384-411, G1 edits :425-460, :800-806, :1203-1212); `layering_baseline.txt` (G2) | Take both sides of each list or hunk; for the baseline, take dev's side and run `--tighten` | Same |
-| `.17` A2/B (plan `2026-10-26-task-13950-17-provider-credentials.md`) | Its K1 codemod rewrites the `core.AuthNZ.llm_provider_overrides` import inside `reset_db_pool` (`database.py:1933-1935`) and the string in `services/startup_auth.py:83`. PR B rewrites `database.py:1762-1897`, the hunk next to it. None of the five singletons lives in a file `.17` moves (`database.py`, `session_manager.py` and `jwt_service.py` stay in `core/AuthNZ`). `.17`'s alias gate rejects new app imports of moved modules; this task adds none | Keep K1's import path in `reset_db_pool`; re-run `.17`'s alias gate (`test_app_code_imports_no_authnz_alias_path`) | K1's re-run (its porting recipe step 4) rewrites the one line |
+| `.13` C1 #3369 (then C2 #3370, D #3373, D2 #3374, stacked) | `backend-required.yml` and `test_license_first_workflow_contracts.py` (one ratchet line each; PR A); `tests/conftest.py` (C1 adds an autouse override-store fixture after `healthy_no_override_tts_credential_snapshot`, around :927-950; PR B edits `pytest_plugins` at :8-14; C and D both edit `_restore_auth_env_and_singletons` at :373-421 (C adds the session-slot reset, D the JWT slot clears at :384-411); G1 edits :450-461, :800-806 and :1203-1212); `layering_baseline.txt` (G2) | Take both sides of each list or hunk; for the baseline, take dev's side and run `--tighten` | Same |
+| `.17` A2/B (plan `2026-10-26-task-13950-17-provider-credentials.md`) | Its K1 codemod rewrites the `core.AuthNZ.llm_provider_overrides` import inside `reset_db_pool` (`database.py:1933-1935`; the function spans :1865-1938) and the string in `services/startup_auth.py:83`. PR B rewrites `database.py:1762-1897`, which ends 36 lines above it in the same function. None of the five singletons lives in a file `.17` moves (`database.py`, `session_manager.py` and `jwt_service.py` stay in `core/AuthNZ`). `.17`'s alias gate rejects new app imports of moved modules; this task adds none | Keep K1's import path in `reset_db_pool`; re-run `.17`'s alias gate (`test_app_code_imports_no_authnz_alias_path`) | K1's re-run (its porting recipe step 4) rewrites the one line |
 | `.15` S4-S9 #3377-#3384 (stacked on S4), S10 | `layering_baseline.txt`. S4 also edits `core/Research_Workspace/capabilities.py` and `core/Sharing/shared_workspace_clone_jobs_worker.py`, two of G2's 18 importers | G2: take dev's side of the baseline, `--tighten`, and re-check the four API_Deps lines listed under Task 10 Files, Baseline. G2's edit to those two files is the one import line (:451, :1422); rebase it onto S4's version | S4 rebases the same import line |
 | `.14` (plan only) | none | - | - |
 | `.19` test-mode seams (plan `2026-10-30-task-13950-19-test-mode-seams.md`) | T1 adds a ratchet line next to Task 1's in `backend-required.yml` and the contract file. T9 edits `reset_singletons` (`tests/AuthNZ/conftest.py:565-575`), which F2b rewrites. T6 deletes the `get_session_manager_dep` pytest stub, after which every endpoint test uses the real session manager in the slot | Take both lines. F2b rebases its `discard_app_services` lines onto T9's hunk (different lines of the same fixture). After T6, per-test emptying of the session slot comes from `reset_singletons` (AuthNZ tests) and `fresh_services`; elsewhere, Task 4 adds the slot to the root autouse `_restore_auth_env_and_singletons` (controller ruling 2026-10-30: `.18` owns the container and its root-fixture reset; `.19` T6 runs after Task 4, consumes the slot and changes no root fixture) | T6 waits for Task 4 |
@@ -490,7 +497,7 @@ git commit -m "test(lifecycle): pin ADR-021's final cleanup order for the servic
 - Modify: `tldw_Server_API/app/core/AuthNZ/database.py`.
   - Delete :1762-1763 (`# Global database pool instance` and `_db_pool: ...`).
   - `_get_db_pool_locked` (:1790-1841) reads `services = app_services()` and works on `services.db_pool` instead of `global _db_pool`. Name the local snapshot `pool`, not `_db_pool`, so no name suggests a module global.
-  - `reset_db_pool` (:1865-1897) closes and empties `app_services().db_pool`.
+  - `reset_db_pool` (:1865-1938): its pool part, :1865-1897, closes and empties `app_services().db_pool`. The cache resets after it are unchanged.
   - Import `from tldw_Server_API.app.core.Utils.app_services import app_services` after the settings import (:52).
 - Modify: `tldw_Server_API/app/main.py`.
   - :1281: add `services = app_services()` and `app.state.services = services`. Import `app_services` function-locally, beside the other local imports in `lifespan` (:1272-1287).
@@ -500,7 +507,7 @@ git commit -m "test(lifecycle): pin ADR-021's final cleanup order for the servic
 - Modify tests:
   - `tests/Services/test_lifespan_startup_sequence.py:53,111,150,245,341` and `tests/Services/test_startup_core_initialization.py:25,88`: drop `db_pool` from the fakes and the asserts.
   - `tests/Services/test_startup_auth_runtime.py:80,124`: drop the `handles.db_pool` asserts; the `observed` call list stays.
-  - `tests/Services/test_main_lifespan_cancellation.py:29,70`: set `monkeypatch.setattr(app_services(), "db_pool", sentinel)` and assert `kwargs["db_pool"] is sentinel`.
+  - `tests/Services/test_main_lifespan_cancellation.py:29,70`: drop `db_pool` from the handles namespace and delete the `kwargs["db_pool"]` assertion. That test is about cancellation; the new lifespan test owns "shutdown receives the container's pool", so the assertion lives in one place.
 - Modify tests that touch `database._db_pool`. Rewrite `monkeypatch.setattr(database, "_db_pool", X)` as `monkeypatch.setattr(app_services(), "db_pool", X)`, and `database._db_pool` reads and writes as `app_services().db_pool`, in:
   - `tests/AuthNZ/unit/test_database_openai_credential_lock_pool.py` (23 lines);
   - `tests/AuthNZ/unit/test_database_health_security.py:105`;
@@ -515,11 +522,14 @@ git commit -m "test(lifecycle): pin ADR-021's final cleanup order for the servic
 **Interfaces:**
 - Produces:
   - `AppServices` (dataclass), `app_services() -> AppServices`.
-  - `async discard_app_services() -> None`, `fresh_app_services() -> AbstractAsyncContextManager[AppServices]` and the fixture `fresh_services -> AppServices`, all in `tldw_Server_API.tests._plugins.app_services_fixtures`.
+  - `async close_app_service(slot: str, *, restore: object = None) -> None`, `async discard_app_services() -> None`, `fresh_app_services() -> AbstractAsyncContextManager[AppServices]` and the fixture `fresh_services -> AppServices`, all in `tldw_Server_API.tests._plugins.app_services_fixtures`.
+  - `close_app_service` is defined here, before anything calls it, so that G1 (Task 9) can build on B without C (Task 4).
   - `main.lifespan` sets `app.state.services`.
 - Consumes: `reset_db_pool() -> Coroutine[None]` (unchanged signature).
 
-- [ ] **Step 1: Write the failing tests** in `tests/unit/test_app_services.py` (`pytestmark = pytest.mark.unit`). An `authnz_sqlite` helper fixture sets `AUTH_MODE=multi_user` and `DATABASE_URL=sqlite:///<tmp>/users.db` with `monkeypatch.setenv`, then calls `reset_settings()`.
+- [ ] **Step 1: Write the failing tests** in `tests/unit/test_app_services.py` (`pytestmark = pytest.mark.unit`).
+  - An `authnz_sqlite` helper fixture sets `AUTH_MODE=multi_user` and `DATABASE_URL=sqlite:///<tmp>/users.db` with `monkeypatch.setenv`, then calls `reset_settings()`.
+  - The module imports `main` (`tldw_Server_API.app`), `lifespan_startup_sequence` and `lifespan_shutdown_sequence` (`tldw_Server_API.app.services`), `AsyncMock`, `SimpleNamespace` and `FastAPI`.
 
 ```python
 async def test_get_db_pool_fills_and_reuses_the_container_slot(fresh_services, authnz_sqlite) -> None:
@@ -547,16 +557,18 @@ async def test_fresh_app_services_empties_slots_then_closes_and_restores(monkeyp
 
 
 async def test_lifespan_publishes_the_container_and_shuts_down_what_it_holds(monkeypatch) -> None:
-    # Modelled on tests/Services/test_main_lifespan_cancellation.py: patch
-    # run_lifespan_startup_sequence (it asserts kwargs["app"].state.services is app_services()
-    # and returns SimpleNamespace(heavy_startup_handles=None, session_manager=None): main.py still
-    # reads .session_manager until Task 4), run_lifespan_shutdown_sequence
-    # (an AsyncMock) and main._run_startup_config_validation.
+    # main.py still reads .session_manager from the startup handles until Task 4.
+    startup = AsyncMock(return_value=SimpleNamespace(heavy_startup_handles=None, session_manager=None))
+    shutdown_spy = AsyncMock()
+    monkeypatch.setattr(lifespan_startup_sequence, "run_lifespan_startup_sequence", startup)
+    monkeypatch.setattr(lifespan_shutdown_sequence, "run_lifespan_shutdown_sequence", shutdown_spy)
+    monkeypatch.setattr(main, "_run_startup_config_validation", lambda: None)
     pool = object()
     monkeypatch.setattr(app_services(), "db_pool", pool)
     app = FastAPI()
     async with main.lifespan(app):
         assert app.state.services is app_services()
+    assert startup.call_args.kwargs["app"] is app
     assert shutdown_spy.call_args.kwargs["db_pool"] is pool
 ```
 
@@ -570,11 +582,13 @@ async def test_lifespan_publishes_the_container_and_shuts_down_what_it_holds(mon
   - `fresh_services` is `@pytest.fixture async def fresh_services(): async with fresh_app_services() as services: yield services`.
 
 - [ ] **Step 4: Run the new tests, the retargeted tests and every test that names the touched symbols.**
-  Run: `"$PY" -m pytest -q -p no:cacheprovider --basetemp "$TMPDIR/t1318-t3" tldw_Server_API/tests/unit/test_app_services.py tldw_Server_API/tests/unit/test_app_services_shutdown_order.py tldw_Server_API/tests/AuthNZ/unit/test_database_openai_credential_lock_pool.py tldw_Server_API/tests/AuthNZ/unit/test_database_health_security.py tldw_Server_API/tests/AuthNZ_Unit/test_auth_refresh_sqlite_connection_scope.py tldw_Server_API/tests/Services/test_lifespan_startup_sequence.py tldw_Server_API/tests/Services/test_startup_core_initialization.py tldw_Server_API/tests/Services/test_startup_auth_runtime.py tldw_Server_API/tests/Services/test_main_lifespan_cancellation.py tldw_Server_API/tests/Services/test_shutdown_auth_db_pool.py tldw_Server_API/tests/Services/test_startup_auth.py tldw_Server_API/tests/Services/test_lifespan_shutdown_sequence.py tldw_Server_API/tests/Services/test_shutdown_resource_cleanup.py tldw_Server_API/tests/Services/test_shutdown_cleanup_timed_segments.py tldw_Server_API/tests/lint/test_layering_contract.py`.
-  Expected: PASS. The dry run of the retarget gave 48 passed for the three database/refresh files, and the layering contract gave 21 passed with the container in place.
+  Run: `"$PY" -m pytest -q -p no:cacheprovider --basetemp "$TMPDIR/t1318-t3" tldw_Server_API/tests/unit/test_app_services.py tldw_Server_API/tests/unit/test_app_services_shutdown_order.py tldw_Server_API/tests/AuthNZ/unit/test_database_openai_credential_lock_pool.py tldw_Server_API/tests/AuthNZ/unit/test_database_health_security.py tldw_Server_API/tests/AuthNZ_Unit/test_auth_refresh_sqlite_connection_scope.py tldw_Server_API/tests/Services/test_lifespan_startup_sequence.py tldw_Server_API/tests/Services/test_startup_core_initialization.py tldw_Server_API/tests/Services/test_startup_auth_runtime.py tldw_Server_API/tests/Services/test_main_lifespan_cancellation.py tldw_Server_API/tests/Services/test_shutdown_auth_db_pool.py tldw_Server_API/tests/Services/test_startup_auth.py tldw_Server_API/tests/Services/test_lifespan_shutdown_sequence.py tldw_Server_API/tests/Services/test_shutdown_resource_cleanup.py tldw_Server_API/tests/Services/test_shutdown_cleanup_timed_segments.py tldw_Server_API/tests/Evaluations/test_eval_test_mode_truthiness.py tldw_Server_API/tests/lint/test_layering_contract.py`.
+  Expected: PASS.
+  - The dry run retargeted all four `_db_pool` files: the three test files gave 48 passed together, and the layering contract gave 21 passed with the container in place.
+  - `Evaluations/conftest.py` is an autouse fixture, so it runs through `test_eval_test_mode_truthiness.py` (3 tests, not gated by `RUN_EVALUATIONS`).
   Then both of these print nothing:
-  - `grep -nE "^_db_pool:|^_db_pool =|global _db_pool" tldw_Server_API/app/core/AuthNZ/database.py`;
-  - `git grep -nE "(database|authnz_db)\._db_pool|(database|authnz_db), \"_db_pool\"" -- tldw_Server_API/tests`.
+  - `grep -nE '^_db_pool:|^_db_pool =|global _db_pool' tldw_Server_API/app/core/AuthNZ/database.py`;
+  - `git grep -nE '(database|authnz_db)\._db_pool|(database|authnz_db), "_db_pool"' -- tldw_Server_API/tests`.
 
 - [ ] **Step 5: Tighten and run the gates.**
   - Run `"$PY" -m tldw_Server_API.tests.lint.test_service_singleton_ratchet --tighten`. Expected diff: one line deleted, `core/AuthNZ/database.py`.
@@ -582,7 +596,12 @@ async def test_lifespan_publishes_the_container_and_shuts_down_what_it_holds(mon
   - Run C6 on `tldw_Server_API/tests/AuthNZ/unit/test_database_openai_credential_lock_pool.py tldw_Server_API/tests/AuthNZ_Postgres` (the pool slot on Postgres).
   - Run C7 after pushing.
 
-- [ ] **Step 6: Commit.** `git commit -m "feat(lifecycle): the AuthNZ DB pool lives in app.state.services; fresh_services replaces per-test pool resets (TASK-13950.18)"`
+- [ ] **Step 6: Commit.**
+
+```bash
+git add tldw_Server_API/app/core/Utils/app_services.py tldw_Server_API/app/core/AuthNZ/database.py tldw_Server_API/app/main.py tldw_Server_API/app/services/lifespan_startup_sequence.py tldw_Server_API/app/services/startup_core_initialization.py tldw_Server_API/app/services/startup_auth_runtime.py tldw_Server_API/tests/_plugins/app_services_fixtures.py tldw_Server_API/tests/conftest.py tldw_Server_API/tests/unit/test_app_services.py tldw_Server_API/tests/Services tldw_Server_API/tests/AuthNZ/unit/test_database_openai_credential_lock_pool.py tldw_Server_API/tests/AuthNZ/unit/test_database_health_security.py tldw_Server_API/tests/AuthNZ_Unit/test_auth_refresh_sqlite_connection_scope.py tldw_Server_API/tests/Evaluations/conftest.py tldw_Server_API/tests/lint/global_statements_baseline.json
+git commit -m "feat(lifecycle): the AuthNZ DB pool lives in app.state.services; fresh_services replaces per-test pool resets (TASK-13950.18)"
+```
 
 ### Task 4: The session manager slot (AC2 session_manager)
 
@@ -593,13 +612,20 @@ async def test_lifespan_publishes_the_container_and_shuts_down_what_it_holds(mon
   - `get_session_manager()` reads `services.session_manager`, serializes on `services.session_manager_lock` and publishes only after `initialize()` succeeds (keep `.4`'s order).
   - `reset_session_manager()` (kept until Task 8b) shuts down the slot's manager, empties the slot and replaces the lock with `asyncio.Lock()`.
 - Modify: `tldw_Server_API/app/main.py:1307,1330`, `lifespan_startup_sequence.py:22,111`, `startup_core_initialization.py:18,76`, `startup_auth_runtime.py:16,36`. `startup_auth_runtime.py:36` still awaits `_get_session_manager()` to warm the slot; it does not store the result.
-- Modify tests: the same four Services files (`session_manager` lines listed in Task 3's grep).
+- Modify tests: drop `session_manager` from the fakes and asserts in the same four Services files:
+  - `test_lifespan_startup_sequence.py:54,112,151,246,342`;
+  - `test_startup_core_initialization.py:25,89`;
+  - `test_startup_auth_runtime.py:81,125`;
+  - `test_main_lifespan_cancellation.py:29,71`: delete the assertion at :71 too; the lifespan test owns it.
   - `tests/AuthNZ/unit/test_session_manager_init_race.py`:
     - `fresh_state` becomes `monkeypatch.setattr(app_services(), "session_manager", None)` plus `monkeypatch.setattr(app_services(), "session_manager_lock", asyncio.Lock())`;
     - `sm._session_manager is None` becomes `app_services().session_manager is None`;
     - `test_reset_recreates_lock` becomes `test_fresh_services_gives_a_fresh_session_init_lock`.
-- Modify: the plugin. `discard_app_services` adds `await services.session_manager.shutdown()` after `reset_db_pool()` when the slot is set.
-- Modify: `tldw_Server_API/tests/conftest.py::_restore_auth_env_and_singletons` (root autouse; Task 5 edits it too). After each test it empties the session slot (`app_services().session_manager = None` after shutting down a manager the test published), so no test inherits another's manager. `.19` T6 relies on this and changes no root fixture (controller ruling 2026-10-30).
+- Modify: the plugin. `discard_app_services` adds `await close_app_service("session_manager")` after `reset_db_pool()`, at its Design position.
+- Modify: `tldw_Server_API/tests/conftest.py::_restore_auth_env_and_singletons` (root autouse, :373-421; Task 5 edits it too).
+  - Before the `yield`: `session_before = app_services().session_manager`.
+  - After it: `_run_coro_sync_best_effort(close_app_service("session_manager", restore=session_before))`, with `close_app_service` imported from `tldw_Server_API.tests._plugins.app_services_fixtures`. A manager the test published is shut down, and the slot goes back to what the test found, normally None. So no test inherits another's manager.
+  - `.19` T6 relies on this and changes no root fixture (controller ruling 2026-10-30).
 - Baseline: `--tighten` deletes `"core/AuthNZ/session_manager.py"` from the globals baseline.
 
 **Interfaces:**
@@ -612,7 +638,10 @@ async def test_lifespan_publishes_the_container_and_shuts_down_what_it_holds(mon
     - assert the set of ids has one element, `fresh_services.session_manager` is that object, and the count is 1.
   - In `tests/AuthNZ/unit/test_session_manager_init_race.py`, `test_reset_recreates_lock` is replaced by `test_fresh_services_gives_a_fresh_session_init_lock`: record `first = s.session_manager_lock` inside one `async with fresh_app_services() as s:` block, then assert the lock inside a second block `is not first`.
   - Extend the lifespan test: `monkeypatch.setattr(app_services(), "session_manager", manager)` and assert `kwargs["session_manager"] is manager`.
-  - `tests/unit/test_app_services.py::test_root_autouse_empties_the_session_slot`: call the root fixture's teardown helper with a slot holding a stub manager; assert the stub's `shutdown` ran once and the slot is `None` afterwards.
+  - `tests/unit/test_app_services.py::test_root_autouse_empties_the_session_slot(fresh_services, monkeypatch)` exercises `close_app_service`, the helper the root fixture's teardown calls. `_StubManager` is a module-level class whose `shutdown()` counts its calls, or raises when built with `fail=True`. Three cases:
+    - with `_StubManager()` in the slot, `close_app_service("session_manager")`: `shutdowns == 1` and the slot is None;
+    - with `_StubManager(fail=True)`: the call returns without raising and the slot is None;
+    - with `keep` in the slot, `close_app_service("session_manager", restore=keep)`: `keep.shutdowns == 0` and the slot is still `keep`.
 
 - [ ] **Step 2: Run them.** Expected: FAIL with `AttributeError: 'AppServices' object has no attribute 'session_manager'`.
 
@@ -621,9 +650,14 @@ async def test_lifespan_publishes_the_container_and_shuts_down_what_it_holds(mon
 - [ ] **Step 4: Run.**
   Run `tests/unit/test_app_services.py tests/unit/test_app_services_shutdown_order.py tests/AuthNZ/unit/test_session_manager_init_race.py tests/AuthNZ/unit/test_singleton_edge_cases.py tests/AuthNZ/unit/test_session_manager_configured_key.py tests/AuthNZ/unit/test_session_manager_dep_production_guard.py tests/Services/` (the whole Services dir: lifecycle tests).
   Expected: PASS.
-  Then run every test file from `git grep -l -w "get_session_manager\|reset_session_manager" -- tldw_Server_API/tests` whose import is `AuthNZ.session_manager` (filter out `Persona.session_manager`). Expected: same pass/fail set as dev.
+  Then run every test file from `git grep -lwE 'get_session_manager|reset_session_manager' -- tldw_Server_API/tests` whose import is `AuthNZ.session_manager` (filter out `Persona.session_manager`). Expected: same pass/fail set as dev.
 
-- [ ] **Step 5: Tighten; run C1-C4, C6** (on `tests/AuthNZ/integration/test_token_blacklist_basic.py tests/AuthNZ_Postgres`) **and C7**. Commit: `git commit -m "feat(lifecycle): the session manager and its init lock live in app.state.services (TASK-13950.18)"`.
+- [ ] **Step 5: Tighten; run C1-C4, C6** (on `tests/AuthNZ/integration/test_token_blacklist_basic.py tests/AuthNZ_Postgres`) **and C7**. Commit:
+
+```bash
+git add tldw_Server_API/app/core/Utils/app_services.py tldw_Server_API/app/core/AuthNZ/session_manager.py tldw_Server_API/app/main.py tldw_Server_API/app/services/lifespan_startup_sequence.py tldw_Server_API/app/services/startup_core_initialization.py tldw_Server_API/app/services/startup_auth_runtime.py tldw_Server_API/tests/_plugins/app_services_fixtures.py tldw_Server_API/tests/conftest.py tldw_Server_API/tests/unit/test_app_services.py tldw_Server_API/tests/Services tldw_Server_API/tests/AuthNZ/unit/test_session_manager_init_race.py tldw_Server_API/tests/lint/global_statements_baseline.json
+git commit -m "feat(lifecycle): the session manager and its init lock live in app.state.services (TASK-13950.18)"
+```
 
 ### Task 5: The JWT service slot; `reset_jwt_service` is deleted (AC2 jwt, AC4)
 
@@ -659,7 +693,13 @@ git grep -l -w reset_jwt_service -- tldw_Server_API/tests | xargs perl -pi -e 's
   Run: `"$PY" -m pytest ... tldw_Server_API/tests/unit/test_app_services.py tldw_Server_API/tests/unit/test_app_services_shutdown_order.py $(git grep -l "app_services().jwt_service" -- tldw_Server_API/tests) tldw_Server_API/tests/AuthNZ/test_admin_impersonation.py tldw_Server_API/tests/AuthNZ/unit`.
   Expected: same pass/fail set as dev for the converted files; the new test passes.
 
-- [ ] **Step 5: Tighten; run C1-C4; C7 (the root conftest changed).** Commit: `git commit -m "feat(lifecycle): the JWT service lives in app.state.services; reset_jwt_service is gone (TASK-13950.18)"`.
+- [ ] **Step 5: Tighten; run C1-C4; C7 (the root conftest changed).** Commit:
+
+```bash
+git add tldw_Server_API/app/core/Utils/app_services.py tldw_Server_API/app/core/AuthNZ/jwt_service.py tldw_Server_API/tests/lint/global_statements_baseline.json
+git add -A tldw_Server_API/tests
+git commit -m "feat(lifecycle): the JWT service lives in app.state.services; reset_jwt_service is gone (TASK-13950.18)"
+```
 
 ### Task 6: The MCP server slot and its Depends provider (AC2 MCP, AC5)
 
@@ -727,13 +767,19 @@ git grep -l -w reset_jwt_service -- tldw_Server_API/tests | xargs perl -pi -e 's
     - the 11 retargeted files;
     - `tests/unit/test_app_services.py tests/unit/test_app_services_shutdown_order.py`;
     - `tests/Services/test_shutdown_resource_cleanup.py tests/Services/test_startup_core_initialization.py`;
-    - every file from `git grep -l -w "get_mcp_server\|reset_mcp_server\|_server" -- tldw_Server_API/tests tldw_Server_API/app/core/MCP_unified/tests`.
+    - every file from `git grep -lwE 'get_mcp_server|reset_mcp_server' -- tldw_Server_API/tests tldw_Server_API/app/core/MCP_unified/tests`, plus the two files the seam scanner lists for `_server` (`... tldw_Server_API.app.core.MCP_unified.server --sites _server` on the PR base). A grep for `_server` would also match every `self._server` attribute.
 
     Expected: the same pass/fail set as dev.
   - Alias-aware checks: `"$PY" "$TMPDIR/t1318_seams.py" tldw_Server_API.app.core.MCP_unified.server | grep -E "^_server(_lock)?:"` and `"$PY" "$TMPDIR/t1318_seams.py" tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint | grep "^get_mcp_server:"` print nothing. On b9eed09f91 they print `_server: patch 6; 2 files` and `get_mcp_server: patch 34; 9 files`.
   - Run `tests/AuthNZ/test_websocket_route_auth_matrix.py tests/lint/test_auth_token_parsing_ratchet.py` (the `.7` guards). Expected: PASS.
 
-- [ ] **Step 5: Tighten; run C1-C5 and C7** (C5 must report no drift: dependencies with no parameters add nothing to the schema). Commit: `git commit -m "feat(mcp): the MCP server lives in app.state.services and reaches the HTTP routes through Depends (TASK-13950.18)"`.
+- [ ] **Step 5: Tighten; run C1-C5 and C7** (C5 must report no drift: dependencies with no parameters add nothing to the schema). Commit:
+
+```bash
+git add tldw_Server_API/app/core/Utils/app_services.py tldw_Server_API/app/core/MCP_unified/server.py tldw_Server_API/app/api/v1/API_Deps/mcp_deps.py tldw_Server_API/app/api/v1/endpoints/mcp_unified_endpoint.py tldw_Server_API/tests/lint/global_statements_baseline.json tldw_Server_API/tests/lint/endpoint_getter_calls_baseline.json
+git add -A tldw_Server_API/tests tldw_Server_API/app/core/MCP_unified/tests
+git commit -m "feat(mcp): the MCP server lives in app.state.services and reaches the HTTP routes through Depends (TASK-13950.18)"
+```
 
 ### Task 7: The reset codemod over async test bodies (AC4, AC6), PRs F1a and F1b
 
@@ -899,8 +945,14 @@ if __name__ == "__main__":
     - the `MULTI-RUN` lines.
   - Run C1-C3 and C7 on each PR.
   - Run C6 on F1a: `$(git diff --name-only origin/dev -- 'tldw_Server_API/tests/AuthNZ*')`.
-  - Run C6 on F1b: `tldw_Server_API/tests/Usage/test_usage_tracker_sqlite.py tldw_Server_API/tests/Usage/test_usage_aggregator.py`. In general, every converted file that requests a `pg_*` fixture, is parametrized with `postgres`, or skips on a non-Postgres `DATABASE_URL`: `grep -lE "pg_temp_db|pg_server|\"postgres\"|startswith\(\"postgresql\"\)" $(cat "$TMPDIR/t1318_converted.txt")`.
-- [ ] **Step 5: Commit** (per PR). `git commit -m "test: async tests take fresh_services instead of resetting the AuthNZ pool and session manager (TASK-13950.18, generated)"`.
+  - Run C6 on F1b: `tldw_Server_API/tests/Usage/test_usage_tracker_sqlite.py tldw_Server_API/tests/Usage/test_usage_aggregator.py`. In general, every converted file that requests a `pg_*` fixture, is parametrized with `postgres`, or skips on a non-Postgres `DATABASE_URL`: `grep -lE 'pg_temp_db|pg_server|"postgres"|startswith\("postgresql"\)' $(cat "$TMPDIR/t1318_converted.txt")`.
+- [ ] **Step 5: Commit** (per PR). Stage exactly the converted files of that PR:
+
+```bash
+git add -- $(grep '^tldw_Server_API/tests/AuthNZ' "$TMPDIR/t1318_converted.txt")    # F1a
+git add -- $(grep -v '^tldw_Server_API/tests/AuthNZ' "$TMPDIR/t1318_converted.txt") # F1b, on F1a's branch
+git commit -m "test: async tests take fresh_services instead of resetting the AuthNZ pool and session manager (TASK-13950.18, generated)"
+```
 
 Dry-run result for the other 44 files (Admin, AuthNZ, AuthNZ_Unit, Audio, MCP_Hub, MCP_unified, MediaIngestion_NEW, Privileges, Resource_Governance, UserProfile): dev and the converted tree both gave 179 passed, 1 xfailed, with no failure on either side. So all 83 converted files matched dev in the dry run.
 
@@ -940,7 +992,12 @@ A sync fixture that requests the async `fresh_services` keeps working on pytest-
     - 11 async tests whose runs the codemod skipped, including `AuthNZ/unit/test_database_openai_credential_lock_pool.py`, which tests `reset_db_pool` itself;
     - 4 sync tests.
   - Task 8b converts two of the async helpers, which brings the count to 43. `AuthNZ/conftest.py` keeps its bootstrap `reset_db_pool()` (Task 8b).
-- [ ] **Step 4: Run C1-C3 and C7; C6** on the AuthNZ files in the table. Commit: `git commit -m "test: fixtures and helpers take fresh_services; reset_db_pool test callers fall below 50 (TASK-13950.18)"`.
+- [ ] **Step 4: Run C1-C3 and C7; C6** on the AuthNZ files in the table. Commit:
+
+```bash
+git add -A tldw_Server_API/tests
+git commit -m "test: fixtures and helpers take fresh_services; reset_db_pool test callers fall below 50 (TASK-13950.18)"
+```
 
 ### Task 8b: `reset_session_manager` is deleted (AC4) (PR F2b)
 
@@ -952,7 +1009,7 @@ A sync fixture that requests the async `fresh_services` keeps working on pytest-
 
 **Files:**
 - Modify: `tldw_Server_API/tests/AuthNZ/conftest.py`.
-  - `reset_singletons` (autouse): the pre-test pair at :498-499 and the post-test pair at :606-607 each become `await discard_app_services()`. Delete the `app_services().jwt_service = None` lines Task 5 left at :506 and :614 (`discard_app_services` empties that slot too), and the `reset_session_manager` and `reset_jwt_service` names from the import block at :479-490. `close_all_chacha_db_instances` stays imported from the deps module; Task 10 keeps it there.
+  - `reset_singletons` (autouse): the pre-test pair at :498-499 and the post-test pair at :606-607 each become `await discard_app_services()`. Delete the `app_services().jwt_service = None` lines Task 5 left at :506 and :614 (`discard_app_services` empties that slot too), and the `reset_session_manager` name from the import block at :479-490. Task 5 already removed `reset_jwt_service` there. `close_all_chacha_db_instances` stays imported from the deps module; Task 10 keeps it there.
   - `isolated_test_environment`, step 5 (:1363-1364): the pair becomes `await discard_app_services()`.
     - The bootstrap `try: ... finally: await reset_db_pool()` (:1377-1382) stays as it is. It closes the fixture-loop pool before `TestClient` builds its own on the app's loop.
     - The `with TestClient(_app) as client: yield client, db_name` block (:1399-1400) is unchanged. Lifespan startup fills the slots there, and the test sees them.
@@ -964,7 +1021,13 @@ A sync fixture that requests the async `fresh_services` keeps working on pytest-
 - Check: `git grep -n -w reset_session_manager -- tldw_Server_API` prints nothing.
 
 - [ ] **Step 1: Convert, delete and run** `tests/AuthNZ` (the whole directory, because its conftest changed) on SQLite and in C6 (`TLDW_TEST_POSTGRES_REQUIRED=1`). Expected: the same pass/fail set as dev on both backends. Use Task 7 Step 3's comparison loop over the directory's files.
-- [ ] **Step 2: Run C1-C3 and C7.** Commit: `git commit -m "refactor(authnz): delete reset_session_manager; AuthNZ fixtures discard the container (TASK-13950.18)"`.
+- [ ] **Step 2: Run C1-C3 and C7.** Commit:
+
+```bash
+git add tldw_Server_API/app/core/AuthNZ/session_manager.py
+git add -A tldw_Server_API/tests
+git commit -m "refactor(authnz): delete reset_session_manager; AuthNZ fixtures discard the container (TASK-13950.18)"
+```
 
 ### Task 9: ChaCha state moves into `ChaChaRuntimeManager` (AC3 runtime half, AC4) (PR G1)
 
@@ -977,8 +1040,8 @@ A sync fixture that requests the async `fresh_services` keeps working on pytest-
   - `_get_or_init_db_instance(user_id, client_id)` stays as the HTTP-mapping wrapper. It calls `await get_chacha_runtime().get_db(str(DatabasePaths.get_user_base_directory(user_id)), partial(_create_and_prepare_db, user_id, client_id), user_id=user_id)`, mapping errors in Interfaces order.
 - Modify tests: every row of the name table with a G1 target, by rules R1-R7. That is about 155 test uses, plus the 6 `importlib.reload` sites (R3).
 - Modify: `tldw_Server_API/tests/_plugins/singleton_guard.py`. The `_chacha_db_instances` watch reads `len(app_services().chacha_runtime.cached_instances())` from module `tldw_Server_API.app.core.Utils.app_services` (None when the slot is empty).
-- Modify: `tldw_Server_API/tests/conftest.py:450-461, :800-806, :1203-1212`. Each after-test ChaCha block runs `runtime = app_services().chacha_runtime; app_services().chacha_runtime = None; await runtime.aclose()` (via `_run_coro_sync_best_effort`, when not None), so every test gets a fresh runtime.
-- Modify: the plugin. `discard_app_services` adds `await services.chacha_runtime.aclose()` after the session manager step.
+- Modify: `tldw_Server_API/tests/conftest.py:450-461, :800-806, :1203-1212`. Each of the three after-test ChaCha blocks becomes one call, `_run_coro_sync_best_effort(close_app_service("chacha_runtime"))` (the Task 3 helper). Every test then gets a fresh runtime.
+- Modify: the plugin. `discard_app_services` adds `await close_app_service("chacha_runtime")` as its last close step (Design order). If Task 4 has not landed, that is directly after `reset_db_pool()`.
 - Modify: `tests/Chat/test_chacha_runtime_contract.py:9-16`. `reset_for_tests` becomes `resume`.
 - Create: `tldw_Server_API/tests/unit/test_chacha_runtime_container.py` (Step 1).
 - Baselines (`--tighten`): delete the state entry `api/v1/API_Deps/ChaCha_Notes_DB_Deps.py` (6 → 0) and its globals entry (3 → 0).
@@ -989,9 +1052,10 @@ A sync fixture that requests the async `fresh_services` keeps working on pytest-
 |---|---|---|
 | **Stays in deps** (G1 delegates to the runtime; G2 re-exports or wraps the provider) | | |
 | `get_chacha_db_for_user` | attr 31, import 165 (155 files) | unchanged FastAPI dependency |
-| `get_chacha_db_for_user_id`, `get_chacha_db_for_owner` | 20, 8 | HTTP wrappers (Task 10 Interfaces) |
+| `get_chacha_db_for_user_id`, `get_chacha_db_for_owner` | 20, 8 | HTTP wrappers (G1: unchanged bodies over the runtime; G2: Task 10 Interfaces) |
 | `_get_or_init_db_instance` | attr 20, patch 2 | HTTP-mapping wrapper (above) |
-| `close_all_chacha_db_instances`, `shutdown_chacha_executor`, `shutdown_chacha_resources`, `reset_chacha_shutdown_state`, `get_chacha_health_snapshot`, `warm_chacha_db_for_user` | 19, 2, 10, 10, 12, 2 | one-line delegations (G1); re-exports of the provider (G2) |
+| `close_all_chacha_db_instances`, `shutdown_chacha_executor`, `shutdown_chacha_resources`, `reset_chacha_shutdown_state`, `get_chacha_health_snapshot` | 19, 2, 10, 10, 12 | one-line delegations to `runtime.close_all`, `.shutdown_executor`, `.aclose`, `.resume` and `.health_snapshot` (G1); re-exports of the provider (G2) |
+| `warm_chacha_db_for_user` | 2 | G1: stays in deps with today's body, except that it uses `runtime.count("warm_startups")` and `runtime.track(task)`. G2: moves to the provider and is re-exported |
 | `get_request_user`, `DEFAULT_CHARACTER_NAME`, `DatabasePaths` | 3, 38, 30 | unchanged imports; tests patch `deps.DatabasePaths.<method>` on the shared class (R4) |
 | `ChaChaDatabaseCorruptionError`, `_CHACHA_CORRUPTION_ERROR_DETAIL`, `_CHACHA_SHUTDOWN_INIT_ERROR_DETAIL` | 2, 2, 3 | re-exported from `chacha.runtime` |
 | **G1: runtime state** (`runtime = get_chacha_runtime()`) | | |
@@ -1099,7 +1163,7 @@ Names no test uses move with their code and need no test edit:
 
   - `test_runtime_owns_the_executor_and_cache(fresh_services)`:
     - `runtime = get_chacha_runtime()`; `db = await runtime.get_db("k", lambda: fake_db, user_id=1)`;
-    - assert `runtime.cached_instances() == (fake_db,)`;
+    - assert `db is fake_db` and `runtime.cached_instances() == (fake_db,)`;
     - after `await runtime.aclose()`, assert `runtime.cached_instances() == ()` and `fake_db.closed`;
     - then `runtime.resume()` and assert `runtime.executor()` is a live executor (R7).
 
@@ -1113,11 +1177,17 @@ Names no test uses move with their code and need no test edit:
   - Run: `"$PY" -m pytest ... tldw_Server_API/tests/unit tldw_Server_API/tests/API_Deps tldw_Server_API/tests/Chat/test_chacha_* tldw_Server_API/tests/DB_Management/test_chacha_* tldw_Server_API/tests/DB_Management/test_character_shared_owner_contract.py tldw_Server_API/tests/DB_Management/test_note_shared_owner_contract.py tldw_Server_API/tests/DB_Management/test_study_* tldw_Server_API/tests/Health/test_readiness_health_sanitizers.py tldw_Server_API/tests/Services/test_startup_chacha_warmup.py tldw_Server_API/tests/Visual_Identities/test_builtin_pixel_migu.py tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py`.
   - Then run every file from `git grep -l ChaCha_Notes_DB_Deps -- tldw_Server_API/tests` (198 files) with Task 7 Step 3's comparison loop: every line `SAME`.
   - Then run `TLDW_SINGLETON_GUARD=error` on `tests/Chat` and `tests/Notes_NEW`: no leak reported.
-  - Re-run Step 0's scan. Pass: it prints no name from the "G1: runtime state" rows. `logger` and `probe_chacha_connection` remain, through their G2 sites and the kept deps logger.
-  - `git grep -nwE "_chacha_db_instances|_CHACHA_RUNTIME|_CHACHA_HEALTH|_CHACHA_SHUTTING_DOWN|_get_chacha_executor" -- tldw_Server_API` prints nothing.
+  - Re-run Step 0's scan. Pass: it prints no name from the "G1: runtime state" rows except `logger`, whose 7 G2 patches stay on deps until Task 10 (R2). `probe_chacha_connection`, `faulthandler` and `asyncio` are gone, because R4 and R5 retarget them in this slice.
+  - `git grep -nwE '_chacha_db_instances|_CHACHA_RUNTIME|_CHACHA_HEALTH|_CHACHA_SHUTTING_DOWN|_get_chacha_executor' -- tldw_Server_API` prints nothing.
   - `git grep -nw reset_for_tests -- tldw_Server_API/app/core/DB_Management tldw_Server_API/app/api tldw_Server_API/tests/Chat tldw_Server_API/tests/unit` prints nothing. The grep is path-scoped because `ExtractionExecutorManager.reset_for_tests` (`core/Web_Scraping/orchestration/executor.py:383,678`, used by `tests/Web_Scraping/test_phase4_extraction_executor.py`) belongs to a service this task does not migrate.
 
-- [ ] **Step 5: Tighten; run C1-C4, C6** (`tests/Chat/test_chacha_notes_db_deps_postgres_health.py tests/DB_Management/test_chacha_postgres_*`) **and C7.** Commit: `git commit -m "refactor(chacha): the runtime owns the executor, cache and init state; ChaCha deps hold none (TASK-13950.18)"`.
+- [ ] **Step 5: Tighten; run C1-C4, C6** (`tests/Chat/test_chacha_notes_db_deps_postgres_health.py tests/DB_Management/test_chacha_postgres_*`) **and C7.** Commit:
+
+```bash
+git add tldw_Server_API/app/core/DB_Management/chacha/runtime.py tldw_Server_API/app/core/Utils/app_services.py tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py tldw_Server_API/tests/lint/global_statements_baseline.json tldw_Server_API/tests/lint/api_deps_module_state_baseline.json
+git add -A tldw_Server_API/tests
+git commit -m "refactor(chacha): the runtime owns the executor, cache and init state; ChaCha deps hold none (TASK-13950.18)"
+```
 
 ### Task 10: The ChaCha provider moves to core; services and core stop importing the deps module (AC3, AC5) (PR G2)
 
@@ -1128,20 +1198,8 @@ Names no test uses move with their code and need no test edit:
   - `_ensure_default_character_async`, `_ensure_default_character_owned`, and `_ensure_default_character`, renamed `ensure_default_character`;
   - `_tenant_client_id`, renamed `tenant_client_id`;
   - `SERVER_CLIENT_ID`, `resolve_chacha_user_base_dir`, and the `Character_Chat.constants` re-export.
-- New public accessors there, all raising core errors and never `HTTPException`:
-  - `async get_chacha_db_for_user_id(user_id: int, client_id: str | None = None) -> CharactersRAGDB`. It raises `ValueError("Invalid owner_user_id.")` for a bool, non-int or non-positive id, plus the runtime errors. It schedules the default-character task through `runtime.track`, as today.
-  - `async get_chacha_db_for_owner(owner_user_id: int) -> CharactersRAGDB`.
-  - `async warm_chacha_db_for_user(user_id: int, client_id: str | None = None) -> None`.
-  - `get_chacha_health_snapshot()`, `snapshot_cached_chacha_db_instances()`, `reset_chacha_shutdown_state()`, `close_all_chacha_db_instances()` and `shutdown_chacha_executor(wait: bool = False)` delegate to `get_chacha_runtime()`.
-  - `async shutdown_chacha_resources(wait_timeout: float = 5.0)` reads `app_services().chacha_runtime` and does nothing when it is None, rather than build a runtime only to close it.
-- Modify: `ChaCha_Notes_DB_Deps.py`, a thin adapter. It keeps:
-  - `get_chacha_db_for_user` (Depends);
-  - `get_chacha_db_for_user_id(user_id, client_id=None)` and `get_chacha_db_for_owner(owner_user_id)`. Each validates the id exactly as today (400 `"Invalid owner_user_id."`), then calls the provider's accessor of the same name and maps core errors with `_to_http` (Task 9 Interfaces order). Delegating keeps one tenant-binding implementation, the provider's `tenant_client_id`;
-  - `_get_or_init_db_instance(user_id, client_id)`, the mapping wrapper that tests call. It now passes `partial(chacha_db_provider.create_and_prepare_chacha_db, user_id, client_id)`;
-  - `_map_chacha_init_db_error` and `_to_http`;
-  - re-exports of the provider's public names, which keep R6's `close_all_chacha_db_instances` and `shutdown_chacha_executor` importable, plus `SERVER_CLIENT_ID`, `resolve_chacha_user_base_dir`, `DEFAULT_CHARACTER_NAME` and the runtime's error constants.
-
-  It keeps no private provider names.
+- Add the provider's public accessors (Interfaces).
+- Modify: `ChaCha_Notes_DB_Deps.py`, a thin adapter (Interfaces). It keeps no private provider names.
 - Modify the 18 importers to import the same names from `tldw_Server_API.app.core.Character_Chat.chacha_db_provider`:
   - `core/Chat/command_router.py:660`, `core/Chat_Macros/jobs.py:12`, `core/Research_Workspace/capabilities.py:451`, `core/Sharing/shared_workspace_clone_jobs_worker.py:1422`;
   - `services/notes_graph_projection_worker.py:34`, `notes_graph_suggestions_maintenance.py:11`, `notes_graph_suggestions_worker.py:12`, `notes_semantic_index_worker.py:17`, `notes_semantic_maintenance.py:14`, `research_workspace_output_jobs_worker.py:13`, `shutdown_resource_cleanup.py:171`, `startup_chacha_warmup.py:35,65`, `study_pack_jobs_worker.py:11`, `study_suggestions_jobs_worker.py:11`, `visual_identity_jobs_worker.py:13`, `vn_asset_jobs_worker.py:13`, `workspace_file_inventory_jobs_worker.py:12`, `writing_annotation_review_jobs_worker.py:13`.
@@ -1155,7 +1213,7 @@ Names no test uses move with their code and need no test edit:
     - `Sharing/test_shared_workspace_clone_jobs_worker.py:84` moves to `chacha_db_provider`, because its caller, `core/Sharing/shared_workspace_clone_jobs_worker.py:1422`, imports the provider after this slice;
     - `Sharing/test_shared_workspace_recipient_security_matrix.py:558-562` keeps both deps patches and adds the same two on `chacha_db_provider`, so the matrix still closes every route to a DB;
     - `Chat/test_chacha_db_deps_error_mapping.py:284` (warm-up log test): `warm_chacha_db_for_user` now lives in the provider and calls the runtime directly. So the test sets the slot to a runtime whose `get_db` raises `RuntimeError("chacha backend exploded at /private/db/path SECRET_TOKEN")`, patches the provider's `logger`, and keeps its assertions;
-    - `Chat/test_chacha_notes_db_deps_sqlite_policy.py:130`: the deps wrapper validates ids before it delegates, so the patch target becomes `chacha_db_provider.get_chacha_db_for_user_id`. The test still asserts the patch is never called;
+    - `Chat/test_chacha_notes_db_deps_sqlite_policy.py:130`: the provider validates ids before it touches the runtime. So the test sets the slot to a runtime whose `get_db` records calls, asserts it was never called, and still expects 400 `"Invalid owner_user_id."` from the wrapper;
     - `CharactersRAGDB` (`API_Deps/test_chacha_notes_db_deps_error_mapping.py:241`, `Chat/test_chacha_db_deps_error_mapping.py:345`, `DB_Management/test_chacha_postgres_http_operation_lifecycle.py:883`, `Visual_Identities/test_builtin_pixel_migu.py:270`) moves to `chacha_db_provider`.
   - `tests/unit/test_app_services_shutdown_order.py`: only the ChaCha seam changes, to `monkeypatch.setattr(app_services(), "chacha_runtime", _Service("chacha", events))`. `ORDER` is unchanged.
 - Modify: `tldw_Server_API/tests/lint/test_service_singleton_ratchet.py`. Add the AC3 pin:
@@ -1169,6 +1227,22 @@ Names no test uses move with their code and need no test edit:
 
   No new pair: `core.Character_Chat -> core.Visual_Identities` and `-> core.DB_Management` are not ratcheted.
 
+**Interfaces:**
+- `core/Character_Chat/chacha_db_provider.py`. Every function raises core errors, never `HTTPException`. The owner-id check lives only here.
+  - `async get_chacha_db_for_user_id(user_id: int, client_id: str | None = None) -> CharactersRAGDB`. It raises `ValueError("Invalid owner_user_id.")` for a bool, non-int or non-positive id, before it touches the runtime, plus the runtime errors. It schedules the default-character task through `runtime.track`, as today.
+  - `async get_chacha_db_for_owner(owner_user_id: int) -> CharactersRAGDB`. It raises `ValueError("Invalid owner_user_id.")` for a non-int id, today's check.
+  - `async warm_chacha_db_for_user(user_id: int, client_id: str | None = None) -> None`.
+  - `create_and_prepare_chacha_db(user_id: int, client_id: str) -> CharactersRAGDB`, `ensure_default_character(db: CharactersRAGDB) -> int | None` and `tenant_client_id(user_id: int, client_id: str | None) -> str`.
+  - `get_chacha_health_snapshot() -> dict[str, Any]`, `snapshot_cached_chacha_db_instances() -> tuple[CharactersRAGDB, ...]`, `reset_chacha_shutdown_state() -> None`, `close_all_chacha_db_instances() -> None` and `shutdown_chacha_executor(wait: bool = False) -> None` delegate to `get_chacha_runtime()`.
+  - `async shutdown_chacha_resources(wait_timeout: float = 5.0) -> None` reads `app_services().chacha_runtime` and does nothing when it is None, rather than build a runtime only to close it.
+- `ChaCha_Notes_DB_Deps.py`:
+  - `get_chacha_db_for_user` (Depends) and `get_chacha_db_for_user_id(user_id, client_id=None)` and `get_chacha_db_for_owner(owner_user_id)` call the provider's accessor of the same name and map errors with `_to_http`. A `ValueError` from the provider becomes 400 `"Invalid owner_user_id."`; the rest follow Task 9's Interfaces order.
+    - There is no second validation in the wrapper.
+    - Delegating keeps one tenant-binding implementation, the provider's `tenant_client_id`.
+  - `_get_or_init_db_instance(user_id, client_id)` stays as the mapping wrapper that tests call. It now passes `partial(chacha_db_provider.create_and_prepare_chacha_db, user_id, client_id)`.
+  - `_map_chacha_init_db_error` and `_to_http`.
+  - Re-exports of the provider's public names, which keep R6's `close_all_chacha_db_instances` and `shutdown_chacha_executor` importable, plus `SERVER_CLIENT_ID`, `resolve_chacha_user_base_dir`, `DEFAULT_CHARACTER_NAME` and the runtime's error constants.
+
 - [ ] **Step 0: Re-measure the seams.** Run Task 9's Step 0 scan and its R5 `--sites` command on the PR base. Every name and site must have a disposition here or in Task 9's table; add any newcomer before Step 1.
 
 - [ ] **Step 1: Write the failing tests.**
@@ -1178,22 +1252,31 @@ Names no test uses move with their code and need no test edit:
     - Patch `chacha_db_provider.create_and_prepare_chacha_db` to record `(user_id, client_id)` and return a `_FakeDB`.
     - Patch `chacha_db_provider._ensure_default_character_async` with an async no-op.
     - Assert that each of these records exactly `(7, "7")`: `get_chacha_db_for_user_id(7, client_id="voice_assistant")`, `get_chacha_db_for_owner(7)` and `warm_chacha_db_for_user(7, "voice_assistant")`.
-  - `test_core_accessor_raises_core_errors_not_http(fresh_services, monkeypatch)`, in `tests/unit/test_chacha_runtime_container.py`. It imports `chacha_db_provider` inside the test, so before the move only this test errors:
+  - `test_core_accessor_raises_core_errors_not_http(fresh_services, monkeypatch)`, in `tests/unit/test_chacha_runtime_container.py`, also importing `chacha_db_provider` inside the test:
     - `await chacha_db_provider.get_chacha_db_for_user_id(0)` raises `ValueError`;
     - with the runtime slot patched so that `get_db` raises `ChaChaInitTimeoutError()`, `await chacha_db_provider.get_chacha_db_for_user_id(1)` raises `ChaChaInitTimeoutError`, not `HTTPException`.
 
-- [ ] **Step 2: Run them.** Expected: the pin fails, listing the 18 modules, and the provider test fails with `ModuleNotFoundError: No module named 'tldw_Server_API.app.core.Character_Chat.chacha_db_provider'`.
+- [ ] **Step 2: Run them.** Expected:
+  - the pin fails, listing the 18 modules;
+  - both provider tests fail with `ModuleNotFoundError: No module named 'tldw_Server_API.app.core.Character_Chat.chacha_db_provider'`;
+  - the file's Task 9 tests still pass, because the import is inside each new test.
 
 - [ ] **Step 3: Move, rewrite the 18 imports, retarget the tests, `--tighten`.**
 
 - [ ] **Step 4: Run.**
-  - Task 9 Step 4's commands, plus every test file of the 18 importers' modules: `git grep -lE "notes_graph|notes_semantic|study_pack|study_suggestions|visual_identity_jobs|vn_asset_jobs|workspace_file_inventory|writing_annotation_review|research_workspace_output|chat_macro|command_router|shared_workspace_clone|startup_chacha|shutdown_resource_cleanup|Research_Workspace/capabilities" -- tldw_Server_API/tests`. Expected: the same pass/fail set as dev.
+  - Task 9 Step 4's commands, plus every test file of the 18 importers' modules: `git grep -lE 'notes_graph|notes_semantic|study_pack|study_suggestions|visual_identity_jobs|vn_asset_jobs|workspace_file_inventory|writing_annotation_review|research_workspace_output|chat_macro|command_router|shared_workspace_clone|startup_chacha|shutdown_resource_cleanup|Research_Workspace/capabilities' -- tldw_Server_API/tests`. Expected: the same pass/fail set as dev.
   - `tests/unit/test_app_services_shutdown_order.py`: PASS with `ORDER` unchanged.
   - `git grep -n "ChaCha_Notes_DB_Deps" -- tldw_Server_API/app/core tldw_Server_API/app/services` prints nothing.
   - Re-run Task 9's Step 0 scan. Pass: it prints no "G2: provider" name. `close_all_chacha_db_instances` and `shutdown_chacha_executor` are still listed (R6).
-  - `wc -l tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py` is reported in the PR (expected under 250).
+  - `wc -l tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py` is reported in the PR, with no target. The slices move about 650 of its 1,030 lines, so about 380 remain before the wrappers are thinned.
 
-- [ ] **Step 5: Run C1-C4, C6 (as Task 9) and C7.** Commit: `git commit -m "refactor(chacha): workers open per-user ChaCha DBs through core; the deps module is a thin adapter (TASK-13950.18)"`.
+- [ ] **Step 5: Run C1-C4, C6 (as Task 9) and C7.** Commit:
+
+```bash
+git add tldw_Server_API/app/core/Character_Chat/chacha_db_provider.py tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py tldw_Server_API/app/core/Notes/README.md tldw_Server_API/tests/lint/layering_baseline.txt tldw_Server_API/tests/lint/test_service_singleton_ratchet.py
+git add -A tldw_Server_API/app/core tldw_Server_API/app/services tldw_Server_API/tests
+git commit -m "refactor(chacha): workers open per-user ChaCha DBs through core; the deps module is a thin adapter (TASK-13950.18)"
+```
 
 ### Task 11: Close-out (ADR-021 amendment, AC checks, DoD) (PR H)
 
@@ -1208,27 +1291,34 @@ Names no test uses move with their code and need no test edit:
 
 - [ ] **Step 1: Verify each AC on dev.**
 
-| AC | Check |
-|---|---|
-| AC1 | The three baselines exist; `test_singleton_counts_do_not_grow[*]` passes; record their totals (seed 456/551/35, now lower) |
-| AC2 | `test_lifespan_publishes_the_container_and_shuts_down_what_it_holds`, the five slot tests and `test_mcp_routes_take_the_server_from_the_container` pass. Wording per the controller's AC2 ruling (Global Constraints) |
-| AC3 | `test_services_and_core_do_not_import_the_chacha_deps_adapter` passes; the state baseline has no ChaCha entry |
-| AC4 | `git grep -nwE "reset_session_manager\|reset_jwt_service" -- tldw_Server_API` and `git grep -nw reset_for_tests -- tldw_Server_API/app/core/DB_Management tldw_Server_API/app/api tldw_Server_API/tests/Chat tldw_Server_API/tests/unit` print nothing. The second grep is path-scoped because Web_Scraping's `ExtractionExecutorManager.reset_for_tests` belongs to a service this task does not migrate |
-| AC5 | `test_final_cleanup_closes_the_container_services_in_adr_021_order` passes, Task 2 Step 3's marker check shows that C3 selects it, and `ORDER` is as committed in PR A (`git diff <PR A merge> HEAD -- tldw_Server_API/tests/unit/test_app_services_shutdown_order.py` changes only the ChaCha seam) |
-| AC6 | `git grep -l -w reset_db_pool -- tldw_Server_API/tests \| wc -l` prints at most 49 |
-| AC7 | `test_backend_required_enforces_size_ratchets[tldw_Server_API/tests/lint/test_service_singleton_ratchet.py]` and `test_backend_required_unit_smoke_runs_the_unit_tests` pass |
+The commands are written outside a table so that they paste into zsh or bash unchanged.
+- **AC1.** The three baselines exist and `test_singleton_counts_do_not_grow[*]` passes. Record the three totals (seed 456/551/35, now lower).
+- **AC2.** `test_lifespan_publishes_the_container_and_shuts_down_what_it_holds`, the five slot tests and `test_mcp_routes_take_the_server_from_the_container` pass. The wording follows the controller's AC2 ruling (Global Constraints).
+- **AC3.** `test_services_and_core_do_not_import_the_chacha_deps_adapter` passes, and the state baseline has no ChaCha entry.
+- **AC4.** Both of these print nothing:
+  - `git grep -nwE 'reset_session_manager|reset_jwt_service' -- tldw_Server_API`;
+  - `git grep -nw reset_for_tests -- tldw_Server_API/app/core/DB_Management tldw_Server_API/app/api tldw_Server_API/tests/Chat tldw_Server_API/tests/unit`. It is path-scoped because Web_Scraping's `ExtractionExecutorManager.reset_for_tests` belongs to a service this task does not migrate.
+- **AC5.** `test_final_cleanup_closes_the_container_services_in_adr_021_order` passes, and Task 2 Step 3's marker check shows that C3 selects it. `ORDER` is as committed in PR A: `git diff <PR A merge> HEAD -- tldw_Server_API/tests/unit/test_app_services_shutdown_order.py` changes only the ChaCha seam.
+- **AC6.** `git grep -l -w reset_db_pool -- tldw_Server_API/tests | wc -l` prints at most 49.
+- **AC7.** `test_backend_required_enforces_size_ratchets[tldw_Server_API/tests/lint/test_service_singleton_ratchet.py]` and `test_backend_required_unit_smoke_runs_the_unit_tests` pass.
 
 - [ ] **Step 2: Run Bandit on the touched app code.** Bandit is not in the venv, so use `uvx bandit -q -ll -r tldw_Server_API/app/core/Utils/app_services.py tldw_Server_API/app/core/DB_Management/chacha/runtime.py tldw_Server_API/app/core/Character_Chat/chacha_db_provider.py tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py tldw_Server_API/app/api/v1/API_Deps/mcp_deps.py`. Expected: no new medium or high finding against dev.
 - [ ] **Step 3: Record the results.**
   - Pass `--check-ac` for each AC proven in Step 1. First rewrite AC2's text to Ruling 1's wording with backlog-py's AC edit, citing the controller ruling of 2026-10-30.
   - Pass `--append-notes` with:
-    - the before and after numbers (globals, getter calls, API_Deps state, `reset_db_pool` test files 168 → N, services/core ChaCha deps importers 18 → 0, `ChaCha_Notes_DB_Deps.py` 1,030 → N lines, the `services -> api.v1.API_Deps` layering line 33 → 18);
+    - the before and after numbers (globals, getter calls, API_Deps state, `reset_db_pool` test files 168 on b9eed09f91 (169 after #3371) → N, services/core ChaCha deps importers 18 → 0, `ChaCha_Notes_DB_Deps.py` 1,030 → N lines, the `services -> api.v1.API_Deps` layering line 33 → 18);
     - the PR numbers;
     - the drift in the backlog's figures (574 → 551; 155 → 168);
     - Rulings 1 and 2 (controller rulings, 2026-10-30).
   - Pass `--check-dod` for each item met, and `--final-summary`.
   - Stage with `git add -A backlog/tasks`; `tldw_Server_API/tests/CI/test_backlog_task_format_ratchet.py` must pass.
-- [ ] **Step 4: Commit.** `git commit -m "docs(adr): ADR-021 names app.state.services; close out TASK-13950.18"`.
+- [ ] **Step 4: Commit.**
+
+```bash
+git add Docs/ADR/021-services-lifecycle-startup-and-shutdown.md Docs/Published/ADR/021-services-lifecycle-startup-and-shutdown.md
+git add -A backlog/tasks
+git commit -m "docs(adr): ADR-021 names app.state.services; close out TASK-13950.18"
+```
 
 ## Self-review (2026-10-30)
 
