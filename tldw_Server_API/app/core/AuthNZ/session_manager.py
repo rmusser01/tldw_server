@@ -2091,15 +2091,6 @@ async def get_session_manager() -> SessionManager:
     return services.session_manager
 
 
-async def reset_session_manager():
-    """Reset session manager (for testing)"""
-    services = app_services()
-    if services.session_manager:
-        await services.session_manager.shutdown()
-    services.session_manager = None
-    services.session_manager_lock = asyncio.Lock()
-
-
 #
 # End of session_manager.py
 #######################################################################################################################
