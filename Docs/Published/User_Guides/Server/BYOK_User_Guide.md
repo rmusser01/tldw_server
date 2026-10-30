@@ -92,6 +92,10 @@ as `source=disabled`. Replacement and testing return `403`, but the key owner
 may still delete the orphan with
 `DELETE /api/v1/users/keys/gateway:<slug>`.
 
+## Usage Quotas
+
+A call made with your own key is recorded in your usage, with its tokens and cost. It does not count toward the operator's per-user LLM limits (`limits.llm_tokens_per_month`, `limits.llm_cost_per_day_usd`, `limits.llm_cost_per_month_usd`) or a hosted plan's monthly LLM tokens, and those limits never refuse it. That applies to providers that bill your key, such as OpenAI or Anthropic, when the server sends the call to that vendor. A key you store for a custom OpenAI-compatible endpoint reaches the operator's server, so those calls count. So do calls on a provider the operator has pointed at its own server instead of the vendor, and calls on an org or team shared key or on a server key. If you are already over a limit, `/chat/completions` and the Messages API still answer a request whose provider uses your own key. Other endpoints, such as character chat and RAG, still refuse it for now. See `Docs/Operations/Usage_Quotas.md` and ADR-083.
+
 ## Credential Fields
 
 Credential fields are validated per provider. By default, unknown providers only

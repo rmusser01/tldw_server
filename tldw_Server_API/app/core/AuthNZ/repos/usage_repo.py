@@ -13,6 +13,30 @@ from tldw_Server_API.app.core.AuthNZ.repos.datetime_utils import _strip_tzinfo
 # ``<>`` would also drop rows with no operation. This is a constant, never user
 # input, so the queries that interpolate it carry ``nosec B608``.
 _LLM_GENERATION_PREDICATE = "COALESCE(operation, '') <> 'embeddings'"
+# Nor do they count calls paid by the user's own provider key (TASK-13955). NULL (unknown, and every
+# row written before the column existed) counts.
+_OPERATOR_PAID_PREDICATE = "COALESCE(credential_source, '') <> 'user'"
+_MISSING_SOURCE_WARNED: set[str] = set()
+
+
+def missing_credential_source(exc: BaseException, where: str) -> bool:
+    """True when ``exc`` names ``llm_usage_log.credential_source``: the schema predates the column.
+
+    The caller then retries without the column, so every row counts. The first
+    time per ``where`` it warns, because the LLM limits then count calls on the
+    user's own key.
+    """
+    if "credential_source" not in str(exc):
+        return False
+    if where not in _MISSING_SOURCE_WARNED:
+        _MISSING_SOURCE_WARNED.add(where)
+        logger.bind(exception_type=type(exc).__name__).warning(
+            "llm_usage_log has no credential_source column, so calls on users' own keys count ({}); "
+            "apply AuthNZ migration 104, or check the PostgreSQL usage-table bootstrap",
+            where,
+        )
+    return True
+
 
 _SQLITE_CORRUPTION_SIGNATURES = (
     "database disk image is malformed",
@@ -255,17 +279,23 @@ class AuthnzUsageRepo:
     async def _sum_llm_column_since(self, column: str, *, user_id: int, since: datetime) -> float:
         """Sum one ``llm_usage_log`` column for a user from ``since`` (inclusive), embeddings excluded.
 
+        Calls made with the user's own provider key are excluded too, except on
+        a schema without ``credential_source``, where every row counts.
         ``since`` is bound naive on Postgres: ``llm_usage_log.ts`` is TIMESTAMP
         without time zone there, so an aware bound would never match.
         ``column`` is a constant chosen by the callers below, never user input.
         """
         bound: Any = _strip_tzinfo(since) if self._is_postgres_backend() else since.strftime("%Y-%m-%d %H:%M:%S")
-        value = await self.db_pool.fetchval(
+        query = (
             f"SELECT COALESCE(SUM({column}), 0) FROM llm_usage_log "  # nosec B608
-            f"WHERE user_id = ? AND ts >= ? AND {_LLM_GENERATION_PREDICATE}",
-            int(user_id),
-            bound,
+            f"WHERE user_id = ? AND ts >= ? AND {_LLM_GENERATION_PREDICATE}"
         )
+        try:
+            value = await self.db_pool.fetchval(f"{query} AND {_OPERATOR_PAID_PREDICATE}", int(user_id), bound)
+        except Exception as exc:
+            if not missing_credential_source(exc, "the per-user LLM limits"):
+                raise
+            value = await self.db_pool.fetchval(query, int(user_id), bound)  # never fail open: count every row
         return float(value or 0)
 
     async def sum_user_llm_tokens_since(self, *, user_id: int, since: datetime) -> float:
@@ -525,69 +555,85 @@ class AuthnzUsageRepo:
         prompt_fingerprint_version: str | None = None,
         world_book_fingerprint: str | None = None,
         raw_usage_metadata_json: str | None = None,
+        credential_source: str | None = None,
     ) -> None:
         """
         Insert a single row into ``llm_usage_log``.
 
         This centralizes dialect handling so callers (e.g., usage_tracker)
-        do not embed backend-specific SQL.
+        do not embed backend-specific SQL. A row with a ``credential_source`` on a schema without that column is written without it.
         """
+
+        async def _insert_full(with_source: bool) -> None:
+            """The current statement, with or without ``credential_source``."""
+            source_column = ", credential_source" if with_source else ""
+            source_value = ", ?" if with_source else ""
+            source_args = (credential_source,) if with_source else ()
+            await self.db_pool.execute(
+                f"""
+                INSERT INTO llm_usage_log (
+                    ts, user_id, key_id, endpoint, operation, provider, model, status, latency_ms,
+                    prompt_tokens, completion_tokens, total_tokens,
+                    prompt_cost_usd, completion_cost_usd, total_cost_usd, currency, estimated, request_id,
+                    remote_ip, user_agent, token_name, conversation_id,
+                    cached_input_tokens, cache_write_input_tokens, cache_read_input_tokens,
+                    billable_input_tokens, reasoning_tokens, choice_count, estimate_source,
+                    prompt_fingerprint, prompt_fingerprint_version, world_book_fingerprint,
+                    raw_usage_metadata_json{source_column}
+                ) VALUES (
+                    CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?, ?{source_value}
+                )
+                """,  # nosec B608 - the interpolated fragments are constants
+                user_id,
+                key_id,
+                endpoint,
+                operation,
+                provider,
+                model,
+                int(status),
+                int(latency_ms),
+                int(prompt_tokens),
+                int(completion_tokens),
+                int(total_tokens),
+                float(prompt_cost_usd),
+                float(completion_cost_usd),
+                float(total_cost_usd),
+                currency,
+                bool(estimated),
+                request_id,
+                remote_ip,
+                user_agent,
+                token_name,
+                conversation_id,
+                int(cached_input_tokens) if cached_input_tokens is not None else None,
+                int(cache_write_input_tokens) if cache_write_input_tokens is not None else None,
+                int(cache_read_input_tokens) if cache_read_input_tokens is not None else None,
+                int(billable_input_tokens) if billable_input_tokens is not None else None,
+                int(reasoning_tokens) if reasoning_tokens is not None else None,
+                int(choice_count) if choice_count is not None else None,
+                estimate_source,
+                prompt_fingerprint,
+                prompt_fingerprint_version,
+                world_book_fingerprint,
+                raw_usage_metadata_json,
+                *source_args,
+            )
+
         try:
             try:
-                await self.db_pool.execute(
-                    """
-                    INSERT INTO llm_usage_log (
-                        ts, user_id, key_id, endpoint, operation, provider, model, status, latency_ms,
-                        prompt_tokens, completion_tokens, total_tokens,
-                        prompt_cost_usd, completion_cost_usd, total_cost_usd, currency, estimated, request_id,
-                        remote_ip, user_agent, token_name, conversation_id,
-                        cached_input_tokens, cache_write_input_tokens, cache_read_input_tokens,
-                        billable_input_tokens, reasoning_tokens, choice_count, estimate_source,
-                        prompt_fingerprint, prompt_fingerprint_version, world_book_fingerprint,
-                        raw_usage_metadata_json
-                    ) VALUES (
-                        CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?,
-                        ?, ?, ?,
-                        ?, ?, ?, ?,
-                        ?, ?, ?, ?
-                    )
-                    """,
-                    user_id,
-                    key_id,
-                    endpoint,
-                    operation,
-                    provider,
-                    model,
-                    int(status),
-                    int(latency_ms),
-                    int(prompt_tokens),
-                    int(completion_tokens),
-                    int(total_tokens),
-                    float(prompt_cost_usd),
-                    float(completion_cost_usd),
-                    float(total_cost_usd),
-                    currency,
-                    bool(estimated),
-                    request_id,
-                    remote_ip,
-                    user_agent,
-                    token_name,
-                    conversation_id,
-                    int(cached_input_tokens) if cached_input_tokens is not None else None,
-                    int(cache_write_input_tokens) if cache_write_input_tokens is not None else None,
-                    int(cache_read_input_tokens) if cache_read_input_tokens is not None else None,
-                    int(billable_input_tokens) if billable_input_tokens is not None else None,
-                    int(reasoning_tokens) if reasoning_tokens is not None else None,
-                    int(choice_count) if choice_count is not None else None,
-                    estimate_source,
-                    prompt_fingerprint,
-                    prompt_fingerprint_version,
-                    world_book_fingerprint,
-                    raw_usage_metadata_json,
-                )
+                try:
+                    await _insert_full(credential_source is not None)
+                except Exception as exc:
+                    if credential_source is None:
+                        raise
+                    missing_credential_source(exc, "usage rows")  # warns once when the column is missing
+                    await _insert_full(False)  # keep the row, without its source: it counts
             except Exception:
                 try:
                     # Backward-compatible fallback for pre-088 schemas.

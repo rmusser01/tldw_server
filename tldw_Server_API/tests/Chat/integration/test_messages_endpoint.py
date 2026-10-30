@@ -143,6 +143,31 @@ def test_messages_refuses_an_over_quota_user_before_any_provider_call(client_use
 
 
 @pytest.mark.integration
+def test_messages_admits_an_over_quota_user_whose_provider_runs_on_their_own_key(client_user_only, monkeypatch):
+    """Over the limit, a request whose provider runs on the user's own key still reaches the provider (TASK-13955)."""
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    calls: list[str] = []
+
+    async def _adapter_call(**kwargs):
+        calls.append("adapter")
+        return _build_openai_response("hello")
+
+    async def _own_key(_uid, provider):
+        return provider == "openai"
+
+    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _adapter_call)
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
+    refuse_llm_work(monkeypatch)
+    payload = {"model": "openai/gpt-4", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 10}
+    response = client_user_only.post("/api/v1/messages", json=payload)
+    assert response.status_code == 200, response.text
+    assert calls == ["adapter"]
+
+
+@pytest.mark.integration
 def test_messages_count_tokens_unsupported_provider(client_user_only, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     payload = {

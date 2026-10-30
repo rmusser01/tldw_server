@@ -302,7 +302,7 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
-from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota, users_own_key_serves
 from tldw_Server_API.app.api.v1.schemas.chat_commands_schemas import ChatCommandInfo, ChatCommandsListResponse
 from tldw_Server_API.app.api.v1.schemas.chat_dictionary_schemas import (
     ValidateDictionaryRequest,
@@ -4395,8 +4395,14 @@ async def create_chat_completion(
             except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                 _estimated_request_tokens = 1000
 
-            # Billing: LLM token enforcement via context manager (tracks actual usage)
-            if enforcement_enabled() and billing_org_id is not None and not _billing_enforcer_entered:
+            # Billing: LLM token enforcement via context manager (tracks actual usage). A request whose
+            # provider runs on the user's own key is neither checked nor counted as plan usage (ADR-083).
+            if (
+                enforcement_enabled()
+                and billing_org_id is not None
+                and not _billing_enforcer_entered
+                and not await users_own_key_serves(getattr(current_user, "id", None), selected_provider)
+            ):
                 try:
                     _billing_enforcer = LimitEnforcer(
                         billing_org_id,
@@ -4412,7 +4418,9 @@ async def create_chat_completion(
                     _billing_enforcer = None
 
             # Usage quotas (LLM usage accounting spec §4a): monthly LLM tokens, and daily and monthly LLM spend.
-            await enforce_llm_quota(getattr(current_user, "id", None), max(1, _estimated_request_tokens))
+            await enforce_llm_quota(
+                getattr(current_user, "id", None), max(1, _estimated_request_tokens), provider=selected_provider
+            )
 
             # Resolve one effective model before either durable macro creation or direct dispatch.
             provider = selected_provider
@@ -5534,6 +5542,8 @@ async def create_chat_completion(
                                 )
 
                             try:
+                                # Checked at the call on its own handle. The usage row keeps the first handle's
+                                # source, which differs only if the user's OAuth key was deleted mid-request (TASK-13955).
                                 refreshed_response = perform_chat_api_call(**refreshed_args)
                                 _record_openai_oauth_retry("success")
                                 return refreshed_response
@@ -6162,6 +6172,7 @@ async def create_chat_completion(
                     status.HTTP_403_FORBIDDEN,
                     status.HTTP_404_NOT_FOUND,
                     status.HTTP_409_CONFLICT,
+                    status.HTTP_402_PAYMENT_REQUIRED,
                     status.HTTP_413_CONTENT_TOO_LARGE,
                     status.HTTP_429_TOO_MANY_REQUESTS,
                     status.HTTP_500_INTERNAL_SERVER_ERROR,
