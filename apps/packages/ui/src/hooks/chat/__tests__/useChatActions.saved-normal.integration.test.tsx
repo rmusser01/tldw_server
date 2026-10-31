@@ -80,7 +80,7 @@ const mocks = vi.hoisted(() => {
   assistantLoading: false,
   serverRows: new Map<
     string,
-    Array<{ id?: string; role: string; content: string; metadata_extra?: Record<string, unknown>; images?: string[]; version?: number }>
+    Array<{ id?: string; role: string; content: string; metadata_extra?: Record<string, unknown>; images?: string[]; version?: number; parent_message_id?: string | null }>
   >(),
   watches: new Set<{ tldwConfig: (change: { newValue: unknown }) => void }>(),
   config: {
@@ -3498,7 +3498,7 @@ describe("saved normal Chat pipeline with autosave", () => {
       }
     });
 
-    it("S04 retains cited workspace source references through the actual SDK model and manual server save", async () => {
+    it.each(["first", "prior-local", "duplicate-ack", "server-alias", "unknown-parent"])("S04 retains cited workspace source references through the actual SDK model and manual server save (%s)", async parentCase => {
       const actualModels =
         await vi.importActual<typeof import("@/models")>("@/models");
       mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel);
@@ -3545,7 +3545,7 @@ describe("saved normal Chat pipeline with autosave", () => {
       const view = await mountSdkScene({
         type: "workspace",
         workspaceId: "sdk-original-workspace",
-      });
+      }, parentCase !== "first");
       act(() =>
         useStoreMessageOption.setState({
           ragMediaIds: [42],
@@ -3575,6 +3575,7 @@ describe("saved normal Chat pipeline with autosave", () => {
           ["user", "SDK original question"],
           ["assistant", "The telescope is Selene."],
         ]);
+        expect(saved.map(row => row.parent_message_id ?? null)).toEqual([null, saved[0].id]);
         expect(saved[1].metadata_extra).toMatchObject({
           workspace_rag_sources_v1: {
             origin: "knowledge_qa",
@@ -3590,6 +3591,28 @@ describe("saved normal Chat pipeline with autosave", () => {
         expect(JSON.stringify(saved[1].metadata_extra)).not.toContain(
           "must-not-persist",
         );
+        if (parentCase !== "first") {
+          const state = useStoreMessageOption.getState();
+          const prior = state.messages.find(row => row.isBot && row.serverMessageId === saved[1].id)!;
+          expect(prior).toBeDefined();
+          act(() => useStoreMessageOption.setState({
+            ...(["duplicate-ack", "server-alias"].includes(parentCase) ? { messages: [...state.messages, { ...prior,
+              id: parentCase === "server-alias" ? prior.serverMessageId! : "duplicate-local-parent",
+              ...(parentCase === "server-alias" ? { serverMessageId: "different-server-parent" } : {}),
+            }] } : {}),
+            replyTarget: { id: parentCase === "unknown-parent" ? "missing-local-parent" : prior.id!,
+              preview: "The telescope is Selene.", isBot: true },
+          }));
+          await act(async () => { await view.send(); });
+          const rows = mocks.serverRows.get("chat-1")!;
+          if (parentCase === "prior-local") {
+            expect(rows).toHaveLength(4);
+            expect(rows.slice(2).map(row => row.parent_message_id)).toEqual([saved[1].id, rows[2].id]);
+          } else {
+            expect(rows).toHaveLength(2);
+            expect(mocks.addChatMessage).toHaveBeenCalledTimes(2);
+          }
+        }
       } finally {
         view.unmount();
       }

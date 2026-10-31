@@ -1446,6 +1446,14 @@ export const useChatActions = ({
                 );
             };
 
+            const savedParent = (parent: string | null | undefined) => {
+              if (parent == null) return null;
+              const matched = messages.filter(row => row.id === parent || row.serverMessageId === parent);
+              const serverId = matched.length === 1 ? matched[0].serverMessageId?.trim() : null;
+              if (!serverId || messages.filter(row => row.id === serverId || row.serverMessageId === serverId).length !== 1)
+                throw new Error("Message parent has no unique server acknowledgement");
+              return serverId;
+            };
             // Current-turn save receipts take precedence over capability discovery.
             if (userContent.length > 0 && !payload.userServerMessageId?.trim()) {
               retainReceipt(
@@ -1453,6 +1461,7 @@ export const useChatActions = ({
                 await addMirroredMessage(cid, {
                   role: 'user',
                   content: userContent,
+                  ...(workspaceReferenceSave ? { parent_message_id: savedParent(payload.userParentMessageId) } : {}),
                   ...(payload.userMetadataExtra ? { metadata_extra: payload.userMetadataExtra } : {}),
                 })
               );
@@ -1462,11 +1471,18 @@ export const useChatActions = ({
               assistantContent.length > 0 &&
               !payload.assistantServerMessageId?.trim()
             ) {
+              if (workspaceReferenceSave &&
+                  (!payload.userServerMessageId?.trim() ||
+                    (payload.assistantParentMessageId != null &&
+                     payload.assistantParentMessageId !== payload.userMessageId &&
+                     payload.assistantParentMessageId !== payload.userServerMessageId)))
+                throw new Error("Assistant parent does not match the acknowledged user");
               retainReceipt(
                 'assistant',
                 await addMirroredMessage(cid, {
                   role: 'assistant',
                   content: assistantContent,
+                  ...(workspaceReferenceSave ? { parent_message_id: payload.userServerMessageId } : {}),
                   metadata_extra: payload.assistantMetadataExtra,
                 })
               );
