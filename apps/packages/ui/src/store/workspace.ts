@@ -3870,7 +3870,7 @@ const normalizeWorkspaceSessionMessages = (messages: unknown): Message[] => {
     .map((message) => ({ ...message }))
 }
 
-const deriveHistoryFromMessages = (messages: Message[]): ChatHistory =>
+export const deriveHistoryFromMessages = (messages: Message[]): ChatHistory =>
   messages
     .map((message) => {
       const content = typeof message.message === "string" ? message.message : ""

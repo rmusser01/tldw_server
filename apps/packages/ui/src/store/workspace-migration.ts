@@ -112,6 +112,23 @@ export const readResearchWorkspaceChatReference = (
   return { referenceId, serverChatId: savedId }
 }
 
+const chatReferenceKey = (workspaceId: string, scopeKey: string): string =>
+  `tldw:research-workspace:chat-reference:${encodeURIComponent(scopeKey)}:${encodeURIComponent(workspaceId)}`
+
+export const readSavedResearchWorkspaceChatReference = (
+  storage: Storage,
+  workspaceId: string,
+  scopeKey: string
+): { key: string; raw: string | null; value: ResearchWorkspaceChatReference | undefined } => {
+  const key = chatReferenceKey(workspaceId, scopeKey)
+  const raw = storage.getItem(key)
+  if (raw === null) return { key, raw, value: undefined }
+  if (raw.length > 4096) throw new Error("Saved workspace chat reference is invalid")
+  const value = readResearchWorkspaceChatReference(JSON.parse(raw))
+  if (!value) throw new Error("Saved workspace chat reference is invalid")
+  return { key, raw, value }
+}
+
 /** Retain only an untrusted location hint; restored content still requires scoped server reads. */
 export const saveResearchWorkspaceChatReference = (
   workspaceId: string,
@@ -155,16 +172,16 @@ export const saveResearchWorkspaceChatReference = (
       throw new Error("Saved workspace chat has ambiguous migration markers")
     match = { key, marker }
   }
-  if (!match) return
-  const { key, marker } = match
   const chatReference = readResearchWorkspaceChatReference({
     referenceId,
     serverChatId
   })!
   if (!owner.isCurrent()) return
-  if (JSON.stringify(marker.chatReference) === JSON.stringify(chatReference))
-    return
-  localStorage.setItem(key, JSON.stringify({ ...marker, chatReference }))
+  const key = chatReferenceKey(workspaceId, owner.scopeKey)
+  const raw = JSON.stringify(chatReference)
+  if (localStorage.getItem(key) !== raw) localStorage.setItem(key, raw)
+  if (match && JSON.stringify(match.marker.chatReference) !== raw)
+    localStorage.setItem(match.key, JSON.stringify({ ...match.marker, chatReference }))
 }
 
 export interface ResearchWorkspaceMigrationSessionResponse {

@@ -1055,8 +1055,14 @@ export const quickNotesDraftMatchesWrite = (
   );
   const research = resolved.provenance?.research;
   let contentHead: unknown = draft.metadata;
+  const workspaceKeyword = draft.metadata?.quickNotesWorkspaceId
+    ? `workspace:${draft.metadata.quickNotesWorkspaceId}`
+    : null;
   const keywords = [
     ...draft.keywords,
+    // A frozen older operation retains its original keyword body on retry.
+    ...(workspaceKeyword && Array.isArray(body.keywords) && body.keywords.includes(workspaceKeyword)
+      ? [workspaceKeyword] : []),
     ...(research ? [`workspace:${research.workspace_id}`] : []),
     draft.metadata?.quickNotesWorkspaceTag || "",
   ]
