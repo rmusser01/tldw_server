@@ -200,3 +200,20 @@ export const bindWorkspaceArtifactOrigin = <T extends GeneratedArtifact>(
     });
   return artifact;
 };
+
+const AUDIO_MIME_TYPES: Readonly<Record<string, string>> = {
+  mp3: "audio/mpeg", wav: "audio/wav", opus: "audio/opus", aac: "audio/aac", flac: "audio/flac",
+}
+
+export const getStoredWorkspaceAudioRef = (
+  artifact: Pick<GeneratedArtifact, "type" | "audioFormat" | "exportRefs">
+): { fileId: number; format: string; mimeType: string } => {
+  const refs = artifact.exportRefs?.filter(ref => ref.sourceType === "storage_file") ?? []
+  const ref = refs[0]
+  if (artifact.type !== "audio_overview" || refs.length !== 1 || ref.status !== "ready" ||
+      typeof ref.fileId !== "number" || !Number.isSafeInteger(ref.fileId) || ref.fileId <= 0 ||
+      ref.format !== artifact.audioFormat || !Object.prototype.hasOwnProperty.call(AUDIO_MIME_TYPES, ref.format)) {
+    throw new Error("This output has no saved audio file. Its script is retained; generate the audio again.")
+  }
+  return { fileId: ref.fileId, format: ref.format, mimeType: AUDIO_MIME_TYPES[ref.format] }
+}

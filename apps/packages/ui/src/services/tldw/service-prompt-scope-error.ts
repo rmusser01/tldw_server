@@ -104,6 +104,7 @@ export const isServicePromptRequestPath = (
   const pathname = readCanonicalPathname(path)
   if (!pathname) return false
   const requestMethod = String(method || "GET").toUpperCase()
+  if (requestMethod === "GET" && /^\/api\/v1\/storage\/files\/[1-9][0-9]*\/download$/.test(pathname)) return true
   if (requestMethod === "GET" && (
     pathname === "/api/v1/agent-orchestration/projects" ||
     /^\/api\/v1\/agent-orchestration\/projects\/[1-9][0-9]*\/tasks$/.test(pathname) ||

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react"
 import { hasResearchWorkspaceMigrationTombstone, useWorkspaceStore } from "@/store/workspace"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
-import { bindWorkspaceArtifactOrigin, hasWorkspaceArtifactOrigin, sameWorkspaceArtifactPayload, workspaceArtifactDraftPayload } from "@/store/workspace-artifact-codec"
+import { getStoredWorkspaceAudioRef, bindWorkspaceArtifactOrigin, hasWorkspaceArtifactOrigin, sameWorkspaceArtifactPayload, workspaceArtifactDraftPayload } from "@/store/workspace-artifact-codec"
 import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
 import { persistWorkspaceArtifact, hasCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence"
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
@@ -1221,7 +1221,7 @@ const finalizeGenerationResult = (
         return normalized
       }
       if (!result.audioUrl) {
-        throw new Error("No usable audio output was returned.")
+        getStoredWorkspaceAudioRef({ type: "audio_overview", audioFormat: result.audioFormat, exportRefs: result.exportRefs })
       }
       return normalized
     }
@@ -2077,6 +2077,7 @@ async function generateAudioOverview(
       speed: options.audioSettings.speed,
       backend: options.audioSettings.backend || undefined,
       allowFallback: options.audioSettings.allowFallback ?? true,
+      ...(options.requestScope ? { returnDownloadLink: true } : {}),
       requestScope: options.requestScope,
         signal: options.abortSignal
     })
@@ -2093,16 +2094,25 @@ async function generateAudioOverview(
       flac: "audio/flac"
     }
 
-    // Create a blob URL for playback
-    const audioBlob = new Blob([result.buffer], {
-      type: mimeTypes[options.audioSettings.format] || "audio/mpeg"
-    })
-    const audioUrl = URL.createObjectURL(audioBlob)
+    const exportRefs = options.requestScope ? [{
+      sourceType: "storage_file", fileId: result.generatedFileId,
+      format: options.audioSettings.format, status: "ready"
+    }] : undefined
+    let audioUrl: string | undefined
+    if (exportRefs) {
+      getStoredWorkspaceAudioRef({ type: "audio_overview", audioFormat: options.audioSettings.format, exportRefs })
+    } else {
+      // Legacy local workspaces retain their existing playback without minting a stored-file witness.
+      audioUrl = URL.createObjectURL(new Blob([result.buffer], {
+        type: mimeTypes[options.audioSettings.format] || "audio/mpeg"
+      }))
+    }
 
     return {
       ...verifiedScript,
       content: script,
       audioUrl,
+      ...(exportRefs ? { exportRefs } : {}),
       audioFormat: options.audioSettings.format,
       data: {
         ...(verifiedScript.data || {}),
