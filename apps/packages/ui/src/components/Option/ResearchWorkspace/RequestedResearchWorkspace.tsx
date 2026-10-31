@@ -1,3 +1,4 @@
+import { canonicalHistoryJson } from "@/db/dexie/history-selection";
 import React from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -40,11 +41,19 @@ export default function RequestedResearchWorkspace({
     const previousId = useWorkspaceStore.getState().workspaceId;
     const isCurrent = () =>
       current && useWorkspaceStore.getState().workspaceId === previousId;
+    const getCachedChat = () => {
+      const state = useWorkspaceStore.getState();
+      const cached = state.workspaceId === workspaceId ? state : state.workspaceSnapshots[workspaceId];
+      const referenceId = cached?.workspaceChatReferenceId || workspaceId;
+      const session = state.getWorkspaceChatSession(buildWorkspaceChatSessionKey(workspaceId, referenceId));
+      return session ? { referenceId, session } : null;
+    };
     void restoreMigratedResearchWorkspace({
       workspaceId,
+      getCachedChat,
       signal: controller.signal,
       isCurrent,
-      apply: (snapshot, chatSession) => {
+      apply: (snapshot, chatSession, verifiedCachedChat) => {
         const state = useWorkspaceStore.getState();
         const cached =
           state.workspaceId === workspaceId
@@ -56,9 +65,14 @@ export default function RequestedResearchWorkspace({
             cached?.workspaceChatReferenceId,
           ),
         );
+        let verified = false;
+        if (cachedChat && verifiedCachedChat) {
+          try { verified = canonicalHistoryJson(getCachedChat()) === canonicalHistoryJson(verifiedCachedChat); }
+          catch { /* Keep opaque local work rather than replacing it. */ }
+        }
         if (
           cached?.currentNote.isDirty ||
-          (cachedChat &&
+          (cachedChat && !verified &&
             (cachedChat.historyId !== null ||
               cachedChat.messages.length ||
               cachedChat.history.length ||

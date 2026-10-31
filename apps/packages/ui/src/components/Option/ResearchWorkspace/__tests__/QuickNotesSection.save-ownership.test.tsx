@@ -350,7 +350,7 @@ describe("Quick Notes save ownership across requests and acknowledgment", () => 
         body: {
           title: "Newer title",
           content: "Newer body",
-          keywords: ["newer", "workspace:a"]
+          keywords: ["newer", "workspace:a", "workspace:workspace-a"]
         }
       })
       await waitFor(() =>
@@ -692,6 +692,7 @@ it("marks an unchanged real cited capture saved after its canonical acknowledgem
   fireEvent.click(screen.getByRole("button", { name: "Save" }))
   await waitFor(() => expect(mocks.success).toHaveBeenCalled())
   expect(writes()).toHaveLength(1)
+  expect(writes()[0][0].body.keywords).toContain("workspace:workspace-a")
   expect(useWorkspaceStore.getState().currentNote.isDirty).toBe(false)
   expect(screen.getByTestId("quick-notes-saved-indicator")).toBeVisible()
   const currentId = String(useWorkspaceStore.getState().currentNote.id)

@@ -1036,6 +1036,23 @@ it("preserves intentional changed-head refusal when canonical recovery verifies 
 });
 
 
+it("leaves multiple canonical Quick Notes for visible selection instead of choosing a search result", async () => {
+  const originalRequest = boundary.request.getMockImplementation()!;
+  boundary.request.mockImplementation(async (request) => {
+    if (request.path.endsWith("/notes")) return [];
+    if (request.path.includes("/notes/search/"))
+      return { notes: [{ id: "note-one" }, { id: "note-two" }] };
+    if (request.path === "/api/v1/notes/note-one" || request.path === "/api/v1/notes/note-two")
+      return { id: request.path.split("/").at(-1), title: "Research", content: "Saved body",
+        version: 1, keywords: ["workspace:original"] };
+    return originalRequest(request);
+  });
+  const apply = vi.fn();
+  await restore(apply);
+  expect(apply.mock.calls[0][0].currentNote.id).toBeUndefined();
+  expect(apply.mock.calls[0][0].currentNote.content).toBe("");
+});
+
 describe("post-migration saved chat identity", () => {
   const chatId = "11111111-2222-4333-8444-555555555555";
   const empty = {
@@ -1409,6 +1426,101 @@ describe("post-migration saved chat identity", () => {
       })
     );
   });
+  it("restores an acknowledged Chat in a fresh canonical Workspace without legacy payloads", async () => {
+    localStorage.clear();
+    await restoreMigratedResearchWorkspace({
+      workspaceId: "original", signal: new AbortController().signal,
+      apply: useWorkspaceStore.getState().restoreServerWorkspace,
+    });
+    useWorkspaceStore.getState().saveWorkspaceChatSession("original", empty, owner());
+    const originalRequest = boundary.request.getMockImplementation()!;
+    boundary.request.mockImplementation(async (request) =>
+      request.path.startsWith("/api/v1/chats/")
+        ? { id: chatId, scope_type: "workspace", workspace_id: "original", deleted: false }
+        : originalRequest(request));
+    useWorkspaceStore.setState({ workspaceChatSessions: {} });
+    const apply = vi.fn();
+    await restoreMigratedResearchWorkspace({
+      workspaceId: "original", signal: new AbortController().signal, apply,
+    });
+    expect(apply.mock.calls[0][1]).toMatchObject({ serverChatId: chatId, messages: [] });
+    expect(localStorage.getItem(receiptKey)).toBeNull();
+  });
+
+  it.each(["clear", "undo", "other-account", "changed-hint", "wrong-workspace"])(
+    "keeps fresh canonical Chat restoration safe after %s",
+    async (change) => {
+      localStorage.clear();
+      await restoreMigratedResearchWorkspace({
+        workspaceId: "original", signal: new AbortController().signal,
+        apply: useWorkspaceStore.getState().restoreServerWorkspace,
+      });
+      const save = useWorkspaceStore.getState().saveWorkspaceChatSession;
+      save("original", empty, owner());
+      if (change === "clear" || change === "undo")
+        save("original", { ...empty, serverChatId: null }, { ...owner(), clear: true });
+      if (change === "undo") save("original", empty, owner());
+      if (change === "other-account") {
+        boundary.scopeKey = "original-bob";
+        boundary.userId = "bob";
+      }
+      const originalRequest = boundary.request.getMockImplementation()!;
+      boundary.request.mockImplementation(async (request) => {
+        if (!request.path.startsWith("/api/v1/chats/")) return originalRequest(request);
+        if (change === "changed-hint")
+          save("original", { ...empty, serverChatId: "newer-chat" }, owner());
+        return { id: chatId, scope_type: "workspace",
+          workspace_id: change === "wrong-workspace" ? "foreign" : "original", deleted: false };
+      });
+      const apply = vi.fn();
+      const restored = restoreMigratedResearchWorkspace({
+        workspaceId: "original", signal: new AbortController().signal, apply,
+      });
+      if (change === "changed-hint" || change === "wrong-workspace") {
+        await expect(restored).rejects.toThrow(
+          change === "changed-hint" ? "changed during restoration" : "Saved workspace chat");
+        expect(apply).not.toHaveBeenCalled();
+      } else {
+        await expect(restored).resolves.toBe(true);
+        expect(apply.mock.calls[0][1]?.serverChatId).toBe(
+          change === "clear" ? null : change === "other-account" ? undefined : chatId);
+      }
+      expect(localStorage.getItem(receiptKey)).toBeNull();
+    }
+  );
+
+  it.each(["malformed", "oversized", "missing-id"])(
+    "refuses a %s canonical Chat hint",
+    async (kind) => {
+      localStorage.clear();
+      await restoreMigratedResearchWorkspace({
+        workspaceId: "original", signal: new AbortController().signal,
+        apply: useWorkspaceStore.getState().restoreServerWorkspace,
+      });
+      useWorkspaceStore.getState().saveWorkspaceChatSession("original", empty, owner());
+      const key = Object.keys(localStorage).find(key => key.startsWith("tldw:research-workspace:chat-reference:"))!;
+      localStorage.setItem(key, kind === "malformed" ? "{" :
+        kind === "oversized" ? " ".repeat(4097) : JSON.stringify({ referenceId: "original" }));
+      const apply = vi.fn();
+      await expect(restoreMigratedResearchWorkspace({
+        workspaceId: "original", signal: new AbortController().signal, apply,
+      })).rejects.toThrow();
+      expect(apply).not.toHaveBeenCalled();
+    }
+  );
+
+  it("refuses conflicting canonical and migration Chat hints", async () => {
+    useWorkspaceStore.setState({ workspaceId: "original", workspaceChatReferenceId: "original" });
+    useWorkspaceStore.getState().saveWorkspaceChatSession("original", empty, owner());
+    const marker = JSON.parse(localStorage.getItem(receiptKey)!);
+    localStorage.setItem(receiptKey, JSON.stringify({
+      ...marker, chatReference: { referenceId: "different-reference", serverChatId: null },
+    }));
+    const apply = vi.fn();
+    await expect(restore(apply)).rejects.toThrow("references conflict");
+    expect(apply).not.toHaveBeenCalled();
+  });
+
   it("enrolls an explicitly requested canonical workspace without manufacturing a migration tombstone", async () => {
     localStorage.clear();
     const applied = vi.fn();

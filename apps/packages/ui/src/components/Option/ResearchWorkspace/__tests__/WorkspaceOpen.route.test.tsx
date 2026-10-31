@@ -64,8 +64,11 @@ vi.mock("../index", async () => {
 
 import {
   createEmptyWorkspaceSnapshot,
+  flushWorkspacePersistence,
   useWorkspaceStore,
 } from "@/store/workspace";
+import { tldwClient } from "@/services/tldw/TldwApiClient";
+import { mapServerChatMessagesToPlaygroundMessages } from "@/hooks/chat/useServerChatLoader";
 import { WorkspacesManagerPage } from "../../Workspaces/WorkspacesManagerPage";
 import { ResearchWorkspaceRouteGate } from "../ResearchWorkspaceRouteGate";
 
@@ -91,7 +94,7 @@ const serverWorkspace = {
 };
 const canonical = () => ({
   workspace_id: TARGET,
-  workspace: serverWorkspace,
+  workspace: { ...serverWorkspace },
   workspace_profile: "research",
   workspace_kind: "research_workspace",
   schema_version: 2,
@@ -452,6 +455,123 @@ it.each(["cached", "active"])(
     expect(screen.queryByTestId("opened-sources")).not.toBeInTheDocument();
   },
 );
+
+it.each(["retained-hint", "pre-hint"])("opens a saved canonical Chat after real persistence rehydration through the requested route (%s)", async (hint) => {
+  prepare(true);
+  useWorkspaceStore.getState().switchWorkspace(TARGET);
+  const serverMessages = [{
+    id: "canonical-answer", role: "assistant" as const, sender: "AI",
+    content: "Canonical cited answer", created_at: "2026-10-31T00:00:00Z", version: 1,
+  }];
+  const messages = mapServerChatMessagesToPlaygroundMessages({ serverMessages, assistantName: "AI", characterId: null });
+  useWorkspaceStore.getState().saveWorkspaceChatSession(TARGET, {
+    messages, history: [], historyId: null, serverChatId: "verified-chat",
+  }, { scopeKey: boundary.scopeKey, isCurrent: () => !boundary.controller.signal.aborted });
+  await flushWorkspacePersistence();
+  await useWorkspaceStore.persist.rehydrate();
+  expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)?.messages).toEqual(messages);
+  if (hint === "pre-hint") {
+    const key = Object.keys(localStorage).find(key => key.startsWith("tldw:research-workspace:chat-reference:"))!;
+    localStorage.removeItem(key);
+  }
+  boundary.request.mockImplementation((request: { path: string }) =>
+    request.path.startsWith("/api/v1/chats/verified-chat/messages")
+      ? Promise.resolve({ messages: serverMessages, total: 1 })
+      : request.path.startsWith("/api/v1/chats/verified-chat?")
+        ? Promise.resolve({ id: "verified-chat", scope_type: "workspace", workspace_id: TARGET, deleted: false })
+        : reply(request));
+  const list = vi.spyOn(tldwClient, "listChatMessages");
+  await mount("/research-workspace?source_workspace_id=" + TARGET);
+  await waitFor(() => expect(list).toHaveBeenCalledWith("verified-chat",
+    expect.objectContaining({ include_metadata: "true", include_images: "true", render_placeholders: "false" }),
+    expect.objectContaining({ fresh: true,
+      scope: { type: "workspace", workspaceId: TARGET },
+      requestScope: expect.objectContaining({ userId: "1" }) })));
+  expect(boundary.request.mock.calls.some(([request]) => {
+    const url = new URL(request.path, "https://open.example.test");
+    return url.pathname === "/api/v1/chats/verified-chat/messages" &&
+      url.searchParams.get("scope_type") === "workspace" && url.searchParams.get("workspace_id") === TARGET;
+  })).toBe(true);
+  const loaded = await list.mock.results[0].value;
+  expect(mapServerChatMessagesToPlaygroundMessages({ serverMessages: loaded, assistantName: "AI", characterId: null })).toEqual(messages);
+  expect(await screen.findByTestId("opened-sources")).toHaveTextContent("source-A");
+  expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)?.serverChatId).toBe("verified-chat");
+});
+
+it.each([
+  "body", "role", "version", "metadata", "sources", "images", "variants",
+  "unknown", "order", "duplicate", "history", "history-id",
+  "concurrent-cache", "concurrent-reference", "concurrent-account", "outage",
+  "absent-clear", "absent-new-reference", "absent-tombstone-clear",
+])("retains local Workspace Chat work after %s differs from canonical data", async (change) => {
+  prepare(true);
+  useWorkspaceStore.getState().switchWorkspace(TARGET);
+  const serverMessages = [
+    { id: "canonical-user", role: "user" as const, content: "Saved question",
+      created_at: "2026-10-31T00:00:00Z", version: 1 },
+    { id: "canonical-answer", role: "assistant" as const, sender: "AI",
+      content: "Saved answer", created_at: "2026-10-31T00:00:01Z", version: 1,
+      metadata_extra: { audit: "canonical" } },
+  ];
+  const messages = mapServerChatMessagesToPlaygroundMessages({ serverMessages, assistantName: "AI", characterId: null });
+  if (change === "body") messages[1].message = "Keep edited answer";
+  if (change === "role") messages[1].isBot = false;
+  if (change === "version") messages[1].serverMessageVersion = 2;
+  if (change === "metadata") messages[1].metadataExtra = { audit: "Keep local metadata" };
+  if (change === "sources") Object.assign(messages[1], { sources: [{ title: "Keep local citation", content: "Private" }] });
+  if (change === "images") messages[1].images = ["data:image/png;base64,bG9jYWw="];
+  if (change === "variants") Object.assign(messages[1], { variants: [{ message: "Keep alternate answer" }] });
+  if (change === "unknown") Object.assign(messages[1], { id: "unknown-local", serverMessageId: undefined });
+  if (change === "order") messages.reverse();
+  if (change === "duplicate") messages[1].serverMessageId = messages[0].serverMessageId;
+  const session = { messages, history: [], historyId: null, serverChatId: "verified-chat" };
+  if (change === "history-id") Object.assign(session, { historyId: "unverified-local-mirror" });
+  const save = useWorkspaceStore.getState().saveWorkspaceChatSession;
+  save(TARGET, session, { scopeKey: boundary.scopeKey, isCurrent: () => !boundary.controller.signal.aborted });
+  await flushWorkspacePersistence();
+  await useWorkspaceStore.persist.rehydrate();
+  let preserved = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET);
+  const hintKey = Object.keys(localStorage).find(key => key.startsWith("tldw:research-workspace:chat-reference:"))!;
+  if (change.startsWith("absent-")) localStorage.removeItem(hintKey);
+  if (change === "history") {
+    preserved = { ...preserved!, history: [{ role: "system", content: "Keep local instruction" }] };
+    save(TARGET, preserved);
+  }
+  boundary.request.mockImplementation((request: { path: string }) => {
+    if (request.path.startsWith("/api/v1/chats/verified-chat/messages")) {
+      if (change === "outage") throw new Error("Controlled canonical read failure");
+      if (change.startsWith("absent-")) return Promise.resolve().then(() => {
+        if (change === "absent-tombstone-clear") localStorage.setItem(
+          "tldw:research-workspace:migration:tombstone:" + TARGET,
+          JSON.stringify({ legacyWorkspaceId: TARGET, serverWorkspaceId: TARGET,
+            migrationId: "new-acknowledged-migration", serverScopeKey: boundary.scopeKey,
+            contentRetained: false, deletedAt: "2026-10-31T00:00:00Z",
+            chatReference: { referenceId: TARGET, serverChatId: null } }));
+        else localStorage.setItem(hintKey, JSON.stringify({ referenceId: TARGET,
+          serverChatId: change === "absent-clear" ? null : "newer-selected-chat" }));
+        return { messages: serverMessages, total: 2 };
+      });
+      if (change === "concurrent-cache") {
+        preserved = { ...preserved!, messages: preserved!.messages.map((message, index) =>
+          index === 1 ? { ...message, message: "Keep newer concurrent edit" } : message) };
+        save(TARGET, preserved);
+      }
+      if (change === "concurrent-reference") {
+        useWorkspaceStore.setState({ workspaceChatReferenceId: "newer-reference" });
+        save(TARGET + "::newer-reference", preserved!);
+      }
+      if (change === "concurrent-account") boundary.controller.abort();
+      return Promise.resolve({ messages: serverMessages, total: 2 });
+    }
+    if (request.path.startsWith("/api/v1/chats/verified-chat?"))
+      return Promise.resolve({ id: "verified-chat", scope_type: "workspace", workspace_id: TARGET, deleted: false });
+    return reply(request);
+  });
+  await mount("/research-workspace?source_workspace_id=" + TARGET);
+  await screen.findByRole("alert");
+  expect(screen.queryByTestId("opened-sources")).not.toBeInTheDocument();
+  expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)).toEqual(preserved);
+});
 
 it("keeps an unverified cached Chat instead of replacing or displaying it", async () => {
   prepare(true);
