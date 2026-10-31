@@ -14,6 +14,7 @@ from dataclasses import MISSING, fields
 import pytest_asyncio
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ import database as authnz_database
 from tldw_Server_API.app.core.Utils.app_services import AppServices, app_services
 
 
@@ -48,10 +49,10 @@ def _set_defaults(services: AppServices) -> None:
 
 async def discard_app_services() -> None:
     """Close what every slot holds, empty it, and reset the caches built on the pool."""
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
-
+    # The module is bound at import: a test that stubs AuthNZ.database in
+    # sys.modules may still have the stub installed when this teardown runs.
     try:
-        await reset_db_pool()  # pool, MCP server, API-key manager, UsersDB, RBAC and MCP caches
+        await authnz_database.reset_db_pool()  # pool, MCP server, API-key manager, UsersDB, RBAC and MCP caches
     except Exception as exc:
         logger.debug("discard_app_services: ignoring reset_db_pool error: {}", exc)
     await close_app_service("session_manager")
