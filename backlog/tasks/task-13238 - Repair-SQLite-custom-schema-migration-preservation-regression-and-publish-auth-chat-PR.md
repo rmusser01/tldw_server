@@ -41,7 +41,7 @@ Stage 3 — Complete: validate, independently review, update the audit, commit, 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Migration repair: reproduced the stale exact-column expectation on the rebased branch. Parameterizing migration 91 and the latest upgrade first produced one pass and one failure. Migration 93 intentionally appends seven user fields. The repaired prefix assertion preserves original column order and all existing data, constraints, defaults, indexes, triggers, sequence, and foreign-key behavior. The full profile migration file passes 22 tests; independent review found no production migration defect or outstanding findings.
 
 Array property reliability: two wider runs passed 99 tests but failed Hypothesis input-generation timing, while the recorded seed passed alone. Profiling a smaller reproduction showed _get_local_constants scanning 2,159 modules for 1.324 seconds. Applied the reviewed public @settings(deadline=1000), retaining a finite deadline, the full array domain and length bound, 100 examples, the assertion, and every health check. No private Hypothesis API or health-check suppression was added.
@@ -53,7 +53,7 @@ Ruff, compilation, repository test guards, and whitespace checks pass. The array
 Rebased the three unpublished issue-fix commits onto origin/dev at 177d58ac6fee87678d65ce3a9db0216021b6b68e without conflicts. Follow-up touched the two test files and Docs/Design/ISSUES_2935_2938_REGRESSION_REPAIR.md. PR publication is the remaining step.
 
 PR #2939 is open against dev. Verified the published head and target through GitHub; final code/test commit is 46b1fd6934. All acceptance criteria are complete.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

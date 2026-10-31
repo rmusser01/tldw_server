@@ -30,7 +30,7 @@ Implement the WP4 slice from the approved Research Workspace NotebookLM Pro/Ultr
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan: Docs/superpowers/plans/2026-07-05-research-workspace-notebooklm-agent-tasks-wp4-plan.md.
 
 Commits:
@@ -57,7 +57,7 @@ PR #2664 review pass after rebase:
 - Rebased codex/research-workspace-notebooklm-wp4 onto latest origin/dev.
 - Addressed Gemini/Qodo/CodeRabbit review comments: nullable truncation guard, bounded source IDs with full selectedSourceCount, draft-vs-latest-message labeling, safe draft restore, localized ACP activity labels, generatedArtifacts fallback, translated saved artifact title, task producerId provenance, version suffix parsing for artifacts without numeric version, and invalid completedAt fallback.
 - Verification after review fixes: focused Research Workspace vitest suite => 180 passed; bun run typecheck => passed; git diff --check => passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

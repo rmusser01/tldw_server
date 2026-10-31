@@ -41,7 +41,7 @@ Close out Stage 5 by adding or updating report presets, documenting the API and 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started Stage 5E after Stage 5D commit 46bb8919b. Scope: report presets/templates, API docs parity, focused backend/frontend verification, Bandit for backend touched scope, and real-server CDP smoke through /watchlists without server mocks.
 
 Implemented built-in `cti_osint_report_markdown` and `news_briefing_markdown` presets in `tldw_Server_API/app/core/Watchlists/template_store.py`. Added focused preset coverage that verifies readiness, source diversity, alert evidence, excluded trails, and follow-up links render from Stage 5 report context.
@@ -82,7 +82,7 @@ Known QA notes:
 - The CDP harness verified the real `/api/v1/watchlists/outputs/{id}/download` response because the UI download path uses a Blob/object URL.
 - The CDP harness attempted the Ant Select UI first, then used the page-exposed Zustand store only after the Ant dropdown portal became unstable after drawer/download interactions; it still verified the selected Watchlist heading after the switch.
 - Observed console warnings were existing Ant Design warnings: `Modal destroyOnClose`, `Alert message`, and static `message` context. No page errors or request failures were recorded.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

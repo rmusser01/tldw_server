@@ -14,7 +14,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -23,8 +23,15 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
     RequireRole,
     get_auth_principal,
+    require_expected_user,
 )
 from tldw_Server_API.app.core import config as config_mod
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import (
+    ROLEPLAY_RESUME_CONTRACT_VERSION,
+    ROLEPLAY_RESUME_FEATURES,
+)
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.byok_config import (
     PROVIDER_APP_CONFIG_KEYS,
@@ -220,7 +227,7 @@ def load_safe_config() -> dict:
 
 
 @router.get("/config/docs-info")
-async def get_documentation_config():
+async def get_documentation_config(request: Request = None, response: Response = None):
     """
     Get configuration information suitable for auto-populating documentation.
 
@@ -233,6 +240,39 @@ async def get_documentation_config():
         Dict with configuration information safe for documentation
     """
     config = load_safe_config()
+    caps = dict(config.get("capabilities", config.get("supported_features", {})))
+    if response is not None:
+        response.headers["Cache-Control"] = "no-store"
+    if request is not None:
+        principal = None
+        try:
+            principal = await get_auth_principal(request)
+        except HTTPException as exc:
+            if exc.status_code != 401 or "authorization" in request.headers or "x-api-key" in request.headers:
+                raise
+        await require_expected_user(
+            expected_user_id=request.headers.get("X-TLDW-Expected-User-ID"),
+            principal=principal or AuthPrincipal(kind="anonymous"),
+        )
+        if principal is not None and principal.kind in {"user", "api_key"} and principal.user_id is not None:
+            try:
+                enabled = all(config_mod.route_enabled(key, default_stable=True)
+                              for key in ("character-chat-sessions", "character-messages"))
+                registered = {
+                    (route.path, getattr(route.endpoint, "__module__", None), getattr(route.endpoint, "__name__", None))
+                    for route in iter_served_routes(request.app.routes) if "POST" in route.methods
+                }
+                required = {
+                    ("/api/v1/chats/{chat_id}/roleplay/messages",
+                     "tldw_Server_API.app.api.v1.endpoints.character_messages", "append_roleplay_resume_input"),
+                    ("/api/v1/chats/{chat_id}/complete-v2",
+                     "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions", "character_chat_completion"),
+                }
+                if enabled and required <= registered:
+                    caps.update(roleplay_resume_contract_version=ROLEPLAY_RESUME_CONTRACT_VERSION,
+                                roleplay_resume_features=list(ROLEPLAY_RESUME_FEATURES))
+            except Exception:
+                logger.debug("Protected Resume capability derivation unavailable")
 
     # Build base URL
     host = config.get("server", {}).get("host", "127.0.0.1")
@@ -254,9 +294,9 @@ async def get_documentation_config():
         # FFmpeg availability for client-side video/audio ingestion hints
         "ffmpeg_available": config.get("ffmpeg_available", False),
         # Surface capabilities map so WebUI can dynamically hide/show experimental tabs
-        "capabilities": config.get("capabilities", config.get("supported_features", {})),
+        "capabilities": caps,
         # Keep supported_features for older clients
-        "supported_features": config.get("supported_features", {}),
+        "supported_features": caps,
         "examples": {
             "python": generate_python_example(
                 _DOCS_API_KEY_PLACEHOLDER,

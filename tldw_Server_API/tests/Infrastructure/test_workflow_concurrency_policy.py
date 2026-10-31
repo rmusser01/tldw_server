@@ -99,10 +99,14 @@ def _suffix(name: str, group: str) -> str:
 @pytest.mark.parametrize("name", TARGET_WORKFLOWS)
 def test_required_workflow_cancels_superseded_runs(name: str) -> None:
     """Without this, a superseded run keeps holding runners to completion."""
-    assert _concurrency(name).get("cancel-in-progress") is True, (
-        f"{name} does not cancel in-progress runs, so pushing to a PR leaves "
-        f"the previous run going."
+    cancel_in_progress = _concurrency(name).get("cancel-in-progress")
+    # Queue kicks serialize; ordinary PR events have no queue_kick input.
+    queue_kick_exception = (
+        name == "security-required.yml" and cancel_in_progress == "${{ github.event.inputs.queue_kick != 'true' }}"
     )
+    assert (
+        cancel_in_progress is True or queue_kick_exception
+    ), f"{name} must cancel superseded PR runs; only the reviewed security queue-kick exception is permitted."
 
 
 @pytest.mark.unit
@@ -143,6 +147,5 @@ def test_required_workflows_agree_on_one_identity_expression() -> None:
     distinct = set(suffixes.values())
     assert len(distinct) == 1, (
         "required workflows disagree on how they identify a run, so their runs "
-        "will not collapse together:\n"
-        + "\n".join(f"  {name}: {suffix}" for name, suffix in sorted(suffixes.items()))
+        "will not collapse together:\n" + "\n".join(f"  {name}: {suffix}" for name, suffix in sorted(suffixes.items()))
     )

@@ -41,7 +41,7 @@ Docs/superpowers/plans/2026-05-27-mcp-unified-stage2-package-boundary-implementa
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the Stage 2 package-boundary slice from Docs/superpowers/plans/2026-05-27-mcp-unified-stage2-package-boundary-implementation-plan.md.
 
 Verification:
@@ -66,7 +66,7 @@ Review-fix verification:
 - python -m mypy mcp_unified --config-file pyproject.toml -> passed
 - python -m bandit -r mcp_unified tldw_Server_API/app/core/MCP_unified/interfaces -f json -o bandit_mcp_unified_stage2_package_boundary.json -> 0 findings
 - git diff --check -> clean
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -20,6 +20,7 @@ import {
 import { useSearchParams } from "react-router-dom"
 
 export interface UsePromptEditorDeps {
+  expectedOwnerId?: string | null
   queryClient: QueryClient
   isOnline: boolean
   t: (key: string, opts?: Record<string, any>) => string
@@ -46,6 +47,7 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
   const notification = useAntdNotification()
   const {
     queryClient,
+    expectedOwnerId,
     t,
     guardPrivateMode,
     getPromptTexts,
@@ -147,8 +149,9 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
         getPromptKeywords(prompt) ??
         []
 
-      return {
-        id: prompt.id,
+    return {
+      expectedOwnerId,
+      id: prompt.id,
         title: promptName,
         name: promptName,
         content: resolvedContent,
@@ -166,13 +169,13 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
         ...overrides
       }
     },
-    [getPromptKeywords, getPromptTexts]
+    [expectedOwnerId, getPromptKeywords, getPromptTexts]
   )
 
   const { mutate: savePromptMutation, mutateAsync: savePromptAsync, isPending: savePromptLoading } =
     useMutation({
       mutationFn: async (payload: any) => {
-        const savedPrompt = await savePrompt(payload)
+        const savedPrompt = await savePrompt({ ...payload, expectedOwnerId })
         const syncState = await syncPromptAfterLocalSave(savedPrompt.id)
         return {
           id: savedPrompt.id,
@@ -203,7 +206,7 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
 
   const { mutate: updatePromptDirect } = useMutation({
     mutationFn: async (payload: any) => {
-      const id = await updatePrompt(payload)
+      const id = await updatePrompt({ ...payload, expectedOwnerId })
       await syncPromptAfterLocalSave(id)
       return id
     },
@@ -226,6 +229,7 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
       mutationFn: async (data: any) => {
         const id = await updatePrompt({
           ...data,
+          expectedOwnerId,
           id: editId
         })
         const syncState = await syncPromptAfterLocalSave(id)
@@ -512,6 +516,7 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
         "Untitled recipe"
       const title = `${sourceName} (Copy)`
       const saved = await savePrompt({
+        expectedOwnerId,
         ...fields,
         title,
         name: title,
@@ -529,6 +534,7 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
     },
     [
       acceptRecipeSyncResult,
+      expectedOwnerId,
       fullEditorInitialValues,
       guardPrivateMode,
       queryClient,

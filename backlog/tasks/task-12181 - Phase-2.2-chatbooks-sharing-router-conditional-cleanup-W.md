@@ -28,13 +28,13 @@ Continue #1116 Phase 2.2 by deferring the adjacent chatbooks and sharing content
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added focused red/green coverage for chatbooks and sharing router specs. Red failed on origin/dev because both fake router attrs were touched during iter_content_router_specs construction.
 
 Converted only chatbooks and sharing from eager try/import blocks to ImportedRouterSpec entries via append_imported_router_spec, preserving prefix /api/v1, tags, route_key values, and default_stable=True behavior.
 
 Verification passed: focused chatbooks/sharing laziness test; full router group contracts 65 passed; main router contracts 6 passed; OpenAPI contracts 69 passed; Bandit content.py 0 results and 0 errors; git diff --check.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

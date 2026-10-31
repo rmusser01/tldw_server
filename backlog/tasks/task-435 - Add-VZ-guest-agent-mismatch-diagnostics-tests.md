@@ -35,13 +35,9 @@ Continue the VZ Linux lifecycle/recovery hardening track by adding host-independ
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 PR review follow-up: added classifier docstrings/constants, aligned text coercion with diagnostics, refactored classifier to return the full guest observability payload, typed the new pytest parameters, and added direct classifier regression tests.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

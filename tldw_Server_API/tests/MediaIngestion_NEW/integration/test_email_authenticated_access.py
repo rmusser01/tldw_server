@@ -1,8 +1,8 @@
-"""Real API-key authentication and per-user SQLite email routing, without lifespan.
+"""Real API-key authentication and per-user SQLite email routing.
 
 Users/keys are created through AuthNZ services. Authentication and Media database
-dependencies are not overridden. This does not certify deployed middleware,
-password/JWT login, upload quotas, application startup, or PostgreSQL RLS.
+dependencies are not overridden. This does not certify deployed infrastructure,
+password/JWT login, upload quotas, or PostgreSQL RLS.
 """
 
 import asyncio
@@ -19,14 +19,17 @@ from fastapi import FastAPI
 from tldw_Server_API.app.api.v1.API_Deps import DB_Deps
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import shutdown_all_audit_services
 from tldw_Server_API.app.api.v1.endpoints import email as email_endpoint
-from tldw_Server_API.app.api.v1.endpoints.media import listing
+from tldw_Server_API.app.api.v1.endpoints.media import add, listing
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager, reset_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+from tldw_Server_API.app.core.Billing.enforcement import reset_billing_enforcer
+from tldw_Server_API.app.core.Billing.subscription_service import reset_subscription_service
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+from tldw_Server_API.app.services.storage_quota_service import reset_storage_service
 from tldw_Server_API.tests.DB_Management.test_email_search_cursor import add_message
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -35,7 +38,11 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 @pytest_asyncio.fixture
 async def authenticated_email(tmp_path, monkeypatch, request):
     """Use real isolated services and reject even swallowed outbound attempts."""
+    from fastapi import BackgroundTasks
+
     from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Chunking.auto_boundary_assistant import ChatAutoChunkBoundaryAssistant
+    from tldw_Server_API.app.core.Claims_Extraction import claims_utils
     from tldw_Server_API.app.core.Embeddings.jobs_adapter import EmbeddingsJobsAdapter
     from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib
 
@@ -51,6 +58,9 @@ async def authenticated_email(tmp_path, monkeypatch, request):
         (socket, "getaddrinfo"),
         (Summarization_General_Lib, "analyze"),
         (EmbeddingsJobsAdapter, "create_job"),
+        (claims_utils, "extract_claims_for_chunks"),
+        (ChatAutoChunkBoundaryAssistant, "refine"),
+        (BackgroundTasks, "add_task"),
     ]:
         monkeypatch.setattr(target, name, forbidden)
     for name in ("fetch", "afetch", "apost", "fetch_json", "afetch_json", "download", "adownload"):
@@ -70,14 +80,20 @@ async def authenticated_email(tmp_path, monkeypatch, request):
         "tldw_production": "false",
         "CONNECTORS_WORKER_ENABLED": "false",
         "DEFER_HEAVY_STARTUP": "true",
+        "STORAGE_QUOTA_ENFORCEMENT": "1",
+        "STORAGE_QUOTA_FAIL_OPEN": "0",
     }.items():
         monkeypatch.setenv(name, value)
     monkeypatch.setitem(email_endpoint.settings, "EMAIL_OPERATOR_SEARCH_ENABLED", True)
     monkeypatch.setitem(email_endpoint.settings, "EMAIL_GMAIL_CONNECTOR_ENABLED", False)
+    monkeypatch.setitem(email_endpoint.settings, "EMAIL_NATIVE_PERSIST_ENABLED", True)
     monkeypatch.setitem(listing.settings, "EMAIL_MEDIA_SEARCH_DELEGATION_MODE", "opt_in")
 
     async def reset():
         await shutdown_all_audit_services()
+        await reset_storage_service()
+        await reset_subscription_service()
+        reset_billing_enforcer()
         await reset_api_key_manager()
         await reset_db_pool()
         reset_settings()
@@ -96,6 +112,7 @@ async def authenticated_email(tmp_path, monkeypatch, request):
                 password_hash=token_urlsafe(32),
                 is_verified=True,
             )
+            await repo.assign_role_if_missing(user_id=user_id, role_name="user")
             key = await manager.create_api_key(user_id=user_id, name="synthetic-read", scope="read")
             path = DatabasePaths.get_media_db_path(user_id)
             assert path.is_relative_to(tmp_path)
@@ -109,7 +126,7 @@ async def authenticated_email(tmp_path, monkeypatch, request):
 
         from tldw_Server_API.tests.helpers.app_main_state import app_main_isolated, reload_app_main
 
-        use_main = getattr(request, "param", None) == "main"
+        use_main = getattr(request, "param", None) in {"main", "main_lifespan"}
         with app_main_isolated() if use_main else nullcontext():
             if use_main:
                 app = reload_app_main().app
@@ -117,9 +134,10 @@ async def authenticated_email(tmp_path, monkeypatch, request):
                 app = FastAPI()
                 app.include_router(email_endpoint.router, prefix="/api/v1/email")
                 app.include_router(listing.router, prefix="/api/v1/media")
+                app.include_router(add.router, prefix="/api/v1/media")
             assert app.dependency_overrides == {}
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-                yield SimpleNamespace(client=client, users=users, manager=manager, pool=pool)
+                yield SimpleNamespace(app=app, client=client, users=users, manager=manager, pool=pool)
     finally:
         await reset()
         assert attempts == [], f"Forbidden attempts, including caught errors: {attempts}"
@@ -242,3 +260,27 @@ async def test_main_app_middleware_auth_and_email_route_registration(authenticat
     )
     assert response.status_code == 200, response.text
     assert [item["title"] for item in response.json()["items"]] == ["Synthetic bob"]
+
+
+@pytest.mark.parametrize("authenticated_email", ["main_lifespan"], indirect=True)
+async def test_main_app_lifespan_serves_scoped_email_and_media_routes(authenticated_email):
+    """Exercise the actual startup/shutdown sequence with synthetic mail and no outbound calls."""
+    env = authenticated_email
+    bob = env.users[1]
+    headers = {"X-API-KEY": bob.key["key"]}
+    async with env.app.router.lifespan_context(env.app):
+        search = await env.client.get("/api/v1/email/search", headers=headers)
+        assert search.status_code == 200, search.text
+        assert [row["subject"] for row in search.json()["items"]] == ["Synthetic bob"]
+
+        detail = await env.client.get(f"/api/v1/email/messages/{bob.message_ids[0]}", headers=headers)
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["subject"] == "Synthetic bob"
+
+        media = await env.client.post(
+            "/api/v1/media/search",
+            headers=headers,
+            json={"query": "subject:Synthetic", "media_types": ["email"], "email_query_mode": "operators"},
+        )
+        assert media.status_code == 200, media.text
+        assert [item["title"] for item in media.json()["items"]] == ["Synthetic bob"]

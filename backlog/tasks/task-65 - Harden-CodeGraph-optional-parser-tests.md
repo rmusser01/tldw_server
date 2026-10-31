@@ -29,11 +29,11 @@ Make CodeGraph parser-dependent positive tests skip gracefully when optional tre
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started after PR #1293 merged. This applies the same parser-availability guard pattern to remaining optional-parser positive tests.
 
 Implemented load_parser-based skip guards for Java/Kotlin extractor modules, Java/Kotlin indexer/MCP positive-path tests, and all Tree-sitter loader parser smoke tests. Added a regression check that the loader smoke helper raises pytest skip when an optional parser dependency is missing. Verification: focused parser tests passed with 21 passed and 5 warnings; Ruff passed on touched files; Bandit on touched test scope with B101 skipped reported errors 0 and results 0 at /tmp/bandit_codegraph_parser_test_guards.json; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

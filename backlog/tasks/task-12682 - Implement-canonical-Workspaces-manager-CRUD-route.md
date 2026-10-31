@@ -36,13 +36,9 @@ Implement Task 5 from the canonical Workspaces manager plan: add the server-back
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Red evidence: package-local Vitest failed because /workspaces metadata, option-workspaces route shell, and WorkspacesManagerPage were missing. Green evidence: ./node_modules/.bin/vitest run src/routes/__tests__/option-workspaces.route.test.tsx src/routes/__tests__/route-metadata.coverage.test.ts src/routes/__tests__/route-registry.visibility.test.ts src/components/Option/Workspaces/__tests__/workspace-manager-models.test.ts src/components/Option/Workspaces/__tests__/WorkspacesManagerPage.test.tsx -> 5 files passed, 25 tests passed. TypeScript check with 8 GB heap reached existing unrelated errors in DynamicUI/OpenUI, ResearchWorkspace test fixture typing, and route AST helper dependency resolution; no TASK-2259 files were reported. Design-system guard runs after repairing local dependency symlinks but fails on existing unrelated blocked labels in Onboarding FirstChatStep and ACP readiness; new Workspaces files were not reported. git diff --check exited 0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

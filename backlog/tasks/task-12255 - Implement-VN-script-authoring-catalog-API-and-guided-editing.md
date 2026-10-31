@@ -46,14 +46,14 @@ Implement the approved VN script authoring catalog sprint from issue #1610 and p
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Implemented backend-owned authoring catalog metadata in `VN_Scripts/authoring_catalog.py`, grounded in canonical validator capabilities instead of duplicated frontend rules.
 - Added pure server-side snippet patching with typed authoring errors, recursive payload/depth/string safety checks, deterministic patch summaries, and V1 snippet coverage for narration, dialogue, authored choices, generated choices, visual/audio/state updates, and endings.
 - Added service-level preview/apply flows using existing draft validation and optimistic revision checks; preview is non-mutating, while apply persists through the repository replace path.
 - Exposed catalog, preview, and apply API endpoints under `/api/v1/vn/vn-scripts`, plus schemas, VN platform capability metadata, and API documentation updates.
 - Added frontend API/types and a guided snippet insert panel that loads from backend capabilities/catalog, renders form fields from `parameters_schema` and `default_parameters`, requires preview before apply, handles structured revision conflicts non-destructively, and keeps VN semantic validation on the backend.
 - Task 6 frontend review fixes addressed stale preview/apply state, raw JSON edit safety, async script-switch races, typed enum preservation, and conflict reload races.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

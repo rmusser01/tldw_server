@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
 import sqlite3
 
 import pytest
@@ -144,7 +143,9 @@ class _LockedOnceWalConnection(_RecordingConnection):
     def execute(self, sql: str):
         if sql == "PRAGMA journal_mode=WAL" and sql not in self.statements:
             self.statements.append(sql)
-            raise sqlite3.OperationalError("database is locked")
+            error = sqlite3.OperationalError("database is locked")
+            error.sqlite_errorcode = sqlite3.SQLITE_BUSY
+            raise error
         return super().execute(sql)
 
 
@@ -166,8 +167,52 @@ def test_configure_sqlite_connection_gives_up_wal_switch_after_busy_timeout():
     class _AlwaysLocked(_RecordingConnection):
         def execute(self, sql: str):
             if sql == "PRAGMA journal_mode=WAL":
-                raise sqlite3.OperationalError("database is locked")
+                error = sqlite3.OperationalError("database is locked")
+                error.sqlite_errorcode = sqlite3.SQLITE_BUSY
+                raise error
             return super().execute(sql)
 
     with pytest.raises(sqlite3.OperationalError, match="locked"):
         configure_sqlite_connection(_AlwaysLocked(), busy_timeout_ms=30)
+
+
+@pytest.mark.asyncio
+async def test_async_wal_setup_retries_sqlite_busy_once():
+    from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection_async
+
+    class BusyOnce(_RecordingAsyncConnection):
+        busy = True
+
+        async def execute(self, sql: str):
+            if sql == "PRAGMA journal_mode=WAL" and self.busy:
+                self.busy = False
+                error = sqlite3.OperationalError("database is locked")
+                error.sqlite_errorcode = sqlite3.SQLITE_BUSY
+                raise error
+            return await super().execute(sql)
+
+    conn = BusyOnce()
+    await configure_sqlite_connection_async(conn, busy_timeout_ms=100)
+
+    assert not conn.busy
+    assert "PRAGMA journal_mode=WAL" in conn.statements
+
+
+def test_wal_setup_preserves_non_lock_sqlite_errors():
+    from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
+
+    class Broken(_RecordingConnection):
+        wal_attempts = 0
+
+        def execute(self, sql: str):
+            if sql == "PRAGMA journal_mode=WAL":
+                self.wal_attempts += 1
+                error = sqlite3.OperationalError("disk I/O error")
+                error.sqlite_errorcode = sqlite3.SQLITE_IOERR
+                raise error
+            return super().execute(sql)
+
+    conn = Broken()
+    with pytest.raises(sqlite3.OperationalError, match="disk I/O error"):
+        configure_sqlite_connection(conn)
+    assert conn.wal_attempts == 1

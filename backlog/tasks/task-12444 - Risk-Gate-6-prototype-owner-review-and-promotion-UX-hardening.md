@@ -44,7 +44,7 @@ Docs/superpowers/plans/2026-05-22-prototype-risk-gate-6-owner-review-plan.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the narrow backend contract gap by adding promotion request summaries to owner workspace detail through PrototypeWorkspacesRepo, Pydantic response schemas, and the detail endpoint builder. Added frontend review input/result types, review service method, TanStack mutation hook, and owner review UI that renders review state separately from runtime/preview health. Added regression coverage for repository filtering/ordering, endpoint response shape, hook request/error/invalidation behavior, and owner-view review/actionability states.
 
 Verification on 2026-05-22 after rebasing onto origin/dev:
@@ -62,7 +62,7 @@ Verification on 2026-05-22 for docstring follow-up:
 - source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/PrototypeWorkspaces -q: 112 passed, 5 warnings.
 - source ../../.venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/prototype_workspaces.py tldw_Server_API/app/api/v1/schemas/prototype_workspace_schemas.py tldw_Server_API/app/core/AuthNZ/repos/prototype_workspaces_repo.py -f json -o /tmp/bandit_prototype_risk_gate_6_docstring_followup.json: 0 findings.
 - git diff --check: passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

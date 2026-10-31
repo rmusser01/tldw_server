@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.Sync.v2.errors import (
+from tldw_Server_API.app.core.Sync_Contracts.errors import (
     SyncConflictNotFoundError,
     SyncDatasetNotFoundError,
     SyncHeadConflictError,
@@ -28,7 +28,7 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncMaterializationPredecessorError,
     SyncStoreError,
 )
-from tldw_Server_API.app.core.Sync.v2.models import (
+from tldw_Server_API.app.core.Sync_Contracts.models import (
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
     MEDIA_SYNC_DOMAINS,
@@ -91,10 +91,10 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     normalize_sync_timestamp,
     resolve_personal_context_ingress_result_revision,
 )
-from tldw_Server_API.app.core.Sync.v2.mutation_group_validation import (
+from tldw_Server_API.app.core.Sync_Contracts.mutation_group_validation import (
     SYNC_MUTATION_GROUP_MAX_SIZE,
 )
-from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_readiness import (
+from tldw_Server_API.app.core.Sync_Contracts.notes_moodboard_studio_readiness import (
     NOTES_MOODBOARD_STUDIO_READINESS_REASON_CODES_BY_KEY,
     NOTES_MOODBOARD_STUDIO_READINESS_STATES,
     NOTES_MOODBOARD_STUDIO_SERVER_METADATA_KEYS,
@@ -102,7 +102,7 @@ from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_readiness import (
     default_notes_moodboard_studio_readiness_record,
     parse_notes_moodboard_studio_readiness_record,
 )
-from tldw_Server_API.app.core.Sync.v2.notes_task_readiness import (
+from tldw_Server_API.app.core.Sync_Contracts.notes_task_readiness import (
     NOTES_TASK_READINESS_REASON_CODES_BY_KEY,
     NOTES_TASK_READINESS_STATES,
     NOTES_TASK_SERVER_METADATA_KEYS,
@@ -131,7 +131,13 @@ SYNC_APPLY_STATUSES: set[str] = {
     "conflict",
     "superseded",
 }
-_WHOLE_OBJECT_DOMAINS = {"notes.note", "chat.conversation"}
+_WHOLE_OBJECT_DOMAINS = {"notes.note", "notes.provenance", "chat.conversation"}
+# A tombstone of one of these may come without a base. It names an object the
+# dataset never held: the head check accepts it only when the object has no head,
+# and the materializer applies it as already satisfied (the object is gone). One
+# without a base for an object that has a head is refused by the head check.
+# Provenance is deleted with its note, from the note's own head, and keeps the rule.
+_BASELESS_TOMBSTONE_DOMAINS = {"notes.note", "chat.conversation"}
 _ATTACHMENT_REF_REQUIRED_PAYLOAD_KEYS = {
     "attachment_id",
     "parent_domain",
@@ -2544,7 +2550,7 @@ class SyncDatabase:
                 self._ensure_key_record_user_id_column(connection=conn)
                 self._ensure_key_record_rotation_columns(connection=conn)
             self._preflight_notes_attachment_bootstrap_tables(connection=conn)
-            self.backend.create_tables(schema, connection=conn)
+            self._create_schema_tables(schema, connection=conn)
             self._ensure_device_lifecycle_columns(connection=conn)
             self._ensure_device_lifecycle_tables(connection=conn)
             self._ensure_background_sync_tables(connection=conn)
@@ -2563,6 +2569,21 @@ class SyncDatabase:
             self._ensure_key_record_user_id_index(connection=conn)
         with self.backend.transaction() as conn:
             self._migrate_versioned_device_state(connection=conn)
+
+    def _create_schema_tables(self, schema: str, *, connection: Any) -> None:
+        """Create fixed Sync tables and indexes without committing SQLite bootstrap.
+
+        Sync schemas contain no triggers or semicolons inside quoted values.
+        Keep SQLite's existing write transaction; other backends retain their
+        schema creation API.
+        """
+        if self.backend_type == BackendType.SQLITE:
+            # executescript would commit the transaction and release its write lock.
+            for statement in schema.split(";"):
+                if statement.strip():
+                    self.execute(statement, connection=connection)
+        else:
+            self.backend.create_tables(schema, connection=connection)
 
     def execute(
         self,
@@ -3595,7 +3616,7 @@ class SyncDatabase:
         if dataset.scope_type == "personal":
             if dataset.workspace_id is not None:
                 raise SyncStoreError("Personal sync datasets must not include workspace_id")
-            allowed_domains = set(M1_SYNC_DOMAINS).union(
+            allowed_domains = {"notes.provenance"}.union(M1_SYNC_DOMAINS,
                 SOURCE_CACHE_SYNC_DOMAINS,
                 MEDIA_SYNC_DOMAINS,
                 NOTES_ORGANIZATION_DOMAINS,
@@ -3643,7 +3664,7 @@ class SyncDatabase:
         ):
             raise SyncStoreError("notes_task_sync_not_ready")
 
-    def _validate_envelope_contract(self, envelope: SyncEnvelopeCreate) -> None:
+    def _validate_envelope_contract(self, envelope: SyncEnvelopeCreate, *, verified_notes_bootstrap: bool = False) -> None:
         if envelope.domain not in SYNC_V2_INTERNAL_OPERATIONS:
             raise SyncInvalidDomainError(f"Sync v2 M1 domain is not supported: {envelope.domain}")
         if envelope.operation not in SYNC_V2_INTERNAL_OPERATIONS[envelope.domain]:
@@ -3677,11 +3698,12 @@ class SyncDatabase:
             raise SyncStoreError(
                 "Sync v2 M1 base metadata must be supplied as a complete set"
             )
-        if envelope.domain in _WHOLE_OBJECT_DOMAINS:
+        if envelope.domain in _WHOLE_OBJECT_DOMAINS and not (verified_notes_bootstrap and envelope.domain in {"notes.note", "notes.provenance"}):
             if (
                 envelope.operation == "tombstone"
                 and not has_all_base
                 and not has_prebootstrap_product_base
+                and envelope.domain not in _BASELESS_TOMBSTONE_DOMAINS
             ):
                 raise SyncStoreError(
                     f"Sync v2 M1 {envelope.domain} tombstones require base metadata"
@@ -4708,14 +4730,16 @@ class SyncDatabase:
         user_id: str,
         *,
         include_archived: bool = False,
+        connection: Any | None = None,
     ) -> list[SyncDataset]:
-        """List Sync v2 datasets owned by a user."""
+        """List Sync v2 datasets owned by a user, inside ``connection``'s transaction when given."""
 
         archived_predicate = "" if include_archived else " AND archived_at IS NULL"
         result = self.execute(
             "SELECT * FROM sync_datasets WHERE owner_user_id = ?"
             f"{archived_predicate} ORDER BY created_at ASC, dataset_id ASC",  # nosec B608
             (user_id,),
+            connection=connection,
         )
         return [_dataset_from_row(row) for row in result.rows]
 
@@ -6978,6 +7002,147 @@ class SyncDatabase:
                 raise SyncStoreError("Sync dataset link bootstrap transition was not persisted")
             return _dataset_from_row(updated)
 
+    def begin_notes_provenance_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+    ) -> SyncDataset:
+        """Atomically enroll notes.provenance without changing organization readiness."""
+
+        if not bootstrap_id.strip():
+            raise SyncStoreError("Notes provenance bootstrap ID is required")
+        with self.backend.transaction() as conn:
+            row = self._get_dataset_row_for_update(dataset_id, connection=conn)
+            if (
+                row is None
+                or row.get("owner_user_id") != owner_user_id
+                or row.get("scope_type") != "personal"
+            ):
+                raise SyncStoreError("Sync dataset was not found or is not accessible")
+            metadata = decode_json(row.get("metadata_json"), default={})
+            current = metadata.get("notes_provenance_v1")
+            if isinstance(current, Mapping) and current.get("state") in {
+                "initializing",
+                "ready",
+            }:
+                return _dataset_from_row(row)
+            enrolled = list(decode_json(row.get("domain_set_json"), default=[]))
+            if "notes.note" not in enrolled:
+                raise SyncStoreError("notes_provenance_note_domain_missing")
+            if "notes.provenance" not in enrolled:
+                enrolled.append("notes.provenance")
+            metadata["notes_provenance_v1"] = {
+                "bootstrap_id": bootstrap_id,
+                "state": "initializing",
+                "captured_count": 0,
+                "expected_count": 0,
+                "source_hash": None,
+                "error_code": None,
+            }
+            self.execute(
+                "UPDATE sync_datasets SET domain_set_json = ?, metadata_json = ?, "
+                "updated_at = ? WHERE dataset_id = ?",
+                (
+                    encode_json(enrolled, default=[]),
+                    encode_json(metadata, default={}),
+                    utcnow_iso(),
+                    dataset_id,
+                ),
+                connection=conn,
+            )
+            self._ensure_domain_state(
+                dataset_id=dataset_id,
+                domain="notes.provenance",
+                adapter_version=1,
+                server_sequence=0,
+                connection=conn,
+            )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("Sync dataset provenance bootstrap update was not persisted")
+            return _dataset_from_row(updated)
+
+    def transition_notes_provenance_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        bootstrap_id: str,
+        expected_state: str,
+        state: str,
+        captured_count: int,
+        expected_count: int,
+        source_hash: str | None,
+        error_code: str | None = None,
+        ready_verifier: Callable[[], bool] | None = None,
+    ) -> SyncDataset:
+        """Compare-and-set one durable notes.provenance bootstrap transition."""
+
+        valid_states = {"initializing", "ready", "failed"}
+        if expected_state not in valid_states or state not in valid_states:
+            raise SyncStoreError("Notes provenance bootstrap state is invalid")
+        if captured_count < 0 or expected_count < 0 or captured_count > expected_count:
+            raise SyncStoreError("Notes provenance bootstrap counts are invalid")
+        if source_hash is not None and (
+            len(source_hash) != 64
+            or any(character not in "0123456789abcdef" for character in source_hash)
+        ):
+            raise SyncStoreError("Notes provenance bootstrap source hash is invalid")
+        with self.backend.transaction() as conn:
+            row = self._get_dataset_row_for_update(dataset_id, connection=conn)
+            if row is None:
+                raise SyncStoreError("Sync dataset was not found or is not accessible")
+            metadata = decode_json(row.get("metadata_json"), default={})
+            current = metadata.get("notes_provenance_v1")
+            if not isinstance(current, Mapping) or (
+                current.get("bootstrap_id") != bootstrap_id
+                or current.get("state") != expected_state
+            ):
+                raise SyncStoreError("notes_provenance_bootstrap_compare_and_set_failed")
+            if {"notes.provenance"}.difference(_dataset_domains_from_row(row)):
+                raise SyncStoreError("notes_provenance_sync_domain_incomplete")
+            current_hash = current.get("source_hash")
+            if current_hash not in {None, source_hash}:
+                raise SyncStoreError("notes_provenance_bootstrap_source_changed")
+            if state == "ready":
+                if (
+                    captured_count != expected_count
+                    or ready_verifier is None
+                    or not ready_verifier()
+                ):
+                    raise SyncStoreError("notes_provenance_bootstrap_verification_failed")
+                undrained = _first(
+                    self.execute(
+                        "SELECT COUNT(*) AS count FROM sync_envelopes "
+                        "WHERE dataset_id = ? AND domain = 'notes.provenance' "
+                        "AND status = 'accepted' "
+                        "AND apply_status NOT IN ('applied', 'superseded')",
+                        (dataset_id,),
+                        connection=conn,
+                    )
+                )
+                if undrained is None or int(undrained.get("count") or 0) != 0:
+                    raise SyncStoreError("notes_provenance_bootstrap_verification_failed")
+                error_code = None
+            metadata["notes_provenance_v1"] = {
+                "bootstrap_id": bootstrap_id,
+                "state": state,
+                "captured_count": captured_count,
+                "expected_count": expected_count,
+                "source_hash": source_hash,
+                "error_code": error_code,
+            }
+            self.execute(
+                "UPDATE sync_datasets SET metadata_json = ?, updated_at = ? WHERE dataset_id = ?",
+                (encode_json(metadata, default={}), utcnow_iso(), dataset_id),
+                connection=conn,
+            )
+            updated = self._get_dataset_row(dataset_id, connection=conn)
+            if updated is None:
+                raise SyncStoreError("Sync dataset provenance bootstrap transition was not persisted")
+            return _dataset_from_row(updated)
+
     @staticmethod
     def _validate_notes_attachment_bootstrap_id(bootstrap_id: str) -> None:
         if (
@@ -7519,9 +7684,11 @@ class SyncDatabase:
     def get_existing_envelope_for_idempotency(
         self,
         envelope: SyncEnvelopeCreate,
+        *,
+        connection: Any | None = None,
     ) -> SyncEnvelope | None:
         self._validate_envelope_contract(envelope)
-        with self.backend.transaction() as conn:
+        with self.backend.transaction(connection) as conn:
             dataset_row = self._require_dataset_domain_for_update(
                 envelope.dataset_id,
                 envelope.domain,
@@ -7619,6 +7786,7 @@ class SyncDatabase:
                 connection=conn,
             )
             self._require_expected_current_head(envelope, connection=conn)
+            self._require_provenance_lifecycle(envelope, connection=conn)
             return self._insert_envelope_in_transaction(envelope, connection=conn)
 
     def insert_claimed_conflict_resolution_envelope(
@@ -7631,10 +7799,25 @@ class SyncDatabase:
         resolution_action: str,
         resolution_notes: str | None,
         connection: Any,
+        mutation_group: Sequence[SyncEnvelopeCreate] | None = None,
     ) -> SyncEnvelope:
         """Append a claimed resolution under the caller's dataset authority."""
 
         self._validate_envelope_contract(envelope)
+        plan = [envelope]
+        if mutation_group is not None:
+            plan = self._validate_mutation_group_plan(list(mutation_group))
+            if (
+                len(plan) != 2
+                or plan[0] != envelope
+                or envelope.domain != "notes.note"
+                or envelope.operation != "tombstone"
+                or plan[1].domain != "notes.provenance"
+                or plan[1].operation != "tombstone"
+                or plan[1].object_id != envelope.object_id
+                or any(member.status != "accepted" for member in plan)
+            ):
+                raise SyncStoreError("Sync claimed resolution group must be a complete Notes deletion")
         with self.backend.transaction(connection) as conn:
             dataset_row = self._require_dataset_domain(
                 envelope.dataset_id,
@@ -7650,6 +7833,12 @@ class SyncDatabase:
                 resolution_notes=resolution_notes,
                 connection=conn,
             )
+            if mutation_group is not None:
+                existing_rows = self._list_mutation_group_rows(
+                    envelope.dataset_id, envelope.mutation_group_id, connection=conn,
+                )
+                if existing_rows:
+                    return self._matched_mutation_group_replay(plan, existing_rows)[0]
             existing = self._find_existing_envelope_for_idempotency(
                 envelope,
                 connection=conn,
@@ -7688,7 +7877,21 @@ class SyncDatabase:
                 )
             else:
                 self._require_expected_current_head(envelope, connection=conn)
-            return self._insert_envelope_in_transaction(envelope, connection=conn)
+            planned_heads: dict[tuple[str, str], SyncEnvelopeCreate] = {}
+            for index, member in enumerate(plan):
+                if index:
+                    self._require_dataset_domain(member.dataset_id, member.domain, connection=conn)
+                    if self._find_existing_envelope_for_idempotency(member, connection=conn) is not None:
+                        raise SyncIdempotencyConflictError(
+                            "Sync mutation group idempotency key was reused with different content"
+                        )
+                    self._require_expected_current_head(member, connection=conn)
+                self._require_provenance_lifecycle(
+                    member, connection=conn, planned_heads=planned_heads, plan=plan,
+                )
+                planned_heads[(member.domain, member.object_id)] = member
+            inserted = [self._insert_envelope_in_transaction(member, connection=conn) for member in plan]
+            return inserted[0]
 
     def list_latest_applied_heads(
         self,
@@ -7931,6 +8134,33 @@ class SyncDatabase:
         ):
             raise SyncHeadConflictError()
 
+    def _require_provenance_lifecycle(
+        self, envelope: SyncEnvelopeCreate, *, connection: Any,
+        planned_heads: Mapping[tuple[str, str], SyncEnvelopeCreate] | None = None,
+        plan: Sequence[SyncEnvelopeCreate] = (), verified_bootstrap: bool = False,
+    ) -> None:
+        """Fence child acceptance and complete parent deletion under the dataset lock."""
+        if envelope.status != "accepted" or envelope.domain not in {"notes.note", "notes.provenance"}:
+            return
+        overlay = planned_heads or {}
+        if envelope.domain == "notes.provenance":
+            from tldw_Server_API.app.core.Sync_Contracts.notes_provenance_contract import notes_provenance_object_hash
+            row = self._require_dataset(envelope.dataset_id, connection=connection)
+            readiness = decode_json(row.get("metadata_json"), default={}).get("notes_provenance_v1", {})
+            if readiness.get("state") != "ready" and not (verified_bootstrap and readiness.get("state") == "initializing"):
+                raise SyncStoreError("notes_provenance_sync_not_ready")
+            if envelope.parent_id != envelope.object_id or envelope.payload_hash != notes_provenance_object_hash(envelope.payload, deleted=envelope.operation == "tombstone"):
+                raise SyncStoreError("notes_provenance_payload_invalid")
+            parent = overlay.get(("notes.note", envelope.object_id)) or self.get_current_head(envelope.dataset_id, "notes.note", envelope.object_id, connection=connection)
+            if parent is None or (parent.operation == "tombstone" and envelope.operation != "tombstone"):
+                raise SyncHeadConflictError()
+        elif envelope.operation == "tombstone":
+            child = overlay.get(("notes.provenance", envelope.object_id)) or self.get_current_head(envelope.dataset_id, "notes.provenance", envelope.object_id, connection=connection)
+            if child is not None and child.operation != "tombstone":
+                following = next((item for item in plan if item.mutation_step == (envelope.mutation_step or 0) + 1), None)
+                if following is None or following.domain != "notes.provenance" or following.operation != "tombstone" or following.object_id != envelope.object_id:
+                    raise SyncHeadConflictError()
+
     def _insert_envelope_in_transaction(
         self,
         envelope: SyncEnvelopeCreate,
@@ -8102,12 +8332,13 @@ class SyncDatabase:
         trusted_notes_organization_bootstrap_id: str | None = None,
         trusted_notes_task_bootstrap_id: str | None = None,
         trusted_notes_task_coordinator: bool = False,
+        trusted_notes_provenance_bootstrap: Callable[[SyncEnvelopeCreate], bool] | None = None,
     ) -> list[SyncEnvelope]:
         """Insert one complete validated group or return its exact stored replay."""
 
         submitted_plan = list(envelopes)
         try:
-            plan = self._validate_mutation_group_plan(submitted_plan)
+            plan = self._validate_mutation_group_plan(submitted_plan, verified_notes_bootstrap=trusted_notes_provenance_bootstrap is not None)
         except SyncStoreError as exc:
             if self._has_existing_mutation_group(submitted_plan):
                 raise SyncIdempotencyConflictError(
@@ -8192,6 +8423,9 @@ class SyncDatabase:
                     envelope_status=first.status,
                     connection=conn,
                 )
+                if trusted_notes_provenance_bootstrap is not None:
+                    if any(not trusted_notes_provenance_bootstrap(item) for item in plan):
+                        raise SyncStoreError("notes_provenance_bootstrap_source_changed")
                 planned_heads: dict[tuple[str, str], SyncEnvelopeCreate] = {}
                 for envelope in plan:
                     key = (envelope.domain, envelope.object_id)
@@ -8200,6 +8434,10 @@ class SyncDatabase:
                         connection=conn,
                         planned_head=planned_heads.get(key),
                         allow_unstored_product_base=trusted_notes_task_coordinator,
+                    )
+                    self._require_provenance_lifecycle(
+                        envelope, connection=conn, planned_heads=planned_heads, plan=plan,
+                        verified_bootstrap=trusted_notes_provenance_bootstrap is not None,
                     )
                     if envelope.status == "accepted":
                         planned_heads[key] = envelope
@@ -8255,6 +8493,7 @@ class SyncDatabase:
     def _validate_mutation_group_plan(
         self,
         envelopes: Sequence[SyncEnvelopeCreate],
+        *, verified_notes_bootstrap: bool = False,
     ) -> list[SyncEnvelopeCreate]:
         plan = list(envelopes)
         if not plan:
@@ -8262,8 +8501,15 @@ class SyncDatabase:
         if len(plan) > SYNC_MUTATION_GROUP_MAX_SIZE:
             raise SyncStoreError("sync_restore_group_limit_exceeded")
         for envelope in plan:
-            self._validate_envelope_contract(envelope)
+            self._validate_envelope_contract(envelope, verified_notes_bootstrap=verified_notes_bootstrap)
 
+        for index, envelope in enumerate(plan):
+            if envelope.domain == "notes.provenance" and any(
+                item.domain == "notes.note" and item.object_id == envelope.object_id
+                for item in plan
+            ):
+                if index == 0 or plan[index - 1].domain != "notes.note" or plan[index - 1].object_id != envelope.object_id:
+                    raise SyncStoreError("notes_provenance_pair_not_adjacent")
         first = plan[0]
         if (
             first.mutation_group_id is None
@@ -8925,6 +9171,50 @@ class SyncDatabase:
         if row is None:
             raise SyncStoreError(f"Sync envelope not found for server cursor: {server_cursor}")
         return _envelope_from_row(row)
+
+    def has_pending_personal_context_authority(
+        self,
+        dataset_id: str,
+        *,
+        profile_id: str,
+        connection: Any | None = None,
+    ) -> bool:
+        """Return whether a staged home-authority row of the profile awaits finalization.
+
+        Args:
+            dataset_id: Sync dataset bound to the profile.
+            profile_id: Canonical profile whose relayed authority rows count.
+            connection: Optional open connection, so a caller already inside a
+                Sync transaction reads its own state; the caller keeps
+                ownership. Without one, the backend runs this single read on
+                a connection of its own.
+
+        Returns:
+            True when an accepted server-origin home-authority envelope for the
+            profile is still ``pending``; False otherwise.
+        """
+
+        rows = self.execute(
+            """SELECT routing_metadata_json FROM sync_envelopes
+                WHERE dataset_id = ? AND device_id = 'server-origin'
+                  AND status = 'accepted' AND apply_status = 'pending'""",
+            (dataset_id,),
+            connection=connection,
+        ).rows
+        for row in rows or []:
+            routing = decode_json(row.get("routing_metadata_json"), default={})
+            authority = (
+                routing.get("personal_context_authority")
+                if isinstance(routing, dict)
+                else None
+            )
+            if (
+                isinstance(authority, dict)
+                and authority.get("role") == "home_authority"
+                and routing.get("profile_id") == profile_id
+            ):
+                return True
+        return False
 
     def discard_pending_personal_context_authority(
         self,
@@ -13709,7 +13999,7 @@ class SyncDatabase:
                 PRIMARY KEY(dataset_id, device_id, attachment_id)
             );
             """
-        self.backend.create_tables(schema, connection=connection)
+        self._create_schema_tables(schema, connection=connection)
         statements = [
             """
             CREATE INDEX IF NOT EXISTS idx_sync_device_authorizations_dataset_device
@@ -13784,7 +14074,7 @@ class SyncDatabase:
                 PRIMARY KEY(dataset_id, device_id)
             );
             """
-        self.backend.create_tables(schema, connection=connection)
+        self._create_schema_tables(schema, connection=connection)
         for statement in (
             """
             CREATE INDEX IF NOT EXISTS idx_sync_background_policies_device
@@ -13953,7 +14243,7 @@ class SyncDatabase:
                 PRIMARY KEY (dataset_id, domain, object_id)
             )
             """
-        self.backend.create_tables(schema, connection=connection)
+        self._create_schema_tables(schema, connection=connection)
         self.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_sync_object_state_dataset_domain_object
@@ -13966,7 +14256,7 @@ class SyncDatabase:
         self, *, connection: Any, projection_exists: bool
     ) -> None:
         cursor_type = "BIGINT" if self.backend_type == BackendType.POSTGRESQL else "INTEGER"
-        self.backend.create_tables(
+        self._create_schema_tables(
             f"""
             CREATE TABLE IF NOT EXISTS sync_current_heads (
                 dataset_id TEXT NOT NULL,
@@ -14062,7 +14352,7 @@ class SyncDatabase:
         timestamp_type = (
             "TIMESTAMPTZ" if self.backend_type == BackendType.POSTGRESQL else "TEXT"
         )
-        self.backend.create_tables(
+        self._create_schema_tables(
             f"""
             CREATE TABLE IF NOT EXISTS sync_materialization_locks (
                 dataset_id TEXT NOT NULL,
@@ -14158,7 +14448,7 @@ class SyncDatabase:
                 CHECK (storage_namespace_id NOT GLOB '*[^0-9a-f]*')
             );
             """
-        self.backend.create_tables(schema, connection=connection)
+        self._create_schema_tables(schema, connection=connection)
         for statement in (
             """
             CREATE INDEX IF NOT EXISTS idx_sync_attachment_bindings_unresolved

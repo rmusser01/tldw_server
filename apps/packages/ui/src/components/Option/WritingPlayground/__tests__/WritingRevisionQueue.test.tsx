@@ -227,3 +227,28 @@ describe("WritingRevisionQueue", () => {
     expect(onCopy).toHaveBeenCalledWith(expect.objectContaining({ id: "revision-1" }))
   })
 })
+
+
+describe("regeneration queue eligibility", () => {
+  it.each(["rejected", "applied", "conflict", "advisory"] as const)(
+    "disables regeneration of an already %s proposal",
+    (status) => {
+      const onRegenerate = vi.fn();
+      const view = render(
+        <WritingRevisionQueue
+          proposals={[buildProposal({ status })]}
+          onApply={vi.fn()}
+          onReject={vi.fn()}
+          onCopy={vi.fn()}
+          onRegenerate={onRegenerate}
+        />,
+      );
+      const control = view.getByRole("button", {
+        name: "Regenerate",
+      });
+      expect(control).toBeDisabled();
+      fireEvent.click(control);
+      expect(onRegenerate).not.toHaveBeenCalled();
+    },
+  );
+});

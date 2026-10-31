@@ -358,11 +358,17 @@ export const normalizeACPHealthStatus = (payload: unknown): ACPHealthStatus | nu
           Boolean(agent) && typeof agent === "object" && !Array.isArray(agent)
       )
     : []
-  const availableAgents = agents.filter((agent) => agent.status === "available").length
+  const availableAgents = agents.filter((agent) =>
+    typeof agent.is_configured === "boolean" ? agent.is_configured : agent.status === "available"
+  ).length
+  const runnerProbe = isRecord(record.runner_probe) ? record.runner_probe : null
+  const probeStatus = typeof runnerProbe?.status === "string" ? runnerProbe.status : null
   const missingApiKeys = agents.some((agent) => agent.api_key_set === false)
 
   return {
-    runner: typeof runner?.status === "string" ? runner.status : "unknown",
+    runner: probeStatus && probeStatus !== "skipped"
+      ? probeStatus === "not_running" ? "unavailable" : probeStatus
+      : typeof runner?.status === "string" ? runner.status : "unknown",
     agent:
       agents.length === 0
         ? "unavailable"
@@ -372,7 +378,7 @@ export const normalizeACPHealthStatus = (payload: unknown): ACPHealthStatus | nu
             ? "available"
             : "degraded",
     api_keys: missingApiKeys ? "missing" : "ok",
-    details: formatHealthDetails(record.message, runner, availableAgents, agents.length)
+    details: formatHealthDetails(record.message || runnerProbe?.detail, runner, availableAgents, agents.length)
   }
 }
 

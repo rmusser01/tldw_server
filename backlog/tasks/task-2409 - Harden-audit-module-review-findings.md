@@ -44,7 +44,7 @@ Temporary plan file IMPLEMENTATION_PLAN_audit_module_hardening.md was completed 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-06-23: Started implementation. Using TDD for focused regression coverage before production changes.
 
 2026-06-23: Created IMPLEMENTATION_PLAN_audit_module_hardening.md with four stages.
@@ -74,7 +74,7 @@ Rebased PR verification:
 - focused review regression subset: 8 passed, 13 warnings
 - touched audit test files: 106 passed, 1 xfailed, 332 warnings
 - Bandit audit module scan: 0 findings (/tmp/bandit_audit_module_hardening_pr2440_rebased.json)
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -29,9 +29,9 @@ Write the approved long-term design spec for WebUI/browser-extension chat audio 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Wrote the approved v1 design spec and self-reviewed it with rg/sed for TBD/TODO markers, protocol contradictions, legacy raw-binary references, fallback wording, and required testing/rollout sections. Bandit skipped: documentation-only change.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

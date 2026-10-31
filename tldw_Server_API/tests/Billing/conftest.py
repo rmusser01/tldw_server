@@ -9,6 +9,12 @@ from tldw_Server_API.app.api.v1.API_Deps import billing_deps
 from tldw_Server_API.app.core.Billing import enforcement as enforcement_mod
 
 
+@pytest.fixture(autouse=True)
+def _hosted_billing_repo(billing_repo_wired):
+    """Billing tests exercise the hosted path, where a billing repository is wired (spec 2 §6)."""
+    yield
+
+
 @pytest.fixture()
 def disable_enforcement(monkeypatch):
     """Disable billing enforcement (simulates OSS mode)."""

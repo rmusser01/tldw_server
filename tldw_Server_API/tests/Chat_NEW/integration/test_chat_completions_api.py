@@ -391,6 +391,7 @@ class TestChatCompletionsEndpoint:
 
             assert response.status_code == status.HTTP_200_OK, response.text
             assert response.headers["content-type"].startswith("text/event-stream")
+            assert "no-transform" in response.headers["cache-control"]  # nosec B101: SSE must not be buffered by proxy compression.
             frames = [line[6:] for line in response.text.splitlines() if line.startswith("data: ")]
             assert frames[-1] == "[DONE]"
             import json
@@ -731,8 +732,12 @@ class TestDatabaseIntegration:
             characters = populated_chacha_db.list_character_cards()
             assert len(characters) > 0
 
-            # Find the character we created in the fixture (default character with client_id test_user)
-            test_char = next((c for c in characters if c['name'] == DEFAULT_CHARACTER_NAME and c['client_id'] == 'test_user'), None)
+            # Find the default character owned by the populated fixture.
+            test_char = next(
+                (c for c in characters
+                 if c['name'] == DEFAULT_CHARACTER_NAME and c['client_id'] == populated_chacha_db.client_id),
+                None,
+            )
             assert test_char is not None, f"Could not find test character '{DEFAULT_CHARACTER_NAME}'"
 
             conversations = populated_chacha_db.get_conversations_for_character(test_char["id"])

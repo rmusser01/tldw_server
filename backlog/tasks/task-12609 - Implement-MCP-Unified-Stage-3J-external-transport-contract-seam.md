@@ -35,9 +35,9 @@ Docs/superpowers/plans/2026-05-29-mcp-unified-stage3j-external-transport-contrac
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 PR review follow-up: added docstrings to the two newly added package-boundary tests after Qodo flagged the repo docstring rule.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

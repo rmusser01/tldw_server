@@ -31,9 +31,9 @@ Refresh sandbox tracking documentation after the merged VZ lifecycle and host re
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified current dev already marks launchd drill design/plan/implementation tasks as Done and includes completed host reboot drill tasks. Updated only the remaining docs wording that blurred completed explicit operator drills with still-open default/scheduled/cross-runtime gaps.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

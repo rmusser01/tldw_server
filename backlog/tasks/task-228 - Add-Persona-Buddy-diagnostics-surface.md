@@ -51,7 +51,7 @@ Stages:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Planning started in isolated worktree .worktrees/persona-buddy-diagnostics on branch codex/persona-buddy-diagnostics. GitHub tracking: epic #1510, Stage 1 issue #1511.
 
 Task 1 complete: added pure Persona/Buddy diagnostics projector and unit tests. Verification: bunx vitest run apps/packages/ui/src/components/PersonaGarden/__tests__/personaBuddyDiagnostics.test.ts passed (5 tests).
@@ -65,7 +65,7 @@ Final verification passed from apps/packages/ui: bun run test src/components/Per
 Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1518
 
 Code review fixes applied: profile fetch failures now surface as degraded diagnostics, visual runtime diagnostics are source-scoped and cleared on Buddy shell unmount, healthy visual pack diagnostics include render state, and runtime store tests reset diagnostics state.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

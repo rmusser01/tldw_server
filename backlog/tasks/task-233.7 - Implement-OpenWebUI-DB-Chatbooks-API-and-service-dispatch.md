@@ -35,7 +35,7 @@ Implement Stage 2 of the OpenWebUI webui.db import plan: add source_format=openw
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Stage 2 Chatbooks schema, endpoint and service dispatch for source_format=openwebui_db. Red verification: pytest failed with unknown enum openwebui_db and missing preview_openwebui_db/import_openwebui_db service methods before production changes.
 
 Verification:
@@ -45,7 +45,7 @@ Verification:
 - git diff --check -> clean
 
 Scope note: async Jobs worker dispatch, visible folder mirroring, frontend controls and user-facing docs remain deferred to later plan stages.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

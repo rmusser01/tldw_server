@@ -9,17 +9,59 @@ export interface StructuredApiErrorDetail {
   [key: string]: unknown
 }
 
-export class TldwApiError extends Error {
-  status: number
-  detail: unknown
+/**
+ * Canonical frontend API error (TASK-13526 stage 2 / ADR-065): one error
+ * model across both clients. The web shell's `ApiError` and this package's
+ * `TldwApiError` were two drift-prone shapes over the same backend
+ * responses; `TldwApiError` is now a strict subclass whose field set is a
+ * subset of this class. The web shell re-exports this class as its ApiError
+ * (apps/tldw-frontend/lib/api.ts), so `instanceof` checks work across both
+ * names and both shells.
+ */
+export class ApiError extends Error {
+  status?: number
+  /** Axios-compat alias kept from the web shell's previous ApiError. */
+  statusCode?: number
+  detail?: unknown
+  errorCode?: string
+  retryAfter?: number
 
-  constructor(message: string, status: number, detail: unknown) {
+  constructor(
+    message: string,
+    options?: {
+      status?: number
+      detail?: unknown
+      errorCode?: string
+      retryAfter?: number
+    }
+  ) {
     super(message)
-    this.name = "TldwApiError"
-    this.status = status
-    this.detail = detail
+    this.name = "ApiError"
+    if (options?.status !== undefined) {
+      this.status = options.status
+      this.statusCode = options.status
+    }
+    if (options?.detail !== undefined) {
+      this.detail = options.detail
+    }
+    if (options?.errorCode !== undefined) {
+      this.errorCode = options.errorCode
+    }
+    if (options?.retryAfter !== undefined) {
+      this.retryAfter = options.retryAfter
+    }
   }
 }
+
+export class TldwApiError extends ApiError {
+  declare status: number
+
+  constructor(message: string, status: number, detail: unknown) {
+    super(message, { status, detail })
+    this.name = "TldwApiError"
+  }
+}
+
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value)
@@ -90,4 +132,42 @@ export const getStructuredApiErrorDetail = (
         ? detail.frontend_state
         : undefined
   }
+}
+
+export const NOTES_PROVENANCE_UNAVAILABLE_MESSAGE =
+  "Source history is unavailable under the current server storage policy. Your draft is retained; retry when it is available."
+
+/** A read-policy gate can reject replay of a write that already committed. */
+export const isNotesProvenancePolicyUnavailable = (error: unknown): boolean => {
+  if (!isRecord(error)) return false
+  const details = isRecord(error.details) ? error.details : null
+  const detail = details?.detail ?? error.detail
+  const code = isRecord(detail) ? detail.error_code ?? detail.code : detail
+  return code === "notes_provenance_encryption_unsupported" ||
+    error.code === "notes_provenance_encryption_unsupported" ||
+    (typeof error.message === "string" && error.message.includes("notes_provenance_encryption_unsupported"))
+}
+
+/** Only known input/version rejection releases identity; pre-receipt gates can hide a committed write. */
+export const isDefinitiveWriteRejection = (error: unknown): boolean => {
+  if (!isRecord(error) || isNotesProvenancePolicyUnavailable(error)) return false
+  const response = isRecord(error.response) ? error.response : null
+  const status = error.status ?? response?.status
+  const details = isRecord(error.details) ? error.details : null
+  const detail = details?.detail ?? error.detail
+  const code = isRecord(detail) ? detail.error_code ?? detail.code : error.code
+  // Legacy Notes errors and schema validation use unstructured input/conflict responses.
+  if (code == null) return status === 400 || status === 409 || status === 422
+  // Structured readiness/capability failures (including unknown future codes) stay uncertain.
+  return status === 409 && [
+    "notes_provenance_version_conflict",
+    "notes_note_version_conflict",
+    "notes_organization_version_conflict",
+    "notes_provenance_expected_version_invalid",
+    "notes_note_expected_version_invalid",
+    "notes_provenance_idempotency_conflict",
+    "sync_server_origin_idempotency_conflict",
+    "sync_server_origin_batch_idempotency_conflict",
+    "sync_server_origin_restore_conflict",
+  ].includes(String(code))
 }

@@ -5,6 +5,7 @@ import React, { Dispatch, SetStateAction, createContext } from "react"
 interface PageAssistContext {
   controller: AbortController | null
   setController: Dispatch<SetStateAction<AbortController | null>>
+  getController?: () => AbortController | null
 
   embeddingController: AbortController | null
   setEmbeddingController: Dispatch<SetStateAction<AbortController | null>>

@@ -50,7 +50,7 @@ Found by the comprehensive core-module review; independently verified by the orc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 DONE (core fix). list_optimizations implemented on _SQLitePromptStudioDatabase, inserted beside the other optimization methods. Signature mirrors _BackendPromptStudioDatabase keyword-for-keyword - verified at runtime, inspect.signature equality is True - so the facade *args/**kwargs delegation cannot produce a TypeError. Uses the SQLite class conventions: get_connection()/cursor, "deleted = 0" (matching get_optimization, not the backend FALSE), and _row_to_dict(cursor, row) for the 2-arg arity.
 
 Verification: new test tldw_Server_API/tests/prompt_studio/test_list_optimizations_sqlite.py (4 tests: existence, round-trip, filter+paginate, bad pagination) red before / green after. FULL prompt_studio suite: 1077 passed, 79 skipped.
@@ -85,7 +85,7 @@ STILL OPEN, tracked separately: the decomposition itself. 59 method names implem
 - [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

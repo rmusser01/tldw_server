@@ -28,9 +28,9 @@ Bridge the issue #2605 coverage gap by adding focused integration and property-s
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Audited existing Research Workspace-related UI tests and added focused UI integration plus deterministic property-style coverage. Added Flashcards -> Quiz URL hydration coverage, TakeQuizTab include_workspace_items hook coverage, route round-trip sweeps for quiz/flashcards handoffs, and flashcards generate prefill route sweep/clamp coverage. No new dependencies.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

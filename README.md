@@ -114,11 +114,11 @@ Optional add-ons (apply AFTER your base profile is healthy):
 ## Current Status
 
 Current release line:
-- `0.1.45` Beta status. Expect rough edges and please report issues.
+- `0.1.46` Beta status. Expect rough edges and please report issues.
 - Primary client surfaces are the Next.js WebUI, Admin UI, and browser extension.
 - Package metadata is prepared under the canonical PyPI name `tldw-server`; use a repository checkout until publishing is complete.
-- The `dev` branch remains the home for ongoing work beyond `0.1.45`.
-- This draft candidate includes all changes since `v0.1.43` through frozen PR #3002. See [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
+- The `dev` branch remains the home for ongoing work beyond `0.1.46`.
+- This release candidate includes merged development changes since `v0.1.45` through frozen PR #3073 and requires Python 3.12 or newer. See [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
 
 <details>
 <summary>Current focus and migration notes from the old Gradio version</summary>
@@ -194,7 +194,7 @@ Still active on `dev`:
 
 License-first CI follow-ups are merged and included in the 0.1.44 candidate.
 
-Currently landing on `dev` (post-`0.1.45` branch work):
+Currently landing on `dev` (post-`0.1.46` branch work):
 - Follow the backlog for separately tracked UAT, native-fork recovery/synchronization and certification work.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.
@@ -540,8 +540,8 @@ docker compose -f Dockerfiles/docker-compose.multi-user-postgres.yml up -d --bui
 <summary>Manual virtualenv, environment, auth, and startup steps</summary>
 
 Supported Python versions:
-- Minimum: Python 3.11+
-- CI-tested: Python 3.11, 3.12, and 3.13
+- Minimum: Python 3.12+
+- CI configurations use Python 3.12 and 3.13
 - Recommended for local development: Python 3.12
 
 Prerequisites:
@@ -568,11 +568,11 @@ Windows notes:
 1) **Create and activate a virtual environment**
 ```bash
 # macOS/Linux: choose a supported interpreter explicitly (3.12 recommended)
-python3.12 -m venv .venv  # or python3.13 / python3.11
+python3.12 -m venv .venv  # or python3.13
 source .venv/bin/activate
 
 # Windows (PowerShell)
-py -3.12 -m venv .venv  # or -3.13 / -3.11
+py -3.12 -m venv .venv  # or -3.13
 .venv\Scripts\Activate.ps1
 
 # Confirm venv interpreter version

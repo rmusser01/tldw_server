@@ -31,7 +31,7 @@ Create the design spec for GitHub issue #1535: backend-owned model expansion and
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Reviewed and patched spec after two reviewer passes. Addressed generation profile snapshot map/profile_key semantics, generation_id ownership via vn_play_generations, active_revision_id checkpoint/restore semantics, read-time activation overlay, fail-closed moderation, idempotent model-call recovery, strict nested output schemas, exact offset pagination envelope, and debug endpoint path/auth/audit.
 
 Verification: git diff --check passed after the review-fix patch. Final focused subagent review found no blocker/high findings. Bandit skipped because this patch only updates design documentation and Backlog metadata, not executable code.
@@ -39,7 +39,7 @@ Verification: git diff --check passed after the review-fix patch. Final focused 
 PR #1549 review pass: live review sweep found two unresolved Gemini threads about active-revision overlay integration with scene-state derivation and deterministic V1 activation blocking. Reopening task to address them.
 
 PR #1549 review fixes: clarified active-revision overlay integration with current scene derivation and replaced vague activation dependency analysis with deterministic V1 blocking when material downstream scene/script events exist. git diff --check passed; Bandit remains skipped because changes are documentation/backlog-only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

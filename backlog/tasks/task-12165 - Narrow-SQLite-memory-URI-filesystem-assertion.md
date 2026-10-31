@@ -35,20 +35,14 @@ The remaining mid-slice stops at `test_sqlite_file_memory_uri_uses_memory` only 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Narrowed the SQLite memory URI assertion to look for created files, allowing unrelated directories produced by lazy config initialization in broad runs.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Fixed the DB backend normalization test by asserting that no filesystem files are created for file::memory:?cache=shared, rather than requiring an entirely empty temporary directory. Verification: focused touched-scope command passed (44 passed); Discord-to-Jobs slice passed (3247 passed, 156 skipped); git diff --check passed; Bandit on touched tests reported no findings.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

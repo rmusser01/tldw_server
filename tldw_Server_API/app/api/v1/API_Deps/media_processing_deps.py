@@ -577,6 +577,9 @@ async def get_process_emails_form(
     accept_mbox: bool = Form(False),
     accept_pst: bool = Form(False),
     ingest_attachments: bool = Form(False),
+    extract_attachments: bool | None = Form(None),
+    attachment_mime_allowlist: list[str] | None = Form(None),
+    attachment_mime_denylist: list[str] | None = Form(None),
     max_depth: int = Form(2),
     api_provider: str | None = Form(None),
     api_name: str | None = Form(None),
@@ -646,6 +649,9 @@ async def get_process_emails_form(
             accept_mbox=accept_mbox,
             accept_pst=accept_pst,
             ingest_attachments=ingest_attachments,
+            extract_attachments=extract_attachments,
+            attachment_mime_allowlist=attachment_mime_allowlist,
+            attachment_mime_denylist=attachment_mime_denylist,
             max_depth=max_depth,
             api_provider=api_provider,
             api_name=api_provider or api_name,
@@ -655,7 +661,18 @@ async def get_process_emails_form(
         _raise_422(exc)
 
 
+def media_analysis_requested(form_data: Any) -> bool:
+    """True when a media request asks for LLM analysis.
+
+    The same condition the audio and video libraries use before they call the
+    LLM: analysis on, and a provider named that is not "none".
+    """
+    api_name = getattr(form_data, "api_name", None)
+    return bool(getattr(form_data, "perform_analysis", False) and api_name and str(api_name).lower() != "none")
+
+
 __all__ = [
+    "media_analysis_requested",
     "get_process_documents_form",
     "get_process_videos_form",
     "get_process_audios_form",

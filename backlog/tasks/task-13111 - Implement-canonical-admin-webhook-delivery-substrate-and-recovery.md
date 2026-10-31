@@ -55,7 +55,6 @@ Detailed plan: Docs/superpowers/plans/2026-08-23-canonical-admin-webhook-deliver
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 The initial draft was created from an earlier reviewed PR 1 head. Planning review identified and incorporated additive schema-extension readiness while preserving canonical schema version 1, durable disposition tokens and absolute not-before timestamps, per-attempt persisted request timeout, runtime heartbeat persistence, queued cancellation without a worker lease, infrastructure-only pre-attempt deferral, and persisted Jobs expired-lease/quarantine controls. Final gate audit added Jobs migration compatibility/parity coverage, exact synchronous-test replay/preflight/reservation ordering, immutable enqueue controls, and first-canonical-activity traceability.
 
@@ -139,7 +138,6 @@ Task 3 Fix Round 1/5 started at FIX_BASE 803ae280f66e990f7b4ffdf29e31cae311d648d
 2026-08-29: Task 4 Fix Round 5/5 complete at pre-commit tree. PostgreSQL lease horizons now use one UPDATE-statement timestamp after row-lock waits; SQLite expired-lease recovery and integrity comparisons use fractional space-separated database time; worker scheduling edge guards are explicitly bound. RED: SQLite/worker 3 failed, 9 passed, 113 deselected; PostgreSQL 1 failed, 55 deselected. Final gates: worker 128 passed; PostgreSQL-required prepared operations 234 passed, 0 skipped; SQLite recovery 35 passed. Ruff, Bandit, git diff --check, and Python 3.10 py_compile passed. Evidence: .superpowers/sdd/2026-08-23-canonical-admin-webhook-delivery-substrate/task-4-report.md.
 2026-08-28: Started Task 5 status-only peer-verified egress and shared signed one-attempt executor at exact clean base fa19b8d39fbed631dc7673a45403524445112109. Strict four-file RED precedes production edits; focused security, static, Python 3.10 compilation, and diff gates are required.
 Extended peer-verified HTTP hop with no-buffer status-only mode and added deterministic signed one-attempt executor; transport/security vectors pass.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 2026-08-28: Started Task 5 Fix Round 1/5 at exact clean FIX_BASE e348d82e21b1a99efcd48e1e7cf9af53738b8756. Scope: status-only coalesced-body discard, closed target construction/syntax, a 30-second status-only whole-hop ceiling, and exact raw Retry-After evidence. Strict focused RED precedes production fixes.
 
@@ -284,7 +282,7 @@ Task 10 complete: exposed canonical persisted test, atomic manual redelivery, an
 2026-08-31: Integration closeout authorized by the user after final head 9a928f13047987b6b70d516769b948e84f2d1a12 reached 50 passed, 28 policy skips, 0 failed, and 0 pending GitHub checks; Jobs SQLite passed and all 5 Qodo threads are resolved. Final evidence and the PR summary comment are linked from PR #2842. TASK-13111 is complete for merge; canonical activation and all PR 3 scope remain prohibited until PR #2842 lands.
 
 2026-08-31: Post-closeout audit corrected the final-summary identity wording: 9a928f13047987b6b70d516769b948e84f2d1a12 is the reviewed implementation/evidence head, while later commits contain only Backlog integration records. The closeout rerun passed 51 checks with 28 policy skips, 0 failed, and 0 pending. This correction changes no product, test, schema, OpenAPI, activation, or PR 3 scope.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

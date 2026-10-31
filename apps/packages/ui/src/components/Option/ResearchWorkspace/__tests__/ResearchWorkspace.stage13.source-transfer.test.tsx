@@ -277,6 +277,20 @@ vi.mock("@/hooks/useFeatureFlags", () => ({
   useFeatureFlag: () => [true]
 }))
 
+// Launcher ownership is qualified separately with the real router/store/library.
+vi.mock("@/hooks/useStartTutorial", async () => {
+  const { useTutorialStore } = await import("@/store/tutorials")
+  return {
+    useStartTutorial: () => {
+      const start = useTutorialStore((state) => state.startTutorial)
+      return (id: string) => {
+        start(id)
+        return true
+      }
+    }
+  }
+})
+
 vi.mock("@/store/tutorials", () => ({
   useTutorialStore: (selector: (state: { startTutorial: () => void }) => unknown) =>
     selector({ startTutorial: vi.fn() })
@@ -288,9 +302,15 @@ vi.mock("@/store/workspace", () => ({
   createWorkspaceStorage: () => workspaceStorage
 }))
 
-vi.mock("@/utils/research-workspace-prefill", () => ({
-  consumeResearchWorkspacePrefill: vi.fn().mockResolvedValue(null),
-  buildKnowledgeQaSeedNote: vi.fn().mockReturnValue("")
+vi.mock("@/utils/use-research-workspace-prefill", () => ({
+  useResearchWorkspacePrefill: () => ({
+    attached: 0,
+    pending: 0,
+    failed: 0,
+    importing: false,
+    error: null,
+    retry: vi.fn(),
+  }),
 }))
 
 vi.mock("@/services/background-proxy", () => ({

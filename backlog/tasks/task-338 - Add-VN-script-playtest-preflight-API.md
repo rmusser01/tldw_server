@@ -34,7 +34,7 @@ Add a backend-owned VN script playtest/preflight API so bundled and custom front
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation plan: Docs/superpowers/plans/2026-05-14-vn-script-playtest-preflight-implementation-plan.md.
 
 Implemented backend-owned VN script playtest/preflight API in branch worktree `.worktrees/vn-script-playtest-preflight`. Added shared VN Play script runtime helpers, pure VN Scripts playtest analyzer, draft/version service methods, public API schemas/endpoints, capability flag, docs, and focused tests.
@@ -44,7 +44,7 @@ Verification:
 - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_api.py -q` -> 48 passed, 8 warnings.
 - `git diff --check` -> passed.
 - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/VN_Play/script_runtime.py tldw_Server_API/app/core/VN_Play/errors.py tldw_Server_API/app/core/VN_Scripts/playtest.py tldw_Server_API/app/core/VN_Scripts/service.py tldw_Server_API/app/api/v1/endpoints/vn_scripts.py -f json -o /tmp/bandit_vn_script_playtest_preflight.json` -> 0 results.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

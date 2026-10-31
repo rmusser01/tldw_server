@@ -38,7 +38,7 @@ Execute Task 3 from the approved plan: stage document uploads with default add-t
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification evidence:
 - RED: focused vitest failed before implementation because DocumentProcessingChoices did not exist, AttachmentsSummary did not render Blocked, and useFileUpload did not stage processing metadata.
 - PASS: cd apps/tldw-frontend && bunx vitest run ../packages/ui/src/services/__tests__/chat-document-processing.test.ts ../packages/ui/src/services/__tests__/tldw-api-client.media-ingest.test.ts ../packages/ui/src/components/Option/Playground/__tests__/DocumentProcessingChoices.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/AttachmentsSummary.integration.test.tsx ../packages/ui/src/hooks/chat/__tests__/useFileUpload.document-processing.test.tsx (33 tests).
@@ -47,7 +47,7 @@ Verification evidence:
 - PASS WITH BASELINE WARNINGS: focused ESLint via apps/tldw-frontend/node_modules/.bin/eslint --config apps/tldw-frontend/eslint.config.mjs exited 0; warnings are existing large-file/no-explicit-any/no-img baseline.
 - BASELINE FAIL: cd apps/tldw-frontend && bunx tsc --noEmit --pretty false --project tsconfig.json still fails in existing unrelated AudioStudio, ScheduledTasks, Skills, scheduled-tasks services, mcp-hub, voice-cloning, and e2e files. No touched Task 3 files appear after fixing the setUploadedFiles wiring error.
 - Bandit: not applicable; Task 3 touched frontend TypeScript/JSON/docs/task files only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

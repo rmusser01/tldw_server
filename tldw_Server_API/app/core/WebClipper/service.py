@@ -10,9 +10,10 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote
 
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     BackendType,
     CharactersRAGDB,
@@ -37,11 +38,13 @@ from tldw_Server_API.app.core.Notes.organization_capture import (
     stable_note_id,
 )
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 from tldw_Server_API.app.core.Utils.Utils import sanitize_filename
 from tldw_Server_API.app.core.WebClipper.schemas import (
     WebClipperAttachmentRecord,
     WebClipperEnrichmentPayload,
     WebClipperEnrichmentResponse,
+    WebClipperOutcomeState,
     WebClipperSavedNote,
     WebClipperSaveRequest,
     WebClipperSaveResponse,
@@ -98,6 +101,14 @@ class WebClipperService:
 
     def save_clip(self, request: WebClipperSaveRequest) -> WebClipperSaveResponse:
         """Create or update the canonical note and optional workspace placement."""
+        descriptor = request.capture_metadata.get("web_capture_v1")
+        if descriptor is not None:
+            full_extract = str(request.content.full_extract or "").strip()
+            if not full_extract:
+                raise InputError("web_capture_v1 requires non-empty full_extract.")
+            digest = hashlib.sha256(full_extract.encode("utf-8")).hexdigest()
+            if digest != descriptor["content_sha256"]:
+                raise InputError("web_capture_v1 SHA-256 does not match full_extract.")
         existing_document = self._document_for_save(request.clip_id)
         warnings: list[str] = []
         analysis_state = self._current_analysis_state(request.clip_id)
@@ -287,7 +298,7 @@ class WebClipperService:
                     note_summary=note_summary,
                     note_content=note_content,
                 )
-            except (CharactersRAGDBError, ConflictError, InputError) as exc:
+            except (CharactersRAGDBError, ConflictError, InputError, BackendDatabaseError) as exc:
                 warnings.append(f"Workspace placement failed: {exc}")
             else:
                 if self.promote_workspace_sources:
@@ -301,7 +312,7 @@ class WebClipperService:
                             workspace_id=request.workspace.workspace_id,
                             source=workspace_source,
                         )
-                    except (CharactersRAGDBError, ConflictError, InputError) as exc:
+                    except (CharactersRAGDBError, ConflictError, InputError, BackendDatabaseError) as exc:
                         warnings.append(f"Workspace source promotion failed: {exc}")
 
         status = self._derive_save_status(
@@ -366,7 +377,7 @@ class WebClipperService:
             status = "saved"
         return WebClipperStatusResponse(
             clip_id=clip_id,
-            status=status,
+            status=cast(WebClipperOutcomeState, status),
             note=self._build_note_summary(note),
             workspace_placements=placements,
             attachments=attachments,
@@ -827,25 +838,22 @@ class WebClipperService:
         return None
 
     def _sync_keywords(self, note_id: str, keywords: list[str], warnings: list[str]) -> None:
-        normalized_keywords: list[str] = []
-        seen_keywords: set[str] = set()
+        normalized_keywords: dict[str, str] = {}
         for keyword in keywords:
             text = str(keyword or "").strip()
-            if not text:
-                continue
-            if text in seen_keywords:
-                continue
-            seen_keywords.add(text)
-            normalized_keywords.append(text)
+            if text:
+                normalized_keywords.setdefault(normalize_keyword_identity(text), text)
 
         existing_keywords = self.db.get_keywords_for_note(note_id)
-        existing_ids_by_text = {str(row["keyword"]): int(row["id"]) for row in existing_keywords}
+        existing_ids_by_text = {
+            normalize_keyword_identity(str(row["keyword"])): int(row["id"]) for row in existing_keywords
+        }
         desired_keyword_ids: set[int] = set()
 
-        for text in normalized_keywords:
+        for identity, text in normalized_keywords.items():
             try:
-                if text in existing_ids_by_text:
-                    keyword_id = existing_ids_by_text[text]
+                if identity in existing_ids_by_text:
+                    keyword_id = existing_ids_by_text[identity]
                 else:
                     existing_keyword = self.db.get_keyword_by_text(text)
                     if existing_keyword is not None:
@@ -1107,6 +1115,7 @@ class WebClipperService:
                 overwrite=True,
                 chunks=chunks,
                 owner_user_id=self._coerce_owner_user_id(),
+                deduplicate_content="web_capture_v1" not in request.capture_metadata,
             )
         except (MediaConflictError, MediaDatabaseError, MediaInputError) as exc:
             raise CharactersRAGDBError("Media DB workspace clip persistence failed.") from exc  # noqa: TRY003
@@ -1179,7 +1188,7 @@ class WebClipperService:
         warnings: list[str],
         workspace_requested: bool,
         workspace_saved: bool,
-    ) -> str:
+    ) -> WebClipperOutcomeState:
         if workspace_requested and not workspace_saved:
             return "partially_saved"
         if warnings:

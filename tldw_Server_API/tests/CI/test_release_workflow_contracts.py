@@ -152,6 +152,22 @@ def test_container_build_check_covers_workers_without_publishing_images() -> Non
     assert build["with"]["load"] == "${{ matrix.backend }}"
 
 
+def test_worker_container_build_has_a_finite_cold_image_budget() -> None:
+    """Cold worker image loading gets headroom without widening other jobs."""
+    workflow = _load(".github/workflows/container-build-check.yml")
+    job = workflow["jobs"]["build"]
+    matrix = job["strategy"]["matrix"]["include"]
+
+    assert job["timeout-minutes"] == "${{ matrix.timeout_minutes || 30 }}"
+    assert {entry["name"]: entry.get("timeout_minutes", 30) for entry in matrix} == {
+        "app": 30,
+        "worker": 45,
+        "audio-worker": 30,
+        "webui": 30,
+        "admin-ui": 30,
+    }
+
+
 def test_container_backend_smoke_uses_the_built_image_and_isolated_imports() -> None:
     """Backend packaging omissions must fail before the matrix result is green."""
     workflow = _load(".github/workflows/container-build-check.yml")
@@ -176,11 +192,11 @@ def test_frontend_required_enforces_shared_hooks_and_preserves_full_lint() -> No
     workflow = _load(".github/workflows/frontend-required.yml")
     steps = workflow["jobs"]["frontend-required"]["steps"]
     lint = _get_step(steps, "Run frontend lint")
-    hooks = _get_step(steps, "Run shared UI hook enforcement")
+    hooks = _get_step(steps, "Run shared UI lint and hook enforcement")
 
     assert lint["run"] == "bun run lint"
     assert lint["working-directory"] == "apps/tldw-frontend"
     assert hooks["if"] == lint["if"]
     assert hooks["working-directory"] == "apps/tldw-frontend"
-    assert hooks["run"] == "bun scripts/check-shared-hooks.mjs"
+    assert hooks["run"] == "node scripts/check-shared-hooks.mjs"
     assert not hooks.get("continue-on-error", False)

@@ -35,7 +35,7 @@ Implement the backend persistence slice from the Stage 1 first-class Watchlists 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline captured before Stage 1A code edits. Route/helper scan confirmed current list_sources, list_jobs, list_outputs, and legacy /{watchlist_id}/clusters locations. Focused backend baseline passed: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Watchlists/test_watchlists_api.py tldw_Server_API/tests/Watchlists/test_runs_list_global.py tldw_Server_API/tests/Watchlists/test_watchlist_clusters_api.py -q => 30 passed, 5 warnings in 57.91s.
 
 Implemented Stage 1A persistence in Watchlists_DB.py. Added WatchlistRow, watchlists/watchlist_sources schema for SQLite and Postgres, lazy default Imported Watchlist creation, idempotent source/job backfill, CRUD lifecycle helpers, source membership helpers, watchlist_id on JobRow, and scoped list filters for sources, jobs, runs, items, and smart counts.
@@ -45,7 +45,7 @@ Verification: new DB contract tests first failed as expected for missing watchli
 Bandit: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/DB_Management/Watchlists_DB.py -f json -o /tmp/bandit_watchlists_stage1a.json => 0 results.
 
 Postgres integration command was attempted: python -m pytest tldw_Server_API/tests/Watchlists/test_watchlists_postgres_integration.py -q => 4 skipped because PostgreSQL was unavailable; the new DB contract test includes a captured Postgres DDL/index assertion for the container schema path.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

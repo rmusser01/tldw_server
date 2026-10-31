@@ -36,7 +36,7 @@ Source: synthesis F14
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Fixed in b5b6dc66a9.
 
 Reproduced first, against the real HTTPConnectionPool: after aclose() on a pooled client, "elevenlabs" is still in _pools, get_client hands back the same object, and is_closed is True. Confirms the finding -- aclose() does not evict, only close_pool/close_client do.
@@ -50,7 +50,7 @@ Checked the sibling adapters for the same pattern: omnivoice_sidecar_supervisor 
 Verification: tests/TTS 54 failed / 553 passed with the change vs 58 / 549 without (stash-isolated); the difference is exactly these four tests, so no regression. The 54 are pre-existing and untouched by this change. Bandit clean on the adapter (run via uvx; bandit is CI-only, not a declared local dependency).
 
 Environment note: the real client factory cannot be exercised locally -- create_async_client raises PackageNotFoundError for "tldw-server" because `pip install -e .` has not been run in this checkout, which HTTPConnectionPool.get_client converts into a generic TTSNetworkError. Not a code defect; the reproduction used a stub client to isolate the pool semantics under test.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

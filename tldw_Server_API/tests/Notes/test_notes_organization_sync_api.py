@@ -20,20 +20,30 @@ from tldw_Server_API.app.core.Sync.v2.adapters import (
     AdapterRejected,
     StaticSyncAdapter,
     SyncAdapterRegistry,
+    SyncDomainAdapter,
 )
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes import NotesDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_organization import (
     NotesOrganizationDomainAdapter,
 )
-from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+from tldw_Server_API.app.core.Sync.v2.errors import SyncMaterializationContractError, SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.materializers import (
     ChatConversationMaterializer,
+    ChatMessageMaterializer,
+    MaterializationResult,
     NotesMaterializer,
     NotesOrganizationMaterializer,
+    SyncMaterializer,
+)
+from tldw_Server_API.app.core.Sync.v2.materializers.guarded_product_mutation import (
+    GuardedProductMutation,
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
     M1_SYNC_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
+    SyncDomain,
+    SyncEnvelope,
+    SyncOperation,
 )
 from tldw_Server_API.app.core.Sync.v2.notes_organization import organization_link_id
 from tldw_Server_API.app.core.Sync.v2.notes_organization_bootstrap import (
@@ -62,33 +72,53 @@ class _NoopRateLimiter:
 
 
 class _FailingOrganizationMaterializer:
-    def __init__(self, domain: str = "notes.keyword") -> None:
+    def __init__(self, domain: SyncDomain = "notes.keyword") -> None:
         self.domain = domain
 
-    def apply(self, envelope, *, store):
+    def apply(
+        self,
+        envelope: SyncEnvelope,
+        *,
+        store: SyncV2Store,
+        guarded_mutation: GuardedProductMutation | None = None,
+    ) -> MaterializationResult:
         raise RuntimeError("secret backend value")
 
 
 class _FailingFolderChildMaterializer:
-    def __init__(self, delegate) -> None:
+    def __init__(self, delegate: SyncMaterializer) -> None:
         self.delegate = delegate
+        self.domain = delegate.domain
 
-    def apply(self, envelope, *, store):
+    def apply(
+        self,
+        envelope: SyncEnvelope,
+        *,
+        store: SyncV2Store,
+        guarded_mutation: GuardedProductMutation | None = None,
+    ) -> MaterializationResult:
         if envelope.payload.get("name") == "Child":
             raise RuntimeError("secret child materialization value")
-        return self.delegate.apply(envelope, store=store)
+        return self.delegate.apply(envelope, store=store, guarded_mutation=guarded_mutation)
 
 
 class _FailingSecondRelationshipMaterializer:
-    def __init__(self, delegate) -> None:
+    def __init__(self, delegate: SyncMaterializer) -> None:
         self.delegate = delegate
+        self.domain = delegate.domain
         self.applies = 0
 
-    def apply(self, envelope, *, store):
+    def apply(
+        self,
+        envelope: SyncEnvelope,
+        *,
+        store: SyncV2Store,
+        guarded_mutation: GuardedProductMutation | None = None,
+    ) -> MaterializationResult:
         self.applies += 1
         if self.applies == 2:
             raise RuntimeError("secret second relationship value")
-        return self.delegate.apply(envelope, store=store)
+        return self.delegate.apply(envelope, store=store, guarded_mutation=guarded_mutation)
 
 
 def _assert_canonical_group_lineage(envelopes) -> None:
@@ -118,7 +148,7 @@ def chacha_db(tmp_path: Path) -> CharactersRAGDB:
 
 @pytest.fixture()
 def sync_service(tmp_path: Path, chacha_db: CharactersRAGDB) -> SyncV2Service:
-    adapters = []
+    adapters: list[SyncDomainAdapter] = []
     for domain in M1_SYNC_DOMAINS:
         adapters.append(
             NotesDomainAdapter()
@@ -129,7 +159,7 @@ def sync_service(tmp_path: Path, chacha_db: CharactersRAGDB) -> SyncV2Service:
         NotesOrganizationDomainAdapter(domain=domain)
         for domain in NOTES_ORGANIZATION_DOMAINS
     )
-    materializers = {
+    materializers: dict[SyncDomain, SyncMaterializer] = {
         "chat.conversation": ChatConversationMaterializer(chacha_db),
         "notes.note": NotesMaterializer(chacha_db),
         **{
@@ -201,7 +231,9 @@ def test_direct_keyword_create_uses_sync_authority(
     assert response.status_code == 201, response.text
     created = response.json()
     assert created["keyword"] == "Project Alpha"
-    assert chacha_db.get_keyword_by_id(created["id"])["sync_id"] == created["sync_id"]
+    stored_keyword = chacha_db.get_keyword_by_id(created["id"])
+    assert stored_keyword is not None
+    assert stored_keyword["sync_id"] == created["sync_id"]
     dataset_id = sync_service.profile(user_id="user-1").active_dataset_id or ""
     envelopes = sync_service.store.list_envelopes_after(
         dataset_id, 0, domains=["notes.keyword"], limit=20
@@ -279,7 +311,9 @@ def test_direct_folder_path_plans_missing_parents_before_child(
     )
     assert response.status_code == 201, response.text
     assert response.json()["path"] == "Projects/Reference"
-    assert chacha_db.get_note_folder_by_path("Projects/Reference")["id"] == response.json()["id"]
+    stored_folder = chacha_db.get_note_folder_by_path("Projects/Reference")
+    assert stored_folder is not None
+    assert stored_folder["id"] == response.json()["id"]
 
     dataset_id = sync_service.profile(user_id="user-1").active_dataset_id or ""
     direct = [
@@ -753,7 +787,7 @@ def test_direct_collection_retry_reuses_manifest_after_applied_link(
         headers={"Idempotency-Key": "collection-link-base"},
         json={"name": "Linked collection"},
     ).json()
-    domain = "notes.keyword_collection_link"
+    domain: SyncDomain = "notes.keyword_collection_link"
     original = sync_service.materializers[domain]
     sync_service.materializers[domain] = _FailingSecondRelationshipMaterializer(
         original
@@ -1016,7 +1050,7 @@ def test_relationship_present_requires_both_endpoints_owned_by_current_client(
         operation="upsert",
         payload={"name": "Owner scoped", "parent_sync_id": None},
     )
-    domain, payload, endpoint_rows = {
+    cases: dict[str, tuple[SyncDomain, dict[str, str], dict[str, tuple[str, str, str]]]] = {
         "note_keyword": (
             "notes.keyword_link",
             {
@@ -1064,7 +1098,8 @@ def test_relationship_present_requires_both_endpoints_owned_by_current_client(
                 "folder": ("note_folders", "sync_id", folder_sync_id),
             },
         ),
-    }[case]
+    }
+    domain, payload, endpoint_rows = cases[case]
     object_id = organization_link_id(domain, list(payload.values()))
     projection.apply_relationship(
         domain=domain,
@@ -1107,7 +1142,7 @@ def test_direct_relationship_relink_restores_current_tombstones(
     keyword_id = "2d89ab39-23db-43d5-9f5e-a6be38edb474"
     collection_id = "1aa34562-962b-4c3c-b14c-d5cecc44fbd9"
     folder_id = "87327cd9-1a35-4270-a60c-d32c7dc9f568"
-    setup = [
+    setup: list[tuple[SyncDomain, str, dict[str, object]]] = [
         ("notes.note", note_id, {"title": "Restore note", "content": "Body"}),
         (
             "chat.conversation",
@@ -1141,7 +1176,7 @@ def test_direct_relationship_relink_restores_current_tombstones(
             payload=payload,
             source="relationship-restore-setup",
         )
-    relationships = [
+    relationships: list[tuple[SyncDomain, dict[str, str]]] = [
         (
             "notes.keyword_link",
             {
@@ -1477,7 +1512,9 @@ def test_inline_note_create_captures_one_complete_ordered_group(
         "Research",
     ]
     assert all(item.apply_status == "applied" for item in group)
-    assert chacha_db.get_note_by_id(note["id"])["version"] == 1
+    stored_note = chacha_db.get_note_by_id(note["id"])
+    assert stored_note is not None
+    assert stored_note["version"] == 1
 
 
 @pytest.mark.parametrize(("method", "path"), [("put", ""), ("patch", "")])
@@ -1798,15 +1835,14 @@ def test_literal_import_overwrite_replays_raw_request_before_mutable_lookup(
         "content": "Imported body",
         "keywords": ["Imported keyword"],
     }
+    import_item = {
+        "file_name": "overwrite.json",
+        "format": "json",
+        "content": json.dumps([imported_row]),
+    }
     body = {
         "duplicate_strategy": "overwrite",
-        "items": [
-            {
-                "file_name": "overwrite.json",
-                "format": "json",
-                "content": json.dumps([imported_row]),
-            }
-        ],
+        "items": [import_item],
     }
 
     original = client.post("/api/v1/notes/import", headers=headers, json=body)
@@ -1817,10 +1853,12 @@ def test_literal_import_overwrite_replays_raw_request_before_mutable_lookup(
     original_ids = [item.client_envelope_id for item in original_group]
 
     conversation_id = chacha_db.add_conversation({"title": "Later conversation"})
+    stored_note = chacha_db.get_note_by_id(note_id)
+    assert stored_note is not None
     changed = client.put(
         f"/api/v1/notes/{note_id}",
         headers={
-            "Expected-Version": str(chacha_db.get_note_by_id(note_id)["version"]),
+            "Expected-Version": str(stored_note["version"]),
             "Idempotency-Key": "literal-import-later-mutation",
         },
         json={
@@ -1844,7 +1882,9 @@ def test_literal_import_overwrite_replays_raw_request_before_mutable_lookup(
             sync_service, "literal-import-durable-overwrite:0:1"
         )
     ] == original_ids
-    assert chacha_db.get_note_by_id(note_id)["title"] == "Later title"
+    stored_note = chacha_db.get_note_by_id(note_id)
+    assert stored_note is not None
+    assert stored_note["title"] == "Later title"
 
     drifted_row = {**imported_row, "content": "Changed import request"}
     drifted = client.post(
@@ -1854,7 +1894,7 @@ def test_literal_import_overwrite_replays_raw_request_before_mutable_lookup(
             **body,
             "items": [
                 {
-                    **body["items"][0],
+                    **import_item,
                     "content": json.dumps([drifted_row]),
                 }
             ],
@@ -2304,7 +2344,9 @@ def test_inline_note_same_key_drift_conflicts_without_second_projection(
     assert drift.json()["detail"]["error_code"] == (
         "sync_server_origin_batch_idempotency_conflict"
     )
-    assert chacha_db.get_note_by_id(first.json()["id"])["title"] == (
+    stored_note = chacha_db.get_note_by_id(first.json()["id"])
+    assert stored_note is not None
+    assert stored_note["title"] == (
         "Original drift note"
     )
     assert chacha_db.get_keyword_by_text("Changed keyword") is None
@@ -2436,7 +2478,9 @@ def test_bulk_compound_interruption_resumes_and_replays_without_duplicates(
     assert [item.client_envelope_id for item in resumed_group] == [
         item.client_envelope_id for item in first_group
     ]
-    assert chacha_db.get_note_by_id(note_id)["version"] == 1
+    stored_note = chacha_db.get_note_by_id(note_id)
+    assert stored_note is not None
+    assert stored_note["version"] == 1
     assert len(chacha_db.get_keywords_for_note(note_id)) == 1
     assert len(chacha_db.get_note_folders_for_note(note_id)) == 2
 
@@ -2497,7 +2541,9 @@ def test_inline_note_retry_resumes_manifest_without_duplicate_note_versions(
         "pending",
     ]
     note_id = group[0].object_id
-    assert chacha_db.get_note_by_id(note_id)["version"] == 1
+    stored_note = chacha_db.get_note_by_id(note_id)
+    assert stored_note is not None
+    assert stored_note["version"] == 1
 
     sync_service.materializers["notes.keyword"] = original
     resumed = client.post("/api/v1/notes/", headers=headers, json=payload)
@@ -2507,7 +2553,9 @@ def test_inline_note_retry_resumes_manifest_without_duplicate_note_versions(
     assert [item.client_envelope_id for item in resumed_group] == [
         item.client_envelope_id for item in group
     ]
-    assert chacha_db.get_note_by_id(note_id)["version"] == 1
+    stored_note = chacha_db.get_note_by_id(note_id)
+    assert stored_note is not None
+    assert stored_note["version"] == 1
     assert len(chacha_db.get_keywords_for_note(note_id)) == 1
     assert len(chacha_db.get_note_folders_for_note(note_id)) == 2
 
@@ -2531,7 +2579,9 @@ def test_inline_patch_without_version_replays_manifest_before_projection_checks(
     assert first.status_code == 200, first.text
     assert replay.status_code == 200, replay.text
     assert replay.json()["version"] == first.json()["version"]
-    assert chacha_db.get_note_by_id(note_id)["version"] == first.json()["version"]
+    stored_note = chacha_db.get_note_by_id(note_id)
+    assert stored_note is not None
+    assert stored_note["version"] == first.json()["version"]
 
 
 def test_inline_folder_omission_preserves_and_empty_list_removes_relationships(
@@ -2670,6 +2720,7 @@ def test_source_folder_read_set_race_preserves_concurrent_manual_membership(
     provenance = stale_remove.steps[0].routing_metadata[
         "notes_folder_origin_provenance"
     ]
+    assert isinstance(provenance, dict)
     assert set(provenance) == {
         "operation",
         "source_id",
@@ -2735,7 +2786,7 @@ def _setup_sync_merge(
     source_sync_id = str(uuid.uuid4())
     target_sync_id = str(uuid.uuid4())
     collection_sync_id = str(uuid.uuid4())
-    setup = (
+    setup: tuple[tuple[SyncDomain, str, dict[str, object]], ...] = (
         ("notes.note", note_id, {"title": "Merge note", "content": "Body"}),
         (
             "chat.conversation",
@@ -2769,7 +2820,7 @@ def _setup_sync_merge(
     source = chacha_db.get_keyword_by_text(f"Merge source {suffix}")
     target = chacha_db.get_keyword_by_text(f"Merge target {suffix}")
     assert source is not None and target is not None
-    source_members = (
+    source_members: tuple[tuple[SyncDomain, dict[str, str]], ...] = (
         (
             "notes.keyword_link",
             {
@@ -2909,6 +2960,7 @@ def test_merge_relationship_set_race_blocks_final_source_tombstone(
     final_guard = stale_merge.steps[-1].routing_metadata[
         "notes_keyword_merge_precondition"
     ]
+    assert isinstance(final_guard, dict)
     assert set(final_guard) == {"relationship_set_hash"}
     assert len(str(final_guard["relationship_set_hash"])) == 64
     assert set(str(final_guard["relationship_set_hash"])) <= set(
@@ -3038,3 +3090,170 @@ def test_merge_sync_append_failure_preserves_source_projection(
         row["id"] for row in chacha_db.get_notes_for_keyword(source["id"])
     } == before_note_ids
     assert _notes_api_group(sync_service, "sync-merge-append") == []
+
+
+@pytest.mark.parametrize("invalid_result", [None, [], [("id", 1)]])
+def test_collection_create_rejects_non_mapping_plan_result(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    invalid_result: object,
+) -> None:
+    original = NotesOrganizationCoordinator.plan_collection_change
+
+    def invalid_loader(self, *args, **kwargs):
+        plan = original(self, *args, **kwargs)
+        return replace(plan, load_result=lambda: invalid_result)
+
+    monkeypatch.setattr(NotesOrganizationCoordinator, "plan_collection_change", invalid_loader)
+    response = client.post(
+        "/api/v1/notes/collections",
+        headers={"Idempotency-Key": "invalid-collection-result"},
+        json={"name": "Invalid projection"},
+    )
+    assert response.status_code == 503, response.text
+
+
+@pytest.mark.parametrize("message", [False, True], ids=["conversation", "message"])
+def test_chat_materializer_rejects_guard_before_product_or_store_access(
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+    monkeypatch: pytest.MonkeyPatch,
+    message: bool,
+) -> None:
+    sync_store = sync_service.store
+    materializer = ChatMessageMaterializer(chacha_db) if message else ChatConversationMaterializer(chacha_db)
+
+    def fail_access(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("Unsupported guard must fail before callbacks or projection access")
+
+    monkeypatch.setattr(sync_store, "get_object_state", fail_access)
+    guard = GuardedProductMutation(
+        expected_domain="notes.keyword",
+        expected_object_id="foreign-guard-target",
+        before=fail_access,
+        after=None,
+    )
+    envelope = SyncEnvelope(
+        dataset_id="dataset-1",
+        client_envelope_id="unsupported-guard",
+        domain=materializer.domain,
+        operation="upsert",
+        object_id="unguarded-product-target",
+        server_cursor=1,
+    )
+    with pytest.raises(SyncMaterializationContractError):
+        materializer.apply(envelope, store=sync_store, guarded_mutation=guard)
+
+
+@pytest.mark.parametrize("object_id", [None, "", 17])
+@pytest.mark.parametrize(
+    "domain, operation",
+    [
+        ("chat.conversation", "upsert"),
+        ("chat.conversation", "tombstone"),
+        ("chat.message", "append"),
+        ("chat.message", "tombstone"),
+    ],
+)
+def test_chat_materializer_rejects_corrupt_stored_id_before_lookup(
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+    monkeypatch: pytest.MonkeyPatch,
+    domain: SyncDomain,
+    operation: SyncOperation,
+    object_id: object,
+) -> None:
+    conversation_id = "corrupt-id-conversation"
+    message_id = "corrupt-id-message"
+    conversation = capture_server_origin_mutation(
+        sync_service,
+        user_id="user-1",
+        domain="chat.conversation",
+        operation="upsert",
+        object_id=conversation_id,
+        payload={"title": "Original conversation"},
+        source="test-corrupt-stored-id",
+    )
+    materializer = (
+        ChatMessageMaterializer(chacha_db) if domain == "chat.message" else ChatConversationMaterializer(chacha_db)
+    )
+    sync_service.materializers[domain] = materializer
+    captured = conversation
+    target_id = conversation_id
+    if domain == "chat.message":
+        target_id = message_id
+        captured = capture_server_origin_mutation(
+            sync_service,
+            user_id="user-1",
+            domain=domain,
+            operation="append",
+            object_id=target_id,
+            payload={
+                "conversation_id": conversation_id,
+                "sender": "user",
+                "content": "Original message",
+            },
+            source="test-corrupt-stored-id",
+        )
+    if operation == "tombstone":
+        captured = capture_server_origin_mutation(
+            sync_service,
+            user_id="user-1",
+            domain=domain,
+            operation=operation,
+            object_id=target_id,
+            payload={},
+            source="test-corrupt-stored-id",
+        )
+    store = sync_service.store
+    stored = store.get_envelope_by_client_id(captured.dataset.dataset_id, captured.envelope.client_envelope_id)
+    assert stored is not None
+    assert stored.operation == operation
+    assert stored.apply_status == "applied"
+    before_state = store.get_object_state(stored.dataset_id, domain, target_id)
+    assert before_state is not None
+    before_conversation = chacha_db.get_conversation_by_id(conversation_id, include_deleted=True)
+    assert before_conversation is not None
+    before_message = chacha_db.get_message_by_id(message_id, include_deleted=True)
+    if domain == "chat.message":
+        assert before_message is not None
+        assert before_message["content"] == "Original message"
+    assert store.list_failed_applies(stored.dataset_id) == []
+    envelope = replace(stored)
+    # Model construction rejects missing IDs; explicitly control a corrupt projection boundary.
+    object.__setattr__(envelope, "object_id", object_id)
+
+    def unexpected_access(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("Invalid chat identity reached state or product access")
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(store, "get_object_state", unexpected_access)
+        scoped.setattr(store, "upsert_object_state", unexpected_access)
+        for method in (
+            "get_conversation_by_id",
+            "get_message_by_id",
+            "get_messages_by_sync_stable_id",
+            "upsert_conversation_from_sync",
+            "tombstone_conversation_from_sync",
+            "append_message_from_sync",
+            "tombstone_unsynced_message_from_sync",
+            "tombstone_message_from_sync",
+        ):
+            scoped.setattr(chacha_db, method, unexpected_access)
+        result = materializer.apply(envelope, store=store)
+
+    assert result.status == "failed"
+    assert result.error_code == "chat_projection_failed"
+    assert result.message == f"Stored {domain} envelope requires a non-empty string object ID"
+    failed = store.list_failed_applies(stored.dataset_id)
+    assert len(failed) == 1
+    assert failed[0].server_cursor == stored.server_cursor
+    assert failed[0].client_envelope_id == stored.client_envelope_id
+    assert failed[0].object_id == target_id
+    assert failed[0].operation == operation
+    assert failed[0].payload == stored.payload
+    assert failed[0].apply_error_code == result.error_code
+    assert failed[0].apply_error_message == result.message
+    assert store.get_object_state(stored.dataset_id, domain, target_id) == before_state
+    assert chacha_db.get_conversation_by_id(conversation_id, include_deleted=True) == before_conversation
+    assert chacha_db.get_message_by_id(message_id, include_deleted=True) == before_message

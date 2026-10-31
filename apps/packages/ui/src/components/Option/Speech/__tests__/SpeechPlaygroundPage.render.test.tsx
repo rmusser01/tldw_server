@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import type { TtsPlaygroundSegment } from "@/hooks/useTtsPlayground"
 import React from "react"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -50,6 +51,11 @@ const {
   getElevenLabsModelsMock,
   addRenderMock,
   generateSegmentsMock,
+  clearSegmentsMock,
+  ttsGeneratingRef,
+  streamStartMock,
+  streamAppendMock,
+  streamFinishMock,
   setTTSSettingsMock,
   inferTldwProviderFromModelMock,
   isTimeoutLikeErrorMock,
@@ -70,7 +76,12 @@ const {
     getElevenLabsVoicesMock: vi.fn(),
     getElevenLabsModelsMock: vi.fn(),
     addRenderMock: vi.fn(),
-    generateSegmentsMock: vi.fn(async () => []),
+    generateSegmentsMock: vi.fn(async (): Promise<TtsPlaygroundSegment[]> => []),
+    clearSegmentsMock: vi.fn(),
+    ttsGeneratingRef: { current: false },
+    streamStartMock: vi.fn(),
+    streamAppendMock: vi.fn(),
+    streamFinishMock: vi.fn(),
     setTTSSettingsMock: vi.fn(async () => undefined),
     inferTldwProviderFromModelMock: vi.fn(() => null),
     isTimeoutLikeErrorMock: vi.fn(() => false),
@@ -232,6 +243,8 @@ vi.mock("@/components/Option/Speech/TtsStickyActionBar", () => ({
   TtsStickyActionBar: ({
     onAddRender,
     onPlay,
+    onStop,
+    isStopDisabled,
     isPlayDisabled,
     playDisabledReason,
     provider,
@@ -240,6 +253,8 @@ vi.mock("@/components/Option/Speech/TtsStickyActionBar", () => ({
   }: {
     onAddRender?: () => void
     onPlay?: () => void
+    onStop?: () => void
+    isStopDisabled?: boolean
     isPlayDisabled?: boolean
     playDisabledReason?: string | null
     provider?: string
@@ -262,6 +277,9 @@ vi.mock("@/components/Option/Speech/TtsStickyActionBar", () => ({
         onClick={onPlay}
       >
         Play
+      </button>
+      <button type="button" disabled={Boolean(isStopDisabled)} onClick={onStop}>
+        Stop
       </button>
       {playDisabledReason && (
         <p data-testid="tts-play-disabled-reason">{playDisabledReason}</p>
@@ -289,7 +307,12 @@ vi.mock("@/components/Option/Speech/TtsInspectorPanel", () => ({
 }))
 
 vi.mock("@/components/Option/Speech/TtsVoiceTab", () => ({
-  TtsVoiceTab: () => <div data-testid="tts-voice-tab">tts-voice-tab</div>,
+  TtsVoiceTab: ({ previewDisabledReason }: { previewDisabledReason?: string | null }) => (
+    <div data-testid="tts-voice-tab">
+      tts-voice-tab
+      <button data-testid="tts-preview-button" disabled={Boolean(previewDisabledReason)}>Preview</button>
+    </div>
+  ),
 }))
 
 vi.mock("@/components/Option/Speech/TtsOutputTab", () => ({
@@ -372,18 +395,18 @@ vi.mock("@/hooks/useTtsPlayground", () => ({
   },
   useTtsPlayground: () => ({
     segments: ttsSegmentsRef.current,
-    isGenerating: false,
+    isGenerating: ttsGeneratingRef.current,
     generateSegments: generateSegmentsMock,
-    clearSegments: vi.fn(),
+    clearSegments: clearSegmentsMock,
     setSegments: vi.fn(),
   }),
 }))
 
 vi.mock("@/hooks/useStreamingAudioPlayer", () => ({
   useStreamingAudioPlayer: () => ({
-    start: vi.fn(),
-    append: vi.fn(),
-    finish: vi.fn(),
+    start: streamStartMock,
+    append: streamAppendMock,
+    finish: streamFinishMock,
     stop: vi.fn(),
     state: "idle",
     getBufferedBlob: vi.fn(() => null),
@@ -514,6 +537,40 @@ vi.mock("@/services/tldw/tts-provider-keys", () => ({
 import SpeechPlaygroundPage from "../SpeechPlaygroundPage"
 
 describe("SpeechPlaygroundPage", () => {
+  it("retires a streaming socket and ignores its queued callbacks after navigation away", async () => {
+    const sockets: TestSocket[] = []
+    class TestSocket {
+      binaryType = "arraybuffer"
+      onopen: (() => void) | null = null
+      onmessage: ((event: { data: ArrayBuffer }) => void) | null = null
+      onclose: (() => void) | null = null
+      onerror: (() => void) | null = null
+      close = vi.fn()
+      send = vi.fn()
+      constructor() { sockets.push(this) }
+    }
+    vi.stubGlobal("WebSocket", TestSocket)
+    ttsSettingsRef.current = { ...ttsSettingsRef.current, ttsProvider: "tldw", tldwTtsStreaming: true }
+    inferTldwProviderFromModelMock.mockReturnValue("kokoro")
+    ttsProviderDataRef.current.providersInfo = { providers: { kokoro: { supports_streaming: true, formats: ["mp3"] } }, voices: { kokoro: [{ id: "Bella", name: "Bella" }] } }
+    try {
+      const view = render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+      fireEvent.change(screen.getByLabelText("Enter some text to hear it spoken."), { target: { value: "Speech that is still streaming." } })
+      await waitFor(() => expect(screen.getByTestId("tts-play-button")).toBeEnabled())
+      fireEvent.click(screen.getByTestId("tts-play-button"))
+      await waitFor(() => expect(sockets).toHaveLength(1))
+      await act(async () => { sockets[0].onopen?.(); await Promise.resolve() })
+      const lateMessage = sockets[0].onmessage
+      const lateClose = sockets[0].onclose
+      view.unmount()
+      expect(sockets[0].close).toHaveBeenCalledOnce()
+      expect(sockets[0].onmessage).toBeNull()
+      act(() => { lateMessage?.({ data: new ArrayBuffer(100) }); lateClose?.() })
+      expect(streamAppendMock).not.toHaveBeenCalled()
+      expect(streamFinishMock).not.toHaveBeenCalled()
+    } finally { vi.unstubAllGlobals() }
+  })
+
   beforeEach((): void => {
     vi.clearAllMocks()
     invalidateQueriesMock.mockReset()
@@ -522,6 +579,8 @@ describe("SpeechPlaygroundPage", () => {
     getElevenLabsVoicesMock.mockReset()
     getElevenLabsModelsMock.mockReset()
     addRenderMock.mockReset()
+    ttsGeneratingRef.current = false
+    clearSegmentsMock.mockReset()
     generateSegmentsMock.mockReset()
     generateSegmentsMock.mockResolvedValue([])
     setTTSSettingsMock.mockClear()
@@ -553,6 +612,59 @@ describe("SpeechPlaygroundPage", () => {
     setSpeechModeMock.mockReset()
     setSpeechHistoryMock.mockReset()
     tMock.mockClear()
+  })
+
+  it.each([false, true])("B04 Stop cancels pending synthesis with prior audio %s", (hasPriorAudio): void => {
+    ttsGeneratingRef.current = true
+    ttsSegmentsRef.current = hasPriorAudio
+      ? [{ id: "prior", index: 0, text: "Prior", source: "generated" }]
+      : []
+    render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+
+    const stop = screen.getByRole("button", { name: "Stop", exact: true })
+    expect(stop).toBeEnabled()
+    fireEvent.click(stop)
+    expect(clearSegmentsMock).toHaveBeenCalledOnce()
+  })
+
+  it("B04 cancelled caller cannot overwrite settings saved by a later retry", async (): Promise<void> => {
+    const cancelled = createDeferred<TtsPlaygroundSegment[]>()
+    const retried = createDeferred<TtsPlaygroundSegment[]>()
+    generateSegmentsMock.mockImplementationOnce(() => cancelled.promise)
+    generateSegmentsMock.mockImplementationOnce(() => retried.promise)
+    ttsSettingsRef.current = { ...ttsSettingsRef.current, ttsProvider: "browser", voice: "old" }
+    const view = render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+    fireEvent.change(screen.getByLabelText("Enter some text to hear it spoken."), { target: { value: "Cancelled speech" } })
+    fireEvent.click(screen.getByTestId("tts-play-button"))
+    await waitFor(() => expect(generateSegmentsMock).toHaveBeenCalledTimes(1))
+    ttsGeneratingRef.current = true
+    clearSegmentsMock.mockClear()
+    view.rerender(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+    const stop = screen.getByRole("button", { name: "Stop", exact: true })
+    expect(stop).toBeEnabled()
+    fireEvent.click(stop)
+    expect(clearSegmentsMock).toHaveBeenCalledOnce()
+
+    ttsGeneratingRef.current = false
+    ttsSettingsRef.current = { ...ttsSettingsRef.current, voice: "new" }
+    view.rerender(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+    fireEvent.click(screen.getByTestId("tts-play-button"))
+    await waitFor(() => expect(generateSegmentsMock).toHaveBeenCalledTimes(2))
+    await act(async () => { retried.resolve([{ id: "retry", index: 0, text: "Retry", source: "browser" }]) })
+    expect(setTTSSettingsMock).toHaveBeenLastCalledWith(expect.objectContaining({ voice: "new" }))
+    setTTSSettingsMock.mockClear()
+    setSpeechHistoryMock.mockClear()
+    await act(async () => { cancelled.resolve([]) })
+    expect(setTTSSettingsMock).not.toHaveBeenCalled()
+    expect(setSpeechHistoryMock).not.toHaveBeenCalled()
+  })
+
+  it("B04 Stop preserves completed audio when generation is idle", (): void => {
+    ttsSegmentsRef.current = [{ id: "completed", index: 0, text: "Completed", source: "generated" }]
+    render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop", exact: true }))
+    expect(clearSegmentsMock).not.toHaveBeenCalled()
   })
 
   it("persists only voice preference fields when a selection includes credentials", (): void => {
@@ -847,6 +959,37 @@ describe("SpeechPlaygroundPage", () => {
     expect(screen.getByTestId("tts-play-button")).toBeDisabled()
     expect(container.querySelectorAll('[data-ds-component="Alert"]')).toHaveLength(0)
   })
+
+  it.each([null, undefined])(
+    "blocks server synthesis when provider data is unavailable (%s)",
+    (providersInfo) => {
+      inferTldwProviderFromModelMock.mockReturnValue("kitten_tts")
+      ttsSettingsRef.current = {
+        ...ttsSettingsRef.current,
+        ttsProvider: "tldw",
+        tldwTtsModel: "KittenML/kitten-tts-nano-0.8",
+        tldwTtsVoice: "Bella"
+      }
+      ttsProviderDataRef.current = {
+        ...ttsProviderDataRef.current,
+        hasAudio: true,
+        providersInfo
+      }
+      render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+      fireEvent.change(
+        screen.getByLabelText("Enter some text to hear it spoken."),
+        { target: { value: "Retain this narration." } }
+      )
+      expect(screen.getByTestId("tts-play-button")).toBeDisabled()
+      expect(screen.getByTestId("tts-preview-button")).toBeDisabled()
+      expect(screen.getByTestId("tts-play-disabled-reason")).toHaveTextContent(
+        /provider/i
+      )
+      expect(
+        screen.getByDisplayValue("Retain this narration.")
+      ).toBeInTheDocument()
+    }
+  )
 
   it("disables server TTS generation when the selected provider is not reported", (): void => {
     inferTldwProviderFromModelMock.mockReturnValue("kitten_tts")
@@ -1302,3 +1445,14 @@ describe("SpeechPlaygroundPage", () => {
     expect(screen.queryByText(/Request failed/)).not.toBeInTheDocument()
   })
 })
+
+vi.mock("@/hooks/useSpeechHistory", () => ({
+  useSpeechHistory: () => {
+    const key = "speechPlaygroundHistory"
+    return [storageValues.get(key) || [], (next: unknown) => {
+      setSpeechHistoryMock(next)
+      const old = storageValues.get(key) || []
+      storageValues.set(key, typeof next === "function" ? next(old) : next)
+    }] as const
+  }
+}))

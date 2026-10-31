@@ -43,9 +43,11 @@ Implement Stage 3 of the WebUI audit remediation roadmap: new self-host users ne
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 3 task created after Stage 1 commit 636853baea and Stage 2 commit 6db1b4c4ef. Planned areas: option-setup route/tests, health-status/connection-status/health-summary helpers, milestone/onboarding overlay triggers, focused onboarding/setup tests after investigation.
-<!-- SECTION:NOTES:END -->
+
+Implemented Stage 3 setup/health UX. /setup now has a self-host connection panel with server URL, password-masked API key, key-location help, Test connection, and Skip and explore UI. Skip writes assistant_setup_dismissed before navigating to /chat so generic first-run overlay does not immediately block exploration. Health diagnostics now labels missing URL, missing API key, invalid API key, unreachable server, and degraded feature checks separately; missing API key no longer renders the generic core-health outage panel. Diagnostics copy and visible raw response details redact secret-shaped keys before display/copy. Verification: focused Vitest passed 23 tests across option-setup-readiness, tldw-connection-status, health-status.design-system, and FirstRunGate. Repo-installed ESLint on touched UI files exited 0 with warnings only in existing health-status patterns and the known Next pages-directory notice when using the app config from apps/. git diff --check passed. Bandit not applicable because this stage touched TypeScript/TSX, docs, and Backlog task files only.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
@@ -56,12 +58,6 @@ Stage 3 task created after Stage 1 commit 636853baea and Stage 2 commit 6db1b4c4
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Implemented Stage 3 setup/health UX. /setup now has a self-host connection panel with server URL, password-masked API key, key-location help, Test connection, and Skip and explore UI. Skip writes assistant_setup_dismissed before navigating to /chat so generic first-run overlay does not immediately block exploration. Health diagnostics now labels missing URL, missing API key, invalid API key, unreachable server, and degraded feature checks separately; missing API key no longer renders the generic core-health outage panel. Diagnostics copy and visible raw response details redact secret-shaped keys before display/copy. Verification: focused Vitest passed 23 tests across option-setup-readiness, tldw-connection-status, health-status.design-system, and FirstRunGate. Repo-installed ESLint on touched UI files exited 0 with warnings only in existing health-status patterns and the known Next pages-directory notice when using the app config from apps/. git diff --check passed. Bandit not applicable because this stage touched TypeScript/TSX, docs, and Backlog task files only.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -41,7 +41,7 @@ Source: synthesis F32
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Evidence:
 - c53f7c5e2b: 50 inline frames -> sse_data/sse_event/sse_done (core/Chat streaming_utils 25, chat_service 6; endpoints character_chat_sessions 15, chat.py 4, prompt_studio_websocket 4). New sse_event(name, payload). All byte-identical (default json.dumps args, stdlib json in every file); tests/LLM_Calls/test_sse_helpers.py pins helper == old f-string. Left inline (non-default bytes, baselined): chat.py 2x separators=(',',':'), anthropic_messages ensure_ascii event frame, character_chat_sessions unterminated send_raw_sse_line. Ratchet tests/lint/test_no_inline_sse_frames.py (per-file baseline, fails on growth and on stale baseline); red on base 4a84d02b55 (chat_service 6, streaming_utils 23, character_chat_sessions 16...), green now.
 - 5452c743b7: is_done_line is the single detector: case-insensitive (decided), any spacing after data:, BOM/zero-width tolerant. streaming_utils (2 sites) and chat_service (2 sites) route through it. Real bug fixed: provider 'data: [done]' was forwarded verbatim next to our DONE (double terminal frame); 'data:[DONE]' slipped past iter_sse_lines_*. tests/Chat/unit/test_done_sentinel_detection.py: 5 fail on old code, 14/14 pass now.
@@ -51,7 +51,7 @@ Evidence:
 - Not done (out of AC scope, behaviour-changing): migrating the nine provider adapters' inline SSE loops onto streaming.iter_sse_lines_requests; other DONE detectors outside core/Chat (endpoints, audio, RAG, workflows) still inline.
 
 Count correction: 54 sites total (50 f-string/DONE literals, which the c53f7c5e2b message counts, plus 4 ensure_sse_line(f"data: {json.dumps(payload)}") in character_chat_sessions that are also byte-identical to sse_data(payload)).
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

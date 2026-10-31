@@ -43,11 +43,8 @@ Saved the Stage 4B source discovery implementation plan to Docs/superpowers/plan
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

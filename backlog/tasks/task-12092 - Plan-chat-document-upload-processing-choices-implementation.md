@@ -30,15 +30,13 @@ Write a concrete implementation plan for the approved chat document upload proce
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation plan drafted at Docs/superpowers/plans/2026-07-09-chat-document-upload-processing-choices-implementation-plan.md. Plan carries forward review constraints: chat-scoped Add to chat, authoritative backend OCR preflight, explicit blocked states, and owner/expiry/retry/cleanup semantics for sidepanel heavy-mode handoff.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Revised implementation plan after review. Added explicit visible send-time processing turn, contextFiles isolation for ingest/mixed sends, idempotent retry/cancel semantics for ingest jobs and drafts, page/token limit preflight and recovery behavior, and sidepanel draft lifecycle cleanup/retry requirements. Re-review requested from plan reviewer agent.
 
 Plan reviewer returned APPROVED after the second revision. Verification before finalization: unresolved-marker check with rg found no TODO/TBD/ISSUES FOUND/stale setContextFiles(next) markers; Bandit is not applicable because this task only created documentation/backlog files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

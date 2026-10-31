@@ -40,7 +40,7 @@ Docs/superpowers/plans/2026-05-29-mcp-unified-stage3c-server-host-deps-plan.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification: RED extraction contracts failed for the expected missing seams; focused pytest passed with 71 tests; Ruff passed on touched files; Bandit scoped scan wrote /tmp/bandit_mcp_stage3c_server_host_deps.json with empty results.
 
 Test hygiene: switched touched WebSocket security tests to monkeypatch.setenv so MCP_WS_* values do not leak into later WebSocket workspace tests.
@@ -48,7 +48,7 @@ Test hygiene: switched touched WebSocket security tests to monkeypatch.setenv so
 Review fix pass after PR #2105 comments: added _handle_websocket_messages -> None annotation, restored AuthNZ-token MCP-JWT fallback gate when the adapter returns None, and added a host-neutral WebSocketStream protocol for the stream factory contract.
 
 Review verification: focused pytest passed with 74 tests; Ruff passed on touched files; Bandit scoped scan wrote /tmp/bandit_mcp_stage3c_server_host_deps_review.json with empty results.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

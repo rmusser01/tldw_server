@@ -41,7 +41,6 @@ Docs/superpowers/plans/2026-06-26-chat-workspace-live-flow-implementation-plan.m
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Wired Chat Workspace scope through persona-backed chat creation so `createChat` receives `{ scope }` when invoked from a workspace.
 - Wired workspace scope through character-backed chat creation, greeting/user/assistant persistence, streaming, and completion persistence.
@@ -53,7 +52,6 @@ Docs/superpowers/plans/2026-06-26-chat-workspace-live-flow-implementation-plan.m
 - Verification: `git diff --check` passed.
 - Verification: `NODE_OPTIONS=--max-old-space-size=8192 ./node_modules/.bin/tsc --noEmit --project tsconfig.json` failed on existing unrelated repo-wide TypeScript errors outside the changed files.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

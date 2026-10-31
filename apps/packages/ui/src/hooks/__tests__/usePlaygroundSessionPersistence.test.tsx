@@ -6,12 +6,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({
   selection: null as any,
   getSessionFiles: vi.fn(),
+  scopeSignal: new AbortController(),
+  loadSnapshot: vi.fn(),
   assistantLoading: false,
   getConfig: vi.fn(),
   getFullChatData: vi.fn(),
   getPromptById: vi.fn(),
   setSystemPrompt: vi.fn(),
-  setSelectedAssistant: vi.fn()
+  setSelectedAssistant: vi.fn(),
+  resolveOwner: vi.fn(),
+  readAssistant: vi.fn()
+}))
+vi.mock("@/services/service-prompts", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/services/service-prompts")>(),
+  resolveServicePromptScope: () => mocks.resolveOwner(),
+  loadServicePromptSnapshot: (...args: unknown[]) => mocks.loadSnapshot(...args)
 }))
 
 vi.mock("@/hooks/chat/useHistorySelection", () => ({ useHistorySelectionContext: () => mocks.selection }))
@@ -48,26 +57,39 @@ vi.mock("@/hooks/useConnectionState", () => ({
 }))
 
 vi.mock("@/hooks/useSelectedAssistant", () => ({
-  useSelectedAssistant: () => [null, mocks.setSelectedAssistant, { isLoading: mocks.assistantLoading }]
+  useSelectedAssistant: () => [null, mocks.setSelectedAssistant, { isLoading: mocks.assistantLoading, readSelection: mocks.readAssistant }]
 }))
 
 import { usePlaygroundSessionPersistence } from "../usePlaygroundSessionPersistence"
 import { useSelectServerChat } from "../chat/useSelectServerChat"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
 import type { ServerChatSummary } from "@/services/tldw/TldwApiClient"
+import { buildQueuedRequest } from "@/utils/chat-request-queue"
 
 describe("usePlaygroundSessionPersistence", () => {
   beforeEach(() => {
+    mocks.scopeSignal = new AbortController()
     mocks.assistantLoading = false
+    mocks.resolveOwner.mockReset().mockResolvedValue({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "bob", clientPrincipalVerified: true, scopeKey: "global" })
+    mocks.readAssistant.mockReset().mockResolvedValue(null)
     localStorage.clear()
     mocks.selection = null
     mocks.getSessionFiles.mockResolvedValue([])
     vi.clearAllMocks()
+    mocks.loadSnapshot.mockReset().mockImplementation(async () => ({
+      requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "bob" },
+      scopeSignal: mocks.scopeSignal.signal, scopeInvalidatedSignal: mocks.scopeSignal.signal,
+      release: vi.fn()
+    }))
     mocks.getConfig.mockResolvedValue(null)
     mocks.getFullChatData.mockResolvedValue(null)
     mocks.setSelectedAssistant.mockReset()
     useStoreMessageOption.setState({
+      chatDraftAddress: null,
+      chatDraftRevision: 0,
+      chatDraftTransition: null,
       history: [],
       messages: [],
       historyId: null,
@@ -94,12 +116,205 @@ describe("usePlaygroundSessionPersistence", () => {
     usePlaygroundSessionStore.getState().clearSession()
   })
 
+  it.each(["immediate", "debounced", "departure"])("does not repin A when its held %s save completes after a new draft", async path => {
+    const ownerHash = chatDraftOwnerKey(await mocks.resolveOwner())
+    useStoreMessageOption.setState({ serverChatId: "A", ...(path === "immediate" ? {
+      serverChatAssistantKind: "character", serverChatAssistantId: "7", serverChatCharacterId: "7"
+    } : {}) })
+    let release!: (value: unknown) => void
+    if (path === "immediate") mocks.readAssistant.mockImplementation(() => new Promise(resolve => { release = resolve }))
+    const view = renderHook(() => usePlaygroundSessionPersistence())
+    await waitFor(() => expect(view.result.current.sessionScopeReady).toBe(true))
+    if (path === "immediate") await waitFor(() => expect(mocks.readAssistant).toHaveBeenCalled())
+    else {
+      await waitFor(() => expect(usePlaygroundSessionStore.getState().serverChatId).toBe("A"))
+      mocks.getConfig.mockImplementation(() => new Promise(resolve => { release = resolve }))
+      if (path === "departure") view.unmount()
+      await waitFor(() => expect(release).toBeTypeOf("function"), { timeout: 2500 })
+    }
+    let address = useStoreMessageOption.getState().chatDraftAddress
+    act(() => {
+      const state = useStoreMessageOption.getState()
+      state.setServerChatId(null)
+      state.setHistoryId(null)
+      state.startNewChatDraft()
+      address = useStoreMessageOption.getState().chatDraftAddress
+      // A later mounted view publishes its validated locator without cancelling this old save.
+      usePlaygroundSessionStore.getState().saveSession({ historyId: null, serverChatId: null,
+        chatDraftHandle: { address: address!, ownerHash }, scopeKey: "global" })
+    })
+    await act(async () => { release(path === "immediate" ? { kind: "character", id: "7", name: "A character", metadata: { selectionMode: "tracked" } } : null); await Promise.resolve() })
+    expect(usePlaygroundSessionStore.getState().serverChatId).toBeNull()
+    expect(useStoreMessageOption.getState().chatDraftAddress).toBe(address)
+    if (path !== "departure") view.unmount()
+  })
+
+  it.each(["immediate", "debounced"])("does not resurrect consumed queued work in the same chat after held %s save", async path => {
+    useStoreMessageOption.setState({ serverChatId: "A", serverChatAssistantKind: "character", serverChatAssistantId: "7", serverChatCharacterId: "7" })
+    useStoreMessageOption.getState().setQueuedMessages([buildQueuedRequest({ id: "old-queue", clientRequestId: "old-request", message: "Already consumed" })])
+    let release!: (value: unknown) => void
+    if (path === "immediate") mocks.readAssistant.mockImplementation(() => new Promise(resolve => { release = resolve }))
+    const view = renderHook(() => usePlaygroundSessionPersistence())
+    await waitFor(() => expect(view.result.current.sessionScopeReady).toBe(true))
+    if (path === "immediate") await waitFor(() => expect(release).toBeTypeOf("function"))
+    else {
+      await waitFor(() => expect(usePlaygroundSessionStore.getState().serverChatId).toBe("A"))
+      mocks.getConfig.mockImplementation(() => new Promise(resolve => { release = resolve }))
+      await waitFor(() => expect(release).toBeTypeOf("function"), { timeout: 2500 })
+    }
+    act(() => {
+      useStoreMessageOption.getState().setQueuedMessages([])
+      useStoreMessageOption.getState().setWebSearch(true)
+      usePlaygroundSessionStore.getState().saveSession({ serverChatId: "A", queuedMessages: [], webSearch: true })
+    })
+    await act(async () => { release(null); await Promise.resolve() })
+    expect(usePlaygroundSessionStore.getState().queuedMessages).toEqual([])
+    expect(usePlaygroundSessionStore.getState().webSearch).toBe(true)
+    view.unmount()
+  })
+
+  it.each(["transcript", "New", "account"])(
+    "does not resurrect a held Temporary save after %s",
+    async (boundary) => {
+      act(() => {
+        const state = useStoreMessageOption.getState()
+        state.setTemporaryChat(true)
+        state.startNewChatDraft(true)
+        state.setHistoryId("temp")
+        state.setHistory([{ role: "assistant", content: "INITIAL TEMP" }])
+        state.setMessages([
+          { isBot: true, name: "Assistant", message: "INITIAL TEMP", sources: [] }
+        ])
+      })
+      const view = renderHook(() => usePlaygroundSessionPersistence())
+      await waitFor(() =>
+        expect(
+          usePlaygroundSessionStore.getState().temporaryTranscript?.messages[0]
+            ?.message
+        ).toBe("INITIAL TEMP")
+      )
+      let release!: (value: null) => void
+      mocks.getConfig.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve
+          })
+      )
+      act(() => {
+        useStoreMessageOption
+          .getState()
+          .setHistory([{ role: "assistant", content: "OLD HELD TEMP" }])
+        useStoreMessageOption.getState().setMessages([
+          {
+            isBot: true,
+            name: "Assistant",
+            message: "OLD HELD TEMP",
+            sources: []
+          }
+        ])
+      })
+      await waitFor(() => expect(release).toBeTypeOf("function"), {
+        timeout: 2500
+      })
+      act(() => {
+        const state = useStoreMessageOption.getState()
+        if (boundary === "transcript") {
+          state.setHistory([{ role: "assistant", content: "LATEST TEMP" }])
+          state.setMessages([
+            {
+              isBot: true,
+              name: "Assistant",
+              message: "LATEST TEMP",
+              sources: []
+            }
+          ])
+        } else if (boundary === "New") {
+          state.setTemporaryChat(false)
+          state.startNewChatDraft(false)
+          state.setHistoryId(null)
+          state.setHistory([])
+          state.setMessages([])
+          usePlaygroundSessionStore.getState().clearSession()
+        } else {
+          mocks.scopeSignal.abort()
+          window.dispatchEvent(
+            new CustomEvent("tldw:auth-principal-changed", {
+              detail: { kind: "logout" }
+            })
+          )
+        }
+      })
+      act(() => window.dispatchEvent(new Event("pagehide")))
+      await act(async () => {
+        release(null)
+        await Promise.resolve()
+      })
+      expect(
+        usePlaygroundSessionStore.getState().temporaryTranscript?.messages[0]
+          ?.message ?? null
+      ).toBe(boundary === "transcript" ? "LATEST TEMP" : null)
+      view.unmount()
+    }
+  )
+
+  it("preserves a saved selection and queue when identity verification is unavailable, then retries", async () => {
+    const saved = { historyId: "bob-history", serverChatId: "bob-chat", scopeKey: "global",
+      queuedMessages: [buildQueuedRequest({ id: "queued-bob", clientRequestId: "request-bob", message: "Private queued question" })] }
+    usePlaygroundSessionStore.getState().saveSession(saved)
+    mocks.loadSnapshot.mockRejectedValueOnce(new TypeError("Failed to fetch"))
+    mocks.getFullChatData.mockResolvedValue({ historyInfo: {
+      id: saved.historyId, server_chat_id: saved.serverChatId,
+      server_scope_key: '["http://chat.test","multi-user","manual",null,"bob",null]'
+    }, messages: [] })
+    const view = renderHook(() => usePlaygroundSessionPersistence())
+    await waitFor(() => expect(view.result.current.sessionScopeReady).toBe(true))
+    await act(async () => { expect(await view.result.current.restoreSession()).toBe("cancelled") })
+    expect(usePlaygroundSessionStore.getState()).toMatchObject(saved)
+    expect(useStoreMessageOption.getState()).toMatchObject({ historyId: null, messages: [], queuedMessages: [] })
+    await act(async () => { expect(await view.result.current.restoreSession()).toBe("restored") })
+    expect(useStoreMessageOption.getState()).toMatchObject({ historyId: saved.historyId, serverChatId: saved.serverChatId })
+    view.unmount()
+  })
+
+  it("does not clear a replacement session when an old identity lookup rejects", async () => {
+    let reject!: (error: Error) => void
+    mocks.loadSnapshot.mockImplementationOnce(() => new Promise((_, rejectPromise) => { reject = rejectPromise }))
+    usePlaygroundSessionStore.getState().saveSession({ historyId: "old-history", serverChatId: "old-chat", scopeKey: "global" })
+    const view = renderHook(() => usePlaygroundSessionPersistence())
+    await waitFor(() => expect(view.result.current.sessionScopeReady).toBe(true))
+    let pending!: ReturnType<typeof view.result.current.restoreSession>
+    act(() => { pending = view.result.current.restoreSession() })
+    await waitFor(() => expect(mocks.loadSnapshot).toHaveBeenCalled())
+    act(() => {
+      usePlaygroundSessionStore.getState().cancelPendingRestore()
+      usePlaygroundSessionStore.getState().saveSession({ historyId: "new-history", serverChatId: "new-chat", scopeKey: "global" })
+    })
+    await act(async () => { reject(new TypeError("Failed to fetch")); expect(await pending).toBe("cancelled") })
+    expect(usePlaygroundSessionStore.getState()).toMatchObject({ historyId: "new-history", serverChatId: "new-chat" })
+    view.unmount()
+  })
+
+  it.each(['["http://chat.test","multi-user","manual",null,"alice",null]', undefined])("does not trust a saved selection pointing to a foreign or unowned cache (%s)", async owner => {
+    mocks.getFullChatData.mockResolvedValue({ historyInfo: {
+      id: "alice-history", title: "ALICE PRIVATE TITLE", server_chat_id: "alice-chat",
+      server_scope_key: owner, last_used_prompt: { prompt_content: "ALICE SECRET PROMPT" }
+    }, messages: [{ role: "user", content: "ALICE PRIVATE TRANSCRIPT" }] })
+    usePlaygroundSessionStore.getState().saveSession({ historyId: "alice-history", serverChatId: "alice-chat", scopeKey: "global" })
+    const view = renderHook(() => usePlaygroundSessionPersistence())
+    await waitFor(() => expect(view.result.current.sessionScopeReady).toBe(true))
+    await act(async () => { await view.result.current.restoreSession() })
+    expect(useStoreMessageOption.getState()).toMatchObject({ historyId: null, serverChatId: null, serverChatTitle: null, messages: [], history: [] })
+    expect(mocks.setSystemPrompt).not.toHaveBeenCalled()
+    view.unmount()
+  })
+
   it("waits for the assistant account before restoring a saved conversation", async () => {
     mocks.assistantLoading = true
-    usePlaygroundSessionStore.getState().saveSession({
+    const legacySession = {
       historyId: null, serverChatId: "saved-chat", serverChatTitle: "Saved",
-      chatMode: "normal", scopeKey: "global"
-    })
+      chatMode: "normal" as const, scopeKey: "global"
+    }
+    usePlaygroundSessionStore.getState().saveSession(legacySession)
     const view = renderHook(() => usePlaygroundSessionPersistence())
     await act(async () => { await Promise.resolve() })
     expect(view.result.current.sessionScopeReady).toBe(false)
@@ -192,9 +407,7 @@ describe("usePlaygroundSessionPersistence", () => {
           kind: "character",
           id: "char-42",
           name: "Captain Redwood",
-          metadata: {
-            selectionMode: "tracked"
-          }
+          metadata: {}
         },
         expect.objectContaining({ isCurrent: expect.any(Function) })
       )
@@ -211,6 +424,7 @@ describe("usePlaygroundSessionPersistence", () => {
   ])("restores matching cached title while leaving server metadata pending ($cachedServerId)", async ({ cachedServerId, expectedTitle }) => {
     mocks.getFullChatData.mockResolvedValue({
       historyInfo: {
+        server_scope_key: '["http://chat.test","multi-user","manual",null,"bob",null]',
         title: "Tracked persona chat",
         server_chat_id: cachedServerId
       },
@@ -648,6 +862,96 @@ describe("usePlaygroundSessionPersistence", () => {
       expect(optionState.serverChatMetaLoaded).toBe(false)
     })
   })
+  it.each([
+    { kind: "character" as const, snapshot: true },
+    { kind: "character" as const, snapshot: false },
+    { kind: "persona" as const, snapshot: true },
+    { kind: "persona" as const, snapshot: false }
+  ])(
+    "restoring $kind (saved selection $snapshot) leaves another plain draft plain",
+    async ({ kind, snapshot }) => {
+      const { resolveEffectiveAssistantState } =
+        await import("@/hooks/chat/effective-assistant-state")
+      const { preserveAssistantSelectionMode } =
+        await import("@/types/assistant-selection")
+      let sharedSelection: Parameters<
+        typeof resolveEffectiveAssistantState
+      >[0]["draftSelection"] = null
+      mocks.setSelectedAssistant.mockImplementation(async (next) => {
+        sharedSelection = preserveAssistantSelectionMode(next, sharedSelection)
+      })
+      usePlaygroundSessionStore.getState().saveSession({
+        historyId: null,
+        serverChatId: "secondary-canonical-chat",
+        trackedAssistantKind: kind,
+        trackedAssistantId: "42",
+        trackedCharacterId: kind === "character" ? "42" : null,
+        trackedAssistantDisplayName: "Saved assistant",
+        trackedAssistantAvatarUrl: null,
+        trackedAssistantSelection: snapshot
+          ? {
+              kind,
+              id: "42",
+              name: "Saved assistant",
+              metadata: { selectionMode: "tracked" }
+            }
+          : null,
+        scopeKey: "global",
+        chatMode: "normal",
+        queuedMessages: []
+      })
+      const view = renderHook(() => usePlaygroundSessionPersistence())
+      try {
+        await waitFor(() =>
+          expect(view.result.current.sessionScopeReady).toBe(true)
+        )
+        await act(async () => {
+          expect(await view.result.current.restoreSession()).toBe("restored")
+        })
+        const secondary = useStoreMessageOption.getState()
+        expect(secondary.serverChatId).toBe("secondary-canonical-chat")
+        expect(
+          resolveEffectiveAssistantState({
+            tracked: {
+              assistantKind: secondary.serverChatAssistantKind,
+              assistantId: secondary.serverChatAssistantId,
+              characterId: secondary.serverChatCharacterId
+            },
+            draftSelection: sharedSelection
+          }).mode
+        ).toBe(kind === "character" ? "tracked_character" : "tracked_persona")
+        // The other tab owns an empty new chat; only the shared preference travels there.
+        expect(
+          resolveEffectiveAssistantState({
+            tracked: {
+              assistantKind: null,
+              assistantId: null,
+              characterId: null
+            },
+            draftSelection: sharedSelection
+          }).mode
+        ).toBe("plain")
+      } finally {
+        view.unmount()
+      }
+    }
+  )
+  it("an explicit tracked draft picker still selects Character mode", async () => {
+    const { resolveEffectiveAssistantState } =
+      await import("@/hooks/chat/effective-assistant-state")
+    expect(
+      resolveEffectiveAssistantState({
+        tracked: { assistantKind: null, assistantId: null, characterId: null },
+        draftSelection: {
+          kind: "character",
+          id: "42",
+          name: "Picked card",
+          metadata: { selectionMode: "tracked" }
+        }
+      }).mode
+    ).toBe("tracked_character")
+  })
+
 })
 
 it("restores tab A's selected conversation even after the shared record was replaced by B", async () => {

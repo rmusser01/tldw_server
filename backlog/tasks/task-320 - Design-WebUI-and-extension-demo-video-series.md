@@ -44,7 +44,7 @@ Revision pass: patch the design spec with the critique findings above, verify ma
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created the strategic design spec at `Docs/superpowers/specs/2026-05-13-webui-extension-demo-video-series-design.md`. The spec is intentionally scoped to campaign architecture, walkthrough chapter structure, persona cuts, production workflow, risks, and follow-up artifacts. Detailed feature inventory and scripts remain deferred to the next planning phase.
 
 Verification: `git diff --check -- Docs/superpowers/specs/2026-05-13-webui-extension-demo-video-series-design.md backlog/tasks/task-320\ -\ Design-WebUI-and-extension-demo-video-series.md` passed with no whitespace errors. Independent bounded spec review returned APPROVED. Bandit is not applicable because this task changes only markdown documentation/backlog records.
@@ -52,7 +52,7 @@ Verification: `git diff --check -- Docs/superpowers/specs/2026-05-13-webui-exten
 User reviewed the committed design and asked for a critique pass before continuing. Review found concrete improvement areas to patch into the spec: add claim/evidence guardrails, WebUI-vs-extension surface mapping, recording readiness gates, stale-asset/version metadata, and clearer script-planning inputs before moving into implementation/script planning.
 
 Design critique patch added guardrails that were missing from the first spec revision: claim/evidence ledger, WebUI-vs-extension surface map, script-planning feature matrix, recording readiness gate, asset versioning/staleness control, and additional follow-up artifacts under `Docs/Product/DemoVideos/`. Verification: `git diff --check -- Docs/superpowers/specs/2026-05-13-webui-extension-demo-video-series-design.md backlog/tasks/task-320\ -\ Design-WebUI-and-extension-demo-video-series.md` passed. Bandit remains not applicable because this revision only changes markdown documentation/backlog records.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

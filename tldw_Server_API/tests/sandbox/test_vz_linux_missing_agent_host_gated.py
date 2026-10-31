@@ -123,6 +123,7 @@ def test_startup_proof_rejects_symlink(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(os.name != "posix", reason="POSIX shell launcher fixture")
 def test_startup_launcher_proves_service_reached_guest_workspace(tmp_path: Path) -> None:
     """The real test fixture writes a fresh proof before refusing to start VSock."""
     import subprocess  # nosec B404 - launch only this checked-in test fixture

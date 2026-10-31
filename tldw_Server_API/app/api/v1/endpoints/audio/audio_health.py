@@ -970,7 +970,7 @@ def get_stt_capabilities(
 
 
 async def _authorize_stt_health_warm(request: Request, warm: bool = Query(default=False)) -> None:
-    """Keep passive status public while reserving model warm-up for admins."""
+    """Reserve model warm-up for admins; plain status needs any authenticated caller."""
     if warm:
         principal = await get_auth_principal(request)
         await RequireRole("admin")(principal)
@@ -979,7 +979,7 @@ async def _authorize_stt_health_warm(request: Request, warm: bool = Query(defaul
 @router.get(
     "/transcriptions/health",
     summary="Check STT transcription model health",
-    dependencies=[Depends(_authorize_stt_health_warm)],
+    dependencies=[Depends(get_request_user), Depends(_authorize_stt_health_warm)],
 )
 async def get_stt_health(
     request: Request,

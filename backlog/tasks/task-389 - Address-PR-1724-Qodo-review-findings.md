@@ -34,9 +34,9 @@ Handle the active PR #1724 review threads after the cache review-fix push. Imple
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Expanded from Qodo-only follow-up to all unresolved PR #1724 review threads after live review refresh. Implemented valid CodeRabbit findings for character-chat guardrails/schema forwarding, migration 088 fail-fast behavior, world-book missing dependency handling, prompt envelope system-message accounting, data URI sanitization, local llama.cpp cache mode detection, cache-cost clamping, legacy estimated flag propagation, PostgreSQL summary fallback response shape, README guardrail docs, and Backlog task metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -796,7 +796,7 @@ async def test_filesystem_read_returns_content_hash_and_receipt(tmp_path: Path) 
     docs_dir = workspace_root / "docs"
     docs_dir.mkdir(parents=True, exist_ok=True)
     content = "alpha\nbeta\ngamma\n"
-    (docs_dir / "story.txt").write_text(content, encoding="utf-8")
+    (docs_dir / "story.txt").write_text(content, encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver(
         {
             "workspace_root": str(workspace_root),
@@ -848,7 +848,7 @@ def test_read_receipts_require_configured_stable_secret() -> None:
 async def test_filesystem_read_omits_receipt_without_configured_secret(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
-    (workspace_root / "story.txt").write_text("alpha\n", encoding="utf-8")
+    (workspace_root / "story.txt").write_text("alpha\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver(
         {
             "workspace_root": str(workspace_root),
@@ -870,7 +870,7 @@ async def test_filesystem_read_omits_receipt_without_configured_secret(tmp_path:
 async def test_filesystem_read_truncates_and_omits_receipt(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
-    (workspace_root / "long.txt").write_text("abcdef\n", encoding="utf-8")
+    (workspace_root / "long.txt").write_text("abcdef\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver(
         {
             "workspace_root": str(workspace_root),
@@ -900,7 +900,7 @@ async def test_filesystem_read_truncates_and_omits_receipt(tmp_path: Path) -> No
 async def test_filesystem_read_truncated_first_utf8_codepoint_returns_prefix(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
-    (workspace_root / "accent.txt").write_text("éclair\n", encoding="utf-8")
+    (workspace_root / "accent.txt").write_text("éclair\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-read-utf8-prefix", user_id="1", metadata={})
@@ -916,7 +916,7 @@ async def test_filesystem_read_truncated_first_utf8_codepoint_returns_prefix(tmp
 async def test_filesystem_read_omits_total_line_count_when_large_file_is_byte_truncated(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
-    (workspace_root / "long.txt").write_text("one\ntwo\nthree\n", encoding="utf-8")
+    (workspace_root / "long.txt").write_text("one\ntwo\nthree\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "workspace-1"})
     mod = FilesystemModule(
         ModuleConfig(
@@ -943,7 +943,7 @@ async def test_filesystem_read_can_include_line_numbers(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
     content = "alpha\nbeta\ngamma\n"
-    (workspace_root / "story.txt").write_text(content, encoding="utf-8")
+    (workspace_root / "story.txt").write_text(content, encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver(
         {
             "workspace_root": str(workspace_root),
@@ -976,7 +976,7 @@ async def test_filesystem_read_can_include_line_numbers(tmp_path: Path) -> None:
 async def test_filesystem_read_applies_configured_caps(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
-    (workspace_root / "story.txt").write_text("one\ntwo\nthree\n", encoding="utf-8")
+    (workspace_root / "story.txt").write_text("one\ntwo\nthree\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver(
         {
             "workspace_root": str(workspace_root),
@@ -1050,7 +1050,7 @@ async def test_filesystem_edit_applies_exact_single_replacement_with_expected_ha
     docs_dir.mkdir(parents=True, exist_ok=True)
     target = docs_dir / "story.txt"
     original = "alpha\nbeta\ngamma\n"
-    target.write_text(original, encoding="utf-8")
+    target.write_text(original, encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-edit-expected", user_id="1", metadata={"workspace_id": "ws-1"})
@@ -1084,7 +1084,7 @@ async def test_filesystem_edit_applies_exact_single_replacement_with_expected_ha
 async def test_filesystem_edit_requires_preimage_for_existing_file(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
-    (workspace_root / "story.txt").write_text("old\n", encoding="utf-8")
+    (workspace_root / "story.txt").write_text("old\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-edit-preimage", user_id="1", metadata={})
@@ -1103,7 +1103,7 @@ async def test_filesystem_edit_rejects_missing_and_non_unique_old_string(tmp_pat
     workspace_root.mkdir(parents=True, exist_ok=True)
     target = workspace_root / "story.txt"
     original = "one\ntwo\ntwo\n"
-    target.write_text(original, encoding="utf-8")
+    target.write_text(original, encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-edit-exact", user_id="1", metadata={})
@@ -1141,7 +1141,7 @@ async def test_filesystem_edit_preserves_raw_tab_literals(tmp_path: Path) -> Non
     workspace_root.mkdir(parents=True, exist_ok=True)
     target = workspace_root / "story.txt"
     original = "plain old\nprefixed\told\n"
-    target.write_text(original, encoding="utf-8")
+    target.write_text(original, encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-edit-raw-tab", user_id="1", metadata={})
@@ -1167,7 +1167,7 @@ async def test_filesystem_edit_rejects_overlapping_old_string_matches(tmp_path: 
     workspace_root.mkdir(parents=True, exist_ok=True)
     target = workspace_root / "story.txt"
     original = "ababa\n"
-    target.write_text(original, encoding="utf-8")
+    target.write_text(original, encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-edit-overlap", user_id="1", metadata={})
@@ -1206,7 +1206,7 @@ async def test_filesystem_edit_replace_all_replaces_every_exact_occurrence(tmp_p
     workspace_root.mkdir(parents=True, exist_ok=True)
     target = workspace_root / "story.txt"
     original = "two\ntwo\n"
-    target.write_text(original, encoding="utf-8")
+    target.write_text(original, encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-edit-replace-all", user_id="1", metadata={})
@@ -1234,7 +1234,7 @@ async def test_filesystem_edit_dry_run_reports_without_writing(tmp_path: Path) -
     workspace_root.mkdir(parents=True, exist_ok=True)
     target = workspace_root / "story.txt"
     original = "alpha\nbeta\n"
-    target.write_text(original, encoding="utf-8")
+    target.write_text(original, encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-edit-dry-run", user_id="1", metadata={})
@@ -1264,7 +1264,7 @@ async def test_filesystem_edit_applies_with_read_receipt(tmp_path: Path) -> None
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
     target = workspace_root / "story.txt"
-    target.write_text("old\n", encoding="utf-8")
+    target.write_text("old\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
     mod = FilesystemModule(
         ModuleConfig(name="filesystem", settings={"read_receipt_secret": "unit-test-secret"}),  # nosec B105
@@ -1294,7 +1294,7 @@ async def test_filesystem_edit_rejects_expected_sha_mismatch_even_with_read_rece
     workspace_root.mkdir(parents=True, exist_ok=True)
     target = workspace_root / "story.txt"
     original = "old\n"
-    target.write_text(original, encoding="utf-8")
+    target.write_text(original, encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
     mod = FilesystemModule(
         ModuleConfig(name="filesystem", settings={"read_receipt_secret": "unit-test-secret"}),  # nosec B105
@@ -1324,7 +1324,7 @@ async def test_filesystem_edit_rejects_bound_read_receipt_without_matching_conte
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
     target = workspace_root / "story.txt"
-    target.write_text("old\n", encoding="utf-8")
+    target.write_text("old\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
     mod = FilesystemModule(
         ModuleConfig(name="filesystem", settings={"read_receipt_secret": "unit-test-secret"}),  # nosec B105
@@ -1379,7 +1379,7 @@ async def test_filesystem_edit_rejects_binary_payload(tmp_path: Path) -> None:
 
 def test_filesystem_edit_no_follow_reader_rejects_oversized_payload(tmp_path: Path) -> None:
     target = tmp_path / "story.txt"
-    target.write_text("abc", encoding="utf-8")
+    target.write_text("abc", encoding="utf-8", newline="")
 
     with pytest.raises(ValueError, match="edit_preimage_too_large"):
         FilesystemModule._read_existing_regular_file_no_follow(target, max_bytes=2)
@@ -1387,7 +1387,7 @@ def test_filesystem_edit_no_follow_reader_rejects_oversized_payload(tmp_path: Pa
 
 def test_filesystem_edit_no_follow_reader_rejects_symlink(tmp_path: Path) -> None:
     target = tmp_path / "story.txt"
-    target.write_text("abc", encoding="utf-8")
+    target.write_text("abc", encoding="utf-8", newline="")
     link_path = tmp_path / "story-link.txt"
     try:
         link_path.symlink_to(target)
@@ -1435,7 +1435,7 @@ async def test_filesystem_patch_requires_preimage_for_existing_file(tmp_path: Pa
     workspace_root = tmp_path / "workspace"
     docs_dir = workspace_root / "docs"
     docs_dir.mkdir(parents=True, exist_ok=True)
-    (docs_dir / "story.txt").write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
+    (docs_dir / "story.txt").write_text("alpha\nbeta\ngamma\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-patch-preimage", user_id="1", metadata={})
@@ -1451,7 +1451,7 @@ async def test_filesystem_patch_applies_existing_file_with_expected_hash(tmp_pat
     docs_dir.mkdir(parents=True, exist_ok=True)
     original = "alpha\nbeta\ngamma\n"
     target = docs_dir / "story.txt"
-    target.write_text(original, encoding="utf-8")
+    target.write_text(original, encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-patch-expected", user_id="1", metadata={"workspace_id": "ws-1"})
@@ -1483,7 +1483,7 @@ async def test_filesystem_patch_preserves_tab_header_metadata_during_sanitizatio
     docs_dir.mkdir(parents=True, exist_ok=True)
     original = "alpha\nbeta\ngamma\n"
     target = docs_dir / "story.txt"
-    target.write_text(original, encoding="utf-8")
+    target.write_text(original, encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-patch-tab-header", user_id="1", metadata={})
@@ -1520,8 +1520,8 @@ async def test_filesystem_patch_rolls_back_previous_writes_on_partial_failure(
     second = docs_dir / "two.txt"
     first_original = "alpha\n"
     second_original = "beta\n"
-    first.write_text(first_original, encoding="utf-8")
-    second.write_text(second_original, encoding="utf-8")
+    first.write_text(first_original, encoding="utf-8", newline="")
+    second.write_text(second_original, encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-patch-rollback", user_id="1", metadata={})
@@ -1577,8 +1577,8 @@ async def test_filesystem_patch_preserves_original_error_when_rollback_raises_un
     second = docs_dir / "two.txt"
     first_original = "alpha\n"
     second_original = "beta\n"
-    first.write_text(first_original, encoding="utf-8")
-    second.write_text(second_original, encoding="utf-8")
+    first.write_text(first_original, encoding="utf-8", newline="")
+    second.write_text(second_original, encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-patch-rollback-unexpected", user_id="1", metadata={})
@@ -1631,7 +1631,7 @@ async def test_filesystem_patch_dry_run_does_not_write(tmp_path: Path) -> None:
     docs_dir.mkdir(parents=True, exist_ok=True)
     original = "alpha\nbeta\ngamma\n"
     target = docs_dir / "story.txt"
-    target.write_text(original, encoding="utf-8")
+    target.write_text(original, encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-patch-dry-run", user_id="1", metadata={})
@@ -1661,7 +1661,7 @@ async def test_filesystem_patch_preserves_no_final_newline(tmp_path: Path) -> No
     docs_dir.mkdir(parents=True, exist_ok=True)
     original = "alpha\nbeta\n"
     target = docs_dir / "story.txt"
-    target.write_text(original, encoding="utf-8")
+    target.write_text(original, encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-patch-no-final-newline", user_id="1", metadata={})
@@ -1697,7 +1697,7 @@ async def test_filesystem_patch_rechecks_preimage_immediately_before_write(
     docs_dir.mkdir(parents=True, exist_ok=True)
     original = "alpha\nbeta\ngamma\n"
     target = docs_dir / "story.txt"
-    target.write_text(original, encoding="utf-8")
+    target.write_text(original, encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-patch-race", user_id="1", metadata={})
@@ -1709,7 +1709,7 @@ async def test_filesystem_patch_rechecks_preimage_immediately_before_write(
         expected_size: int,
     ) -> None:
         if check_target == target:
-            target.write_text("concurrent\n", encoding="utf-8")
+            target.write_text("concurrent\n", encoding="utf-8", newline="")
         original_assert(check_target, expected_sha256, expected_size)
 
     monkeypatch.setattr(
@@ -1737,7 +1737,7 @@ async def test_filesystem_patch_applies_existing_file_with_read_receipt(tmp_path
     docs_dir = workspace_root / "docs"
     docs_dir.mkdir(parents=True, exist_ok=True)
     target = docs_dir / "story.txt"
-    target.write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
+    target.write_text("alpha\nbeta\ngamma\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
     mod = FilesystemModule(
         ModuleConfig(name="filesystem", settings={"read_receipt_secret": "unit-test-secret"}),
@@ -1762,7 +1762,7 @@ async def test_filesystem_patch_requires_lock_by_path_when_configured(tmp_path: 
     docs_dir = workspace_root / "docs"
     docs_dir.mkdir(parents=True, exist_ok=True)
     target = docs_dir / "story.txt"
-    target.write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
+    target.write_text("alpha\nbeta\ngamma\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
     mod = FilesystemModule(
         ModuleConfig(name="filesystem", settings={"require_lock_for_mutation": True}),
@@ -1857,7 +1857,7 @@ async def test_filesystem_patch_rejects_bound_read_receipt_without_matching_cont
     docs_dir = workspace_root / "docs"
     docs_dir.mkdir(parents=True, exist_ok=True)
     target = docs_dir / "story.txt"
-    target.write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
+    target.write_text("alpha\nbeta\ngamma\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
     mod = FilesystemModule(
         ModuleConfig(name="filesystem", settings={"read_receipt_secret": "unit-test-secret"}),
@@ -1888,7 +1888,7 @@ async def test_filesystem_patch_rejects_stale_hash_and_context_mismatch(tmp_path
     docs_dir = workspace_root / "docs"
     docs_dir.mkdir(parents=True, exist_ok=True)
     target = docs_dir / "story.txt"
-    target.write_text("alpha\nchanged\ngamma\n", encoding="utf-8")
+    target.write_text("alpha\nchanged\ngamma\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-patch-stale", user_id="1", metadata={})
@@ -1968,7 +1968,7 @@ async def test_filesystem_write_create_creates_new_text_file(tmp_path: Path) -> 
 async def test_filesystem_write_replace_requires_preimage(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
-    (workspace_root / "story.txt").write_text("old\n", encoding="utf-8")
+    (workspace_root / "story.txt").write_text("old\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-write-preimage", user_id="1", metadata={})
@@ -1986,7 +1986,7 @@ async def test_filesystem_write_text_replace_requires_preimage(tmp_path: Path) -
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
     target = workspace_root / "story.txt"
-    target.write_text("old\n", encoding="utf-8")
+    target.write_text("old\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-write-text-preimage", user_id="1", metadata={})
@@ -2006,7 +2006,7 @@ async def test_filesystem_write_replace_rejects_large_preimage_before_reading(tm
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
     target = workspace_root / "story.txt"
-    target.write_text("large\n", encoding="utf-8")
+    target.write_text("large\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(
         ModuleConfig(
@@ -2033,7 +2033,7 @@ async def test_filesystem_write_replace_with_expected_hash(tmp_path: Path) -> No
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
     target = workspace_root / "story.txt"
-    target.write_text("old\n", encoding="utf-8")
+    target.write_text("old\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-write-expected", user_id="1", metadata={})
@@ -2057,7 +2057,7 @@ async def test_filesystem_write_requires_lock_when_configured(tmp_path: Path) ->
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
     target = workspace_root / "story.txt"
-    target.write_text("old\n", encoding="utf-8")
+    target.write_text("old\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
     mod = FilesystemModule(
         ModuleConfig(name="filesystem", settings={"require_lock_for_mutation": True}),
@@ -2108,7 +2108,7 @@ async def test_filesystem_write_rejects_lock_that_expires_before_commit(
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
     target = workspace_root / "story.txt"
-    target.write_text("old\n", encoding="utf-8")
+    target.write_text("old\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
     mod = FilesystemModule(
         ModuleConfig(name="filesystem", settings={"require_lock_for_mutation": True}),
@@ -2224,7 +2224,7 @@ async def test_filesystem_write_rechecks_preimage_immediately_before_replace(
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
     target = workspace_root / "story.txt"
-    target.write_text("old\n", encoding="utf-8")
+    target.write_text("old\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-write-race", user_id="1", metadata={})
@@ -2237,7 +2237,7 @@ async def test_filesystem_write_rechecks_preimage_immediately_before_replace(
         expected_size: int,
     ) -> None:
         if check_target == target:
-            target.write_text("concurrent\n", encoding="utf-8")
+            target.write_text("concurrent\n", encoding="utf-8", newline="")
         original_assert(check_target, expected_sha256, expected_size)
 
     monkeypatch.setattr(
@@ -2261,8 +2261,9 @@ async def test_filesystem_write_replace_preserves_existing_file_mode(tmp_path: P
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
     target = workspace_root / "script.sh"
-    target.write_text("#!/bin/sh\necho old\n", encoding="utf-8")
+    target.write_text("#!/bin/sh\necho old\n", encoding="utf-8", newline="")
     os.chmod(target, 0o755)
+    original_mode = stat.S_IMODE(target.stat(follow_symlinks=False).st_mode)
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-write-mode", user_id="1", metadata={})
@@ -2279,7 +2280,20 @@ async def test_filesystem_write_replace_preserves_existing_file_mode(tmp_path: P
         context=context,
     )
 
-    assert stat.S_IMODE(target.stat(follow_symlinks=False).st_mode) == 0o755  # nosec B101
+    assert stat.S_IMODE(target.stat(follow_symlinks=False).st_mode) == original_mode  # nosec B101
+
+
+def test_atomic_write_preserves_mode_without_fchmod(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    target = tmp_path / "story.txt"
+    target.write_bytes(b"old\n")
+    target.chmod(0o600)
+    original_mode = stat.S_IMODE(target.stat(follow_symlinks=False).st_mode)
+    monkeypatch.delattr(os, "fchmod", raising=False)
+
+    FilesystemModule._atomic_write_text_file(target, "new\n")
+
+    assert target.read_bytes() == b"new\n"  # nosec B101
+    assert stat.S_IMODE(target.stat(follow_symlinks=False).st_mode) == original_mode  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -2287,7 +2301,7 @@ async def test_filesystem_write_replace_with_read_receipt(tmp_path: Path) -> Non
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
     target = workspace_root / "story.txt"
-    target.write_text("old\n", encoding="utf-8")
+    target.write_text("old\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
     mod = FilesystemModule(
         ModuleConfig(name="filesystem", settings={"read_receipt_secret": "unit-test-secret"}),
@@ -2316,7 +2330,7 @@ async def test_filesystem_write_rejects_bound_read_receipt_without_matching_cont
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
     target = workspace_root / "story.txt"
-    target.write_text("old\n", encoding="utf-8")
+    target.write_text("old\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root), "workspace_id": "ws-1"})
     mod = FilesystemModule(
         ModuleConfig(name="filesystem", settings={"read_receipt_secret": "unit-test-secret"}),
@@ -2351,7 +2365,7 @@ async def test_filesystem_write_rejects_stale_hash_and_dry_run_does_not_write(tm
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
     target = workspace_root / "story.txt"
-    target.write_text("old\n", encoding="utf-8")
+    target.write_text("old\n", encoding="utf-8", newline="")
     resolver = _FakeWorkspaceRootResolver({"workspace_root": str(workspace_root)})
     mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
     context = RequestContext(request_id="req-fs-write-stale", user_id="1", metadata={})
@@ -3729,7 +3743,7 @@ async def test_fs_edit_matches_a_tab_indented_old_string(tmp_path: Path) -> None
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
     target = workspace_root / "Makefile"
-    target.write_text("all:\n\tgcc -o x x.c\n", encoding="utf-8")
+    target.write_text("all:\n\tgcc -o x x.c\n", encoding="utf-8", newline="")
 
     resolver = _FakeWorkspaceRootResolver(
         {

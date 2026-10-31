@@ -43,7 +43,7 @@ Approved design-doc plan:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created after user approved the product flow, architecture, UX, and execution/safety/testing sections during brainstorming. This task is for the design artifact only; implementation planning follows after user review.
 
 Wrote `Docs/superpowers/specs/2026-05-08-embeddings-rag-recipe-webui-design.md`. Verification: `git diff --check -- Docs/superpowers/specs/2026-05-08-embeddings-rag-recipe-webui-design.md backlog/tasks/task-145 - Design-productized-embeddings-model-selection-recipe-flow.md` passed with no output. Spec review subagent returned APPROVED with no blocking issues. Bandit is not applicable because this task changed only markdown/design tracking files.
@@ -53,7 +53,7 @@ Commit attempt: `git commit --only -m "docs: design embeddings rag recipe flow" 
 Reopened for user-requested design hardening pass before implementation planning. Scope: patch the spec to clarify media-scoped V1 execution, expected source ID contracts, candidate readiness statuses, and staged apply-preview/apply boundaries.
 
 Design hardening pass completed. Updated the spec to narrow V1 to media-backed RAG corpus execution where resolvable, make media IDs the V1 expected-source contract, require server-provided candidate runnable statuses and apply eligibility, document preview/copy-config fallback when config mutation is not yet safe, and split follow-up implementation into staged reviewable slices. Spec review subagent returned APPROVED. Verification: `git diff --check -- Docs/superpowers/specs/2026-05-08-embeddings-rag-recipe-webui-design.md "backlog/tasks/task-145 - Design-productized-embeddings-model-selection-recipe-flow.md"` passed with no output. Bandit remains not applicable because only markdown/task tracking changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

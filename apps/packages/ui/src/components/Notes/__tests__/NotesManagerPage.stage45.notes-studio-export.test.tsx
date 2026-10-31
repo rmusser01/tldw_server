@@ -4,6 +4,35 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
+const notesConnectionConfig = {
+  serverUrl: "https://notes.example.test",
+  authMode: "multi-user" as const,
+  accessToken: "test-access-token"
+}
+
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: notesConnectionConfig,
+    loading: false,
+    authorityLoading: false
+  })
+}))
+
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: {
+    getCurrentUser: vi.fn(async () => ({ id: 1, is_active: true }))
+  }
+}))
+
+vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/Notes/hooks/useNotesGraphAuthorityScope")>()
+  return {
+    ...actual,
+    useNotesGraphAuthorityScope: () =>
+      actual.createNotesGraphAuthorityScope(notesConnectionConfig.serverUrl, 1)
+  }
+})
+
 const {
   mockBgRequest,
   mockMessageSuccess,
@@ -122,9 +151,9 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 
 vi.mock("@/components/Notes/NotesListPanel", () => ({
-  default: ({ notes = [], onSelectNote }: any) => (
+  default: ({ notes = [], onSelectNote }: Pick<React.ComponentProps<typeof import("../NotesListPanel").default>, "notes" | "onSelectNote">) => (
     <div data-testid="notes-list-panel">
-      {notes.map((note: { id: string; title: string }) => (
+      {notes.map((note) => (
         <button
           key={note.id}
           data-testid={`notes-list-item-${note.id}`}
@@ -138,7 +167,7 @@ vi.mock("@/components/Notes/NotesListPanel", () => ({
 }))
 
 vi.mock("@/components/Notes/NotesEditorHeader", () => ({
-  default: ({ onExport }: any) => (
+  default: ({ onExport }: Pick<React.ComponentProps<typeof import("../NotesEditorHeader").default>, "onExport">) => (
     <div>
       <button data-testid="print-note-action" onClick={() => onExport("print")}>
         Print note
@@ -225,6 +254,29 @@ const makeStudioState = (options: {
   is_stale: options.isStale,
   stale_reason: options.isStale ? "companion_content_hash_mismatch" : null
 })
+
+const createPrintWindow = () => {
+  const printWindow = {
+    opener: {} as unknown,
+    document: {
+      open: vi.fn(),
+      write: vi.fn((_html: string) => expect(printWindow.opener).toBeNull()),
+      close: vi.fn()
+    },
+    focus: vi.fn(),
+    print: vi.fn()
+  }
+  return printWindow
+}
+
+const openPrintWindow = (printWindow: ReturnType<typeof createPrintWindow>, features = "") => {
+  const options = new Map(features.split(",").map((feature) => {
+    const [name, value] = feature.trim().toLowerCase().split("=")
+    return [name, value] as const
+  }))
+  if (["noopener", "noreferrer"].some((name) => options.has(name) && !["0", "no", "false"].includes(options.get(name) ?? ""))) return null
+  return printWindow as unknown as Window
+}
 
 const renderPage = () => {
   const queryClient = new QueryClient({
@@ -360,16 +412,9 @@ describe("NotesManagerPage stage 45 notes studio export", () => {
   })
 
   it("prints selected Studio note with notebook HTML, selected paper size, Cornell layout, and SVG diagram", async () => {
-    const mockPrintWindow = {
-      document: {
-        open: vi.fn(),
-        write: vi.fn(),
-        close: vi.fn()
-      },
-      focus: vi.fn(),
-      print: vi.fn()
-    }
-    const openSpy = vi.spyOn(window, "open").mockReturnValue(mockPrintWindow as any)
+    currentCachedSvg = '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><script>alert(1)</script><text>Safe diagram</text></svg>'
+    const mockPrintWindow = createPrintWindow()
+    const openSpy = vi.spyOn(window, "open").mockImplementation((_url, _target, features) => openPrintWindow(mockPrintWindow, features))
 
     renderPage()
 
@@ -384,26 +429,26 @@ describe("NotesManagerPage stage 45 notes studio export", () => {
       expect(mockPrintWindow.document.write).toHaveBeenCalledTimes(1)
     })
 
+    const features = String(openSpy.mock.calls[0]?.[2]).split(",")
+    expect(features).toEqual(expect.arrayContaining(["width=1024", "height=768"]))
+    expect(features.some((feature) => /^(noopener|noreferrer)(=|$)/i.test(feature))).toBe(false)
+
     const html = String(mockPrintWindow.document.write.mock.calls[0]?.[0] || "")
+    expect(html).toContain("<title>Studio note - Notes Studio Print</title>")
     expect(html).toContain('data-paper-size="A5"')
     expect(html).toContain("studio-template-cornell")
     expect(html).toContain("studio-cornell-layout")
     expect(html).toContain("<svg")
+    expect(html).toContain("Safe diagram")
+    expect(html).not.toContain("<script")
+    expect(html).not.toContain("onload=")
     expect(mockPrintWindow.focus).toHaveBeenCalled()
     expect(mockPrintWindow.print).toHaveBeenCalled()
   })
 
   it("uses locale-driven default paper size: US locale -> US Letter, non-US -> A4", async () => {
-    const usPrintWindow = {
-      document: {
-        open: vi.fn(),
-        write: vi.fn(),
-        close: vi.fn()
-      },
-      focus: vi.fn(),
-      print: vi.fn()
-    }
-    const openSpy = vi.spyOn(window, "open").mockReturnValue(usPrintWindow as any)
+    const usPrintWindow = createPrintWindow()
+    const openSpy = vi.spyOn(window, "open").mockImplementation((_url, _target, features) => openPrintWindow(usPrintWindow, features))
 
     setNavigatorLanguage("en-US")
     renderPage()
@@ -418,16 +463,8 @@ describe("NotesManagerPage stage 45 notes studio export", () => {
 
     cleanup()
     vi.clearAllMocks()
-    const intlPrintWindow = {
-      document: {
-        open: vi.fn(),
-        write: vi.fn(),
-        close: vi.fn()
-      },
-      focus: vi.fn(),
-      print: vi.fn()
-    }
-    openSpy.mockReturnValue(intlPrintWindow as any)
+    const intlPrintWindow = createPrintWindow()
+    openSpy.mockImplementation((_url, _target, features) => openPrintWindow(intlPrintWindow, features))
     setNavigatorLanguage("de-DE")
     renderPage()
     await screen.findByTestId("notes-studio-view")
@@ -458,6 +495,7 @@ describe("NotesManagerPage stage 45 notes studio export", () => {
 
   it("shows an actionable error when the print pop-up cannot be opened", async () => {
     vi.spyOn(window, "open").mockReturnValue(null)
+    const printSpy = vi.spyOn(window, "print")
 
     renderPage()
     await screen.findByTestId("notes-studio-view")
@@ -468,20 +506,14 @@ describe("NotesManagerPage stage 45 notes studio export", () => {
         "Unable to open print view. Please allow pop-ups and try again."
       )
     })
+    expect(mockMessageSuccess).not.toHaveBeenCalled()
+    expect(printSpy).not.toHaveBeenCalled()
   })
 
   it("falls back to plain single-note print path for non-Studio notes", async () => {
     useStudioNote = false
-    const mockPrintWindow = {
-      document: {
-        open: vi.fn(),
-        write: vi.fn(),
-        close: vi.fn()
-      },
-      focus: vi.fn(),
-      print: vi.fn()
-    }
-    vi.spyOn(window, "open").mockReturnValue(mockPrintWindow as any)
+    const mockPrintWindow = createPrintWindow()
+    vi.spyOn(window, "open").mockImplementation((_url, _target, features) => openPrintWindow(mockPrintWindow, features))
 
     renderPage()
 
@@ -500,16 +532,8 @@ describe("NotesManagerPage stage 45 notes studio export", () => {
 
   it("falls back to plain single-note print when the Studio view is stale", async () => {
     currentStale = true
-    const mockPrintWindow = {
-      document: {
-        open: vi.fn(),
-        write: vi.fn(),
-        close: vi.fn()
-      },
-      focus: vi.fn(),
-      print: vi.fn()
-    }
-    vi.spyOn(window, "open").mockReturnValue(mockPrintWindow as any)
+    const mockPrintWindow = createPrintWindow()
+    vi.spyOn(window, "open").mockImplementation((_url, _target, features) => openPrintWindow(mockPrintWindow, features))
 
     renderPage()
 

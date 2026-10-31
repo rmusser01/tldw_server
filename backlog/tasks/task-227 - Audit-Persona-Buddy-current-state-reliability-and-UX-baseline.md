@@ -62,11 +62,11 @@ Follow `Docs/superpowers/plans/2026-05-10-persona-buddy-stage-0-audit-implementa
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Docs/Reviews/PERSONA_BUDDY_CURRENT_STATE_AUDIT_2026_05_10.md. Live GitHub tracker state was checked with gh api graphql on 2026-05-10. The report preserves useful #635 references, inventories backend/frontend/MCP/test/doc contracts, and limits Stage 1 recommendations to diagnostics, recovery copy, and existing-flow smoke coverage.
 
 Verification: git diff --check passed with no output before staging. Pytest/Vitest/Playwright were intentionally not run because this is a docs-only audit. Bandit is skipped because no Python code changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

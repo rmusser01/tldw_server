@@ -28,7 +28,7 @@ Investigate and fix the latest-dev Quick Ingest regression where adding a YouTub
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Latest-dev investigation used a clean worktree at `.worktrees/investigate-quick-ingest-loop`. PR #2700 is present on `origin/dev` and `origin/main`; the original `/media` render-loop fixes remain.
 
 Root cause: a later commit, `e204d26cce` (`Harden ingest analysis provider UX`), added an analysis-provider guard inside `QuickIngestWizardModal.startRun`. The default Quick Ingest preset has `perform_analysis=true` and no `api_name`, so clicking `Use defaults & process` moves the wizard into processing and then immediately creates a synthetic failed run. In a real browser that reproduced React `Maximum update depth exceeded` through the AntD/rc-portal modal path.
@@ -38,7 +38,7 @@ Fix in the clean worktree: detect the missing provider before `skipToProcessing`
 Verification: RED session test failed on latest behavior, then passed after fix (22/22); quick-ingest-batch service tests passed (33/33); frontend typecheck passed; Playwright browser regression passed after walking through the Quick Ingest YouTube defaults flow. Bandit was skipped because only frontend TypeScript and Backlog Markdown were touched.
 
 PR review follow-up: rebased PR #2707 on latest `origin/dev` (already up to date), addressed Gemini/CodeRabbit/Qodo comments by moving `markRunActive()` after the late provider guard, restoring and re-showing hidden/minimized sessions when that guard blocks user action, suppressing the floating widget's non-terminal 0/0 state, switching touched Zustand selectors to `useShallow`, avoiding unknown progress-id reducer array rebuilds, removing the swallowed Playwright `networkidle` catch, and adding late-guard regression coverage. Verification after review fixes: QuickIngestWizardModal session suite passed (23/23), Playwright Quick Ingest browser regression passed, quick-ingest-batch service suite passed (33/33), frontend typecheck passed, and `git diff --check` passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

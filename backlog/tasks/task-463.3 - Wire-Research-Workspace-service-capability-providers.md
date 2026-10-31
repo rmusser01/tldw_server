@@ -38,20 +38,14 @@ Implement the next Research Workspace capability slice by deriving MCP/tool, ACP
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Implemented service-derived Research Workspace capability projection for MCP Hub policy, ACP agent readiness, sandbox runtime discovery, and configured provider health. Added deterministic endpoint fixtures plus pure projection coverage for available, needs-approval, unavailable/blocked, degraded, resolver-failure, and configured-provider filtering states.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Wired /api/v1/workspaces/{workspace_id}/capabilities and /context to backend service capability collection instead of fixed placeholder service states. MCP now reflects effective MCP Hub policy, ACP reflects configured agent readiness and approval requirements, sandbox reflects runtime discovery, and provider readiness is based on configured providers plus health/degraded/external-provider state. Added tests for the capability projection and endpoint merge behavior; verified no active /workspace-playground route alias was added.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

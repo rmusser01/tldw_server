@@ -38,13 +38,13 @@ Add a narrow Phase 4 sandbox runtime parity slice that exposes stable session se
 
 ## Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added a narrow discovery-only `session_contract` metadata layer for every sandbox runtime. This keeps runtime behavior unchanged while making workspace-only, warm VM, and scaffolded session semantics machine-readable.
 - Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/sandbox/test_runtime_inventory_contract.py tldw_Server_API/tests/Docs/test_sandbox_public_docs_contract.py -q` passed with 30 tests.
 - Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Sandbox/runtime_capabilities.py tldw_Server_API/app/core/Sandbox/service.py tldw_Server_API/app/api/v1/schemas/sandbox_schemas.py -f json -o /tmp/bandit_sandbox_session_contract.json` completed with no findings.
 - Verification: `git diff --check` passed.
 - Known limitation: the broader TestClient feature-discovery suite timed out in unrelated full-app lifespan teardown while background workers/schedulers were active. The branch adds direct `SandboxRuntimesResponse` validation of `SandboxService.feature_discovery()` to cover the endpoint response schema without starting full app lifespan.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

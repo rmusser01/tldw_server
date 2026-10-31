@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import types
 import uuid
 
@@ -119,6 +120,98 @@ async def test_hub_multi_subscriber_ordering() -> None:
 
     # Cleanup
     hub.cleanup_run(run_id)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_hub_subscriber_attaching_before_dispatch_sees_each_frame_once() -> None:
+    """Frames published but not yet dispatched reach a new subscriber exactly once, in seq order."""
+    from tldw_Server_API.app.core.Sandbox.streams import RunStreamHub
+
+    hub = RunStreamHub()
+    hub.set_loop(asyncio.get_running_loop())
+    run_id = f"run-attach-{uuid.uuid4().hex}"
+
+    early = hub.subscribe_with_buffer(run_id)
+    # Publishing from the loop thread schedules dispatch; it cannot run until we await.
+    hub.publish_event(run_id, "start", {})
+    hub.publish_heartbeat(run_id)
+    hub.publish_stdout(run_id, b"A\n", max_log_bytes=1024)
+    late = hub.subscribe_with_buffer(run_id)
+    resumed = hub.subscribe_with_buffer_from_seq(run_id, 1)
+
+    # Seq follows publish order. Heartbeats are live-only (never buffered), so
+    # only the subscriber attached before it was published sees seq 2.
+    history = [("event", 1), ("stdout", 3)]
+    for q, expected in (
+        (early, [("event", 1), ("heartbeat", 2), ("stdout", 3)]),
+        (late, history),
+        (resumed, history),
+    ):
+        got = [await asyncio.wait_for(q.get(), timeout=1.0) for _ in expected]
+        assert [(f["type"], f["seq"]) for f in got] == expected
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(q.get(), timeout=0.1)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_drain_buffer_numbers_frames_in_publish_order() -> None:
+    """drain_buffer must not number a buffered frame ahead of an earlier queued heartbeat."""
+    from tldw_Server_API.app.core.Sandbox.streams import RunStreamHub
+
+    hub = RunStreamHub()
+    hub.set_loop(asyncio.get_running_loop())
+    run_id = f"run-drain-{uuid.uuid4().hex}"
+
+    # Dispatch is scheduled on this loop and cannot run until we await.
+    hub.publish_heartbeat(run_id)
+    hub.publish_stdout(run_id, b"A\n", max_log_bytes=1024)
+    drained: asyncio.Queue = asyncio.Queue()
+    hub.drain_buffer(run_id, drained)
+
+    frame = drained.get_nowait()
+    assert (frame["type"], frame["seq"]) == ("stdout", 2)
+    assert drained.empty()
+
+
+@pytest.mark.unit
+def test_hub_slow_fanout_on_one_run_does_not_block_other_runs() -> None:
+    """A dispatcher stuck copying one run's frame must not stall other runs."""
+    from tldw_Server_API.app.core.Sandbox.streams import RunStreamHub
+
+    copying = threading.Event()
+    release = threading.Event()
+
+    class _SlowPayload:
+        def __deepcopy__(self, memo: dict) -> _SlowPayload:
+            copying.set()
+            release.wait(5)
+            return self
+
+    loop = asyncio.new_event_loop()
+    loop_thread = threading.Thread(target=loop.run_forever, daemon=True)
+    loop_thread.start()
+    try:
+        hub = RunStreamHub()
+        hub.set_loop(loop)
+        hub.subscribe("run-slow")
+        hub.publish_event("run-slow", "start", {"payload": _SlowPayload()})
+        assert copying.wait(2), "dispatcher never reached the slow fan-out"
+
+        def _other_run() -> None:
+            hub.subscribe_with_buffer("run-fast")
+            hub.publish_stdout("run-fast", b"hi\n", max_log_bytes=1024)
+
+        other = threading.Thread(target=_other_run, daemon=True)
+        other.start()
+        other.join(2)
+        assert not other.is_alive(), "another run's subscribe/publish blocked behind a slow fan-out"
+    finally:
+        release.set()
+        loop.call_soon_threadsafe(loop.stop)
+        loop_thread.join(2)
+        loop.close()
 
 
 @pytest.mark.asyncio

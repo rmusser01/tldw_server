@@ -45,7 +45,7 @@ Design/spec task only. Write the approved Workspaces manager and Project Workspa
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created the canonical Workspaces manager and Project Workspace creation roadmap spec at Docs/superpowers/specs/2026-06-04-canonical-workspaces-manager-project-creation-design.md. The spec defines /workspaces as the canonical product manager, separates durable Sandbox workspace-volume mechanics from the Workspace-owned sandbox root provision-and-attach command, decomposes the roadmap into seven reviewable tasks, adds partial-failure recovery states, archive/delete safety, file inventory gating, metadata-first local Research Workspace reconciliation, cross-surface links, validation strategy, and parallelization boundaries.
 
 Spec reviewer pass 1 approved with advisory recommendations. Followed up by adding a shared manager attention-state mapping, recommended Project Workspace hard-delete disablement until a cleanup contract exists, and a minimal local reconciliation marker requirement.
@@ -55,7 +55,7 @@ Spec reviewer pass 2 approved with no serious planning blockers. Remaining advis
 User-requested spec review amendment completed before implementation planning. Added explicit Task 3 response semantics (`202` for queued/active provisioning, `200` for already-attached or synchronously complete roots), Workspace-owned idempotency ownership and `409` behavior, deterministic Sandbox-to-Workspace projection mapping, definitive V1 Project Workspace hard-delete disablement, Task 4/Task 5 Project creation boundary, and required planning-time decisions for reconciliation marker, idempotency storage, projections, response behavior, and hard-delete policy.
 
 Verification: keyword scan for unresolved planning markers returned no matches; wording ambiguity scan returned no matches; git diff --check on the spec/task paths passed. Bandit skipped because this is documentation/backlog-only work with no Python code changes.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

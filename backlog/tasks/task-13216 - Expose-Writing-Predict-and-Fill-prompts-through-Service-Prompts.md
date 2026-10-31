@@ -36,7 +36,7 @@ Implement the user-approved bounded continuation slice: expose Writing Playgroun
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Approved design and three-stage plan remain linked.
 
 Stage 1 complete at ae91269a78: exact independent literal Predict/Fill definitions, packaged 404 fallback, Settings save/reset and mirrored locale support. Backend 101/101 and shared UI 225/225 passed; Ruff clean; production Bandit zero findings; ESLint zero errors with 10 baseline no-explicit-any warnings. Independent Task 1 review approved.
@@ -54,7 +54,7 @@ Final review found and test-first fixed provisional continuation autosave throug
 2026-09-12: Rebased PR #2931 onto origin/dev 0a5d0d6e0a, preserving both additions in the extension locale conflict. Verifying Qodo findings on scene-version ownership and non-streaming cancellation test-first before republishing.
 
 2026-09-12 review verification: Qodo scene-version overwrite reproduced in both modes (2 failing regressions), fixed by including activeSceneVersion in operation binding (2 passing). Full client union 390/390 across 13 files; backend registry/API 101/101. Production Bandit 0 findings/errors, Ruff clean, changed-file ESLint 0 errors/27 baseline warnings. Rebased shared-UI TypeScript reports 192 diagnostics, none in the two changed files; latest-dev comparison is being finalized in an isolated archive. Independent review approved. Qodo cancellation finding verified false positive: parent abort chains to snapshot scopeSignal before release and reaches non-streaming transport; replied in its thread. Rebased locale JSON is valid and preserves both feature additions. Temporary dependency symlinks removed. Awaiting current-head Qodo/CI and PR-specific human-summary decision.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

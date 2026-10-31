@@ -10,10 +10,24 @@ from typing import Any, Literal, Optional, Union
 
 #
 # 3rd-party imports
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    StrictBool,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic_core import InitErrorDetails, PydanticCustomError
 
-from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistorySelectionV1
+from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
+    HISTORY_BRANCH_FIELD_DESCRIPTION,
+    HISTORY_EDIT_FIELD_DESCRIPTION,
+    HistoryEditTargetV1,
+    HistorySelectionV1,
+)
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
     is_safe_extra_header_value,
     is_server_managed_extra_header,
@@ -123,12 +137,6 @@ def _is_server_managed_chat_request_field(field_name: str) -> bool:
 
 # Use load_and_log_configs which returns a proper dict
 from tldw_Server_API.app.core.config import load_and_log_configs
-from tldw_Server_API.app.core.custom_openai_providers import (
-    custom_openai_api_key_env_keys,
-    custom_openai_provider_number,
-    custom_openai_section_name,
-    iter_custom_openai_provider_names,
-)
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import normalize_catalog_provider_for_chat
 
 _config = load_and_log_configs() or {}
@@ -186,103 +194,7 @@ def _get_setting(env_var, section, key, default=""):
     return default
 
 
-_BASE_SUPPORTED_PROVIDER_NAMES_LIST: list[str] = [
-    "bedrock",
-    "anthropic",
-    "cohere",
-    "deepseek",
-    "google",
-    "groq",
-    "qwen",
-    "huggingface",
-    "mistral",
-    "openai",
-    "openrouter",
-    "novita",
-    "poe",
-    "together",
-    "llama.cpp",
-    "kobold",
-    "ollama",
-    "ooba",
-    "tabbyapi",
-    "vllm",
-    "local-llm",
-    "aphrodite",
-    "moonshot",
-    "zai",
-]
-
-ALL_SUPPORTED_PROVIDER_NAMES_LIST: list[str] = [
-    *_BASE_SUPPORTED_PROVIDER_NAMES_LIST,
-    *iter_custom_openai_provider_names(),
-]
-
-
-def get_api_keys() -> dict[str, Optional[str]]:
-    """
-    Get API keys dynamically to support runtime changes.
-    This function reloads config and environment variables each time it's called,
-    ensuring that test environment changes are properly reflected.
-    """
-    # Reload config to get latest values
-    current_config = load_and_log_configs() or {}
-
-    def _get_dynamic_setting(
-        env_vars: str | tuple[str, ...],
-        section: str,
-        key: str,
-        default: Optional[str] = "",
-    ) -> Optional[str]:
-        """Resolve an API key from env aliases before config-backed settings."""
-        # First check environment variable
-        env_candidates = (env_vars,) if isinstance(env_vars, str) else tuple(env_vars or ())
-        for env_var in env_candidates:
-            env_value = os.getenv(env_var)
-            if env_value is not None:
-                return env_value
-
-        custom_number = custom_openai_provider_number(key)
-        if section == "api_keys" and custom_number is not None:
-            custom_section = current_config.get(custom_openai_section_name(custom_number))
-            if isinstance(custom_section, dict):
-                api_key = custom_section.get("api_key")
-                if api_key:
-                    return api_key
-
-        # Check for API key in the config dict
-        if section == "api_keys":
-            # Look for provider-specific API config like 'openai_api'
-            provider_api_key = f"{key}_api"
-            if provider_api_key in current_config:
-                api_config = current_config[provider_api_key]
-                if isinstance(api_config, dict):
-                    api_key = api_config.get("api_key")
-                    if api_key:
-                        return api_key
-
-        # Fallback to checking section directly
-        config_section = current_config.get(section)
-        if config_section:
-            config_value = config_section.get(key) if isinstance(config_section, dict) else None
-            if config_value is not None:
-                return config_value
-
-        return default
-
-    def _provider_env_keys(provider_name: str) -> tuple[str, ...]:
-        custom_number = custom_openai_provider_number(provider_name)
-        if custom_number is not None:
-            return custom_openai_api_key_env_keys(custom_number)
-        normalized = provider_name.upper().replace('.', '_').replace('-', '_')
-        if normalized.endswith("_API"):
-            normalized = normalized[: -len("_API")]
-        return (f"{normalized}_API_KEY",)
-
-    return {
-        name: _get_dynamic_setting(_provider_env_keys(name), "api_keys", name)
-        for name in ALL_SUPPORTED_PROVIDER_NAMES_LIST
-    }
+from tldw_Server_API.app.core.config_llm_providers import ALL_SUPPORTED_PROVIDER_NAMES_LIST, get_api_keys  # noqa: F401 - re-exported until TASK-13950.14 retargets importers
 
 
 # Keep API_KEYS for backward compatibility but make it compute on first access.
@@ -988,7 +900,7 @@ class ChatCompletionRequest(BaseModel):
         None, description="ID of the model to use. Specific model compatibility depends on the selected `api_provider`."
     )
     messages: list[ChatCompletionMessageParam] = Field(
-        ..., description="A list of messages comprising the conversation so far.", min_length=1
+        ..., description="A list of current messages. Empty only for an explicit server-settled existing-input selection.", min_length=0
     )
     frequency_penalty: Optional[float] = Field(
         None, ge=-2.0, le=2.0, description="Frequency penalty parameter (provider support varies)."
@@ -1140,6 +1052,9 @@ class ChatCompletionRequest(BaseModel):
     )
     conversation_id: Optional[str] = Field(None, description="Optional ID of the conversation to use for context.")
     tldw_history_selection_v1: HistorySelectionV1 | None = None
+    tldw_history_server_existing_input_v1: HistorySelectionV1 | None = None
+    tldw_history_branch: StrictBool | None = Field(None, description=HISTORY_BRANCH_FIELD_DESCRIPTION)
+    tldw_history_edit_v1: HistoryEditTargetV1 | None = Field(None, description=HISTORY_EDIT_FIELD_DESCRIPTION)
     tldw_continuation: Optional[TLDWContinuationSpec] = Field(
         None,
         description=(
@@ -1220,16 +1135,42 @@ class ChatCompletionRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_history_selection_request(self) -> "ChatCompletionRequest":
-        if self.tldw_history_selection_v1 is not None:
+        existing = self.tldw_history_server_existing_input_v1
+        if existing is not None:
+            if (self.tldw_history_selection_v1 is not None or self.tldw_history_branch is not None
+                    or self.tldw_continuation is not None or self.messages or not self.stream or self.tools):
+                raise ValueError("Existing-input completion requires only its selection, streaming, and no current messages or tools")
+            if (existing.purpose != "send" or existing.cursor.kind != "after_message"
+                    or not existing.messages or existing.cursor.message_id != existing.messages[-1].id):
+                raise ValueError("Existing-input completion requires a selected saved question")
+        elif not self.messages:
+            raise ValueError("At least one current message is required")
+        if self.tldw_history_branch is not None and self.tldw_history_selection_v1 is None:
+            raise ValueError("tldw_history_branch requires tldw_history_selection_v1")
+        if self.tldw_history_edit_v1 is not None:
+            selection = self.tldw_history_selection_v1
+            if (
+                self.tldw_history_branch is not True
+                or selection is None
+                or selection.purpose != "send"
+                or selection.cursor.kind != "before_message"
+                or selection.cursor.message_id != self.tldw_history_edit_v1.message_id
+            ):
+                raise ValueError("Protected Edit requires an explicit branch and matching before-message selection")
+            if [message.role for message in self.messages if message.role != "system"] != ["user"]:
+                raise ValueError("Protected Edit requires one current user input")
+        selection = self.tldw_history_selection_v1 or existing
+        if selection is not None:
             if self.tldw_continuation is not None:
                 raise ValueError("Versioned selection cannot be combined with legacy continuation controls")
             if not self.conversation_id or self.save_to_db is not True:
                 raise ValueError("Versioned completion requires conversation_id and save_to_db=true")
-            if self.conversation_id != self.tldw_history_selection_v1.conversation_id:
+            if self.conversation_id != selection.conversation_id:
                 raise ValueError("Selection conversation mismatch")
-            roles = [message.role for message in self.messages]
-            if not any(role in {"user", "tool"} for role in roles) or any(role not in {"system", "user", "tool"} for role in roles):
-                raise ValueError("Versioned messages must contain only current system/user/tool inputs")
+            if existing is None:
+                roles = [message.role for message in self.messages]
+                if not any(role in {"user", "tool"} for role in roles) or any(role not in {"system", "user", "tool"} for role in roles):
+                    raise ValueError("Versioned messages must contain only current system/user/tool inputs")
         return self
 
     @model_validator(mode="after")

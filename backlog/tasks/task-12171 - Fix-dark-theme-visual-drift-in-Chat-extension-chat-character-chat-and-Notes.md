@@ -36,11 +36,11 @@ Docs/superpowers/plans/2026-07-05-chat-notes-dark-theme-visual-fidelity-plan.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added a focused Playwright smoke regression that seeds dark mode, mocks target API shapes, captures screenshots, and scans normal chat, character chat, extension sidepanel chat, Notes, and available overflow/tool menus for large light surfaces and low-contrast dark text. Fixed the confirmed Notes leaks by adding .ant-select to the shared Ant Design token bridge and covering Ant text buttons/radio-button wrappers in apps/packages/ui/src/assets/tailwind-shared.css.
 
 PR review follow-up: excluded Ant link buttons from the generic text-color override and collapsed the visual scanner into one DOM traversal per checkpoint with opacity and viewport-bound checks.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

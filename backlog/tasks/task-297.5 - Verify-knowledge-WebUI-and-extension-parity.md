@@ -51,7 +51,7 @@ Stage 5 implementation plan:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified active extension options entrypoint imports @tldw/ui/entries/options/main, so the shipped extension route graph is the shared UI route registry rather than the legacy apps/tldw-frontend/extension route tree.
 
 Aligned the legacy extension route mirror as a safety net: /knowledge now renders KnowledgeQA instead of KnowledgeSettings, and /knowledge/shared/:shareToken is present alongside /knowledge/thread/:threadId.
@@ -79,7 +79,7 @@ Resolved the browser-level extension E2E blocker after TASK-306 unblocked WXT bu
 Fixed a real route-parity usability issue found during E2E: the collapsed ChatSidebar could push Notes/Quick Chat/Settings footer actions below the viewport at 1280x720 because the shortcut icon list was not scroll-constrained. The shortcut list now owns the scroll area and the footer actions remain reachable.
 
 Verification on 2026-05-12: bunx playwright test tests/e2e/quick-chat-guides-tutorials.spec.ts -g "knowledge tutorial card" --reporter=line passed with 2 tests; ChatSidebar focused Vitest suite passed; git diff --check passed. Existing broader package typecheck/design-state limitations remain as previously documented.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

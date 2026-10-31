@@ -29,13 +29,13 @@ Resolve the broader tldw_Server_API/tests/Setup failures observed while closing 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Fixed setup audio release-gate failures found while closing TASK-499. Changes included sanitized TTS health exception logging, external-path support for audio pack manifest reads/imports, dict-compatible machine profile projection, sanitized-but-specific setup validation details, installer download fake compatibility with revision kwargs, and TestClient teardown-safe API fixtures.
 
 Verification run: source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Setup tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py tldw_Server_API/tests/Config/test_config_providers_endpoints.py -v -> 324 passed, 4 warnings.
 Bandit run: source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/setup.py tldw_Server_API/app/api/v1/endpoints/audio/audio_health.py tldw_Server_API/app/core/Setup/audio_pack_service.py -f json -o /tmp/bandit_setup_audio_release_gate.json -> 0 findings.
 git diff --check -> clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

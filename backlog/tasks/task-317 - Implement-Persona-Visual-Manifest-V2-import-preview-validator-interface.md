@@ -39,7 +39,7 @@ Implement the next Manifest V2 foundation slice for Persona/Buddy visual packs: 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation plan created: Docs/superpowers/plans/2026-05-13-persona-visual-v2-import-preview-validator.md. Plan reviewer subagent was not dispatched because this session only allows subagents when explicitly requested; proceeding with an inline self-review and TDD implementation.
 
 Implemented fixture-only renderer import-preview validator and documented the boundary. Verification: initial red pytest failed on missing visual_import_preview_validators module; focused validator tests passed; persona visual boundary suite passed; git diff --check passed; Bandit JSON reported zero findings.
@@ -47,7 +47,7 @@ Implemented fixture-only renderer import-preview validator and documented the bo
 PR #1634 review sweep started. Actionable findings verified: sanitize unknown-renderer blocker text, avoid float version truncation, treat missing required manifest/contract versions as blockers, and make asset attribute reads robust.
 
 PR #1634 review fixes implemented and verified: unknown renderer blocker text is escaped/capped, version coercion no longer truncates floats, missing manifest/contract versions now block supported renderers, and asset text extraction tolerates unexpected objects. Verification: 38 persona visual tests passed, git diff --check passed, Bandit reported zero findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

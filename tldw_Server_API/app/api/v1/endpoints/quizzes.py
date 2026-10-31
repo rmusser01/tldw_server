@@ -10,6 +10,7 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.API_Deps.study_assistant_deps import get_study_assistant_guidance
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import require_llm_quota
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.flashcards import (
     StudyAssistantContextResponse,
@@ -780,6 +781,7 @@ def get_quiz_attempt_question_assistant(
 @router.post(
     "/attempts/{attempt_id:int}/questions/{question_id:int}/assistant/respond",
     response_model=StudyAssistantRespondResponse,
+    dependencies=[Depends(require_llm_quota)],
 )
 async def respond_quiz_attempt_question_assistant(
     attempt_id: int,

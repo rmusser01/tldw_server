@@ -36,7 +36,7 @@ Docs/superpowers/plans/2026-06-09-scheduled-tasks-phase3-results-inbox-home-surf
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 8 final verification and closeout in progress.
 
 Verification evidence:
@@ -53,7 +53,7 @@ Final closeout:
 
 PR link:
 - Draft PR: https://github.com/rmusser01/tldw_server/pull/2328
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

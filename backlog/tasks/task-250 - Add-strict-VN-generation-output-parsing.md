@@ -46,13 +46,13 @@ Implementation plan:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented strict Pydantic parser models in VN_Play/generated_outputs.py and generation-specific provider/moderation adapter contracts in VN_Play/adapters.py. Kept the scope out of service.py; usage metadata is exposed on VNGenerationCallResult for the later runtime persistence step, and VNPlayRepository already supports usage_metadata on revisions from TASK-249. Addressed review findings by making moderation decisions fail closed on malformed results, honoring moderation_required plus provider_class/deployment_class, mapping 408/504 and timeout-like provider failures to model_timeout, and rejecting narrative/dialogue line metadata.
 
 Verification: pytest tldw_Server_API/tests/VN_Play/test_vn_play_generated_outputs.py -q --tb=short --disable-warnings -> 12 passed; pytest tldw_Server_API/tests/VN_Play/test_vn_play_turns.py -q --tb=short --disable-warnings -> 48 passed; compileall touched backend modules -> exit 0; Bandit touched backend modules -> 0 findings in /tmp/bandit_vn_generated_outputs.json; git diff --check -> exit 0.
 
 No blockers. Documentation-only updates were not needed because this implements the documented Task 3 contracts without changing public API docs.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

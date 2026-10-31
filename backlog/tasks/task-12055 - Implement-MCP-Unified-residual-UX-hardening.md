@@ -70,11 +70,8 @@ Docs/superpowers/plans/2026-06-28-mcp-unified-residual-ux-hardening-implementati
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

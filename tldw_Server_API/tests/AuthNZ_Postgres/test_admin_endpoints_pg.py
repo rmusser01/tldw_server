@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+
 from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
 
@@ -9,14 +10,15 @@ from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 @pytest.mark.asyncio
 async def test_admin_endpoints_pg(test_db_pool):
     # App and overrides
-    from tldw_Server_API.app.main import app
+    from starlette.requests import Request
+
     from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
-    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, AuthContext
-    from starlette.requests import Request
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 
     # Disable CSRF for test client
     from tldw_Server_API.app.core.config import settings as app_settings
+    from tldw_Server_API.app.main import app
     app_settings['CSRF_ENABLED'] = False
 
     # Ensure Postgres pool from fixture
@@ -246,10 +248,10 @@ async def test_admin_endpoints_pg(test_db_pool):
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_org_member_list_pagination_filters_pg(test_db_pool):
-    from tldw_Server_API.app.main import app
     from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
-    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, AuthContext
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
     from tldw_Server_API.app.core.config import settings as app_settings
+    from tldw_Server_API.app.main import app
 
     pool = test_db_pool
     app_settings['CSRF_ENABLED'] = False

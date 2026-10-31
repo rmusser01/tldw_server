@@ -35,11 +35,9 @@ Fix the UI TypeScript verification blocker where TaskActivityNotice passes a str
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause: TaskActivityNotice used count for display text, but i18next reserves count for numeric pluralization. Fixed by passing count: events.length and interpolating countLabel separately. Updated the English locale template from {{count}} to {{countLabel}}.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

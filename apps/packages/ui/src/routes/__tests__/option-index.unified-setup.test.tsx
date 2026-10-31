@@ -15,7 +15,7 @@ import {
 } from "@/store/quick-ingest-session"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import { useMilestoneStore } from "@/store/milestones"
-import { DISCUSS_MEDIA_PROMPT_SETTING } from "@/services/settings/ui-settings"
+import * as mediaHandoff from "@/services/tldw/media-chat-handoff"
 
 const routeMocks = vi.hoisted(() => ({
   firstRunState: {
@@ -51,7 +51,8 @@ vi.mock("@/services/settings/registry", async (importOriginal) => ({
 }))
 
 function RouteProbe() {
-  return <span data-testid="route">{useLocation().pathname}</span>
+  const location = useLocation()
+  return <span data-testid="route">{location.pathname}{location.search}</span>
 }
 
 vi.mock("~/components/Layouts/Layout", () => ({
@@ -423,12 +424,12 @@ describe("OptionIndex unified setup resolver", () => {
   it("uses persisted first-source session result summary after reload", async () => {
     routeMocks.firstRunState.current = createCompletedFirstRunState()
     let finishSaving!: () => void
-    routeMocks.setSetting.mockImplementation(
-      () =>
-        new Promise<void>((resolve) => {
-          finishSaving = resolve
-        })
-    )
+    const create = mediaHandoff.createMediaChatHandoff
+    vi.spyOn(mediaHandoff, "createMediaChatHandoff").mockImplementationOnce(async payload => {
+      const token = await create(payload)
+      await new Promise<void>(resolve => { finishSaving = resolve })
+      return token
+    })
     seedQuickIngestSession({
       lifecycle: "completed",
       openDetail: {
@@ -476,12 +477,13 @@ describe("OptionIndex unified setup resolver", () => {
     )
 
     expect(screen.getByTestId("route")).toHaveTextContent(/^\/$/)
+    await waitFor(() => expect(finishSaving).toBeDefined())
     finishSaving()
     await waitFor(() =>
       expect(screen.getByTestId("route")).toHaveTextContent("/chat")
     )
-    expect(routeMocks.setSetting).toHaveBeenCalledWith(
-      DISCUSS_MEDIA_PROMPT_SETTING,
+    const token = new URL(screen.getByTestId("route").textContent!, "http://localhost").searchParams.get(mediaHandoff.MEDIA_CHAT_HANDOFF_PARAM)!
+    expect(await mediaHandoff.readMediaChatHandoff(token, ownerScope)).toEqual(
       {
         mediaId: "42",
         ownerScope,
@@ -501,12 +503,12 @@ describe("OptionIndex unified setup resolver", () => {
   it("does not navigate a saved Home source handoff after the account changes", async () => {
     routeMocks.firstRunState.current = createCompletedFirstRunState()
     let finishSaving!: () => void
-    routeMocks.setSetting.mockImplementation(
-      () =>
-        new Promise<void>((resolve) => {
-          finishSaving = resolve
-        })
-    )
+    const create = mediaHandoff.createMediaChatHandoff
+    vi.spyOn(mediaHandoff, "createMediaChatHandoff").mockImplementationOnce(async payload => {
+      const token = await create(payload)
+      await new Promise<void>(resolve => { finishSaving = resolve })
+      return token
+    })
     seedQuickIngestSession({
       lifecycle: "completed",
       openDetail: { source: "first_source_milestone", ownerScope },
@@ -584,7 +586,7 @@ describe("OptionIndex unified setup resolver", () => {
 
   it("keeps the source on Home with an actionable error if handoff cannot be saved", async () => {
     routeMocks.firstRunState.current = createCompletedFirstRunState()
-    routeMocks.setSetting.mockRejectedValue(new Error("Storage unavailable"))
+    vi.spyOn(mediaHandoff, "createMediaChatHandoff").mockRejectedValueOnce(new Error("Storage unavailable"))
     seedQuickIngestSession({
       lifecycle: "completed",
       openDetail: {

@@ -28,9 +28,9 @@ Main CI run 28994210037 is failing media-audio and media-ingestion-modification 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause: handle_unified_websocket applied the strict public v1 audio protocol validator to every first config frame. Legacy/internal unified streaming clients send only transcription settings, so frames without protocol_version/mode/audio_format/channels were rejected before transcriber setup, quota, VAD, or diarization behavior could run. Fix: synthesize strict v1 defaults only when protocol_version is omitted; explicit protocol frames remain strict.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

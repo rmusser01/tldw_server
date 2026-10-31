@@ -7,6 +7,7 @@ type MultiUserExitPanelProps = {
   metadata: FirstRunMetadata | null
   onBack?: () => void
   onSignIn?: () => void
+  onOpenConnectionSettings?: () => void
   loginPending?: boolean
 }
 
@@ -24,7 +25,13 @@ const resolveDocsHref = (path: string): string => {
   return `${DOCS_REPO_BASE}${trimmed.replace(/^\.?\//, "")}`
 }
 
-export function MultiUserExitPanel({ metadata, onBack, onSignIn, loginPending }: MultiUserExitPanelProps) {
+export function MultiUserExitPanel({
+  metadata,
+  onBack,
+  onSignIn,
+  onOpenConnectionSettings,
+  loginPending
+}: MultiUserExitPanelProps) {
   const guidePath = resolveDocsHref(
     metadata?.multi_user_exit?.guide_path ||
     "Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md"
@@ -82,6 +89,12 @@ export function MultiUserExitPanel({ metadata, onBack, onSignIn, loginPending }:
         className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
       >
         {loginPending ? "Opening login..." : "Sign in"}
+      </button> : onOpenConnectionSettings ? <button
+        type="button"
+        onClick={onOpenConnectionSettings}
+        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+      >
+        Open connection settings
       </button> : null}
       {onBack ? <button
         type="button"

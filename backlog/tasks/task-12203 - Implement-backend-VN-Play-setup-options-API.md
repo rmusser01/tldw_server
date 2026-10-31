@@ -38,11 +38,11 @@ Implement the backend-first VN Play setup-options API described in the design sp
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Direction confirmed: prefer a backend setup-options API over PR #1409's frontend-only selector logic so custom frontends and standalone API deployments can reuse server-authoritative setup rules. Created backend implementation plan Docs/superpowers/plans/2026-05-09-vn-play-setup-options-backend-implementation-plan.md.
 
 Implemented backend-first setup-options endpoint, bounded pack listing/provenance helpers, response schemas, composer, API docs, and focused backend coverage. Verification: pytest VN_Play+VN_Assets 24 passed; Bandit production scope exit 0; Bandit touched tests with B101 skipped exit 0; git diff --check exit 0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

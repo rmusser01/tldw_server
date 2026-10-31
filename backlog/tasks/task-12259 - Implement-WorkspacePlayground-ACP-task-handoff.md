@@ -39,7 +39,7 @@ Implement Slice 2 from Docs/Design/ACP_Workspace_Integration_Decision_2026_05.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented WorkspacePlayground ACP handoff slice in isolated worktree .worktrees/acp-workspace-task-handoff-1540. Added Workspace settings action and modal that calls canonical bridge, creates an AgentProject bound to returned ACP workspace ID, then creates the AgentTask with workspace metadata.
 
 Verification: bunx vitest run src/components/Option/WorkspacePlayground/__tests__/WorkspaceHeader.test.tsx src/components/Option/AgentTasks/__tests__/AgentTasksPage.connection.test.tsx passed from apps/packages/ui. git diff --check passed. Bandit skipped/documented because touched source is TypeScript/TSX frontend only.
@@ -49,7 +49,7 @@ PR #1625 review-fix pass reopened this task in the branch worktree. Scope: resol
 Review fixes now also document that WorkspacePlayground ACP history/retention must coordinate with #1512 and #1513 rather than creating a separate retention/redaction path.
 
 Review-fix verification: focused Vitest passed for WorkspaceHeader, AgentTasks connection, and AntD modal prop guards (40 tests). bun run lint from apps/tldw-frontend exited 0 with existing warnings only. Targeted ESLint on changed package files exited 0 with warnings only. git diff --check passed. Bandit on the touched frontend path wrote /tmp/bandit_task311_pr1625_review_frontend_path.json with zero findings and loc=0 because no Python files were touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

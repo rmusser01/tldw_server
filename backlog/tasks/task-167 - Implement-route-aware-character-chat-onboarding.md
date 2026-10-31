@@ -54,7 +54,7 @@ Implemented:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Focused RED tests confirmed the prior behavior: /characters first-run setup navigated to plain /, OptionIndex lacked a character-chat onboarding lane/return navigation, and OnboardingConnectForm success screen lacked character-chat actions.
 
 Focused GREEN verification: bunx vitest run src/components/Common/__tests__/WorkspaceConnectionGate.test.tsx src/routes/__tests__/core-route-identity.test.tsx src/components/Option/Onboarding/__tests__/OnboardingConnectForm.success-screen.guard.test.tsx --testTimeout=20000 passed, 18 tests.
@@ -62,7 +62,7 @@ Focused GREEN verification: bunx vitest run src/components/Common/__tests__/Work
 Full UI typecheck: ../../tldw-frontend/node_modules/.bin/tsc --noEmit -p tsconfig.json --pretty false passed. The earlier bunx tsc attempt used transient TS 6 and failed on the repo baseUrl deprecation gate, so the pinned project compiler was used for verification.
 
 git diff --check passed. Bandit skipped because touched scope is frontend TypeScript/tests plus plan/backlog documentation.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

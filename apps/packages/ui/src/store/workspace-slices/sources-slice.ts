@@ -431,7 +431,14 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
       if (!targetSource) return state
 
       const nextSources = state.sources.map((source) =>
-        source.mediaId === mediaId
+        source.mediaId === mediaId &&
+        // Media readiness cannot validate an immutable captured pin.
+        !(
+          source.status === "error" &&
+          (source.statusDetails?.statusReason === "capture_unavailable" ||
+            (source.webCapture &&
+              source.statusDetails?.statusReason === "capture_head_changed"))
+        )
           ? {
               ...source,
               status,
@@ -439,10 +446,10 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
               statusDetails:
                 statusDetails ??
                 (source.status === status ? source.statusDetails : undefined),
-              readiness: readiness ?? source.readiness
+              readiness: readiness ?? source.readiness,
             }
-          : source
-      )
+          : source,
+      );
       return {
         sources: nextSources,
         selectedSourceIds:

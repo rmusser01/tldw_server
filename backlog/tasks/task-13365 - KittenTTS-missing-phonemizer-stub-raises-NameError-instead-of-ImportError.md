@@ -25,9 +25,9 @@ TTS/vendors/kittentts_compat.py: the fallback EspeakWrapper methods used the exc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Fixed in 56ef37d4af: except block captures exc as _phonemizer_error for the closures. test_kittentts_compat.py::test_missing_phonemizer_wrapper_raises_import_error_not_name_error blocks phonemizer via sys.modules, reloads, asserts ImportError for both methods; red on HEAD (NameError), green now; kittentts tests 12 passed. Bandit: n/a beyond variable rename. No docs affected.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

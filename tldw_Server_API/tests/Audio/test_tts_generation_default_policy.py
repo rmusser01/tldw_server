@@ -8,7 +8,6 @@ import pytest
 
 from tldw_Server_API.app.services import audiobook_jobs_worker, outputs_service
 
-
 pytestmark = pytest.mark.unit
 
 DEFAULT_KITTEN_TTS_MODEL = "KittenML/kitten-tts-nano-0.8"

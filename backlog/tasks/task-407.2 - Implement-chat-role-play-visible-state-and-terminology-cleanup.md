@@ -33,11 +33,11 @@ Stage 2 implementation for the main /chat role-play preset plan: add derived rol
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 2 started after Stage 1 commit 6bd234f1d passed spec and code-quality review. Scope remains limited to visible role-play state, behavior template identity, active chips, and terminology cleanup on main /chat.
 
 Stage 2 implementation completed in the dedicated chat role-play remediation worktree. Added a pure derived role-play state adapter, preserved applied behavior-template identity via the chat model settings store, rendered role-play active chips for identity/behavior/scene/generation/context summary, and routed terminology changes through the English locale files. Verification: focused Stage 2 Vitest suite passed (4 files, 39 tests); git diff --check passed; locale JSON parse check passed. Full tsc still fails on existing unrelated baseline files. Browser verification for 127.0.0.1:3001/chat was blocked by the in-app browser security policy; CDP was not used because the policy explicitly prohibited routing around the blocked target. Bandit is not applicable because this stage only touches frontend TypeScript/React/locale files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

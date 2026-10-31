@@ -28,9 +28,9 @@ Verify PR review feedback for GatewayConfigSnapshotManager default assignment im
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified normal mapping snapshots were already rejected by GatewayConfigSnapshot validation. The still-valid issue was the direct GatewayConfigSnapshot instance path, where model_construct could bypass validation before GatewayConfigSnapshotManager._mutation_actions wrote the assignment. Added manager-level validation and canonical default assignment ids for planned and mutation actions.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

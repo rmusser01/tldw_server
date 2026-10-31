@@ -278,7 +278,11 @@ class _CapturingPostgresBackend:
         return []
 
 
-def test_postgres_schema_text_includes_watchlist_container_contract():
+def test_postgres_schema_text_includes_watchlist_container_contract(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.DB_Management.Watchlists_DB.ensure_tag_identity",
+        lambda *_args: None,
+    )
     backend = _CapturingPostgresBackend()
 
     WatchlistsDatabase(user_id=123, backend=backend)  # type: ignore[arg-type]

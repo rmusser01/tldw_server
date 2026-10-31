@@ -51,7 +51,7 @@ Create a docs-only implementation plan for the Stage 0 Persona/Buddy current-sta
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Created `Docs/superpowers/plans/2026-05-10-persona-buddy-stage-0-audit-implementation-plan.md`.
 - Plan creates the audit report artifact at `Docs/Reviews/PERSONA_BUDDY_CURRENT_STATE_AUDIT_2026_05_10.md`.
 - Plan names backend Persona endpoints/schemas/core services, frontend Persona Garden/Live/Buddy/wake services, MCP `persona_visuals`, existing tests, E2E workflows, and docs to inspect.
@@ -59,7 +59,7 @@ Create a docs-only implementation plan for the Stage 0 Persona/Buddy current-sta
 - Plan requires contract inventory, evidence table, known-good flow checklist, smoke/E2E candidates, and Stage 1 reliability/UX-only recommendations.
 - Verification: `git diff --check` passed; targeted `rg` checks confirmed required sections and key surfaces are present in the plan.
 - Bandit: skipped because this is a docs/backlog-only planning change with no touched Python code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

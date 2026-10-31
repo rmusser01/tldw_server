@@ -31,7 +31,7 @@ from ..tts_exceptions import (
 )
 from ..tts_resource_manager import get_resource_manager
 from ..tts_validation import TTSInputValidator, validate_tts_request
-from ..utils import parse_bool
+from ..utils import hold_tts_engine, parse_bool, tts_model_load_lock
 
 #
 # Local Imports
@@ -147,7 +147,6 @@ class EchoTTSAdapter(TTSAdapter):
         self._fish_ae = None
         self._pca_state = None
         self._echo_modules_loaded = False
-        self._model_lock = asyncio.Lock()
         self._cache_lock = asyncio.Lock()
         self._speaker_cache: OrderedDict[str, tuple[float, Any, Any]] = OrderedDict()
 
@@ -476,7 +475,7 @@ class EchoTTSAdapter(TTSAdapter):
     async def _ensure_models_loaded(self) -> None:
         if self._model is not None and self._fish_ae is not None and self._pca_state is not None:
             return
-        async with self._model_lock:
+        async with hold_tts_engine(tts_model_load_lock(self.provider_key, str(self.model_repo))) as run:
             if self._model is not None and self._fish_ae is not None and self._pca_state is not None:
                 return
 
@@ -499,7 +498,7 @@ class EchoTTSAdapter(TTSAdapter):
             except (TypeError, ValueError):
                 model_dtype = torch.bfloat16
 
-            self._model = await asyncio.to_thread(
+            self._model = await run(
                 inference.load_model_from_hf,
                 repo_id=self.model_repo,
                 device=self.device,
@@ -507,14 +506,14 @@ class EchoTTSAdapter(TTSAdapter):
                 compile=False,
                 delete_blockwise_modules=True,
             )
-            self._fish_ae = await asyncio.to_thread(
+            self._fish_ae = await run(
                 inference.load_fish_ae_from_hf,
                 repo_id=self.fish_ae_repo,
                 device=self.device,
                 dtype=torch.float32,
                 compile=False,
             )
-            self._pca_state = await asyncio.to_thread(
+            self._pca_state = await run(
                 inference.load_pca_state_from_hf,
                 repo_id=self.model_repo,
                 device=self.device,

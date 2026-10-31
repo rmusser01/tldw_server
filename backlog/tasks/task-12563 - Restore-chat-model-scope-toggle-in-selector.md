@@ -30,13 +30,13 @@ Address /chat UX rebaseline F6 by wiring the existing configured/catalog model s
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Starting focused /chat F6 model selector slice. Investigation found PlaygroundModelCatalogControls and useModelSelector scope state already existed, but PlaygroundForm did not pass those controls into ChatModelSelectorDropdown, whose popup still rendered the older inline search/sort header.
 
 Implemented catalogControls support in ChatModelSelectorDropdown and wired PlaygroundForm to pass PlaygroundModelCatalogControls into the model selector popup. Kept the fallback inline search/sort header for selector usages that do not provide catalogControls.
 
 Verification: RED focused run failed as expected because the dropdown ignored supplied catalog controls and PlaygroundForm did not contain catalogControls={modelCatalogControls}. GREEN focused run passed 8 tests across ChatModelSelectorDropdown.character-usability and Playground.cockpit-regression.guard. Broader nearby run passed 47 tests across selector, cockpit guard, cockpit a11y, and cockpit shell. TypeScript compiler gate still fails only on known baseline CharacterListContent.design-system.test.tsx GalleryCardDensity error. git diff --check passed. Bandit not run because touched code is TS/TSX UI only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

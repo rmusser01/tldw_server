@@ -39,9 +39,9 @@ Docs/superpowers/specs/2026-06-06-chat-mermaid-card-artifact-rail-design.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented TDD red/green flow for Mermaid chat cards. Red run failed on missing artifact action, prop forwarding, and context-aware ids. Green run passed the focused Vitest suite. TypeScript full UI check was attempted with an 8GB heap and failed on an unrelated existing TaskActivityNotice i18next count type error outside the touched files. Bandit is not applicable because no Python code changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

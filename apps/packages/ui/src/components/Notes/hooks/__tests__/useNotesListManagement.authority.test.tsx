@@ -7,9 +7,11 @@ import { createRoot } from "react-dom/client"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useNotesListManagement } from "../useNotesListManagement"
+import { useNotesGraphAuthorityScope } from "../useNotesGraphAuthorityScope"
 
 const mocks = vi.hoisted(() => ({
   bgRequest: vi.fn(),
+  getCurrentUser: vi.fn(),
   getSetting: vi.fn(),
   setSetting: vi.fn(),
   confirmDanger: vi.fn(),
@@ -25,6 +27,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/services/background-proxy", () => ({
   bgRequest: mocks.bgRequest
+}))
+
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: mocks.getCurrentUser }
 }))
 
 vi.mock("@/services/settings/registry", async (importOriginal) => {
@@ -126,6 +132,7 @@ const renderList = (
 describe("useNotesListManagement authority boundaries", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.getCurrentUser.mockReset()
     mocks.getSetting.mockResolvedValue(null)
     mocks.setSetting.mockResolvedValue(undefined)
     mocks.confirmDanger.mockResolvedValue(true)
@@ -775,4 +782,47 @@ describe("useNotesListManagement authority boundaries", () => {
       ])
     })
   })
+  it("fetches owned Notes after an initially failed identity lookup recovers through renewal", async () => {
+    const { queryClient, wrapper } = createHarness()
+    const token = (suffix: string) => `test.${btoa(JSON.stringify({ sub: "7" }))}.${suffix}`
+    const canonicalConfig = {
+      serverUrl: "https://notes.example.test",
+      authMode: "multi-user" as const,
+      accessToken: token("expired")
+    }
+    mocks.getCurrentUser
+      .mockRejectedValueOnce(new Error("Refresh transport unavailable"))
+      .mockResolvedValueOnce({ id: 7, is_active: true })
+    mocks.bgRequest.mockImplementation(async ({ path }: { path: string }) => {
+      if (path.startsWith("/api/v1/notes/collections")) return { collections: [], count: 0 }
+      return notesResponse("recovered-owned-note")
+    })
+    const { result, rerender } = renderHook(({ config }) => {
+      const authorityScope = useNotesGraphAuthorityScope({ config, loading: false })
+      return useNotesListManagement({
+        authorityScope,
+        isOnline: true,
+        message: mocks.message as unknown as MessageInstance,
+        confirmDanger: mocks.confirmDanger,
+        queryClient,
+        t: (key: string) => key,
+        keywordTokens: [],
+        setKeywordTokens: mocks.setKeywordTokens,
+        notebookKeywordTokens: []
+      })
+    }, { initialProps: { config: canonicalConfig }, wrapper })
+    await waitFor(() => expect(mocks.getCurrentUser).toHaveBeenCalledTimes(1))
+    expect(notesRequestPaths()).toEqual([])
+    expect(result.current.data).toBeUndefined()
+
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated", {
+      detail: { authorityChanged: false }
+    })))
+    rerender({ config: { ...canonicalConfig, accessToken: token("renewed") } })
+
+    await waitFor(() => expect(result.current.data?.map(note => note.id)).toEqual(["recovered-owned-note"]))
+    expect(result.current.total).toBe(1)
+    expect(notesRequestPaths().some(path => path.startsWith("/api/v1/notes/?"))).toBe(true)
+  })
+
 })

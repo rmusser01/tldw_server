@@ -2,12 +2,15 @@
 Property-based tests for user endpoints.
 """
 
+from datetime import timezone
 from unittest.mock import AsyncMock
 
 import pytest
-from email_validator import validate_email, EmailNotValidError
-from httpx import AsyncClient, ASGITransport
-from hypothesis import given, strategies as st, settings as hypothesis_settings, HealthCheck
+from email_validator import EmailNotValidError, validate_email
+from httpx import ASGITransport, AsyncClient
+from hypothesis import HealthCheck, given
+from hypothesis import settings as hypothesis_settings
+from hypothesis import strategies as st
 
 from tldw_Server_API.app.main import app
 
@@ -47,8 +50,17 @@ class TestUserEndpointsProperty:
         users_endpoints.update_user_email = AsyncMock()
 
         mock_conn = AsyncMock()
-        mock_conn.execute = AsyncMock()
+        mock_conn.execute = AsyncMock(return_value="UPDATE 1")
         mock_conn.fetchrow = AsyncMock(return_value=updated_user)
+        mock_conn.fetch = AsyncMock(
+            return_value=[
+                {
+                    "source_tag": "user",
+                    "source_id": test_user["id"],
+                    "candidate_value": test_user["created_at"].replace(tzinfo=timezone.utc),
+                }
+            ]
+        )
         mock_conn.commit = AsyncMock()
 
         mock_db_pool.transaction.return_value.__aenter__.return_value = mock_conn

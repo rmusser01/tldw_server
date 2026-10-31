@@ -1,4 +1,11 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import {
+  fireEvent,
+  render as renderUI,
+  screen,
+  waitFor,
+  within
+} from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   WORKSPACE_CONFLICT_NOTICE_THROTTLE_MS,
@@ -6,6 +13,13 @@ import {
   WORKSPACE_STORAGE_QUOTA_EVENT
 } from "@/store/workspace-events"
 import { ResearchWorkspace } from "../index"
+
+// Match the router context provided by both deployed shells.
+const render: typeof renderUI = (ui, options) =>
+  renderUI(ui, {
+    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>,
+    ...options
+  })
 
 const {
   mockGetMediaDetails,
@@ -124,9 +138,15 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
-vi.mock("@/utils/research-workspace-prefill", () => ({
-  consumeResearchWorkspacePrefill: vi.fn().mockResolvedValue(null),
-  buildKnowledgeQaSeedNote: vi.fn().mockReturnValue("")
+vi.mock("@/utils/use-research-workspace-prefill", () => ({
+  useResearchWorkspacePrefill: () => ({
+    attached: 0,
+    pending: 0,
+    failed: 0,
+    importing: false,
+    error: null,
+    retry: vi.fn(),
+  }),
 }))
 
 vi.mock("../WorkspaceHeader", () => ({

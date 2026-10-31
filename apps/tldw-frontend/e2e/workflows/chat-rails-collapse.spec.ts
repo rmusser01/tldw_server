@@ -143,7 +143,7 @@ test.describe("/chat siderail collapse", () => {
 
     const cockpitLeftRail = page.getByTestId("playground-cockpit-left-rail")
     await expect(cockpitLeftRail).toBeVisible()
-    await cockpitLeftRail.getByRole("button", { name: "Collapse context sidechannel" }).click()
+    await cockpitLeftRail.getByRole("button", { name: "Hide context" }).click()
 
     const cockpitRestore = page.getByTestId("playground-cockpit-left-rail-restore")
     await expect(cockpitRestore).toBeVisible()

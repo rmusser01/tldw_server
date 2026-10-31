@@ -44,7 +44,7 @@ Refresh the selected Watchlist Items tab into an alert-aware Updates triage surf
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started after Stage 4C commit b5df2e63b. Scope: visible Items/Updates triage refresh using existing Stage 4 backend/client contracts; preserve route compatibility and defer report-builder work to Stage 5.
 
 Implemented Updates-oriented selected-Watchlist triage copy, alert-match smart filtering, server-backed sort/filter params, row/reader alert context, backend batch review actions, and selected-Watchlist saved views with legacy localStorage import.
@@ -52,7 +52,7 @@ Implemented Updates-oriented selected-Watchlist triage copy, alert-match smart f
 Verification: focused Vitest slice passed: 7 files / 81 tests; locale JSON parse check passed; git diff --check passed; debug/any scan found no matches in touched frontend files.
 
 Known skip: Bandit is not applicable to this Stage 4D frontend TypeScript/locale-only slice. API docs and real-server CDP smoke remain scoped to Stage 4E.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

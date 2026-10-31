@@ -1,3 +1,5 @@
+import { getPersonalItemCount } from "../sourceHealth"
+import type { KnowledgeSourceHealthState } from "../types"
 import type { KnowledgeStatus } from "@/types/connection"
 
 export type KnowledgeReadyRecoveryKind =
@@ -20,6 +22,7 @@ export type KnowledgeReadyRecoveryState = {
 }
 
 type ClassifyKnowledgeReadyRecoveryInput = {
+  sourceHealth?: KnowledgeSourceHealthState
   knowledgeStatus: KnowledgeStatus
   selectedSourceCount: number
   webFallbackAvailable: boolean
@@ -28,11 +31,14 @@ type ClassifyKnowledgeReadyRecoveryInput = {
 
 export function classifyKnowledgeReadyRecoveryState({
   knowledgeStatus,
+  sourceHealth,
   selectedSourceCount,
   webFallbackAvailable,
   webFallbackEnabled,
 }: ClassifyKnowledgeReadyRecoveryInput): KnowledgeReadyRecoveryState {
-  const hasIndexedSources = knowledgeStatus !== "empty"
+  const personalCount = getPersonalItemCount(sourceHealth)
+  const hasIndexedSources =
+    personalCount == null ? knowledgeStatus !== "empty" : personalCount > 0
   const hasSelectedSources = selectedSourceCount > 0
   const canSearchWebOnly = webFallbackAvailable && webFallbackEnabled
   const canSearchPersonalLibrary = hasIndexedSources && hasSelectedSources

@@ -2,12 +2,7 @@ import React from "react"
 import { useMutation, type QueryClient } from "@tanstack/react-query"
 import { tldwClient, type ServerChatSummary } from "@/services/tldw/TldwApiClient"
 import { useNavigate } from "react-router-dom"
-import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
-import { focusComposer } from "@/hooks/useComposerFocus"
 import { useStoreMessageOption } from "@/store/option"
-import { useStoreChatModelSettings } from "@/store/model"
-import { usePlaygroundSessionStore } from "@/store/playground-session"
-import { useStorage } from "@plasmohq/storage/hook"
 import { shallow } from "zustand/shallow"
 import { exportCharacterToJSON, exportCharacterToPNG } from "@/utils/character-export"
 import {
@@ -139,9 +134,6 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
   } = deps
 
   const navigate = useNavigate()
-  const [, setSelectedCharacter] = useSelectedCharacter<any>(null)
-  const [, setStoredSystemPrompt] = useStorage<string | null>("selectedSystemPrompt", null)
-  const [, setStoredQuickPrompt] = useStorage<string | null>("selectedQuickPrompt", null)
 
   // Conversation state
   const [characterChats, setCharacterChats] = React.useState<ServerChatSummary[]>([])
@@ -154,8 +146,6 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
     setHistory,
     setMessages,
     setHistoryId,
-    setSelectedSystemPrompt,
-    setSelectedQuickPrompt,
     setServerChatId,
     setServerChatState,
     setServerChatTopic,
@@ -167,8 +157,6 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
       setHistory: state.setHistory,
       setMessages: state.setMessages,
       setHistoryId: state.setHistoryId,
-      setSelectedSystemPrompt: state.setSelectedSystemPrompt,
-      setSelectedQuickPrompt: state.setSelectedQuickPrompt,
       setServerChatId: state.setServerChatId,
       setServerChatState: state.setServerChatState,
       setServerChatTopic: state.setServerChatTopic,
@@ -241,15 +229,17 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
       if (!editId) {
         throw new Error("No character selected for editing")
       }
+      const selectedWorldBookIds =
+        editWorldBooksInitializedRef.current &&
+        typeof values?.world_book_ids !== "undefined"
+          ? normalizeWorldBookIds(values.world_book_ids)
+          : null
       const updatedCharacter = await tldwClient.updateCharacter(
         editId,
         buildCharacterPayload(values),
         editVersion ?? undefined
       )
-      if (typeof values?.world_book_ids !== "undefined") {
-        const selectedWorldBookIds = normalizeWorldBookIds(
-          values?.world_book_ids
-        )
+      if (selectedWorldBookIds !== null) {
         const editCharacterId = Number(editId)
         if (Number.isFinite(editCharacterId) && editCharacterId > 0) {
           await syncWorldBookSelection(
@@ -532,8 +522,6 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
       ...buildCharacterSelectionPayload(record),
       metadata: { selectionMode: "tracked" }
     }
-    await setSelectedCharacter(characterSelection)
-
     const readiness = buildCharacterChatReadiness({
       selectedCharacter: characterSelection,
       selectedModel: activeChatModel,
@@ -550,48 +538,16 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
       return
     }
 
-    // A row Chat action starts a fresh conversation. Establish that state before
-    // navigation so the composer cannot submit a previous prompt or history.
-    usePlaygroundSessionStore.getState().clearSession()
-    setHistoryId(null)
-    setHistory([])
-    setMessages([])
-    setServerChatId(null)
-    setSelectedSystemPrompt("")
-    setSelectedQuickPrompt(null)
-    useStoreChatModelSettings.getState().setSystemPrompt(undefined)
-    await Promise.all([setStoredSystemPrompt(null), setStoredQuickPrompt(null)])
+    // The destination owns preparation and acceptance of this fresh-chat intent.
     setChatIntentBlocker(null)
     navigate(buildCharacterChatPath({ characterId: characterSelection.id }))
-    setTimeout(() => {
-      focusComposer()
-    }, 0)
-  }, [
-    activeChatModel,
-    availableChatModels,
-    navigate,
-    setChatIntentBlocker,
-    setSelectedCharacter,
-    setHistoryId,
-    setHistory,
-    setMessages,
-    setServerChatId,
-    setSelectedSystemPrompt,
-    setSelectedQuickPrompt,
-    setStoredSystemPrompt,
-    setStoredQuickPrompt
-  ])
+  }, [activeChatModel, availableChatModels, navigate, setChatIntentBlocker])
 
   // --- Chat in new tab ---
   const handleChatInNewTab = React.useCallback(
     async (record: any) => {
-      const characterSelection = {
-        ...buildCharacterSelectionPayload(record),
-        metadata: { selectionMode: "tracked" }
-      }
-      await setSelectedCharacter(characterSelection)
       const opened = window.open(
-        resolveChatWorkspaceUrl({ characterId: characterSelection.id }),
+        resolveChatWorkspaceUrl({ characterId: resolveCharacterSelectionId(record) }),
         "_blank",
         "noopener,noreferrer"
       )
@@ -610,7 +566,7 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
         })
       }
     },
-    [notification, setSelectedCharacter, t]
+    [notification, t]
   )
 
   // --- Edit handler ---
@@ -764,7 +720,7 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
 
         notification.info({
           message: t("settings:manageCharacters.notification.deletedWithUndo", {
-            defaultValue: "Character '{{name}}' deleted",
+            defaultValue: "Character {{name}} moved to Trash",
             name
           }),
           description: (

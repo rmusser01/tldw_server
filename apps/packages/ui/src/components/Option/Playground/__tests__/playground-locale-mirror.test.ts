@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -46,6 +46,28 @@ const flattenNested = (
 };
 
 describe("playground locale mirror parity", () => {
+  it("localizes all media handoff conflict choices in supported locales", () => {
+    const localesRoot = path.resolve(srcRoot, "assets/locale");
+    const keys = ["conflictLabel", "conflict", "insert", "replace", "cancel"];
+    for (const locale of readdirSync(localesRoot)) {
+      const copy = JSON.parse(
+        readFileSync(path.join(localesRoot, locale, "playground.json"), "utf8"),
+      );
+      for (const key of keys) {
+        expect(
+          copy.mediaHandoff?.[key],
+          `${locale}:mediaHandoff.${key}`,
+        ).toEqual(expect.any(String));
+        expect(copy.mediaHandoff[key].trim()).not.toBe("");
+        if (locale !== "en") {
+          expect(copy.mediaHandoff[key]).not.toBe(
+            (playgroundLocale.mediaHandoff as Record<string, string>)[key],
+          );
+        }
+      }
+    }
+  });
+
   it("mirrors nested English playground strings into extension locale messages", () => {
     const flattenedNested = flattenNested(playgroundLocale);
     const extensionMessages = Object.fromEntries(

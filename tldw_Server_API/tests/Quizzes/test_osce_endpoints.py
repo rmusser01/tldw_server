@@ -516,7 +516,10 @@ def test_osce_router_applies_finite_ingress_limit_before_handler(monkeypatch):
     from tldw_Server_API.app.api.v1.API_Deps import auth_deps
     from tldw_Server_API.app.api.v1.endpoints import quizzes_osce
 
-    monkeypatch.setenv("RG_ENABLED", "0")
+    # check_rate_limit's fallback now honors the RG single switch (RG off means
+    # off everywhere); this test exercises the fallback itself, so RG must be
+    # explicitly enabled for it to enforce.
+    monkeypatch.setenv("RG_ENABLED", "1")
     monkeypatch.setattr(auth_deps, "_is_test_mode", lambda: False)
     monkeypatch.setenv("AUTH_DEPS_FALLBACK_RATE_LIMIT", "1")
     monkeypatch.setenv("AUTH_DEPS_FALLBACK_RATE_WINDOW_SECONDS", "60")

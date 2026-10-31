@@ -32,9 +32,9 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified PR comments: startup_service_groups still allowed worker_inventory=None while dropping registry-owned worker handles; telemetry guarded-exception test lacked a hook-invocation sentinel; post-worker shutdown helper keys currently match both strict production signatures; Qodo TODO comment targets a phase2-followup plan file that is absent from current HEAD. Red/green: added test_start_service_groups_requires_worker_inventory_before_starting_registry_owned_workers and confirmed it failed before the guard, then passed after start_service_groups now fails fast when worker_inventory is None. Added telemetry sentinel assertion and a post-worker helper/signature contract test. Verification: pytest startup_service_groups + shutdown_telemetry_services + shutdown_post_worker_services -q -> 16 passed, 5 warnings; pytest startup_service_tail -q -> 1 passed, 5 warnings; Bandit on startup_service_groups.py -> 0 findings; git diff --check -> clean. Follow-up CodeRabbit comments after push addressed: wrapped `_base_shutdown_kwargs` in Backlog final summary markdown and converted the post-worker failure stub to async. Verification: pytest test_shutdown_post_worker_services.py -q -> 10 passed, 5 warnings; git diff --check -> clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -38,7 +38,7 @@ Reason: Routine bug fix preserving the existing floating-shell geometry contract
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 The floating shell now clamps before paint on expansion/context changes and observes dock size changes, so asynchronous diagnostics and visual/live content cannot leave the shell at its compact lower-right coordinates. Position updates remain equality-guarded; dragging and persisted surface buckets retain their existing behavior. The dock has a viewport-height bound; its popover scrolls within the remaining flex space, with outer overflow as a fallback.
 Modified BuddyShellHost.tsx, BuddyShellDock.tsx, BuddyShellPopover.tsx, and BuddyShellHost.test.tsx.
 TDD: two new regressions failed on the original code at (1104,609) instead of (1044,17), and on unobserved content growth. Focused host/popover/position-store Vitest run: 46 passed across 3 files. Regression coverage includes opening, content growth, unchanged-size notifications without repeated position writes, collapse/remount position, and viewport resizing. Scoped ESLint passes using the WebUI config from apps/ (Next page-directory lookup disabled because these are shared components); git diff --check passes. Existing localStorage/i18next test-environment warnings remain.
@@ -47,7 +47,7 @@ ADR required: no; routine correction of the existing Track B floating-shell geom
 Real Chromium UAT at 1280x720: expanded Migu dock x938.55 y229 w325.45 h416; bottom645 within720. At1280x360 dock y16 h328 bottom344; popover client219/content331 with overflow auto; bottom Choose/Change Buddy link reachable after scrolling. Screenshots and DOM geometry captured for the coordinated UAT report.
 
 Coordinated final validation: 265 focused frontend tests, 54 backend tests, production Bandit0 findings, scoped frontend ESLint0 errors (warnings documented), unchanged Python lint baseline, real browser evidence and limitations recorded in Docs/Reviews/MIGU_BUDDY_UAT_2026_09_05.md. Repository-wide typechecking remains limited by80 diagnostics across6 unchanged unrelated files; no full suite run.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

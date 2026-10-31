@@ -8,6 +8,7 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.endpoints import characters_endpoint as characters
 from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendType, CharactersRAGDB
 
 pytestmark = pytest.mark.integration
@@ -88,6 +89,7 @@ def test_actual_character_world_books_route_returns_complete_rows(books, populat
     if populated:
         _seed(db, character)
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(characters.router, prefix="/api/v1/characters")
     app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     with TestClient(app, raise_server_exceptions=False) as client:
@@ -143,6 +145,7 @@ def test_actual_world_book_catalogue_route_returns_rows_and_counts(books, popula
     if populated:
         _seed(db, character)
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(characters.router, prefix="/api/v1/characters")
     app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     with TestClient(app, raise_server_exceptions=False) as client:
@@ -161,6 +164,7 @@ def test_create_world_book_route_persists_and_returns_readback(books):
     db, _service, _character = books
     requested_budget = 250
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(characters.router, prefix="/api/v1/characters")
     app.dependency_overrides[get_chacha_db_for_user] = lambda: db
 

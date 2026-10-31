@@ -52,7 +52,7 @@ Related setup docs:
 ```
 apps/
 ├── extension/           # WXT browser extension (build config, manifests)
-│   ├── entries/         # Thin wrappers pointing to shared entries
+│   ├── entrypoints/     # Thin wrappers pointing to shared entries
 │   └── wxt.config.ts    # Extension build configuration
 ├── packages/
 │   └── ui/
@@ -75,7 +75,7 @@ apps/
 │   │   └── shims/       # Browser API compatibility shims
 │   ├── hooks/           # Web-only hooks
 │   ├── lib/             # Web-only utilities
-│   └── components/      # Web-only components (if any)
+│   └── components/      # Web-only components (layout, networking, UI primitives)
 └── package.json         # Workspace root
 ```
 
@@ -87,6 +87,7 @@ apps/
 | `~/` | `packages/ui/src/` | `packages/ui/src/` | Alternative shared path |
 | `@tldw/ui` | `packages/ui/src/` | `packages/ui/src/` | Explicit shared package |
 | `@web/*` | N/A | `tldw-frontend/*` | Web-only modules |
+| `@tldw/api-types` | `packages/api-types/` | `packages/api-types/` | Generated API contract types (ADR-069) |
 
 ## Code Organization Rules
 

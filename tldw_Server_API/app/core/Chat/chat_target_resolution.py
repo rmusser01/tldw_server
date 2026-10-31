@@ -21,15 +21,13 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     configured_provider_model_from_snapshot,
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
-from tldw_Server_API.app.core.Chat.chat_service import (
-    _split_inline_provider_model,
-    resolve_provider_and_model,
-)
+from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_and_model
 from tldw_Server_API.app.core.config import (
     load_and_log_configs,
     load_comprehensive_config,
 )
 from tldw_Server_API.app.core.LLM_Calls import adapter_registry as _adapter_registry
+from tldw_Server_API.app.core.LLM_Calls.gateway import _split_inline_provider_model
 from tldw_Server_API.app.core.testing import is_test_mode
 
 

@@ -22,16 +22,51 @@ import {
   ReloadOutlined,
   UndoOutlined,
   PlayCircleOutlined,
-  EyeOutlined
+  EyeOutlined,
+  DownloadOutlined
 } from "@ant-design/icons"
 import { Alert } from "@/components/ui/primitives"
 import {
   deriveAdminGuardFromError,
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
-import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient"
+import type { BundleImportResult } from "@/services/tldw/domains/admin"
+import { downloadBlob } from "@/utils/download-blob"
+import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
+import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope"
+import { useAdminMutation, useAdminRequestScope } from "./admin-request-scope"
+
+import { formatAdminDateTime } from "./admin-format"
 
 // ── Backups Tab ──
+
+// Deterministic fallback row keys for records the server sends without an
+// id: a `dataset|created_at|filename|name` composite instead of
+// JSON.stringify, which leaks whole records into the DOM as keys and still
+// collides on identical rows (C-S5).
+const dataOpsRowKey = (r: any): string =>
+  r.id ?? r.backup_id ?? r.schedule_id ?? r.bundle_id ??
+  `${r.dataset ?? "ds"}|${r.created_at ?? ""}|${r.filename ?? r.name ?? ""}`
+
+// Duplicate composites (e.g. two schedules for one dataset before the first
+// run) get a fetch-order suffix (`#2`, `#3`, ...) so every row keeps a
+// stable, unique key across re-renders of the same snapshot.
+const tagDuplicateRowKeys = (records: any[]): any[] => {
+  const seen = new Map<string, number>()
+  let tagged = false
+  const result = records.map((record) => {
+    const base = dataOpsRowKey(record)
+    const nth = (seen.get(base) ?? 0) + 1
+    seen.set(base, nth)
+    if (nth > 1) {
+      tagged = true
+      return { ...record, _rowKey: `${base}#${nth}` }
+    }
+    return record
+  })
+  return tagged ? result : records
+}
 
 // Mirrors the backend's _BACKUP_DATASETS allowlist (#2917): the UI used to
 // offer "chachanotes"/"users", which the API rejects, and missed three valid
@@ -71,11 +106,34 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
   const [creatingSchedule, setCreatingSchedule] = useState(false)
   const selectedScheduleDataset = Form.useWatch("dataset", scheduleForm)
 
+  const getRestoreTarget = (record: {
+    id?: unknown
+    backup_id?: unknown
+    dataset?: unknown
+    user_id?: unknown
+  }) => {
+    const backupId = record.id ?? record.backup_id
+    if (typeof backupId !== "string" || !backupId.trim()) return null
+    const dataset = record.dataset
+    if (typeof dataset !== "string" || (!PER_USER_BACKUP_DATASETS.has(dataset) && dataset !== "authnz")) return null
+    const userId = record.user_id
+    if (userId != null) {
+      if (typeof userId !== "number" || !Number.isSafeInteger(userId) || userId <= 0) return null
+    } else if (PER_USER_BACKUP_DATASETS.has(dataset)) {
+      return null
+    }
+    return { backupId, dataset, userId: typeof userId === "number" ? userId : undefined }
+  }
+
   const loadBackups = useCallback(async () => {
     setLoading(true)
     try {
       const result = await tldwClient.listBackups()
-      setBackups(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.backups ?? [])
+      setBackups(
+        tagDuplicateRowKeys(
+          Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.backups ?? []
+        )
+      )
     } catch (err) {
       onGuardError(err)
     } finally {
@@ -87,7 +145,11 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
     setSchedulesLoading(true)
     try {
       const result = await tldwClient.listBackupSchedules()
-      setSchedules(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.schedules ?? [])
+      setSchedules(
+        tagDuplicateRowKeys(
+          Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.schedules ?? []
+        )
+      )
     } catch (err) {
       onGuardError(err)
     } finally {
@@ -119,10 +181,15 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
     }
   }
 
-  const handleRestore = async (backupId: string) => {
-    setRestoring(backupId)
+  const handleRestore = async (target: ReturnType<typeof getRestoreTarget>) => {
+    if (!target) return
+    setRestoring(target.backupId)
     try {
-      await tldwClient.restoreBackup(backupId)
+      await tldwClient.restoreBackup(target.backupId, {
+        dataset: target.dataset,
+        user_id: target.userId,
+        confirm: true
+      })
       message.success(t("settings:adminDataOps.backupRestored", "Backup restored successfully"))
       void loadBackups()
     } catch (err: any) {
@@ -166,6 +233,12 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
 
   const backupColumns = [
     {
+      title: t("settings:adminDataOps.colId", "ID"),
+      dataIndex: "id",
+      key: "id",
+      render: (v: string, record: { backup_id?: string }) => <code>{v ?? record.backup_id ?? "\u2014"}</code>
+    },
+    {
       title: t("settings:adminDataOps.colDataset", "Dataset"),
       dataIndex: "dataset",
       key: "dataset",
@@ -183,14 +256,14 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
       dataIndex: "created_at",
       key: "created_at",
       width: 180,
-      render: (v: string) => (v ? new Date(v).toLocaleString() : "\u2014")
+      render: (v: string) => (v ? formatAdminDateTime(v) : "\u2014")
     },
     {
       title: t("settings:adminDataOps.colSize", "Size"),
-      dataIndex: "size",
-      key: "size",
+      dataIndex: "size_bytes",
+      key: "size_bytes",
       width: 100,
-      render: (v: number | string) => v ?? "\u2014"
+      render: (v: number | string, record: { size?: number | string }) => v ?? record.size ?? "\u2014"
     },
     {
       title: t("settings:adminDataOps.colStatus", "Status"),
@@ -206,23 +279,38 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
       title: t("settings:adminDataOps.colActions", "Actions"),
       key: "actions",
       width: 100,
-      render: (_: any, record: any) => (
-        <Popconfirm
-          title={t("settings:adminDataOps.restoreConfirm", "Restore this backup? This will overwrite current data.")}
-          onConfirm={() => handleRestore(record.id ?? record.backup_id)}
-          okText={t("settings:adminDataOps.restore", "Restore")}
-          okButtonProps={{ danger: true }}
-        >
-          <Button
-            type="text"
-            size="small"
-            icon={<UndoOutlined />}
-            loading={restoring === (record.id ?? record.backup_id)}
+      render: (_: any, record: any) => {
+        const target = getRestoreTarget(record)
+        return (
+          <Popconfirm
+            title={t("settings:adminDataOps.restoreConfirm", "Restore this backup? This will overwrite current data.")}
+            description={target && (
+              <div>
+                <div>{t("settings:adminDataOps.backupArtifact", "Backup artifact")}: <code>{target.backupId}</code></div>
+                <div>{t("settings:adminDataOps.colDataset", "Dataset")}: <strong>{target.dataset}</strong></div>
+                <div>{target.dataset === "authnz"
+                  ? t("settings:adminDataOps.restoreServerWide", "Server-wide users and authentication data")
+                  : <>{t("settings:adminDataOps.colUser", "User")}: <strong>{target.userId}</strong></>}
+                </div>
+              </div>
+            )}
+            disabled={!target}
+            onConfirm={() => handleRestore(target)}
+            okText={t("settings:adminDataOps.restore", "Restore")}
+            okButtonProps={{ danger: true }}
           >
-            {t("settings:adminDataOps.restore", "Restore")}
-          </Button>
-        </Popconfirm>
-      )
+            <Button
+              type="text"
+              size="small"
+              icon={<UndoOutlined />}
+              disabled={!target}
+              loading={restoring === target?.backupId}
+            >
+              {t("settings:adminDataOps.restore", "Restore")}
+            </Button>
+          </Popconfirm>
+        )
+      }
     }
   ]
 
@@ -326,7 +414,7 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
         <Table
           dataSource={backups}
           columns={backupColumns}
-          rowKey={(r) => r.id ?? r.backup_id ?? JSON.stringify(r)}
+          rowKey={(r) => r._rowKey ?? dataOpsRowKey(r)}
           loading={loading}
           pagination={backups.length > 20 ? { pageSize: 20 } : false}
           size="small"
@@ -476,7 +564,7 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
         <Table
           dataSource={schedules}
           columns={scheduleColumns}
-          rowKey={(r) => r.id ?? r.schedule_id ?? JSON.stringify(r)}
+          rowKey={(r) => r._rowKey ?? dataOpsRowKey(r)}
           loading={schedulesLoading}
           pagination={false}
           size="small"
@@ -512,7 +600,7 @@ const DsrTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }
     setLoading(true)
     try {
       const result = await tldwClient.listDsrs({ limit: 100 })
-      setDsrs(Array.isArray(result) ? result : result?.data ?? result?.requests ?? [])
+      setDsrs(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.requests ?? [])
     } catch (err) {
       onGuardError(err)
     } finally {
@@ -534,7 +622,7 @@ const DsrTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }
         categories: values.categories?.length ? values.categories : undefined
       })
       setPreviewData(result)
-      setPendingDsr(values)
+      setPendingDsr({ ...values, client_request_id: crypto.randomUUID() })
       setPreviewModalOpen(true)
     } catch (err: any) {
       if (err?.errorFields) return
@@ -552,7 +640,7 @@ const DsrTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }
         requester_identifier: pendingDsr.requester_identifier,
         request_type: pendingDsr.request_type || "erasure",
         categories: pendingDsr.categories?.length ? pendingDsr.categories : undefined,
-        client_request_id: pendingDsr.client_request_id || undefined,
+        client_request_id: pendingDsr.client_request_id,
         notes: pendingDsr.notes || undefined
       })
       message.success(t("settings:adminDataOps.dsrRecorded", "DSR recorded"))
@@ -616,10 +704,13 @@ const DsrTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }
     },
     {
       title: t("settings:adminDataOps.colCreated", "Created"),
-      dataIndex: "created_at",
-      key: "created_at",
+      dataIndex: "requested_at",
+      key: "requested_at",
       width: 180,
-      render: (v: string) => (v ? new Date(v).toLocaleString() : "\u2014")
+      render: (v: string, record: { created_at?: string }) => {
+        const value = v || record.created_at
+        return value ? formatAdminDateTime(value) : "\u2014"
+      }
     },
     {
       title: t("settings:adminDataOps.colActions", "Actions"),
@@ -678,8 +769,7 @@ const DsrTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }
                 options={[
                   { value: "erasure", label: t("settings:adminDataOps.typeErasure", "Erasure (Right to be Forgotten)") },
                   { value: "export", label: t("settings:adminDataOps.typeExport", "Data Export") },
-                  { value: "access", label: t("settings:adminDataOps.typeAccess", "Access Request") },
-                  { value: "rectification", label: t("settings:adminDataOps.typeRectification", "Rectification") }
+                  { value: "access", label: t("settings:adminDataOps.typeAccess", "Access Request") }
                 ]}
               />
             </Form.Item>
@@ -689,11 +779,11 @@ const DsrTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }
                 placeholder={t("settings:adminDataOps.categoriesPlaceholder", "Select categories to include")}
                 allowClear
                 options={[
-                  { value: "media", label: t("settings:adminDataOps.categoryMedia", "Media") },
-                  { value: "chats", label: t("settings:adminDataOps.categoryChats", "Chats") },
+                  { value: "media_records", label: t("settings:adminDataOps.categoryMedia", "Media") },
+                  { value: "chat_messages", label: t("settings:adminDataOps.categoryChats", "Chats") },
                   { value: "notes", label: t("settings:adminDataOps.categoryNotes", "Notes") },
-                  { value: "embeddings", label: t("settings:adminDataOps.categoryEmbeddings", "Embeddings") },
-                  { value: "profile", label: t("settings:adminDataOps.categoryProfile", "Profile") }
+                  { value: "audit_events", label: t("settings:adminDataOps.datasetAudit", "Audit log") },
+                  { value: "embeddings", label: t("settings:adminDataOps.categoryEmbeddings", "Embeddings") }
                 ]}
               />
             </Form.Item>
@@ -712,6 +802,15 @@ const DsrTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }
               </Space>
             </Form.Item>
           </Form>
+        </div>
+        {/* Bounded snapshot (limit:100) — full server pagination waits on a
+            truthful total; disclose the truncation instead of hiding it. */}
+        <div style={{ marginBottom: 8 }}>
+          <span
+            style={{ color: "var(--color-text-secondary, #888)", fontSize: "0.85rem" }}
+          >
+            {t("settings:adminDataOps.showingFirst100Dsrs", "Showing first 100 requests")}
+          </span>
         </div>
         <Table
           dataSource={dsrs}
@@ -883,61 +982,161 @@ const RetentionPoliciesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ 
 // ── Bundles Tab ──
 
 const BundlesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }) => {
+  const { config, authorityLoading } = useCanonicalConnectionConfig()
+  const { t } = useTranslation("settings")
+  if (!config || authorityLoading) return <p role="status">{t("admin.resolvingConnection", "Resolving admin connection…")}</p>
+  return <BundlesWorkspace key={deriveConnectionAuthorityId(config)} config={config} onGuardError={onGuardError} />
+}
+
+type BundlePreview = { file: File; userId?: number; result: BundleImportResult }
+const BundlesWorkspace: React.FC<{ config: TldwConfig; onGuardError: (err: any) => void }> = ({ config, onGuardError }) => {
   const { t } = useTranslation(["settings", "common"])
+  const captureScope = useAdminRequestScope(config)
+  const { runMutation, mutating } = useAdminMutation(captureScope, onGuardError)
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
+  const [importUserId, setImportUserId] = useState<number | null>(null)
+  const [preview, setPreview] = useState<BundlePreview | null>(null)
+  const [confirmation, setConfirmation] = useState<BundlePreview | null>(null)
+  const [outcome, setOutcome] = useState<BundleImportResult | null>(null)
+  const [restoreUnconfirmed, setRestoreUnconfirmed] = useState(false)
+  const validUserId = importUserId !== null && Number.isSafeInteger(importUserId) && importUserId > 0
+  const recognized = new Set([...PER_USER_BACKUP_DATASETS, "authnz"])
+  const previewDatasets = preview?.result.validations?.map((item) => item.dataset) ?? []
+  const postgresPreview = previewDatasets.includes("postgresql")
+  const canRestore = Boolean(preview && !postgresPreview && preview.result.status === "compatible" &&
+    previewDatasets.length && new Set(previewDatasets).size === previewDatasets.length &&
+    preview.result.validations.every((item) => recognized.has(item.dataset) && item.compatible === true) &&
+    (!previewDatasets.some((item) => PER_USER_BACKUP_DATASETS.has(item)) || validUserId))
+  let targetServer = ""
+  try {
+    const url = new URL(config.serverUrl)
+    targetServer = url.origin + url.pathname.replace(/\/$/, "")
+  } catch { /* Invalid configuration is refused by the request transport. */ }
   const [bundles, setBundles] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [createForm] = Form.useForm()
   const [creating, setCreating] = useState(false)
+  const datasetOptions = useBackupDatasetOptions(t)
+  const selectedDatasets = Form.useWatch("datasets", createForm)
+  const databaseSelected = Array.isArray(selectedDatasets) && selectedDatasets.includes("postgresql")
+  const bundleDatasetOptions = [
+    ...datasetOptions.map((option) => ({ ...option, disabled: databaseSelected })),
+    { value: "postgresql", label: t("settings:adminDataOps.datasetPostgresql", "PostgreSQL database (all users and Jobs)"), disabled: Array.isArray(selectedDatasets) && selectedDatasets.some((dataset) => dataset !== "postgresql") }
+  ]
+  const needsUser = Array.isArray(selectedDatasets) && selectedDatasets.some((dataset) => PER_USER_BACKUP_DATASETS.has(dataset))
 
   const loadBundles = useCallback(async () => {
+    const scope = captureScope()
+    if (!scope) return
     setLoading(true)
     try {
-      const result = await tldwClient.listBundles()
-      setBundles(Array.isArray(result) ? result : result?.data ?? result?.bundles ?? [])
+      const result = await tldwClient.listBundles(scope)
+      if (scope.abortSignal.aborted) return
+      setBundles(tagDuplicateRowKeys(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.bundles ?? []))
     } catch (err) {
-      onGuardError(err)
+      if (!scope.abortSignal.aborted) onGuardError(err)
     } finally {
-      setLoading(false)
+      if (!scope.abortSignal.aborted) setLoading(false)
     }
-  }, [onGuardError])
+  }, [captureScope, onGuardError])
 
   useEffect(() => {
     void loadBundles()
   }, [loadBundles])
 
-  const handleCreate = async () => {
+  const handleCreate = () => runMutation(t("settings:adminDataOps.bundleCreateFailed", "Failed to create bundle"), async (scope) => {
+    const values = await createForm.validateFields()
+    if (scope.abortSignal.aborted) return
+    const databaseScope = values.datasets.includes("postgresql")
+    if (databaseScope && values.datasets.length !== 1) throw new Error(t("settings:adminDataOps.databaseExclusive", "Choose the PostgreSQL database by itself."))
+    setCreating(true)
     try {
-      const values = await createForm.validateFields()
-      setCreating(true)
-      await tldwClient.createBundle({ datasets: values.datasets })
+      await tldwClient.createBundle({
+        datasets: values.datasets,
+        user_id: values.datasets.some((dataset: string) => PER_USER_BACKUP_DATASETS.has(dataset)) ? values.user_id : undefined
+      }, scope)
+      if (scope.abortSignal.aborted) return
       message.success(t("settings:adminDataOps.bundleCreated", "Bundle created"))
       createForm.resetFields()
       void loadBundles()
-    } catch (err: any) {
-      if (err?.errorFields) return
-      message.error(sanitizeAdminErrorMessage(err, t("settings:adminDataOps.bundleCreateFailed", "Failed to create bundle")))
+    } catch (error) {
+      if (databaseScope && deriveAdminGuardFromError(error) === "forbidden") {
+        throw new Error(t("settings:adminDataOps.databasePermissionRequired", "Platform administrator access is required for whole-database backups."))
+      }
+      throw error
     } finally {
-      setCreating(false)
+      if (!scope.abortSignal.aborted) setCreating(false)
     }
-  }
+  })
 
-  const handleDelete = async (bundleId: string) => {
+  const handleDelete = (bundleId: string) => runMutation(t("settings:adminDataOps.bundleDeleteFailed", "Failed to delete bundle"), async (scope) => {
+    await tldwClient.deleteBundle(bundleId, scope)
+    if (scope.abortSignal.aborted) return
+    message.success(t("settings:adminDataOps.bundleDeleted", "Bundle deleted"))
+    void loadBundles()
+  })
+
+  const handleDownload = async (bundleId: string) => {
+    const scope = captureScope()
+    if (!scope) return
     try {
-      await tldwClient.deleteBundle(bundleId)
-      message.success(t("settings:adminDataOps.bundleDeleted", "Bundle deleted"))
-      void loadBundles()
-    } catch (err: any) {
-      message.error(sanitizeAdminErrorMessage(err, t("settings:adminDataOps.bundleDeleteFailed", "Failed to delete bundle")))
+      const blob = await tldwClient.downloadBundle(bundleId, scope)
+      if (scope.abortSignal.aborted) return
+      downloadBlob(blob, bundleId)
+      message.success(t("settings:adminDataOps.downloadStarted", "Download started"))
+    } catch (error) {
+      if (!scope.abortSignal.aborted) message.error(sanitizeAdminErrorMessage(error, t("settings:adminDataOps.downloadFailed", "Could not download this backup. Refresh the list and try again.")))
     }
   }
+  const handleValidate = () => runMutation(t("settings:adminDataOps.validateFailed", "Backup validation failed"), async (scope) => {
+    setPreview(null)
+    setOutcome(null)
+    setRestoreUnconfirmed(false)
+    if (!importFile) throw new Error(t("settings:adminDataOps.backupFileRequired", "Choose a backup ZIP file"))
+    if (importUserId !== null && !validUserId) throw new Error(t("settings:adminDataOps.bundleUserIdInvalid", "Enter a valid target user ID"))
+    const result = await tldwClient.importBundle(importFile, { user_id: importUserId ?? undefined, dry_run: true }, scope).catch((error: unknown) => {
+      if (error instanceof Error && /^(invalid_bundle|invalid_bundle_manifest)$/.test(sanitizeAdminErrorMessage(error, ""))) {
+        error.message = t("settings:adminDataOps.invalidBackupFormat", "This backup is damaged or uses an unsupported format. Choose a complete backup ZIP from a compatible server.")
+      }
+      throw error
+    })
+    if (scope.abortSignal.aborted) return
+    if (!result || typeof result.status !== "string" || !Array.isArray(result.validations) || !result.validations.every((item) => item && typeof item.dataset === "string" && typeof item.compatible === "boolean" && (item.message === undefined || typeof item.message === "string")) || !Array.isArray(result.warnings) || !result.warnings.every((item) => typeof item === "string")) {
+      throw new Error(t("settings:adminDataOps.invalidValidation", "The server did not return a valid backup validation result."))
+    }
+    setPreview({ file: importFile, userId: importUserId ?? undefined, result })
+  })
+  const handleRestore = () => runMutation(t("settings:adminDataOps.restoreNotConfirmed", "Restore was not confirmed. Inspect the target data before retrying."), async (scope) => {
+    if (!canRestore || !confirmation || confirmation !== preview || confirmation.file !== importFile || confirmation.userId !== (importUserId ?? undefined)) return
+    const checked = confirmation
+    setPreview(null)
+    setRestoreUnconfirmed(true)
+    const result = await tldwClient.importBundle(checked.file, { user_id: checked.userId, dry_run: false }, scope)
+    if (scope.abortSignal.aborted) return
+    if (!result || typeof result.status !== "string" || !Array.isArray(result.datasets_restored) || !result.datasets_restored.every((item) => typeof item === "string") || !Array.isArray(result.warnings) || !result.warnings.every((item) => typeof item === "string") || (result.rollback_failures !== undefined && (!Array.isArray(result.rollback_failures) || !result.rollback_failures.every((item) => typeof item === "string")))) {
+      throw new Error(t("settings:adminDataOps.restoreNotConfirmed", "Restore was not confirmed. Inspect the target data before retrying."))
+    }
+    setOutcome(result)
+    const expected = checked.result.validations.map((item) => item.dataset).sort()
+    const actual = Array.isArray(result.datasets_restored) ? [...result.datasets_restored].sort() : []
+    const complete = result.status === "imported" && expected.length === actual.length && expected.every((item, index) => item === actual[index]) && !result.rollback_failures?.length
+    if (!complete) throw new Error(t("settings:adminDataOps.restoreIncomplete", "Restore is incomplete. Review the restored datasets and warnings before retrying."))
+    setRestoreUnconfirmed(false)
+    setConfirmation(null)
+    setImportFile(null)
+    if (fileInput.current) fileInput.current.value = ""
+    message.success(t("settings:adminDataOps.backupRestored", "Backup restored successfully"))
+    void loadBundles()
+  })
 
   const bundleColumns = [
     {
       title: t("settings:adminDataOps.colId", "ID"),
-      dataIndex: "id",
-      key: "id",
+      dataIndex: "bundle_id",
+      key: "bundle_id",
       width: 200,
-      render: (v: string) => <code style={{ fontSize: 12 }}>{v}</code>
+      render: (v: string, record: { id?: string }) => <code style={{ fontSize: 12 }}>{v ?? record.id ?? "\u2014"}</code>
     },
     {
       title: t("settings:adminDataOps.colDatasets", "Datasets"),
@@ -953,21 +1152,24 @@ const BundlesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
       dataIndex: "created_at",
       key: "created_at",
       width: 180,
-      render: (v: string) => (v ? new Date(v).toLocaleString() : "\u2014")
+      render: (v: string) => (v ? formatAdminDateTime(v) : "\u2014")
     },
     {
       title: t("settings:adminDataOps.colActions", "Actions"),
       key: "actions",
       width: 80,
       render: (_: any, record: any) => (
+        <Space wrap>
+        <Button type="text" size="small" icon={<DownloadOutlined />} aria-label={`${t("settings:adminDataOps.download", "Download")} ${record.bundle_id ?? record.id}`} onClick={() => handleDownload(record.bundle_id ?? record.id)} disabled={mutating} />
         <Popconfirm
           title={t("settings:adminDataOps.deleteBundleConfirm", "Delete this bundle?")}
           onConfirm={() => handleDelete(record.id ?? record.bundle_id)}
           okText={t("settings:adminDataOps.delete", "Delete")}
           okButtonProps={{ danger: true }}
         >
-          <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+          <Button type="text" size="small" danger icon={<DeleteOutlined />} disabled={mutating} />
         </Popconfirm>
+        </Space>
       )
     }
   ]
@@ -982,7 +1184,7 @@ const BundlesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
       }
     >
       <div style={{ marginBottom: 16 }}>
-        <Form form={createForm} layout="inline">
+        <Form form={createForm} name="admin-bundle-create" layout="inline" disabled={mutating}>
           <Form.Item
             name="datasets"
             rules={[{ required: true, message: t("settings:adminDataOps.datasetsRequired", "Select at least one dataset") }]}
@@ -991,14 +1193,22 @@ const BundlesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
               mode="multiple"
               placeholder={t("settings:adminDataOps.datasetsPlaceholder", "Select datasets")}
               style={{ width: 320 }}
-              options={[
-                { value: "media", label: t("settings:adminDataOps.datasetMedia", "Media") },
-                { value: "chachanotes", label: t("settings:adminDataOps.datasetChaChaNotes", "ChaChaNotes") },
-                { value: "users", label: t("settings:adminDataOps.datasetUsers", "Users") },
-                { value: "evaluations", label: t("settings:adminDataOps.datasetEvaluations", "Evaluations") }
-              ]}
+              options={bundleDatasetOptions}
             />
           </Form.Item>
+          {needsUser && (
+            <Form.Item
+              name="user_id"
+              label={t("settings:adminDataOps.bundleUserId", "Target user ID")}
+              preserve={false}
+              rules={[
+                { required: true, message: t("settings:adminDataOps.bundleUserIdRequired", "Enter a target user ID") },
+                { type: "integer", min: 1, max: Number.MAX_SAFE_INTEGER, message: t("settings:adminDataOps.bundleUserIdInvalid", "Enter a valid target user ID") }
+              ]}
+            >
+              <InputNumber style={{ width: 160 }} />
+            </Form.Item>
+          )}
           <Form.Item>
             <Button
               type="primary"
@@ -1010,15 +1220,63 @@ const BundlesTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
             </Button>
           </Form.Item>
         </Form>
+        {databaseSelected && <p role="note">{t("settings:adminDataOps.databaseCoverage", "Platform administrator only. Backs up the co-located PostgreSQL database, including all users, stored content and Jobs. Uploaded files, local SQLite, models and external stores are excluded. Recovery requires the offline helper.")}</p>}
       </div>
       <Table
         dataSource={bundles}
         columns={bundleColumns}
-        rowKey={(r) => r.id ?? r.bundle_id ?? JSON.stringify(r)}
+        rowKey={(r) => r._rowKey ?? dataOpsRowKey(r)}
         loading={loading}
         pagination={bundles.length > 20 ? { pageSize: 20 } : false}
         size="small"
       />
+      <h3 style={{ marginTop: 24 }}>{t("settings:adminDataOps.restoreBundleTitle", "Restore a backup")}</h3>
+      <Form layout="vertical">
+        <Form.Item label={t("settings:adminDataOps.backupZipFile", "Backup ZIP file")} htmlFor="admin-bundle-file">
+          <input id="admin-bundle-file" ref={fileInput} type="file" accept=".zip,application/zip" disabled={mutating} onChange={(event) => { setImportFile(event.target.files?.[0] ?? null); setPreview(null); setOutcome(null) }} />
+        </Form.Item>
+        <Form.Item label={t("settings:adminDataOps.restoreTargetId", "Restore target user ID")} htmlFor="admin-bundle-restore-user" extra={t("settings:adminDataOps.restoreTargetHelp", "Required for per-user datasets; leave blank for PostgreSQL database archives. Users and authentication affect the entire server.")}>
+          <InputNumber id="admin-bundle-restore-user" value={importUserId} disabled={mutating} onChange={(value) => { setImportUserId(value); setPreview(null); setOutcome(null) }} />
+        </Form.Item>
+        <Space wrap>
+          <Button onClick={handleValidate} disabled={!importFile || mutating} loading={mutating && !confirmation}>{t("settings:adminDataOps.validateBackup", "Validate backup")}</Button>
+          <Button danger disabled={!canRestore || mutating} onClick={() => setConfirmation(preview)}>{t("settings:adminDataOps.restoreValidated", "Restore validated backup")}</Button>
+        </Space>
+      </Form>
+      {preview && <div role="status" style={{ marginTop: 16, overflowWrap: "anywhere" }}>
+        <p>{preview.file.name}</p>
+        <p>{preview.result.status}</p>
+        {preview.result.validations?.map((item) => <p key={item.dataset}><strong>{item.dataset}</strong>: {item.message}</p>)}
+        {preview.result.warnings?.map((warning, index) => <p key={index}>{warning}</p>)}
+        {postgresPreview && <section aria-label={t("settings:adminDataOps.databaseRecovery", "Offline PostgreSQL recovery")}>
+          <h4>{t("settings:adminDataOps.databaseRecovery", "Offline PostgreSQL recovery")}</h4>
+          <p>{t("settings:adminDataOps.targetServer", "Target server")}: {targetServer}</p>
+          <p>{t("settings:adminDataOps.databaseOfflineSteps", "Stop all API, Jobs and Scheduler clients and prevent reconnection. Use a separate recovery target for rehearsal. This replaces the database for all users and stored Jobs.")}</p>
+          <code>python Helper_Scripts/pg_backup_restore.py restore-bundle --bundle-file &lt;trusted-backup.zip&gt; --confirm-database &lt;target-database&gt; --confirm-offline</code>
+          <p>{t("settings:adminDataOps.databaseRestartSteps", "After restore, verify data and review queued or leased Jobs. Explicitly decide which work to resume or cancel before a cold restart and normal sign-in.")}</p>
+        </section>}
+        {!canRestore && !postgresPreview && <p>{t("settings:adminDataOps.restoreNeedsValidScope", "Restore requires complete compatible validation and an explicit target for per-user data.")}</p>}
+      </div>}
+      {restoreUnconfirmed && <Alert variant="warning" title={t("settings:adminDataOps.restoreNotConfirmed", "Restore was not confirmed. Inspect the target data before retrying.")} />}
+      {outcome && <div role="status" style={{ marginTop: 16, overflowWrap: "anywhere" }}>
+        <p>{t("settings:adminDataOps.restoredDatasets", "Restored datasets")}: {outcome.datasets_restored?.join(", ") || "—"}</p>
+        {outcome.warnings?.map((warning, index) => <p key={index}>{warning}</p>)}
+        {outcome.rollback_failures?.map((failure, index) => <p key={index}>{failure}</p>)}
+      </div>}
+      <Modal title={t("settings:adminDataOps.restoreBundleConfirm", "Restore backup to this server?")} open={Boolean(confirmation)}
+        onOk={handleRestore} onCancel={() => { if (!mutating) setConfirmation(null) }}
+        okText={t("settings:adminDataOps.restoreBackup", "Restore backup")} cancelText={t("common:cancel", "Cancel")}
+        okButtonProps={{ danger: true, disabled: !canRestore }} confirmLoading={mutating}
+        cancelButtonProps={{ disabled: mutating }} closable={!mutating} maskClosable={!mutating} keyboard={!mutating}>
+        <Descriptions column={1} size="small">
+          <Descriptions.Item label={t("settings:adminDataOps.backupZipFile", "Backup ZIP file")}>{confirmation?.file.name}</Descriptions.Item>
+          <Descriptions.Item label={t("settings:adminDataOps.targetServer", "Target server")}>{targetServer}</Descriptions.Item>
+          <Descriptions.Item label={t("settings:adminDataOps.restoreTargetId", "Restore target user ID")}>{confirmation?.userId ? `User ${confirmation.userId}` : t("settings:adminDataOps.serverWide", "Server-wide")}</Descriptions.Item>
+          <Descriptions.Item label={t("settings:adminDataOps.colDatasets", "Datasets")}>{confirmation?.result.validations.map((item) => item.dataset).join(", ")}</Descriptions.Item>
+        </Descriptions>
+        {confirmation?.result.validations.some((item) => item.dataset === "authnz") && <Alert variant="warning" title={t("settings:adminDataOps.restoreServerWide", "Server-wide users and authentication data")} />}
+        <p>{t("settings:adminDataOps.restoreBundleWarning", "This replaces the selected data on this server. Use an isolated target server for a recovery rehearsal.")}</p>
+      </Modal>
     </Card>
   )
 }

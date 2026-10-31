@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -13,6 +15,9 @@ from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
 from tldw_Server_API.app.services import auth_service
 
 
+_DOLLAR_PARAM = re.compile(r"\$\d+")
+
+
 def _profile_candidate(user_id: int) -> list[dict[str, Any]]:
     return [
         {
@@ -23,12 +28,73 @@ def _profile_candidate(user_id: int) -> list[dict[str, Any]]:
     ]
 
 
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_auth_service_profile_writes_use_sqlite_pool_transaction(tmp_path: Path) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+    from tldw_Server_API.app.core.AuthNZ.settings import Settings
+    from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
+
+    pool = DatabasePool(
+        Settings(AUTH_MODE="single_user", DATABASE_URL=f"sqlite:///{tmp_path / 'auth.db'}")
+    )
+    await pool.initialize()
+    try:
+        users = UsersDB(pool)
+        await users.initialize(ensure_schema=False)
+        seed_hash = "hash"
+        user = await users.create_user(
+            username="sqlite-profile-service",
+            email="sqlite-profile-service@example.com",
+            password_hash=seed_hash,
+        )
+        user_id = int(user["id"])
+        now = datetime(2026, 7, 5, 6, 25, 52, tzinfo=timezone.utc)
+
+        changed = await auth_service.verify_user_email_once(
+            pool,
+            user_id=user_id,
+            email="sqlite-profile-service@example.com",
+            now_utc=now,
+        )
+        assert changed == 1
+        await auth_service.mark_user_verified(pool, user_id=user_id, now_utc=now)
+        await auth_service.update_user_last_login(pool, user_id=user_id, now=now)
+
+        row = await pool.fetchone(
+            "SELECT is_verified, last_login, profile_version FROM users WHERE id = ?",
+            user_id,
+        )
+        assert bool(row["is_verified"]) is True
+        assert row["last_login"] is not None
+        assert row["profile_version"] is not None
+    finally:
+        await pool.close()
+
+
 class _Cursor:
     def __init__(self, row: Any) -> None:
         self._row = row
 
     async def fetchone(self) -> Any:
         return self._row
+
+
+class _SqliteAdapterConn:
+    """Models the backend-specific SQLite adapter contract.
+
+    Mirrors AuthNZ's guarded SQLite connection: variadic ``execute`` with
+    ``$N`` -> ``?`` normalization performed inside the adapter, and cursors
+    exposing ``fetchone`` for single-row reads.
+    """
+
+    def __init__(self, row: Any = None) -> None:
+        self._row = row
+        self.calls: list[tuple[str, tuple[Any, ...]]] = []
+
+    async def execute(self, query: str, *params: Any) -> _Cursor:
+        self.calls.append((_DOLLAR_PARAM.sub("?", query), params))
+        return _Cursor(self._row)
 
 
 @pytest.mark.unit
@@ -73,16 +139,19 @@ async def test_fetch_user_by_login_identifier_prefers_fetchrow() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_fetch_user_by_login_identifier_sqlite_fallback_uses_qmark() -> None:
-    class _SqliteLikeConn:
-        def __init__(self) -> None:
-            self.calls: list[tuple[str, tuple[Any, ...]]] = []
+async def test_raw_sqlite_execute_signature_is_no_longer_shimmed() -> None:
+    class _RawSqliteSignatureConn:
+        async def execute(self, query: str, params: tuple[Any, ...]) -> _Cursor:  # noqa: ARG002
+            raise AssertionError("compat shim must not retry execute(query, tuple(params))")
 
-        async def execute(self, query: str, params: tuple[Any, ...]) -> _Cursor:
-            self.calls.append((query, params))
-            return _Cursor({"id": 3, "username": "bob"})
+    with pytest.raises(TypeError):
+        await auth_service.fetch_user_by_login_identifier(_RawSqliteSignatureConn(), "bob")
 
-    db = _SqliteLikeConn()
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_fetch_user_by_login_identifier_sqlite_adapter_uses_fetchone() -> None:
+    db = _SqliteAdapterConn(row={"id": 3, "username": "bob"})
 
     result = await auth_service.fetch_user_by_login_identifier(db, "BOB")
 
@@ -97,19 +166,16 @@ async def test_fetch_user_by_login_identifier_sqlite_fallback_uses_qmark() -> No
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_update_user_password_hash_commits_sqlite_like_connection() -> None:
-    class _SqliteLikeConn:
+async def test_update_user_password_hash_commits_sqlite_adapter_connection() -> None:
+    class _CommittingSqliteAdapter(_SqliteAdapterConn):
         def __init__(self) -> None:
-            self.calls: list[tuple[str, tuple[Any, ...]]] = []
+            super().__init__()
             self.commits = 0
-
-        async def execute(self, query: str, params: tuple[Any, ...]) -> None:
-            self.calls.append((query, params))
 
         async def commit(self) -> None:
             self.commits += 1
 
-    db = _SqliteLikeConn()
+    db = _CommittingSqliteAdapter()
 
     await auth_service.update_user_password_hash(db, 42, "new-hash")
 
@@ -120,34 +186,31 @@ async def test_update_user_password_hash_commits_sqlite_like_connection() -> Non
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_fetch_active_user_by_id_normalizes_sqlite_tuple_boolean() -> None:
-    class _SqliteLikeConn:
-        async def execute(self, query: str, params: tuple[Any, ...]) -> _Cursor:
-            assert query == "SELECT * FROM users WHERE id = ? AND is_active = ?"
-            assert params == (9, True)
-            return _Cursor(
-                (
-                    9,
-                    "f7d8d7ac-2c08-4f50-92dd-111111111111",
-                    "carol",
-                    "carol@example.com",
-                    "hash",
-                    "user",
-                    1,
-                    0,
-                    "2026-01-01T00:00:00",
-                    "2026-01-01T00:00:00",
-                    "2026-01-01T00:00:00",
-                    1024,
-                    12.5,
-                )
-            )
+    db = _SqliteAdapterConn(
+        row=(
+            9,
+            "f7d8d7ac-2c08-4f50-92dd-111111111111",
+            "carol",
+            "carol@example.com",
+            "hash",
+            "user",
+            1,
+            0,
+            "2026-01-01T00:00:00",
+            "2026-01-01T00:00:00",
+            "2026-01-01T00:00:00",
+            1024,
+            12.5,
+        )
+    )
 
-    result = await auth_service.fetch_active_user_by_id(_SqliteLikeConn(), 9)
+    result = await auth_service.fetch_active_user_by_id(db, 9)
 
     assert result is not None
     assert result["id"] == 9
     assert result["is_active"] is True
     assert result["username"] == "carol"
+    assert db.calls == [("SELECT * FROM users WHERE id = ? AND is_active = ?", (9, True))]
 
 
 @pytest.mark.unit
@@ -191,42 +254,37 @@ async def test_update_user_last_login_uses_adapter_query_shape() -> None:
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_managed_sqlite_service_does_not_commit_caller_transaction() -> None:
-    class _ManagedSqliteConn:
+    class _ManagedSqliteAdapter(_SqliteAdapterConn):
         _authnz_profile_user_backend = "sqlite"
         _authnz_profile_user_guard_identity = object()
 
         def __init__(self) -> None:
+            super().__init__()
             self.commits = 0
-
-        async def execute(self, query: str, params: tuple[Any, ...]) -> None:
-            assert query == "UPDATE users SET password_hash = ? WHERE id = ?"
-            assert params == ("new-hash", 42)
 
         async def commit(self) -> None:
             self.commits += 1
 
-    db = _ManagedSqliteConn()
+    db = _ManagedSqliteAdapter()
 
     await auth_service.update_user_password_hash(db, 42, "new-hash")
 
+    assert db.calls == [("UPDATE users SET password_hash = ? WHERE id = ?", ("new-hash", 42))]
     assert db.commits == 0
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_store_password_reset_token_sqlite_fallback_normalizes_placeholders() -> None:
-    class _SqliteLikeConn:
+async def test_store_password_reset_token_sqlite_adapter_normalizes_placeholders() -> None:
+    class _CommittingSqliteAdapter(_SqliteAdapterConn):
         def __init__(self) -> None:
-            self.calls: list[tuple[str, tuple[Any, ...]]] = []
+            super().__init__()
             self.commits = 0
-
-        async def execute(self, query: str, params: tuple[Any, ...]) -> None:
-            self.calls.append((query, params))
 
         async def commit(self) -> None:
             self.commits += 1
 
-    db = _SqliteLikeConn()
+    db = _CommittingSqliteAdapter()
     expires = datetime(2026, 2, 9, 12, 30, 0)
 
     await auth_service.store_password_reset_token(
@@ -247,16 +305,9 @@ async def test_store_password_reset_token_sqlite_fallback_normalizes_placeholder
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_fetch_password_reset_token_record_sqlite_fallback_dynamic_in_clause() -> None:
-    class _SqliteLikeConn:
-        def __init__(self) -> None:
-            self.calls: list[tuple[str, tuple[Any, ...]]] = []
+async def test_fetch_password_reset_token_record_sqlite_adapter_dynamic_in_clause() -> None:
+    db = _SqliteAdapterConn(row=(55, None))
 
-        async def execute(self, query: str, params: tuple[Any, ...]) -> _Cursor:
-            self.calls.append((query, params))
-            return _Cursor((55, None))
-
-    db = _SqliteLikeConn()
     token_id, used_at = await auth_service.fetch_password_reset_token_record(
         db,
         user_id=4,

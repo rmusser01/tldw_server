@@ -35,9 +35,9 @@ Trigger content alerts from the Watchlists ingestion pipeline and keep run-stat 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 3C RED: test_watchlist_alert_rules.py and test_watchlist_content_alerts_pipeline.py failed on missing health-oriented run-stat payload and missing pipeline content-alert invocation. GREEN: 11 focused tests passed after implementation. Regression: watchlist alert rules, content-alert pipeline tests, and Topic Monitoring tests passed: 26 passed. Bandit: /tmp/bandit_watchlists_stage3c_pipeline_alerts.json with zero errors/results. Documentation: API docs were already updated in Stage 3B; no additional public route contract changed in Stage 3C.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

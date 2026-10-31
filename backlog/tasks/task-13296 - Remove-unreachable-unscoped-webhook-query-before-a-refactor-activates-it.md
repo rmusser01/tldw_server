@@ -54,7 +54,7 @@ Found by the comprehensive core-module review; independently verified by the orc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 CORRECTION by the filer, 2026-09-21. This task was filed as a live cross-user leak. That was wrong, and the error was mine: I read the unscoped query and its is_test_mode() gate but did not trace reachability.
 
 The block is UNREACHABLE. _get_webhooks opens with 'if _is_test_mode():' whose branch returns unconditionally (webhook_manager.py:548 guard, return at :555-564). So the two later fallbacks -- both guarded by 'if not webhooks and _is_test_mode()' -- can only be evaluated on the path where _is_test_mode() is False, where their own guard is therefore False. Neither ever executes, in either mode.
@@ -64,7 +64,7 @@ Proven, not reasoned: tests/Evaluations/unit/test_webhook_manager_user_scoping.p
 What remains true and why this is still worth doing: an unscoped 'SELECT id, url, secret, ... FROM webhook_registrations WHERE active = ?' sat in the file, dormant, behind a condition that can never be true. The early return keeping it dead is itself a TEST_MODE hack and a plausible refactor target; removing it would have activated a cross-user disclosure of webhook URLs and signing secrets. Removed rather than left dormant, with the parametrized test as the guard against reactivation.
 
 Severity corrected High -> Medium: latent hazard and dead code, not a live disclosure. The is_test_mode-reads-an-env-var observation still stands as a general concern (see AUTHNZ-1, which documents four strictness levels for test-context detection), but it is not exploitable here.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

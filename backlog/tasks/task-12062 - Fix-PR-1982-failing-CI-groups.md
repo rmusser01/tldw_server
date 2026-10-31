@@ -25,7 +25,7 @@ Address current failing GitHub Actions checks on PR #1982 with minimal targeted 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented minimal fixes for the current PR #1982 failing CI groups:
 - Restored README release status wording expected by the release docs contract.
 - Sent setup install plans to background execution without the false default trusted_custom_model_acknowledged flag when no custom embedding models are requested.
@@ -47,14 +47,12 @@ Verification:
 Known skips/blockers:
 - The macOS CI sandbox failure is Python 3.12-specific in Actions; local verification used the project Python 3.11 venv because no usable local Python 3.12 pytest environment is installed.
 - Two untracked watchlist template files are present in the worktree but are unrelated to this task and intentionally not staged.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Prepared and verified targeted fixes for the current PR #1982 CI failures covering release docs, setup install-plan queuing, audio auth/BYOK behavior, ChromaDB embedding dimension recovery, embeddings policy codes, TTS env isolation, sandbox store env precedence, Docker env-file parsing, and the privilege route snapshot.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

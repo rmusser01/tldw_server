@@ -41,9 +41,9 @@ Task 3 slice from the unified onboarding plan. Add backend-generated setup provi
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started Task 3 subagent-driven slice after TASK-490 cleared spec and code-quality review at 3bd11d4e3f805cce849759319c0407c8711fb7dd. Scope: backend-generated setup provider catalog, provider save/validation schemas and endpoints, local OpenAI-compatible endpoint diagnostics, and regression coverage. Task 3 must reuse `_require_first_run_write_access` from Task 2 for setup writes.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

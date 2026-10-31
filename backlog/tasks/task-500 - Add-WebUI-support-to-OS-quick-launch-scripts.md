@@ -49,7 +49,6 @@ Docs/superpowers/plans/2026-05-24-quick-launch-webui-implementation-plan.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Red-green coverage recorded in `tldw_Server_API/tests/Utils/test_quick_launch_scripts.py`: the new consolidation assertions first failed against API-only root launchers and duplicated installer run scripts, then passed after consolidation.
 - Verification passed: focused launcher and onboarding docs suites reported 34 passed; Bash syntax checks passed for touched shell launchers and installer scripts; root and wrapper help output returned successfully; Bandit reported no findings for the touched Python test file; `git diff --check` passed.
@@ -58,7 +57,6 @@ Docs/superpowers/plans/2026-05-24-quick-launch-webui-implementation-plan.md
 - Qodo review coverage: added explicit regression assertions for documented launcher tests, direct Uvicorn PID capture in shell all-mode cleanup, and removal of the brittle legacy Windows exit-count assertion.
 - PowerShell parser execution was skipped because neither `pwsh` nor `powershell` is installed on this host.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

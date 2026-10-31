@@ -11,7 +11,6 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
 
@@ -136,6 +135,17 @@ def _b64_key(byte_char: bytes) -> str:
 
 def _auth_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+async def _set_user_active(pool, user_id: int, value: bool | None) -> None:
+    from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
+
+    users = UsersDB(pool)
+    await users.initialize(ensure_schema=False)
+    await users.update_user(user_id, is_active=value)
+    persisted = await pool.fetchrow("SELECT is_active FROM users WHERE id = $1", user_id)
+    assert persisted is not None
+    assert persisted["is_active"] is value
 
 
 def _capture_real_openai_adapter_headers(monkeypatch):
@@ -355,7 +365,7 @@ async def test_authorized_shared_fetch_rejects_null_activity_boundaries_postgres
     ) is not None
 
     if null_boundary in {"team_user", "org_user"}:
-        await UsersDB(test_db_pool).update_user(user_id, is_active=None)
+        await _set_user_active(test_db_pool, user_id, None)
     elif null_boundary == "team_membership":
         await test_db_pool.execute(
             "UPDATE team_members SET status = NULL WHERE team_id = $1 AND user_id = $2",
@@ -1658,7 +1668,7 @@ async def test_inactive_user_blocks_overlapping_oauth_refresh_before_openai_adap
         await asyncio.wait_for(initial_reads_ready.wait(), timeout=10)
         await asyncio.sleep(0)
         assert not second_task.done()
-        await UsersDB(test_db_pool).update_user(user_id, is_active=inactive_value)
+        await _set_user_active(test_db_pool, user_id, inactive_value)
     finally:
         release_refresh.set()
 
@@ -1717,7 +1727,7 @@ async def test_inactive_user_static_openai_key_fails_before_adapter_postgres(
         provider="openai",
         payload=build_secret_payload("sk-inactive-owner-must-not-dispatch"),
     )
-    await UsersDB(test_db_pool).update_user(user_id, is_active=False)
+    await _set_user_active(test_db_pool, user_id, False)
     adapter, captured_headers = _capture_real_openai_adapter_headers(monkeypatch)
     adapter_calls = 0
 

@@ -32,7 +32,7 @@ Implement PR 1 from the narrow flashcards UX remediation plan: fix the direct ex
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented PR 1 from the narrow flashcards UX remediation plan only. PR 2 dashboard-first Study and session-history deck-name work was intentionally left out.
 
 The branch was rebased onto latest origin/dev after implementation. The pre-existing ReviewTab.create-cta active-card snapshot mismatch was refreshed to match the current design-system Badge markup so the focused suite passes on the rebased branch.
@@ -40,7 +40,7 @@ The branch was rebased onto latest origin/dev after implementation. The pre-exis
 Final review follow-up: Practice again availability now uses useCramQueueQuery(..., { limit: 1 }) while due-mode is caught up, and full cram queue loading is reserved for actual cram mode. The probe continues past filtered tutorial-residue cards until it finds one reviewable card or reaches a small fetch safety cap. The extension sidepanel handoff is now covered by an app-level render test and uses sidepanel i18n keys with English resources.
 
 Post-rebase review follow-up: Rebasing onto latest origin/dev completed without conflicts. The Qodo import/export localization thread was addressed by using the existing option:flashcards.importExport key and removing the unused English-only tabImportExport key. The Qodo cram-probe false negative was addressed by giving small availability probes a larger bounded residue buffer and adding a >10 tutorial-residue regression. The CodeRabbit stale hidden cram tag concern was addressed by passing the cram tag filter only while the visible review mode is cram and adding a due-mode regression.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

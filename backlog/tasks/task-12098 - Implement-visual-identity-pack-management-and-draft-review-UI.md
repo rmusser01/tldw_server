@@ -21,9 +21,6 @@ priority: high
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-<!-- SECTION:DESCRIPTION:BEGIN -->
-<!-- SECTION:DESCRIPTION:END -->
-
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -38,7 +35,7 @@ Stage 9: add reusable VisualIdentityPackPanel, draft review/grid/uploader compon
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Stage 9 UI components and integrations:
 - Added VisualIdentityPackPanel, VisualIdentityDraftReview, ExpressionSlotGrid, and ExpressionAssetUploader.
 - Integrated expression packs into character metadata and persona visual workflows without removing legacy mood images or Persona Visual Pack management.
@@ -52,7 +49,7 @@ Review follow-up:
 Known gap:
 - Default-expression selection from valid draft assets is deferred. The current V1 API has no draft default-expression update or activation-time default override, and reviewers agreed there is no safe frontend-only implementation.
 - ZIP import polling uses terminal draft polling because there is no current Visual Identity job status endpoint/helper.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -66,8 +63,6 @@ Verification recorded:
 - Bandit on VisualIdentity_DB.py => 0 findings.
 - git diff --check => passed.
 - UI package tsc with 8GB heap still fails only on unrelated baseline files; no Common/VisualIdentity errors reported.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

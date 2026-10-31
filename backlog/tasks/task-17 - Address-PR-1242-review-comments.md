@@ -39,7 +39,7 @@ Follow-up for PR #1242 on the Phase 2.2 router conditional cleanup branch. Addre
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED: test_append_imported_router_spec_propagates_unexpected_import_error failed before the helper change because RuntimeError from importlib.import_module was swallowed as a skipped optional router.
 
 GREEN/focused: python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "append_imported_router_spec" -q passed 5 selected tests.
@@ -61,7 +61,7 @@ Final full focused suite rerun: python -m pytest tldw_Server_API/tests/Services/
 Final Bandit rerun: python -m bandit -r tldw_Server_API/app/api/v1/router_groups/conditional.py -f json -o /tmp/bandit_pr1242_review_comments.json reported 0 results and 0 errors.
 
 Final git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

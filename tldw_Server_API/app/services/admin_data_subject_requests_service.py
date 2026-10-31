@@ -13,6 +13,11 @@ from tldw_Server_API.app.core.AuthNZ.repos.data_subject_requests_repo import (
     AuthnzDataSubjectRequestsRepo,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_privacy import (
+    count_workspace_chat_startup_messages,
+    erase_workspace_chat_startup_chats,
+    has_workspace_chat_startup_receipts,
+)
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
 from tldw_Server_API.app.services import admin_scope_service
@@ -173,9 +178,27 @@ async def _count_notes(user_id: int) -> int:
     )
 
 
+def _has_workspace_chat_startup_receipts(path: Path) -> bool:
+    """Keep chat erasure compatible with ChaCha databases predating receipts."""
+    try:
+        return has_workspace_chat_startup_receipts(path)
+    except sqlite3.Error as exc:
+        raise DataSubjectRequestCoverageUnavailableError(
+            f"DSR count query failed for {path}: {exc}"
+        ) from exc
+
+
 async def _count_chat_messages(user_id: int) -> int:
+    path = DatabasePaths.get_chacha_db_path(user_id)
+    if await asyncio.to_thread(_has_workspace_chat_startup_receipts, path):
+        try:
+            return await asyncio.to_thread(count_workspace_chat_startup_messages, path, str(user_id))
+        except FileNotFoundError as exc:
+            raise DataSubjectRequestCoverageUnavailableError(f"DSR subject store missing for {path}") from exc
+        except sqlite3.Error as exc:
+            raise DataSubjectRequestCoverageUnavailableError(f"DSR count query failed for {path}: {exc}") from exc
     return await _sqlite_count(
-        DatabasePaths.get_chacha_db_path(user_id),
+        path,
         """
         SELECT COUNT(1)
         FROM messages m
@@ -467,6 +490,10 @@ async def _erase_media_records(user_id: int) -> int:
 async def _erase_chat_messages(user_id: int) -> int:
     """Hard-delete all chat conversations and messages for a user."""
     path = DatabasePaths.get_chacha_db_path(user_id)
+    if await asyncio.to_thread(_has_workspace_chat_startup_receipts, path):
+        return await asyncio.to_thread(
+            erase_workspace_chat_startup_chats, path, str(user_id),
+        )
     return await asyncio.to_thread(
         _sqlite_hard_delete_sync,
         path,
@@ -477,26 +504,72 @@ async def _erase_chat_messages(user_id: int) -> int:
     )
 
 
-async def _erase_notes(user_id: int) -> int:
-    """Hard-delete all notes for a user."""
-    path = DatabasePaths.get_chacha_db_path(user_id)
-    return await asyncio.to_thread(
-        _sqlite_hard_delete_sync,
-        path,
-        [
-            (
-                "DELETE FROM note_edges WHERE from_note_id IN (SELECT id FROM notes) "
-                "OR to_note_id IN (SELECT id FROM notes)",
-                (),
-            ),
-            (
-                "DELETE FROM note_wikilink_edges WHERE source_note_id IN (SELECT id FROM notes) "
-                "OR target_note_id IN (SELECT id FROM notes)",
-                (),
-            ),
-            ("DELETE FROM notes", ()),
-        ],
+def _build_notes_semantic_erasure_coordinator(user_id: int):
+    """Open the owner-bound Notes store used by semantic erasure."""
+
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+    from tldw_Server_API.app.core.Notes_Graph.semantic_api import (
+        load_semantic_settings,
     )
+    from tldw_Server_API.app.core.Notes_Graph.semantic_erasure import (
+        SemanticErasureCoordinator,
+    )
+    from tldw_Server_API.app.services.notes_semantic_audit import emit_semantic_audit_event
+
+    path = DatabasePaths.get_chacha_db_path(user_id)
+    db = CharactersRAGDB(
+        db_path=str(path),
+        client_id=str(user_id),
+        require_existing_sqlite=True,
+    )
+    try:
+        return SemanticErasureCoordinator(
+            db=db,
+            audit_emitter=emit_semantic_audit_event,
+            settings=load_semantic_settings(),
+            close_database_on_exit=True,
+        )
+    finally:
+        db.close_connection()
+
+
+def _notes_content_backend_is_postgres() -> bool:
+    """Return whether the canonical content store is configured for PostgreSQL."""
+
+    from tldw_Server_API.app.core.config import load_comprehensive_config
+    from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+    from tldw_Server_API.app.core.DB_Management.content_backend import (
+        load_content_db_settings,
+    )
+
+    settings = load_content_db_settings(load_comprehensive_config())
+    return settings.backend_type == BackendType.POSTGRESQL
+
+
+async def _erase_notes(user_id: int) -> int:
+    """Atomically finalize semantic state and canonical owner Notes."""
+
+    from tldw_Server_API.app.core.Notes_Graph.semantic_erasure import (
+        SemanticErasureError,
+    )
+
+    try:
+        is_postgres = _notes_content_backend_is_postgres()
+        path = DatabasePaths.get_chacha_db_path(user_id)
+        if not is_postgres and not path.exists():
+            return 0
+        coordinator = await asyncio.to_thread(
+            _build_notes_semantic_erasure_coordinator,
+            user_id,
+        )
+    except SemanticErasureError:
+        raise
+    except Exception:  # noqa: BLE001 - DSR receives a content-free code
+        raise SemanticErasureError(
+            "notes_semantic_erasure_backend_unavailable"
+        ) from None
+    result = await coordinator.erase()
+    return int(result.deleted_notes)
 
 
 async def _erase_embeddings(user_id: int) -> int:

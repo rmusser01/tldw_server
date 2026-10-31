@@ -144,6 +144,11 @@ class SubscriptionService:
         self._billing_repo = billing_repo
         self._stripe_client = stripe_client
 
+    @property
+    def has_billing_repo(self) -> bool:
+        """True when a billing repository (the hosted product's plans) is wired in."""
+        return self._billing_repo is not None
+
     @staticmethod
     def _free_plan_record() -> dict[str, Any]:
         return {
@@ -1025,6 +1030,12 @@ async def get_subscription_service() -> SubscriptionService:
             if _subscription_service is None:
                 _subscription_service = SubscriptionService()
     return _subscription_service
+
+
+async def billing_repo_configured() -> bool:
+    """True when the subscription service has a billing repository: commercial (hosted) mode."""
+    service = await get_subscription_service()
+    return service.has_billing_repo
 
 
 async def reset_subscription_service() -> None:

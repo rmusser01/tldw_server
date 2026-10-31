@@ -31,7 +31,7 @@ Write the system design for a canonical dual-mode Embeddings workflow engine and
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Spec written at Docs/superpowers/specs/2026-07-03-embeddings-workflow-architecture-design.md. Self-review completed: no placeholder markers found; scope limited to architecture/spec work; first implementation slice remains API inline workflow facade only; no code, schema, metrics, logs, headers, or endpoint behavior changes included. Verification: git diff --check passed. Bandit not run because this task only adds documentation and Backlog task metadata.
 
 Post-approval review reopened the design task to tighten trace collector bounds/overflow behavior, endpoint test seam wording, workflow id/item identity, and durable RG/billing boundary language before implementation planning.
@@ -41,7 +41,7 @@ Post-approval spec refinements completed: added safe workflow id/item identity l
 Planning review found that the inline runner needs a boundary hook between prepare and execute so the endpoint can preserve ResourceGovernor reservation after token counting and before provider/cache execution. Reopening design task to document that hook before finalizing the implementation plan.
 
 Planning review update completed: the spec now requires an optional async pre-execute hook so endpoint-owned ResourceGovernor reservation can remain after prepare/token counting and before cache/provider execution. Verification: placeholder scan passed and git diff --check passed. Bandit remains not applicable for documentation-only changes.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -36,9 +36,9 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review fixes: verified the PR threads pointed to real issues. StatusDot now maps uxState directly: connected_degraded -> degraded, error_auth -> auth_required, error_unreachable -> unavailable, testing -> retrying, setup/configuring -> setup_required, and demo/connected_ok -> ready. Test fixtures now use real ConnectionUxState and mode values instead of synthetic failed/full states. Red run before implementation failed 4 tests on degraded/auth/unreachable/retry; green run passed 12/12. Additional verification: product-state guard test passed 49/49; verify:design-system-state passed with 511 baseline exceptions; git diff --check passed; UI tsc still exits 2 on existing repo-wide typing debt with 236 lines and no touched-file diagnostics. Bandit skipped because touched files are TS/TSX and Backlog markdown only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

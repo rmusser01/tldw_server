@@ -46,9 +46,9 @@ Continue the tldw_server WebUI design-system migration by resolving the current 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation replaced ScheduledTasks AntD product-state Alert/Empty/Spin/Tag usage with DS Alert, EmptyState, LoadingState, and Badge primitives, including the read-only Watchlists panel. ScheduledTasks blocked/unavailable labels now come from the design-system registry. Review follow-up removed the template state default branch so TypeScript can enforce exhaustiveness and extracted the shared result severity-to-badge variant mapper for the drawer and results panel. Verification: focused ScheduledTasks vitest suite passed (99 tests), direct ScheduledTasks product-state guard scan passed with zero findings, git diff --check passed, full product-state verifier failed only on unrelated Skills/KnowledgeQA/Onboarding/ACP blockers, and TypeScript failed only on unrelated Notes/background/voice-cloning diagnostics.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

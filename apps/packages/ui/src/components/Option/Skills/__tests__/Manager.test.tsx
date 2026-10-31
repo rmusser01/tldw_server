@@ -333,15 +333,18 @@ describe("SkillsManager imports", () => {
     )
 
   const openFilters = async () => {
-    if (!screen.queryByRole("combobox", { name: "Skill mode filter" })) {
+    const mountedFilter = screen.queryByLabelText("Skill mode filter")
+    if (!mountedFilter || !within(mountedFilter.parentElement!).queryByRole("combobox", { name: "Skill mode filter" })) {
       fireEvent.click(screen.getByRole("button", { name: /^Filters/ }))
     }
-    return screen.findByRole("combobox", { name: "Skill mode filter" })
+    const modeFilter = await screen.findByLabelText("Skill mode filter")
+    return within(modeFilter.parentElement!).getByRole("combobox", { name: "Skill mode filter" })
   }
 
   const chooseFilter = async (label: string, option: string) => {
     await openFilters()
-    const combobox = screen.getByRole("combobox", { name: label })
+    const filter = screen.getByLabelText(label)
+    const combobox = within(filter.parentElement!).getByRole("combobox", { name: label })
     fireEvent.mouseDown(combobox)
     fireEvent.click(await screen.findByText(option))
   }
@@ -2986,7 +2989,7 @@ describe("SkillsManager imports", () => {
           offset: 0
         }
     ))
-    renderManager()
+    await act(async () => { renderManager() })
 
     fireEvent.click(await screen.findByRole("checkbox", { name: "Select shared-skill" }))
     fireEvent.click(screen.getByRole("button", { name: "View shared-skill" }))

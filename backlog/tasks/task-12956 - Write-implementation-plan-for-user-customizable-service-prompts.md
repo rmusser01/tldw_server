@@ -40,13 +40,13 @@ Follow Docs/superpowers/plans/2026-07-12-user-customizable-service-prompts.md an
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Reallocated from the delayed duplicate creation so both current-dev task IDs remain useful and unique. TASK-12955 owns the approved design; this task owns implementation planning and collision-free PR preparation.
 
 Final current-dev verification: all foundation and rollout plans are present, task references are collision-free, the inventory validator passes, no Python changed, and planning-only full CI shards remain intentionally skipped at requester direction.
 
 Draft PR: https://github.com/rmusser01/tldw_server/pull/2726. The PR remains draft until the requester supplies the required human-written Change summary.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

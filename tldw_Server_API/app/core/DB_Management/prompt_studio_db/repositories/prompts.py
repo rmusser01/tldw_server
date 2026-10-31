@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Any, Optional
 
@@ -19,6 +20,38 @@ from tldw_Server_API.app.core.DB_Management.retry_policy import run_with_content
 class PromptsRepository:
     def __init__(self, session: Any):
         self.session = session
+
+    def repair_generated_uuids(self) -> None:
+        """Repair only identifiers emitted by the old optimizer writers."""
+        db = self.session
+        legacy = re.compile(
+            r"(?:(?:refined|genetic|mcts)-[0-9]+(?:\.[0-9]+)?|"
+            r"(?:opt|bootstrap)-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})"
+        )
+        tenant = getattr(db, "tenant_user_id", None)
+        owner_clause = (
+            " AND project_id IN (SELECT id FROM prompt_studio_projects WHERE user_id = ?)" if tenant is not None else ""
+        )
+        owner_params = (str(tenant),) if tenant is not None else ()
+        try:
+            with db._write_lock, db.transaction() as conn:
+                cursor = db._cursor_exec(
+                    conn,
+                    "SELECT id, uuid FROM prompt_studio_prompts WHERE (uuid LIKE ? OR uuid LIKE ? "  # nosec B608 - Only a fixed owner clause is appended; all values are parameters.
+                    "OR uuid LIKE ? OR uuid LIKE ? OR uuid LIKE ?)" + owner_clause,
+                    ("refined-%", "genetic-%", "mcts-%", "opt-%", "bootstrap-%") + owner_params,
+                )
+                rows = [db._row_to_dict(cursor, row) for row in cursor.fetchall()]
+                for row in rows:
+                    if legacy.fullmatch(row["uuid"]):
+                        # Numeric IDs retain lineage/results; CAS leaves a competing repair's UUID intact.
+                        db._cursor_exec(
+                            conn,
+                            "UPDATE prompt_studio_prompts SET uuid = ? WHERE id = ? AND uuid = ?" + owner_clause,  # nosec B608 - Fixed clause; UUID, ID and owner stay bound parameters.
+                            (str(uuid.uuid4()), row["id"], row["uuid"]) + owner_params,
+                        )
+        except DB_ERRORS as exc:
+            raise DatabaseError("Failed to repair generated Prompt Studio identities") from exc
 
     def create(
         self,

@@ -12,6 +12,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from tldw_Server_API.app.core.Utils.tokenizer import estimate_segment_tokens
+from tldw_Server_API.app.core.Utils.tokenizer import redact_data_uris as _sanitize_data_uris
+
 FINGERPRINT_VERSION = "prompt-v1"
 
 _KNOWN_PART_TYPES = frozenset(
@@ -92,14 +95,6 @@ def fingerprint_text(text: str, *, version: str = FINGERPRINT_VERSION) -> str:
     return f"{version}:sha256:{digest}"
 
 
-def estimate_segment_tokens(text: str) -> int:
-    """Conservative deterministic estimate using the existing 4 chars/token heuristic."""
-    if not text:
-        return 0
-    sanitized = _sanitize_data_uris(text)
-    return max(0, (len(sanitized) + 3) // 4)
-
-
 def build_prompt_cost_envelope(
     messages: Sequence[Mapping[str, Any]],
     *,
@@ -176,28 +171,6 @@ def _text_segment(name: str, kind: str, text: str, *, version: str) -> PromptSeg
 
 def _canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
-
-
-def _sanitize_data_uris(text: str) -> str:
-    lowered = text.lower()
-    output: list[str] = []
-    index = 0
-    while True:
-        start = lowered.find("data:image", index)
-        if start == -1:
-            output.append(text[index:])
-            break
-        comma = text.find(",", start)
-        if comma == -1:
-            output.append(text[index:])
-            break
-        output.append(text[index : comma + 1])
-        output.append("<omitted>")
-        end = comma + 1
-        while end < len(text) and not text[end].isspace() and text[end] not in "\"'":
-            end += 1
-        index = end
-    return "".join(output)
 
 
 def _normalize_message(message: Mapping[str, Any]) -> dict[str, Any]:

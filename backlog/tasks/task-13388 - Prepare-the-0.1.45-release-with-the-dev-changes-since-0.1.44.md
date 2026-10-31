@@ -34,11 +34,11 @@ The protected frontend is unchanged since 0.1.44: the manifest is byte-identical
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-09-27: released. #3034 merged to main at 96bf0996eb after owner approval, with all 7 required checks green and the Watchlists RC gates confirmed failing identically on main (pre-existing). Annotated tag v0.1.45; GitHub release published; PyPI publish, publish-ghcr-main and the Docker images all succeeded, and PyPI serves tldw-server 0.1.45. TASK-13361 verified live on the published gate. Remaining for AC #4: the main-to-dev sync #3035, held behind #3033 (the other session's 0.1.44 sync) and blocked by the pre-existing Playground coordinator failure (TASK-13391).
 
 Closed 2026-09-28. main was synced back to dev through #3035 (merged 5f9815293b), after merging current dev twice and repairing two latent dev ratchet failures on the way (#3044: two public audio routes restored to the auth baseline, automation_messages RLS exemption) and stale Review test mocks (db5c752231, 9776b1e7ab). TASK-13361 was verified live on the published gate on 2026-09-27. All ACs are met.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

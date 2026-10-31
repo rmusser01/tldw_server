@@ -3849,11 +3849,8 @@ async def _reserve_embedding_rg_tokens(
 
     try:
         policy_id = str(getattr(request.state, "rg_policy_id", None) or "embeddings.default")
-        op_id = str(
-            getattr(request.state, "request_id", None)
-            or request.headers.get("X-Request-ID")
-            or uuid.uuid4().hex
-        )
+        # Never the client's X-Request-ID: a repeated op_id replays the cached reservation.
+        op_id = str(uuid.uuid4())
         entity = derive_entity_key(request)
         try:
             entity_scope, entity_value = entity.split(":", 1)
@@ -4374,11 +4371,8 @@ async def _create_embedding_legacy(
         if rg_governor is not None and rg_loader is not None:
             try:
                 policy_id = str(getattr(request.state, "rg_policy_id", None) or "embeddings.default")
-                rg_commit_op_id = str(
-                    getattr(request.state, "request_id", None)
-                    or request.headers.get("X-Request-ID")
-                    or uuid.uuid4().hex
-                )
+                # Never the client's X-Request-ID: a repeated op_id replays the cached reservation.
+                rg_commit_op_id = str(uuid.uuid4())
 
                 entity = derive_entity_key(request)
                 try:

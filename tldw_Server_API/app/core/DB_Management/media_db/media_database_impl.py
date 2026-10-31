@@ -10,7 +10,9 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
 
-from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from loguru import logger
+
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseBackend
 from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError, DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.clone_snapshot_repository import (
     confirm_operation_owned_clone_media,
@@ -162,8 +164,11 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_review_metri
     count_claims_review_extractor_metrics_daily,
     get_claims_review_extractor_metrics_daily,
     get_claims_review_latency_stats,
+    get_claims_review_metrics_window_rows,
     list_claims_review_extractor_metrics_daily,
     list_claims_review_user_ids,
+    list_claims_review_user_ids_page,
+    lock_claims_review_metrics_owner,
     upsert_claims_review_extractor_metrics_daily,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_review_read_ops import (
@@ -532,10 +537,16 @@ from tldw_Server_API.app.core.DB_Management.media_db.schema.sqlite_schema_versio
     get_db_version,
 )
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import begin_immediate_if_needed
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
 
 
 class MediaDatabase:
     """Canonical package-native Media DB runtime class."""
+
+    client_id: str
+    backend_type: BackendType
+    backend: DatabaseBackend
+    _persistent_conn: sqlite3.Connection | None
 
     _CURRENT_SCHEMA_VERSION = 26  # Final staged shared Workspace clone persistence
 
@@ -1893,7 +1904,7 @@ class MediaDatabase:
             outermost = self._get_txn_conn() is None
             if outermost:
                 conn = self._persistent_conn or self.backend.connect()
-                with suppress(MEDIA_NONCRITICAL_EXCEPTIONS):
+                with suppress(*MEDIA_NONCRITICAL_EXCEPTIONS):
                     conn.row_factory = sqlite3.Row
                 try:
                     self._apply_sqlite_connection_pragmas(conn)
@@ -1912,8 +1923,8 @@ class MediaDatabase:
                 if outermost:
                     conn.commit()
                     logging.debug("Committed SQLite transaction.")
-            except MEDIA_NONCRITICAL_EXCEPTIONS:
-                logging.exception("SQLite transaction failed, rolling back")
+            except MEDIA_NONCRITICAL_EXCEPTIONS as exc:
+                logger.error("SQLite transaction rollback (error_type={})", exception_type_for_log(exc))
                 if outermost:
                     with suppress(sqlite3.Error):
                         conn.rollback()
@@ -1923,7 +1934,7 @@ class MediaDatabase:
                 if outermost:
                     self._set_txn_conn(None)
                     if self._persistent_conn is None:
-                        with suppress(MEDIA_NONCRITICAL_EXCEPTIONS):
+                        with suppress(*MEDIA_NONCRITICAL_EXCEPTIONS):
                             conn.close()
             return
 
@@ -1946,372 +1957,332 @@ class MediaDatabase:
             if depth == 0:
                 self._set_txn_conn(None)
             if manages_backend_conn:
-                with suppress(MEDIA_NONCRITICAL_EXCEPTIONS):
+                with suppress(*MEDIA_NONCRITICAL_EXCEPTIONS):
                     self.backend.get_pool().return_connection(conn)
 
-MediaDatabase.add_media_chunks_in_batches = add_media_chunks_in_batches
-MediaDatabase.batch_insert_chunks = batch_insert_chunks
-MediaDatabase.clear_unvectorized_chunks = clear_unvectorized_chunks
-MediaDatabase.create_chunking_template = create_chunking_template
-MediaDatabase.delete_chunking_template = delete_chunking_template
-MediaDatabase.create_document_version = create_document_version
-MediaDatabase.fetch_all_keywords = fetch_all_keywords
-MediaDatabase.get_all_document_versions = get_all_document_versions
-MediaDatabase.get_chunking_template = get_chunking_template
-MediaDatabase.get_distinct_media_types = get_distinct_media_types
-MediaDatabase.get_media_by_id = get_media_by_id
-MediaDatabase.get_media_by_hash = get_media_by_hash
-MediaDatabase.get_media_status_by_id = get_media_status_by_id
-MediaDatabase.get_media_by_title = get_media_by_title
-MediaDatabase.get_media_by_url = get_media_by_url
-MediaDatabase.get_media_by_uuid = get_media_by_uuid
-MediaDatabase.count_chatbook_scope_category = count_chatbook_scope_category
-MediaDatabase.list_chatbook_scope_ids = list_chatbook_scope_ids
-MediaDatabase.search_media_db = run_search_media_db
-MediaDatabase.get_paginated_media_list = get_paginated_media_list
-MediaDatabase.get_paginated_files = get_paginated_files
-MediaDatabase.get_paginated_trash_list = get_paginated_trash_list
-MediaDatabase.has_unvectorized_chunks = has_unvectorized_chunks
-MediaDatabase.get_unvectorized_anchor_index_for_offset = get_unvectorized_anchor_index_for_offset
-MediaDatabase.get_unvectorized_chunk_by_index = get_unvectorized_chunk_by_index
-MediaDatabase.get_unvectorized_chunk_count = get_unvectorized_chunk_count
-MediaDatabase.get_unvectorized_chunk_index_by_uuid = get_unvectorized_chunk_index_by_uuid
-MediaDatabase.get_unvectorized_chunks_in_range = get_unvectorized_chunks_in_range
-MediaDatabase.get_unvectorized_max_chunk_index = get_unvectorized_max_chunk_index
-MediaDatabase._postgres_migrate_to_v5 = run_postgres_migrate_to_v5
-MediaDatabase._postgres_migrate_to_v6 = run_postgres_migrate_to_v6
-MediaDatabase._postgres_migrate_to_v7 = run_postgres_migrate_to_v7
-MediaDatabase._postgres_migrate_to_v8 = run_postgres_migrate_to_v8
-MediaDatabase._postgres_migrate_to_v9 = run_postgres_migrate_to_v9
-MediaDatabase._postgres_migrate_to_v10 = run_postgres_migrate_to_v10
-MediaDatabase._postgres_migrate_to_v11 = run_postgres_migrate_to_v11
-MediaDatabase._postgres_migrate_to_v12 = run_postgres_migrate_to_v12
-MediaDatabase._postgres_migrate_to_v13 = run_postgres_migrate_to_v13
-MediaDatabase._postgres_migrate_to_v14 = run_postgres_migrate_to_v14
-MediaDatabase._postgres_migrate_to_v15 = run_postgres_migrate_to_v15
-MediaDatabase._postgres_migrate_to_v16 = run_postgres_migrate_to_v16
-MediaDatabase._postgres_migrate_to_v17 = run_postgres_migrate_to_v17
-MediaDatabase._postgres_migrate_to_v18 = run_postgres_migrate_to_v18
-MediaDatabase._postgres_migrate_to_v19 = run_postgres_migrate_to_v19
-MediaDatabase._postgres_migrate_to_v20 = run_postgres_migrate_to_v20
-MediaDatabase._postgres_migrate_to_v21 = run_postgres_migrate_to_v21
-MediaDatabase._postgres_migrate_to_v22 = run_postgres_migrate_to_v22
-MediaDatabase._postgres_migrate_to_v23 = run_postgres_migrate_to_v23
-MediaDatabase._postgres_migrate_to_v24 = run_postgres_migrate_to_v24
-MediaDatabase._postgres_migrate_to_v25 = run_postgres_migrate_to_v25
-MediaDatabase._postgres_migrate_to_v26 = run_postgres_migrate_to_v26
-MediaDatabase._get_db_version = get_db_version
-MediaDatabase._update_schema_version_postgres = update_schema_version_postgres
-MediaDatabase._sync_postgres_sequences = sync_postgres_sequences
-MediaDatabase._convert_sqlite_sql_to_postgres_statements = _convert_sqlite_sql_to_postgres_statements
-MediaDatabase._transform_sqlite_statement_to_postgres = _transform_sqlite_statement_to_postgres
-MediaDatabase._ensure_fts_structures = ensure_fts_structures
-MediaDatabase._ensure_sqlite_fts = ensure_sqlite_fts
-MediaDatabase._ensure_postgres_fts = ensure_postgres_fts
-MediaDatabase._ensure_sqlite_email_schema = ensure_sqlite_email_schema
-MediaDatabase._ensure_postgres_email_schema = ensure_postgres_email_schema
-MediaDatabase._ensure_sqlite_visibility_columns = ensure_sqlite_visibility_columns
-MediaDatabase._ensure_sqlite_source_hash_column = ensure_sqlite_source_hash_column
-MediaDatabase._ensure_sqlite_data_tables = ensure_sqlite_data_tables
-MediaDatabase._ensure_sqlite_claims_extensions = ensure_sqlite_claims_extensions
-MediaDatabase._ensure_postgres_data_tables = ensure_postgres_data_tables
-MediaDatabase._ensure_postgres_columns = ensure_postgres_columns
-MediaDatabase._ensure_postgres_data_tables_columns = ensure_postgres_data_tables_columns
-MediaDatabase._ensure_postgres_tts_history = ensure_postgres_tts_history
-MediaDatabase._ensure_postgres_audio_presets = ensure_postgres_audio_presets
-MediaDatabase._ensure_postgres_source_hash_column = ensure_postgres_source_hash_column
-MediaDatabase._ensure_postgres_claims_tables = ensure_postgres_claims_tables
-MediaDatabase._ensure_postgres_collections_tables = ensure_postgres_collections_tables
-MediaDatabase._ensure_postgres_claims_extensions = ensure_postgres_claims_extensions
-MediaDatabase.list_chunking_templates = list_chunking_templates
-MediaDatabase.lookup_section_by_heading = lookup_section_by_heading
-MediaDatabase.lookup_section_for_offset = lookup_section_for_offset
-MediaDatabase.process_chunks = process_chunks
-MediaDatabase.process_unvectorized_chunks = process_unvectorized_chunks
-MediaDatabase.mark_embeddings_error = mark_embeddings_error
-MediaDatabase._get_txn_conn = _get_txn_conn
-MediaDatabase._set_txn_conn = _set_txn_conn
-MediaDatabase._get_tx_depth = _get_tx_depth
-MediaDatabase._set_tx_depth = _set_tx_depth
-MediaDatabase._inc_tx_depth = _inc_tx_depth
-MediaDatabase._dec_tx_depth = _dec_tx_depth
-MediaDatabase._get_persistent_conn = _get_persistent_conn
-MediaDatabase._set_persistent_conn = _set_persistent_conn
-MediaDatabase._prepare_backend_statement = _prepare_backend_statement
-MediaDatabase._prepare_backend_many_statement = _prepare_backend_many_statement
-MediaDatabase._normalise_params = _normalise_params
-MediaDatabase._resolve_scope_ids = _resolve_scope_ids
-MediaDatabase._initialize_schema = ensure_media_schema
-MediaDatabase._initialize_schema_sqlite = bootstrap_sqlite_schema
-MediaDatabase._initialize_schema_postgres = bootstrap_postgres_schema
-MediaDatabase._run_postgres_migrations = run_postgres_migrations
-MediaDatabase._get_postgres_migrations = get_postgres_migrations
-MediaDatabase._apply_schema_v1_sqlite = apply_sqlite_core_media_schema
-MediaDatabase._apply_schema_v1_postgres = apply_postgres_core_media_schema
-MediaDatabase._postgres_policy_exists = _postgres_policy_exists
-MediaDatabase._ensure_postgres_rls = _ensure_postgres_rls
-MediaDatabase._generate_uuid = _generate_uuid
-MediaDatabase._get_current_utc_timestamp_str = _get_current_utc_timestamp_str
-MediaDatabase._get_next_version = _get_next_version
-MediaDatabase._log_sync_event = _log_sync_event
-MediaDatabase.get_sync_log_entries = get_sync_log_entries
-MediaDatabase.delete_sync_log_entries = delete_sync_log_entries
-MediaDatabase.delete_sync_log_entries_before = delete_sync_log_entries_before
-MediaDatabase._write_structure_index_records = _write_structure_index_records
-MediaDatabase.write_document_structure_index = write_document_structure_index
-MediaDatabase.delete_document_structure_for_media = delete_document_structure_for_media
-MediaDatabase._keyword_order_expression = _keyword_order_expression
-MediaDatabase._append_case_insensitive_like = _append_case_insensitive_like
-MediaDatabase._convert_sqlite_placeholders_to_postgres = _convert_sqlite_placeholders_to_postgres
-MediaDatabase.insert_media_file = insert_media_file
-MediaDatabase.get_media_file = get_media_file
-MediaDatabase.get_media_files = get_media_files
-MediaDatabase.has_original_file = has_original_file
-MediaDatabase.soft_delete_media = soft_delete_media
-MediaDatabase.share_media = share_media
-MediaDatabase.unshare_media = unshare_media
-MediaDatabase.get_media_visibility = get_media_visibility
-MediaDatabase.mark_as_trash = mark_as_trash
-MediaDatabase.restore_from_trash = restore_from_trash
-MediaDatabase.add_media_with_keywords = run_add_media_with_keywords
-MediaDatabase._resolve_data_tables_owner = _resolve_data_tables_owner
-MediaDatabase._resolve_data_table_write_client_id = _resolve_data_table_write_client_id
-MediaDatabase._get_data_table_owner_client_id = _get_data_table_owner_client_id
-MediaDatabase._soft_delete_data_table_children = _soft_delete_data_table_children
-MediaDatabase._normalize_data_table_row_json = _normalize_data_table_row_json
-MediaDatabase.create_data_table = create_data_table
-MediaDatabase.get_data_table = get_data_table
-MediaDatabase.get_data_table_by_uuid = get_data_table_by_uuid
-MediaDatabase.list_data_tables = list_data_tables
-MediaDatabase.count_data_tables = count_data_tables
-MediaDatabase.update_data_table = update_data_table
-MediaDatabase.soft_delete_data_table = soft_delete_data_table
-MediaDatabase.persist_data_table_generation = persist_data_table_generation
-MediaDatabase.replace_data_table_contents = replace_data_table_contents
-MediaDatabase.search_by_safe_metadata = search_by_safe_metadata
-MediaDatabase.apply_media_item_update = apply_media_item_update
-MediaDatabase.apply_synced_document_content_update = (
-    apply_synced_document_content_update
-)
-MediaDatabase.rollback_to_version = rollback_to_version
-MediaDatabase._resolve_email_tenant_id = _resolve_email_tenant_id
-MediaDatabase.upsert_email_message_graph = upsert_email_message_graph
-MediaDatabase.create_claims_analytics_export = create_claims_analytics_export
-MediaDatabase.get_claims_analytics_export = get_claims_analytics_export
-MediaDatabase.attach_claims_analytics_export_job = attach_claims_analytics_export_job
-MediaDatabase.transition_claims_analytics_export_status = (
-    transition_claims_analytics_export_status
-)
-MediaDatabase.mark_claims_analytics_export_ready = mark_claims_analytics_export_ready
-MediaDatabase.list_claims_analytics_exports = list_claims_analytics_exports
-MediaDatabase.list_claims_analytics_exports_for_maintenance = (
-    list_claims_analytics_exports_for_maintenance
-)
-MediaDatabase.count_claims_analytics_exports = count_claims_analytics_exports
-MediaDatabase.cleanup_claims_analytics_exports = cleanup_claims_analytics_exports
-MediaDatabase.delete_claims_analytics_exports = delete_claims_analytics_exports
-MediaDatabase.insert_claim_notification = insert_claim_notification
-MediaDatabase.get_claim_notification = get_claim_notification
-MediaDatabase.get_latest_claim_notification = get_latest_claim_notification
-MediaDatabase.list_claim_notifications = list_claim_notifications
-MediaDatabase.get_claim_notifications_by_ids = get_claim_notifications_by_ids
-MediaDatabase.mark_claim_notifications_delivered = mark_claim_notifications_delivered
-MediaDatabase.list_claim_review_rules = list_claim_review_rules
-MediaDatabase.create_claim_review_rule = create_claim_review_rule
-MediaDatabase.get_claim_review_rule = get_claim_review_rule
-MediaDatabase.update_claim_review_rule = update_claim_review_rule
-MediaDatabase.delete_claim_review_rule = delete_claim_review_rule
-MediaDatabase.list_claim_review_history = list_claim_review_history
-MediaDatabase.list_review_queue = list_review_queue
-MediaDatabase.get_claims_by_media = get_claims_by_media
-MediaDatabase.get_claim_with_media = get_claim_with_media
-MediaDatabase.get_claims_by_uuid = get_claims_by_uuid
-MediaDatabase.upsert_claims = upsert_claims
-MediaDatabase.update_claim = update_claim
-MediaDatabase.update_claim_review = update_claim_review
-MediaDatabase.soft_delete_claims_for_media = soft_delete_claims_for_media
-MediaDatabase.list_claims = list_claims
-MediaDatabase.search_claims = search_claims
-MediaDatabase.get_claims_review_extractor_metrics_daily = (
-    get_claims_review_extractor_metrics_daily
-)
-MediaDatabase.upsert_claims_review_extractor_metrics_daily = (
-    upsert_claims_review_extractor_metrics_daily
-)
-MediaDatabase.list_claims_review_extractor_metrics_daily = (
-    list_claims_review_extractor_metrics_daily
-)
-MediaDatabase.count_claims_review_extractor_metrics_daily = (
-    count_claims_review_extractor_metrics_daily
-)
-MediaDatabase.list_claims_review_user_ids = list_claims_review_user_ids
-MediaDatabase.get_claims_review_latency_stats = get_claims_review_latency_stats
-MediaDatabase.get_claim_clusters_by_ids = get_claim_clusters_by_ids
-MediaDatabase.get_claim_cluster_member_counts = get_claim_cluster_member_counts
-MediaDatabase.update_claim_clusters_watchlist_counts = (
-    update_claim_clusters_watchlist_counts
-)
-MediaDatabase.list_claim_clusters = list_claim_clusters
-MediaDatabase.get_claim_cluster = get_claim_cluster
-MediaDatabase.get_claim_cluster_link = get_claim_cluster_link
-MediaDatabase.list_claim_cluster_links = list_claim_cluster_links
-MediaDatabase.create_claim_cluster_link = create_claim_cluster_link
-MediaDatabase.delete_claim_cluster_link = delete_claim_cluster_link
-MediaDatabase.list_claim_cluster_members = list_claim_cluster_members
-MediaDatabase.create_claim_cluster = create_claim_cluster
-MediaDatabase.add_claim_to_cluster = add_claim_to_cluster
-MediaDatabase.rebuild_claim_clusters_exact = rebuild_claim_clusters_exact
-MediaDatabase.rebuild_claim_clusters_from_assignments = (
-    rebuild_claim_clusters_from_assignments
-)
-MediaDatabase.rebuild_claims_fts = rebuild_claims_fts
-MediaDatabase.get_claims_monitoring_settings = get_claims_monitoring_settings
-MediaDatabase.upsert_claims_monitoring_settings = upsert_claims_monitoring_settings
-MediaDatabase.migrate_legacy_claims_monitoring_alerts = (
-    migrate_legacy_claims_monitoring_alerts
-)
-MediaDatabase.delete_claims_monitoring_configs_by_user = (
-    delete_claims_monitoring_configs_by_user
-)
-MediaDatabase.list_claims_monitoring_configs = list_claims_monitoring_configs
-MediaDatabase.create_claims_monitoring_config = create_claims_monitoring_config
-MediaDatabase.get_claims_monitoring_config = get_claims_monitoring_config
-MediaDatabase.update_claims_monitoring_config = update_claims_monitoring_config
-MediaDatabase.delete_claims_monitoring_config = delete_claims_monitoring_config
-MediaDatabase.list_claims_monitoring_user_ids = list_claims_monitoring_user_ids
-MediaDatabase.list_claims_monitoring_alerts = list_claims_monitoring_alerts
-MediaDatabase.get_claims_monitoring_alert = get_claims_monitoring_alert
-MediaDatabase.create_claims_monitoring_alert = create_claims_monitoring_alert
-MediaDatabase.update_claims_monitoring_alert = update_claims_monitoring_alert
-MediaDatabase.delete_claims_monitoring_alert = delete_claims_monitoring_alert
-MediaDatabase.get_claims_monitoring_health = get_claims_monitoring_health
-MediaDatabase.upsert_claims_monitoring_health = upsert_claims_monitoring_health
-MediaDatabase.insert_claims_monitoring_event = insert_claims_monitoring_event
-MediaDatabase.get_claims_monitoring_event = get_claims_monitoring_event
-MediaDatabase.get_claims_monitoring_event_high_water = get_claims_monitoring_event_high_water
-MediaDatabase.get_claims_monitoring_event_export_data_bounded = (
-    get_claims_monitoring_event_export_data_bounded
-)
-MediaDatabase.get_claims_monitoring_event_payload_bounded = (
-    get_claims_monitoring_event_payload_bounded
-)
-MediaDatabase.list_claims_monitoring_events = list_claims_monitoring_events
-MediaDatabase.list_claims_monitoring_events_page = list_claims_monitoring_events_page
-MediaDatabase.list_undelivered_claims_monitoring_events = (
-    list_undelivered_claims_monitoring_events
-)
-MediaDatabase.mark_claims_monitoring_events_delivered = (
-    mark_claims_monitoring_events_delivered
-)
-MediaDatabase.get_latest_claims_monitoring_event_delivery = (
-    get_latest_claims_monitoring_event_delivery
-)
-MediaDatabase.has_successful_claims_monitoring_event_delivery = (
-    has_successful_claims_monitoring_event_delivery
-)
-MediaDatabase._resolve_email_sync_source_row_id = _resolve_email_sync_source_row_id
-MediaDatabase._fetch_email_sync_state_row = _fetch_email_sync_state_row
-MediaDatabase.get_email_sync_state = get_email_sync_state
-MediaDatabase.mark_email_sync_run_started = mark_email_sync_run_started
-MediaDatabase.mark_email_sync_run_succeeded = mark_email_sync_run_succeeded
-MediaDatabase.mark_email_sync_run_failed = mark_email_sync_run_failed
-MediaDatabase._normalize_email_label_values = staticmethod(_normalize_email_label_values)
-MediaDatabase._resolve_email_message_row_for_source_message = (
-    _resolve_email_message_row_for_source_message
-)
-MediaDatabase.apply_email_label_delta = apply_email_label_delta
-MediaDatabase.reconcile_email_message_state = reconcile_email_message_state
-MediaDatabase._parse_email_operator_query = _parse_email_operator_query
-MediaDatabase._email_like_clause = _email_like_clause
-MediaDatabase.search_email_messages = search_email_messages
-MediaDatabase.get_email_message_detail = get_email_message_detail
-MediaDatabase._cleanup_email_orphans_for_tenant = _cleanup_email_orphans_for_tenant
-MediaDatabase.enforce_email_retention_policy = enforce_email_retention_policy
-MediaDatabase.hard_delete_email_tenant_data = hard_delete_email_tenant_data
-MediaDatabase.run_email_legacy_backfill_batch = run_email_legacy_backfill_batch
-MediaDatabase.run_email_legacy_backfill_worker = run_email_legacy_backfill_worker
-MediaDatabase._fetch_email_backfill_state_row = _fetch_email_backfill_state_row
-MediaDatabase._ensure_email_backfill_state_row = _ensure_email_backfill_state_row
-MediaDatabase.get_email_legacy_backfill_state = get_email_legacy_backfill_state
-MediaDatabase._update_email_backfill_progress = _update_email_backfill_progress
-MediaDatabase.get_data_table_counts = get_data_table_counts
-MediaDatabase.insert_data_table_columns = insert_data_table_columns
-MediaDatabase.list_data_table_columns = list_data_table_columns
-MediaDatabase.soft_delete_data_table_columns = soft_delete_data_table_columns
-MediaDatabase.insert_data_table_rows = insert_data_table_rows
-MediaDatabase.list_data_table_rows = list_data_table_rows
-MediaDatabase.soft_delete_data_table_rows = soft_delete_data_table_rows
-MediaDatabase.insert_data_table_sources = insert_data_table_sources
-MediaDatabase.list_data_table_sources = list_data_table_sources
-MediaDatabase.soft_delete_data_table_sources = soft_delete_data_table_sources
-MediaDatabase.soft_delete_media_file = soft_delete_media_file
-MediaDatabase.soft_delete_media_files_for_media = soft_delete_media_files_for_media
-MediaDatabase.insert_visual_document = insert_visual_document
-MediaDatabase.list_visual_documents_for_media = list_visual_documents_for_media
-MediaDatabase.soft_delete_visual_documents_for_media = soft_delete_visual_documents_for_media
-MediaDatabase.create_tts_history_entry = create_tts_history_entry
-MediaDatabase._build_tts_history_filters = _build_tts_history_filters
-MediaDatabase.list_tts_history = list_tts_history
-MediaDatabase.count_tts_history = count_tts_history
-MediaDatabase.get_tts_history_entry = get_tts_history_entry
-MediaDatabase.update_tts_history_favorite = update_tts_history_favorite
-MediaDatabase.soft_delete_tts_history_entry = soft_delete_tts_history_entry
-MediaDatabase.mark_tts_history_artifacts_deleted_for_output = (
-    mark_tts_history_artifacts_deleted_for_output
-)
-MediaDatabase.mark_tts_history_artifacts_deleted_for_file_id = (
-    mark_tts_history_artifacts_deleted_for_file_id
-)
-MediaDatabase.purge_tts_history_for_user = purge_tts_history_for_user
-MediaDatabase.list_tts_history_user_ids = list_tts_history_user_ids
-MediaDatabase.create_audio_preset = create_audio_preset
-MediaDatabase.list_audio_presets = list_audio_presets
-MediaDatabase.count_audio_presets = count_audio_presets
-MediaDatabase.get_audio_preset = get_audio_preset
-MediaDatabase.update_audio_preset = update_audio_preset
-MediaDatabase.soft_delete_audio_preset = soft_delete_audio_preset
-MediaDatabase.get_connection = get_connection
-MediaDatabase.read_media_clone_snapshots = read_media_clone_snapshots
-MediaDatabase.read_operation_owned_clone_media_readiness = (
-    read_operation_owned_clone_media_readiness
-)
-MediaDatabase.read_operation_owned_clone_media_publication_state = (
-    read_operation_owned_clone_media_publication_state
-)
-MediaDatabase.insert_operation_owned_clone_media = insert_operation_owned_clone_media
-MediaDatabase.delete_operation_owned_clone_media = delete_operation_owned_clone_media
-MediaDatabase.list_operation_owned_clone_media = list_operation_owned_clone_media
-MediaDatabase.confirm_operation_owned_clone_media = confirm_operation_owned_clone_media
-MediaDatabase.close_connection = close_connection
-MediaDatabase.release_context_connection = release_context_connection
-MediaDatabase._execute_with_connection = _execute_with_connection
-MediaDatabase._executemany_with_connection = _executemany_with_connection
-MediaDatabase._fetchone_with_connection = _fetchone_with_connection
-MediaDatabase._fetchall_with_connection = _fetchall_with_connection
-MediaDatabase.execute_query = execute_query
-MediaDatabase.execute_many = execute_many
-MediaDatabase._update_fts_media = _update_fts_media
-MediaDatabase._delete_fts_media = _delete_fts_media
-MediaDatabase._update_fts_keyword = _update_fts_keyword
-MediaDatabase._delete_fts_keyword = _delete_fts_keyword
-MediaDatabase.sync_get_media_fts_values = sync_get_media_fts_values
-MediaDatabase.sync_refresh_fts_for_entity = sync_refresh_fts_for_entity
-MediaDatabase.ensure_chunk_fts = ensure_chunk_fts
-MediaDatabase.maybe_rebuild_chunk_fts_if_empty = maybe_rebuild_chunk_fts_if_empty
-MediaDatabase._apply_sqlite_connection_pragmas = apply_sqlite_connection_pragmas
-MediaDatabase.__init__ = initialize_media_database
-MediaDatabase.initialize_db = initialize_db
-MediaDatabase._ensure_sqlite_backend = _ensure_sqlite_backend
-MediaDatabase.backup_database = backup_database
-MediaDatabase._backup_non_sqlite_database = _backup_non_sqlite_database
-MediaDatabase._resolve_backend = _resolve_backend
-MediaDatabase.seed_builtin_templates = seed_builtin_templates
-MediaDatabase.add_keyword = add_keyword
-MediaDatabase.fetch_media_for_keywords = fetch_media_for_keywords
-MediaDatabase.soft_delete_document_version = soft_delete_document_version
-MediaDatabase.soft_delete_keyword = soft_delete_keyword
-MediaDatabase.update_media_reprocess_state = update_media_reprocess_state
-MediaDatabase.update_chunking_template = update_chunking_template
-MediaDatabase.update_keywords_for_media = update_keywords_for_media
+    add_media_chunks_in_batches = add_media_chunks_in_batches
+    batch_insert_chunks = batch_insert_chunks
+    clear_unvectorized_chunks = clear_unvectorized_chunks
+    create_chunking_template = create_chunking_template
+    delete_chunking_template = delete_chunking_template
+    create_document_version = create_document_version
+    fetch_all_keywords = fetch_all_keywords
+    get_all_document_versions = get_all_document_versions
+    get_chunking_template = get_chunking_template
+    get_distinct_media_types = get_distinct_media_types
+    get_media_by_id = get_media_by_id
+    get_media_by_hash = get_media_by_hash
+    get_media_status_by_id = get_media_status_by_id
+    get_media_by_title = get_media_by_title
+    get_media_by_url = get_media_by_url
+    get_media_by_uuid = get_media_by_uuid
+    count_chatbook_scope_category = count_chatbook_scope_category
+    list_chatbook_scope_ids = list_chatbook_scope_ids
+    search_media_db = run_search_media_db
+    get_paginated_media_list = get_paginated_media_list
+    get_paginated_files = get_paginated_files
+    get_paginated_trash_list = get_paginated_trash_list
+    has_unvectorized_chunks = has_unvectorized_chunks
+    get_unvectorized_anchor_index_for_offset = get_unvectorized_anchor_index_for_offset
+    get_unvectorized_chunk_by_index = get_unvectorized_chunk_by_index
+    get_unvectorized_chunk_count = get_unvectorized_chunk_count
+    get_unvectorized_chunk_index_by_uuid = get_unvectorized_chunk_index_by_uuid
+    get_unvectorized_chunks_in_range = get_unvectorized_chunks_in_range
+    get_unvectorized_max_chunk_index = get_unvectorized_max_chunk_index
+    _postgres_migrate_to_v5 = run_postgres_migrate_to_v5
+    _postgres_migrate_to_v6 = run_postgres_migrate_to_v6
+    _postgres_migrate_to_v7 = run_postgres_migrate_to_v7
+    _postgres_migrate_to_v8 = run_postgres_migrate_to_v8
+    _postgres_migrate_to_v9 = run_postgres_migrate_to_v9
+    _postgres_migrate_to_v10 = run_postgres_migrate_to_v10
+    _postgres_migrate_to_v11 = run_postgres_migrate_to_v11
+    _postgres_migrate_to_v12 = run_postgres_migrate_to_v12
+    _postgres_migrate_to_v13 = run_postgres_migrate_to_v13
+    _postgres_migrate_to_v14 = run_postgres_migrate_to_v14
+    _postgres_migrate_to_v15 = run_postgres_migrate_to_v15
+    _postgres_migrate_to_v16 = run_postgres_migrate_to_v16
+    _postgres_migrate_to_v17 = run_postgres_migrate_to_v17
+    _postgres_migrate_to_v18 = run_postgres_migrate_to_v18
+    _postgres_migrate_to_v19 = run_postgres_migrate_to_v19
+    _postgres_migrate_to_v20 = run_postgres_migrate_to_v20
+    _postgres_migrate_to_v21 = run_postgres_migrate_to_v21
+    _postgres_migrate_to_v22 = run_postgres_migrate_to_v22
+    _postgres_migrate_to_v23 = run_postgres_migrate_to_v23
+    _postgres_migrate_to_v24 = run_postgres_migrate_to_v24
+    _postgres_migrate_to_v25 = run_postgres_migrate_to_v25
+    _postgres_migrate_to_v26 = run_postgres_migrate_to_v26
+    _get_db_version = get_db_version
+    _update_schema_version_postgres = update_schema_version_postgres
+    _sync_postgres_sequences = sync_postgres_sequences
+    _convert_sqlite_sql_to_postgres_statements = _convert_sqlite_sql_to_postgres_statements
+    _transform_sqlite_statement_to_postgres = _transform_sqlite_statement_to_postgres
+    _ensure_fts_structures = ensure_fts_structures
+    _ensure_sqlite_fts = ensure_sqlite_fts
+    _ensure_postgres_fts = ensure_postgres_fts
+    _ensure_sqlite_email_schema = ensure_sqlite_email_schema
+    _ensure_postgres_email_schema = ensure_postgres_email_schema
+    _ensure_sqlite_visibility_columns = ensure_sqlite_visibility_columns
+    _ensure_sqlite_source_hash_column = ensure_sqlite_source_hash_column
+    _ensure_sqlite_data_tables = ensure_sqlite_data_tables
+    _ensure_sqlite_claims_extensions = ensure_sqlite_claims_extensions
+    _ensure_postgres_data_tables = ensure_postgres_data_tables
+    _ensure_postgres_columns = ensure_postgres_columns
+    _ensure_postgres_data_tables_columns = ensure_postgres_data_tables_columns
+    _ensure_postgres_tts_history = ensure_postgres_tts_history
+    _ensure_postgres_audio_presets = ensure_postgres_audio_presets
+    _ensure_postgres_source_hash_column = ensure_postgres_source_hash_column
+    _ensure_postgres_claims_tables = ensure_postgres_claims_tables
+    _ensure_postgres_collections_tables = ensure_postgres_collections_tables
+    _ensure_postgres_claims_extensions = ensure_postgres_claims_extensions
+    list_chunking_templates = list_chunking_templates
+    lookup_section_by_heading = lookup_section_by_heading
+    lookup_section_for_offset = lookup_section_for_offset
+    process_chunks = process_chunks
+    process_unvectorized_chunks = process_unvectorized_chunks
+    mark_embeddings_error = mark_embeddings_error
+    _get_txn_conn = _get_txn_conn
+    _set_txn_conn = _set_txn_conn
+    _get_tx_depth = _get_tx_depth
+    _set_tx_depth = _set_tx_depth
+    _inc_tx_depth = _inc_tx_depth
+    _dec_tx_depth = _dec_tx_depth
+    _get_persistent_conn = _get_persistent_conn
+    _set_persistent_conn = _set_persistent_conn
+    _prepare_backend_statement = _prepare_backend_statement
+    _prepare_backend_many_statement = _prepare_backend_many_statement
+    _normalise_params = _normalise_params
+    _resolve_scope_ids = _resolve_scope_ids
+    _initialize_schema = ensure_media_schema
+    _initialize_schema_sqlite = bootstrap_sqlite_schema
+    _initialize_schema_postgres = bootstrap_postgres_schema
+    _run_postgres_migrations = run_postgres_migrations
+    _get_postgres_migrations = get_postgres_migrations
+    _apply_schema_v1_sqlite = apply_sqlite_core_media_schema
+    _apply_schema_v1_postgres = apply_postgres_core_media_schema
+    _postgres_policy_exists = _postgres_policy_exists
+    _ensure_postgres_rls = _ensure_postgres_rls
+    _generate_uuid = _generate_uuid
+    _get_current_utc_timestamp_str = _get_current_utc_timestamp_str
+    _get_next_version = _get_next_version
+    _log_sync_event = _log_sync_event
+    get_sync_log_entries = get_sync_log_entries
+    delete_sync_log_entries = delete_sync_log_entries
+    delete_sync_log_entries_before = delete_sync_log_entries_before
+    _write_structure_index_records = _write_structure_index_records
+    write_document_structure_index = write_document_structure_index
+    delete_document_structure_for_media = delete_document_structure_for_media
+    _keyword_order_expression = _keyword_order_expression
+    _append_case_insensitive_like = _append_case_insensitive_like
+    _convert_sqlite_placeholders_to_postgres = _convert_sqlite_placeholders_to_postgres
+    insert_media_file = insert_media_file
+    get_media_file = get_media_file
+    get_media_files = get_media_files
+    has_original_file = has_original_file
+    soft_delete_media = soft_delete_media
+    share_media = share_media
+    unshare_media = unshare_media
+    get_media_visibility = get_media_visibility
+    mark_as_trash = mark_as_trash
+    restore_from_trash = restore_from_trash
+    add_media_with_keywords = run_add_media_with_keywords
+    _resolve_data_tables_owner = _resolve_data_tables_owner
+    _resolve_data_table_write_client_id = _resolve_data_table_write_client_id
+    _get_data_table_owner_client_id = _get_data_table_owner_client_id
+    _soft_delete_data_table_children = _soft_delete_data_table_children
+    _normalize_data_table_row_json = _normalize_data_table_row_json
+    create_data_table = create_data_table
+    get_data_table = get_data_table
+    get_data_table_by_uuid = get_data_table_by_uuid
+    list_data_tables = list_data_tables
+    count_data_tables = count_data_tables
+    update_data_table = update_data_table
+    soft_delete_data_table = soft_delete_data_table
+    persist_data_table_generation = persist_data_table_generation
+    replace_data_table_contents = replace_data_table_contents
+    search_by_safe_metadata = search_by_safe_metadata
+    apply_media_item_update = apply_media_item_update
+    apply_synced_document_content_update = apply_synced_document_content_update
+    rollback_to_version = rollback_to_version
+    _resolve_email_tenant_id = _resolve_email_tenant_id
+    upsert_email_message_graph = upsert_email_message_graph
+    create_claims_analytics_export = create_claims_analytics_export
+    get_claims_analytics_export = get_claims_analytics_export
+    attach_claims_analytics_export_job = attach_claims_analytics_export_job
+    transition_claims_analytics_export_status = transition_claims_analytics_export_status
+    mark_claims_analytics_export_ready = mark_claims_analytics_export_ready
+    list_claims_analytics_exports = list_claims_analytics_exports
+    list_claims_analytics_exports_for_maintenance = list_claims_analytics_exports_for_maintenance
+    count_claims_analytics_exports = count_claims_analytics_exports
+    cleanup_claims_analytics_exports = cleanup_claims_analytics_exports
+    delete_claims_analytics_exports = delete_claims_analytics_exports
+    insert_claim_notification = insert_claim_notification
+    get_claim_notification = get_claim_notification
+    get_latest_claim_notification = get_latest_claim_notification
+    list_claim_notifications = list_claim_notifications
+    get_claim_notifications_by_ids = get_claim_notifications_by_ids
+    mark_claim_notifications_delivered = mark_claim_notifications_delivered
+    list_claim_review_rules = list_claim_review_rules
+    create_claim_review_rule = create_claim_review_rule
+    get_claim_review_rule = get_claim_review_rule
+    update_claim_review_rule = update_claim_review_rule
+    delete_claim_review_rule = delete_claim_review_rule
+    list_claim_review_history = list_claim_review_history
+    list_review_queue = list_review_queue
+    get_claims_by_media = get_claims_by_media
+    get_claim_with_media = get_claim_with_media
+    get_claims_by_uuid = get_claims_by_uuid
+    upsert_claims = upsert_claims
+    update_claim = update_claim
+    update_claim_review = update_claim_review
+    soft_delete_claims_for_media = soft_delete_claims_for_media
+    list_claims = list_claims
+    search_claims = search_claims
+    get_claims_review_extractor_metrics_daily = get_claims_review_extractor_metrics_daily
+    upsert_claims_review_extractor_metrics_daily = upsert_claims_review_extractor_metrics_daily
+    list_claims_review_extractor_metrics_daily = list_claims_review_extractor_metrics_daily
+    count_claims_review_extractor_metrics_daily = count_claims_review_extractor_metrics_daily
+    list_claims_review_user_ids = list_claims_review_user_ids
+    list_claims_review_user_ids_page = list_claims_review_user_ids_page
+    get_claims_review_metrics_window_rows = get_claims_review_metrics_window_rows
+    lock_claims_review_metrics_owner = lock_claims_review_metrics_owner
+    get_claims_review_latency_stats = get_claims_review_latency_stats
+    get_claim_clusters_by_ids = get_claim_clusters_by_ids
+    get_claim_cluster_member_counts = get_claim_cluster_member_counts
+    update_claim_clusters_watchlist_counts = update_claim_clusters_watchlist_counts
+    list_claim_clusters = list_claim_clusters
+    get_claim_cluster = get_claim_cluster
+    get_claim_cluster_link = get_claim_cluster_link
+    list_claim_cluster_links = list_claim_cluster_links
+    create_claim_cluster_link = create_claim_cluster_link
+    delete_claim_cluster_link = delete_claim_cluster_link
+    list_claim_cluster_members = list_claim_cluster_members
+    create_claim_cluster = create_claim_cluster
+    add_claim_to_cluster = add_claim_to_cluster
+    rebuild_claim_clusters_exact = rebuild_claim_clusters_exact
+    rebuild_claim_clusters_from_assignments = rebuild_claim_clusters_from_assignments
+    rebuild_claims_fts = rebuild_claims_fts
+    get_claims_monitoring_settings = get_claims_monitoring_settings
+    upsert_claims_monitoring_settings = upsert_claims_monitoring_settings
+    migrate_legacy_claims_monitoring_alerts = migrate_legacy_claims_monitoring_alerts
+    delete_claims_monitoring_configs_by_user = delete_claims_monitoring_configs_by_user
+    list_claims_monitoring_configs = list_claims_monitoring_configs
+    create_claims_monitoring_config = create_claims_monitoring_config
+    get_claims_monitoring_config = get_claims_monitoring_config
+    update_claims_monitoring_config = update_claims_monitoring_config
+    delete_claims_monitoring_config = delete_claims_monitoring_config
+    list_claims_monitoring_user_ids = list_claims_monitoring_user_ids
+    list_claims_monitoring_alerts = list_claims_monitoring_alerts
+    get_claims_monitoring_alert = get_claims_monitoring_alert
+    create_claims_monitoring_alert = create_claims_monitoring_alert
+    update_claims_monitoring_alert = update_claims_monitoring_alert
+    delete_claims_monitoring_alert = delete_claims_monitoring_alert
+    get_claims_monitoring_health = get_claims_monitoring_health
+    upsert_claims_monitoring_health = upsert_claims_monitoring_health
+    insert_claims_monitoring_event = insert_claims_monitoring_event
+    get_claims_monitoring_event = get_claims_monitoring_event
+    get_claims_monitoring_event_high_water = get_claims_monitoring_event_high_water
+    get_claims_monitoring_event_export_data_bounded = get_claims_monitoring_event_export_data_bounded
+    get_claims_monitoring_event_payload_bounded = get_claims_monitoring_event_payload_bounded
+    list_claims_monitoring_events = list_claims_monitoring_events
+    list_claims_monitoring_events_page = list_claims_monitoring_events_page
+    list_undelivered_claims_monitoring_events = list_undelivered_claims_monitoring_events
+    mark_claims_monitoring_events_delivered = mark_claims_monitoring_events_delivered
+    get_latest_claims_monitoring_event_delivery = get_latest_claims_monitoring_event_delivery
+    has_successful_claims_monitoring_event_delivery = has_successful_claims_monitoring_event_delivery
+    _resolve_email_sync_source_row_id = _resolve_email_sync_source_row_id
+    _fetch_email_sync_state_row = _fetch_email_sync_state_row
+    get_email_sync_state = get_email_sync_state
+    mark_email_sync_run_started = mark_email_sync_run_started
+    mark_email_sync_run_succeeded = mark_email_sync_run_succeeded
+    mark_email_sync_run_failed = mark_email_sync_run_failed
+    _normalize_email_label_values = staticmethod(_normalize_email_label_values)
+    _resolve_email_message_row_for_source_message = _resolve_email_message_row_for_source_message
+    apply_email_label_delta = apply_email_label_delta
+    reconcile_email_message_state = reconcile_email_message_state
+    _parse_email_operator_query = _parse_email_operator_query
+    _email_like_clause = _email_like_clause
+    search_email_messages = search_email_messages
+    get_email_message_detail = get_email_message_detail
+    _cleanup_email_orphans_for_tenant = _cleanup_email_orphans_for_tenant
+    enforce_email_retention_policy = enforce_email_retention_policy
+    hard_delete_email_tenant_data = hard_delete_email_tenant_data
+    run_email_legacy_backfill_batch = run_email_legacy_backfill_batch
+    run_email_legacy_backfill_worker = run_email_legacy_backfill_worker
+    _fetch_email_backfill_state_row = _fetch_email_backfill_state_row
+    _ensure_email_backfill_state_row = _ensure_email_backfill_state_row
+    get_email_legacy_backfill_state = get_email_legacy_backfill_state
+    _update_email_backfill_progress = _update_email_backfill_progress
+    get_data_table_counts = get_data_table_counts
+    insert_data_table_columns = insert_data_table_columns
+    list_data_table_columns = list_data_table_columns
+    soft_delete_data_table_columns = soft_delete_data_table_columns
+    insert_data_table_rows = insert_data_table_rows
+    list_data_table_rows = list_data_table_rows
+    soft_delete_data_table_rows = soft_delete_data_table_rows
+    insert_data_table_sources = insert_data_table_sources
+    list_data_table_sources = list_data_table_sources
+    soft_delete_data_table_sources = soft_delete_data_table_sources
+    soft_delete_media_file = soft_delete_media_file
+    soft_delete_media_files_for_media = soft_delete_media_files_for_media
+    insert_visual_document = insert_visual_document
+    list_visual_documents_for_media = list_visual_documents_for_media
+    soft_delete_visual_documents_for_media = soft_delete_visual_documents_for_media
+    create_tts_history_entry = create_tts_history_entry
+    _build_tts_history_filters = _build_tts_history_filters
+    list_tts_history = list_tts_history
+    count_tts_history = count_tts_history
+    get_tts_history_entry = get_tts_history_entry
+    update_tts_history_favorite = update_tts_history_favorite
+    soft_delete_tts_history_entry = soft_delete_tts_history_entry
+    mark_tts_history_artifacts_deleted_for_output = mark_tts_history_artifacts_deleted_for_output
+    mark_tts_history_artifacts_deleted_for_file_id = mark_tts_history_artifacts_deleted_for_file_id
+    purge_tts_history_for_user = purge_tts_history_for_user
+    list_tts_history_user_ids = list_tts_history_user_ids
+    create_audio_preset = create_audio_preset
+    list_audio_presets = list_audio_presets
+    count_audio_presets = count_audio_presets
+    get_audio_preset = get_audio_preset
+    update_audio_preset = update_audio_preset
+    soft_delete_audio_preset = soft_delete_audio_preset
+    get_connection = get_connection
+    read_media_clone_snapshots = read_media_clone_snapshots
+    read_operation_owned_clone_media_readiness = read_operation_owned_clone_media_readiness
+    read_operation_owned_clone_media_publication_state = read_operation_owned_clone_media_publication_state
+    insert_operation_owned_clone_media = insert_operation_owned_clone_media
+    delete_operation_owned_clone_media = delete_operation_owned_clone_media
+    list_operation_owned_clone_media = list_operation_owned_clone_media
+    confirm_operation_owned_clone_media = confirm_operation_owned_clone_media
+    close_connection = close_connection
+    release_context_connection = release_context_connection
+    _execute_with_connection = _execute_with_connection
+    _executemany_with_connection = _executemany_with_connection
+    _fetchone_with_connection = _fetchone_with_connection
+    _fetchall_with_connection = _fetchall_with_connection
+    execute_query = execute_query
+    execute_many = execute_many
+    _update_fts_media = _update_fts_media
+    _delete_fts_media = _delete_fts_media
+    _update_fts_keyword = _update_fts_keyword
+    _delete_fts_keyword = _delete_fts_keyword
+    sync_get_media_fts_values = sync_get_media_fts_values
+    sync_refresh_fts_for_entity = sync_refresh_fts_for_entity
+    ensure_chunk_fts = ensure_chunk_fts
+    maybe_rebuild_chunk_fts_if_empty = maybe_rebuild_chunk_fts_if_empty
+    _apply_sqlite_connection_pragmas = apply_sqlite_connection_pragmas
+    __init__ = initialize_media_database
+    initialize_db = initialize_db
+    _ensure_sqlite_backend = _ensure_sqlite_backend
+    backup_database = backup_database
+    _backup_non_sqlite_database = _backup_non_sqlite_database
+    _resolve_backend = _resolve_backend
+    seed_builtin_templates = seed_builtin_templates
+    add_keyword = add_keyword
+    fetch_media_for_keywords = fetch_media_for_keywords
+    soft_delete_document_version = soft_delete_document_version
+    soft_delete_keyword = soft_delete_keyword
+    update_media_reprocess_state = update_media_reprocess_state
+    update_chunking_template = update_chunking_template
+    update_keywords_for_media = update_keywords_for_media
+
 
 __all__ = ["MediaDatabase"]

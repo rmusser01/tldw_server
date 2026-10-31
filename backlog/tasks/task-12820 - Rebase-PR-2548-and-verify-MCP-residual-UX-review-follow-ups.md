@@ -28,7 +28,6 @@ Track rebasing PR #2548 onto latest dev, verifying all PR review comments/issues
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Fetched latest `origin/dev` and PR head, then rebased `codex/mcp-residual-ux-clean` onto `origin/dev`.
 - Verified the existing PR review fixes after rebase: package gateway readiness uses `package_summary.get(...)`, admin-auth `None` is handled, `/mcp/status` has `GatewayReadinessStatusResponse`, and MCP status distinguishes configured-but-not-loaded modules.
@@ -47,7 +46,6 @@ Verification:
 - `git diff --check`: passed.
 - Bandit on touched MCP/app/test scope wrote `/tmp/bandit_pr2548_mcp_scope.json`; only LOW-severity B101 assert findings in the touched pytest file, no production-code findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

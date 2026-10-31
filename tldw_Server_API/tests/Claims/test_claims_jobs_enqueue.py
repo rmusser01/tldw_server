@@ -311,3 +311,117 @@ def test_claims_jobs_summary_is_read_only() -> None:
         "domain": CLAIMS_JOBS_DOMAIN,
         "counts": {"queued": 2, "processing": 1, "failed": 1},
     }
+
+
+def _enqueue_review_metrics(manager, **overrides):
+    return claims_jobs.enqueue_claims_review_metrics(
+        **{
+            "owner_user_id": "42",
+            "scheduled_for": "2026-09-07T00:00:00Z",
+            "start_date": "2026-09-06",
+            "end_date": "2026-09-07",
+            "interval_seconds": 86400,
+            "job_manager": manager,
+            "settings_obj": {"CLAIMS_JOBS_QUEUE": "claims-test", "CLAIMS_JOBS_MAX_RETRIES_REVIEW_METRICS": 4},
+            **overrides,
+        }
+    )
+
+
+class TypedAdmissionManager:
+    def __init__(self, result):
+        self.result = result
+        self.calls = []
+
+    def admit_job(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.result
+
+
+def test_review_metrics_enqueue_uses_typed_admission_and_exact_metadata() -> None:
+    from tldw_Server_API.app.core.Jobs.operations.contracts import AdmissionResult
+
+    result = AdmissionResult.applied(row={"id": 91})
+    manager = TypedAdmissionManager(result)
+    assert _enqueue_review_metrics(manager) is result
+    assert manager.calls == [{
+        "domain": "claims", "queue": "claims-test", "job_type": "claims_aggregate_review_metrics",
+        "payload": {"version": 1, "owner_user_id": "42", "scheduled_for": "2026-09-07T00:00:00Z", "start_date": "2026-09-06", "end_date": "2026-09-07"},
+        "owner_user_id": "42", "priority": 5, "max_retries": 4,
+        "batch_group": "claims-review-metrics:2026-09-06:2026-09-07",
+        "idempotency_key": "claims:review_metrics:v1:42:86400:1788739200:2026-09-06:2026-09-07",
+    }]
+
+
+def test_review_metrics_enqueue_preserves_all_typed_admission_outcomes() -> None:
+    from tldw_Server_API.app.core.Jobs.operations.contracts import (
+        AdmissionRejectionReason,
+        AdmissionResult,
+        OperationOutcome,
+    )
+
+    for result in (
+        AdmissionResult.existing(row={"id": 91}),
+        AdmissionResult(outcome=OperationOutcome.BACKEND_CONFLICT),
+        AdmissionResult.rejected(next(iter(AdmissionRejectionReason))),
+    ):
+        assert _enqueue_review_metrics(TypedAdmissionManager(result)) is result
+
+
+@pytest.mark.parametrize("interval", [True, False, 0, -1, "86400", 86400.0, None])
+def test_review_metrics_enqueue_rejects_invalid_interval_before_admission(interval) -> None:
+    manager = TypedAdmissionManager(None)
+    with pytest.raises(ClaimsJobError):
+        _enqueue_review_metrics(manager, interval_seconds=interval)
+    assert manager.calls == []
+
+
+def test_review_metrics_enqueue_identity_includes_interval_and_dates() -> None:
+    manager = TypedAdmissionManager(None)
+    _enqueue_review_metrics(manager)
+    _enqueue_review_metrics(manager, interval_seconds=60)
+    _enqueue_review_metrics(manager, start_date="2026-09-07", end_date="2026-09-08")
+    assert len({call["idempotency_key"] for call in manager.calls}) == 3
+
+
+@pytest.mark.parametrize("retries", [True, -1, 101, "invalid", 2.5])
+def test_review_metrics_enqueue_defaults_invalid_retries(retries) -> None:
+    manager = TypedAdmissionManager(None)
+    _enqueue_review_metrics(manager, settings_obj={"CLAIMS_JOBS_MAX_RETRIES_REVIEW_METRICS": retries})
+    assert manager.calls[0]["max_retries"] == 3
+
+
+@pytest.mark.parametrize("global_flag,metrics_flag,expected", [(False, False, False), (False, True, False), (True, False, False), (True, True, True), ("false", "true", False), ("true", "off", False)])
+def test_review_metrics_jobs_enabled_requires_both_flags(global_flag, metrics_flag, expected) -> None:
+    assert claims_jobs.claims_review_metrics_jobs_enabled({"CLAIMS_JOBS_ENABLED": global_flag, "CLAIMS_REVIEW_METRICS_JOBS_ENABLED": metrics_flag}) is expected
+
+
+def test_review_metrics_jobs_enabled_reads_environment_and_defaults_off(monkeypatch) -> None:
+    assert claims_jobs.claims_review_metrics_jobs_enabled({"CLAIMS_JOBS_ENABLED": True}) is False
+    monkeypatch.setenv("CLAIMS_JOBS_ENABLED", "true")
+    monkeypatch.setenv("CLAIMS_REVIEW_METRICS_JOBS_ENABLED", "true")
+    assert claims_jobs.claims_review_metrics_jobs_enabled() is True
+
+
+def test_review_metrics_enqueue_replay_returns_authoritative_existing_row(tmp_path) -> None:
+    from tldw_Server_API.app.core.Claims_Extraction.claims_job_contracts import (
+        validate_review_metrics_payload,
+    )
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.app.core.Jobs.operations.contracts import (
+        NoTransitionReason,
+        OperationOutcome,
+    )
+
+    manager = JobManager(tmp_path / "jobs.sqlite")
+    first = _enqueue_review_metrics(manager, settings_obj={})
+    replay = _enqueue_review_metrics(manager, settings_obj={})
+    assert first.outcome is OperationOutcome.APPLIED
+    assert replay.outcome is OperationOutcome.NO_TRANSITION
+    assert replay.no_transition_reason is NoTransitionReason.IDEMPOTENT_EXISTING
+    assert replay.row["id"] == first.row["id"]
+    persisted = manager.get_job(first.row["id"])
+    assert {key: value for key, value in replay.row.items() if key != "payload"} == {
+        key: value for key, value in persisted.items() if key != "payload"
+    }
+    assert validate_review_metrics_payload(replay.row["payload"]) == persisted["payload"]

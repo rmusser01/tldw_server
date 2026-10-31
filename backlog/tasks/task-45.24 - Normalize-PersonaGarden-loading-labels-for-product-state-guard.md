@@ -32,7 +32,7 @@ Replace the new PersonaGarden hardcoded Loading fallbacks flagged by the product
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Initial verifier run failed on fresh origin/dev plus the StatusTag slice with two blocked canonical-state-label findings for hardcoded Loading fallbacks in VisualPackEditor.tsx. Using that verifier output as the red guard evidence for this small cleanup.
 
 Implementation: VisualPackEditor now uses getDesignSystemState("loading").label for its loading button fallbacks instead of new hardcoded Loading strings.
@@ -42,7 +42,7 @@ Verification: bun run verify:design-system-state passed with no blocked PersonaG
 TypeScript caveat: bunx tsc --noEmit --pretty false still fails on unrelated repo-wide frontend baseline errors; a filtered tsc pass for the touched files produced no VisualPackEditor errors.
 
 Bandit: skipped because this cleanup only changes TypeScript and Backlog task metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

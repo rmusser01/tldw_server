@@ -35,9 +35,9 @@ Expand Sync v2 domain coverage beyond personal Notes/Chat/attachment refs in rev
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Closed by reviewed domain-expansion subtasks TASK-490.13.9 through TASK-490.13.12. Source cache and media metadata domains now define stable identity, conflict/tombstone behavior, projection ownership, restore inventory, and redaction policy; derived content domains were reassessed and deferred unless promoted as source-of-truth later.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

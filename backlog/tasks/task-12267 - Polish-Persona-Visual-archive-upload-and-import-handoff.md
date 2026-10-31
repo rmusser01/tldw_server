@@ -63,7 +63,7 @@ Stage 5: Closeout
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-05-15: Started planning in isolated worktree .worktrees/persona-visual-import-handoff-1696 after PR #1701 merged. MCP Backlog is rooted at the dirty main checkout, so this task is being maintained with the Backlog CLI in the branch worktree.
 
 Verification 2026-05-15:
@@ -91,7 +91,7 @@ Review-fix verification 2026-05-15:
 - node -e JSON.parse(...) for apps/packages/ui/src/assets/locale/en/sidepanel.json passed.
 - git diff --check passed.
 - Bandit remains N/A because this review pass touched TypeScript/JSON/Markdown only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

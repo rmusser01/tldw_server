@@ -122,7 +122,7 @@ _EXPECTED_IMPORT_DIGESTS = {
     "tldw_Server_API/__init__.py": "b70c123a5edf6dd5edd30b5fd42c2d4c184032b550c3571ba50791de7d61ce63",
     "tldw_Server_API/app/__init__.py": "4d024921beea6dc90cd29b6a2699f05de3e1b428b14b7cac356b1cf83544495a",
     "tldw_Server_API/app/core/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "tldw_Server_API/app/core/testing.py": "8faa0f20557fbfa1bb2a26ba45ded00a5dc9230d0abc467216a56797f4150ce6",
+    "tldw_Server_API/app/core/testing.py": "f6e34db8bf08f5e931d86e4655fde2eae1a456e2204c6920af6fd068f9247945",
     "tldw_Server_API/app/core/Utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "tldw_Server_API/app/core/Utils/coercion.py": "b8addf624893d382167013ccfef0916ec14e21919a887c303a899b18bd318994",
     "tldw_Server_API/app/core/Research/__init__.py": "7c52a1d6f02b53490c86e1f4ace834428b1358036ba9f5fb5ec50524dbab7db9",
@@ -143,7 +143,7 @@ _EXPECTED_AST_DIGESTS = {
     "tldw_Server_API/__init__.py": "450c3d7751c7b4d86400f87ae9bbdbdec9306297f44dc3dde652c1508d1bb8df",
     "tldw_Server_API/app/__init__.py": "88280dc29abf20f25212758d3a6497a3be5e5647b78037128817634245ab39b6",
     "tldw_Server_API/app/core/__init__.py": "3543b4693a36a1098850b8bc928887694ed59a6deb7d3dfd0339de01f55a77b6",
-    "tldw_Server_API/app/core/testing.py": "c2d8e72df27fcaea84a3e7ef804503dac8a931084bd894edbba0f67ee2f5b18d",
+    "tldw_Server_API/app/core/testing.py": "d3dfdf4102917f9350ce94c76fb4d4a27abe86548a5152c38f7c546e390afc00",
     "tldw_Server_API/app/core/Utils/__init__.py": "b16d8275df7d14ba18378cbfad7d5a716bdb3faa72c1e7dce98e7a81e5f14235",
     "tldw_Server_API/app/core/Utils/coercion.py": "e8bc88da43d8bc3c0fd366e9ae434213a827baebc356712d93237624534427b9",
     "tldw_Server_API/app/core/Research/__init__.py": "73cdb8ab06dbdbca4a15f25e9695273f19a55fce7670872d5374c0177e1302a4",
@@ -1240,7 +1240,7 @@ def _install_runtime_tripwires(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError("discovery V2 attempted an alternate effect path")
 
     monkeypatch.setattr(socket, "create_connection", forbidden)
-    monkeypatch.setattr(socket, "socket", forbidden)
+    monkeypatch.setattr(socket.socket, "__new__", forbidden)
     for name in ("getaddrinfo", "gethostbyaddr", "gethostbyname", "gethostbyname_ex", "getnameinfo"):
         monkeypatch.setattr(socket, name, forbidden)
     monkeypatch.setattr(http.client, "HTTPConnection", forbidden)
@@ -1256,6 +1256,8 @@ def _install_runtime_tripwires(monkeypatch: pytest.MonkeyPatch) -> None:
         "open_unix_connection",
         "start_unix_server",
     ):
+        if name in ("open_unix_connection", "start_unix_server") and not hasattr(asyncio, name):
+            continue
         monkeypatch.setattr(asyncio, name, forbidden)
     for name in ("Popen", "call", "check_call", "check_output", "run"):
         monkeypatch.setattr(subprocess, name, forbidden)
@@ -1298,6 +1300,47 @@ def _install_runtime_tripwires(monkeypatch: pytest.MonkeyPatch) -> None:
         return original_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr(builtins, "__import__", guarded_import)
+
+
+@pytest.mark.parametrize(
+    "missing_apis",
+    [(), ("open_unix_connection",), ("start_unix_server",),
+     ("open_unix_connection", "start_unix_server"), ("open_connection",)],
+    ids=["unix", "no-unix-client", "no-unix-server", "windows", "missing-mandatory"],
+)
+def test_runtime_tripwires_preserve_socket_type_and_platform_capabilities(
+    missing_apis: tuple[str, ...],
+) -> None:
+    """Absent Unix APIs are optional; available egress and mandatory seams remain guarded."""
+    def available_api(*_args, **_kwargs):
+        return None
+
+    with pytest.MonkeyPatch.context() as patch:
+        for name in ("open_unix_connection", "start_unix_server"):
+            patch.setattr(asyncio, name, available_api, raising=False)
+        for name in missing_apis:
+            patch.delattr(asyncio, name)
+        existing_socket = socket.socket()
+        try:
+            if "open_connection" in missing_apis:
+                with pytest.raises(AttributeError, match="open_connection"):
+                    _install_runtime_tripwires(patch)
+                return
+            _install_runtime_tripwires(patch)
+            assert isinstance(existing_socket, socket.socket)
+            with pytest.raises(AssertionError, match="alternate effect path"):
+                socket.socket()
+            for name in (
+                "open_connection", "start_server", "create_subprocess_exec", "create_subprocess_shell",
+                "open_unix_connection", "start_unix_server",
+            ):
+                if name in missing_apis:
+                    assert not hasattr(asyncio, name)
+                else:
+                    with pytest.raises(AssertionError, match="alternate effect path"):
+                        getattr(asyncio, name)()
+        finally:
+            existing_socket.close()
 
 
 def _aggregator_plan():

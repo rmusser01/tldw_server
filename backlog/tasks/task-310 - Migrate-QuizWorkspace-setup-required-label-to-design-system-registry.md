@@ -38,7 +38,7 @@ Replace the remaining hardcoded QuizWorkspace setup-required product-state label
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation notes:
 - Replaced QuizWorkspace setup-required offline banner badge label with getDesignSystemState("setup_required").label.
 - Added a registry-backed regression assertion in QuizWorkspace.connection-state.test.tsx.
@@ -59,7 +59,7 @@ Pull request: https://github.com/rmusser01/tldw_server/pull/1622
 Review follow-up plan: add a regression test that simulates getDesignSystemState("setup_required") returning undefined, then make QuizWorkspace tolerate that missing registry value without crashing while preserving the existing registry-backed path. Re-run the focused Quiz test, product-state guard test, verify:design-system-state, diff checks, and touched-path TypeScript filter before closing the PR thread.
 
 Review follow-up verification: added a regression test for a missing setup_required registry entry; red run failed at QuizWorkspace.tsx with Cannot read properties of undefined (reading 'label'); after optional chaining fallback, bun run test src/components/Quiz/__tests__/QuizWorkspace.connection-state.test.tsx --reporter=dot passed 7 tests. Also passed product-state guard unit tests, verify:design-system-state, baseline JSON parse, git diff --check, and touched-path TypeScript filtering with no diagnostics for QuizWorkspace or its connection-state test. Bandit skipped again because touched files are frontend TypeScript and Backlog task docs only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

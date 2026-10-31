@@ -32,9 +32,9 @@ Implement GitHub issue #1740 by removing duplicate Persona Visual starter-pack s
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Removed the duplicate starter-pack type declarations from apps/packages/ui/src/types/persona-visuals.ts, leaving the canonical declaration near PersonaVisualStarterPackAssetSummary/Detail. Validation: rg confirms one export each for PersonaVisualStarterPackSummary/ListResponse/CopyRequest; focused Vitest passed with 63 tests across persona-visuals service and VisualPackEditor; git diff --check passed. Package tsc still exits nonzero on existing repo-wide baseline errors; /tmp/persona_visual_starter_type_cleanup_tsc.log has no errors for apps/packages/ui/src/types/persona-visuals.ts. Bandit is not applicable because this is TypeScript-only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

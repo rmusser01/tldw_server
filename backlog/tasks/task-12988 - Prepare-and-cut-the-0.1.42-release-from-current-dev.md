@@ -43,7 +43,7 @@ Prepare a normal patch release by integrating current origin/main into current o
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Branch integration completed at merge commit 2e63d09aa0. Frozen inputs were origin/dev=0f3983788c413e0d17ffe7eabe8cff4a9f6ae723 and origin/main=d9c245ac14c40df855d1ab6cd19b3c137b16b47b. The merge preview and real merge produced five conflicts, all in the license bootstrap/actionlint surfaces. Each was resolved to the newer origin/dev version because dev contains the completed live rollout plus subsequent TASK-12986 hardening; the resolved files are byte-for-byte identical to origin/dev. The merge commit therefore changes ancestry only and retains all current dev content.
 
 Focused local release verification on merge head 2e63d09aa0 passed: 211 pytest tests across the release helper, required workflow contracts, license-first workflow/admission contracts, trusted frontend license workflow/classifier, and release workflow contracts (2 pre-existing warnings). Pinned Actionlint 1.7.12 reported no findings across all workflows. Bandit scanned 363 LOC in Helper_Scripts/ci/check_frontend_license_gate.py and Helper_Scripts/ci/license_first_admission.py with errors=[] and results=[]. Both origin/dev and origin/main are ancestors of the merge head; git diff --check is clean. No production runtime file was changed by conflict resolution, so broader release security coverage is delegated to the security-required PR gate.
@@ -55,7 +55,7 @@ Requester selected the reviewed-metadata release approach: PR #2761 will carry t
 Requester approved the release-specific legal dates on 2026-07-26. The protected trees on the release branch are identical to frozen dev source 0f3983788c413e0d17ffe7eabe8cff4a9f6ae723. Design and implementation plan now include LICENSES/releases/0.1.42, source-only protected publication, and a human legal-record review gate.
 
 0.1.42 release preparation is implemented. Added immutable LICENSES/releases/0.1.42 with approved dates, completed Countdown grant, exact protected source revision, 6,867-file SHA-256 manifest, legal digests/notices, and source-only artifact boundary. Added full changelog/release notes/version surfaces and regenerated Docs/Published idempotently; strict MkDocs build passed. Verification: 46 release utility tests, 19 release-doc tests, 33 published-doc tests, and 185 CI/licensing/workflow tests passed; Actionlint 1.7.12 clean; Bandit returned errors=[] and results=[] excluding standard B101 test assertions; git diff --check clean; both frozen inputs remain ancestors and protected trees remain identical to source 0f3983788c413e0d17ffe7eabe8cff4a9f6ae723. Also removed one stale frontend workflow test assertion that contradicted TASK-12986's required full-history checkout; both old and license-first contracts pass.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

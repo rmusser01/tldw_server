@@ -30,7 +30,7 @@ Confirm whether INV-032 from Docs/ADR/inventory/2026-06-03-decision-inventory.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Created `Docs/ADR/inventory/2026-06-04-embeddings-confirmation-audit.md`.
 - Classified INV-032 as current governing and ready for one bounded Embeddings ADR backfill.
 - Scoped the future ADR to OpenAI-compatible request/response semantics, provider resolution and allowlist safeguards, optional adapter-registry routing with legacy provider-config/direct execution fallback, endpoint cache/batching/circuit-breaker controls, and Jobs-root/Redis-stage media embedding pipeline ownership.
@@ -43,7 +43,7 @@ Confirm whether INV-032 from Docs/ADR/inventory/2026-06-03-decision-inventory.md
   - `source ../../.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Embeddings/test_embeddings_policy.py tldw_Server_API/tests/Embeddings/test_embeddings_fallback.py tldw_Server_API/tests/Embeddings/test_embeddings_endpoint_cache_identity.py tldw_Server_API/tests/Embeddings/test_request_batching.py tldw_Server_API/tests/Embeddings/test_embeddings_jobs_adapter.py tldw_Server_API/tests/Embeddings/test_embeddings_redis_worker.py` passed: 34 passed, 3 warnings.
   - Removed test-generated untracked Watchlists template artifacts before staging.
 - Bandit: skipped because this task touched only Markdown documentation and Backlog task metadata; no Python/code paths were changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

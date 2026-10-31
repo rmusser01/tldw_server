@@ -33,6 +33,7 @@ type EnsurePersonaServerChatArgs = {
   requestScope?: ServicePromptRequestScope
   signal?: AbortSignal
   scopeInvalidatedSignal?: AbortSignal
+  isCurrent?: () => boolean
   createChat: (
     payload: Record<string, unknown>,
     options?: {
@@ -47,7 +48,7 @@ type EnsurePersonaServerChatArgs = {
     scopeInvalidatedSignal?: AbortSignal
   ) => Promise<string | null>
   invalidateServerChatHistory: () => void
-  setServerChatId: (value: string | null) => void
+  setServerChatId: import("@/store/option/types").State["setServerChatId"]
   setServerChatTitle: (value: string | null) => void
   setServerChatCharacterId: (value: string | number | null) => void
   setServerChatAssistantKind: (value: "character" | "persona" | null) => void
@@ -64,49 +65,57 @@ type EnsurePersonaServerChatArgs = {
   setServerChatExternalRef: (value: string | null) => void
 }
 
-export const resetAssistantServerChatState = ({
-  setServerChatId,
-  setServerChatTitle,
-  setServerChatCharacterId,
-  setServerChatAssistantKind,
-  setServerChatAssistantId,
-  setServerChatPersonaMemoryMode,
-  setServerChatMetaLoaded,
-  setServerChatState,
-  setServerChatVersion,
-  setServerChatTopic,
-  setServerChatClusterId,
-  setServerChatSource,
-  setServerChatExternalRef
-}: Pick<
-  EnsurePersonaServerChatArgs,
-  | "setServerChatId"
-  | "setServerChatTitle"
-  | "setServerChatCharacterId"
-  | "setServerChatAssistantKind"
-  | "setServerChatAssistantId"
-  | "setServerChatPersonaMemoryMode"
-  | "setServerChatMetaLoaded"
-  | "setServerChatState"
-  | "setServerChatVersion"
-  | "setServerChatTopic"
-  | "setServerChatClusterId"
-  | "setServerChatSource"
-  | "setServerChatExternalRef"
->) => {
-  setServerChatId(null)
-  setServerChatTitle(null)
-  setServerChatCharacterId(null)
-  setServerChatAssistantKind(null)
-  setServerChatAssistantId(null)
-  setServerChatPersonaMemoryMode(null)
-  setServerChatMetaLoaded(false)
-  setServerChatState("in-progress")
-  setServerChatVersion(null)
-  setServerChatTopic(null)
-  setServerChatClusterId(null)
-  setServerChatSource(null)
-  setServerChatExternalRef(null)
+export const resetAssistantServerChatState = (
+  {
+    setServerChatId,
+    setServerChatTitle,
+    setServerChatCharacterId,
+    setServerChatAssistantKind,
+    setServerChatAssistantId,
+    setServerChatPersonaMemoryMode,
+    setServerChatMetaLoaded,
+    setServerChatState,
+    setServerChatVersion,
+    setServerChatTopic,
+    setServerChatClusterId,
+    setServerChatSource,
+    setServerChatExternalRef
+  }: Pick<
+    EnsurePersonaServerChatArgs,
+    | "setServerChatId"
+    | "setServerChatTitle"
+    | "setServerChatCharacterId"
+    | "setServerChatAssistantKind"
+    | "setServerChatAssistantId"
+    | "setServerChatPersonaMemoryMode"
+    | "setServerChatMetaLoaded"
+    | "setServerChatState"
+    | "setServerChatVersion"
+    | "setServerChatTopic"
+    | "setServerChatClusterId"
+    | "setServerChatSource"
+    | "setServerChatExternalRef"
+  >,
+  assertCurrent: () => void = () => {}
+) => {
+  const publish = (update: () => void) => {
+    assertCurrent()
+    update()
+    assertCurrent()
+  }
+  publish(() => setServerChatId(null))
+  publish(() => setServerChatTitle(null))
+  publish(() => setServerChatCharacterId(null))
+  publish(() => setServerChatAssistantKind(null))
+  publish(() => setServerChatAssistantId(null))
+  publish(() => setServerChatPersonaMemoryMode(null))
+  publish(() => setServerChatMetaLoaded(false))
+  publish(() => setServerChatState("in-progress"))
+  publish(() => setServerChatVersion(null))
+  publish(() => setServerChatTopic(null))
+  publish(() => setServerChatClusterId(null))
+  publish(() => setServerChatSource(null))
+  publish(() => setServerChatExternalRef(null))
 }
 
 export const ensurePersonaServerChat = async ({
@@ -130,6 +139,7 @@ export const ensurePersonaServerChat = async ({
   requestScope,
   signal,
   scopeInvalidatedSignal,
+  isCurrent,
   createChat,
   ensureServerChatHistoryId,
   invalidateServerChatHistory,
@@ -151,10 +161,20 @@ export const ensurePersonaServerChat = async ({
   historyId: string | null
   personaMemoryMode: "read_only" | "read_write"
 }> => {
+  const capturedScope = scope ? structuredClone(scope) : undefined
+  const capturedRequestScope = requestScope
+    ? structuredClone(requestScope)
+    : undefined
   const throwIfScopeInvalidated = () => {
-    if (scopeInvalidatedSignal?.aborted) {
+    if (scopeInvalidatedSignal?.aborted || isCurrent?.() === false) {
       throw createServicePromptScopeChangedError()
     }
+    signal?.throwIfAborted()
+  }
+  const publish = (update: () => void) => {
+    throwIfScopeInvalidated()
+    update()
+    throwIfScopeInvalidated()
   }
   throwIfScopeInvalidated()
   const overrideChatId =
@@ -187,21 +207,24 @@ export const ensurePersonaServerChat = async ({
 
   if (shouldResetServerChat) {
     throwIfScopeInvalidated()
-    resetAssistantServerChatState({
-      setServerChatId,
-      setServerChatTitle,
-      setServerChatCharacterId,
-      setServerChatAssistantKind,
-      setServerChatAssistantId,
-      setServerChatPersonaMemoryMode,
-      setServerChatMetaLoaded,
-      setServerChatState,
-      setServerChatVersion,
-      setServerChatTopic,
-      setServerChatClusterId,
-      setServerChatSource,
-      setServerChatExternalRef
-    })
+    resetAssistantServerChatState(
+      {
+        setServerChatId,
+        setServerChatTitle,
+        setServerChatCharacterId,
+        setServerChatAssistantKind,
+        setServerChatAssistantId,
+        setServerChatPersonaMemoryMode,
+        setServerChatMetaLoaded,
+        setServerChatState,
+        setServerChatVersion,
+        setServerChatTopic,
+        setServerChatClusterId,
+        setServerChatSource,
+        setServerChatExternalRef
+      },
+      throwIfScopeInvalidated
+    )
   }
 
   let chatId = shouldResetServerChat ? null : resolvedServerChatId
@@ -216,8 +239,8 @@ export const ensurePersonaServerChat = async ({
       cluster_id: undefined,
       source: undefined,
       external_ref: undefined
-    }, scope || requestScope || signal
-      ? { scope, requestScope, signal }
+    }, capturedScope || capturedRequestScope || signal
+      ? { scope: capturedScope, requestScope: capturedRequestScope, signal }
       : undefined)
 
     throwIfScopeInvalidated()
@@ -282,28 +305,28 @@ export const ensurePersonaServerChat = async ({
         : personaMemoryMode
 
     publishServerChatState = () => {
-      setServerChatId(normalizedId)
-      setServerChatState(normalizeConversationState(createdState))
-      setServerChatVersion(createdVersion)
-      setServerChatTopic(createdTopic)
-      setServerChatClusterId(createdClusterId)
-      setServerChatSource(createdSource)
-      setServerChatExternalRef(createdExternalRef)
-      setServerChatTitle(createdTitle)
-      setServerChatCharacterId(createdCharacterId)
-      setServerChatAssistantKind(createdAssistantKind)
-      setServerChatAssistantId(createdAssistantId)
-      setServerChatPersonaMemoryMode(createdPersonaMemoryMode)
-      setServerChatMetaLoaded(true)
-      invalidateServerChatHistory()
+      publish(() => setServerChatId(normalizedId, { preserveTemporaryChat: temporaryChat }))
+      publish(() => setServerChatState(normalizeConversationState(createdState)))
+      publish(() => setServerChatVersion(createdVersion))
+      publish(() => setServerChatTopic(createdTopic))
+      publish(() => setServerChatClusterId(createdClusterId))
+      publish(() => setServerChatSource(createdSource))
+      publish(() => setServerChatExternalRef(createdExternalRef))
+      publish(() => setServerChatTitle(createdTitle))
+      publish(() => setServerChatCharacterId(createdCharacterId))
+      publish(() => setServerChatAssistantKind(createdAssistantKind))
+      publish(() => setServerChatAssistantId(createdAssistantId))
+      publish(() => setServerChatPersonaMemoryMode(createdPersonaMemoryMode))
+      publish(() => setServerChatMetaLoaded(true))
+      publish(invalidateServerChatHistory)
     }
   } else {
     throwIfScopeInvalidated()
     publishServerChatState = () => {
-      setServerChatAssistantKind("persona")
-      setServerChatAssistantId(assistantId)
-      setServerChatPersonaMemoryMode(personaMemoryMode)
-      setServerChatCharacterId(null)
+      publish(() => setServerChatAssistantKind("persona"))
+      publish(() => setServerChatAssistantId(assistantId))
+      publish(() => setServerChatPersonaMemoryMode(personaMemoryMode))
+      publish(() => setServerChatCharacterId(null))
     }
   }
 

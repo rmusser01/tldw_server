@@ -40,7 +40,7 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Inspected aggregate /api/v1/health, /api/v1/health/live, RAG /api/v1/rag/health, LLM /api/v1/llm/health, audio /api/v1/audio/health and /api/v1/audio/transcriptions/health, slides /api/v1/slides/health, frontend connection store, ServerReadinessGate, and WorkspaceStatusBar.
 
 Documented that current payloads support broad app entry and degraded status only; they do not prove per-action safety for source browsing, chat, artifact generation, slides, audio, export, or sync.
@@ -48,7 +48,7 @@ Documented that current payloads support broad app entry and degraded status onl
 Implementation decision: no action-level disabling in this slice because doing so would invent unsupported frontend semantics. Follow-up requires backend-owned capability payload fixtures.
 
 Verification: git diff --check passed. Tests and Bandit skipped because this slice changes docs/task records only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

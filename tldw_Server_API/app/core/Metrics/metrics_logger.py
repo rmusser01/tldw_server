@@ -214,22 +214,6 @@ def log_resource_usage():
 #     elif metric_name == "total_processing_time_seconds":
 #         TOTAL_PROCESSING_TIME.labels(**(labels or {})).observe(value)
 
-
-# # main.py or equivalent entry point
-# from metrics_logger import init_metrics_server
-#
-#
-# def main():
-#     # Start Prometheus metrics server on port 8000
-#     init_metrics_server(port=8000)
-#
-#     # Initialize and launch your Gradio app
-#     create_video_transcription_tab()
-#
-#
-# if __name__ == "__main__":
-#     main()
-
 # prometheus.yml
 # scrape_configs:
 #   - job_name: 'video_transcription_app'

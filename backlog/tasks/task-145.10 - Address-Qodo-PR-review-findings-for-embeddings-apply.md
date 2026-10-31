@@ -40,13 +40,13 @@ Inspect existing helper/endpoint tests, add focused regressions for the three re
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Qodo review fixes for the embeddings live-apply backend path. Policy helper fallback now logs a warning when import/runtime helper loading fails instead of silently returning permissive defaults. apply_embedding_recipe_recommendation now receives a config_updater callable, and the FastAPI endpoint exposes get_recipe_config_updater as a dependency returning setup_manager.update_config, so tests and callers can override config mutation behavior without patching the helper module singleton. The apply endpoint now catches OSError subclasses from config writes, logs them, and returns sanitized HTTP 500 details through sanitize_error_message.
 
 Verification: red test run first failed on missing get_recipe_config_updater import before production changes. After implementation, targeted regressions passed 3 tests with 5 warnings; focused backend eval recipe tests passed 41 tests with 5 warnings. Bandit on touched backend source wrote /tmp/bandit_embeddings_qodo_review.json with results 0/errors 0/skipped 0. git diff --check passed.
 
 Pushed commit 529e34e9a to origin/codex/embeddings-rag-recipe-design, replied to the three Qodo inline threads, and resolved them.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

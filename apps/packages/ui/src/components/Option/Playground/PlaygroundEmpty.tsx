@@ -14,7 +14,11 @@ import { useDemoMode } from "@/context/demo-mode";
 import { useHelpModal } from "@/store/tutorials";
 import { buildResearchLaunchPath } from "@/routes/route-paths";
 import { requestQuickIngestOpen } from "@/utils/quick-ingest-open";
+import { useConnectionState, useIsConnected } from "@/hooks/useConnectionState";
+import { requestSettingsNavigation } from "@/utils/settings-return";
 import { EmptyState } from "@/components/ui/feedback";
+import { FEATURE_FLAGS, useFeatureFlag } from "@/hooks/useFeatureFlags";
+import { isAwaitingFirstConnectionCheck } from "./composer-connection";
 
 const actionButtonFocusClassName =
   "focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg";
@@ -22,9 +26,15 @@ const actionButtonFocusClassName =
 export const PlaygroundEmpty = () => {
   const { t } = useTranslation(["playground", "common", "option"]);
   const { demoEnabled } = useDemoMode();
+  const isConnected = useIsConnected();
+  // While the first server check runs, keep the normal chat card instead of
+  // flashing "Connect to start chatting" and then jumping to it (CC-03).
+  const connectionPending = isAwaitingFirstConnectionCheck(useConnectionState());
   const { open: openHelpModal } = useHelpModal();
   const navigate = useNavigate();
   const [modesExpanded, setModesExpanded] = React.useState(false);
+  // Compare stays hidden until it is verified (owner decision D4).
+  const [compareEnabled] = useFeatureFlag(FEATURE_FLAGS.COMPARE_MODE);
 
   const dispatchStarter = React.useCallback(
     (mode: "general" | "compare" | "character" | "rag", prompt?: string) => {
@@ -127,27 +137,42 @@ export const PlaygroundEmpty = () => {
         ),
         action: handleOpenDeepResearch,
       },
-    ],
-    [dispatchStarter, handleOpenDeepResearch, t],
+    ].filter((starter) => compareEnabled || starter.key !== "compare"),
+    [compareEnabled, dispatchStarter, handleOpenDeepResearch, t],
   );
 
-  const description = demoEnabled ? (
-    t("playground:empty.demoDescription", {
-      defaultValue:
-        "You're in demo mode — try asking a question to see how the assistant responds. You can connect your own tldw server later.",
-    })
-  ) : (
-    t("playground:empty.description", {
-      defaultValue:
-        "Experiment with different models, prompts, and knowledge sources here.",
-    })
-  );
+  const description = demoEnabled
+    ? t("playground:empty.demoDescription", {
+        defaultValue:
+          "You're in demo mode — try asking a question to see how the assistant responds. You can connect your own tldw server later.",
+      })
+    : connectionPending
+      ? t("playground:empty.connectingDescription", {
+          defaultValue:
+            "Connecting to your tldw server. You can start writing your first message below.",
+        })
+      : t("playground:empty.description", {
+          defaultValue: "Choose a model, then write your first message below.",
+        });
+
+  if (!demoEnabled && !isConnected && !connectionPending) {
+    return <div className="mx-auto w-full max-w-xl px-4 py-4">
+      <EmptyState data-testid="playground-empty-shell" icon={MessageSquarePlus}
+        title={t("playground:empty.connectTitle", "Connect to start chatting")}
+        description={t("playground:empty.connectDescription", "Connect to your tldw server, then choose a model and start chatting.")}
+        primaryAction={{ label: t("playground:empty.connectAction", "Connect server"),
+          onClick: () => { if (requestSettingsNavigation("/settings/tldw")) navigate("/settings/tldw"); } }}
+        variant="inline" size="sm" />
+    </div>;
+  }
 
   return (
-    <div className="mx-auto mt-10 max-w-5xl px-4">
+    <div className="mx-auto mt-1 max-w-5xl px-0 sm:mt-10 sm:px-4">
       <EmptyState
         data-testid="playground-empty-shell"
         icon={MessageSquarePlus}
+        iconClassName="h-6 w-6 text-text-subtle sm:h-10 sm:w-10"
+        iconWrapperClassName="p-2 sm:p-4"
         title={t("playground:empty.title", {
           defaultValue: "Start a new chat",
         })}
@@ -164,7 +189,7 @@ export const PlaygroundEmpty = () => {
         }}
         variant="card"
         size="lg"
-        className="max-w-4xl rounded-[28px] p-5 text-sm sm:p-7"
+        className="max-w-4xl rounded-[28px] !p-2 text-sm [&>div]:space-y-2 sm:!p-7 sm:[&>div]:space-y-3"
       >
         <div className="flex flex-col gap-6">
           <div className="border-t border-border/60 pt-5">
@@ -246,7 +271,7 @@ export const PlaygroundEmpty = () => {
               <button
                 type="button"
                 onClick={openHelpModal}
-                className={`inline-flex items-center gap-1.5 text-xs font-medium text-primary transition hover:underline ${actionButtonFocusClassName}`}
+                className={`inline-flex min-h-[44px] items-center gap-1.5 px-3 py-2 text-xs font-medium text-primary transition hover:underline ${actionButtonFocusClassName}`}
               >
                 <HelpCircle className="h-3.5 w-3.5" />
                 {t("playground:empty.takeTour", "Take a quick tour")}

@@ -1,11 +1,53 @@
 import type { HistoryOwnerV1 } from "@/services/chat-history-selection"
 import type {
-  HistoryAdmissionV1,
+  HistoryAdmissionReferenceV1,
+  HistoryEditTargetV1,
   HistorySelectionCaptureV1,
   HistoryViewSelectionV1,
   HistorySelectionV1
 } from "@/types/history-selection"
-import type { Message as StoredMessage } from "@/db/dexie/types"
+import type {
+  HistoryTurnOutcome,
+  Message as StoredMessage
+} from "@/db/dexie/types"
+
+/** Private explicit branch intent; its editor lease never enters a wire payload. */
+export type NativeHistoryEditResend = {
+  owner_key: string
+  conversation_id: string
+  message_id: string
+  message_revision: string
+  isCurrent: () => boolean
+  isOriginCurrent: () => boolean
+}
+
+/** A private saved-reply action also captures its canonical direct user. */
+export type NativeHistoryRegenerate = NativeHistoryEditResend & {
+  input_message_id: string
+  input_message_revision: string
+  /**
+   * Native Continue (CM-01) reuses the same saved admission as Regenerate, but
+   * the server keeps the reply in context and saves it plus its continuation.
+   */
+  action?: "continue"
+}
+
+/** A local selected input branches without changing its original transcript. */
+export type HistoryEditAndSendBoundary = {
+  targetId: string
+  owner: HistoryOwnerV1
+  originView: HistoryViewSelectionV1
+  originIsCurrent: () => boolean
+}
+
+export type HistoryRegenerateBoundary = {
+  answerId: string
+  questionId: string
+  questionRevision: string
+  owner: HistoryOwnerV1
+  originView: HistoryViewSelectionV1
+  originIsCurrent: () => boolean
+}
 
 /** One operation owns its adapter and immutable pending intent across display navigation. */
 export interface HistorySendTurn {
@@ -14,22 +56,63 @@ export interface HistorySendTurn {
   currentView: () => HistoryViewSelectionV1 | null
   validateLease: () => boolean
   canUpdateView: () => boolean
-  admission?: HistoryAdmissionV1
+  /** Original command or its accepted bind, required until user admission. */
+  preparationIsCurrent?: () => boolean;
+  persistence?: 'server';
+  clientManagedContext?: boolean;
+  admission?: HistoryAdmissionReferenceV1;
+  /**
+   * Retry of a reply that ended early (CS-04): the question was admitted when
+   * it was first sent, so the turn settles a new reply against this admission
+   * instead of admitting the question a second time.
+   */
+  retryAdmission?: HistoryAdmissionReferenceV1
+  historyBranch?: boolean
+  historyEdit?: HistoryEditTargetV1
+  existingSelection?: boolean
+  stageSettlementPayload?: (message: StoredMessage) => Promise<void>
   selection?: HistorySelectionV1
   input?: StoredMessage
   resultId?: string
   assistantId?: string
   createdAt?: number
   dispatched?: boolean
+  /** The model that writes the reply, recorded with a retained reply. */
+  replyModel?: {
+    name: string
+    id?: string
+    /** "model (Provider)", for messages about this reply (CC-N2). */
+    label?: string
+  }
+  /**
+   * How the reply ended when it should stay in the transcript instead of in
+   * review (CS-04): see HistoryTurnRecovery.outcome.
+   */
+  outcome?: HistoryTurnOutcome
   recover: (
-    data: { content: string; assistantId: string; createdAt: number },
+    data: {
+      content: string
+      assistantId: string
+      createdAt: number
+      outcome?: HistoryTurnOutcome
+      interruptionReason?: string
+    },
     error: unknown
   ) => Promise<void>
+  /** Record the reply so far, throttled, so a reload can keep it. */
+  checkpoint?: (content: string) => void
   cancelPreparation?: () => Promise<void>
   beforeDispatch?: () => Promise<void>
   afterAdmission?: () => Promise<void>
-  complete?: () => Promise<void>
-  followResult: (id: string) => Promise<void>
+  complete?: (content?: string) => Promise<void>
+  /** Resolves false when the view had moved on and could not follow. */
+  followResult: (id: string) => Promise<boolean | void>
+  /** After a settled reply: clear its record, or keep it until a view follows. */
+  finish?: (followed: boolean) => Promise<void>
+  /** Put a reply that ended early back into the transcript. */
+  keep?: () => Promise<void>
+  /** The turn has ended; its record may be kept by any view. */
+  release?: () => void
 }
 
 import type { ChatHistory, MessageMetadataExtra } from "~/store/option"

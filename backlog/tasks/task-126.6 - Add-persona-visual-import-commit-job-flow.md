@@ -52,7 +52,7 @@ Add the PR1135-style commit step after a completed persona visual import preview
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the import_commit flow for persona visual packs: new job helpers, importer, worker routing, API start/status routes, and tests for successful commit, scoped status, asset-id remapping, and incomplete-preview rejection.
 
 Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_jobs.py tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q --tb=short` -> 28 passed, 5 warnings.
@@ -62,7 +62,7 @@ Security/quality checks: Bandit touched scope with `-s B101` wrote `/tmp/bandit_
 Broader regression: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_service.py tldw_Server_API/tests/Persona/test_persona_visual_portability.py tldw_Server_API/tests/Persona/test_persona_visual_jobs.py tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q --tb=short` -> 39 passed, 5 warnings.
 
 Draft PR opened for the completed persona visual packs branch: https://github.com/rmusser01/tldw_server/pull/1393. PR is draft and linked to tracker #1388 and sub-issue #1389; GitHub checks were pending at creation time.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

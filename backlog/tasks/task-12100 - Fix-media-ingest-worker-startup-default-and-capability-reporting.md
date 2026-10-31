@@ -47,14 +47,12 @@ Design and implement fixes for media ingest jobs staying queued when the normal 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Design spec written: Docs/superpowers/specs/2026-07-09-media-ingest-worker-startup-capability-design.md
 Implementation plan written: Docs/superpowers/plans/2026-07-09-media-ingest-worker-startup-capability-implementation-plan.md
 Spec review: Approved locally. No TODO/TBD/placeholders; scope limited to media ingest worker startup, config capability reporting, and matching docs. Subagent reviewer not dispatched because this session's tool rules require explicit user authorization for delegation.
 Plan review: Approved locally after correcting the route-policy design to inject WorkerLifecycleContext.route_enabled into should_start_inprocess_worker(). No implementation code changed yet.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

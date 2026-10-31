@@ -35,7 +35,7 @@ Add focused launcher regression coverage; register Explainer in shortcut IDs, Re
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 User approved the bounded navigation follow-up. Backlog MCP resource and task search requests did not respond; using CLI fallback. Worktree: .worktrees/codex-explainer-navigation.
 
 User explicitly requested WebUI and extension parity. Verified WXT resolves shared UI routes; the active shared route-registry.tsx is missing /explainer even though an older route file under tldw-frontend/extension contains it. Adding the active registration and a runtime lazy-route test. Initial 96 focused tests pass in both WebUI and extension Vitest configurations.
@@ -55,7 +55,7 @@ Frontend shard 8/8 failed: all 22 assertions also failed on exact dev, but one S
 Deeper investigation found the context replay also requires identical test identities, so test consolidation is not a sufficient root fix and will be reverted. CI Skills live-region test asserts Loading skills before async scope resolution starts the query; when it fails, clearAllMocks leaves its unconsumed mockImplementationOnce for the next empty-state test. The different Ant Design css-var IDs in that subsequent failure produce the ratchet mismatch. Fix only the live-region test synchronization, preserving all assertions and production behavior.
 
 Verified the final CI fix: replaced only the premature Loading skills assertion with waitFor; original Explainer route test layout restored. All 83 SkillsManager tests pass (116.98s); 106 navigation tests pass in both WebUI and extension configs; extension compile passes; git diff --check passes. Shared UI ESLint uses the repository-pinned frontend binary: zero errors, 18 pre-existing no-explicit-any warnings on unchanged Skills test lines. Bandit remains not applicable to TS/TSX/JSON. Latest origin/dev remains c70387f496. No application behavior or CI gate policy was changed by this follow-up; awaiting new-head CI/Qodo and human rationale before merge.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

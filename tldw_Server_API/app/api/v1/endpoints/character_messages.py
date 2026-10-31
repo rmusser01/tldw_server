@@ -4,15 +4,13 @@ API endpoints for message management within character chat sessions.
 Provides CRUD operations for messages in conversations.
 """
 
-import io
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
-from typing import Any, Literal, Optional
+from typing import Any, Literal, TypeVar
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, Response, status
 from loguru import logger
-from PIL import Image
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
@@ -35,6 +33,13 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     MessageListResponse,
     MessageResponse,
     MessageUpdate,
+    RoleplayResumeUserAppendRequest,
+    RoleplayResumeUserAppendResponse,
+)
+from tldw_Server_API.app.api.v1.utils.chat_message_images import (
+    _detect_image_mime_type,
+    format_message_content,
+    read_messages_with_images,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
@@ -59,6 +64,7 @@ from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
 from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets import (
     build_character_system_prompt,
 )
+from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import RoleplayResumeConflictError
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.chacha.message_store import MAX_CHAT_ATTACHMENT_READ_BYTES
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
@@ -69,11 +75,15 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+from tldw_Server_API.app.core.Sync.v2.models import normalize_sync_timestamp
 from tldw_Server_API.app.core.Sync.v2.server_origin import (
+    AppliedServerOriginObject,
     SyncServerOriginIdempotencyConflictError,
     SyncServerOriginMaterializationError,
     SyncServerOriginMutationNotSupportedError,
+    capture_applied_server_origin_write,
     capture_server_origin_mutation,
+    delete_unenrolled_server_origin_objects,
     get_active_server_origin_sync_service_for_user,
     server_origin_object_id,
     server_origin_stable_key,
@@ -99,47 +109,9 @@ _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS = (
 )
 
 
-def _detect_image_mime_type(data: bytes) -> Optional[str]:
-    """
-    Detect image MIME type from magic bytes.
+router = APIRouter(dependencies=[Depends(require_expected_user)])
 
-    Args:
-        data: Raw image bytes
-
-    Returns:
-        MIME type string if recognized image format, None otherwise
-    """
-    if not data or len(data) < 12:
-        return None
-
-    # Check PNG
-    if data[:8] == b'\x89PNG\r\n\x1a\n':
-        return 'image/png'
-
-    # Check JPEG (multiple signatures)
-    if data[:3] == b'\xff\xd8\xff':
-        return 'image/jpeg'
-
-    # Check GIF
-    if data[:6] in (b'GIF87a', b'GIF89a'):
-        return 'image/gif'
-
-    # Check WebP (RIFF....WEBP)
-    if data[:4] == b'RIFF' and data[8:12] == b'WEBP':
-        return 'image/webp'
-
-    # Check BMP
-    if data[:2] == b'BM':
-        return 'image/bmp'
-
-    # Check ICO
-    if data[:4] == b'\x00\x00\x01\x00':
-        return 'image/x-icon'
-
-    return None
-
-
-router = APIRouter()
+_HistoryWrite = TypeVar("_HistoryWrite")
 
 # ========================================================================
 # Helper Functions
@@ -158,35 +130,6 @@ def _convert_db_message_to_response(msg_data: dict[str, Any]) -> MessageResponse
         has_image=bool(msg_data.get('image_data')),
         version=msg_data.get('version', 1)
     )
-
-
-def _complete_message_images(message: dict[str, Any]) -> list[str]:
-    """Expand every stored attachment, or fail the entire opt-in read."""
-    import base64
-
-    images = message.get("images") or []
-    if not images and (message.get("image_data") is not None or message.get("image_mime_type") is not None):
-        images = [message]
-    result = []
-    for image in images:
-        data = image.get("image_data")
-        if isinstance(data, memoryview):
-            data = data.tobytes()
-        mime = image.get("image_mime_type")
-        detected_mime = _detect_image_mime_type(data) if isinstance(data, bytes) and data else None
-        if not detected_mime or not isinstance(mime, str) or detected_mime != mime:
-            raise HTTPException(status_code=409, detail="A saved chat attachment is incomplete or invalid. Reload after repairing the source message.")
-        if len(data) > int(settings.get("MAX_MESSAGE_IMAGE_BYTES", 5 * 1024 * 1024)):
-            raise HTTPException(status_code=413, detail="A saved chat attachment exceeds the image read limit.")
-        try:
-            with Image.open(io.BytesIO(data)) as decoded:
-                decoded.verify()
-            with Image.open(io.BytesIO(data)) as decoded:
-                decoded.load()
-        except (OSError, ValueError, SyntaxError, Image.DecompressionBombError) as exc:
-            raise HTTPException(status_code=409, detail="A saved chat attachment is incomplete or invalid.") from exc
-        result.append(f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}")
-    return result
 
 
 def _message_sync_http_error(exc: Exception) -> HTTPException:
@@ -248,6 +191,60 @@ def _active_message_sync_service(
     if scope.scope_type == "workspace":
         return None
     return get_active_server_origin_sync_service_for_user(str(current_user.id))
+
+
+def _applied_message_object(db: CharactersRAGDB, message_id: str, owner_id: str) -> AppliedServerOriginObject:
+    """Describe a stored message as the ``chat.message`` append other devices receive.
+
+    The payload has the same fields as a Sync-routed append and is read back from
+    the row, so the parent and timestamp are the ones the owner transaction
+    stored. Owner-only history provenance is not part of it.
+    """
+    row = db.get_message_by_id(message_id)
+    if row is None:
+        raise CharactersRAGDBError(f"Message {message_id} is unavailable for Sync capture.")
+    timestamp = row.get("timestamp")
+    return AppliedServerOriginObject(
+        domain="chat.message",
+        operation="append",
+        object_id=message_id,
+        parent_id=str(row["conversation_id"]),
+        payload={
+            "conversation_id": str(row["conversation_id"]),
+            "parent_message_id": row.get("parent_message_id"),
+            "sender": row["sender"],
+            "content": row.get("content") or "",
+            "timestamp": timestamp if isinstance(timestamp, str) else normalize_sync_timestamp(timestamp),
+            "client_id": owner_id,
+        },
+    )
+
+
+def _publish_history_messages(
+    sync_service: SyncV2Service,
+    db: CharactersRAGDB,
+    *,
+    owner_id: str,
+    message_ids: list[str],
+    write: Callable[[], _HistoryWrite],
+) -> _HistoryWrite:
+    """Run a versioned history write inside the Sync projection fence and publish its messages.
+
+    Admission and settlement validate and append under the conversation owner's
+    transaction, which a Sync materializer cannot replay. So the owner write
+    commits first, inside the fence, and each message in ``message_ids`` that
+    Sync has not seen is then recorded as an applied ``chat.message`` append, in
+    that order. Both writes are idempotent by message id, so a request repeated
+    after a lost capture publishes the message it already stored.
+    """
+    return capture_applied_server_origin_write(
+        sync_service,
+        user_id=owner_id,
+        source="server_api",
+        claims=[("chat.message", message_id) for message_id in message_ids],
+        write=write,
+        describe=lambda _result: [_applied_message_object(db, message_id, owner_id) for message_id in message_ids],
+    )
 
 
 def _verify_conversation_access(
@@ -351,10 +348,49 @@ def _resolve_message_scope(
 # Message Endpoints
 # ========================================================================
 
+
+@router.post(
+    "/chats/{chat_id}/roleplay/messages",
+    response_model=RoleplayResumeUserAppendResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Messages"],
+)
+async def append_roleplay_resume_input(
+    body: RoleplayResumeUserAppendRequest,
+    chat_id: str = Path(..., description="Chat session ID"),
+    scope_type: Literal["global", "workspace"] | None = Query(None),
+    workspace_id: str | None = Query(None),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+):
+    """Append exactly one owned global Resume input or replay its original receipt."""
+    from tldw_Server_API.app.core.Character_Chat.roleplay_resume_prompt import format_roleplay_resume_messages
+
+    scope = _resolve_message_scope(scope_type, workspace_id)
+    if scope.scope_type != "global" or scope.workspace_id is not None:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+    if _active_message_sync_service(current_user, scope) is not None:
+        raise HTTPException(status_code=409, detail=RoleplayResumeConflictError("resume_sync_unsupported").to_detail())
+    limiter = get_character_rate_limiter()
+    await limiter.check_message_send_rate(current_user.id)
+    try:
+        return await run_in_threadpool(
+            db.append_idempotent_user_message,
+            chat_id,
+            body.model_dump(mode="json"),
+            owner_client_id=str(current_user.id),
+            build_messages=format_roleplay_resume_messages,
+            validate_message_count=lambda count: limiter.validate_message_limit(chat_id, count),
+        )
+    except RoleplayResumeConflictError as exc:
+        raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
+    except (NotFoundError, InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Unable to append the Resume input.") from exc
+
+
 @router.post("/chats/{chat_id}/messages", response_model=MessageResponse,
              status_code=status.HTTP_201_CREATED,
-             summary="Send a message in a chat", tags=["Messages"],
-             dependencies=[Depends(require_expected_user)])
+             summary="Send a message in a chat", tags=["Messages"])
 async def send_message(
     message_data: MessageCreate,
     request: Request,
@@ -378,7 +414,11 @@ async def send_message(
         Created message details
 
     Raises:
-        HTTPException: 404 if chat not found, 403 if unauthorized, 429 if rate limited
+        HTTPException: 404 if chat not found, 403 if unauthorized, 429 if rate limited.
+            409 `{status, code}` when a versioned admission or settlement is stale. With
+            `tldw_history_branch: false`, a selection whose last message already has a
+            live child is refused with code `history_branch_changed` plus
+            `conversation_id`, `parent_message_id`, `leaf_ids` and `history_version`.
     """
     try:
         scope = _resolve_message_scope(scope_type, workspace_id)
@@ -408,7 +448,7 @@ async def send_message(
             ) from e
 
         # Validate parent message if provided
-        if message_data.parent_message_id:
+        if message_data.parent_message_id and message_data.tldw_history_selection_v1 is None:
             parent_msg = _verify_message_access(db, message_data.parent_message_id, current_user.id, scope)
             if parent_msg.get('conversation_id') != chat_id:
                 raise HTTPException(
@@ -487,10 +527,12 @@ async def send_message(
                 ) from e
 
         history_admission = None
-        versioned = message_data.tldw_history_selection_v1 is not None or message_data.tldw_history_admission_v1 is not None
+        versioned = any(value is not None for value in (
+            message_data.tldw_history_selection_v1,
+            message_data.tldw_history_admission_v1,
+            message_data.tldw_history_existing_input_v1,
+        ))
         sync_service = _active_message_sync_service(current_user, scope)
-        if versioned and sync_service is not None:
-            raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "sync_owner_unsupported"})
 
         if sync_service is not None and image_data is not None:
             raise HTTPException(
@@ -507,21 +549,55 @@ async def send_message(
                     "image_data": image_data, "image_mime_type": image_mime_type}
             if "parent_message_id" in message_data.model_fields_set:
                 data["parent_message_id"] = message_data.parent_message_id
+            owner = native_history_owner_key(request, current_user.id)
+            owner_id = str(current_user.id)
+            if message_data.tldw_history_selection_v1 is not None:
+                selection = message_data.tldw_history_selection_v1.model_dump(mode="json")
+                # The admitted message is the only row this write creates.
+                published_ids = [message_data.id]
+
+                def history_write() -> tuple[str, dict[str, Any] | None]:
+                    admission = db.append_selected_history_input(
+                        chat_id,
+                        selection,
+                        data,
+                        owner_client_id=owner_id,
+                        owner_key=owner,
+                        history_branch=message_data.tldw_history_branch,
+                        history_edit=(
+                            message_data.tldw_history_edit_v1.model_dump(mode="json")
+                            if message_data.tldw_history_edit_v1 is not None
+                            else None
+                        ),
+                    )
+                    return admission["input_message_id"], admission
+            elif message_data.tldw_history_admission_v1 is not None:
+                reference = message_data.tldw_history_admission_v1.model_dump(mode="json")
+                # The accepted input goes first, so a reply is never published ahead of
+                # an input whose own capture was lost.
+                published_ids = [reference["input_message_id"], message_data.id]
+
+                def history_write() -> tuple[str, dict[str, Any] | None]:
+                    return db.settle_history_admission(
+                        chat_id, reference, data, owner_client_id=owner_id, owner_key=owner), None
+            else:
+                selection = message_data.tldw_history_existing_input_v1.model_dump(mode="json")
+                published_ids = [message_data.id]
+
+                def history_write() -> tuple[str, dict[str, Any] | None]:
+                    return db.settle_selected_existing_input(
+                        chat_id, selection, data, owner_client_id=owner_id, owner_key=owner), None
             try:
-                owner = native_history_owner_key(request, current_user.id)
-                if message_data.tldw_history_selection_v1 is not None:
-                    history_admission = await run_in_threadpool(
-                        db.append_selected_history_input, chat_id,
-                        message_data.tldw_history_selection_v1.model_dump(mode="json"), data,
-                        owner_client_id=str(current_user.id), owner_key=owner)
-                    created_id = history_admission["input_message_id"]
+                if sync_service is None:
+                    created_id, history_admission = await run_in_threadpool(history_write)
                 else:
-                    created_id = await run_in_threadpool(
-                        db.settle_history_admission, chat_id,
-                        message_data.tldw_history_admission_v1.model_dump(mode="json"), data,
-                        owner_client_id=str(current_user.id), owner_key=owner)
+                    created_id, history_admission = await run_in_threadpool(
+                        _publish_history_messages, sync_service, db,
+                        owner_id=owner_id, message_ids=published_ids, write=history_write)
             except HistorySelectionError as exc:
-                raise HTTPException(409, detail={"status": "stale_selection", "code": exc.code}) from exc
+                raise HTTPException(409, detail={"status": "stale_selection", "code": exc.code, **exc.details}) from exc
+            except SyncStoreError as sync_exc:
+                raise _message_sync_http_error(sync_exc) from sync_exc
         elif sync_service is not None:
             created_id = server_origin_object_id("chat.message", idempotency_key) or str(uuid.uuid4())
             stable_key = server_origin_stable_key(
@@ -660,39 +736,18 @@ async def get_chat_messages(
         conversation = _verify_conversation_access(db, chat_id, current_user.id, scope)
 
         # Get messages (honor include_deleted and DB pagination)
-        expand_images = include_images is True and not format_for_completions
-        try:
+        expand_images = include_images is True or format_for_completions is True
+        if expand_images:
+            messages, attachment_urls = await run_in_threadpool(
+                read_messages_with_images, db, chat_id, limit=limit, offset=offset, include_deleted=include_deleted,
+                image_byte_limit=MAX_CHAT_ATTACHMENT_READ_BYTES,
+                for_completions=format_for_completions is True,
+            )
+        else:
             messages = db.get_messages_for_conversation(
                 chat_id, limit=limit, offset=offset, include_deleted=include_deleted,
-                **({"strict_images": True, "image_byte_limit": MAX_CHAT_ATTACHMENT_READ_BYTES} if expand_images else {}),
             )
-        except InputError as exc:
-            if not expand_images:
-                raise
-            raise HTTPException(status_code=413, detail="Chat attachments exceed the image read limit.") from exc
-        except CharactersRAGDBError as exc:
-            if not expand_images:
-                raise
-            raise HTTPException(status_code=503, detail="Saved chat attachments could not be read completely. Retry loading the conversation.") from exc
-        attachment_urls = {}
-        if expand_images:
-            decoded_total = 0
-            for message in messages:
-                images = message.get("images") or ([message] if message.get("image_data") is not None or message.get("image_mime_type") is not None else [])
-                for image in images:
-                    data = image.get("image_data")
-                    if not isinstance(data, (bytes, memoryview)) or not data:
-                        raise HTTPException(status_code=409, detail="A saved chat attachment is incomplete or invalid.")
-                    decoded_total += len(data)
-                    if decoded_total > MAX_CHAT_ATTACHMENT_READ_BYTES:
-                        raise HTTPException(status_code=413, detail="Chat attachments exceed the image read limit.")
-            encoded_total = 0
-            for message in messages:
-                urls = _complete_message_images(message)
-                encoded_total += sum(len(url) for url in urls)
-                if encoded_total > (MAX_CHAT_ATTACHMENT_READ_BYTES * 4 // 3) + 1024 * len(messages):
-                    raise HTTPException(status_code=413, detail="Chat attachments exceed the image read limit.")
-                attachment_urls[message["id"]] = urls
+            attachment_urls = {}
 
         if not messages:
             messages = []
@@ -770,7 +825,10 @@ async def get_chat_messages(
                     content = _replace_text(msg.get('content'))
                     msg_id = msg.get('id')
 
-                    base_message: dict[str, Any] = {"role": role, "content": content}
+                    base_message: dict[str, Any] = {
+                        "role": role,
+                        "content": format_message_content(content, attachment_urls.get(msg_id, []), msg.get("image_details")),
+                    }
                     if include_message_ids and msg_id:
                         base_message["message_id"] = msg_id
 
@@ -1115,15 +1173,15 @@ async def edit_message(
                 detail=f"Chat session {message['conversation_id']} not found",
             )
         with db.transaction() as conn:
-            db.lock_message_for_edit(message_id, conn=conn)
-            if metadata_updated:
-                db.lock_message_metadata_for_edit(message_id, conn=conn)
             resume_state = db.get_roleplay_resume_state(
                 message["conversation_id"],
                 conn=conn,
                 lock_for_update=True,
                 owner_client_id=str(current_user.id),
             )
+            db.lock_message_for_edit(message_id, conn=conn)
+            if metadata_updated:
+                db.lock_message_metadata_for_edit(message_id, conn=conn)
             conversation = resume_state.get("conversation")
             if not isinstance(conversation, Mapping):
                 raise InputError("Conversation resume state is incomplete")
@@ -1272,10 +1330,14 @@ async def edit_message(
 async def delete_message(
     message_id: str = Path(..., description="Message ID"),
     expected_version: int = Query(..., description="Expected version for optimistic locking"),
+    require_leaf: bool = Query(False, description="Refuse deletion of a message with live replies"),
+    expected_revision: str | None = Query(
+        None, min_length=1, max_length=128, description="Expected opaque saved-history message revision"
+    ),
     scope_type: Literal["global", "workspace"] | None = Query(None, description="Conversation scope type"),
     workspace_id: str | None = Query(None, description="Workspace ID when scope_type='workspace'"),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
-    current_user: User = Depends(get_request_user)
+    current_user: User = Depends(get_request_user),
 ) -> Response:
     """
     Soft delete a message from a conversation.
@@ -1305,36 +1367,76 @@ async def delete_message(
                 detail=f"Version mismatch. Expected {expected_version}, found {message.get('version', 1)}"
             )
 
-        sync_service = _active_message_sync_service(current_user, scope)
-        if sync_service is not None:
-            try:
-                capture_server_origin_mutation(
-                    sync_service,
-                    user_id=str(current_user.id),
-                    domain="chat.message",
-                    operation="tombstone",
-                    object_id=message_id,
-                    parent_id=str(message.get("conversation_id") or ""),
-                    payload={
-                        "id": message_id,
-                        "deleted": True,
-                        "conversation_id": str(message.get("conversation_id") or ""),
-                        "client_id": str(current_user.id),
-                        "owner_user_id": str(current_user.id),
-                    },
-                    source="server_api",
-                )
-            except Exception as sync_exc:
-                raise _message_sync_http_error(sync_exc) from sync_exc
-        else:
+        def delete_directly() -> None:
             # Soft delete the message
-            success = remove_message_from_conversation(db, message_id, expected_version)
+            success = (
+                remove_message_from_conversation(
+                    db, message_id, expected_version, require_leaf=require_leaf, expected_revision=expected_revision
+                )
+                if require_leaf or expected_revision is not None
+                else remove_message_from_conversation(db, message_id, expected_version)
+            )
 
             if not success:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Failed to delete message"
                 )
+
+        sync_service = _active_message_sync_service(current_user, scope)
+        if (require_leaf or expected_revision is not None) and sync_service is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="unsupported_native_sync_delete",
+            )
+        if sync_service is not None:
+            try:
+                conversation_id = str(message.get("conversation_id") or "")
+                tombstone_payload: dict[str, object] = {
+                    "id": message_id,
+                    "deleted": True,
+                    "conversation_id": conversation_id,
+                    "client_id": str(current_user.id),
+                    "owner_user_id": str(current_user.id),
+                }
+                # A message Sync never saw (it predates the profile, or was saved by a path
+                # that publishes nothing) is deleted directly, as without a profile (#3181),
+                # and then published by id, so a device that kept a copy outside Sync
+                # deletes it too (Q8).
+                published = await run_in_threadpool(
+                    delete_unenrolled_server_origin_objects,
+                    sync_service,
+                    user_id=str(current_user.id),
+                    objects=[("chat.message", message_id)],
+                    delete=lambda _unpublished: delete_directly(),
+                    tombstones=[
+                        AppliedServerOriginObject(
+                            domain="chat.message",
+                            operation="tombstone",
+                            object_id=message_id,
+                            parent_id=conversation_id,
+                            payload=tombstone_payload,
+                        )
+                    ],
+                    source="server_api",
+                )
+                if published:
+                    capture_server_origin_mutation(
+                        sync_service,
+                        user_id=str(current_user.id),
+                        domain="chat.message",
+                        operation="tombstone",
+                        object_id=message_id,
+                        parent_id=conversation_id,
+                        payload=tombstone_payload,
+                        source="server_api",
+                    )
+            except HTTPException:
+                raise
+            except Exception as sync_exc:
+                raise _message_sync_http_error(sync_exc) from sync_exc
+        else:
+            delete_directly()
 
         # Update conversation metadata (last_modified/version) via DB abstraction
         conv = db.get_conversation_by_id(message['conversation_id'])

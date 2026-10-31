@@ -6,7 +6,7 @@
 
 - `runtime_registry.py` contains the registry loader and runtime deprecation logging helpers.
 - `__init__.py` re-exports the public helpers.
-- Related consumers: `app/core/LLM_Calls/chat_calls.py`, `app/core/LLM_Calls/deprecation.py`, `app/services/web_scraping_service.py`, and `app/services/auth_service.py`.
+- Related consumer: `app/core/LLM_Calls/deprecation.py`. The registry (`COMPAT_PATHS`) is currently empty: the three paths past their sunset dates (`web_scraping_legacy_fallback`, `llm_chat_legacy_session`, `auth_db_execute_compat`) were removed along with their call sites in `chat_calls.py`, `web_scraping_service.py`, and `auth_service.py`.
 - Related tests: `tests/Services/test_compatibility_registry_contract.py` and `tests/lint/test_no_new_runtime_compat_markers.py`.
 
 ## Responsibilities
@@ -24,9 +24,9 @@
 
 ## How It Connects
 
-- `app/core/LLM_Calls/chat_calls.py`, `app/core/LLM_Calls/deprecation.py`, `app/services/web_scraping_service.py`, and `app/services/auth_service.py` call into this package when emitting runtime compatibility warnings.
+- `app/core/LLM_Calls/deprecation.py` calls into this package when emitting runtime compatibility warnings.
 - Compatibility registry contract tests verify that registry-backed messages remain valid.
-- Lint tests prevent new ad hoc runtime compatibility markers from being introduced outside the approved path.
+- Lint tests prevent new ad hoc runtime compatibility markers from being introduced outside the approved path, and fail if an expired key is re-added to the registry or referenced by a call site (`EXPIRED_COMPAT_KEYS` in `tests/lint/test_no_new_runtime_compat_markers.py`).
 
 ## Extension Points
 

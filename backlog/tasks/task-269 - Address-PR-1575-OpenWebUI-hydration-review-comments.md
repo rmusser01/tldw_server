@@ -40,9 +40,9 @@ Address actionable review comments on PR #1575 for OpenWebUI attachment hydratio
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Addressed Gemini review feedback on PR #1575: non-image Media DB/copy failures now return per-item media_registration_failed results, chat_file fallback uses one batched lookup for source chat ids, and preview/job responses cap returned items with returned_items/omitted_items summary counters. Verification: targeted review regression pytest 4 passed; focused hydration/docs pytest 75 passed; Bandit report /tmp/bandit_openwebui_hydration_review.json has 0 findings and 0 errors; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

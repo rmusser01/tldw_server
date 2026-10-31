@@ -36,7 +36,7 @@ Investigate and fix the webapp relaunch path where a stale multi-user session ca
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification:
 - bunx vitest run __tests__/app/app-layout.test.tsx (red before production fix: 3 expected failures; green after fix: 21/21 passed)
 - ./node_modules/.bin/eslint pages/_app.tsx lib/configured-auth-state.ts __tests__/app/app-layout.test.tsx
@@ -46,7 +46,7 @@ Verification:
 Bandit: skipped because the touched implementation and tests are TypeScript/React frontend files only; no Python code changed.
 
 PR review follow-up: replaced silent logout rejection handling with logged try/catch, classified plain-object Not authenticated errors, and added coverage for optional logout, logout rejection, and hosted tokenless transient failures. Verification: app-layout Vitest 25/25, touched frontend ESLint, TypeScript noEmit, and git diff --check.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

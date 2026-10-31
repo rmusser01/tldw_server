@@ -60,6 +60,18 @@ describe("flashcards error taxonomy", () => {
     expect(mapped.actionLabel).toBe("Retry")
   })
 
+  it.each([400, 422])("uses generation guidance instead of an opaque error code (%s)", (status) => {
+    const fallback = "Generation failed. Check provider/model settings and try shorter source text."
+    const mapped = mapFlashcardsUiError(Object.assign(new Error("flashcard_generate_error"), { status }), {
+      operation: "generating cards", fallback
+    })
+    expect(mapped.message).toContain(fallback)
+    expect(mapped.message).not.toContain("flashcard_generate_error")
+    expect(mapped.rawMessage).toBe("flashcard_generate_error")
+    expect(mapped.status).toBe(status)
+    expect(mapped.actionLabel).toBe("Fix input")
+  })
+
   it("maps validation failures to fix-input guidance", () => {
     const mapped = mapFlashcardsUiError(
       {

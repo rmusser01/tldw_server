@@ -45,11 +45,11 @@ Deliver through child tasks 2A-2E in dependency order. Each child must pass focu
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-07-18: Created child tasks TASK-12973.1 through TASK-12973.5 with sequential dependencies after PR #2733 established the Stage 1 workflow boundary.
 
 2026-07-23 to 2026-07-26: The Stage 2 concrete-steps design completed iterative user review, written-spec review, specification review, and quality review. The user approved the design and Stage 2A implementation plan. TASK-12973.1 characterization is complete in PR #2762; Stage 2B through Stage 2E remain pending and continue in dependency order.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

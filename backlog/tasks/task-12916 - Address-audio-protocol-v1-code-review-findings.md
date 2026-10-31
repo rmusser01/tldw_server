@@ -30,11 +30,7 @@ Fix validated review findings from the strict chat audio streaming protocol v1 c
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Implemented review fixes:
 - WebUI server dictation now accepts backend final frames, waits after stop for final/done, and appends only the missing suffix from cumulative full_transcript frames.
 - STT redaction policy and audio stream redaction metrics now include final frames.
@@ -48,7 +44,7 @@ Verification:
 - Bandit touched backend audio scope: 0 findings.
 - Scoped git diff --check: passed.
 - apps/tldw-frontend typecheck still fails on unrelated pre-existing files: AudioStudio TimelineEditor, ScheduledTasks, Skills Manager, scheduled-tasks service, mcp-hub, voice-cloning, knowledge QA fixtures, flashcards spec.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

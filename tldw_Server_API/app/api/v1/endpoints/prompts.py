@@ -12,7 +12,7 @@ import re
 import traceback
 from collections.abc import Mapping
 from dataclasses import asdict
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, cast
 
 #
 # 3rd-party imports
@@ -31,6 +31,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_auth_principal,
     get_request_user,
     rbac_rate_limit,
+    require_expected_user_if_present,
 )
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (
@@ -41,6 +42,7 @@ from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_
 from tldw_Server_API.app.api.v1.schemas import prompt_schemas as schemas
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
+from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import bearer_credential
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.llm_budget_guard import enforce_llm_budget
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings as get_auth_settings
@@ -99,6 +101,7 @@ from tldw_Server_API.app.core.Prompt_Management.structured_prompts.single_text_r
     render_single_text_recipe_template,
 )
 from tldw_Server_API.app.core.testing import env_flag_enabled
+from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 
 from .llm_providers import get_configured_providers
 
@@ -109,7 +112,7 @@ from .llm_providers import get_configured_providers
 #
 # Functions:
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_expected_user_if_present)])
 
 _TEMPLATE_VAR_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
 _MAX_DUPLICATE_NAME_ITERATIONS = 10000
@@ -208,7 +211,7 @@ def _inline_local_openapi_refs(schema: dict[str, Any]) -> dict[str, Any]:
                 return expand({**referenced, **siblings})
         return {key: expand(item) for key, item in value.items()}
 
-    return expand(schema)
+    return cast(dict[str, Any], expand(schema))
 
 
 def _extract_template_variables(template: str) -> list[str]:
@@ -383,8 +386,8 @@ def _get_single_user_api_key() -> Optional[str]:
     except _PROMPTS_LOOKUP_EXCEPTIONS:
         key = None
     if key:
-        return key
-    return settings.get("SINGLE_USER_API_KEY")
+        return cast(Optional[str], key)
+    return cast(Optional[str], settings.get("SINGLE_USER_API_KEY"))
 
 
 async def _resolve_prompts_auth_user(
@@ -394,10 +397,11 @@ async def _resolve_prompts_auth_user(
     Authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> Optional[User]:
     """
-    Validate the legacy Token header for prompts endpoints.
+    Authenticate prompts requests, including the legacy Token header.
 
-    Single-user mode validates against SINGLE_USER_API_KEY. Multi-user mode
-    defers to the unified AuthNZ path for API keys/JWTs.
+    Headerless requests resolve canonical cookie-session owners. Single-user
+    headers validate against SINGLE_USER_API_KEY; multi-user headers defer to
+    the unified AuthNZ path for API keys/JWTs.
     """
     raw_token = None
     for candidate in (Token, x_api_key, Authorization):
@@ -406,14 +410,23 @@ async def _resolve_prompts_auth_user(
             break
 
     if not raw_token:
+        if request is not None:
+            try:
+                return await get_request_user(
+                    request,
+                    api_key=None,
+                    token=None,
+                    legacy_token_header=None,
+                )
+            except HTTPException as exc:
+                if exc.status_code != status.HTTP_401_UNAUTHORIZED:
+                    raise
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing authentication token",
         )
 
-    normalized = raw_token
-    if normalized.lower().startswith("bearer "):
-        normalized = normalized[len("Bearer ") :].strip()
+    normalized = bearer_credential(raw_token) or raw_token
 
     if _is_single_user_auth_mode():
         expected = _get_single_user_api_key()
@@ -456,14 +469,13 @@ async def _resolve_prompts_auth_user(
     legacy_header = None
 
     if isinstance(Authorization, str) and Authorization.strip():
-        scheme, _, credential = Authorization.strip().partition(" ")
-        if scheme.lower() == "bearer" and credential:
-            bearer_token = credential.strip()
+        bearer_token = bearer_credential(Authorization.strip())
 
     if isinstance(Token, str) and Token.strip():
         legacy_header = Token.strip()
-        if legacy_header.lower().startswith("bearer "):
-            bearer_token = legacy_header[len("Bearer ") :].strip()
+        legacy_bearer = bearer_credential(legacy_header)
+        if legacy_bearer is not None:
+            bearer_token = legacy_bearer
         else:
             api_key = legacy_header
 
@@ -592,7 +604,7 @@ def _prompt_improvement_error_response(
         except (TypeError, ValueError):
             retry_after_seconds = None
     error = schemas.PromptImproveErrorResponse(
-        code=public_code,
+        code=cast(schemas.PromptImproveErrorCode, public_code),
         message=_PROMPT_IMPROVEMENT_ERROR_MESSAGES[public_code],
         retryable=should_retry,
         retry_after_seconds=retry_after_seconds,
@@ -1057,11 +1069,9 @@ async def create_keyword(
             logger.error(f"db.add_keyword failed to return ID/UUID for '{keyword_data.keyword_text}' after pre-check.")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create or retrieve keyword.")
 
-        # Fetch the full details of the (potentially newly created or undeleted) keyword for the response.
-        # To do this properly, we might need a get_keyword_by_id or get_keyword_by_uuid
-        # For now, constructing from what we have. Prompts_DB.add_keyword normalizes.
-        # API contract: return normalized, lowercased keyword text while DB preserves original casing
-        final_keyword_text = db._normalize_keyword(keyword_data.keyword_text).lower()
+        # Return the stored display casing (the first-seen casing; TASK-13950.5).
+        stored = db.get_active_keyword_by_text(keyword_data.keyword_text)
+        final_keyword_text = stored["keyword"] if stored else db._normalize_keyword(keyword_data.keyword_text)
 
         return schemas.KeywordResponse(
             id=kw_id,
@@ -1086,13 +1096,8 @@ async def list_all_keywords(
     db: PromptsDatabase = Depends(get_prompts_db_for_user)
 ):
     try:
-        # API contract: return lowercased normalized keyword strings
-        try:
-            kws = db.fetch_all_keywords(include_deleted=False)
-            return [db._normalize_keyword(k).lower() for k in kws]
-        except (AttributeError, TypeError):
-            # Fallback if normalization method is unavailable
-            return db.fetch_all_keywords(include_deleted=False)
+        # Stored display casing (TASK-13950.5).
+        return db.fetch_all_keywords(include_deleted=False)
     except DatabaseError as e:
         logger.error(f"Database error listing keywords: {e}", exc_info=True)
         raise map_db_error_to_http(e, default_detail="Database error.") from e
@@ -1542,9 +1547,9 @@ async def bulk_update_prompt_keywords(
 
     def _normalize_for_compare(value: str) -> str:
         try:
-            return db._normalize_keyword(value).casefold()
+            return normalize_keyword_identity(db._normalize_keyword(value))
         except (AttributeError, TypeError, ValueError):
-            return str(value).strip().casefold()
+            return normalize_keyword_identity(str(value))
 
     remove_set = {
         _normalize_for_compare(k)

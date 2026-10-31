@@ -37,7 +37,7 @@ Implement PR 2 of the post-merge main /chat cockpit maturity roadmap: reorganize
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created the PR 2 implementation plan for rail information architecture and action hierarchy. Scope is the main WebUI /chat cockpit only. The plan preserves existing shared state/handlers, keeps focus mode and mobile rail tabs intact, excludes sidepanel/sidebar and model selector redesign work, and requires TDD plus real-server Playwright proof.
 
 Implemented PR 2 rail IA grouping for the main /chat cockpit only. Left rail now orders Composition, Context stack, Prompt, Search & sources, and Session. Right rail now orders Runtime, Model & Chat, Assistant, Tools, and Run controls. Preserved existing shared callbacks, accessible names, focus restoration, focus mode, and mobile rail tab behavior.
@@ -47,7 +47,7 @@ Verification: TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=$KEY bu
 Verification: bun run verify:design-system-state => passed with existing allowed legacy product-state exceptions.
 Verification: git diff --check => passed.
 Bandit: skipped because no Python files were touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

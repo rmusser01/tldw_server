@@ -37,11 +37,11 @@ Review PR 2628 against latest dev; rebase its three commits; verify the reader r
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause: primeConnection used a bufio.Reader for handshake/ready, then Run passed the raw connection into ServeStream. If the helper's ready ACK and first exec request arrived together, the exec bytes could remain buffered in the discarded reader. Fix: return the priming bufio.Reader from primeConnection and pass it to ServeStream. PR review follow-ups: the regression test now waits for and validates the exec response, and uses a 5s read deadline to avoid CI-load flakiness while still failing genuine hangs. Verification: GOCACHE=/private/tmp/tldw-go-build-cache go test ./internal/guest; GOCACHE=/private/tmp/tldw-go-build-cache go test ./... in tools/tldw-agent; git diff --check; rebuilt Debian arm64 bundle; real host smoke final_exit_code=0 at /private/tmp/tvz-e2e.4iJ3wt/evidence/host-smoke-evidence.json. Bandit N/A: Go-only production change.
 
 2026-09-10 PR review and rebase: rebased the three PR commits unchanged onto origin/dev 40345571a2cfc8b3a8893545836097d27e4ee86c. Current dev still discards the handshake buffered reader, so the fix remains applicable. Independent code review found no actionable Go issues. Both prior GitHub review threads (early pipe closure and one-second deadline) are resolved. User explicitly approved renaming this record from TASK-13134 to TASK-13231 because TASK-13134 collides with existing dev records and the Backlog tools do not support ID renames; other task records are untouched. Fresh verification in tools/tldw-agent: go test ./... passed before rebase; go test -race -count=1 ./... and go vet ./... passed after rebase; the buffered-exec regression passed 20 consecutive runs. A temporary Go overlay reverting only the reader handoff caused that regression to fail after five seconds, proving it detects the original bug. CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build of cmd/tldw-agent-guest passed. gofmt and git diff --check passed. Bandit ran from the project venv on the touched guest directory and found no Python files (zero LOC); it provides no Go security coverage. The original real Apple VZ smoke evidence above is historical and was not rerun during this review. Fresh GitHub checks on rebased commit 742801866d currently have no failures; final task correction will require checks on its new head.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

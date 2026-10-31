@@ -37,24 +37,20 @@ Continue the Settings/account-security product-state migration by replacing Prov
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added focused ProviderKeysSettings design-system Alert regression tests for BYOK-unavailable guidance and provider-key load failures. The RED Vitest run failed 2/2 because the current AntD Alert markup did not expose data-ds-component="Alert".
 - Replaced the two ProviderKeysSettings AntD Alert callouts with the shared design-system Alert primitive while preserving info/error severity, title/body copy, and dismiss behavior for the error state.
 - Removed the two matching ProviderKeysSettings baseline exceptions; baseline count moved from 79 to 77 and the touched path now has zero baseline entries.
 - Verification: focused ProviderKeysSettings Vitest passed 2/2; product-state guard unit passed 54/54; bun run verify:design-system-state exited 0 with 77 baseline exceptions; baseline parse reported ProviderKeysSettings count 0; git diff --check exited 0.
 - TypeScript caveat: node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit --pretty false exits 2 on unrelated existing frontend baseline diagnostics in QuickIngest, Layout shell overrides, setup onboarding, and quick-ingest-open; the output included no ProviderKeysSettings, ProviderKeysSettings.design-system-alert, baseline, or TASK-45.44.6.10 diagnostics.
 - Bandit skipped because this slice touched frontend TSX/test/JSON/Backlog markdown only, with no Python code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Migrated ProviderKeysSettings BYOK-unavailable and load-error product-state alerts from direct AntD Alert usage to the shared design-system Alert primitive, added focused DOM coverage for both branches, and removed the two matching ProviderKeysSettings product-state baseline exceptions. Baseline count moved from 79 to 77 total exceptions.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

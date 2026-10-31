@@ -442,7 +442,9 @@ def _normalize_source_options_for_provider(provider: str, options: dict[str, Any
 
 
 @router.get("/providers", response_model=list[ConnectorProvider])
-async def list_providers() -> list[ConnectorProvider]:
+async def list_providers(
+    principal: AuthPrincipal = Depends(get_auth_principal),
+) -> list[ConnectorProvider]:
     providers: list[ConnectorProvider] = [
         ConnectorProvider(name="drive", scopes_required=["drive.readonly"], auth_type="oauth2"),
         ConnectorProvider(name="onedrive", scopes_required=["Files.Read"], auth_type="oauth2"),
@@ -995,17 +997,21 @@ async def trigger_source_sync(
     )
 
 
-@router.api_route(
-    "/providers/{provider}/webhook",
-    methods=["GET", "POST"],
-    response_model=ConnectorWebhookCallbackResponse,
-    responses={
+_WEBHOOK_ROUTE = {
+    "path": "/providers/{provider}/webhook",
+    "response_model": ConnectorWebhookCallbackResponse,
+    "responses": {
         200: {
             "description": "Connector webhook callback result or plaintext validation challenge.",
             "content": {"text/plain": {}},
         },
     },
-)
+}
+
+
+# One route per method: a two-method api_route gives both the same operationId (TASK-13890).
+@router.get(**_WEBHOOK_ROUTE)
+@router.post(**_WEBHOOK_ROUTE)
 async def provider_webhook_callback(
     provider: str,
     request: Request,

@@ -36,14 +36,14 @@ Continue reducing the shared UI package-wide TypeScript compiler baseline by fix
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Captured red evidence from `/tmp/task524-tsc-final.txt`: package `tsc` reported three spread-argument diagnostics in the chat-settings deep research test files.
 - Root cause was test mock forwarding only. The mocked `tldwClient` methods forwarded `unknown[]` rest args into local `vi.fn()` mocks inferred as zero-argument functions, and these tests do not assert remote-client arguments.
 - Replaced the rest-spread wrappers with direct calls to `storageState.initialize`, `storageState.getChatSettings`, and `storageState.updateChatSettings` in the three test files.
 - Focused verification: `bunx vitest run src/services/__tests__/chat-settings.deep-research.test.ts src/services/__tests__/chat-settings.deep-research-pinned.test.ts src/services/__tests__/chat-settings.deep-research-history.test.ts` passed: 13 tests.
 - Package verification: `bunx tsc --noEmit --pretty false > /tmp/task525-tsc-final.txt 2>&1` still exits nonzero from the known baseline, but diagnostics dropped from 49 in `/tmp/task524-tsc-final.txt` to 46 in `/tmp/task525-tsc-final.txt`; searching for `chat-settings.deep-research` returns no matches.
 - Bandit skipped: this is a TypeScript test-only WebUI change with no Python touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

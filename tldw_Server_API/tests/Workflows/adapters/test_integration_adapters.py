@@ -486,6 +486,7 @@ async def test_acp_stage_adapter_registers_created_session_and_records_prompt(mo
             "content": "Workflow reply",
             "usage": {"prompt_tokens": 2, "completion_tokens": 4, "total_tokens": 6},
         },
+        assistant_text=None,
     )
 
 
@@ -1109,85 +1110,114 @@ async def test_github_create_issue_adapter_cancelled():
     assert result.get("__status__") == "cancelled"
 
 
-@pytest.mark.asyncio
-async def test_github_create_issue_adapter_success():
-    """Test GitHub adapter creates issue successfully."""
+_GITHUB_ISSUES_URL = "https://api.github.com/repos/owner/repo/issues"
+_GITHUB_TEST_TOKEN = "ghp" + "_test_token"
+
+
+def _route_github_through_mock_transport(monkeypatch, handler):
+    """Send the adapter's POST through the real ``apost`` over a MockTransport.
+
+    Egress checks run for real; only the socket layer is replaced. A raw client that
+    bypasses core.http_client fails loudly instead of touching the network or DNS.
+    """
+    import socket
+
+    import httpx
+
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Workflows.adapters.integration import github
+
+    def _no_real_network(*_args, **_kwargs):
+        raise AssertionError("github_create_issue bypassed core.http_client")
+
+    monkeypatch.setattr(socket, "create_connection", _no_real_network)
+    monkeypatch.setattr(socket.socket, "connect", _no_real_network)
+    monkeypatch.setattr(socket, "getaddrinfo", _no_real_network)
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+    client = http_client.create_async_client(transport=httpx.MockTransport(handler))
+
+    async def _apost_via_mock(**kwargs):
+        return await http_client.apost(client=client, **kwargs)
+
+    monkeypatch.setattr(github, "apost", _apost_via_mock, raising=False)
+    return client
+
+
+def _resolve_api_github_com_to(monkeypatch, ip):
+    """Make the egress check resolve hostnames to ``ip``, as it does outside pytest."""
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Security import egress
+
+    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
+    monkeypatch.setattr(http_client, "env_flag_enabled", lambda _name: False)
+    monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda _host, **_kwargs: [ip])
+
+
+async def _create_issue(monkeypatch, handler, config=None, context=None):
     from tldw_Server_API.app.core.Workflows.adapters.integration import run_github_create_issue_adapter
 
-    mock_response = MagicMock()
-    mock_response.status_code = 201
-    mock_response.json.return_value = {"html_url": "https://github.com/owner/repo/issues/1", "number": 1}
-
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
-    mock_client.post = AsyncMock(return_value=mock_response)
-
-    mock_httpx = MagicMock()
-    mock_httpx.AsyncClient.return_value = mock_client
-
-    http_module_key = "http" + "x"
-    with patch.dict("sys.modules", {http_module_key: mock_httpx}):
-        fixture_token = "ghp" + "_test_token"
-        config = {
-            "repo": "owner/repo",
-            "title": "Bug Report",
-            "body": "This is a bug",
-            "labels": ["bug"],
-            "token": fixture_token,
-        }
-        context = {}
-
-        result = await run_github_create_issue_adapter(config, context)
-        assert result.get("created") is True
-        assert result.get("issue_url") == "https://github.com/owner/repo/issues/1"
-        assert result.get("issue_number") == 1
-
-
-@pytest.mark.asyncio
-async def test_github_create_issue_adapter_api_error():
-    """Test GitHub adapter handles API errors."""
-    from tldw_Server_API.app.core.Workflows.adapters.integration import run_github_create_issue_adapter
-
-    mock_response = AsyncMock()
-    mock_response.status_code = 422
-    mock_response.text = "Validation Failed"
-
-    async_client_path = "http" + "x" + ".AsyncClient"
-    with patch(async_client_path) as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client.__aenter__.return_value = mock_client
-        mock_client.__aexit__.return_value = None
-        mock_client.post.return_value = mock_response
-        mock_client_cls.return_value = mock_client
-
-        fixture_token = "test" + "_token"
-        config = {"repo": "owner/repo", "title": "Test", "token": fixture_token}
-        context = {}
-
-        result = await run_github_create_issue_adapter(config, context)
-        assert result.get("created") is False
-        assert "github_api_error" in result.get("error", "")
-
-
-@pytest.mark.asyncio
-async def test_github_create_issue_adapter_sanitizes_backend_errors():
-    """Test GitHub adapter hides raw backend errors."""
-    from tldw_Server_API.app.core.Workflows.adapters.integration import run_github_create_issue_adapter
-
-    async_client_path = "http" + "x" + ".AsyncClient"
-    with patch(async_client_path) as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client.__aenter__.return_value = mock_client
-        mock_client.__aexit__.return_value = None
-        mock_client.post.side_effect = RuntimeError("github token at /private/workflows-github.key")
-        mock_client_cls.return_value = mock_client
-
-        token_value = "_".join(("test", "token"))
-        result = await run_github_create_issue_adapter(
-            {"repo": "owner/repo", "title": "Test", "token": token_value},
-            {},
+    client = _route_github_through_mock_transport(monkeypatch, handler)
+    try:
+        return await run_github_create_issue_adapter(
+            {"repo": "owner/repo", "title": "Bug Report", "token": _GITHUB_TEST_TOKEN, **(config or {})},
+            context or {},
         )
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_github_create_issue_adapter_success(monkeypatch):
+    """A 201 is parsed; the POST carries the same URL, headers, JSON body and 30 s timeout."""
+    import json
+
+    import httpx
+
+    requests: list[Any] = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(201, json={"html_url": "https://github.com/owner/repo/issues/1", "number": 1})
+
+    result = await _create_issue(monkeypatch, handler, {"body": "This is a bug", "labels": ["bug"]})
+
+    assert result == {"issue_url": "https://github.com/owner/repo/issues/1", "issue_number": 1, "created": True}
+    (request,) = requests
+    assert request.method == "POST"
+    assert str(request.url) == _GITHUB_ISSUES_URL
+    assert request.headers["Authorization"] == f"token {_GITHUB_TEST_TOKEN}"
+    assert request.headers["Accept"] == "application/vnd.github.v3+json"
+    assert json.loads(request.content) == {
+        "title": "Bug Report",
+        "body": "This is a bug",
+        "labels": ["bug"],
+        "assignees": [],
+    }
+    assert request.extensions["timeout"] == {"connect": 30.0, "read": 30.0, "write": 30.0, "pool": 30.0}
+
+
+@pytest.mark.asyncio
+async def test_github_create_issue_adapter_api_error(monkeypatch):
+    """A non-201 answer is reported with its status and body."""
+    import httpx
+
+    def handler(request):
+        return httpx.Response(422, text="Validation Failed")
+
+    result = await _create_issue(monkeypatch, handler)
+
+    assert result == {"error": "github_api_error: 422 - Validation Failed", "created": False}
+
+
+@pytest.mark.asyncio
+async def test_github_create_issue_adapter_sanitizes_backend_errors(monkeypatch):
+    """Test GitHub adapter hides raw backend errors."""
+
+    def handler(request):
+        raise RuntimeError("github token at /private/workflows-github.key")
+
+    result = await _create_issue(monkeypatch, handler)
 
     assert result == {
         "error": "GitHub issue creation failed",
@@ -1197,38 +1227,69 @@ async def test_github_create_issue_adapter_sanitizes_backend_errors():
 
 
 @pytest.mark.asyncio
-async def test_github_create_issue_adapter_with_template():
+async def test_github_create_issue_adapter_with_template(monkeypatch):
     """Test GitHub adapter applies template to title and body."""
-    from tldw_Server_API.app.core.Workflows.adapters.integration import run_github_create_issue_adapter
+    import json
 
-    mock_response = MagicMock()
-    mock_response.status_code = 201
-    mock_response.json.return_value = {"html_url": "https://github.com/owner/repo/issues/1", "number": 1}
+    import httpx
 
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
-    mock_client.post = AsyncMock(return_value=mock_response)
+    requests: list[Any] = []
 
-    mock_httpx = MagicMock()
-    mock_httpx.AsyncClient.return_value = mock_client
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(201, json={"html_url": "https://github.com/owner/repo/issues/1", "number": 1})
 
-    http_module_key = "http" + "x"
-    with patch.dict("sys.modules", {http_module_key: mock_httpx}):
-        fixture_token = "test" + "_token"
-        config = {
-            "repo": "owner/repo",
-            "title": "Issue for {{inputs.component}}",
-            "body": "Error: {{prev.error_message}}",
-            "token": fixture_token,
-        }
-        context = {
-            "inputs": {"component": "auth"},
-            "prev": {"error_message": "Connection refused"},
-        }
+    result = await _create_issue(
+        monkeypatch,
+        handler,
+        {"title": "Issue for {{inputs.component}}", "body": "Error: {{prev.error_message}}"},
+        {"inputs": {"component": "auth"}, "prev": {"error_message": "Connection refused"}},
+    )
 
-        result = await run_github_create_issue_adapter(config, context)
-        assert result.get("created") is True
+    assert result.get("created") is True
+    sent = json.loads(requests[0].content)
+    assert (sent["title"], sent["body"]) == ("Issue for auth", "Error: Connection refused")
+
+
+@pytest.mark.asyncio
+async def test_github_create_issue_refuses_egress_denied_api_host(monkeypatch):
+    """The operator egress denylist now applies: a denied api.github.com is never contacted."""
+    sent: list[Any] = []
+    monkeypatch.setenv("EGRESS_DENYLIST", "api.github.com")
+
+    result = await _create_issue(monkeypatch, sent.append)
+
+    assert result == {"error": "github_api_blocked_egress", "issue_url": None, "created": False}
+    assert sent == []
+
+
+@pytest.mark.asyncio
+async def test_github_create_issue_refuses_api_host_resolving_to_metadata(monkeypatch):
+    """If api.github.com resolves to link-local metadata, the token and body are not sent."""
+    sent: list[Any] = []
+    _resolve_api_github_com_to(monkeypatch, "169.254.169.254")
+
+    result = await _create_issue(monkeypatch, sent.append)
+
+    assert result == {"error": "github_api_blocked_egress", "issue_url": None, "created": False}
+    assert sent == []
+
+
+@pytest.mark.asyncio
+async def test_github_create_issue_does_not_follow_redirects(monkeypatch):
+    """A redirect, even to link-local metadata, is reported as the status it was."""
+    import httpx
+
+    requests: list[str] = []
+
+    def handler(request):
+        requests.append(str(request.url))
+        return httpx.Response(307, headers={"Location": "http://169.254.169.254/latest/meta-data/"})
+
+    result = await _create_issue(monkeypatch, handler)
+
+    assert requests == [_GITHUB_ISSUES_URL]
+    assert result == {"error": "github_api_error: 307 - ", "created": False}
 
 
 # ==============================================================================
@@ -1251,6 +1312,7 @@ async def test_kanban_adapter_missing_action():
 @pytest.mark.asyncio
 async def test_kanban_adapter_board_list(monkeypatch):
     """Test Kanban adapter list boards action."""
+    from tldw_Server_API.app.core.Kanban.vector_search import create_kanban_vector_search
     from tldw_Server_API.app.core.Workflows.adapters.integration import run_kanban_adapter
 
     mock_db = MagicMock()
@@ -1260,7 +1322,7 @@ async def test_kanban_adapter_board_list(monkeypatch):
     with patch(
         "tldw_Server_API.app.core.Workflows.adapters.integration.messaging.KanbanDB",
         return_value=mock_db,
-    ):
+    ) as kanban_db_cls:
         with patch(
             "tldw_Server_API.app.core.Workflows.adapters.integration.messaging.DatabasePaths.get_kanban_db_path",
             return_value=Path("/tmp/kanban.db"),  # nosec B108
@@ -1271,6 +1333,7 @@ async def test_kanban_adapter_board_list(monkeypatch):
             result = await run_kanban_adapter(config, context)
             assert "boards" in result
             assert result.get("total") == 1
+            assert kanban_db_cls.call_args.kwargs["vector_search_factory"] is create_kanban_vector_search
 
 
 @pytest.mark.asyncio
@@ -1637,7 +1700,7 @@ async def test_character_chat_adapter_message_uses_current_core_writer(monkeypat
     offloaded: list[Any] = []
 
     async def fake_to_thread(func: Any, /, *args: Any, **kwargs: Any) -> Any:
-        offloaded.append(func)
+        offloaded.append(getattr(func, "__wrapped__", func))  # each call runs in its own ChaCha operation
         return func(*args, **kwargs)
 
     monkeypatch.setattr(
@@ -2387,6 +2450,231 @@ async def test_podcast_rss_publish_rejects_non_http_seed_url(monkeypatch, tmp_pa
     )
     assert result.get("published") is False
     assert result.get("error") == "invalid_remote_seed_url"
+
+
+_PUBLIC_SEED_URL = "http://93.184.216.34/feed.xml"
+_SEED_FEED_XML = (
+    b'<?xml version="1.0" encoding="utf-8"?>'
+    b"<rss version=\"2.0\"><channel><title>Seed</title>"
+    b"<item><guid>seed-episode</guid><title>Seed Episode</title>"
+    b"<pubDate>Thu, 12 Feb 2026 20:00:00 +0000</pubDate></item>"
+    b"</channel></rss>"
+)
+
+
+def _route_seed_fetch_through_mock_transport(monkeypatch, handler):
+    """Send the adapter's seed fetch through the real ``afetch`` over a MockTransport.
+
+    Egress, redirect and size checks all run for real; only the socket layer is
+    replaced. A direct stdlib fetch fails loudly instead of touching the network.
+    """
+    import socket
+
+    import httpx
+
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Workflows.adapters.integration import podcast_rss
+
+    def _no_real_network(*_args, **_kwargs):
+        raise AssertionError("podcast_rss seed fetch bypassed core.http_client")
+
+    monkeypatch.setattr(socket, "create_connection", _no_real_network)
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+    client = http_client.create_async_client(transport=httpx.MockTransport(handler))
+
+    async def _afetch_via_mock(**kwargs):
+        return await http_client.afetch(client=client, **kwargs)
+
+    monkeypatch.setattr(podcast_rss, "afetch", _afetch_via_mock, raising=False)
+    return client
+
+
+async def _publish_with_seed(tmp_path, source_feed_url):
+    from tldw_Server_API.app.core.Workflows.adapters.integration import (
+        run_podcast_rss_publish_adapter,
+    )
+
+    return await run_podcast_rss_publish_adapter(
+        {
+            "feed_uri": "file://feeds/podcast.xml",
+            "source_feed_url": source_feed_url,
+            "allow_remote_fetch": True,
+            "episode": {
+                "guid": "episode-new",
+                "title": "New Episode",
+                "audio_url": "https://cdn.example.com/new.mp3",
+                "published_at": "2026-02-13T20:00:00Z",
+            },
+        },
+        {"user_id": "test_user", "tenant_id": "default"},
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "seed_url",
+    [
+        "http://127.0.0.1/feed.xml",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://10.0.0.5/feed.xml",
+    ],
+)
+async def test_podcast_rss_seed_refuses_private_address_without_fetching(monkeypatch, tmp_path, seed_url):
+    """A seed URL on loopback, link-local or a private range is refused before any request."""
+    monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+    requested: list[str] = []
+
+    def handler(request):
+        import httpx
+
+        requested.append(str(request.url))
+        return httpx.Response(200, request=request, stream=httpx.ByteStream(_SEED_FEED_XML))
+
+    client = _route_seed_fetch_through_mock_transport(monkeypatch, handler)
+    try:
+        result = await _publish_with_seed(tmp_path, seed_url)
+    finally:
+        await client.aclose()
+
+    assert result == {"error": "remote_seed_blocked_egress", "published": False}
+    assert requested == []
+    assert not (tmp_path / "feeds" / "podcast.xml").exists()
+
+
+@pytest.mark.asyncio
+async def test_podcast_rss_seed_refuses_redirect_to_private_address(monkeypatch, tmp_path):
+    """A public seed URL that redirects to link-local metadata is refused at the redirect."""
+    monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+    requested: list[str] = []
+
+    def handler(request):
+        import httpx
+
+        requested.append(str(request.url))
+        if request.url.host == "93.184.216.34":
+            return httpx.Response(
+                302,
+                request=request,
+                headers={"Location": "http://169.254.169.254/latest/meta-data/"},
+            )
+        return httpx.Response(200, request=request, stream=httpx.ByteStream(_SEED_FEED_XML))
+
+    client = _route_seed_fetch_through_mock_transport(monkeypatch, handler)
+    try:
+        result = await _publish_with_seed(tmp_path, _PUBLIC_SEED_URL)
+    finally:
+        await client.aclose()
+
+    assert result == {"error": "remote_seed_blocked_egress", "published": False}
+    assert requested == [_PUBLIC_SEED_URL]
+    assert not (tmp_path / "feeds" / "podcast.xml").exists()
+
+
+@pytest.mark.asyncio
+async def test_podcast_rss_seed_refuses_oversized_body(monkeypatch, tmp_path):
+    """A seed body over the byte cap is refused by http_client's max_response_bytes."""
+    from tldw_Server_API.app.core.Workflows.adapters.integration import podcast_rss
+
+    monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(podcast_rss, "_MAX_SEED_FEED_BYTES", 1024, raising=False)
+    padded_feed = _SEED_FEED_XML.replace(b"</channel>", b"<!--" + b"x" * 4096 + b"--></channel>")
+    chunks = [padded_feed[i : i + 512] for i in range(0, len(padded_feed), 512)]
+    yielded: list[int] = []
+
+    import httpx
+
+    class _CountingStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            for chunk in chunks:
+                yielded.append(len(chunk))
+                yield chunk
+
+    def handler(request):
+        return httpx.Response(200, request=request, stream=_CountingStream())
+
+    client = _route_seed_fetch_through_mock_transport(monkeypatch, handler)
+    try:
+        result = await _publish_with_seed(tmp_path, _PUBLIC_SEED_URL)
+    finally:
+        await client.aclose()
+
+    assert result == {"error": "remote_seed_fetch_failed", "published": False}
+    # The cap stopped the read: only enough chunks to cross 1024 bytes were pulled.
+    assert 1024 < sum(yielded) <= 1024 + 512
+    assert len(yielded) < len(chunks)
+    assert not (tmp_path / "feeds" / "podcast.xml").exists()
+
+
+@pytest.mark.asyncio
+async def test_podcast_rss_seed_non_2xx_is_fetch_failure(monkeypatch, tmp_path):
+    """A non-2xx seed response is a fetch failure, as it was under urlopen."""
+    monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+
+    def handler(request):
+        import httpx
+
+        return httpx.Response(404, request=request, stream=httpx.ByteStream(b"not found"))
+
+    client = _route_seed_fetch_through_mock_transport(monkeypatch, handler)
+    try:
+        result = await _publish_with_seed(tmp_path, _PUBLIC_SEED_URL)
+    finally:
+        await client.aclose()
+
+    assert result == {"error": "remote_seed_fetch_failed", "published": False}
+
+
+@pytest.mark.asyncio
+async def test_podcast_rss_seed_non_xml_body_is_invalid_feed_xml(monkeypatch, tmp_path):
+    """A public seed that answers with non-XML returns invalid_feed_xml instead of raising."""
+    monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+
+    def handler(request):
+        import httpx
+
+        return httpx.Response(200, request=request, stream=httpx.ByteStream(b"<html>not a feed"))
+
+    client = _route_seed_fetch_through_mock_transport(monkeypatch, handler)
+    try:
+        result = await _publish_with_seed(tmp_path, _PUBLIC_SEED_URL)
+    finally:
+        await client.aclose()
+
+    assert result == {"error": "invalid_feed_xml", "published": False}
+    assert not (tmp_path / "feeds" / "podcast.xml").exists()
+
+
+@pytest.mark.asyncio
+async def test_podcast_rss_seed_public_feed_still_parses(monkeypatch, tmp_path):
+    """A valid public seed feed is fetched through http_client and merged as before."""
+    monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+    user_agents: list[str | None] = []
+
+    def handler(request):
+        import httpx
+
+        user_agents.append(request.headers.get("user-agent"))
+        return httpx.Response(200, request=request, stream=httpx.ByteStream(_SEED_FEED_XML))
+
+    client = _route_seed_fetch_through_mock_transport(monkeypatch, handler)
+    try:
+        result = await _publish_with_seed(tmp_path, _PUBLIC_SEED_URL)
+    finally:
+        await client.aclose()
+
+    assert result == {
+        "published": True,
+        "feed_uri": f"file://{(tmp_path / 'feeds' / 'podcast.xml').resolve()}",
+        "item_guid": "episode-new",
+        "item_count": 2,
+        "version": 2,
+        "replaced_existing_guid": False,
+        "source_feed_url": _PUBLIC_SEED_URL,
+    }
+    assert user_agents == ["tldw-workflows/0.2"]
+    channel = ET.parse(tmp_path / "feeds" / "podcast.xml").getroot().find("channel")  # nosec B314
+    assert channel is not None
+    assert [item.findtext("guid") for item in channel.findall("item")] == ["episode-new", "seed-episode"]
 
 
 # ==============================================================================

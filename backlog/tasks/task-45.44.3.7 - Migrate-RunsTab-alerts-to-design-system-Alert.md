@@ -45,11 +45,11 @@ Replace the Watchlists RunsTab AntD Alert product-state callouts with the shared
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 TDD red/green completed. Added focused RunsTab assertions requiring both the load-error retry banner and the reliability-attention banner to be wrapped in data-ds-component="Alert"; the red run failed on the missing design-system Alert marker for both banners. Replaced the two RunsTab AntD Alert callouts with the shared design-system Alert primitive, preserved the load-error retry action plus reliability attention view/filter actions, and removed the single RunsTab Alert baseline exception. Verification: focused RunsTab load-error retry test passed 2/2; RunsTab advanced-filters test passed 5/5; product-state guard passed 54/54; bun run verify:design-system-state passed with 257 total baseline exceptions and 22 Jobs/Scheduler/Watchlists exceptions; RunsTab target rows 1 -> 0; git diff --check passed. Bandit skipped because this slice touched frontend TSX/test/JSON/Backlog markdown only.
 
 TypeScript: NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false still exits 2 on 347 existing diagnostics; no diagnostics mention RunsTab.tsx, RunsTab.load-error-retry.test.tsx, the baseline, or TASK-45.44.3.7.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

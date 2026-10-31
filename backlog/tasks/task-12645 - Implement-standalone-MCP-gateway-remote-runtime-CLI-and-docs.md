@@ -41,7 +41,7 @@ Docs/superpowers/plans/2026-06-02-mcp-gateway-remote-runtime-cli-docs.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented a package-owned remote admin client for mounted gateway base URLs, env/header-based admin auth, sanitized malformed/connection failures, and HTTP JSON error payload preservation.
 
 Added flat runtime CLI commands for list/start/stop/restart/refresh/reconcile/install/update that call the running gateway over HTTP rather than starting local transports.
@@ -63,7 +63,7 @@ Verification passed:
 - git diff --check: passed
 
 Known skips or blockers: none.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

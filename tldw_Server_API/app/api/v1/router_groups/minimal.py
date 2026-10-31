@@ -57,6 +57,7 @@ MINIMAL_REQUIRED_ROUTER_NAMES = (
     "service_prompts",
     "rpg",
     "admin",
+    "billing",
     "workspace_eligibility",
 )
 MINIMAL_REQUIRED_ROUTER_OVERRIDES = {
@@ -617,6 +618,13 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             log_name="archetype",
             prefix=f"{API_V1_PREFIX}/persona/archetypes",
             tags=("persona-archetypes",),
+            skip_context=minimal_skip_context,
+        ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.notes_semantic_index",
+            log_name="notes_semantic_index",
+            prefix=f"{API_V1_PREFIX}/notes",
+            tags=("notes",),
             skip_context=minimal_skip_context,
         ),
         ImportedRouterSpec(

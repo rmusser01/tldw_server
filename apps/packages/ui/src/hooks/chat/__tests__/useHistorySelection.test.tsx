@@ -1,4 +1,8 @@
+import { useSidepanelChatFreshness, FOCUS_CHECK_DEBOUNCE_MS, FOCUS_CHECK_MIN_INTERVAL_MS } from "@/routes/sidepanel-chat-freshness"
 import React from "react"
+import userEvent from "@testing-library/user-event"
+import { getServerChatSaveStatus, resetServerChatSaveStatus } from "@/store/server-chat-save-status"
+import { useChatHistoryFreshness } from "../useChatHistoryFreshness"
 import {
   act,
   fireEvent,
@@ -12,30 +16,49 @@ import type {
   HistoryViewSelectionV1,
   HistorySelectionSnapshotV1
 } from "@/types/history-selection"
-import { resolveHistorySelection } from "@/utils/history-selection"
+import { resolveHistorySelection, selectionDigest } from "@/utils/history-selection"
 
 const mocks = vi.hoisted(() => ({
+  openButtons: [] as Array<() => void>,
   bookmarks: new Map<string, any>(),
+  saveBookmark: vi.fn<() => Promise<void>>(async () => {}),
   configChanged: null as null | (() => void),
   forkCandidate: vi.fn(async (..._args: any[]) => null as any),
   forkRecords: vi.fn(async (..._args: any[]) => [] as any[]),
   forkSettings: vi.fn(async (..._args: any[]) => null as any),
   updateForkSettings: vi.fn(async (..._args: any[]) => null as any),
   capture: vi.fn(),
+  historyVersion: vi.fn(),
+  beforeBookmark: vi.fn(async () => {}),
+  verifyEdit: vi.fn(async (..._args: any[]) => {}),
   confirm: vi.fn(),
   profile: vi.fn(),
   details: vi.fn(),
   localOwner: vi.fn(),
+  bindLocal: vi.fn(),
   link: vi.fn(),
   recoveries: vi.fn<(...args: any[]) => Promise<any[]>>(async () => []),
-  dismissRecovery: vi.fn<(...args: any[]) => Promise<void>>(async () => {})
+  dismissRecovery: vi.fn<(...args: any[]) => Promise<boolean>>(async () => true)
 }))
+vi.mock("@/components/Common/Button", async (original) => {
+  const { Button } =
+    await original<typeof import("@/components/Common/Button")>()
+  const React = await import("react")
+  return {
+    Button: React.forwardRef<HTMLButtonElement, any>((props, ref) => {
+      if (props.children === "Open saved reply")
+        mocks.openButtons.push(props.onClick)
+      return React.createElement(Button, { ...props, ref })
+    })
+  }
+})
 vi.mock("@/db/dexie/fork-operations", () => ({
   findForkCandidate: (...args: any[]) => mocks.forkCandidate(...args),
   loadForkOperations: (...args: any[]) => mocks.forkRecords(...args),
   allowNewForkOperation: vi.fn()
 }))
-vi.mock("@/db/dexie/history-selection", () => ({
+vi.mock("@/db/dexie/history-selection", async (original) => ({
+  canonicalHistoryJson: (await original<any>()).canonicalHistoryJson,
   ensureLocalProfileId: () => mocks.profile(),
   loadHistoryTurnRecoveries: (...args: any[]) => mocks.recoveries(...args),
   dismissHistoryTurnRecovery: (...args: any[]) =>
@@ -50,17 +73,24 @@ vi.mock("@/db/dexie/history-selection", () => ({
         { owner_key: owner.owner_key, conversation_id: owner.conversation_id }
       ])
     ) ?? null,
-  saveHistoryBookmark: async (scope: any, view: any) =>
-    mocks.bookmarks.set(
+  saveHistoryBookmark: async (scope: any, view: any) => {
+    await mocks.beforeBookmark()
+    await mocks.saveBookmark()
+    return mocks.bookmarks.set(
       JSON.stringify([
         scope,
         { owner_key: view.owner_key, conversation_id: view.conversation_id }
       ]),
       { ...scope, view }
-    ),
-  getLocalHistoryOwner: (id: string) => mocks.localOwner(id)
+    )
+  },
+  getLocalHistoryOwner: (id: string) => mocks.localOwner(id),
+  bindUnboundLocalHistory: (...args: any[]) => mocks.bindLocal(...args)
 }))
-vi.mock("@/services/chat-history-selection", () => ({
+vi.mock("@/services/chat-history-selection", async (original) => ({
+  readNativeHistoryVersion: (...args: unknown[]) => mocks.historyVersion(...args),
+  qualifyNativeMessageEditCapture: (await original<any>()).qualifyNativeMessageEditCapture,
+  verifyNativeMessageEditReceipt: (...args: any[]) => mocks.verifyEdit(...args),
   captureHistorySnapshot: (...args: any[]) => mocks.capture(...args),
   readNativeForkSettings: (...args: any[]) => mocks.forkSettings(...args),
   updateNativeForkSettings: (...args: any[]) => mocks.updateForkSettings(...args),
@@ -155,23 +185,27 @@ function View({ label, reference }: { label: string; reference?: any }) {
   )
 }
 beforeEach(() => {
+  mocks.beforeBookmark.mockReset().mockResolvedValue(undefined)
+  mocks.verifyEdit.mockReset().mockResolvedValue(undefined)
   mocks.forkCandidate.mockReset().mockResolvedValue(null)
   mocks.forkRecords.mockReset().mockResolvedValue([])
   mocks.forkSettings.mockReset().mockResolvedValue(null)
   mocks.updateForkSettings.mockReset().mockResolvedValue(null)
   mocks.confirm.mockClear()
   mocks.recoveries.mockReset().mockResolvedValue([])
-  mocks.dismissRecovery.mockReset().mockResolvedValue(undefined)
+  mocks.dismissRecovery.mockReset().mockResolvedValue(true)
   mocks.configChanged = null
   controllers = {}
   mocks.bookmarks.clear()
+  mocks.saveBookmark.mockReset().mockResolvedValue(undefined)
   mocks.profile.mockReset().mockResolvedValue("profile")
   mocks.localOwner
     .mockReset()
     .mockImplementation(async (id) => ({ ...owner, conversation_id: id }))
+  mocks.bindLocal.mockReset().mockImplementation(async (id: string) => ({ ...owner, conversation_id: id }))
   mocks.details.mockReset().mockResolvedValue(null)
   mocks.link.mockReset()
-  mocks.capture.mockImplementation(async (_owner, view) => {
+  mocks.capture.mockReset().mockImplementation(async (_owner, view) => {
     const bound = { ...view, owner_key: "owner" }
     const result = resolveHistorySelection(snapshot, bound, "send", "")
     if (result.status !== "ready") return { ...result, snapshot, view: bound }
@@ -220,6 +254,72 @@ it("does not publish a late capture error after deliberate selection is cancelle
   expect(mounted.result.current.getCurrent().error).toBeNull()
   expect(mounted.result.current.canAutomaticallyLoad()).toBe(false)
 })
+it.each([false, true])(
+  'does not restore a cancelled fresh owner or overwrite a newer handoff while saving its bookmark: newer=%s',
+  async (newer) => {
+    const storageKey = 'cancelled-fresh-bookmark';
+    sessionStorage.removeItem(storageKey);
+    let entered!: () => void, finish!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    mocks.saveBookmark.mockImplementationOnce(async () => {
+      entered();
+      await held;
+    });
+    let current = true;
+    const mounted = renderHook(() => useHistorySelection({ storageKey }));
+    let pending!: Promise<boolean>;
+    act(() => {
+      pending = mounted.result.current.loadConversation(
+        {
+          serverChatId: 'chat',
+          resetOnCancel: true,
+          isCurrent: () => current,
+        },
+        null
+      );
+    });
+    await act(async () => {
+      await started;
+    });
+    current = false;
+    let newerReference: ReturnType<typeof mounted.result.current.getStoredReference> = null;
+    if (newer) {
+      const destination = renderHook(() => useHistorySelection({ storageKey }));
+      await act(async () => {
+        await destination.result.current.open(owner, null);
+      });
+      newerReference = destination.result.current.getStoredReference();
+      expect(newerReference).not.toBeNull();
+      destination.unmount();
+    }
+    await act(async () => {
+      finish();
+      expect(await pending).toBe(false);
+    });
+    expect(mounted.result.current.getCurrent().owner).toBeNull();
+    expect(mounted.result.current.getReference()).toBeNull();
+    expect(mounted.result.current.getStoredReference()).toEqual(newerReference);
+    mounted.unmount();
+    const reloaded = renderHook(() => useHistorySelection({ storageKey }));
+    expect(reloaded.result.current.getStoredReference()).toEqual(newerReference);
+    if (!newer) {
+      current = true;
+      await act(async () => {
+        expect(await reloaded.result.current.loadConversation({ serverChatId: 'chat' }, null)).toBe(
+          true
+        );
+      });
+      expect(reloaded.result.current.getStoredReference()?.conversation_id).toBe('chat');
+    }
+    sessionStorage.removeItem(storageKey);
+  }
+);
+
 describe("mounted history selection", () => {
   it("keeps identical initialization independent and follows only the originating view revision", async () => {
     render(
@@ -387,6 +487,190 @@ it("preserves before-first through copied references while allocating independen
     controllers["copy-b"].bookmarkScope
   )
 })
+it.each([undefined, "owner"])("rejects a foreign account-stamped local history before ownership or capture (local owner %s)", async (localOwner) => {
+  mocks.details.mockResolvedValue({ id: "chat", server_scope_key: "foreign-account", local_owner_key: localOwner })
+  const onCapture = vi.fn()
+  const { result } = renderHook(() => useHistorySelection({ onCapture }))
+  await act(async () => { await result.current.loadConversation({ historyId: "chat" }) })
+  expect(result.current.error).toBe("owner_conversation_mismatch")
+  expect(mocks.localOwner).not.toHaveBeenCalled()
+  expect(mocks.capture).not.toHaveBeenCalled()
+  expect(onCapture).not.toHaveBeenCalled()
+})
+
+it.each([
+  { server_scope_key: "verified-scope" },
+  { local_owner_key: "owner" }
+])("opens a verified account history or an intentional profile-owned local fork: %j", async (ownership) => {
+  mocks.details.mockResolvedValue({ id: "chat", ...ownership })
+  const onCapture = vi.fn()
+  const { result } = renderHook(() => useHistorySelection({ onCapture }))
+  await act(async () => { await result.current.loadConversation({ historyId: "chat" }) })
+  expect(result.current.status).toBe("ready")
+  expect(result.current.owner).toMatchObject({ kind: "local", conversation_id: "chat" })
+  expect(onCapture).toHaveBeenCalled()
+})
+
+it("does not install ownership on an unowned local cache", async () => {
+  mocks.details.mockResolvedValue({ id: "unowned" })
+  const { result } = renderHook(() => useHistorySelection())
+  await act(async () => { await result.current.loadConversation({ historyId: "unowned" }) })
+  expect(result.current.error).toBe("unbound_local_history")
+  expect(mocks.localOwner).not.toHaveBeenCalled()
+  expect(mocks.capture).not.toHaveBeenCalled()
+})
+
+it.each([
+  { id: "cache" },
+  { id: "cache", local_owner_key: "owner" },
+  { id: "cache", server_chat_id: "other-chat" }
+])("rejects unrelated local and native locators before capture: %j", async (details) => {
+  mocks.details.mockResolvedValue(details)
+  const onCapture = vi.fn()
+  const { result } = renderHook(() => useHistorySelection({ onCapture }))
+  await act(async () => {
+    await result.current.loadConversation({ historyId: "cache", serverChatId: "chat" })
+  })
+  expect(result.current.error).toBe("owner_conversation_mismatch")
+  expect(mocks.localOwner).not.toHaveBeenCalled()
+  expect(mocks.capture).not.toHaveBeenCalled()
+  expect(onCapture).not.toHaveBeenCalled()
+})
+
+it.each([
+  { server_scope_key: "verified-scope" },
+  { local_owner_key: "owner" }
+])("does not publish a selected local capture after its caller is cancelled: %j", async (ownership) => {
+  mocks.details.mockResolvedValue({ id: "chat", ...ownership })
+  const capture = mocks.capture.getMockImplementation()!
+  let finish!: () => void
+  const held = new Promise<void>((resolve) => { finish = resolve })
+  mocks.capture.mockImplementationOnce(async (...args) => {
+    await held
+    return capture(...args)
+  })
+  let current = true
+  const onCapture = vi.fn()
+  const { result } = renderHook(() => useHistorySelection({ onCapture }))
+  let pending!: Promise<boolean>
+  act(() => {
+    pending = result.current.loadConversation({ historyId: "chat", isCurrent: () => current })
+  })
+  await waitFor(() => expect(mocks.capture).toHaveBeenCalledTimes(1))
+  await act(async () => {
+    current = false
+    finish()
+    expect(await pending).toBe(false)
+  })
+  expect(onCapture).not.toHaveBeenCalled()
+  expect(result.current.capture).toBeNull()
+})
+
+const changeAccount = (event: string) => {
+  if (event === "cookie") {
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "tldwCookieSessionConfig",
+      oldValue: JSON.stringify({ serverUrl: "http://old", authMode: "multi-user" }),
+      newValue: null
+    }))
+  } else {
+    window.dispatchEvent(new Event(`tldw:auth-${event}-changed`))
+  }
+}
+
+it.each(
+  ["local", "native"].flatMap((kind) =>
+    ["principal", "credentials", "cookie"].flatMap((event) =>
+      [false, true].map((held) => ({ kind, event, held }))
+    )
+  )
+)("revokes $kind previews after $event boundary (held: $held)", async ({ kind, event, held }) => {
+  mocks.details.mockResolvedValue({ id: "chat", server_scope_key: "verified-scope" })
+  const capture = mocks.capture.getMockImplementation()!
+  let finish!: () => void
+  if (held) {
+    const gate = new Promise<void>((resolve) => { finish = resolve })
+    mocks.capture.mockImplementationOnce(async (...args) => { await gate; return capture(...args) })
+  }
+  const onCapture = vi.fn()
+  const mounted = renderHook(() => useHistorySelection({ onCapture }))
+  let pending!: Promise<boolean>
+  act(() => {
+    pending = mounted.result.current.loadConversation(kind === "local"
+      ? { historyId: "chat" } : { serverChatId: "chat" })
+  })
+  if (held) await waitFor(() => expect(mocks.capture).toHaveBeenCalledTimes(1))
+  else await act(async () => { await pending })
+  const published = onCapture.mock.calls.length
+  act(() => { changeAccount(event) })
+  expect(mounted.result.current.getCurrent()).toMatchObject({
+    view: null,
+    capture: null,
+    pending: null,
+    error: "request_config_scope_changed"
+  })
+  expect(mounted.result.current.canAutomaticallyLoad()).toBe(false)
+  const capturesBeforeActions = mocks.capture.mock.calls.length
+  await act(async () => {
+    expect(await mounted.result.current.choose({ kind: "empty" })).toBe(false)
+    expect(await mounted.result.current.refresh()).toBe(false)
+    if (held) { finish(); expect(await pending).toBe(false) }
+  })
+  expect(mocks.capture).toHaveBeenCalledTimes(capturesBeforeActions)
+  expect(onCapture).toHaveBeenCalledTimes(published)
+})
+
+it("does not revive expired account previews when returning to a logical tab, while a profile fork reopens", async () => {
+  const capture = mocks.capture.getMockImplementation()!
+  mocks.capture.mockImplementation(async (owner, view) => {
+    const result = await capture(owner, { ...view, conversation_id: "chat" })
+    return {
+      ...result,
+      view: { ...result.view, conversation_id: owner.conversation_id },
+      snapshot: { ...result.snapshot, conversation_id: owner.conversation_id }
+    }
+  })
+  mocks.details.mockImplementation(async (id) => id === "chat"
+    ? { id, server_scope_key: "verified-scope" }
+    : { id, local_owner_key: "owner" })
+  const { result } = renderHook(() => useHistorySelection())
+  await act(async () => { await result.current.loadConversation({ historyId: "chat" }) })
+  expect(result.current.capture).not.toBeNull()
+  act(() => { result.current.activate("profile-tab") })
+  await act(async () => { await result.current.loadConversation({ historyId: "fork" }) })
+  expect(result.current.owner).toMatchObject({ kind: "local", conversation_id: "fork" })
+  expect(result.current.owner).not.toHaveProperty("validate_lease")
+  act(() => { changeAccount("principal"); result.current.activate("default") })
+  expect(result.current.capture).toBeNull()
+  expect(result.current.view).toBeNull()
+  expect(result.current.canAutomaticallyLoad()).toBe(false)
+  act(() => { result.current.activate("profile-tab") })
+  expect(result.current.canAutomaticallyLoad()).toBe(true)
+  await act(async () => { await result.current.loadConversation({ historyId: "fork" }) })
+  expect(result.current.status).toBe("ready")
+})
+
+it("invalidates an account-stamped local capture when the account changes during its read", async () => {
+  mocks.details.mockResolvedValue({ id: "chat", server_scope_key: "verified-scope" })
+  const capture = mocks.capture.getMockImplementation()!
+  let entered!: () => void, finish!: () => void
+  const started = new Promise<void>(resolve => { entered = resolve })
+  const held = new Promise<void>(resolve => { finish = resolve })
+  mocks.capture.mockImplementationOnce(async (...args) => { entered(); await held; return capture(...args) })
+  const onCapture = vi.fn()
+  const { result } = renderHook(() => useHistorySelection({ onCapture }))
+  await act(async () => {
+    const pending = result.current.loadConversation({ historyId: "chat" })
+    await started
+    mocks.configChanged!()
+    finish()
+    expect(await pending).toBe(false)
+  })
+  expect(onCapture).not.toHaveBeenCalled()
+  expect(result.current.capture).toBeNull()
+  expect(result.current.error).toBe("request_config_scope_changed")
+})
+
 it("keeps an unbound mirror readable without initializing local ownership, and binds only on explicit capture", async () => {
   mocks.details.mockResolvedValue({
     id: "mirror",
@@ -424,7 +708,7 @@ it("does not create a durable profile for temporary history", async () => {
   expect(mocks.profile).not.toHaveBeenCalled()
   expect(result.current.reference).toBeNull()
 })
-it("keeps logical tab identities stable and refuses a result captured in another tab", async () => {
+it("keeps another logical tab's selection after reset and refuses its stale results", async () => {
   const { result } = renderHook(() => useHistorySelection())
   await act(async () => {
     result.current.activate("A")
@@ -437,6 +721,8 @@ it("keeps logical tab identities stable and refuses a result captured in another
     await result.current.choose({ kind: "empty" })
   })
   const second = result.current.view!
+  act(() => { result.current.reset() })
+  expect(result.current.owner).toBeNull()
   await act(async () => {
     result.current.activate("A")
   })
@@ -494,6 +780,31 @@ it("never reuses an old view revision after rehydrating the same conversation", 
   await act(async () => {
     expect(await result.current.followResult(origin, "b")).toBe(false)
   })
+})
+
+it("does not commit a held explicit mirror binding after caller cancellation", async () => {
+  mocks.details.mockResolvedValue({ id: "mirror", server_chat_id: "chat" })
+  let entered!: () => void, finish!: () => void
+  const started = new Promise<void>((resolve) => { entered = resolve })
+  const held = new Promise<void>((resolve) => { finish = resolve })
+  const committed = vi.fn()
+  mocks.link.mockImplementation(async (options) => {
+    entered()
+    await held
+    if (options.validate_lease?.() === false)
+      throw new Error("request_config_scope_changed")
+    committed()
+  })
+  let current = true
+  const { result } = renderHook(() => useHistorySelection())
+  await act(async () => {
+    const pending = result.current.loadConversation({ historyId: "mirror", bindUnbound: true, isCurrent: () => current })
+    await started
+    current = false
+    finish()
+    expect(await pending).toBe(false)
+  })
+  expect(committed).not.toHaveBeenCalled()
 })
 
 it("exposes a missing bookmarked target instead of choosing the latest remaining row", async () => {
@@ -656,9 +967,74 @@ it("restores scoped pending operations from older views without making them sele
   expect(mocks.dismissRecovery).toHaveBeenCalledWith(
     entry.scope,
     expect.objectContaining({ owner_key: "owner", conversation_id: "chat" }),
-    "op"
+    "op", "dismissed", expect.objectContaining({ validate_lease: expect.any(Function) })
   )
   expect(result.current.recoveries).toEqual([])
+})
+
+it("Regenerate reload keeps a reviewed legacy bookmark and exposes bound recovery after stale projection", async () => {
+  const origin = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await origin.result.current.loadConversation({ serverChatId: "chat" })
+  })
+  const reference = origin.result.current.getReference()!
+  const legacyView = {
+    ...origin.result.current.view!,
+    interpretation: { kind: "legacy_linear_v1" as const, projection_id: "reviewed" },
+    cursor: { kind: "after_message" as const, message_id: "u" }
+  }
+  const key = JSON.stringify([
+    { profile_id: reference.profile_id, client_session_id: reference.client_session_id },
+    { owner_key: reference.owner_key, conversation_id: reference.conversation_id }
+  ])
+  mocks.bookmarks.set(key, { ...reference, view: legacyView })
+  const savedSelection = {
+    version: 1 as const, owner_key: "owner", conversation_id: "chat",
+    interpretation: legacyView.interpretation, cursor: legacyView.cursor,
+    selection_revision: legacyView.selection_revision, purpose: "send" as const,
+    messages: [{ id: "u", revision: "u1" }], fences: snapshot.fences,
+    storage_context_digest: snapshot.storage_context_digest,
+    request_context_digest: "prepared"
+  }
+  const existingSelection = {
+    ...savedSelection, selection_digest: selectionDigest({ ...savedSelection, selection_digest: "" })
+  }
+  const entry: ReturnType<typeof useHistorySelection>["recoveries"][number] = {
+    scope: { profile_id: reference.profile_id, client_session_id: reference.client_session_id },
+    turn: {
+      operation_id: "regenerate-retained", origin_view: legacyView,
+      owner_key: "owner", conversation_id: "chat", state: "generated_unsaved",
+      input_id: "u", assistant_id: "alternative", input_text: "Question",
+      result_text: "New answer", input_images: [], created_at: 1,
+      outcome: "complete", selection_digest: existingSelection.selection_digest,
+      request_context_digest: existingSelection.request_context_digest,
+      existing_selection: existingSelection
+    }
+  }
+  mocks.recoveries.mockResolvedValue([entry])
+  mocks.capture.mockImplementation(async (_owner, view, _purpose, _signal, capability) => {
+    if (view.interpretation.kind === "legacy_linear_v1")
+      throw Object.assign(new Error("stale_projection"), { status: 409 })
+    if (capability === "tldw_history_existing_input_v1") return {
+      status: "legacy_review_required", code: "legacy_review_required",
+      acknowledged_capability: capability,
+      snapshot: { ...snapshot, interpretation_status: { kind: "legacy_review_required" } },
+      view: { ...view, owner_key: "owner" }
+    }
+    throw new Error("unexpected_history_read")
+  })
+  const reopened = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await reopened.result.current.loadConversation({ serverChatId: "chat" }, reference)
+  })
+  await waitFor(() => expect(reopened.result.current.recoveries).toEqual([entry]))
+  expect(mocks.capture).toHaveBeenCalledWith(expect.objectContaining({ kind: "native" }),
+    expect.objectContaining({ interpretation: { kind: "parent_graph_v1" }, cursor: { kind: "empty" } }),
+    "send", expect.anything(), "tldw_history_existing_input_v1")
+  expect(reopened.result.current.view?.interpretation).toEqual(legacyView.interpretation)
+  expect(reopened.result.current.view?.cursor).toEqual(legacyView.cursor)
+  expect(mocks.bookmarks.get(key).view).toEqual(legacyView)
+  expect(mocks.confirm).not.toHaveBeenCalled()
 })
 
 it("a historyId-only bound native mirror supplies its own successful load receipt", async () => {
@@ -928,7 +1304,7 @@ it.each(["published", "held-success", "held-error"])(
     expect(mocks.dismissRecovery).toHaveBeenCalledExactlyOnceWith(
       entry.scope,
       expect.objectContaining({ owner_key: "owner", conversation_id: "chat" }),
-      "retained-turn"
+      "retained-turn", "dismissed", expect.objectContaining({ validate_lease: expect.any(Function) })
     )
   }
 )
@@ -1000,4 +1376,1839 @@ it("does not re-commit consumers when a load starts with nothing to clear", () =
     result.current.beginLoad()
   })
   expect(commits).toBe(before)
+})
+
+
+it("following an edit result refuses a retired editor before capture", async () => {
+  const { result } = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await result.current.open(owner)
+  })
+  const origin = structuredClone(result.current.view!)
+  mocks.capture.mockClear()
+  await act(async () => {
+    const follow = result.current.followResult as (
+      view: HistoryViewSelectionV1,
+      id: string,
+      isCurrent: () => boolean
+    ) => Promise<boolean>
+    expect(await follow(origin, "a", () => false)).toBe(false)
+  })
+  expect(mocks.capture).not.toHaveBeenCalled()
+  expect(result.current.view).toEqual(origin)
+})
+
+it("following an edit result keeps the original view when typing retires a held capture", async () => {
+  const { result } = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await result.current.open(owner)
+  })
+  const origin = structuredClone(result.current.view!)
+  const capture = mocks.capture.getMockImplementation()!
+  let release!: () => void
+  const held = new Promise<void>(done => {release = done})
+  mocks.capture.mockImplementationOnce(async (...args) => {
+    await held
+    return capture(...args)
+  })
+  let current = true
+  let attempt!: Promise<boolean>
+  act(() => {
+    const follow = result.current.followResult as (
+      view: HistoryViewSelectionV1,
+      id: string,
+      isCurrent: () => boolean
+    ) => Promise<boolean>
+    attempt = follow(origin, "a", () => current)
+  })
+  try {
+    expect(result.current.view).toEqual(origin)
+  } finally {
+    current = false
+    await act(async () => {
+      release()
+      await attempt
+    })
+  }
+  expect(await attempt).toBe(false)
+  expect(result.current.view).toEqual(origin)
+})
+
+it("a current edit result installs once and acknowledges its own editor retirement", async () => {
+  let current = true
+  const onCapture = vi.fn(() => {
+    current = false
+  })
+  const hook = renderHook(() => useHistorySelection({ onCapture }))
+  await act(async () => {
+    await hook.result.current.open(owner)
+  })
+  current = true
+  onCapture.mockClear()
+  const origin = hook.result.current.view!
+  await act(async () => {
+    expect(
+      await hook.result.current.followResult(origin, "a", () => current)
+    ).toBe(true)
+  })
+  expect(hook.result.current.view).toMatchObject({
+    cursor: {
+      kind: "after_message",
+      message_id: "a"
+    },
+    selection_revision: origin.selection_revision + 1
+  })
+  expect(onCapture).toHaveBeenCalledOnce()
+  expect(hook.result.current.status).toBe("ready")
+})
+
+it("an edit result that cannot be captured preserves the original selected view", async () => {
+  const hook = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await hook.result.current.open(owner)
+  })
+  const origin = hook.result.current.view!
+  mocks.capture.mockImplementationOnce(async (_owner, view) => ({
+    status: "invalid_history",
+    code: "missing_message",
+    snapshot,
+    view,
+    purpose: "send"
+  }))
+  await act(async () => {
+    expect(
+      await hook.result.current.followResult(origin, "a", () => true)
+    ).toBe(false)
+  })
+  expect(hook.result.current.view).toBe(origin)
+  expect(hook.result.current.status).toBe("ready")
+})
+
+it.each(["new-draft", "same-id-restore", "source-intent"])(
+  "actual %s retirement during edit result capture cannot install an obsolete branch",
+  async (boundary) => {
+    const { captureChatDraftSource } = await import("../chat-draft-transition")
+    const { useStoreMessageOption } = await import("@/store/option")
+    const { usePlaygroundSessionStore } = await import(
+      "@/store/playground-session"
+    )
+    const hook = renderHook(() => useHistorySelection())
+    await act(async () => {
+      await hook.result.current.open(owner)
+    })
+    const origin = hook.result.current.view!
+    const source = captureChatDraftSource()
+    const capture = mocks.capture.getMockImplementation()!
+    let release!: () => void
+    const held = new Promise<void>((done) => {
+      release = done
+    })
+    mocks.capture.mockImplementationOnce(async (...args) => {
+      await held
+      return capture(...args)
+    })
+    let attempt!: Promise<boolean>
+    act(() => {
+      attempt = hook.result.current.followResult(origin, "a", source.isCurrent)
+    })
+    if (boundary === "new-draft")
+      useStoreMessageOption.getState().startNewChatDraft()
+    else if (boundary === "same-id-restore")
+      usePlaygroundSessionStore.setState({
+        restoreRevision:
+          usePlaygroundSessionStore.getState().restoreRevision + 1
+      })
+    else
+      usePlaygroundSessionStore.setState({
+        sourceSelectionRevision:
+          usePlaygroundSessionStore.getState().sourceSelectionRevision + 1
+      })
+    await act(async () => {
+      release()
+      expect(await attempt).toBe(false)
+    })
+    expect(hook.result.current.view).toBe(origin)
+    expect(hook.result.current.status).toBe("ready")
+  }
+)
+
+const savedEditedRecovery = (view: HistoryViewSelectionV1) => ({
+  scope: { profile_id: "profile", client_session_id: "originating-session" },
+  turn: {
+    operation_id: "edited-operation",
+    action: "edit_resend" as const,
+    origin_view: view,
+    owner_key: "owner",
+    conversation_id: "chat",
+    persistence: "server" as const,
+    input_id: "u",
+    assistant_id: "b",
+    settled_message_id: "b",
+    created_at: 1,
+    input_text: "Edited question",
+    input_images: [],
+    result_text: "Other answer",
+    state: "generated_unsaved" as const,
+    outcome: "complete" as const,
+    selection_digest: "selection",
+    request_context_digest: "request",
+    admission: {
+      version: 1 as const,
+      owner_key: "owner",
+      conversation_id: "chat",
+      input_message_id: "u",
+      input_message_revision: "u1",
+      selection_digest: "selection"
+    }
+  }
+})
+const editedRecoveryOwner = {
+  kind: "native" as const,
+  owner_key: "owner",
+  conversation_id: "chat",
+  request_scope: {} as never,
+  validate_lease: () => true
+}
+
+it("explicit recovery opens a freshly reread completed edit result and dismisses only after capture", async () => {
+  const hook = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await hook.result.current.open(editedRecoveryOwner)
+  })
+  const entry = savedEditedRecovery(hook.result.current.view!)
+  mocks.recoveries.mockResolvedValue([entry])
+  mocks.capture.mockClear()
+  await act(async () => {
+    expect(
+      await hook.result.current.openRecoveryResult(entry, () => true)
+    ).toBe(true)
+  })
+  expect(mocks.capture).toHaveBeenCalledOnce()
+  expect(hook.result.current.view?.cursor).toEqual({
+    kind: "after_message",
+    message_id: "b"
+  })
+  expect(mocks.dismissRecovery).toHaveBeenCalledWith(
+    entry.scope,
+    expect.objectContaining({ owner_key: "owner", conversation_id: "chat" }),
+    "edited-operation",
+    "completed"
+  )
+})
+
+it.each([
+  "foreign profile",
+  "foreign owner",
+  "changed result",
+  "missing receipt",
+  "incomplete",
+  "ordinary",
+  "retired source"
+])("explicit recovery does not follow or dismiss after %s", async (reason) => {
+  const hook = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await hook.result.current.open(editedRecoveryOwner)
+  })
+  const origin = hook.result.current.view!
+  const entry = savedEditedRecovery(origin)
+  mocks.recoveries.mockResolvedValue(
+    reason === "missing receipt"
+      ? []
+      : [
+          reason === "changed result"
+            ? { ...entry, turn: { ...entry.turn, settled_message_id: "a" } }
+            : reason === "incomplete"
+              ? { ...entry, turn: { ...entry.turn, outcome: "interrupted" } }
+              : reason === "ordinary"
+                ? { ...entry, turn: { ...entry.turn, action: undefined } }
+                : entry
+        ]
+  )
+  const offered =
+    reason === "foreign profile"
+      ? { ...entry, scope: { ...entry.scope, profile_id: "foreign" } }
+      : reason === "foreign owner"
+        ? { ...entry, turn: { ...entry.turn, owner_key: "foreign" } }
+        : entry
+  mocks.capture.mockClear()
+  await act(async () => {
+    expect(
+      await hook.result.current.openRecoveryResult(
+        offered,
+        () => reason !== "retired source"
+      )
+    ).toBe(false)
+  })
+  expect(hook.result.current.view).toBe(origin)
+  expect(mocks.capture).not.toHaveBeenCalled()
+  expect(mocks.dismissRecovery).not.toHaveBeenCalled()
+})
+
+it("an editor opened during held recovery capture preserves the view and recovery receipt", async () => {
+  const hook = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await hook.result.current.open(editedRecoveryOwner)
+  })
+  const origin = hook.result.current.view!
+  const entry = savedEditedRecovery(origin)
+  mocks.recoveries.mockResolvedValue([entry])
+  const capture = mocks.capture.getMockImplementation()!
+  let entered!: () => void, release!: () => void
+  const ready = new Promise<void>((done) => {
+    entered = done
+  })
+  const held = new Promise<void>(done => {release = done})
+  mocks.capture.mockImplementationOnce(async (...args) => { entered(); await held; return capture(...args) })
+  let current = true,
+    attempt!: Promise<boolean>
+  await act(async () => {
+    attempt = hook.result.current.openRecoveryResult(entry, () => current)
+    await ready
+  })
+  current = false
+  await act(async () => {
+    release()
+    expect(await attempt).toBe(false)
+  })
+  expect(hook.result.current.view).toBe(origin)
+  expect(mocks.dismissRecovery).not.toHaveBeenCalled()
+})
+
+it("a retained rendered recovery callback refuses an actual same-ID H1 refresh before invocation", async () => {
+  const { HistorySelectionReview } = await import(
+    "@/components/Common/Playground/HistorySelectionReview"
+  )
+  let controller!: HistorySelectionController
+  function RecoveryView() {
+    const selection = useHistorySelection()
+    React.useLayoutEffect(() => { controller = selection }, [selection])
+    return <HistorySelectionReview selection={selection} />
+  }
+  render(<RecoveryView />)
+  await act(async () => {
+    await controller.open(editedRecoveryOwner)
+  })
+  const entry = savedEditedRecovery(controller.view!)
+  mocks.recoveries.mockResolvedValue([entry])
+  await act(async () => {
+    await controller.refreshRecovery()
+  })
+  const retained = mocks.openButtons.at(-1)!
+  expect(retained).toBeTypeOf("function")
+  await act(async () => {
+    expect(await controller.refresh()).toBe(true)
+  })
+  const refreshed = controller.view
+  mocks.capture.mockClear()
+  await act(async () => {
+    retained()
+    await Promise.resolve()
+  })
+  expect(mocks.capture).not.toHaveBeenCalled()
+  expect(mocks.dismissRecovery).not.toHaveBeenCalled()
+  expect(controller.view).toBe(refreshed)
+  await act(async () => {
+    mocks.openButtons.at(-1)!()
+    await Promise.resolve()
+  })
+  await waitFor(() => expect(mocks.dismissRecovery).toHaveBeenCalledOnce())
+})
+
+
+const mountNativeEditRefresh = async () => {
+  let saved = false
+  const originalCapture = mocks.capture.getMockImplementation()!
+  mocks.capture.mockImplementation(async (...args) => {
+    const capture = await originalCapture(...args)
+    capture.snapshot = structuredClone(capture.snapshot)
+    capture.rows = structuredClone(capture.rows)
+    capture.selected_content = structuredClone(capture.selected_content)
+    for (const node of [...capture.snapshot.nodes, ...capture.rows])
+      if (node.id === "u") node.revision = saved ? "opaque-2" : "opaque-1"
+    for (const row of capture.selected_content)
+      if (row.id === "u")
+        Object.assign(row, {
+          revision: saved ? "opaque-2" : "opaque-1",
+          message: saved ? "Edited {{char}}  \n" : "Original"
+        })
+    return capture
+  })
+  const onCapture = vi.fn()
+  const hook = renderHook(() => useHistorySelection({ onCapture }))
+  const native = {
+    kind: "native" as const,
+    owner_key: "owner",
+    conversation_id: "chat",
+    validate_lease: () => true,
+    request_scope: {
+      config: {
+        serverUrl: "https://original.test",
+        authMode: "multi-user" as const
+      },
+      userId: "alice"
+    }
+  }
+  await act(async () => {
+    expect(await hook.result.current.open(native)).toBe(true)
+  })
+  const origin = hook.result.current.getCurrent().capture!
+  onCapture.mockClear()
+  saved = true
+  return {
+    hook,
+    native,
+    origin,
+    onCapture,
+    receipt: { message_id: "u", message: "Edited {{char}}  \n", version: 2 }
+  }
+}
+
+it("native Save refresh preserves the original cursor and certifies canonical raw text before installation", async () => {
+  const mounted = await mountNativeEditRefresh()
+  try {
+    await act(async () => {
+      expect(
+        await (mounted.hook.result.current as any).refreshEditedMessage(
+          mounted.origin,
+          mounted.receipt,
+          () => true
+        )
+      ).toBe(true)
+    })
+    expect(mounted.hook.result.current.view?.cursor).toEqual(
+      mounted.origin.view.cursor
+    )
+    expect(mounted.hook.result.current.view?.selection_revision).toBe(
+      mounted.origin.view.selection_revision
+    )
+    expect(mounted.onCapture).toHaveBeenCalledOnce()
+    expect(mounted.hook.result.current.status).toBe("ready")
+  } finally {
+    mounted.hook.unmount()
+  }
+})
+
+it.each(["capture", "bookmark"])(
+  "native Save refresh keeps an edited draft when source retires during held %s",
+  async (stage) => {
+    const mounted = await mountNativeEditRefresh()
+    let current = true,
+      reached = false,
+      release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    if (stage === "bookmark")
+      mocks.beforeBookmark.mockImplementationOnce(async () => {
+        reached = true
+        await held
+      })
+    else {
+      const original = mocks.capture.getMockImplementation()!
+      mocks.capture.mockImplementationOnce(async (...args) => {
+        reached = true
+        await held
+        return original(...args)
+      })
+    }
+    let pending!: Promise<boolean>
+    try {
+      act(() => {
+        pending = (mounted.hook.result.current as any).refreshEditedMessage(
+          mounted.origin,
+          mounted.receipt,
+          () => current
+        )
+      })
+      await waitFor(() => expect(reached).toBe(true))
+      expect(mounted.hook.result.current.getCurrent().capture).toBe(
+        mounted.origin
+      )
+      expect(mounted.hook.result.current.status).toBe("ready")
+      current = false
+      await act(async () => {
+        release()
+        expect(await pending).toBe(false)
+      })
+      expect(mounted.onCapture).not.toHaveBeenCalled()
+      expect(mounted.hook.result.current.getCurrent().capture).toBe(
+        mounted.origin
+      )
+    } finally {
+      release?.()
+      await pending?.catch(() => {})
+      mounted.hook.unmount()
+    }
+  }
+)
+
+it("native Save refresh refuses a newer canonical target before publication", async () => {
+  const mounted = await mountNativeEditRefresh()
+  mounted.receipt.message = "Different raw text"
+  try {
+    await act(async () => {
+      expect(
+        await (mounted.hook.result.current as any).refreshEditedMessage(
+          mounted.origin,
+          mounted.receipt,
+          () => true
+        )
+      ).toBe(false)
+    })
+    expect(mounted.onCapture).not.toHaveBeenCalled()
+    expect(mounted.hook.result.current.getCurrent().capture).toBe(
+      mounted.origin
+    )
+    expect(mounted.hook.result.current.status).toBe("ready")
+  } finally {
+    mounted.hook.unmount()
+  }
+})
+
+
+it.each(["complete", "interrupted", "stopped"] as const)("ordinary server %s recovery opens its exact acknowledged reply", async outcome => {
+  const hook = renderHook(() => useHistorySelection())
+  await act(async () => { await hook.result.current.open(editedRecoveryOwner) })
+  const origin = hook.result.current.view!, saved = savedEditedRecovery(origin)
+  const entry = { ...saved, turn: { ...saved.turn, action: undefined, outcome } }
+  mocks.recoveries.mockResolvedValue([entry]); mocks.capture.mockClear()
+  try {
+    await act(async () => { expect(await hook.result.current.openRecoveryResult(entry, () => true)).toBe(true) })
+    expect(hook.result.current.view?.cursor).toEqual({ kind: "after_message", message_id: "b" })
+    expect(mocks.dismissRecovery).toHaveBeenCalledWith(entry.scope, origin, entry.turn.operation_id, "completed")
+  } finally { hook.unmount() }
+})
+
+it("explicit regeneration recovery opens the actual alternative reply without treating original input admission as a new send", async () => {
+  const hook = renderHook(() => useHistorySelection())
+  await act(async () => { await hook.result.current.open(editedRecoveryOwner) })
+  const origin = hook.result.current.view!, edited = savedEditedRecovery(origin)
+  const entry = { ...edited, turn: { ...edited.turn, action: "regenerate" as const, selection_digest: "REGENERATION SELECTION",
+    input_text: "Original question", admission: { ...edited.turn.admission, selection_digest: "ORIGINAL ADMISSION" } } }
+  mocks.recoveries.mockResolvedValue([entry]); mocks.capture.mockClear()
+  await act(async () => { expect(await hook.result.current.openRecoveryResult(entry, () => true)).toBe(true) })
+  expect(mocks.capture).toHaveBeenCalledOnce()
+  expect(hook.result.current.view?.cursor).toEqual({ kind: "after_message", message_id: "b" })
+  expect(mocks.dismissRecovery).toHaveBeenCalledWith(entry.scope, origin, entry.turn.operation_id, "completed")
+  hook.unmount()
+})
+
+
+describe("owned native stale-send choices", () => {
+  const nativeOwner = {
+    kind: "native" as const,
+    owner_key: "owner",
+    conversation_id: "chat",
+    request_scope: {
+      config: {
+        serverUrl: "https://chat.test",
+        authMode: "single-user" as const,
+        apiKey: "synthetic"
+      }
+    },
+    validate_lease: () => true
+  }
+  const mountedAtEarlierAnswer = async () => {
+    const hook = renderHook(() => useHistorySelection())
+    await act(async () => {
+      await hook.result.current.open(nativeOwner)
+      await hook.result.current.choose({
+        kind: "after_message",
+        message_id: "a"
+      })
+    })
+    return hook
+  }
+  it.each(["latest", "branch"] as const)(
+    "an accepted %s choice supplies a live lease after retiring its entry fence",
+    async (choice) => {
+      const hook = await mountedAtEarlierAnswer()
+      const origin = hook.result.current.view!
+      const entryFence = hook.result.current.fence()
+      const accepted = vi.fn<(isCurrent: () => boolean) => void>()
+      act(() => {
+        hook.result.current.holdStaleSend(origin, () => true)
+      })
+      await act(async () => {
+        const result =
+          choice === "latest"
+            ? await hook.result.current.loadLatest(origin, () => true, accepted)
+            : hook.result.current.branchHere(origin, () => true, accepted)
+        expect(result).toBe(true)
+      })
+      expect(accepted).toHaveBeenCalledOnce()
+      expect(entryFence()).toBe(false)
+      expect(accepted.mock.calls[0][0]()).toBe(true)
+      act(() => {
+        hook.result.current.beginLoad()
+      })
+      expect(accepted.mock.calls[0][0]()).toBe(false)
+      hook.unmount()
+    }
+  )
+
+  const mountedRecoveryComposer = async () => {
+    const { HistorySelectionReview } = await import(
+      "@/components/Common/Playground/HistorySelectionReview"
+    )
+    const { useComposerEvents } = await import("@/hooks/useComposerEvents")
+    const { useStoreMessageOption } = await import("@/store/option")
+    useStoreMessageOption.getState().startNewChatDraft()
+    useStoreMessageOption.setState({
+      streaming: false,
+      isLoading: false,
+      isProcessing: false,
+      historyId: null,
+      serverChatId: null,
+      history: [],
+      messages: []
+    })
+    let selection!: HistorySelectionController
+    const focusRequests = vi.fn()
+    function Composer() {
+      const controller = useHistorySelection()
+      React.useLayoutEffect(() => {
+        selection = controller
+      }, [controller])
+      const input = React.useRef<HTMLTextAreaElement>(null)
+      const onFocusComposer = React.useCallback(() => {
+        focusRequests()
+        input.current?.focus()
+      }, [])
+      useComposerEvents({ onFocusComposer })
+      return (
+        <>
+          <textarea
+            aria-label="Recovery composer"
+            ref={input}
+            defaultValue={"Exact input.  \nSecond line."}
+          />
+          <button>Other control</button>
+          <HistorySelectionReview selection={controller} />
+        </>
+      )
+    }
+    const mounted = render(<Composer />)
+    await act(async () => {
+      await selection.open(nativeOwner)
+      await selection.choose({ kind: "after_message", message_id: "a" })
+      selection.holdStaleSend(selection.getCurrent().view!, () => true)
+    })
+    return { mounted, controller: () => selection, focusRequests }
+  }
+
+  it.each(["Load latest messages", "Branch here"])(
+    "%s returns focus to the exact-input composer once after actual H1 acceptance",
+    async (label) => {
+      const probe = await mountedRecoveryComposer()
+      const button = screen.getByRole("button", { name: label })
+      button.focus()
+      fireEvent.click(button)
+      const input = screen.getByRole("textbox", { name: "Recovery composer" })
+      await waitFor(() => {
+        expect(input).toHaveFocus()
+      })
+      expect(probe.focusRequests).toHaveBeenCalledOnce()
+      expect(input).toHaveValue("Exact input.  \nSecond line.")
+      expect(probe.controller().status).toBe("ready")
+      expect(screen.queryByRole("button", { name: label })).toBeNull()
+      probe.mounted.unmount()
+    }
+  )
+
+  it.each(["latest", "branch"] as const)(
+    "a failed local %s acceptance callback cannot undo the installed choice",
+    async (choice) => {
+      const hook = await mountedAtEarlierAnswer()
+      const origin = hook.result.current.view!
+      act(() => {
+        hook.result.current.holdStaleSend(origin, () => true)
+      })
+      const failedFocus = () => {
+        throw new Error("local focus unavailable")
+      }
+      await act(async () => {
+        expect(
+          choice === "latest"
+            ? await hook.result.current.loadLatest(
+                origin,
+                () => true,
+                failedFocus
+              )
+            : hook.result.current.branchHere(origin, () => true, failedFocus)
+        ).toBe(true)
+      })
+      expect(hook.result.current.status).toBe("ready")
+      expect(hook.result.current.sendConflict).toBe(false)
+      expect(hook.result.current.view?.cursor).toEqual({
+        kind: "after_message",
+        message_id: choice === "latest" ? "b" : "a"
+      })
+      hook.unmount()
+    }
+  )
+
+  it.each(
+    ["Load latest messages", "Branch here"].flatMap((label) =>
+      [
+        "source",
+        "H1",
+        "New",
+        "account",
+        "busy",
+        "editor",
+        "unmount",
+        "focus ABA",
+        "pointer",
+        "hidden"
+      ].map((boundary) => [label, boundary])
+    )
+  )(
+    "%s does not steal focus after %s changes before its accepted frame",
+    async (label, boundary) => {
+      const frames: FrameRequestCallback[] = []
+      const raf = vi
+        .spyOn(globalThis, "requestAnimationFrame")
+        .mockImplementation((callback) => frames.push(callback))
+      const cancel = vi
+        .spyOn(globalThis, "cancelAnimationFrame")
+        .mockImplementation(() => {})
+      const probe = await mountedRecoveryComposer()
+      const { useStoreMessageOption } = await import("@/store/option")
+      const button = screen.getByRole("button", { name: label })
+      const other = screen.getByRole("button", { name: "Other control" })
+      const editor = document.createElement("form")
+      let lease: ReturnType<typeof vi.spyOn> | undefined
+      let visibility: ReturnType<typeof vi.spyOn> | undefined
+      try {
+        button.focus()
+        fireEvent.click(button)
+        await waitFor(() => {
+          expect(probe.controller().status).toBe("ready")
+        })
+        expect(frames).toHaveLength(1)
+        act(() => {
+          if (boundary === "source")
+            useStoreMessageOption.getState().startNewChatDraft()
+          if (boundary === "H1") probe.controller().beginLoad()
+          if (boundary === "New") probe.controller().reset()
+          if (boundary === "account")
+            lease = vi.spyOn(nativeOwner, "validate_lease").mockReturnValue(false)
+          if (boundary === "busy")
+            useStoreMessageOption.setState({ isProcessing: true })
+          if (boundary === "editor") {
+            editor.dataset.chatMessageEditor = ""
+            document.body.append(editor)
+          }
+          if (boundary === "unmount") probe.mounted.unmount()
+          if (boundary === "focus ABA") {
+            other.focus()
+            other.blur()
+          }
+          if (boundary === "pointer") fireEvent.pointerDown(other)
+          if (boundary === "hidden")
+            visibility = vi
+              .spyOn(document, "visibilityState", "get")
+              .mockReturnValue("hidden")
+          frames[0](performance.now())
+        })
+        expect(probe.focusRequests).not.toHaveBeenCalled()
+        if (boundary !== "unmount")
+          expect(
+            screen.getByRole("textbox", { name: "Recovery composer" })
+          ).toHaveValue("Exact input.  \nSecond line.")
+      } finally {
+        editor.remove()
+        lease?.mockRestore()
+        visibility?.mockRestore()
+        useStoreMessageOption.setState({ isProcessing: false })
+        probe.mounted.unmount()
+        raf.mockRestore()
+        cancel.mockRestore()
+      }
+    }
+  )
+
+  it("a held Latest never takes focus after the user moves away and back to BODY", async () => {
+    const frames: FrameRequestCallback[] = []
+    const raf = vi
+      .spyOn(globalThis, "requestAnimationFrame")
+      .mockImplementation((callback) => frames.push(callback))
+    const cancel = vi
+      .spyOn(globalThis, "cancelAnimationFrame")
+      .mockImplementation(() => {})
+    const probe = await mountedRecoveryComposer()
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const capture = mocks.capture.getMockImplementation()!
+    mocks.capture.mockImplementationOnce(async (...args) => {
+      await held
+      return capture(...args)
+    })
+    try {
+      const button = screen.getByRole("button", { name: "Load latest messages" })
+      button.focus()
+      fireEvent.click(button)
+      const other = screen.getByRole("button", { name: "Other control" })
+      other.focus()
+      other.blur()
+      expect(document.activeElement).toBe(document.body)
+      await act(async () => {
+        release()
+      })
+      await waitFor(() => {
+        expect(probe.controller().status).toBe("ready")
+      })
+      expect(frames).toHaveLength(1)
+      act(() => {
+        frames[0](performance.now())
+      })
+      expect(probe.focusRequests).not.toHaveBeenCalled()
+    } finally {
+      release()
+      probe.mounted.unmount()
+      raf.mockRestore()
+      cancel.mockRestore()
+    }
+  })
+
+  it("a refused Latest capture leaves focus quiet and retains exact composer input", async () => {
+    const probe = await mountedRecoveryComposer()
+    mocks.capture.mockRejectedValueOnce(new Error("capture unavailable"))
+    const button = screen.getByRole("button", { name: "Load latest messages" })
+    button.focus()
+    fireEvent.click(button)
+    await waitFor(() => {
+      expect(probe.controller().error).toBe("capture unavailable")
+    })
+    expect(probe.controller().status).toBe("stale_selection")
+    expect(probe.focusRequests).not.toHaveBeenCalled()
+    expect(
+      screen.getByRole("textbox", { name: "Recovery composer" })
+    ).toHaveValue("Exact input.  \nSecond line.")
+    probe.mounted.unmount()
+  })
+
+  it("an accepted branch focus lease never adopts a newer branch at the same view", async () => {
+    const hook = await mountedAtEarlierAnswer()
+    const origin = hook.result.current.view!
+    const accepted = vi.fn<(isCurrent: () => boolean) => void>()
+    act(() => {
+      hook.result.current.holdStaleSend(origin, () => true)
+      hook.result.current.branchHere(origin, () => true, accepted)
+    })
+    const firstLease = accepted.mock.calls[0][0]
+    expect(firstLease()).toBe(true)
+    act(() => {
+      hook.result.current.holdStaleSend(origin, () => true)
+      hook.result.current.branchHere(origin, () => true)
+    })
+    expect(hook.result.current.branchPending).toBe(true)
+    expect(firstLease()).toBe(false)
+    hook.unmount()
+  })
+
+  it("an old accepted Branch frame stays quiet after a newer branch at the same view", async () => {
+    const frames: FrameRequestCallback[] = []
+    const raf = vi
+      .spyOn(globalThis, "requestAnimationFrame")
+      .mockImplementation((callback) => frames.push(callback))
+    const cancel = vi
+      .spyOn(globalThis, "cancelAnimationFrame")
+      .mockImplementation(() => {})
+    const probe = await mountedRecoveryComposer()
+    try {
+      const button = screen.getByRole("button", { name: "Branch here" })
+      const origin = probe.controller().view!
+      button.focus()
+      fireEvent.click(button)
+      expect(frames).toHaveLength(1)
+      act(() => {
+        probe.controller().holdStaleSend(origin, () => true)
+        probe.controller().branchHere(origin, () => true)
+        frames[0](performance.now())
+      })
+      expect(probe.controller().branchPending).toBe(true)
+      expect(probe.focusRequests).not.toHaveBeenCalled()
+    } finally {
+      probe.mounted.unmount()
+      raf.mockRestore()
+      cancel.mockRestore()
+    }
+  })
+
+  it("holds the current graph without capture and grants exactly one explicit branch", async () => {
+    const hook = await mountedAtEarlierAnswer()
+    const origin = hook.result.current.getCurrent().view!
+    const capture = hook.result.current.getCurrent().capture
+    const calls = mocks.capture.mock.calls.length
+    act(() => {
+      expect(hook.result.current.holdStaleSend(origin, () => true)).toBe(true)
+    })
+    expect(hook.result.current.status).toBe("stale_selection")
+    expect(hook.result.current.getCurrent().capture).toBe(capture)
+    expect(mocks.capture).toHaveBeenCalledTimes(calls)
+    act(() => {
+      expect(hook.result.current.branchHere(origin, () => true)).toBe(true)
+    })
+    expect(hook.result.current.status).toBe("ready")
+    expect(hook.result.current.branchPending).toBe(true)
+    act(() => {
+      expect(hook.result.current.takeBranchIntent(origin)).toBe(true)
+    })
+    expect(hook.result.current.takeBranchIntent(origin)).toBe(false)
+    expect(hook.result.current.getCurrent().view).toBe(origin)
+    hook.unmount()
+  })
+  it.each(["source", "H1", "New", "unmount"])(
+    "an armed branch retires across %s",
+    async (boundary) => {
+      const hook = await mountedAtEarlierAnswer()
+      const origin = hook.result.current.getCurrent().view!
+      let current = true
+      act(() => {
+        hook.result.current.holdStaleSend(origin, () => current)
+        hook.result.current.branchHere(origin, () => current)
+      })
+      act(() => {
+        if (boundary === "source") current = false
+        if (boundary === "H1") hook.result.current.beginLoad()
+        if (boundary === "New") hook.result.current.reset()
+        if (boundary === "unmount") hook.unmount()
+      })
+      expect(hook.result.current.takeBranchIntent(origin)).toBe(false)
+      if (boundary !== "unmount") hook.unmount()
+    }
+  )
+  it.each(["source", "H1"])(
+    "an obsolete %s conflict cannot replace the current view",
+    async (boundary) => {
+      const hook = await mountedAtEarlierAnswer()
+      const origin = hook.result.current.getCurrent().view!
+      const fence = hook.result.current.fence()
+      if (boundary === "H1")
+        act(() => {
+          hook.result.current.beginLoad()
+        })
+      act(() => {
+        expect(
+          hook.result.current.holdStaleSend(
+            origin,
+            boundary === "source" ? () => false : fence
+          )
+        ).toBe(false)
+      })
+      expect(hook.result.current.status).toBe("ready")
+      hook.unmount()
+    }
+  )
+  it("load latest derives its boundary from a new owned graph and clears branch intent", async () => {
+    const hook = await mountedAtEarlierAnswer()
+    const origin = hook.result.current.getCurrent().view!
+    act(() => {
+      hook.result.current.holdStaleSend(origin, () => true)
+    })
+    const fresh = {
+      ...snapshot,
+      nodes: [
+        ...snapshot.nodes,
+        {
+          ...snapshot.nodes[1],
+          id: "latest",
+          parent_id: "a",
+          revision: "latest-1"
+        }
+      ]
+    }
+    mocks.capture.mockImplementation(async (_owner, selected) => {
+      const resolved = resolveHistorySelection(fresh, selected, "send", "")
+      if (resolved.status !== "ready") throw new Error(resolved.code)
+      return {
+        status: "captured",
+        purpose: "send",
+        snapshot: fresh,
+        view: selected,
+        rows: resolved.rows,
+        selected_content: resolved.rows.map((row) => ({
+          id: row.id,
+          revision: row.revision,
+          message: row.preview,
+          images: []
+        })),
+        storage_context_digest: "storage"
+      }
+    })
+    await act(async () => {
+      expect(await hook.result.current.loadLatest(origin, () => true)).toBe(
+        true
+      )
+    })
+    expect(hook.result.current.getCurrent().view?.cursor).toEqual({
+      kind: "after_message",
+      message_id: "latest"
+    })
+    expect(hook.result.current.status).toBe("ready")
+    expect(hook.result.current.branchPending).toBe(false)
+    expect(
+      hook.result.current.takeBranchIntent(
+        hook.result.current.getCurrent().view!
+      )
+    ).toBe(false)
+    hook.unmount()
+  })
+  it.each(["source", "H1", "New", "unmount"])(
+    "a held latest capture cannot install after %s",
+    async (boundary) => {
+      const hook = await mountedAtEarlierAnswer()
+      const origin = hook.result.current.getCurrent().view!
+      act(() => {
+        hook.result.current.holdStaleSend(origin, () => true)
+      })
+      let current = true,
+        release!: () => void
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const actualCapture = mocks.capture.getMockImplementation()!
+      mocks.capture.mockImplementationOnce(async (...args) => {
+        await held
+        return actualCapture(...args)
+      })
+      let loading!: Promise<boolean>
+      act(() => {
+        loading = hook.result.current.loadLatest(origin, () => current)
+      })
+      act(() => {
+        if (boundary === "source") current = false
+        if (boundary === "H1") hook.result.current.beginLoad()
+        if (boundary === "New") hook.result.current.reset()
+        if (boundary === "unmount") hook.unmount()
+      })
+      await act(async () => {
+        release()
+        expect(await loading).toBe(false)
+      })
+      expect(hook.result.current.getCurrent().view?.cursor).not.toEqual({
+        kind: "after_message",
+        message_id: "b"
+      })
+      if (boundary === "source")
+        expect(hook.result.current.status).toBe("stale_selection")
+      if (boundary !== "unmount") hook.unmount()
+    }
+  )
+})
+
+it("an actual H1 branch survives a held compact focus capture and subsequent focus checks", async () => {
+  const nativeOwner = {
+    kind: "native" as const,
+    owner_key: "owner",
+    conversation_id: "chat",
+    request_scope: {
+      config: {
+        serverUrl: "https://chat.test",
+        authMode: "single-user" as const,
+        apiKey: "synthetic"
+      }
+    },
+    validate_lease: () => true
+  }
+  const hook = renderHook(() => {
+    const selection = useHistorySelection()
+    const freshness = useSidepanelChatFreshness({
+      historySelection: selection,
+      checkableTabId: () => "source"
+    })
+    return { selection, freshness }
+  })
+  await act(async () => {
+    await hook.result.current.selection.open(nativeOwner)
+    await hook.result.current.selection.choose({
+      kind: "after_message",
+      message_id: "a"
+    })
+  })
+  vi.useFakeTimers()
+  try {
+    const origin = hook.result.current.selection.getCurrent().view!
+    const actual = mocks.capture.getMockImplementation()!
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mocks.capture.mockImplementationOnce(async (...args) => {
+      await held
+      return actual(...args)
+    })
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"))
+      await vi.advanceTimersByTimeAsync(FOCUS_CHECK_DEBOUNCE_MS)
+    })
+    const reads = mocks.capture.mock.calls.length
+    act(() => {
+      hook.result.current.selection.holdStaleSend(origin, () => true)
+      hook.result.current.selection.branchHere(origin, () => true)
+    })
+    await act(async () => {
+      release()
+      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(FOCUS_CHECK_MIN_INTERVAL_MS)
+      window.dispatchEvent(new Event("focus"))
+      await vi.advanceTimersByTimeAsync(FOCUS_CHECK_DEBOUNCE_MS)
+    })
+    expect(hook.result.current.selection.getCurrent().view).toBe(origin)
+    expect(hook.result.current.selection.branchPending).toBe(true)
+    expect(mocks.capture).toHaveBeenCalledTimes(reads)
+    expect(hook.result.current.freshness.notice).toBeNull()
+  } finally {
+    hook.unmount()
+    vi.useRealTimers()
+  }
+})
+
+
+describe("shared proactive native freshness", () => {
+  const nativeOwner = {
+    kind: "native" as const,
+    owner_key: "owner",
+    conversation_id: "chat",
+    request_scope: {
+      config: {
+        serverUrl: "https://chat.test",
+        authMode: "single-user" as const,
+        apiKey: "synthetic"
+      }
+    },
+    validate_lease: () => true
+  }
+  const mount = async () => {
+    const { useStoreMessageOption } = await import("@/store/option")
+    useStoreMessageOption.setState({
+      isLoading: false,
+      isProcessing: false,
+      streaming: false,
+      messages: [],
+      chatDraftAddress: {
+        kind: "native",
+        id: "chat",
+        ownerKey: "owner",
+        scope: { type: "global" }
+      }
+    })
+    mocks.historyVersion.mockReset().mockResolvedValue(1)
+    const hook = renderHook(() => useHistorySelection())
+    await act(async () => {
+      await hook.result.current.open(nativeOwner)
+      await hook.result.current.choose({
+        kind: "after_message",
+        message_id: "a"
+      })
+    })
+    return hook
+  }
+  const changed = () => {
+    const original = mocks.capture.getMockImplementation()!
+    mocks.capture.mockImplementation(async (...args) => {
+      const result = await original(...args)
+      return {
+        ...result,
+        snapshot: {
+          ...result.snapshot,
+          fences: { ...result.snapshot.fences, history: "2" }
+        }
+      }
+    })
+    mocks.historyVersion.mockResolvedValue(2)
+  }
+  it("an unchanged detail requires no graph capture or display installation", async () => {
+    const hook = await mount(),
+      original = hook.result.current.getCurrent(),
+      reads = mocks.capture.mock.calls.length
+    await act(async () => {
+      expect(await hook.result.current.checkFreshness(() => true)).toBe(false)
+    })
+    expect(mocks.capture).toHaveBeenCalledTimes(reads)
+    expect(mocks.historyVersion).toHaveBeenCalledOnce()
+    expect(hook.result.current.getCurrent()).toBe(original)
+    hook.unmount()
+  })
+  it("same-ID history changes hold a passive choice without moving or saving the view", async () => {
+    const hook = await mount(),
+      origin = hook.result.current.getCurrent().view!,
+      bookmarks = [...mocks.bookmarks.values()],
+      reads = mocks.capture.mock.calls.length
+    changed()
+    await act(async () => {
+      expect(await hook.result.current.checkFreshness(() => true)).toBe(true)
+    })
+    expect(hook.result.current.getCurrent().view).toBe(origin)
+    expect(hook.result.current.freshnessConflict).toBe(true)
+    expect(mocks.capture).toHaveBeenCalledTimes(reads + 1)
+    expect([...mocks.bookmarks.values()]).toEqual(bookmarks)
+    expect(mocks.dismissRecovery).not.toHaveBeenCalled()
+    hook.unmount()
+  })
+  it.each(["GET", "manifest"])(
+    "held %s cannot publish after original eligibility retires",
+    async (boundary) => {
+      const hook = await mount(),
+        origin = hook.result.current.getCurrent(),
+        reads = mocks.capture.mock.calls.length
+      changed()
+      let release!: () => void,
+        current = true
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      if (boundary === "GET")
+        mocks.historyVersion.mockImplementationOnce(async () => {
+          await held
+          return 2
+        })
+      else {
+        const original = mocks.capture.getMockImplementation()!
+        mocks.capture.mockImplementationOnce(async (...args) => {
+          await held
+          return original(...args)
+        })
+      }
+      let pending!: Promise<boolean>
+      act(() => {
+        pending = hook.result.current.checkFreshness(() => current)
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+      current = false
+      await act(async () => {
+        release()
+        expect(await pending).toBe(false)
+      })
+      expect(hook.result.current.getCurrent()).toBe(origin)
+      if (boundary === "GET") expect(mocks.capture).toHaveBeenCalledTimes(reads)
+      hook.unmount()
+    }
+  )
+  it("a restored old native tip exposes the existing freshness choice even when its capture version is current", async () => {
+    const { useStoreMessageOption } = await import("@/store/option")
+    useStoreMessageOption.setState({
+      isLoading: false, isProcessing: false, streaming: false, messages: [],
+      chatDraftAddress: { kind: "native", id: "chat", ownerKey: "owner", scope: { type: "global" } }
+    })
+    const hook = renderHook(() => {
+      const selection = useHistorySelection()
+      const freshness = useSidepanelChatFreshness({ historySelection: selection, checkableTabId: () => "active" })
+      return { selection, freshness }
+    })
+    try {
+      await act(async () => {
+        await hook.result.current.selection.open(nativeOwner)
+        await hook.result.current.selection.choose({ kind: "after_message", message_id: "a" })
+      })
+      const origin = hook.result.current.selection.getCurrent().view!
+      const capture = hook.result.current.selection.getCurrent().capture
+      const reads = mocks.capture.mock.calls.length
+      await act(async () => {
+        hook.result.current.freshness.showTab("a")
+        hook.result.current.freshness.checkShownTab()
+      })
+      expect(hook.result.current.selection.freshnessConflict).toBe(true)
+      expect(hook.result.current.selection.getCurrent().view).toBe(origin)
+      expect(hook.result.current.selection.getCurrent().capture).toBe(capture)
+      expect(mocks.capture).toHaveBeenCalledTimes(reads)
+      expect(hook.result.current.freshness.notice).toBeNull()
+    } finally { hook.unmount() }
+  })
+
+  it("compact focus cannot automatically choose a new parent", async () => {
+    vi.useFakeTimers()
+    const hook = renderHook(() => {
+      const selection = useHistorySelection()
+      const freshness = useSidepanelChatFreshness({
+        historySelection: selection,
+        checkableTabId: () => "active"
+      })
+      return { selection, freshness }
+    })
+    try {
+      const { useStoreMessageOption } = await import("@/store/option")
+      useStoreMessageOption.setState({
+        isLoading: false,
+        isProcessing: false,
+        streaming: false,
+        messages: [],
+        chatDraftAddress: {
+          kind: "native",
+          id: "chat",
+          ownerKey: "owner",
+          scope: { type: "global" }
+        }
+      })
+      mocks.historyVersion.mockReset().mockResolvedValue(2)
+      await act(async () => {
+        await hook.result.current.selection.open(nativeOwner)
+        await hook.result.current.selection.choose({
+          kind: "after_message",
+          message_id: "a"
+        })
+      })
+      const origin = hook.result.current.selection.getCurrent().view!
+      const next = {
+        ...snapshot,
+        fences: { ...snapshot.fences, history: "2" },
+        nodes: [
+          ...snapshot.nodes,
+          { ...snapshot.nodes[1], id: "latest", parent_id: "a" }
+        ]
+      }
+      mocks.capture.mockImplementation(async (_owner, view) => {
+        const resolved = resolveHistorySelection(next, view, "send", "")
+        if (resolved.status !== "ready") throw Error(resolved.code)
+        return {
+          status: "captured",
+          snapshot: next,
+          view,
+          rows: resolved.rows,
+          selected_content: resolved.rows.map((row) => ({
+            id: row.id,
+            revision: row.revision,
+            message: row.preview,
+            images: []
+          })),
+          purpose: "send",
+          storage_context_digest: "storage"
+        }
+      })
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"))
+        await vi.advanceTimersByTimeAsync(FOCUS_CHECK_DEBOUNCE_MS)
+      })
+      expect(hook.result.current.selection.getCurrent().view).toBe(origin)
+      expect(hook.result.current.selection.freshnessConflict).toBe(true)
+    } finally {
+      hook.unmount()
+      vi.useRealTimers()
+    }
+  })
+  it("Load latest refuses before capture while a message edit is open", async () => {
+    const hook = await mount(),
+      origin = hook.result.current.getCurrent().view!,
+      reads = mocks.capture.mock.calls.length
+    act(() => {
+      hook.result.current.holdStaleSend(origin, () => true)
+    })
+    const editor = document.createElement("form")
+    editor.dataset.chatMessageEditor = ""
+    document.body.append(editor)
+    try {
+      await act(async () => {
+        expect(await hook.result.current.loadLatest(origin, () => true)).toBe(
+          false
+        )
+      })
+      expect(mocks.capture).toHaveBeenCalledTimes(reads)
+      expect(hook.result.current.getCurrent().view).toBe(origin)
+    } finally {
+      editor.remove()
+      hook.unmount()
+    }
+  })
+  it("a message editor opened during Load latest keeps the original captured view", async () => {
+    const hook = await mount(),
+      original = hook.result.current.getCurrent(),
+      origin = original.view!
+    act(() => {
+      hook.result.current.holdStaleSend(origin, () => true)
+    })
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+        release = resolve
+      }),
+      capture = mocks.capture.getMockImplementation()!
+    mocks.capture.mockImplementationOnce(async (...args) => {
+      await held
+      return capture(...args)
+    })
+    let loading!: Promise<boolean>
+    act(() => {
+      loading = hook.result.current.loadLatest(origin, () => true)
+    })
+    const editor = document.createElement("form")
+    editor.dataset.chatMessageEditor = ""
+    document.body.append(editor)
+    try {
+      await act(async () => {
+        release()
+        expect(await loading).toBe(false)
+      })
+      expect(hook.result.current.getCurrent().view).toBe(origin)
+      expect(hook.result.current.getCurrent().capture).toBe(original.capture)
+      expect(hook.result.current.status).toBe("stale_selection")
+    } finally {
+      editor.remove()
+      hook.unmount()
+    }
+  })
+  it.each(["New", "H1", "draft", "owner", "busy", "editor", "unmount"])(
+    "a held detail cannot publish across %s",
+    async (boundary) => {
+      const hook = await mount(),
+        reads = mocks.capture.mock.calls.length
+      let release!: () => void,
+        valid = true
+      const held = new Promise<void>((resolve) => {
+          release = resolve
+        }),
+        validate = nativeOwner.validate_lease
+      nativeOwner.validate_lease = () => valid
+      mocks.historyVersion.mockImplementationOnce(async () => {
+        await held
+        return 2
+      })
+      let pending!: Promise<boolean>
+      act(() => {
+        pending = hook.result.current.checkFreshness(() => true)
+      })
+      const { useStoreMessageOption } = await import("@/store/option")
+      const editor = document.createElement("form")
+      editor.dataset.chatMessageEditor = ""
+      act(() => {
+        if (boundary === "New") hook.result.current.reset()
+        if (boundary === "H1") hook.result.current.beginLoad()
+        if (boundary === "draft")
+          useStoreMessageOption.getState().startNewChatDraft()
+        if (boundary === "owner") valid = false
+        if (boundary === "busy")
+          useStoreMessageOption.setState({ isProcessing: true })
+        if (boundary === "editor") document.body.append(editor)
+        if (boundary === "unmount") hook.unmount()
+      })
+      try {
+        await act(async () => {
+          release()
+          expect(await pending).toBe(false)
+        })
+        expect(mocks.capture).toHaveBeenCalledTimes(reads)
+        expect(hook.result.current.freshnessConflict).toBe(false)
+      } finally {
+        nativeOwner.validate_lease = validate
+        editor.remove()
+        hook.unmount()
+        useStoreMessageOption.setState({ isProcessing: false })
+      }
+    }
+  )
+  it("an armed explicit branch does not read or change its intent on focus checks", async () => {
+    const hook = await mount(),
+      origin = hook.result.current.getCurrent().view!
+    act(() => {
+      hook.result.current.holdStaleSend(origin, () => true)
+      hook.result.current.branchHere(origin, () => true)
+    })
+    await act(async () => {
+      expect(await hook.result.current.checkFreshness(() => true)).toBe(false)
+    })
+    expect(mocks.historyVersion).not.toHaveBeenCalled()
+    expect(hook.result.current.branchPending).toBe(true)
+    expect(hook.result.current.getCurrent().view).toBe(origin)
+    hook.unmount()
+  })
+  it("unavailable detail leaves saved state and recovery untouched", async () => {
+    const hook = await mount(),
+      original = hook.result.current.getCurrent(),
+      reads = mocks.capture.mock.calls.length
+    mocks.historyVersion.mockRejectedValueOnce(
+      Error("unsupported_history_version")
+    )
+    await act(async () => {
+      expect(await hook.result.current.checkFreshness(() => true)).toBe(false)
+    })
+    expect(hook.result.current.getCurrent()).toBe(original)
+    expect(mocks.capture).toHaveBeenCalledTimes(reads)
+    expect(mocks.dismissRecovery).not.toHaveBeenCalled()
+    hook.unmount()
+  })
+
+  it("the active full-view hook coalesces focus/visibility and skips unchanged graph reads", async () => {
+    vi.useFakeTimers()
+    const hook = renderHook(() => {
+      const selection = useHistorySelection()
+      useChatHistoryFreshness(selection)
+      return selection
+    })
+    try {
+      const { useStoreMessageOption } = await import("@/store/option")
+      useStoreMessageOption.setState({
+        isLoading: false,
+        isProcessing: false,
+        streaming: false,
+        chatDraftAddress: {
+          kind: "native",
+          id: "chat",
+          ownerKey: "owner",
+          scope: { type: "global" }
+        }
+      })
+      mocks.historyVersion.mockReset().mockResolvedValue(1)
+      await act(async () => {
+        await hook.result.current.open(nativeOwner)
+        await hook.result.current.choose({
+          kind: "after_message",
+          message_id: "a"
+        })
+      })
+      const reads = mocks.capture.mock.calls.length
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"))
+        document.dispatchEvent(new Event("visibilitychange"))
+        await vi.advanceTimersByTimeAsync(FOCUS_CHECK_DEBOUNCE_MS)
+      })
+      expect(mocks.historyVersion).toHaveBeenCalledOnce()
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"))
+        await vi.advanceTimersByTimeAsync(FOCUS_CHECK_DEBOUNCE_MS)
+      })
+      expect(mocks.historyVersion).toHaveBeenCalledOnce()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(FOCUS_CHECK_MIN_INTERVAL_MS)
+        document.dispatchEvent(new Event("visibilitychange"))
+        await vi.advanceTimersByTimeAsync(FOCUS_CHECK_DEBOUNCE_MS)
+      })
+      expect(mocks.historyVersion).toHaveBeenCalledTimes(2)
+      expect(mocks.capture).toHaveBeenCalledTimes(reads)
+    } finally {
+      hook.unmount()
+      vi.useRealTimers()
+    }
+  })
+  it("an opening-only controller remains passive on focus", async () => {
+    const hook = await mount()
+    act(() => {
+      window.dispatchEvent(new Event("focus"))
+      document.dispatchEvent(new Event("visibilitychange"))
+    })
+    expect(mocks.historyVersion).not.toHaveBeenCalled()
+    hook.unmount()
+  })
+})
+describe("explicit imported local consent", () => {
+  it("keeps an import unowned until consent, then resumes its exact loader target", async () => {
+    mocks.details.mockResolvedValue({ id: "imported", message_source: "web-ui" })
+    const resumeAfterBind = vi.fn(async () => true)
+    const { result } = renderHook(() => useHistorySelection())
+    await act(async () => { await result.current.loadConversation({ historyId: "imported", resumeAfterBind }) })
+    expect(result.current.error).toBe("unbound_local_history")
+    expect(mocks.bindLocal).not.toHaveBeenCalled()
+    expect(mocks.localOwner).not.toHaveBeenCalled()
+    await act(async () => { expect(await result.current.bindUnavailableConversation()).toBe(true) })
+    expect(mocks.bindLocal).toHaveBeenCalledTimes(1)
+    expect(mocks.bindLocal.mock.calls[0][0]).toBe("imported")
+    expect(resumeAfterBind).toHaveBeenCalledTimes(1)
+  })
+  it("retires a refused target after a different conversation is chosen", async () => {
+    const { result } = renderHook(() => useHistorySelection())
+    mocks.details.mockResolvedValue({ id: "imported" })
+    await act(async () => { await result.current.loadConversation({ historyId: "imported", resumeAfterBind: async () => true }) })
+    mocks.details.mockResolvedValue({ id: "replacement", local_owner_key: "owner" })
+    await act(async () => { await result.current.loadConversation({ historyId: "replacement" }) })
+    await act(async () => { expect(await result.current.bindUnavailableConversation()).toBe(false) })
+    expect(mocks.bindLocal).not.toHaveBeenCalled()
+    expect(result.current.owner).toMatchObject({ conversation_id: "replacement" })
+  })
+  it("does not bind a refused target after unmount", async () => {
+    mocks.details.mockResolvedValue({ id: "imported" })
+    const { result, unmount } = renderHook(() => useHistorySelection())
+    await act(async () => { await result.current.loadConversation({ historyId: "imported", resumeAfterBind: async () => true }) })
+    const bind = result.current.bindUnavailableConversation
+    unmount()
+    expect(await bind()).toBe(false)
+    expect(mocks.bindLocal).not.toHaveBeenCalled()
+  })
+})
+
+
+describe("acknowledged recovery controller", () => {
+  const mountRecovery = async () => {
+    const hook = renderHook(() => useHistorySelection())
+    await act(async () => {
+      await hook.result.current.open(owner)
+    })
+    const entry: Parameters<HistorySelectionController["dismissRecovery"]>[0] =
+      {
+        scope: { profile_id: "profile", client_session_id: "old-view" },
+        turn: {
+          operation_id: "dismiss-ack",
+          owner_key: "owner",
+          conversation_id: "chat",
+          origin_view: hook.result.current.view!,
+          input_id: "input",
+          created_at: 1,
+          input_text: "  exact input\n  ",
+          input_images: [],
+          result_text: "  exact reply\n  ",
+          state: "generated_unsaved",
+          selection_digest: "selected",
+          request_context_digest: "prepared"
+        }
+      }
+    mocks.recoveries.mockResolvedValue([entry])
+    await act(async () => {
+      await hook.result.current.refreshRecovery()
+    })
+    return { hook, entry }
+  }
+
+  it.each(["refused", "failed"])(
+    "retains recovery text and reports no acknowledgement when dismissal is %s",
+    async (mode) => {
+      const { hook, entry } = await mountRecovery()
+      if (mode === "failed")
+        mocks.dismissRecovery.mockRejectedValueOnce(
+          new Error("journal unavailable")
+        )
+      else mocks.dismissRecovery.mockResolvedValueOnce(false)
+      let receipt: unknown
+      await act(async () => {
+        receipt = await hook.result.current.dismissRecovery(entry)
+      })
+      expect(receipt).toBe(false)
+      expect(hook.result.current.recoveries).toEqual([entry])
+      expect(hook.result.current.recoveryError).toBe(
+        mode === "failed"
+          ? "journal unavailable"
+          : "recovery_dismissal_not_committed"
+      )
+      hook.unmount()
+    }
+  )
+
+  it.each(["caller", "same-ID reset", "owner lease", "unmount"])(
+    "cannot acknowledge or remove an old recovery after %s during storage",
+    async (boundary) => {
+      const { hook, entry } = await mountRecovery()
+      let callerCurrent = true
+      let leaseCurrent = true
+      let finish!: () => void
+      let entered!: () => void
+      const ready = new Promise<void>((resolve) => {
+        entered = resolve
+      })
+      const leasedOwner = { ...owner, validate_lease: () => leaseCurrent }
+      await act(async () => {
+        await hook.result.current.open(leasedOwner)
+        await hook.result.current.refreshRecovery()
+      })
+      const durable = [entry]
+      mocks.dismissRecovery.mockImplementationOnce(
+        async (_scope, _view, _id, _outcome, options) => {
+          entered()
+          await new Promise<void>((resolve) => {
+            finish = resolve
+          })
+          if (options?.signal?.aborted || options?.validate_lease?.() === false)
+            return false
+          durable.splice(0)
+          return true
+        }
+      )
+      let pending!: Promise<boolean>
+      act(() => {
+        pending = hook.result.current.dismissRecovery(
+          entry,
+          () => callerCurrent
+        )
+      })
+      await ready
+      if (boundary === "caller") callerCurrent = false
+      else if (boundary === "owner lease") leaseCurrent = false
+      else if (boundary === "unmount") hook.unmount()
+      else
+        await act(async () => {
+          hook.result.current.beginLoad()
+          await hook.result.current.open(leasedOwner)
+          await hook.result.current.refreshRecovery()
+        })
+      let receipt: unknown
+      await act(async () => {
+        finish()
+        receipt = await pending
+      })
+      expect(receipt).toBe(false)
+      expect(durable).toEqual([entry])
+      if (boundary === "same-ID reset") {
+        expect(hook.result.current.recoveries).toEqual([entry])
+        expect(hook.result.current.recoveryError).toBeNull()
+      }
+      hook.unmount()
+    }
+  )
+
+  it("refuses an old rendered caller before it can adopt a replacement same-ID epoch", async () => {
+    const { hook, entry } = await mountRecovery()
+    const old = hook.result.current.dismissRecovery
+    const source = hook.result.current.fence()
+    await act(async () => {
+      hook.result.current.beginLoad()
+      await hook.result.current.open(owner)
+    })
+    await act(async () => {
+      expect(await old(entry, source)).toBe(false)
+    })
+    expect(mocks.dismissRecovery).not.toHaveBeenCalled()
+    hook.unmount()
+  })
+})
+
+it("explicitly refreshes empty native history after settlement without widening its chosen boundary or replaying recovery", async () => {
+  const native = {
+    kind: "native" as const, conversation_id: "chat", scope: { type: "global" as const },
+    request_scope: { userId: 1, config: { serverUrl: "https://owned-refresh.test", authMode: "single-user" as const } },
+    validate_lease: () => true,
+  }
+  const retained = [{ scope: { profile_id: "profile", client_session_id: "old-writer" }, turn: {
+    operation_id: "unknown-original", owner_key: "owner", conversation_id: "chat", persistence: "server", state: "unknown",
+    selection_digest: "original", request_context_digest: "original-command", created_at: 1,
+    input_text: "  original input  ", input_images: [], result_text: "",
+  } }]
+  mocks.recoveries.mockResolvedValue(retained)
+  let settled = false
+  mocks.capture.mockImplementation(async (_source, view) => {
+    const source = settled ? snapshot : { ...snapshot, source_digest: "empty", nodes: [] }
+    const bound = { ...view, owner_key: "owner" }
+    const selected = resolveHistorySelection(source, bound, "send", "")
+    if (selected.status !== "ready") throw new Error("fixture_selection_failed")
+    return { status: "captured", view: bound, snapshot: source, rows: selected.rows,
+      selected_content: selected.rows.map(row => ({ id: row.id, revision: row.revision, message: row.preview, images: [] })),
+      purpose: "send", storage_context_digest: "storage" }
+  })
+  const hook = renderHook(() => useHistorySelection())
+  await act(async () => { await hook.result.current.open(native) })
+  await waitFor(() => expect(hook.result.current.recoveries).toEqual(retained))
+  expect(hook.result.current.capture?.snapshot.nodes).toHaveLength(0)
+  const originalView = hook.result.current.view
+  const originalScope = hook.result.current.bookmarkScope
+  const originalRecovery = structuredClone(hook.result.current.recoveries)
+  settled = true
+  await act(async () => { expect(await hook.result.current.refresh()).toBe(true) })
+  expect(hook.result.current.capture?.snapshot.nodes).toHaveLength(snapshot.nodes.length)
+  expect(hook.result.current.capture?.rows).toEqual([])
+  expect(hook.result.current.view).toEqual(originalView)
+  expect(hook.result.current.view?.cursor).toEqual({ kind: "empty" })
+  expect(hook.result.current.owner).toBe(native)
+  expect(hook.result.current.bookmarkScope).toBe(originalScope)
+  expect(hook.result.current.recoveries).toEqual(originalRecovery)
+  expect(mocks.capture).toHaveBeenCalledTimes(2)
+  expect(mocks.dismissRecovery).not.toHaveBeenCalled()
+  hook.unmount()
+})
+
+it.each(['settlement', 'capture failure', 'later focus', 'retired account'])("returns owned keyboard focus after empty recovery refresh: %s", async outcome => {
+  const { HistorySelectionReview } = await import("@/components/Common/Playground/HistorySelectionReview")
+  let leaseCurrent = true
+  const native = { kind: "native" as const, conversation_id: "chat", scope: { type: "global" as const }, request_scope: { userId: 1, config: { serverUrl: "https://owned-refresh.test", authMode: "single-user" as const } }, validate_lease: () => leaseCurrent }
+  const retained = [{ scope: { profile_id: "profile", client_session_id: "old-writer" }, turn: { operation_id: "unknown-original", owner_key: "owner", conversation_id: "chat", persistence: "server", state: "unknown", selection_digest: "original", request_context_digest: "original-command", created_at: 1, input_text: "original input", input_images: [], result_text: "" } }]
+  mocks.recoveries.mockResolvedValue(retained)
+  let reads = 0, release!: () => void
+  const held = new Promise<void>(done => { release = done })
+  mocks.capture.mockImplementation(async (_source, view) => {
+    if (++reads > 1) { await held; if (outcome === 'capture failure') throw new Error('capture_unavailable') }
+    const source = reads === 1 ? { ...snapshot, source_digest: "empty", nodes: [] } : snapshot
+    const bound = { ...view, owner_key: "owner" }
+    const selected = resolveHistorySelection(source, bound, "send", "")
+    if (selected.status !== 'ready') throw Error('fixture_selection_failed')
+    return { status: 'captured', view: bound, snapshot: source, rows: selected.rows, selected_content: selected.rows.map(row => ({ id: row.id, revision: row.revision, message: row.preview, images: [] })), purpose: 'send', storage_context_digest: 'storage' }
+  })
+  let controller!: HistorySelectionController
+  function RecoveryView() { const selection = useHistorySelection(); React.useLayoutEffect(() => { controller = selection }, [selection]); return <><button>Other control</button><HistorySelectionReview selection={selection} /></> }
+  const mounted = render(<RecoveryView />)
+  try {
+    await act(async () => { await controller.open(native) })
+    const refresh = await screen.findByRole('button', { name: 'Refresh history', exact: true })
+    refresh.focus()
+    await userEvent.setup().keyboard('{Enter}')
+    await waitFor(() => expect(reads).toBe(2))
+    if (outcome === 'later focus' || outcome === 'retired account') screen.getByRole('button', { name: 'Other control' }).focus()
+    if (outcome === 'retired account') leaseCurrent = false
+    await act(async () => { release(); await held })
+    if (outcome === 'settlement') await waitFor(() => expect(screen.getByRole('button', { name: 'Review conversation history', exact: true })).toHaveFocus())
+    else if (outcome === 'capture failure') await waitFor(() => expect(screen.getByRole('alert').closest('[tabindex="-1"]')).toHaveFocus())
+    else expect(screen.getByRole('button', { name: 'Other control' })).toHaveFocus()
+  } finally { release(); mounted.unmount() }
+})
+
+it.each(['settled', 'unresolved', 'read failure', 'retired lease'])("projects only current owned cold history evidence: %s", async outcome => {
+  resetServerChatSaveStatus()
+  let current = true, entered!: () => void, release!: () => void
+  const ready = new Promise<void>(done => { entered = done })
+  const held = new Promise<void>(done => { release = done })
+  const native = { kind: 'native' as const, conversation_id: 'chat', scope: { type: 'global' as const }, request_scope: { userId: 1, config: { serverUrl: 'https://cold-history.test', authMode: 'single-user' as const } }, validate_lease: () => current }
+  mocks.recoveries.mockImplementation(async (scope, view) => {
+    entered(); await held
+    if (outcome === 'read failure') throw Error('journal_read_unavailable')
+    return outcome === 'unresolved' ? [{ scope, turn: { persistence: 'server', owner_key: view.owner_key, conversation_id: view.conversation_id, state: 'unknown', input_text: 'Original retained input', input_images: [], result_text: '', operation_id: 'unknown-completion' } }] : []
+  })
+  const hook = renderHook(() => useHistorySelection())
+  try {
+    await act(async () => { await hook.result.current.open(native) })
+    await ready
+    if (outcome === 'retired lease') current = false
+    await act(async () => { release(); await held })
+    if (outcome === 'settled') await waitFor(() => expect(getServerChatSaveStatus('chat')).toBe('saved'))
+    else if (outcome === 'retired lease') expect(getServerChatSaveStatus('chat')).not.toBe('saved')
+    else await waitFor(() => expect(getServerChatSaveStatus('chat')).toBe('unconfirmed'))
+  } finally { release(); hook.unmount(); resetServerChatSaveStatus() }
+})
+
+it("an older empty journal read cannot replace newer unresolved cold status", async () => {
+  resetServerChatSaveStatus()
+  const native = { kind: 'native' as const, conversation_id: 'chat', scope: { type: 'global' as const }, request_scope: { userId: 1, config: { serverUrl: 'https://cold-history.test', authMode: 'single-user' as const } }, validate_lease: () => true }
+  let entered!: () => void, release!: () => void, reads = 0
+  const ready = new Promise<void>(done => { entered = done })
+  const oldRead = new Promise<void>(done => { release = done })
+  mocks.recoveries.mockImplementation(async (scope, view) => {
+    if (++reads === 1) { entered(); await oldRead; return [] }
+    return [{ scope, turn: { persistence: 'server', owner_key: view.owner_key, conversation_id: view.conversation_id, state: 'unknown', input_text: 'Retained original', input_images: [], result_text: '', operation_id: 'unknown-completion' } }]
+  })
+  const hook = renderHook(() => useHistorySelection())
+  try {
+    await act(async () => { await hook.result.current.open(native) })
+    await ready
+    await act(async () => { await hook.result.current.refreshRecovery() })
+    expect(getServerChatSaveStatus('chat')).toBe('unconfirmed')
+    await act(async () => { release(); await oldRead })
+    expect(getServerChatSaveStatus('chat')).toBe('unconfirmed')
+    expect(hook.result.current.recoveries).toHaveLength(1)
+  } finally { release(); hook.unmount(); resetServerChatSaveStatus() }
+})
+describe("explicit imported consent retirement", () => {
+  it("clears pending local consent when the account changes before the click", async () => {
+    mocks.details.mockResolvedValue({ id: "imported" })
+    const resume = vi.fn(async () => true)
+    const { result } = renderHook(() => useHistorySelection())
+    await act(async () => { await result.current.loadConversation({ historyId: "imported", resumeAfterBind: resume }) })
+    act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed")))
+    await act(async () => { expect(await result.current.bindUnavailableConversation()).toBe(false) })
+    expect(mocks.bindLocal).not.toHaveBeenCalled()
+    expect(resume).not.toHaveBeenCalled()
+  })
+  it("does not offer local consent for a malformed native-source record", async () => {
+    mocks.details.mockResolvedValue({ id: "imported", message_source: "server" })
+    const { result } = renderHook(() => useHistorySelection())
+    await act(async () => { await result.current.loadConversation({ historyId: "imported", resumeAfterBind: async () => true }) })
+    expect(result.current.canBindUnavailable).toBe(false)
+    await act(async () => { expect(await result.current.bindUnavailableConversation()).toBe(false) })
+    expect(mocks.bindLocal).not.toHaveBeenCalled()
+  })
+  it("hides expired caller consent and does not bind it", async () => {
+    mocks.details.mockResolvedValue({ id: "imported" })
+    let current = true
+    const { result, rerender } = renderHook(() => useHistorySelection())
+    await act(async () => { await result.current.loadConversation({ historyId: "imported", isCurrent: () => current, resumeAfterBind: async () => true }) })
+    current = false; rerender()
+    expect(result.current.canBindUnavailable).toBe(false)
+    await act(async () => { expect(await result.current.bindUnavailableConversation()).toBe(false) })
+    expect(mocks.bindLocal).not.toHaveBeenCalled()
+  })
 })

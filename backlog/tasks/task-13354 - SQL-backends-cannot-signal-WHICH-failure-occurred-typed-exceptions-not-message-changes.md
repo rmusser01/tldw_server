@@ -73,7 +73,7 @@ Source: found while fixing TASK-13352/13344 follow-ups; corrected twice while at
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 AC1 and AC2 DONE in bcf6e2b5ed. AC3 (profile.py:552) is left open deliberately -- see below.
 
 WHAT SHIPPED. ConstraintViolationError sits between DatabaseError and UniqueConstraintError in backends/base.py, so:
@@ -107,7 +107,7 @@ So nothing is destroyed here, and this is NOT the same failure mode as the DB ba
 What remains is much weaker and is probably deliberate: the CODE reported to callers is generic, which is reasonable for an API-facing error where the internal reason should not leak, given the reason is preserved on __cause__ for diagnosis. The one mild smell is that lines 547-550 whitelist specific error strings to pass through, so a new meaningful code needs an edit there -- but the authority error is a sentence, not a code, and would not belong in that set anyway.
 
 Recording this rather than changing working code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

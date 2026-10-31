@@ -46,7 +46,7 @@ Execute the approved public tracker creation slice for the remaining tldw WebUI 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 User approved continuing past the human review gate after reviewed local issue-body drafts were created and approved.
 
 Duplicate search before public creation found no existing design-system/product-state tracker. Issue #32 is an older broad UI tracker, not a design-system/product-state migration tracker; issue #1645 was closed and unrelated.
@@ -58,7 +58,7 @@ Created GitHub epic #1655, product-area issues #1658-#1670, and governance issue
 Cross-link verification: gh issue view 1655 shows all child issue numbers and Backlog task IDs; gh issue view 1658 and 1671 show parent epic and Backlog references; gh issue list --label design-system returns the expected 20 open tracker issues; backlog task TASK-45.44 shows 19 subtasks.
 
 Final review follow-up: removed stale placeholder wording from the implementation-plan templates and updated issue-body README wording from pre-approval draft language to created/cross-linked mirror language.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

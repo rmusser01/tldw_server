@@ -73,6 +73,8 @@ describe("notes export utils", () => {
       }
     )
 
+    expect(new DOMParser().parseFromString(html, "text/html")
+      .querySelector('head > meta[name="referrer"]')?.getAttribute("content")).toBe("no-referrer")
     expect(html).toContain("Printable &lt;Note&gt;")
     expect(html).toContain("<strong>bold</strong>")
     expect(html).toContain("Tags:</strong> research, summary")
@@ -231,6 +233,8 @@ describe("notes export utils", () => {
       }
     )
 
+    expect(new DOMParser().parseFromString(html, "text/html")
+      .querySelector('head > meta[name="referrer"]')?.getAttribute("content")).toBe("no-referrer")
     expect(html).toContain('data-paper-size="A4"')
     expect(html).toContain("studio-template-cornell")
     expect(html).toContain("studio-cornell-layout")
@@ -304,4 +308,14 @@ describe("notes export utils", () => {
     expect(getDefaultStudioPaperSizeFromLocale("de-DE")).toBe("A4")
     expect(getDefaultStudioPaperSizeFromLocale("")).toBe("A4")
   })
+})
+
+it("exports canonical history after the editor strips its portable marker", () => {
+  const history = { origin: "knowledge_qa" as const, question: "Original question" }
+  const note = { id: "n", title: "T", content: "Edited answer", keywords: [],
+    knowledge_provenance_state: "active" as const, knowledge_provenance: history,
+    knowledge_provenance_version: 2, knowledge_provenance_hash: `sha256:${"a".repeat(64)}`,
+  }
+  expect(buildSingleNoteMarkdown(note)).toContain("tldw-knowledge:v1:")
+  expect(JSON.parse(buildSingleNoteJson(note)).content).toContain("tldw-knowledge:v1:")
 })

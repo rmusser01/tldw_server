@@ -30,7 +30,7 @@ Confirm whether INV-025 from Docs/ADR/inventory/2026-06-03-decision-inventory.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started in isolated worktree .worktrees/confirm-data-tables-adr-candidate from origin/dev. Initial plan: inspect INV-025 source and implementation evidence; write bounded confirmation audit; update inventory if disposition changes; create a follow-up ADR backfill task only if ready; verify docs/references and focused tests where applicable.
 
 Confirmation result: INV-025 is current governing and ready for a bounded Data Tables backend ADR backfill. Added Docs/ADR/inventory/2026-06-07-data-tables-confirmation-audit.md, updated the inventory disposition, and created follow-up TASK-2273. Caveats recorded for numeric job IDs, wait-for-completion/direct-export paths, source ownership scope, bounded snapshots, and File Artifacts internals.
@@ -48,7 +48,7 @@ source ../../.venv/bin/activate && python -m pytest -q \\
   tldw_Server_API/tests/DB_Management/test_media_db_data_table_generation_ops.py
 
 Bandit applicability: skipped because touched files are Markdown docs and Backlog task records only; no Python/code paths changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

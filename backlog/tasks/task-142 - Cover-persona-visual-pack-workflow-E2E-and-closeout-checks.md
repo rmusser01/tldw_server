@@ -41,7 +41,7 @@ Implement Task 11 from Docs/superpowers/plans/2026-05-08-persona-visual-packs-im
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Persona Live visual workflow E2E coverage in apps/tldw-frontend/e2e/workflows/persona-live.spec.ts. Added mocked persona API/session/profile/visual-pack fixtures, active-pack idle state assertion, speaking/tool_running/error visual_state_override assertions, and broken-pack fallback coverage that still verifies live controls connect.
 
 Verification passed: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_core.py tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py tldw_Server_API/tests/Persona/test_persona_visuals_api.py tldw_Server_API/tests/Persona/test_persona_visual_jobs.py tldw_Server_API/tests/Services/test_persona_visual_jobs_worker_startup.py tldw_Server_API/app/core/MCP_unified/tests/test_persona_visuals_module.py -v (36 passed).
@@ -53,7 +53,7 @@ Verification passed with escalated local-server permission: bunx playwright test
 Verification passed: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Persona tldw_Server_API/app/api/v1/endpoints/persona.py tldw_Server_API/app/services/startup_optional_workers.py tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py tldw_Server_API/app/core/MCP_unified/modules/implementations/persona_visuals_module.py -f json -o /tmp/bandit_persona_visuals.json. Bandit results: 0 findings, report at /tmp/bandit_persona_visuals.json.
 
 Verification passed: git diff --check.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

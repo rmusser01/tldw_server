@@ -37,17 +37,13 @@ Create one accepted ADR using the existing template and next ADR number. Link th
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Created Docs/ADR/018-resource-governance-endpoint-policy-and-route-map.md as the accepted Resource Governance endpoint policy ADR. Updated Docs/ADR/README.md, the decision inventory, and the Resource Governance README backlink.
 
 Verification: git diff --check passed. ADR/link grep passed for ADR-018, the inventory row, and the Resource Governance README backlink. Targeted pytest passed: python -m pytest -q tldw_Server_API/tests/Resource_Governance/test_policy_loader_route_map_db_store.py tldw_Server_API/tests/Resource_Governance/test_policy_loader_reload_db_store.py tldw_Server_API/tests/Resource_Governance/test_middleware_simple.py tldw_Server_API/tests/Resource_Governance/test_slowapi_decorated_routes_mapped.py tldw_Server_API/tests/Resource_Governance/test_auth_route_map_coverage.py tldw_Server_API/tests/AuthNZ_Unit/test_claim_first_single_user_mode_guardrail.py (14 passed).
 
 Bandit: not run because this slice only changed Markdown documentation and Backlog task records; no Python/source code changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

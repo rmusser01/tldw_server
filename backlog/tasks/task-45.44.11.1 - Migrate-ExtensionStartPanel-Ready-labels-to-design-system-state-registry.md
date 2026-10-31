@@ -49,7 +49,7 @@ Replace the remaining ExtensionStartPanel hardcoded Ready product-state labels w
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation replaced ExtensionStartPanel seeded narration and image Ready labels with getDesignSystemState('ready').label while preserving Empty copy.
 
 Verified red before implementation: focused ExtensionStartPanel design-system test failed because seeded status rows rendered literal Ready instead of the mocked registry label.
@@ -61,7 +61,7 @@ TypeScript note: bunx tsc --noEmit --pretty false exits 2 on existing package-wi
 Bandit not run: touched runtime scope is UI TypeScript plus JSON baseline and Backlog metadata, with no Python execution path.
 
 PR link: https://github.com/rmusser01/tldw_server/pull/1709
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

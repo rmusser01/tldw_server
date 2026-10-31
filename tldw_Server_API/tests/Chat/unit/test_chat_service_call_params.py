@@ -840,3 +840,50 @@ def test_history_owner_envelopes_do_not_reach_provider_extensions():
     assert "tldw_history_selection_v1" not in params
     assert params["extra_body"] == {"safe": 1}
     assert params["extra_headers"] == {"X-Safe": "yes"}
+
+
+def test_history_branch_opt_in_does_not_reach_provider():
+    req = ChatCompletionRequest.model_construct(
+        model="gpt-4o-mini", messages=[], tldw_history_selection_v1={"owner_key": "private-owner"},
+        tldw_history_branch=False)
+    params = build_call_params_from_request(request_data=req, target_api_provider="openai", provider_api_key="test",
+        templated_llm_payload=[], final_system_message=None, app_config=None)
+    assert "tldw_history_branch" not in params
+
+
+@pytest.mark.parametrize(
+    "field", ["tldw_history_selection_v1", "tldw_history_branch", "tldw_history_edit_v1", "tldw_history_admission_v1"]
+)
+def test_private_history_proof_never_reaches_provider_extensions(field):
+    # model_construct exercises the final provider boundary when upstream validation was bypassed.
+    alias = field.upper().replace("_", "-")
+    req = ChatCompletionRequest.model_construct(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": "hi"}],
+        extra_body={field: {"private": True}, alias: {"private": True}, "provider_extension": 7},
+        extra_headers={field: "private", alias: "private", "X-Provider-Extension": "kept"},
+        **{field: {"private": True}},
+    )
+    params = build_call_params_from_request(
+        request_data=req,
+        target_api_provider="openai",
+        provider_api_key="synthetic-test-key",
+        templated_llm_payload=[{"role": "user", "content": "hi"}],
+        final_system_message=None,
+        app_config=None,
+    )
+    assert field not in params
+    assert params["extra_body"] == {"provider_extension": 7}
+    assert params["extra_headers"] == {"X-Provider-Extension": "kept"}
+
+
+@pytest.mark.parametrize("location", ["direct", "extra_body", "extra_headers"])
+def test_b02_existing_input_selection_never_reaches_provider(location):
+    field = "tldw_history_server_existing_input_v1"
+    values = {field: {"owner_key": "private-owner"}} if location == "direct" else {location: {field.replace("_", "-"): "private", "safe": "kept"}}
+    req = ChatCompletionRequest.model_construct(model="gpt-4o-mini", messages=[], **values)
+    params = build_call_params_from_request(request_data=req, target_api_provider="openai", provider_api_key="test",
+        templated_llm_payload=[], final_system_message=None, app_config=None)
+    assert field not in params  # nosec B101 - Internal selection authority stays server-side.
+    if location != "direct":
+        assert params[location] == {"safe": "kept"}  # nosec B101 - Strip only private envelopes, retaining provider extensions.

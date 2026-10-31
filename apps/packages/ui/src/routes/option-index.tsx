@@ -1,3 +1,4 @@
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import React from "react"
 
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
@@ -26,8 +27,7 @@ import { isSetupStatusRequiringWizard } from "./setup-status"
 import { ConnectionPhase } from "@/types/connection"
 import { useNavigate } from "react-router-dom"
 import { useMilestoneStore } from "@/store/milestones"
-import { setSetting } from "@/services/settings/registry"
-import { DISCUSS_MEDIA_PROMPT_SETTING } from "@/services/settings/ui-settings"
+import { createMediaChatHandoff, buildMediaChatHandoffRoute, removeMediaChatHandoff } from "@/services/tldw/media-chat-handoff"
 
 const LazyUnifiedSetupWizard = React.lazy(() =>
   import("@/components/Option/Onboarding/UnifiedSetupWizard").then((module) => ({
@@ -102,7 +102,7 @@ const persistFirstSourceDiscussion = async (payload: {
   if (question) {
     detail.content = question
   }
-  await setSetting(DISCUSS_MEDIA_PROMPT_SETTING, detail)
+  return createMediaChatHandoff(detail)
 }
 
 const SETUP_BANNER_DISMISSED_KEY = "__tldw_setup_banner_dismissed"
@@ -110,14 +110,24 @@ const SETUP_BANNER_DISMISSED_KEY = "__tldw_setup_banner_dismissed"
 const OptionIndex = () => {
   const hostedMode = isHostedTldwDeployment()
   const homeScope = useHomeMilestoneScope()
-  const homeScopeRef = React.useRef(homeScope)
-  homeScopeRef.current = homeScope
+  const handoffBoundaryRevision = React.useRef(0)
+  React.useLayoutEffect(() => watchChatAccountChanges(invalidated => {
+    if (invalidated) handoffBoundaryRevision.current += 1
+  }), [])
+  const handoffLifetime = React.useRef<AbortController | null>(null)
+  React.useLayoutEffect(() => {
+    const lifetime = new AbortController()
+    handoffLifetime.current = lifetime
+    return () => lifetime.abort()
+  }, [homeScope])
   const { phase, serverUrl } = useConnectionState()
   const { checkOnce } = useConnectionActions()
   const {
     state: firstRunState,
     metadata: firstRunMetadata,
     loading: setupLoading,
+    connectionConfigured: setupConnectionConfigured,
+    connectionChecking: setupConnectionChecking,
     adoptState: adoptFirstRunState
   } = useSetupOnboarding()
   const [didHydrate, setDidHydrate] = React.useState(false)
@@ -132,16 +142,22 @@ const OptionIndex = () => {
       "ownerScope"
     >
   ) => {
-    if (!homeScope) return
+    const boundaryRevision = handoffBoundaryRevision.current
+    const lifetime = handoffLifetime.current
+    if (!homeScope || !lifetime || lifetime.signal.aborted) return
     const requestOwnerScope = homeScope
     setHandoffError(null)
     try {
-      await persistFirstSourceDiscussion({
+      const token = await persistFirstSourceDiscussion({
         ...payload,
         ownerScope: requestOwnerScope
       })
-      if (homeScopeRef.current !== requestOwnerScope) return
-      navigate("/chat")
+      if (!token) return
+      if (boundaryRevision !== handoffBoundaryRevision.current || lifetime.signal.aborted) {
+        await removeMediaChatHandoff(token)
+        return
+      }
+      navigate(buildMediaChatHandoffRoute(token))
     } catch {
       setHandoffError(
         "Could not prepare this source for Chat. Please try again."
@@ -264,8 +280,13 @@ const OptionIndex = () => {
   // route (#2871); a true first run (no connection) still gets the wizard.
   const wizardRequired = isSetupStatusRequiringWizard(setupStatus)
   const connectionReady = phase === ConnectionPhase.CONNECTED
+  const setupBannerRequired =
+    wizardRequired &&
+    !(firstRunMetadata?.auth_mode === "multi_user" &&
+      firstRunMetadata.setup_completed &&
+      !firstRunMetadata.setup_required)
 
-  if (wizardRequired && !connectionReady) {
+  if ((wizardRequired || (setupConnectionConfigured === false && !setupConnectionChecking)) && !connectionReady) {
     return (
       <OptionLayout hideHeader hideSidebar>
         <React.Suspense fallback={<PageAssistLoader />}>
@@ -341,7 +362,7 @@ const OptionIndex = () => {
           {handoffError}
         </p>
       ) : null}
-      {wizardRequired && connectionReady && !setupBannerDismissed ? (
+      {setupBannerRequired && connectionReady && !setupBannerDismissed ? (
         <div
           role="status"
           data-testid="resume-setup-banner"
@@ -420,6 +441,7 @@ const OptionIndex = () => {
           <PageAssistLoader
             label="Loading home..."
             description="Preparing your dashboard"
+            autoFocus={false}
           />
         }
       >

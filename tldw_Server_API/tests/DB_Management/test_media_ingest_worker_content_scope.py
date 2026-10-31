@@ -10,12 +10,12 @@ from uuid import uuid4
 import pytest
 from psycopg import Cursor, sql
 
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext import Plaintext_Files as plaintext_files
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database, search_media
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.DB_Management.scope_context import get_scope, scoped_context
 from tldw_Server_API.app.core.Ingestion_Media_Processing import persistence
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext import Plaintext_Files as plaintext_files
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.services import media_ingest_jobs_worker as worker
 
@@ -318,10 +318,9 @@ async def test_worker_scope_retires_after_failed_or_cancelled_executor(ingest_st
         if exit_kind == "cancel":
             jm.cancel_job(job["id"], reason="controlled cancellation")
             task.cancel()
-            # Since 9f5373725b persistence no longer swallows CancelledError into a
-            # Warning, so cancelling the worker task propagates cooperatively.
             with pytest.raises(asyncio.CancelledError):
                 await task
+            assert jm.get_job(job["id"])["status"] == "cancelled"
         release.set()
         if exit_kind == "error":
             result = await task
@@ -367,6 +366,13 @@ async def test_direct_authorized_persistence_preserves_scope_for_primary_and_chi
         return original_session(**kwargs)
 
     monkeypatch.setattr(persistence, "_with_media_db_session", observe)
+    if path == "archive":
+        # Archives own one lazy DB handle on their worker instead of a per-item session.
+        def observe_archive(client_id, **kwargs):
+            observed.append(get_scope())
+            return store.factory(client_id, **kwargs)
+
+        monkeypatch.setattr(persistence, "create_media_database", observe_archive)
     if path == "pdf":
         from tldw_Server_API.app.core.Ingestion_Media_Processing import visual_ingestion
 

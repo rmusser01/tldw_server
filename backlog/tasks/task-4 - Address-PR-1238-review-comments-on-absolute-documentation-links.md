@@ -46,14 +46,14 @@ Fix the actionable review feedback on PR #1238 by replacing local absolute Markd
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Validated link remediation before commit:
 - rg over the six PR documentation files found no local absolute workspace path references.
 - test -f checks confirmed each replacement relative target exists from its source document.
 - git diff --check passed for the current edits.
 
 Committed and pushed 4caf51e64c to origin/codex/phase4-5-api-versioning-policy. Bandit was not run because the touched repo files are Markdown documentation and a Backlog task record only. GitHub checks are still pending after the push.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

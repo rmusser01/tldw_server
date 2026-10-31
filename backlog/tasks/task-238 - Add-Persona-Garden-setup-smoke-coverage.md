@@ -46,13 +46,13 @@ Add the next Stage 1 Persona/Buddy reliability slice from epic #1510. Focus on s
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added a route-level Persona Garden setup smoke test that starts at persona choice, exercises starter-template failure recovery, completes safety/test steps, and verifies dry-run handoff state. The smoke exposed a starter-command recovery gap, and PR review clarified the required behavior: selected template clicks must continue to toggle/uncheck normally. The component now keeps those toggle semantics and exposes a dedicated Retry <template> action in the starter-command error banner for explicit retry.
 
 Verification passed: bun run test src/components/PersonaGarden/__tests__/SetupStarterCommandsStep.test.tsx src/routes/__tests__/sidepanel-persona.test.tsx --maxWorkers=1 (84 tests); git diff --check. Bandit skipped because touched files are TypeScript/Backlog only.
 
 PR #1534 review follow-up addressed the Gemini and Qodo findings by replacing the selected-template retry shortcut with the explicit retry action and updating the route smoke to use that path.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

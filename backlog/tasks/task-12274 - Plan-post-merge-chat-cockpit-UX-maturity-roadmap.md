@@ -37,11 +37,11 @@ Create a post-merge staged roadmap for bringing the main WebUI /chat cockpit fro
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created the post-merge main /chat cockpit maturity roadmap and the PR 1 Context Stack + Prompt/Persona/Model Composition Preview implementation plan. Scope remains main /chat only, with sidepanel/sidebar explicitly excluded.
 
 Verification: git diff --check passed. Bandit skipped because this task only adds Markdown planning/task files and no Python/application code. No blockers.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

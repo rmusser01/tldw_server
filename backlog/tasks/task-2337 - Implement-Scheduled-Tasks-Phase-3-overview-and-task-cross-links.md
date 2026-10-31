@@ -37,7 +37,7 @@ Docs/superpowers/plans/2026-06-09-scheduled-tasks-phase3-results-inbox-home-surf
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - ScheduledTaskOverview now renders the newest projected result signal with a direct action into the Results tab, without review-count copy in projected mode.
 - ScheduledTaskTable now computes task result presence from projected result items and only shows a Results row action when at least one projected signal exists for that task.
 - ScheduledTaskDetailDrawer now accepts the latest result signal and exposes an exact latest-result link before the existing native reminder or Watchlists-owned actions.
@@ -46,7 +46,7 @@ Docs/superpowers/plans/2026-06-09-scheduled-tasks-phase3-results-inbox-home-surf
 - Verification: ./node_modules/.bin/vitest run src/components/Option/ScheduledTasks/__tests__ passed 136 tests.
 - Verification: git diff --check passed before task finalization.
 - Bandit: skipped because this slice only changes frontend TypeScript/React and Backlog/plan text, not Python executable code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

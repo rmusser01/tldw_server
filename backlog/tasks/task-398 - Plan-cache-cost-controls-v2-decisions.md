@@ -46,11 +46,11 @@ Capture the approved v2 direction for chat/world-book cache cost controls and tu
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created v2 implementation plan at Docs/superpowers/plans/2026-05-16-chat-cache-cost-v2-implementation-plan.md and updated the approved design spec with resolved v2 direction.
 
 Verification: git diff --check passed; targeted rg checks confirmed Resolved V2 Direction, debug-gated/stable-prefix decisions, UsageAnalyticsPage/WorldBookEntryManager implementation paths, and local latency source labels; ASCII scan with rg -nP "[^\x00-\x7F]" returned no matches. Bandit is not applicable because this task changed only docs and Backlog metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

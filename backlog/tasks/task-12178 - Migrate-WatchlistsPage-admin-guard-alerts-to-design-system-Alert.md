@@ -41,7 +41,7 @@ Continue the Admin and health expansion product-state migration by replacing the
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented with a focused red/green guard test for both admin guard paths.
 
 Verification:
@@ -63,7 +63,7 @@ PR review follow-up verification:
 - Verifier: `bun run verify:design-system-state` passed with total baseline exceptions still 254.
 - `git diff --check` passed.
 - TypeScript: `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` still exits 2 on 347 existing diagnostics; no diagnostics mention WatchlistsPage, WatchlistsPage.admin-guard, the baseline, or TASK-45.44.3.9.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

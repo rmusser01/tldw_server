@@ -55,7 +55,7 @@ Source: synthesis F40 / section 5
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 PARTIAL. Deleted the four helpers with genuinely ZERO references (72 lines): Utils.py truncate_content, generate_unique_identifier, is_valid_url; LLM_Calls/streaming.py aiter_normalized_sse. Both modules still import; re-verified references immediately before deleting.
 
 CONFIRMED but NOT deleted - each is TEST-ONLY, so removing the helper means removing its test, which is a product call about whether the capability is wanted rather than a mechanical cleanup:
@@ -69,7 +69,7 @@ STILL OPEN: the unreachable PromptStudioDatabase.list_optimization_iterations du
 2026-09-23 reconciliation: no ACs met. AC1 NOT met. Done: Utils.truncate_content, generate_unique_identifier and is_valid_url, and streaming.aiter_normalized_sse (0 references remain; the modules import). The duplicate PromptStudioDatabase.list_optimization_iterations is also gone, done under TASK-13318 (dee169a794; one def remains at :1937). Still present: RAG batch_utils.run_batch_indexed (:190), TTS tts_validation ProviderLimits.get_max_text_length (:220), TTS tts_config ProviderConfig.max_retries (:66), TTS adapters/base.py convert_audio_format source_format param (still unused in the body), Sync/v2/service.py resolve_conflict unreachable personal-context require_active_exchange branch (~:7036-7046, still shadowed by the unconditional raise above it) plus the dead require_personal_context_conflict and personal_context_exchange params, and streaming.aiter_sse_lines_httpx (:120). The suite has not been re-run for the finished set. AC2 NOT met - Utils.save_temp_file (:789) and its test are both still there. AC3 NOT met - core/Chat/REFACTORING_PLAN.md still exists.
 
 2026-09-23 (c8a570b21e): deleted TTS convert_audio_format source_format (13 kwarg call sites + 3 test fakes), ProviderConfig.max_retries (+ tts_providers_config.yaml and TTS-DEPLOYMENT.md lines; pydantic extra=ignore keeps old configs loading), ProviderLimits.get_max_text_length (kokoro test reads get_limits directly); Sync resolve_conflict unreachable require_active_exchange branch + require_personal_context_conflict / personal_context_exchange / _verified_personal_context_exchange params (sole internal caller updated, no external callers); Utils.save_temp_file + temp_files + cleanup_temp_files with its test (AC2: removed together); RAG run_batch_indexed + TestRunBatchIndexed; core/Chat/REFACTORING_PLAN.md (AC3: all phases done, README module map already covers the inventory; README pointer updated). AC1 AMENDMENT: streaming.aiter_sse_lines_httpx deliberately KEPT - Docs/Development/LLM_Adapters_Authoring_Guide.md directs new async adapters to it and its tests pin secret-bounded error frames; deleting it would send authors to hand-rolled loops. Verification: TTS, TTS_NEW, Utils, RAG batch_utils, Sync, Chat/unit on HEAD vs change: 102 failed both; -7 passed = the 7 deleted tests; the one differing failure each way is a load flake (tts history perf sanity passes 3/3 alone). Bandit -ll on touched modules: no findings. Found in passing, separate fix: TTS/vendors/kittentts_compat.py closures reference the except-bound exc after the block (F821).
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

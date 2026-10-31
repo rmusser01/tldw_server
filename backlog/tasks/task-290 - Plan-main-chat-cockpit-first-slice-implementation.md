@@ -36,9 +36,9 @@ Write an implementation plan for the first slice of the main WebUI /chat cockpit
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created first-slice implementation plan at Docs/superpowers/plans/2026-05-12-main-chat-cockpit-first-slice-implementation-plan.md. Scope is explicitly limited to main WebUI /chat and excludes sidepanel/sidebar plus broader cockpit maturity backlog work. Plan is documentation-only and decomposes the work into test-first tasks for shared cockpit actions, context rail controls, runtime inspector, status strip, real-server Playwright coverage, and verification/handoff. Verification for this planning task: git diff --check passed. Bandit skipped because this task only changes Markdown planning/task files and no Python code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

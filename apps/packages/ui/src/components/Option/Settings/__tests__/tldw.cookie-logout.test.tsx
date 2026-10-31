@@ -34,7 +34,7 @@ const form = {
   setFieldValue: vi.fn((key: string, value: unknown) => {
     formValues[key] = value
   }),
-  validateFields: vi.fn().mockResolvedValue({})
+  validateFields: vi.fn(async (fields?: string[]) => Object.fromEntries(Object.entries(formValues).filter(([key]) => !fields || fields.includes(key))))
 }
 
 const configuredClient = (config: Partial<TldwConfig>) => {
@@ -44,9 +44,9 @@ const configuredClient = (config: Partial<TldwConfig>) => {
 
 vi.mock("antd", () => {
   const Form = Object.assign(
-    ({ children, onValuesChange, onFinish }: {
-      children?: React.ReactNode; onValuesChange?: () => void; onFinish?: (values: Record<string, unknown>) => void
-    }) => <form onChange={() => onValuesChange?.()} onSubmit={(event) => {
+    ({ children, onValuesChange, onFinish, component }: {
+      component?: false; children?: React.ReactNode; onValuesChange?: (changed: Record<string, unknown>) => void; onFinish?: (values: Record<string, unknown>) => void
+    }) => component === false ? <div onChange={() => onValuesChange?.(form.getFieldsValue())}>{children}</div> : <form onChange={() => onValuesChange?.(form.getFieldsValue())} onSubmit={(event) => {
       event.preventDefault()
       onFinish?.(form.getFieldsValue())
     }}>{children}</form>,
@@ -71,9 +71,12 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-vi.mock("react-router-dom", () => ({
+vi.mock("react-router-dom", async (importOriginal) => ({
+  ...await importOriginal<typeof import("react-router-dom")>(),
   Link: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
-  useNavigate: () => vi.fn()
+  useNavigate: () => vi.fn(),
+  useBlocker: () => ({ state: "unblocked", proceed: undefined, reset: undefined }),
+  unstable_usePrompt: vi.fn()
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", async (importOriginal) => ({
@@ -317,7 +320,7 @@ describe("TldwSettings cookie logout", () => {
       vi.stubGlobal("fetch", probe)
       render(<TldwSettings />)
       await waitFor(() => expect(screen.getByTestId("login-status")).toHaveTextContent("Logged In"))
-      fireEvent.click(screen.getByRole("button", { name: "Test connection", exact: true }))
+      fireEvent.click(screen.getByRole("button", { name: "Test connection" }))
       await waitFor(() => expect(screen.getByTestId("connection-status")).toHaveTextContent("success"))
       expect(probe).not.toHaveBeenCalled()
       noBilling()
@@ -358,7 +361,7 @@ describe("TldwSettings cookie logout", () => {
       render(<TldwSettings />)
       await waitFor(() => expect(signal).toBeDefined())
       mocks.getConfig.mockResolvedValue(null)
-      fireEvent.click(screen.getByRole("button", { name: "Logout", exact: true }))
+      fireEvent.click(screen.getByRole("button", { name: "Logout" }))
       await waitFor(() => expect(signal.aborted).toBe(true))
       await act(async () => { release(billingSpec()) })
       noBilling()
@@ -628,7 +631,8 @@ describe("TldwSettings cookie logout", () => {
       fireEvent.change(screen.getByLabelText("Edit server"), { target: { value: "https://unsaved.example.test" } })
       fireEvent.change(screen.getByLabelText("Request timeout"), { target: { value: "47" } })
       const formWrites = mocks.setFieldsValue.mock.calls.length
-      await act(async () => finishOld({ ...signedIn, serverUrl: "https://stale.example.test", requestTimeoutMs: 1000 }))
+      const staleConfig = { ...signedIn, serverUrl: "https://stale.example.test", requestTimeoutMs: 1000 }
+      await act(async () => finishOld(staleConfig))
       expect(formValues.serverUrl).toBe("https://unsaved.example.test")
       expect(formValues.apiKey).toBe("unsaved-key")
       expect(screen.getByLabelText("Request timeout")).toHaveValue(47)

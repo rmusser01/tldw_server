@@ -30,17 +30,13 @@ Fix the main /chat composer send control naming ambiguity from the UX rebaseline
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Root cause: the primary submit action was correctly named Send message, but the adjacent split-menu trigger used Open send options, so broad/fuzzy role queries for Send matched both controls and made automation and screen-reader scan output less distinct.
 
 Implementation: kept the primary ready action as Send message and renamed the adjacent split trigger to Open message delivery options in WebUI /chat and sidepanel chat. This preserves the same visual affordance and menu behavior while separating the accessible names.
 
 Verification: RED PlaygroundSendControl accessibility test and sidepanel compact-toolbar contract failed on the old Open send options label before implementation. Focused Vitest passed 5 files and 16 tests. git diff --check passed. Full UI tsc still fails on the pre-existing CharacterListContent GalleryCardDensity baseline outside this slice. Bandit skipped because no Python files changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

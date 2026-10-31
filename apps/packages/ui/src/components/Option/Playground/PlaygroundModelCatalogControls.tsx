@@ -1,4 +1,4 @@
-import { Input, Select } from "antd";
+import { Input, Segmented, Select } from "antd";
 
 import type { ModelSortMode } from "@/hooks/playground";
 
@@ -29,38 +29,34 @@ export const PlaygroundModelCatalogControls = ({
   modelSortMode,
   setModelSortMode,
 }: PlaygroundModelCatalogControlsProps) => (
-  <div className="p-2 border-b border-border flex flex-col gap-2">
-    <div className="flex items-center gap-2">
-      <button
-        type="button"
+  <div className="p-2 border-b border-border flex shrink-0 flex-col gap-2">
+    {/* A labelled two-way switch (CC-06): it always shows both choices. */}
+    <div
+      className="min-w-0"
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") event.stopPropagation();
+      }}
+    >
+      <Segmented<PlaygroundModelListScope>
+        block
+        size="small"
         data-testid="model-list-scope-toggle"
-        aria-pressed={modelListScope === "catalog"}
-        className={`rounded border px-2 py-1 text-xs transition-colors ${
-          modelListScope === "catalog"
-            ? "border-primary bg-primary/10 text-primary"
-            : "border-border bg-surface2 text-text-muted hover:text-text"
-        }`}
-        onClick={(event) => {
-          event.preventDefault();
-          setModelListScope(
-            modelListScope === "catalog" ? "configured" : "catalog",
-          );
-        }}
-      >
-        {modelListScope === "catalog"
-          ? t("playground:composer.configuredModels", "Configured")
-          : t("playground:composer.searchAllModels", "Search all models")}
-      </button>
-      <span className="text-[11px] text-text-subtle">
-        {modelListScope === "catalog"
-          ? t("playground:composer.catalogScopeHint", "All known models")
-          : t(
-              "playground:composer.configuredScopeHint",
-              "Usable configured models",
-            )}
-      </span>
+        aria-label={t("playground:composer.modelScopeLabel", "Models to show")}
+        value={modelListScope}
+        onChange={(value) => setModelListScope(value)}
+        options={[
+          {
+            value: "configured",
+            label: t("playground:composer.modelScopeReady", "Ready to use"),
+          },
+          {
+            value: "catalog",
+            label: t("playground:composer.modelScopeAll", "All models"),
+          },
+        ]}
+      />
     </div>
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <Input
         size="small"
         placeholder={t(
@@ -68,7 +64,7 @@ export const PlaygroundModelCatalogControls = ({
             ? "playground:composer.modelCatalogSearchPlaceholder"
             : "playground:composer.modelSearchPlaceholder",
           modelListScope === "catalog"
-            ? "Search all known models"
+            ? "Search all models"
             : "Search models",
         )}
         aria-label={t(
@@ -77,12 +73,15 @@ export const PlaygroundModelCatalogControls = ({
         )}
         value={modelSearchQuery}
         allowClear
-        className="flex-1"
+        className="min-w-0 flex-1 basis-36"
         onChange={(event) => setModelSearchQuery(event.target.value)}
-        onKeyDown={(event) => event.stopPropagation()}
+        onKeyDown={(event) => {
+          if (event.key !== "Escape") event.stopPropagation();
+        }}
       />
       <Select
         size="small"
+        aria-label={t("playground:composer.modelSortLabel", "Sort models")}
         value={modelSortMode}
         onChange={(value) => setModelSortMode(value as ModelSortMode)}
         options={[
@@ -100,8 +99,10 @@ export const PlaygroundModelCatalogControls = ({
             label: t("playground:composer.sort.localFirst", "Local-first"),
           },
         ]}
-        className="min-w-[120px]"
-        onKeyDown={(event) => event.stopPropagation()}
+        className="min-w-0 flex-1 basis-32"
+        onKeyDown={(event) => {
+          if (event.key !== "Escape") event.stopPropagation();
+        }}
       />
     </div>
   </div>

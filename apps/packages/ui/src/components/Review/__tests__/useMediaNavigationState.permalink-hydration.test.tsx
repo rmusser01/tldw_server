@@ -1,5 +1,5 @@
 import React from 'react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -43,6 +43,30 @@ const createDeps = (displayResults: any[]) => ({
 describe('useMediaNavigationState permalink hydration', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it('preserves a new URL target while the previous selection is still displayed', async () => {
+    const next = createDeferred<any>()
+    vi.mocked(bgRequest).mockImplementation(({ path }) => path === '/api/v1/media/9'
+      ? next.promise : Promise.resolve({ id: 7, title: 'Old selection', content: { text: 'Old body' } }))
+    const { result } = renderHook(() => ({
+      nav: useMediaNavigationState(createDeps([])),
+      navigate: useNavigate(),
+      location: useLocation()
+    }), { wrapper: ({ children }) => <MemoryRouter initialEntries={['/media?id=7']}>{children}</MemoryRouter> })
+    await waitFor(() => expect(result.current.nav.selectedContent).toBe('Old body'))
+    await act(async () => {
+      result.current.navigate('/media?id=9')
+    })
+    await waitFor(() => expect(bgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: '/api/v1/media/9' })))
+    expect(result.current.location.search).toBe('?id=9')
+    await act(async () => {
+      next.resolve({ id: 9, title: 'New selection', content: { text: 'New body' } })
+      await next.promise
+    })
+    await waitFor(() => expect(result.current.nav.selectedContent).toBe('New body'))
+    expect(result.current.nav.selected?.id).toBe(9)
+    expect(result.current.location.search).toBe('?id=9')
   })
 
   it("clears selected private details and rejects their late replacement on logout", async () => {

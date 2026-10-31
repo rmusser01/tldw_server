@@ -36,14 +36,14 @@ Run a post-merge UAT and polish pass for the Writing Playground manuscript annot
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-06-26 UAT/polish notes:
 - Found rendered WebUI crash in Rich mode: TipTap raised SSR hydration error before the annotation margin rail could render. Added WritingTipTapEditor SSR option coverage and set immediatelyRender: false.
 - Found Plain/Rich mode switch marking saved scenes dirty and disabling range comments. Root cause was TipTap plain-text serialization and adapter offsets using single-newline paragraph boundaries while manuscript content_plain uses blank-line paragraph delimiters. Updated serializer + TipTap offset mapping and added focused coverage.
 - Rendered Playwright UAT seeds a session/project/chapter/scene plus two annotations, verifies Rich margin rail cards are visible/non-overlapping, switches to Plain, opens the inspector, verifies the annotation list, and asserts no false Scene unsaved/save-before-range-comments state. Evidence: /tmp/writing-annotations-uat/writing-annotations-rich-rail.png and /tmp/writing-annotations-uat/writing-annotations-plain-inspector.png.
 - Residual environment noise during UAT: local API /openapi.json returns 500 independently of writing endpoints; Ant Design Drawer logs a width deprecation warning. Extension E2E harness was blocked earlier by service-worker/blank extension launch in this environment, so WebUI shared-component UAT was used for rendered evidence.
 - Verification: focused backend annotation suite passed earlier (75 passed); focused frontend annotation suite now passes (10 files, 68 tests); git diff --check passes; package tsc needed NODE_OPTIONS=--max-old-space-size=8192 and then failed on unrelated baseline type errors outside WritingPlayground. Bandit is not applicable because this pass changed frontend TypeScript/tests and Backlog metadata only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

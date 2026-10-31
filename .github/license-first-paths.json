@@ -12,7 +12,9 @@
     "patterns": [
       "apps/packages/ui/src/**",
       "apps/tldw-frontend/**",
-      "tldw_Server_API/**"
+      "apps/extension/**",
+      "tldw_Server_API/**",
+      ".github/workflows/frontend-e2e-tiers.yml"
     ]
   },
   "jobs-suite.yml": {

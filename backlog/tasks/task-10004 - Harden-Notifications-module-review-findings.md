@@ -49,7 +49,7 @@ Verify and fix validated Notifications module review findings. Scope: bounded em
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added service-level recipient normalization, dedupe, validation, and fanout limits before email delivery.
 - Added attachment count, filename, and total byte checks before delivery.
 - Changed email result details and failure logs to use masked recipients and exception type only; raw exception strings, subjects, and full recipient addresses are no longer returned by `NotificationsService`.
@@ -61,7 +61,10 @@ Verify and fix validated Notifications module review findings. Scope: bounded em
 - Preserved the public `send_notification_email()` helper while removing its duplicate raw SMTP sender path; it now delegates to AuthNZ `EmailService`.
 - Kept the legacy SMTP config compatibility helper and added explicit positive `SMTP_TIMEOUT` parsing.
 - Updated the core Notifications README to describe actual package ownership and safe delivery boundaries.
-<!-- SECTION:NOTES:END -->
+
+2026-06-24 13:00: Addressed two additional CodeRabbit review comments after the latest rebase check: `_attachment_content_size_bytes()` now uses `memoryview.nbytes` so non-byte memoryviews are measured by bytes, and attachment filename validation now rejects all ASCII control characters including NUL, unit separator, and DEL. Added focused regression coverage for both cases. Fresh verification before amend: focused Notifications/Watchlists delivery slice passed with 34 tests, broader non-scheduled Notifications slice passed with 129 tests, scoped Ruff passed, `py_compile` passed with the same pre-existing Watchlists `return`-in-`finally` warnings, `git diff --check` passed, and Bandit report `/tmp/bandit_notifications_pr2493_coderabbit_final.json` produced 0 findings.
+2026-06-24 13:06 final verification after rebasing onto `origin/dev` at `7ab6ae8c4`: focused delivery slice passed (`34 passed, 86 warnings`), broader non-scheduled Notifications slice passed (`129 passed, 661 warnings`), scheduled API/control-plane slice passed (`46 passed, 1534 warnings`), scoped Ruff passed, `py_compile` passed with the same pre-existing Watchlists `return`-in-`finally` warnings, `git diff --check` passed, and Bandit report `/tmp/bandit_notifications_pr2493_rebased_final.json` produced 0 findings. The branch is 0 behind and 1 ahead of `origin/dev` after rebase.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Verification
 
@@ -94,10 +97,3 @@ Hardened the Notifications core package by bounding email fanout and attachments
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-2026-06-24 13:00: Addressed two additional CodeRabbit review comments after the latest rebase check: `_attachment_content_size_bytes()` now uses `memoryview.nbytes` so non-byte memoryviews are measured by bytes, and attachment filename validation now rejects all ASCII control characters including NUL, unit separator, and DEL. Added focused regression coverage for both cases. Fresh verification before amend: focused Notifications/Watchlists delivery slice passed with 34 tests, broader non-scheduled Notifications slice passed with 129 tests, scoped Ruff passed, `py_compile` passed with the same pre-existing Watchlists `return`-in-`finally` warnings, `git diff --check` passed, and Bandit report `/tmp/bandit_notifications_pr2493_coderabbit_final.json` produced 0 findings.
-2026-06-24 13:06 final verification after rebasing onto `origin/dev` at `7ab6ae8c4`: focused delivery slice passed (`34 passed, 86 warnings`), broader non-scheduled Notifications slice passed (`129 passed, 661 warnings`), scheduled API/control-plane slice passed (`46 passed, 1534 warnings`), scoped Ruff passed, `py_compile` passed with the same pre-existing Watchlists `return`-in-`finally` warnings, `git diff --check` passed, and Bandit report `/tmp/bandit_notifications_pr2493_rebased_final.json` produced 0 findings. The branch is 0 behind and 1 ahead of `origin/dev` after rebase.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

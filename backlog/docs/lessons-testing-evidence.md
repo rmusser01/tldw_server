@@ -1,5 +1,28 @@
 # Testing Evidence Lessons
 
+
+## Hash navigation does not replay browser initialization (TASK-13227, 2026-10-11)
+
+**Incident.** The disposable extension upgrade fixture registered a version0 Buddy-shell seed after the options document had loaded, then navigated only to its workspace hash. The initialization script never ran, so the check did not exercise the claimed migration. A real reload applied the seed; the final WebUI and extension journeys observed version1 with the retained240,160 position.
+
+**What to do.** Install persisted-state seeds before document creation or reload after registering initialization. Assert both the preexisting value and the migrated result. A hash-route change preserves the current document and cannot prove initialization or upgrade behavior.
+
+## Check event-loop progress while blocking work is held
+
+**Incident (TASK-13424, PR #3091, 2026-10-03):** The VN recipe-capture
+responsiveness test failed CI after request startup took 1.001778 seconds against
+a one-second limit. The endpoint already ran in a worker thread. A controlled
+nonblocking 1.1-second startup delay reproduced the failure without blocking
+the event loop.
+
+**Evidence and rule:** A thread-safe capture notification now lets the test
+assert that capture and the request remain pending before it releases the gate.
+The delayed startup passes; forcing the real endpoint inline fails that progress
+check. The complete generation-jobs file passes all 128 tests. Verify progress
+while the blocking operation is held, rather than measuring aggregate request
+startup. Keep bounded failure cleanup and an inline negative control so removing
+a timing assertion does not weaken responsiveness coverage.
+
 ## Route continuity needs the real application layout
 
 **Incident (TASK-13226.4, 2026-09-08):** Buddy component tests passed with drafts
@@ -174,6 +197,14 @@ mixed legacy matrix, preserve the production path guard and record conclusive
 group results under pytest's trusted temp root; never weaken storage validation
 to make evidence paths prettier.
 
+**Follow-up incident (TASK-13423, 2026-10-04):** A shared database/startup
+integration run passed 77 cases but produced five Persona fixture setup errors
+after its launcher placed basetemp under `/private/tmp`. The database guard
+correctly rejected that path. Rerunning only those same five cases beneath the
+macOS system temporary root passed all five without source or assertion changes.
+The original 82-case report and the exact five-case retry remain separately
+attributed in `/private/tmp/buddy-pr3091-claims-integration-20261004.json`.
+
 ## Security report formatters can fail on deliberate invalid-Unicode fixtures
 
 **Incident (TASK-13173, 2026-09-05):** Bandit's text and JSON report writers both
@@ -342,3 +373,22 @@ the actual Chatbook importer accepted the same HTTP-exported archive with all
 of cross-host portability. The same task's PostgreSQL run first exposed datetime
 export serialization and then the explicit SQLite-only import-job boundary;
 qualify supported storage paths separately instead of claiming backend parity.
+
+## Public model catalogs do not validate cookie sessions
+
+**Incident (TASK-13398, PR #3069, 2026-09-30):** Cookie cache tests passed while
+the real metadata endpoint stayed HTTP 200 after session expiry. The protected
+profile returned HTTP 401. A full browser reload then minted a fresh cookie,
+masking expiry; mounted-page Refresh reproduced zero usable models. Cubic also
+found that one instance's generation guard did not protect another instance's
+persistent key catalog, and two outer requests could share different auth modes.
+
+**Evidence and rule:** Validate cookies through the existing profile request,
+exercise expiry without renewing the session, and test independent cache
+instances and both auth-mode transitions. Cookie catalogs need no persistent
+cache when offline hydration is forbidden; retain transient metadata fallback
+only after the current request's profile check succeeds.
+
+## A copied linter baseline needs the same module filename
+
+**PR3091, 2026-10-04.** The Buddy service-base integration copied nine reviewed dev modules into a temporary directory for a Ruff comparison. Their bytes matched the integrated modules, but the copy reported fifteen findings versus six: its temporary paths bypassed nine `BLE001` per-file ignores. Passing the real module name through `--stdin-filename` in both arms applied the same configuration and produced the same six findings. Preserve the filename/configuration context as well as source bytes when comparing static diagnostics; do not report an apparent improvement from a mismatched baseline.

@@ -6,10 +6,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+from types import SimpleNamespace
 
 import pytest
 
 from tldw_Server_API.app.core.MCP_unified import get_mcp_server
+from tldw_Server_API.app.core.MCP_unified import server as mcp_server_module
 from tldw_Server_API.app.core.MCP_unified.tests.support import build_mcp_test_client
 
 
@@ -65,3 +67,13 @@ def mcp_ws_client(monkeypatch):
 def ws_client(mcp_ws_client):
     """Alias for mcp_ws_client to match common fixture name across tests."""
     yield mcp_ws_client
+
+
+@pytest.fixture
+def allow_knowledge_source_tools(monkeypatch):
+    """Give aggregation-only stub tests explicit source-tool permission."""
+    async def allow(*_args, **_kwargs):
+        return True
+
+    protocol = SimpleNamespace(_has_tool_permission=allow)
+    monkeypatch.setattr(mcp_server_module, "get_mcp_server", lambda: SimpleNamespace(protocol=protocol))

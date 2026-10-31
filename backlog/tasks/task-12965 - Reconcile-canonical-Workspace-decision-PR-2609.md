@@ -50,9 +50,9 @@ Take over the stale draft PR #2609 for GitHub issue #1526: rebase onto current d
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Takeover completed in the isolated worktree. PR #2609 was rebased cleanly onto current origin/dev, the branch-only TASK-12128 collision was replaced with TASK-12965, and the decision record was reconciled with the canonical manager, research surfaces, owner-domain boundaries, current contracts, and live UAT evidence. All three review threads were answered and resolved. Fresh CI launched after push and was still queued with no reported failures when the requester directed that CI checks be ignored. PR remains draft pending the required human-written Change summary.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

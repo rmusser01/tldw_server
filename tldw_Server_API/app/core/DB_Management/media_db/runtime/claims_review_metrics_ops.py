@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
@@ -11,6 +12,110 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import 
 )
 
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
+
+
+def _claims_review_window_bounds(self, start_date: date, end_date: date) -> tuple[Any, Any]:
+    """Return half-open UTC parameters in the backend's stored timestamp format."""
+    if type(start_date) is not date or type(end_date) is not date:
+        raise ValueError("review metrics dates must be date values")
+    if start_date > end_date or (end_date - start_date).days >= 366 or end_date == date.max:
+        raise ValueError("review metrics window must contain 1..366 representable days")
+    start = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
+    end = datetime.combine(end_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+    if self.backend_type == BackendType.POSTGRESQL:
+        return start, end
+    return start.strftime("%Y-%m-%d %H:%M:%S"), end.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def lock_claims_review_metrics_owner(self, *, owner_user_id: str) -> None:
+    """Serialize PostgreSQL calculations for an owner until the window commits."""
+    if self.backend_type != BackendType.POSTGRESQL:
+        return
+    connection = self._get_txn_conn()
+    if connection is None:
+        raise RuntimeError("review metrics owner lock requires an active transaction")
+    self.execute_query(
+        "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))",
+        (f"claims-review-metrics:{owner_user_id}",),
+        connection=connection,
+    )
+
+
+def get_claims_review_metrics_window_rows(
+    self,
+    *,
+    owner_user_id: str,
+    start_date: date,
+    end_date: date,
+) -> list[dict[str, Any]]:
+    """Read metric and reason groups together from one source statement snapshot."""
+    start, end = _claims_review_window_bounds(self, start_date, end_date)
+    postgresql = self.backend_type == BackendType.POSTGRESQL
+    day = "(l.created_at AT TIME ZONE 'UTC')::date" if postgresql else "DATE(l.created_at)"
+    claims_table, media_table, _placeholder = _claims_review_tables(self)
+    owner_predicate = ""
+    params = [start, end]
+    if postgresql:
+        owner_predicate = " AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ?"
+        params.append(owner_user_id)
+
+    # The SELECT wrapper also lets SQLite's cursor adapter collect CTE results.
+    query = (
+        "SELECT * FROM (WITH filtered AS (SELECT "  # nosec B608
+        + day
+        + " AS day, COALESCE(c.extractor, 'unknown') AS extractor, "
+        "COALESCE(c.extractor_version, '') AS extractor_version, "
+        "l.new_status, l.old_text, l.new_text, l.reason_code "
+        "FROM claims_review_log l "
+        f"LEFT JOIN {claims_table} c ON c.id = l.claim_id "
+        f"LEFT JOIN {media_table} m ON m.id = c.media_id "
+        "WHERE l.created_at >= ? AND l.created_at < ?" + owner_predicate + ") "
+        "SELECT 'metrics' AS kind, day, extractor, extractor_version, COUNT(*) AS total_reviewed, "
+        "SUM(CASE WHEN lower(new_status) = 'approved' THEN 1 ELSE 0 END) AS approved_count, "
+        "SUM(CASE WHEN lower(new_status) = 'rejected' THEN 1 ELSE 0 END) AS rejected_count, "
+        "SUM(CASE WHEN lower(new_status) = 'flagged' THEN 1 ELSE 0 END) AS flagged_count, "
+        "SUM(CASE WHEN lower(new_status) = 'reassigned' THEN 1 ELSE 0 END) AS reassigned_count, "
+        "SUM(CASE WHEN old_text IS NOT NULL AND new_text IS NOT NULL AND old_text <> new_text "
+        "THEN 1 ELSE 0 END) AS edited_count, CAST(NULL AS TEXT) AS reason_code, "
+        "CAST(0 AS BIGINT) AS reason_count FROM filtered GROUP BY day, extractor, extractor_version "
+        "UNION ALL SELECT 'reason' AS kind, day, extractor, extractor_version, "
+        "0, 0, 0, 0, 0, 0, reason_code, COUNT(*) AS reason_count "
+        "FROM filtered GROUP BY day, extractor, extractor_version, reason_code) AS aggregates "
+        "ORDER BY day, extractor, extractor_version, kind, reason_code"
+    )
+    return [dict(row) for row in self.execute_query(query, tuple(params)).fetchall()]
+
+
+def list_claims_review_user_ids_page(
+    self,
+    *,
+    start_date: date,
+    end_date: date,
+    after_user_id: str | None = None,
+    limit: int = 100,
+) -> list[str]:
+    """Return a bounded, date-filtered PostgreSQL owner page in text key order."""
+    if self.backend_type != BackendType.POSTGRESQL:
+        return []
+    start, end = _claims_review_window_bounds(self, start_date, end_date)
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 100
+    limit = max(1, min(100, limit))
+    owner = "COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id)"
+    cursor_predicate = f" AND {owner} > ?" if after_user_id is not None else ""
+    params = [start, end]
+    if after_user_id is not None:
+        params.append(after_user_id)
+    params.append(limit)
+    query = (
+        f"SELECT DISTINCT {owner} AS user_id FROM claims_review_log l "  # nosec B608
+        "JOIN claims c ON c.id = l.claim_id JOIN media m ON m.id = c.media_id "
+        "WHERE l.created_at >= ? AND l.created_at < ? "
+        f"AND {owner} IS NOT NULL AND {owner} <> ''" + cursor_predicate + " ORDER BY user_id ASC LIMIT ?"
+    )
+    return [str(row["user_id"]) for row in self.execute_query(query, tuple(params)).fetchall()]
 
 
 def _claims_review_tables(self) -> tuple[str, str, str]:
@@ -138,38 +243,22 @@ def upsert_claims_review_extractor_metrics_daily(
     edited_count: int = 0,
     reason_code_counts_json: str | None = None,
 ) -> dict[str, Any]:
+    """Atomically insert/update one group, joining any caller-owned transaction."""
     version = "" if extractor_version is None else str(extractor_version)
     now = self._get_current_utc_timestamp_str()
-    existing = self.execute_query(
-        "SELECT id FROM claims_review_extractor_metrics_daily "
-        "WHERE user_id = ? AND report_date = ? AND extractor = ? AND extractor_version = ?",
-        (
-            str(user_id),
-            str(report_date),
-            str(extractor),
-            version,
-        ),
-    ).fetchone()
-    existing_id: int | None = None
-    if existing is not None:
-        try:
-            existing_id = int(existing["id"])
-        except _MEDIA_NONCRITICAL_EXCEPTIONS:
-            try:
-                existing_id = int(existing[0])
-            except _MEDIA_NONCRITICAL_EXCEPTIONS:
-                existing_id = None
-
-    if existing_id is None:
-        insert_sql = (
+    with self.transaction() as connection:
+        row = self.execute_query(
             "INSERT INTO claims_review_extractor_metrics_daily "
             "(user_id, report_date, extractor, extractor_version, total_reviewed, approved_count, "
             "rejected_count, flagged_count, reassigned_count, edited_count, reason_code_counts_json, "
             "created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        )
-        self.execute_query(
-            insert_sql,
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(user_id, report_date, extractor, extractor_version) DO UPDATE SET "
+            "total_reviewed = excluded.total_reviewed, approved_count = excluded.approved_count, "
+            "rejected_count = excluded.rejected_count, flagged_count = excluded.flagged_count, "
+            "reassigned_count = excluded.reassigned_count, edited_count = excluded.edited_count, "
+            "reason_code_counts_json = excluded.reason_code_counts_json, updated_at = excluded.updated_at "
+            "RETURNING *",
             (
                 str(user_id),
                 str(report_date),
@@ -185,41 +274,9 @@ def upsert_claims_review_extractor_metrics_daily(
                 now,
                 now,
             ),
-            commit=True,
-        )
-        return self.get_claims_review_extractor_metrics_daily(
-            user_id=str(user_id),
-            report_date=str(report_date),
-            extractor=str(extractor),
-            extractor_version=version,
-        )
-
-    self.execute_query(
-        (
-            "UPDATE claims_review_extractor_metrics_daily SET "
-            "total_reviewed = ?, approved_count = ?, rejected_count = ?, flagged_count = ?, "
-            "reassigned_count = ?, edited_count = ?, reason_code_counts_json = ?, updated_at = ? "
-            "WHERE id = ?"
-        ),
-        (
-            int(total_reviewed),
-            int(approved_count),
-            int(rejected_count),
-            int(flagged_count),
-            int(reassigned_count),
-            int(edited_count),
-            reason_code_counts_json,
-            now,
-            int(existing_id),
-        ),
-        commit=True,
-    )
-    return self.get_claims_review_extractor_metrics_daily(
-        user_id=str(user_id),
-        report_date=str(report_date),
-        extractor=str(extractor),
-        extractor_version=version,
-    )
+            connection=connection,
+        ).fetchone()
+    return dict(row) if row else {}
 
 
 def list_claims_review_extractor_metrics_daily(

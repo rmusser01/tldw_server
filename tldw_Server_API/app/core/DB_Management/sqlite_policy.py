@@ -17,17 +17,6 @@ def _iter_database_list_rows(conn: Any) -> Iterable[Any]:
     return rows
 
 
-_WAL_RETRY_SLEEP_S = 0.01
-
-
-def _is_wal_switch_lock_error(exc: sqlite3.OperationalError, deadline: float) -> bool:
-    # Switching a rollback-journal DB to WAL needs an exclusive lock, and SQLite
-    # returns SQLITE_BUSY without calling the busy handler when another
-    # connection holds a write lock (deadlock avoidance), so concurrent first
-    # opens of a legacy DB fail instantly unless we retry within busy_timeout.
-    return "database is locked" in str(exc) and time.monotonic() < deadline
-
-
 def _is_in_memory_connection(conn: Any) -> bool:
     try:
         rows = tuple(_iter_database_list_rows(conn))
@@ -37,10 +26,20 @@ def _is_in_memory_connection(conn: Any) -> bool:
     if not rows:
         return False
 
-    for row in rows:
-        if len(row) >= 3 and not row[2]:
-            return True
-    return False
+    return any(len(row) >= 3 and not row[2] for row in rows)
+
+
+def _wal_retry_delay(exc: sqlite3.OperationalError, deadline: float) -> float | None:
+    """Retry only SQLite lock contention while the WAL setup budget remains."""
+    code = getattr(exc, "sqlite_errorcode", None)
+    remaining = deadline - time.monotonic()
+    if (
+        type(code) is not int
+        or code & 0xFF not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+        or remaining <= 0
+    ):
+        return None
+    return min(0.01, remaining)
 
 
 def configure_sqlite_connection(
@@ -57,15 +56,17 @@ def configure_sqlite_connection(
     is_memory = _is_in_memory_connection(conn)
 
     if use_wal and (enable_on_memory or not is_memory):
-        deadline = time.monotonic() + busy_timeout_ms / 1000
+        deadline = time.monotonic() + max(0, int(busy_timeout_ms)) / 1000
         while True:
             try:
                 conn.execute("PRAGMA journal_mode=WAL")
-                break
             except sqlite3.OperationalError as exc:
-                if not _is_wal_switch_lock_error(exc, deadline):
+                delay = _wal_retry_delay(exc, deadline)
+                if delay is None:
                     raise
-                time.sleep(_WAL_RETRY_SLEEP_S)
+                time.sleep(delay)
+            else:
+                break
 
     if synchronous:
         conn.execute(f"PRAGMA synchronous={synchronous}")
@@ -138,10 +139,7 @@ async def _is_in_memory_connection_async(conn: Any) -> bool:
     if not rows:
         return False
 
-    for row in rows:
-        if len(row) >= 3 and not row[2]:
-            return True
-    return False
+    return any(len(row) >= 3 and not row[2] for row in rows)
 
 
 async def configure_sqlite_connection_async(
@@ -158,15 +156,17 @@ async def configure_sqlite_connection_async(
     is_memory = await _is_in_memory_connection_async(conn)
 
     if use_wal and (enable_on_memory or not is_memory):
-        deadline = time.monotonic() + busy_timeout_ms / 1000
+        deadline = time.monotonic() + max(0, int(busy_timeout_ms)) / 1000
         while True:
             try:
                 await conn.execute("PRAGMA journal_mode=WAL")
-                break
             except sqlite3.OperationalError as exc:
-                if not _is_wal_switch_lock_error(exc, deadline):
+                delay = _wal_retry_delay(exc, deadline)
+                if delay is None:
                     raise
-                await asyncio.sleep(_WAL_RETRY_SLEEP_S)
+                await asyncio.sleep(delay)
+            else:
+                break
 
     if synchronous:
         await conn.execute(f"PRAGMA synchronous={synchronous}")

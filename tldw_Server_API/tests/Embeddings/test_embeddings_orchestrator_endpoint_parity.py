@@ -946,6 +946,23 @@ def test_dual_path_single_string_numeric_embedding_response(client, monkeypatch)
     assert result["legacy"]["json"]["usage"] == {"prompt_tokens": 2, "total_tokens": 2}
 
 
+def test_dual_path_rg_op_id_ignores_client_request_id(client, monkeypatch):
+    # A client-repeatable op_id replays the cached reservation without charging tokens.
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
+
+    result = _run_dual_path_embedding_request(
+        client,
+        monkeypatch,
+        mod=mod,
+        payload={"model": "sentence-transformers/all-MiniLM-L6-v2", "input": "red seed"},
+        headers={"x-provider": "huggingface", "X-Request-ID": "replayed-req-id"},
+    )
+
+    op_ids = [op_id for path in ("legacy", "orchestrator") for _req, op_id in result[path]["rg_reserves"]]
+    assert len(op_ids) == 2
+    assert not any("replayed-req-id" in str(op_id) for op_id in op_ids), op_ids
+
+
 def test_dual_path_batch_string_response_preserves_indexes(client, monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
 
@@ -4383,10 +4400,9 @@ def test_concurrent_public_endpoint_modes_isolate_real_legacy_oauth_refresh_poli
     orchestrator_enabled,
 ):
     """A 401 refresh and a concurrent 403 must not exchange keys, endpoints, or policy."""
+    import httpx
+
     from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
-    from tldw_Server_API.app.core.LLM_Calls.providers.openai_embeddings_adapter import (
-        OpenAIEmbeddingsAdapter,
-    )
 
     snapshots = {
         ("alpha", False): FakeCredentials(
@@ -4435,15 +4451,14 @@ def test_concurrent_public_endpoint_modes_isolate_real_legacy_oauth_refresh_poli
             resolve_calls.append((label, force_oauth_refresh))
         return snapshots[(label, force_oauth_refresh)]
 
-    class _RawLegacyAuthError(RuntimeError):
-        def __init__(self, status_code: int, sentinel: str) -> None:
-            super().__init__(sentinel)
-            self.status_code = status_code
-
-    def _legacy_single(text, model, app_config=None, dimensions=None):
-        del dimensions
-        config = (app_config or {})["openai_api"]
-        call = (config["api_key"], config["api_base_url"], model, text)
+    def _legacy_fetch(**kwargs):
+        payload = kwargs["json"]
+        call = (
+            kwargs["headers"]["Authorization"].removeprefix("Bearer "),
+            kwargs["url"].removesuffix("/embeddings"),
+            payload["model"],
+            payload["input"][0],
+        )
         with lock:
             transport_calls.append(call)
             initial_count = sum(
@@ -4455,28 +4470,26 @@ def test_concurrent_public_endpoint_modes_isolate_real_legacy_oauth_refresh_poli
         if call[0] in {"key-alpha-old", "key-beta"} and not release.wait(10):
             raise TimeoutError("concurrent legacy OAuth calls were not released")
         if call[0] == "key-alpha-old":
-            raise _RawLegacyAuthError(401, "raw-alpha-oauth-secret")
+            return httpx.Response(401, json={"error": "raw-alpha-oauth-secret"})
         if call[0] == "key-beta":
-            raise _RawLegacyAuthError(403, "raw-beta-oauth-secret")
-        return [0.1, 0.2]
-
-    class _Registry:
-        def get_adapter(self, provider):
-            assert provider == "openai"
-            return OpenAIEmbeddingsAdapter()
+            return httpx.Response(403, json={"error": "raw-beta-oauth-secret"})
+        return httpx.Response(
+            200, json={"data": [{"index": 0, "embedding": [0.1, 0.2]}]}
+        )
 
     if orchestrator_enabled:
         monkeypatch.setenv("EMBEDDINGS_ORCHESTRATOR_ENABLED", "1")
     else:
         monkeypatch.delenv("EMBEDDINGS_ORCHESTRATOR_ENABLED", raising=False)
-    monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
+    monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "0")
     monkeypatch.delenv("LLM_EMBEDDINGS_NATIVE_HTTP_OPENAI", raising=False)
     monkeypatch.setenv("USE_REAL_OPENAI_IN_TESTS", "1")
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: _Registry())
+    adapter_registry = Mock(side_effect=AssertionError("Legacy-only call loaded adapters"))
+    monkeypatch.setattr(mod, "get_embeddings_registry", adapter_registry)
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.LLM_Calls.chat_calls.get_openai_embeddings",
-        _legacy_single,
+        "tldw_Server_API.app.core.http_client.fetch",
+        _legacy_fetch,
     )
 
     def _post(label: str):
@@ -4513,6 +4526,7 @@ def test_concurrent_public_endpoint_modes_isolate_real_legacy_oauth_refresh_poli
     snapshots[("alpha", True)].touch_last_used.assert_awaited_once()
     snapshots[("alpha", False)].touch_last_used.assert_not_awaited()
     snapshots[("beta", False)].touch_last_used.assert_not_awaited()
+    adapter_registry.assert_not_called()
 
 
 @pytest.mark.parametrize("orchestrator_enabled", [True, False], ids=("orchestrator", "legacy"))

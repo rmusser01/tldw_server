@@ -47,7 +47,7 @@ async def test_notes_retriever_uses_adapter_without_raw_sql(monkeypatch):
     monkeypatch.setattr(BaseRetriever, "_execute_query", _no_sql, raising=True)
 
     class FakeChaCha:
-        def search_notes(self, query: str, limit: int) -> List[Dict[str, Any]]:  # noqa: D401
+        def search_notes(self, query: str, limit: int, *, match_any: bool = False) -> List[Dict[str, Any]]:  # noqa: D401
             return [
                 {
                     "id": 1,

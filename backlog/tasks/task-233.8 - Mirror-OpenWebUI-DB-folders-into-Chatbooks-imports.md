@@ -35,11 +35,11 @@ Implement Stage 3 folder mirroring for selected-user OpenWebUI database chat imp
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Stage 3 folder mirroring in tldw_Server_API/app/core/Chatbooks/openwebui_folders.py and wired selected-user DB imports to mirror OpenWebUI / <user> / <source folder path> using keyword collections and conversation keyword links. Added deterministic global collection-name disambiguation, path-segment sanitization warnings, folder path metadata preservation in conversation settings, and mirrored_folders/folder_links result counts.
 
 Verification: focused Stage 3 pytest passed 16 tests; overlapping Chatbooks regression pytest passed 59 tests; Bandit over openwebui_folders.py, chatbook_service.py, and chatbook_schemas.py reported 0 findings; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -36,17 +36,17 @@ from tldw_Server_API.app.core.AuthNZ.crypto_utils import (
 #
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
-from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError, InvalidTokenError, TransactionError
+from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError, InvalidTokenError
 from tldw_Server_API.app.core.AuthNZ.api_key_audit import (
     emit_mandatory_api_key_management_audit,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
+from tldw_Server_API.app.core.exceptions import APIKeyRotationRejected
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventCategory,
     AuditEventType,
     MandatoryAuditWriteError,
 )
-from tldw_Server_API.app.core.exceptions import ApiKeyNotFoundError
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.AuthNZ.repos.api_keys_repo import AuthnzApiKeysRepo
@@ -931,21 +931,7 @@ class APIKeyManager:
                     return None
 
             if record_usage:
-                # Update usage statistics
-                await self._update_usage(key_info['id'], ip_address)
-
-                # Optional lightweight audit of usage
-                try:
-                    if self.settings.API_KEY_AUDIT_LOG_USAGE:
-                        await self._log_action(
-                            key_info['id'],
-                            "used",
-                            key_info.get('user_id'),
-                            details=usage_details,
-                        )
-                except Exception as _e:
-                    # Do not fail request on audit write
-                    logger.debug(f"API key usage audit skipped/failed: {_e}")
+                await self.record_key_usage(key_info['id'], key_info.get('user_id'), ip_address, usage_details)
 
             return key_info
 
@@ -995,9 +981,9 @@ class APIKeyManager:
                 old_key = await repo.fetch_key_for_user(key_id=key_id, user_id=user_id, conn=conn)
 
                 if not old_key:
-                    raise ApiKeyNotFoundError("API key not found or unauthorized")
+                    raise APIKeyRotationRejected()
                 if str(old_key.get("status") or "").lower() != APIKeyStatus.ACTIVE.value:
-                    raise ApiKeyNotFoundError("API key not found or unauthorized")
+                    raise APIKeyRotationRejected()
 
                 raw_allowed_ips = old_key.get("allowed_ips")
                 allowed_ips: Optional[list[str]] = None
@@ -1080,17 +1066,6 @@ class APIKeyManager:
             raise
         except MandatoryAuditWriteError:
             raise
-        except TransactionError as exc:
-            message = str(exc)
-            if (
-                "API key not found or inactive" in message
-                or "API key not found or unauthorized" in message
-            ):
-                raise ValueError("API key not found or unauthorized") from exc
-            logger.exception("Failed to rotate API key")
-            raise DatabaseError(
-                f"Failed to rotate API key {self._db_context_hint()}"
-            ) from exc
         except Exception as e:
             logger.exception("Failed to rotate API key")
             raise DatabaseError(
@@ -1233,6 +1208,21 @@ class APIKeyManager:
         """
         key_scopes = normalize_scope(key_scope)
         return has_scope(key_scopes, required_scope)
+
+    async def record_key_usage(
+        self,
+        key_id: int,
+        user_id: Optional[int] = None,
+        ip_address: Optional[str] = None,
+        usage_details: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """Update a key's usage statistics and, with API_KEY_AUDIT_LOG_USAGE, write a "used" audit row."""
+        await self._update_usage(key_id, ip_address)
+        try:
+            if self.settings.API_KEY_AUDIT_LOG_USAGE:
+                await self._log_action(key_id, "used", user_id, details=usage_details)
+        except Exception as _e:  # noqa: BLE001 - do not fail the request on an audit write
+            logger.debug(f"API key usage audit skipped/failed: {_e}")
 
     async def _update_usage(self, key_id: int, ip_address: Optional[str] = None) -> None:
         """Update usage statistics for a key"""

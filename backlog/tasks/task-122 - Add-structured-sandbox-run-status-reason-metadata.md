@@ -51,7 +51,7 @@ Design approved and captured in `Docs/superpowers/specs/2026-05-08-sandbox-statu
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created a fresh worktree from `origin/dev` at merge commit `182a29c2e` on branch `codex/sandbox-status-reason-details`. The design keeps the API additive: derive `status_reason_details` from existing `status_reason_code` without changing runner behavior, persisted run rows, phases, raw messages, or existing code literals.
 
 Implemented `RunStatusReasonDetails`, literal metadata types, `RUN_STATUS_REASON_METADATA`, import-time completeness validation, and `run_status_reason_details()` in `run_status_taxonomy.py`. Added nullable `status_reason_details` fields to public and admin schemas and populated them in public start/status responses plus admin list/detail responses.
@@ -72,7 +72,7 @@ Verification recorded:
 Known limitation: grouping the four TestClient endpoint checks in one pytest process hung in the existing TestClient shutdown path after the first test. The same endpoint checks passed as isolated pytest processes, so this slice records the grouped run as an existing lifecycle limitation rather than a status metadata failure.
 
 PR review follow-up: addressed two Gemini Code Assist threads by adding bounded caching for status reason detail schema objects and strengthening taxonomy validation so each metadata key must match its internal `code`. Added a focused mismatch regression test.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

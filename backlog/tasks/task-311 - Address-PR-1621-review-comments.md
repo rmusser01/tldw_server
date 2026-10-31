@@ -32,7 +32,7 @@ Resolve still-actionable review threads on PR #1621 for moderation review/rules 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Local verification completed before commit:
 - Backend focused pytest: 57 passed.
 - UI focused Vitest: 25 files / 241 tests passed.
@@ -43,7 +43,7 @@ Local verification completed before commit:
 - Bandit wrote /tmp/bandit_pr1621_review_fixes.json; only finding is existing migrations.py B608 at line 616 outside the PR review-fix hunk.
 
 Documentation DoD: no product docs changed; this was a PR review-fix slice and the durable notes are in the Backlog task plus PR comment.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

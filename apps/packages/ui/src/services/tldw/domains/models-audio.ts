@@ -1,3 +1,4 @@
+import { requestScopeFields } from "./service-prompts"
 import {
   bgRequest,
   sanitizeResponseData
@@ -69,6 +70,8 @@ export interface TldwApiClientCore {
   ): Promise<T>
   upload<T>(init: any, requireAuth?: boolean): Promise<T>
 }
+
+export type LlamacppRequestOptions = { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }
 
 export type TldwSpeechOptions = {
   voice?: string
@@ -574,12 +577,20 @@ export const modelsAudioMethods = {
   },
 
   // Admin / diagnostics helpers
-  async getSystemStats(options?: { timeoutMs?: number }): Promise<any> {
+  async getSystemStats(options?: {
+    timeoutMs?: number;
+    configSnapshot?: import("../../tldw/TldwApiClient").TldwConfig;
+    abortSignal?: AbortSignal;
+  }): Promise<any> {
+    // Forwards configSnapshot/abortSignal like the stage-3-deleted base
+    // copy: admin stats ride the captured request scope (TASK-13526).
     return await bgRequest<any>({
       path: "/api/v1/admin/stats",
       method: "GET",
-      timeoutMs: options?.timeoutMs
-    })
+      ...(options?.configSnapshot ? { servicePromptConfig: options.configSnapshot } : {}),
+      ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
+      ...(options?.timeoutMs ? { timeoutMs: options.timeoutMs } : {})
+    });
   },
 
   async getMediaIngestionBudgetDiagnostics(params: {
@@ -596,8 +607,9 @@ export const modelsAudioMethods = {
     })
   },
 
-  async getLlamacppStatus(): Promise<any> {
+  async getLlamacppStatus(options?: LlamacppRequestOptions): Promise<any> {
     return await bgRequest<any>({
+      ...options,
       path: "/api/v1/llamacpp/status",
       method: "GET",
       // 503 means the managed backend is deliberately not configured -
@@ -606,24 +618,27 @@ export const modelsAudioMethods = {
     })
   },
 
-  async listLlamacppModels(): Promise<any> {
+  async listLlamacppModels(options?: LlamacppRequestOptions): Promise<any> {
     return await bgRequest<any>({
+      ...options,
       path: "/api/v1/llamacpp/models",
       method: "GET"
     })
   },
 
-  async getLlamacppConfig(): Promise<LlamacppConfigResponse> {
+  async getLlamacppConfig(options?: LlamacppRequestOptions): Promise<LlamacppConfigResponse> {
     return await bgRequest<LlamacppConfigResponse>({
+      ...options,
       path: "/api/v1/llamacpp/config",
       method: "GET"
     })
   },
 
   async updateLlamacppConfig(
-    payload: LlamacppConfigUpdateRequest
+    payload: LlamacppConfigUpdateRequest, options?: LlamacppRequestOptions
   ): Promise<LlamacppConfigResponse> {
     return await bgRequest<LlamacppConfigResponse>({
+      ...options,
       path: "/api/v1/llamacpp/config",
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -632,9 +647,10 @@ export const modelsAudioMethods = {
   },
 
   async validateLlamacpp(
-    payload: LlamacppValidationRequest
+    payload: LlamacppValidationRequest, options?: LlamacppRequestOptions
   ): Promise<LlamacppValidationResponse> {
     return await bgRequest<LlamacppValidationResponse>({
+      ...options,
       path: "/api/v1/llamacpp/validate",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -642,22 +658,25 @@ export const modelsAudioMethods = {
     })
   },
 
-  async getLlamacppInventory(): Promise<LlamacppInventoryResponse> {
+  async getLlamacppInventory(options?: LlamacppRequestOptions): Promise<LlamacppInventoryResponse> {
     return await bgRequest<LlamacppInventoryResponse>({
+      ...options,
       path: "/api/v1/llamacpp/inventory",
       method: "GET"
     })
   },
 
-  async getLlamacppAssets(): Promise<LlamacppAssetsResponse> {
+  async getLlamacppAssets(options?: LlamacppRequestOptions): Promise<LlamacppAssetsResponse> {
     return await bgRequest<LlamacppAssetsResponse>({
+      ...options,
       path: "/api/v1/llamacpp/assets",
       method: "GET"
     })
   },
 
-  async registerLlamacppModelPath(path: string): Promise<LlamacppInventoryItem> {
+  async registerLlamacppModelPath(path: string, options?: LlamacppRequestOptions): Promise<LlamacppInventoryItem> {
     return await bgRequest<LlamacppInventoryItem>({
+      ...options,
       path: "/api/v1/llamacpp/models/register-path",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -665,8 +684,9 @@ export const modelsAudioMethods = {
     })
   },
 
-  async registerLlamacppAssetPath(path: string): Promise<LlamacppAsset> {
+  async registerLlamacppAssetPath(path: string, options?: LlamacppRequestOptions): Promise<LlamacppAsset> {
     return await bgRequest<LlamacppAsset>({
+      ...options,
       path: "/api/v1/llamacpp/assets/register-path",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -674,8 +694,9 @@ export const modelsAudioMethods = {
     })
   },
 
-  async importLlamacppAssetFolder(path: string): Promise<LlamacppAsset> {
+  async importLlamacppAssetFolder(path: string, options?: LlamacppRequestOptions): Promise<LlamacppAsset> {
     return await bgRequest<LlamacppAsset>({
+      ...options,
       path: "/api/v1/llamacpp/assets/import-folder",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -684,9 +705,10 @@ export const modelsAudioMethods = {
   },
 
   async previewLlamacppAssetFolder(
-    path: string
+    path: string, options?: LlamacppRequestOptions
   ): Promise<LlamacppAssetImportPreviewResponse> {
     return await bgRequest<LlamacppAssetImportPreviewResponse>({
+      ...options,
       path: "/api/v1/llamacpp/assets/import-folder/preview",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -695,9 +717,10 @@ export const modelsAudioMethods = {
   },
 
   async startLlamacppAssetDownload(
-    payload: LlamacppAssetDownloadRequest
+    payload: LlamacppAssetDownloadRequest, options?: LlamacppRequestOptions
   ): Promise<LlamacppAcquisitionJobResponse> {
     return await bgRequest<LlamacppAcquisitionJobResponse>({
+      ...options,
       path: "/api/v1/llamacpp/assets/downloads",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -705,26 +728,29 @@ export const modelsAudioMethods = {
     })
   },
 
-  async listLlamacppAssetDownloads(): Promise<LlamacppAcquisitionJobListResponse> {
+  async listLlamacppAssetDownloads(options?: LlamacppRequestOptions): Promise<LlamacppAcquisitionJobListResponse> {
     return await bgRequest<LlamacppAcquisitionJobListResponse>({
+      ...options,
       path: "/api/v1/llamacpp/assets/downloads",
       method: "GET"
     })
   },
 
   async getLlamacppAssetDownload(
-    jobId: string | number
+    jobId: string | number, options?: LlamacppRequestOptions
   ): Promise<LlamacppAcquisitionJobResponse> {
     return await bgRequest<LlamacppAcquisitionJobResponse>({
+      ...options,
       path: `/api/v1/llamacpp/assets/downloads/${encodeURIComponent(String(jobId))}`,
       method: "GET"
     })
   },
 
   async cancelLlamacppAssetDownload(
-    jobId: string | number
+    jobId: string | number, options?: LlamacppRequestOptions
   ): Promise<LlamacppAcquisitionJobResponse> {
     return await bgRequest<LlamacppAcquisitionJobResponse>({
+      ...options,
       path: `/api/v1/llamacpp/assets/downloads/${encodeURIComponent(String(jobId))}`,
       method: "DELETE"
     })
@@ -732,9 +758,10 @@ export const modelsAudioMethods = {
 
   async startLlamacppServer(
     modelFilename: string,
-    serverArgs?: Record<string, any>
+    serverArgs?: Record<string, any>, options?: LlamacppRequestOptions
   ): Promise<any> {
     return await bgRequest<any>({
+      ...options,
       path: "/api/v1/llamacpp/start_server",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -747,9 +774,10 @@ export const modelsAudioMethods = {
 
   async startLlamacppModel(
     modelId: string,
-    serverArgs?: Record<string, unknown>
+    serverArgs?: Record<string, unknown>, options?: LlamacppRequestOptions
   ): Promise<Record<string, unknown>> {
     return await bgRequest<Record<string, unknown>>({
+      ...options,
       path: "/api/v1/llamacpp/start-by-model",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -760,8 +788,9 @@ export const modelsAudioMethods = {
     })
   },
 
-  async stopLlamacppServer(): Promise<any> {
+  async stopLlamacppServer(options?: LlamacppRequestOptions): Promise<any> {
     return await bgRequest<any>({
+      ...options,
       path: "/api/v1/llamacpp/stop_server",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -769,8 +798,9 @@ export const modelsAudioMethods = {
     })
   },
 
-  async useLlamacppInChat(): Promise<LlamacppUseInChatResponse> {
+  async useLlamacppInChat(options?: LlamacppRequestOptions): Promise<LlamacppUseInChatResponse> {
     return await bgRequest<LlamacppUseInChatResponse>({
+      ...options,
       path: "/api/v1/llamacpp/use-in-chat",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -778,25 +808,28 @@ export const modelsAudioMethods = {
     })
   },
 
-  async tailLlamacppLogs(lines?: number): Promise<LlamacppLogTailResponse> {
+  async tailLlamacppLogs(lines?: number, options?: LlamacppRequestOptions): Promise<LlamacppLogTailResponse> {
     const query = buildQuery(lines === undefined ? {} : { lines })
     return await bgRequest<LlamacppLogTailResponse>({
+      ...options,
       path: `/api/v1/llamacpp/logs/tail${query}`,
       method: "GET"
     })
   },
 
-  async listLlamacppProfiles(): Promise<LlamacppProfileListResponse> {
+  async listLlamacppProfiles(options?: LlamacppRequestOptions): Promise<LlamacppProfileListResponse> {
     return await bgRequest<LlamacppProfileListResponse>({
+      ...options,
       path: "/api/v1/llamacpp/profiles",
       method: "GET"
     })
   },
 
   async createLlamacppProfile(
-    payload: LlamacppProfileCreateRequest
+    payload: LlamacppProfileCreateRequest, options?: LlamacppRequestOptions
   ): Promise<LlamacppProfile> {
     return await bgRequest<LlamacppProfile>({
+      ...options,
       path: "/api/v1/llamacpp/profiles",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -806,9 +839,10 @@ export const modelsAudioMethods = {
 
   async updateLlamacppProfile(
     profileId: string,
-    payload: LlamacppProfileUpdateRequest
+    payload: LlamacppProfileUpdateRequest, options?: LlamacppRequestOptions
   ): Promise<LlamacppProfile> {
     return await bgRequest<LlamacppProfile>({
+      ...options,
       path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}`,
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -817,18 +851,20 @@ export const modelsAudioMethods = {
   },
 
   async deleteLlamacppProfile(
-    profileId: string
+    profileId: string, options?: LlamacppRequestOptions
   ): Promise<{ profile_id: string; deleted: boolean }> {
     return await bgRequest<{ profile_id: string; deleted: boolean }>({
+      ...options,
       path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}`,
       method: "DELETE"
     })
   },
 
   async startLlamacppProfile(
-    profileId: string
+    profileId: string, options?: LlamacppRequestOptions
   ): Promise<LlamacppLifecycleActionResponse> {
     return await bgRequest<LlamacppLifecycleActionResponse>({
+      ...options,
       path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/start`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -837,9 +873,10 @@ export const modelsAudioMethods = {
   },
 
   async stopLlamacppProfile(
-    profileId: string
+    profileId: string, options?: LlamacppRequestOptions
   ): Promise<LlamacppLifecycleActionResponse> {
     return await bgRequest<LlamacppLifecycleActionResponse>({
+      ...options,
       path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/stop`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -848,9 +885,10 @@ export const modelsAudioMethods = {
   },
 
   async pauseLlamacppProfile(
-    profileId: string
+    profileId: string, options?: LlamacppRequestOptions
   ): Promise<LlamacppLifecycleActionResponse> {
     return await bgRequest<LlamacppLifecycleActionResponse>({
+      ...options,
       path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/pause`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -859,9 +897,10 @@ export const modelsAudioMethods = {
   },
 
   async resumeLlamacppProfile(
-    profileId: string
+    profileId: string, options?: LlamacppRequestOptions
   ): Promise<LlamacppLifecycleActionResponse> {
     return await bgRequest<LlamacppLifecycleActionResponse>({
+      ...options,
       path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/resume`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -870,9 +909,10 @@ export const modelsAudioMethods = {
   },
 
   async useLlamacppProfileInChat(
-    profileId: string
+    profileId: string, options?: LlamacppRequestOptions
   ): Promise<LlamacppUseInChatResponse> {
     return await bgRequest<LlamacppUseInChatResponse>({
+      ...options,
       path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/use-in-chat`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -880,8 +920,9 @@ export const modelsAudioMethods = {
     })
   },
 
-  async listLlamacppInstances(): Promise<LlamacppRuntimeListResponse> {
+  async listLlamacppInstances(options?: LlamacppRequestOptions): Promise<LlamacppRuntimeListResponse> {
     return await bgRequest<LlamacppRuntimeListResponse>({
+      ...options,
       path: "/api/v1/llamacpp/instances",
       method: "GET"
     })
@@ -889,17 +930,19 @@ export const modelsAudioMethods = {
 
   async tailLlamacppInstanceLogs(
     profileId: string,
-    lines?: number
+    lines?: number, options?: LlamacppRequestOptions
   ): Promise<LlamacppLogTailResponse> {
     const query = buildQuery(lines === undefined ? {} : { lines })
     return await bgRequest<LlamacppLogTailResponse>({
+      ...options,
       path: `/api/v1/llamacpp/instances/${encodeURIComponent(profileId)}/logs/tail${query}`,
       method: "GET"
     })
   },
 
-  async getLlamacppHardware(): Promise<LlamacppHardwareSnapshotResponse> {
+  async getLlamacppHardware(options?: LlamacppRequestOptions): Promise<LlamacppHardwareSnapshotResponse> {
     return await bgRequest<LlamacppHardwareSnapshotResponse>({
+      ...options,
       path: "/api/v1/llamacpp/hardware",
       method: "GET"
     })
@@ -1071,7 +1114,9 @@ export const modelsAudioMethods = {
     audioFile: File | Blob,
     options?: any
   ): Promise<any> {
+    options?.signal?.throwIfAborted()
     await this.ensureConfigForRequest(true)
+    options?.signal?.throwIfAborted()
     const fields: Record<string, any> = {}
     if (options) {
       if (options.model != null) fields.model = options.model
@@ -1102,9 +1147,11 @@ export const modelsAudioMethods = {
       }
     }
     const data = await audioFile.arrayBuffer()
+    options?.signal?.throwIfAborted()
     const name = (typeof File !== 'undefined' && audioFile instanceof File && (audioFile as File).name) ? (audioFile as File).name : 'audio'
     const type = (audioFile as any)?.type || 'application/octet-stream'
-    return await this.upload<any>({ path: '/api/v1/audio/transcriptions', method: 'POST', fields, file: { name, type, data } })
+    // Local ASR can exceed the generic ten-second request budget.
+    return await this.upload<any>({ path: '/api/v1/audio/transcriptions', method: 'POST', ...requestScopeFields(options?.requestScope), abortSignal: options?.signal, timeoutMs: options?.timeoutMs ?? 180000, fields, file: { name, type, data } })
   },
 
   async synthesizeSpeech(

@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Requ
 from loguru import logger
 from pydantic import ValidationError
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_expected_user_if_present
 from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     PromptStudioDatabase,
     SecurityConfig,
@@ -104,6 +105,7 @@ from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 # Router Setup
 
 router = APIRouter(
+    dependencies=[Depends(require_expected_user_if_present)],
     prefix="/api/v1/prompt-studio/prompts",
     tags=["prompt-studio"],
     responses={
@@ -194,7 +196,13 @@ def _coerce_structured_definition(
             schema_version=prompt_schema_version,
         )
     except ValueError as exc:
-        raise InputError(str(exc)) from exc
+        raise InputError(
+            str(exc),
+            safe_message=(
+                "Invalid structured prompt definition. Check schema version, "
+                "block roles, and declared template variables."
+            ),
+        ) from exc
 
     definition_schema_version = int(definition.schema_version)
     if int(prompt_schema_version) != definition_schema_version:
@@ -321,9 +329,13 @@ def _validate_prompt_content(
         )
         return
 
+    # Authoring measures defaults and fixed content before runtime values exist.
+    validation_definition = definition.model_copy(
+        update={"variables": [variable.model_copy(update={"required": False}) for variable in definition.variables]}
+    )
     assembly = assemble_prompt_definition(
-        definition,
-        _validation_variables(definition),
+        validation_definition,
+        _validation_variables(validation_definition),
         extras=extras,
     )
     messages = assembly.messages
@@ -852,6 +864,17 @@ async def execute_prompt_simple(
         import inspect as _inspect
 
         result = await maybe if _inspect.isawaitable(maybe) else maybe
+        if (isinstance(result, dict) and result.get("success") is False
+                and result.get("error_code") == "missing_required_variable"):
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "error_code": "missing_required_variable",
+                        "message": "Required prompt inputs are missing.",
+                    },
+                )
+            )
         if not isinstance(result, dict) or result.get("success") is False:
             raise_detached_error(
                 HTTPException(

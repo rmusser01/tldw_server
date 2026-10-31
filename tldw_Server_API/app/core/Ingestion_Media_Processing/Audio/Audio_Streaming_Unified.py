@@ -335,20 +335,6 @@ def _get_torch_module():
     return torch
 
 
-def _vad_observe_exceptions() -> tuple[type[BaseException], ...]:
-    """Noncritical errors plus ``torch.jit.Error`` for TorchScript VAD models.
-
-    Silero runs as TorchScript, whose errors (e.g. "Input audio chunk is too
-    short" for a short client chunk) surface as ``torch.jit.Error``. That derives
-    from ``Exception``, not ``RuntimeError``, so the noncritical tuple alone lets
-    it escape the detector's fail-open handling and abort the stream.
-    """
-    jit_error = getattr(getattr(_get_torch_module(), "jit", None), "Error", None)
-    if isinstance(jit_error, type) and issubclass(jit_error, Exception):
-        return (*_AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS, jit_error)
-    return _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS
-
-
 def _get_torchaudio_module():
     global torchaudio, _TORCHAUDIO_IMPORT_ATTEMPTED
     if torchaudio is not None:
@@ -613,6 +599,8 @@ class SileroTurnDetector:
         self._backend: str = "silero_hub"
         self._onnx_session = None
         self._onnx_input_name: Optional[str] = None
+        self._vad_audio_remainder = np.empty(0, dtype=np.float32)
+        self._vad_runtime_exceptions = _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS
 
         if not enabled:
             self.unavailable_reason = "disabled"
@@ -703,6 +691,15 @@ class SileroTurnDetector:
                 )
                 return
 
+            torch_mod = _get_torch_module()
+            script_error = getattr(getattr(torch_mod, "jit", None), "Error", None)
+            if (
+                isinstance(script_error, type)
+                and issubclass(script_error, Exception)
+                and script_error is not Exception
+            ):
+                self._vad_runtime_exceptions += (script_error,)
+
             self._iterator = VADIterator(
                 model=model,
                 threshold=self._vad_threshold,
@@ -711,11 +708,15 @@ class SileroTurnDetector:
                 speech_pad_ms=30,
             )
             self.available = True
-        except _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS as err:  # pragma: no cover - defensive; exercised in fail-open tests
-            self.unavailable_reason = str(err)
-            logger.warning(f"Silero VAD failed to initialize; continuing without auto-commit: {err}")
+        except self._vad_runtime_exceptions as err:
+            self.unavailable_reason = "vad_initialization_error"
+            logger.warning(
+                "Silero VAD failed to initialize; continuing without auto-commit error_type={}",
+                type(err).__name__,
+            )
             self.available = False
             self._iterator = None
+            self._vad_audio_remainder = np.empty(0, dtype=np.float32)
 
     @property
     def last_trigger_at(self) -> Optional[float]:
@@ -724,13 +725,16 @@ class SileroTurnDetector:
 
     def _saw_speech(self, vad_result: Any) -> bool:
         """Best-effort speech detection from Silero iterator outputs."""
-        if vad_result is None:
-            return False
         try:
+            triggered = getattr(self._iterator, "triggered", None)
+            if isinstance(triggered, bool):
+                return triggered
+            if vad_result is None:
+                return False
             if isinstance(vad_result, dict):
                 if vad_result.get("speech_timestamps"):
                     return True
-                if vad_result.get("start") is not None or vad_result.get("end") is not None:
+                if vad_result.get("start") is not None:
                     return True
                 probs = vad_result.get("speech_probs") or vad_result.get("probs")
                 if probs:
@@ -744,7 +748,7 @@ class SileroTurnDetector:
 
     def observe(self, audio_bytes: bytes) -> bool:
         """
-        Feed an audio chunk into the detector.
+        Feed an audio chunk into the detector, retaining incomplete Silero windows.
 
         Returns True exactly once per speech turn when silence >= turn_stop_secs
         occurs after a detected speech span (minimum utterance guard applied).
@@ -793,24 +797,40 @@ class SileroTurnDetector:
                 audio_np = np.frombuffer(audio_bytes, dtype=np.float32)
                 if audio_np.size == 0:
                     return False
-                audio_in = audio_np
-                # Prefer torch tensor input when available (Silero expects torch tensors)
+                if self._vad_audio_remainder.size:
+                    audio_np = np.concatenate((self._vad_audio_remainder, audio_np))
+                self._vad_audio_remainder = np.empty(0, dtype=np.float32)
+                window_samples = 512 if self._sample_rate == 16000 else 256
+                complete_samples = audio_np.size - audio_np.size % window_samples
+                if complete_samples == 0:
+                    self._vad_audio_remainder = audio_np.copy()
+                    return False
+
                 torch_mod = _get_torch_module()
-                if torch_mod is not None:
-                    try:
-                        audio_in = torch_mod.from_numpy(audio_np)  # type: ignore
-                    except _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS:
-                        audio_in = audio_np
-                vad_result = self._iterator(audio_in, return_seconds=False)
-                speech_detected = self._saw_speech(vad_result)
-            except _vad_observe_exceptions() as err:
-                logger.warning(f"Silero VAD failed during observe; disabling auto-commit: {err}")
+                speech_detected = False
+                for start in range(0, complete_samples, window_samples):
+                    audio_in = audio_np[start : start + window_samples].copy()
+                    # Silero expects Torch tensors when Torch is available.
+                    if torch_mod is not None:
+                        try:
+                            audio_in = torch_mod.from_numpy(audio_in)  # type: ignore
+                        except _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS:
+                            pass
+                    vad_result = self._iterator(audio_in, return_seconds=False)
+                    speech_detected = self._saw_speech(vad_result) or speech_detected
+                self._vad_audio_remainder = audio_np[complete_samples:].copy()
+            except self._vad_runtime_exceptions as err:
+                logger.warning(
+                    "Silero VAD failed during observe; disabling auto-commit error_type={}",
+                    type(err).__name__,
+                )
                 self.available = False
-                self.unavailable_reason = str(err)
+                self.unavailable_reason = "vad_runtime_error"
+                self._vad_audio_remainder = np.empty(0, dtype=np.float32)
                 try:
                     if hasattr(self._iterator, "reset_states"):
                         self._iterator.reset_states()
-                except _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS:
+                except self._vad_runtime_exceptions:
                     pass
                 return False
 
@@ -835,11 +855,21 @@ class SileroTurnDetector:
             self._speech_started_at = None
             self._last_speech_at = None
             self._last_trigger_at = now
+            self._vad_audio_remainder = np.empty(0, dtype=np.float32)
             try:
                 if hasattr(self._iterator, "reset_states"):
                     self._iterator.reset_states()
             except _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS:
                 pass
+            except self._vad_runtime_exceptions as err:
+                self.available = False
+                self.unavailable_reason = "vad_runtime_error"
+                self._last_trigger_at = None
+                logger.warning(
+                    "Silero VAD failed during reset; disabling auto-commit error_type={}",
+                    type(err).__name__,
+                )
+                return False
             return True
 
         return False

@@ -30,9 +30,9 @@ Migrate the DocumentWorkspace PagesTab PDF load-error banner from AntD Alert to 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented test-first: the PagesTab regression drives the mocked react-pdf load-error branch and failed on the missing canonical Alert marker before the AntD Alert was replaced with the design-system Alert.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -842,11 +842,11 @@ def test_host_mcp_import_bootstraps_standalone_src_for_source_checkout() -> None
 
     script = (
         "import json, sys; "
-        "sys.path = [p for p in sys.path if 'apps/mcp-unified/src' not in p]; "
+        "sys.path = [p for p in sys.path if 'apps/mcp-unified/src' not in p.replace(chr(92), '/')]; "
         "import tldw_Server_API.app.core.MCP_unified.modules.base; "
         "import mcp_unified; "
         "print(json.dumps({'file': mcp_unified.__file__, 'paths': ["
-        "p for p in sys.path if 'apps/mcp-unified/src' in p"
+        "p for p in sys.path if 'apps/mcp-unified/src' in p.replace(chr(92), '/')"
         "]}))"
     )
     result = subprocess.run(  # nosec B603

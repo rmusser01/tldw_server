@@ -26,7 +26,6 @@ Implement the first Workspace Assistant Defaults V1 slice from #1911: backend st
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added Workspace Assistant Defaults Pydantic schema types with Persona-only `assistant_kind`, read-only/read-write memory modes, and explicit null-only deferred fields.
 - Added ChaChaNotes schema v49 with `assistant_defaults_json` storage for SQLite and PostgreSQL creation/migration paths.
@@ -38,11 +37,10 @@ Implement the first Workspace Assistant Defaults V1 slice from #1911: backend st
   - `python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_workspace_assistant_defaults_db.py tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py -q --tb=short --disable-warnings` passed: 31 passed, 6 warnings.
   - `git diff --check` passed.
   - Production Bandit passed with 0 findings for `workspace_schemas.py` and `ChaChaNotes_DB.py`; full touched-scope Bandit only reported pytest `assert` warnings in the new test file.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 - PR review follow-up after rebase onto origin/dev: mapped API assistant_defaults patches to assistant_defaults_json, consumed confirmation-only request metadata, enforced read_write confirmation in WorkspacePatchRequest, added effective assistant default status validation, made malformed write payloads raise InputError while logging malformed stored DB values, and rejected unknown-only DB updates.
 - Review verification: focused regression pytest passed (11 passed); broader workspace/DB pytest passed (111 passed); py_compile passed for touched app files; git diff --check passed; Bandit passed on touched app files with 0 findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

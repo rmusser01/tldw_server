@@ -10,15 +10,26 @@ import asyncio
 import base64
 import contextlib
 import json
-import os
 import time
 import uuid
+from functools import partial
 from typing import Any, Optional
 
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+    WebSocketException,
+    status,
+)
 from loguru import logger
 from pydantic import BaseModel, Field
+from starlette.websockets import WebSocketState
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user,
@@ -61,15 +72,15 @@ from tldw_Server_API.app.api.v1.schemas.voice_assistant_schemas import (
     WSWorkflowProgressMessage,
 )
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError
 from tldw_Server_API.app.core.TTS.tts_request_resolution import (
     resolve_tts_request_defaults,
 )
-from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime
-from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
-    cookie_websocket_rejection_code,
-    resolve_single_user_cookie_websocket,
+from tldw_Server_API.app.core.AuthNZ.websocket_principal import (
+    resolve_ws_principal_first_frame,
+    resolve_ws_principal_or_deprecated_query,
 )
 from tldw_Server_API.app.core.VoiceAssistant import (
     ActionType,
@@ -117,9 +128,6 @@ router = APIRouter(
 # WebSocket router (separate to avoid auth middleware conflicts)
 ws_router = APIRouter()
 
-_AUTH_ACCESS_KIND = "access"
-
-
 # Helper functions
 
 def _action_type_to_voice(action_type: ActionType) -> VoiceActionType:
@@ -151,80 +159,30 @@ def _voice_command_to_info(command: VoiceCommand) -> VoiceCommandInfo:
     )
 
 
-def _looks_like_jwt(token: Optional[str]) -> bool:
-    return isinstance(token, str) and token.count(".") == 2
+# The AUTH_ERROR text the voice SDKs show, by refusal reason; anything else is "Invalid credentials".
+_AUTH_ERRORS = {"authentication_timeout": "Authentication timeout", "expected_auth_frame": "Expected AUTH message"}
 
 
-async def _authenticate_websocket(
-    websocket: WebSocket,
-    token: Optional[str] = None,
-) -> tuple[bool, Optional[int]]:
+async def _authenticate_websocket(websocket: WebSocket) -> int:
+    """Return the user id of the caller's AUTH frame, ``{"type": "auth", "token": <JWT or API key>}``.
+
+    The core first-frame resolver accepts the socket, reads only that frame and verifies its token
+    on HTTP's path, so revocation, the API key's ``read`` scope and the single-user key and IP
+    allowlist follow HTTP (TASK-13950.7). It waits ``FIRST_FRAME_TIMEOUT_S`` (10 s) for the frame. A
+    frame without a token falls back to the cookie, then to a handshake credential, then to the
+    DEPRECATED ``?token=`` the voice SDKs also send (TASK-13950.61 moves them); ``?api_key=`` is not
+    read. Raises ``WebSocketException`` as the resolver does, and 4401 for a service token, which owns
+    no voice session.
     """
-    Authenticate WebSocket connection.
-
-    Args:
-        websocket: The WebSocket connection
-        token: JWT token or API key
-
-    Returns:
-        Tuple of (authenticated, user_id)
-    """
-    if not token:
-        return False, None
-
-    if _looks_like_jwt(token):
-        try:
-            from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidTokenError, TokenExpiredError
-            from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
-            from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
-
-            jwt_service = get_jwt_service()
-            payload = await jwt_service.verify_token_async(token, token_type=_AUTH_ACCESS_KIND)
-            session_manager = await get_session_manager()
-            if await session_manager.is_token_blacklisted(token, payload.get("jti")):
-                return False, None
-
-            user_id = payload.get("user_id") or payload.get("sub")
-            if isinstance(user_id, str):
-                try:
-                    user_id = int(user_id)
-                except (TypeError, ValueError):
-                    user_id = None
-            if isinstance(user_id, int):
-                return True, user_id
-        except (InvalidTokenError, TokenExpiredError):
-            pass
-        except (AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError):
-            pass
-
-    try:
-        from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
-        from tldw_Server_API.app.core.AuthNZ.ip_allowlist import is_single_user_ip_allowed, resolve_client_ip
-        from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-
-        settings = get_settings()
-        client_ip = resolve_client_ip(websocket, settings)
-        if getattr(settings, "AUTH_MODE", None) == "single_user":
-            allowed_keys: set[str] = set()
-            primary_key = getattr(settings, "SINGLE_USER_API_KEY", None)
-            if primary_key:
-                allowed_keys.add(primary_key)
-            if is_explicit_pytest_runtime():
-                test_key = os.getenv("SINGLE_USER_TEST_API_KEY")
-                if test_key:
-                    allowed_keys.add(test_key)
-            if token in allowed_keys and is_single_user_ip_allowed(client_ip, settings):
-                return True, int(getattr(settings, "SINGLE_USER_FIXED_ID", 1))
-            return False, None
-
-        api_mgr = await get_api_key_manager()
-        info = await api_mgr.validate_api_key(api_key=token, required_scope="read", ip_address=client_ip)
-        if info and info.get("user_id") is not None:
-            return True, int(info["user_id"])
-    except (AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError):
-        pass
-
-    return False, None
+    principal = await resolve_ws_principal_first_frame(
+        websocket,
+        required_scope="read",
+        # ``?token=`` only, the one query channel voice ever read; never the shim's ``?api_key=``.
+        tokenless_frame=partial(resolve_ws_principal_or_deprecated_query, query_params=("token",)),
+    )
+    if principal.user_id is None:
+        raise WebSocketException(code=4401, reason="user_principal_required")
+    return principal.user_id
 
 
 async def _generate_tts_audio(
@@ -1019,16 +977,19 @@ async def cancel_workflow(
 
 # WebSocket Endpoint
 
+def _save_session_and_load_commands(db: CharactersRAGDB, session: Any, registry: Any, user_id: int) -> list[Any]:
+    """Session start's ChaCha work; it runs off the event loop, and the loop applies the commands."""
+    save_voice_session(db, session)
+    return registry.load_user_commands(db, user_id, include_disabled=True)
+
+
 @ws_router.websocket("/assistant")
-async def websocket_voice_assistant(
-    websocket: WebSocket,
-    token: Optional[str] = Query(None),
-):
+async def websocket_voice_assistant(websocket: WebSocket):
     """
     WebSocket endpoint for real-time voice assistant sessions.
 
     Protocol:
-    1. Client sends AUTH message with token
+    1. Client sends AUTH message with token (or, deprecated, ``?token=`` when the frame has none)
     2. Server responds with AUTH_OK or AUTH_ERROR
     3. Client sends CONFIG message with preferences
     4. Server responds with CONFIG_ACK
@@ -1037,13 +998,6 @@ async def websocket_voice_assistant(
     7. Server sends TRANSCRIPTION, INTENT, ACTION_START, ACTION_RESULT, TTS_CHUNK*, TTS_END
     8. Repeat from step 5
     """
-    cookie_identity = await resolve_single_user_cookie_websocket(websocket)
-    cookie_close_code = cookie_websocket_rejection_code(websocket)
-    if cookie_close_code is not None:
-        await websocket.close(code=cookie_close_code)
-        return
-    await websocket.accept()
-
     user_id: Optional[int] = None
     session_id: Optional[str] = None
     db: Optional[CharactersRAGDB] = None
@@ -1051,41 +1005,16 @@ async def websocket_voice_assistant(
     transcriber = None
 
     try:
-        # Wait for authentication
-        auth_timeout = 10.0  # seconds
         try:
-            auth_data = await asyncio.wait_for(
-                websocket.receive_json(),
-                timeout=auth_timeout,
-            )
-        except asyncio.TimeoutError:
-            await websocket.send_json(
-                WSAuthErrorMessage(error="Authentication timeout").model_dump()
-            )
-            await websocket.close(code=4401)
-            return
-
-        # Process auth message
-        if auth_data.get("type") != WSMessageType.AUTH.value:
-            await websocket.send_json(
-                WSAuthErrorMessage(error="Expected AUTH message").model_dump()
-            )
-            await websocket.close(code=4400)
-            return
-
-        auth_token = auth_data.get("token") or token
-        if auth_token:
-            authenticated, user_id = await _authenticate_websocket(websocket, auth_token)
-        elif cookie_identity is not None:
-            authenticated, user_id = True, cookie_identity.user_id
-        else:
-            authenticated, user_id = False, None
-
-        if not authenticated or user_id is None:
-            await websocket.send_json(
-                WSAuthErrorMessage(error="Invalid credentials").model_dump()
-            )
-            await websocket.close(code=4401)
+            user_id = await _authenticate_websocket(websocket)
+        except WebSocketException as refused:
+            if websocket.application_state != WebSocketState.CONNECTED:  # the cookie's Origin check
+                await websocket.close(code=refused.code)
+                return
+            error = _AUTH_ERRORS.get(refused.reason, "Invalid credentials")
+            await websocket.send_json(WSAuthErrorMessage(error=error).model_dump())
+            # As shipped: 4400 for another first frame, 4401 for any refused credential.
+            await websocket.close(code=4400 if refused.reason == "expected_auth_frame" else 4401)
             return
 
         # Create session
@@ -1100,11 +1029,19 @@ async def websocket_voice_assistant(
         # Initialize DB + load user commands for persistence
         try:
             db = await get_chacha_db_for_user_id(user_id, client_id="voice_assistant")
-            save_voice_session(db, session)
             registry = get_voice_command_registry()
             registry.load_defaults()
-            registry.refresh_user_commands(db, user_id, include_disabled=True)
-        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            # A WebSocket runs outside the HTTP operation middleware: this step owns its
+            # checkout, off the event loop, so a full pool cannot stall the server.
+            commands = await asyncio.to_thread(
+                chacha_operation(independent=True)(_save_session_and_load_commands),
+                db,
+                session.model_copy(deep=True),
+                registry,
+                user_id,
+            )
+            registry.apply_user_commands(user_id, commands)
+        except Exception:  # noqa: BLE001 - a full pool (PoolTimeout) or a DB error degrades the session, not the socket
             logger.warning("Voice assistant DB init failed")
 
         await websocket.send_json(
@@ -1405,7 +1342,8 @@ async def _process_text_command(
     db: Optional[CharactersRAGDB] = None,
 ) -> None:
     """Process text through Intent -> Action -> TTS pipeline."""
-    # Process command
+    # No operation around the command: the router runs each of its ChaCha call groups off
+    # the event loop in its own, so no checkout spans the LLM call, MCP action or workflow.
     result, _ = await router_instance.process_command(
         text=text,
         user_id=user_id,

@@ -44,7 +44,7 @@ See Docs/superpowers/plans/2026-06-07-knowledge-uat-regression-guardrails-plan.m
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added the Knowledge QA UAT checklist at Docs/Plans/2026-06-07-knowledge-qa-uat-checklist.md, covering backend unavailable recovery, first-run/no-source recovery, successful cited search, no-results recovery, scoped document/note search, advanced settings/evidence review, and export.
 - Added the Knowledge QA user guide at Docs/User_Guides/WebUI_Extension/Knowledge_QA_Guide.md, documenting source scope, citations/evidence, presets/settings, web fallback, answer model/provider controls, export, related workflows, and WebUI/extension differences.
 - Recorded consolidated regression commands for shared UI Vitest, WebUI Playwright, extension Playwright, backend pytest/Bandit when applicable, and the Knowledge QA scope terminology guard.
@@ -53,16 +53,12 @@ See Docs/superpowers/plans/2026-06-07-knowledge-uat-regression-guardrails-plan.m
 - Verification: trailing-whitespace guard passed for TASK-528.8 docs/task files, and the Knowledge QA code/test scope guard found no deck/spaced-repetition/study-set terminology in touched Knowledge QA source or E2E files.
 - Known blocker: extension runtime E2E/UAT remains blocked by the previously recorded WXT production build stall before browser launch. No browser-phase extension evidence was produced in this closeout pass.
 - Bandit is not applicable for TASK-528.8 because only markdown documentation and Backlog records were touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Completed the Knowledge QA closeout documentation and regression guardrails. The new UAT checklist and user guide make the WebUI/extension release checks repeatable while preserving the Knowledge QA-only scope. Shared UI Vitest and WebUI Playwright checks pass; extension runtime E2E remains a documented WXT build blocker rather than a verified browser pass.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

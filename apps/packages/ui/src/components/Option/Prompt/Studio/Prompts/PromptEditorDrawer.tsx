@@ -118,8 +118,13 @@ export const PromptEditorDrawer: React.FC<PromptEditorDrawerProps> = ({
 
   // Create mutation
   const createMutation = useMutation({
-    mutationFn: (values: PromptCreatePayload) =>
-      createPrompt(values, crypto.randomUUID()),
+    mutationFn: async (values: PromptCreatePayload) => {
+      const response = await createPrompt(values, crypto.randomUUID())
+      if (response.ok === false || response.data?.success === false) {
+        throw new Error(response.error || response.data?.error || "Prompt could not be created")
+      }
+      return response
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["prompt-studio", "prompts", projectId]
@@ -133,7 +138,7 @@ export const PromptEditorDrawer: React.FC<PromptEditorDrawerProps> = ({
     },
     onError: (error: any) => {
       notification.error({
-        message: t("common:error", { defaultValue: "Error" }),
+        message: t("common:error.label", { defaultValue: "Error" }),
         description: error?.message || t("common:unknownError")
       })
     }
@@ -141,8 +146,13 @@ export const PromptEditorDrawer: React.FC<PromptEditorDrawerProps> = ({
 
   // Update mutation
   const updateMutation = useMutation({
-    mutationFn: (values: PromptUpdatePayload) =>
-      updatePrompt(promptId!, values),
+    mutationFn: async (values: PromptUpdatePayload) => {
+      const response = await updatePrompt(promptId!, values)
+      if (response.ok === false || response.data?.success === false) {
+        throw new Error(response.error || response.data?.error || "Prompt could not be saved")
+      }
+      return response
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["prompt-studio", "prompts", projectId]
@@ -162,7 +172,7 @@ export const PromptEditorDrawer: React.FC<PromptEditorDrawerProps> = ({
     },
     onError: (error: any) => {
       notification.error({
-        message: t("common:error", { defaultValue: "Error" }),
+        message: t("common:error.label", { defaultValue: "Error" }),
         description: error?.message || t("common:unknownError")
       })
     }
@@ -176,7 +186,7 @@ export const PromptEditorDrawer: React.FC<PromptEditorDrawerProps> = ({
     },
     onError: (error: any) => {
       notification.error({
-        message: t("common:error", { defaultValue: "Error" }),
+        message: t("common:error.label", { defaultValue: "Error" }),
         description: error?.message || t("common:unknownError")
       })
     }
@@ -255,6 +265,7 @@ export const PromptEditorDrawer: React.FC<PromptEditorDrawerProps> = ({
       null
     )
 
+    setPreviewResult(null)
     previewMutation.mutate({
       project_id: projectId,
       signature_id: existingPrompt?.signature_id ?? null,

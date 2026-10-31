@@ -38,9 +38,9 @@ Resolve actionable Qodo review findings on PR #1483 for VN Play branch navigatio
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Addressed Qodo review threads r3214116320 r3214116321 r3214116322 r3214116324 and r3214116326. Red evidence before fixes: focused review regression run failed with 3 failures for branch warning severity, missing list_events_for_branch_nodes, and failed restore retry terminal error preservation. Green evidence: focused regression set passed; branch-query focused tests passed; full VN Play suite passed with 125 passed, 5 warnings in 31.40s. Bandit touched backend scope wrote /tmp/bandit_vn_play_branch_navigation_review_fixes.json with results/errors empty. git diff --check => exit 0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

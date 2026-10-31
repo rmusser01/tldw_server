@@ -36,9 +36,11 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatRateLimitError,
     SanitizedProviderStreamError,
 )
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     bind_provider_call_credentials,
 )
+from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
 from tldw_Server_API.app.services import admin_byok_service as shared_service
 from tldw_Server_API.tests.provider_credential_test_helpers import (
     resolved_request_fields_async,
@@ -249,8 +251,13 @@ class _StaticValidationResultAdapter:
 class _CredentialBoundaryAdapter:
     """Exercise the real credential binder at the validation adapter boundary."""
 
-    def __init__(self, observed: list[dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        observed: list[dict[str, Any]],
+        exempt_seen: list[bool] | None = None,
+    ) -> None:
         self.observed = observed
+        self.exempt_seen = exempt_seen
 
     def chat(
         self,
@@ -259,6 +266,8 @@ class _CredentialBoundaryAdapter:
         timeout: float | None = None,
     ) -> dict[str, Any]:
         del timeout
+        if self.exempt_seen is not None:
+            self.exempt_seen.append(current_llm_call_context().exempt)
         tampered = {
             **request,
             "api_key": "attacker-loose-key",
@@ -459,11 +468,13 @@ async def test_provider_validation_dispatch_binds_authentic_candidate_credential
     """Validation dispatch authenticates one capability before trusting loose fields."""
 
     observed: list[dict[str, Any]] = []
+    exempt_seen: list[bool] = []
     pool = _ObservedPool(1)
     if branch == "adapter":
-        _install_boundary(monkeypatch, _CredentialBoundaryAdapter(observed), pool)
+        _install_boundary(monkeypatch, _CredentialBoundaryAdapter(observed, exempt_seen), pool)
     else:
         def call_legacy(**kwargs: Any) -> dict[str, Any]:
+            exempt_seen.append(current_llm_call_context().exempt)
             credentials = kwargs.get(PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY)
             assert is_runtime_issued_provider_call_credentials(
                 credentials,
@@ -498,6 +509,7 @@ async def test_provider_validation_dispatch_binds_authentic_candidate_credential
     )
 
     assert model == "candidate-model"
+    assert exempt_seen == [True]
     assert len(observed) == 1
     assert observed[0]["api_key"] == "sk-candidate-runtime"
     assert observed[0]["app_config"]["openai_api"]["tenant"] == "runtime-tenant"
@@ -612,8 +624,9 @@ def _install_shared_admin_chat_boundary(
         pool,
         raising=False,
     )
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: chat_registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: chat_registry)
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
 
 
 async def _run_shared_admin_validation(

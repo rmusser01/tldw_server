@@ -167,7 +167,7 @@ export class Storage {
 
   private backend: StorageBackend
   private serde: Required<SerdeOptions>
-  private area: StorageOptions["area"]
+  readonly area: StorageOptions["area"]
   private watchers = new Map<string, Set<WatchCallback>>()
 
   constructor(options: StorageOptions = {}) {

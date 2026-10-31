@@ -31,11 +31,11 @@ Resolve the remaining PR #1293 review comments by adding parser-availability ski
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review-fix pass started for CodeRabbit parser-availability comments.
 
 Added parser-availability guards using CodeGraph load_parser for C, C++, indexer, and MCP positive-path tests. Verification: focused parser guard pytest passed with 9 passed and 5 warnings; Ruff passed on touched test files; Bandit on touched test scope with B101 skipped reported errors 0 and results 0 at /tmp/bandit_codegraph_c_cpp_parser_guard_tests.json; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

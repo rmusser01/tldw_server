@@ -31,7 +31,7 @@ Follow-up hardening for first-class /chat character role-play after PR merges: m
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented in branch codex/character-chat-stage2-visible-state after rebasing onto latest origin/dev.
 
 Changes:
@@ -65,7 +65,7 @@ Review-fix verification:
 - bunx vitest run __tests__/frontend-quickstart-networking.test.ts __tests__/e2e-fixture-models.test.ts --reporter=verbose passed: 2 files, 12 tests.
 - git diff --check passed.
 - Real backend/WebUI Playwright rerun passed against backend http://127.0.0.1:8000 and WebUI http://localhost:8081: character-chat.spec.ts --project=journeys --reporter=line passed: 1 test.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -10,6 +10,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_
 
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import require_rag_query_quota
 from tldw_Server_API.app.api.v1.schemas.text2sql_schemas import (
     Text2SQLRequest,
     Text2SQLResponse,
@@ -19,6 +20,7 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
     SQL_TARGET_ANY,
 )
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
+from tldw_Server_API.app.core.RAG.rag_service import transport as rag_transport
 from tldw_Server_API.app.core.Text2SQL.executor import SqliteReadOnlyExecutor
 from tldw_Server_API.app.core.Text2SQL.service import Text2SQLCoreService
 from tldw_Server_API.app.core.Text2SQL.source_registry import normalize_source
@@ -94,6 +96,7 @@ def _connector_acl_allows(current_user: User, target_id: str) -> bool:
         Depends(RequirePermission(SQL_READ)),
         Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="text2sql.query", count_as="call")),
         Depends(require_within_limit(LimitCategory.RAG_QUERIES_DAY, 1)),
+        Depends(require_rag_query_quota(1)),
     ],
 )
 async def query_text2sql(
@@ -146,6 +149,8 @@ async def query_text2sql(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"code": "sql_execution_failed", "message": "SQL execution failed"},
         ) from exc
+
+    await rag_transport.log_rag_queries_for_org_context(current_user=current_user, units=1)
 
     sql_text = str(result.get("sql", ""))
     if not request.include_sql:

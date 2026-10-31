@@ -110,3 +110,17 @@ describe("onboarding-ingestion-telemetry", () => {
     expect(state.current_session.first_ingest_at).toBeNull()
   })
 })
+
+it("does not write a chat conversion after its source retires during the storage read", async () => {
+  vi.resetModules()
+  let finish!: (value: undefined) => void, current = true
+  const write = vi.fn()
+  vi.doMock("@/utils/safe-storage", () => ({ createSafeStorage: () => ({
+    get: () => new Promise<undefined>(resolve => { finish = resolve }), set: write
+  }) }))
+  const telemetry = await import("../onboarding-ingestion-telemetry")
+  const pending = telemetry.trackOnboardingChatSubmitSuccess("/chat", () => current)
+  current = false; finish(undefined); await pending
+  expect(write).not.toHaveBeenCalled()
+  vi.resetModules()
+})

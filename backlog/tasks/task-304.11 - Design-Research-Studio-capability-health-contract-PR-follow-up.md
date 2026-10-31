@@ -37,7 +37,7 @@ Design the PR-scoped follow-up for Research Studio capability-aware health and a
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Wrote Docs/superpowers/specs/2026-05-13-research-studio-capability-health-contract-design.md. The spec defines a backend-owned Research Studio capability endpoint, stable status/mode semantics, frontend action-boundary gating, authenticated CDP verification, and local/manual real summary artifact generation using existing saved LLM credentials.
 
 Verification: git diff --check passed for the docs/task-only change. Bandit not run because no backend Python or executable code changed in this design slice.
@@ -47,7 +47,7 @@ Spec review note: subagent review was not dispatched because this Codex session 
 2026-05-13 design review reopened the task to patch issues found before implementation planning: endpoint auth/rate-limit ownership, stale capability payload handling, source-selection versus capability-gating precedence, and local manual generation evidence boundaries.
 
 2026-05-13 design review patches applied: endpoint must be authenticated/rate-limited, implemented through lightweight local collectors rather than HTTP calls; contract now includes status/mode semantics table and ttl_seconds; frontend refreshes stale payloads and gives no-source guidance precedence; export/download distinguishes browser-local from backend-dependent exports; real generation evidence avoids recording full generated text and treats missing saved credentials as a PR verification blocker.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

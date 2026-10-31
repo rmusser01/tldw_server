@@ -42,7 +42,7 @@ Reason: routine bug fix preserving existing persistent session ownership, resume
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Restored mounted readiness on every lifecycle setup. A mount-generation fence cancels session creation, configuration lookup, and send continuations from a discarded mount; stale connection rejections cannot clear a newer connection promise or publish its error. Actual cleanup still rejects pending handshakes, clears timers, detaches handlers, and closes sockets.
 
 Changed apps/packages/ui/src/hooks/usePersonaLiveControl.tsx and its focused hook test file. No ADR required: routine preservation of the existing lifecycle/stream contract.
@@ -59,7 +59,7 @@ Qodo PR2884 follow-up: Start now returns the successful backend session result e
 
 Red: the new pending-Start/unmount regression failed with promise rejected STREAM_CONNECT_ERROR (1 failed, 22 passed). Green: bun x vitest run ../packages/ui/src/hooks/__tests__/usePersonaLiveControl.test.tsx from apps/tldw-frontend passed 23 tests, including discarded StrictMode send returning either a different session or the same session used by the current mount. Existing backend contract tests create_resume_compatible_reuses_active_session and stop_marks_closed_and_clears_focus passed (2 passed, 39 deselected). Scoped ESLint run from repository root with apps/tldw-frontend/eslint.config.mjs passed without findings; existing root pages-directory configuration notice remains. An initial frontend-directory ESLint invocation ignored shared files; it was replaced by the effective root run. git diff --check clean. Bandit not applicable to this TS/TSX-only follow-up. No additional browser UAT or full suite run; no backend contract changes. ADR not required: preserves existing persistent ownership/resume behavior.
 Rebase provenance: originally TASK-13177, created before review. Latest dev independently allocated13177 to the Docs Design recovery task in PR2885. Buddy record renumbered to13183 during the already-authorized task collision closeout; the dev record is preserved.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

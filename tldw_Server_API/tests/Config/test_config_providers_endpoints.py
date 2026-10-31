@@ -10,7 +10,7 @@ import threading
 import types
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -42,6 +42,8 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     PROVIDER_STREAM_ERROR_MESSAGES,
 )
+from tldw_Server_API.app.core.LLM_Calls import gateway
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
 from tldw_Server_API.tests.provider_credential_test_helpers import (
     resolved_request_fields_async,
 )
@@ -369,6 +371,12 @@ def _install_real_http_validation_boundary(
             "http_client_factory",
             lambda **_kwargs: client,
         )
+        monkeypatch.setattr(
+            chat_service,
+            "discover_provider_models",
+            MagicMock(return_value=ModelDiscoveryResult("ready", ("gpt-validation",))),
+        )
+        monkeypatch.setattr(gateway, "discover_provider_models", chat_service.discover_provider_models)
 
     def fake_httpx_request_io(**kwargs: Any) -> _ProviderValidationHTTPResponse:
         calls.append(
@@ -670,6 +678,7 @@ class TestListConfiguredProviders:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.provider_inventory
 class TestValidateProviderKey:
     @pytest.fixture(autouse=True)
     def _clear_rate_limit_state(self):
@@ -1278,11 +1287,17 @@ class TestValidateProviderKey:
         )
         monkeypatch.setattr(config_info_mod, "_VALIDATION_TIMEOUT_SECONDS", 1.0)
         monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
+        monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
         monkeypatch.setattr(
-            chat_service,
+            gateway,
             "_get_llm_registry",
             lambda: types.SimpleNamespace(get_adapter=lambda _provider: chat_adapter),
         )
+        discovery = MagicMock(
+            return_value=ModelDiscoveryResult("ready", ("foreground-chat-model",)),
+        )
+        monkeypatch.setattr(chat_service, "discover_provider_models", discovery)
+        monkeypatch.setattr(gateway, "discover_provider_models", discovery)
 
         validations = [
             asyncio.create_task(
@@ -1308,7 +1323,7 @@ class TestValidateProviderKey:
             chat_credentials = await resolved_request_fields_async(
                 "groq",
                 api_key="sk-foreground-chat",
-                app_config={},
+                app_config={"groq_api": {"api_base_url": "https://groq.example/v1"}},
                 model="foreground-chat-model",
             )
             await chat_service.perform_chat_api_call_async(
@@ -1320,6 +1335,9 @@ class TestValidateProviderKey:
             )
             assert chat_adapter.call_count == 1
             assert pool.active_count == 2
+            discovery.assert_called_once_with(
+                "groq", "sk-foreground-chat", base_url="https://groq.example/v1",
+            )
         finally:
             custom_adapter.release.set()
             anthropic_adapter.release.set()
@@ -1456,6 +1474,11 @@ class TestValidateProviderKey:
         assert http_calls[0]["url"].startswith(endpoint)
         assert http_calls[0]["headers"]["Authorization"] == f"Bearer {caller_key}"
         assert "sk-server-key-must-not-dispatch" not in repr(http_calls)
+        if provider == "openai":
+            discovery = cast(MagicMock, chat_service.discover_provider_models)
+            discovery.assert_called_once()
+            assert discovery.call_args.args == (provider, caller_key)
+            assert discovery.call_args.kwargs["base_url"] == endpoint
 
     @pytest.mark.asyncio
     async def test_allowed_validation_suppresses_transport_logs_and_auto_instrumentation(
@@ -1667,8 +1690,13 @@ class TestValidateProviderKey:
         if expected_valid:
             assert len(http_calls) == 1
             assert http_calls[0]["url"].startswith(api_base_url)
+            discovery = cast(MagicMock, chat_service.discover_provider_models)
+            discovery.assert_called_once()
+            assert discovery.call_args.args == ("openai", "sk-openai-precedence-candidate")
+            assert discovery.call_args.kwargs["base_url"] == api_base_url
         else:
             assert http_calls == []
+            cast(MagicMock, chat_service.discover_provider_models).assert_not_called()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -1700,6 +1728,14 @@ class TestValidateProviderKey:
         )
 
         http_calls: list[dict[str, Any]] = []
+        discovery = MagicMock(
+            return_value=ModelDiscoveryResult("ready", ("hf-validation-model",)),
+        )
+        monkeypatch.setattr(chat_service, "discover_provider_models", discovery)
+        monkeypatch.setattr(gateway, "discover_provider_models", discovery)
+        # This synthetic router tests egress precedence, not supported inventory URLs.
+        inventory_base = MagicMock(return_value=router_base_url)
+        monkeypatch.setattr(gateway, "resolve_provider_models_base_url", inventory_base)
         monkeypatch.setattr(
             huggingface_adapter,
             "http_client_factory",
@@ -1745,8 +1781,17 @@ class TestValidateProviderKey:
         if expected_valid:
             assert len(http_calls) == 1
             assert http_calls[0]["url"].startswith(router_base_url)
+            discovery.assert_called_once()
+            assert discovery.call_args.args == ("huggingface", "hf-precedence-candidate")
+            assert discovery.call_args.kwargs["base_url"] == router_base_url
+            inventory_base.assert_called_once()
+            assert inventory_base.call_args.args[0] == "huggingface"
+            assert inventory_base.call_args.args[1]["huggingface_api"]["router_base_url"] == router_base_url
+            assert inventory_base.call_args.kwargs["credentials_resolved"] is True
         else:
             assert http_calls == []
+            discovery.assert_not_called()
+            inventory_base.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

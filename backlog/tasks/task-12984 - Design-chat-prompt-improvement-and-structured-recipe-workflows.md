@@ -43,7 +43,7 @@ Write the approved interaction, architecture, model contract, error handling, an
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Design spec written at Docs/superpowers/specs/2026-07-22-chat-prompt-improvement-recipes-design.md.
 
 Self-review completed: scanned for unresolved markers, reviewed all sections for contradictory product/API/state/privacy behavior, and tightened empty-draft behavior, post-apply inspection, client-side preservation checks, preservation error semantics, and external-provider privacy boundaries.
@@ -55,7 +55,7 @@ Verification: Markdown heading inventory and unresolved-marker scan passed. Runt
 Verification: scoped git diff check and decision/placeholder scans passed. Runtime tests and Bandit remain inapplicable because this pass changes only the design spec and Backlog metadata. The task remains In Progress pending user approval of the amended written spec.
 
 User approved the design on 2026-08-01. Added separate dependency-ordered implementation plans and Backlog children TASK-12984.1 and TASK-12984.2. Final planning review aligned the implementation contracts with the approved operation_id/model_selection/protected_tokens API, adaptive non-stacked UI, exact Undo lifetime, dedicated rate limiting, fail-closed capabilities, schema-v2 rendered_text preview, and old/offline recipe persistence behavior. Verification for this documentation-only checkpoint: plan structure/contract scans and git diff checks; runtime tests and Bandit are not applicable because no executable code changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date, datetime, timezone
 from typing import Any
 
 from tldw_Server_API.app.core import (
@@ -41,6 +42,7 @@ CLAIMS_REBUILD_MEDIA_JOB_TYPE = "claims_rebuild_media"
 CLAIMS_DELIVER_REVIEW_NOTIFICATION_JOB_TYPE = "claims_deliver_review_notification"
 CLAIMS_DELIVER_ALERT_JOB_TYPE = "claims_deliver_alert"
 CLAIMS_GENERATE_ANALYTICS_EXPORT_JOB_TYPE = "claims_generate_analytics_export"
+CLAIMS_AGGREGATE_REVIEW_METRICS_JOB_TYPE = "claims_aggregate_review_metrics"
 
 CLAIMS_JOB_PAYLOAD_VERSION = 1
 CLAIMS_ALERT_JOB_CHANNELS = {"slack", "webhook"}
@@ -83,6 +85,13 @@ CLAIMS_ALERT_DELIVERY_PAYLOAD_KEYS = {
     "channel",
 }
 CLAIMS_ANALYTICS_EXPORT_PAYLOAD_KEYS = {"version", "owner_user_id", "export_id"}
+CLAIMS_REVIEW_METRICS_PAYLOAD_KEYS = {
+    "version",
+    "owner_user_id",
+    "scheduled_for",
+    "start_date",
+    "end_date",
+}
 CLAIMS_ANALYTICS_EXPORT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
@@ -311,6 +320,63 @@ def validate_analytics_export_payload(value: Any) -> dict[str, Any]:
         "version": version,
         "owner_user_id": owner_user_id,
         "export_id": export_id,
+    }
+
+
+def validate_review_metrics_payload(value: Any) -> dict[str, Any]:
+    """Require an exact versioned owner/window contract without type coercion."""
+    payload = _normalize_dict(value)
+    if set(payload) != CLAIMS_REVIEW_METRICS_PAYLOAD_KEYS:
+        raise ClaimsJobError(
+            "claims review metrics payload requires exactly the contract fields",
+            failure_code="claims_invalid_payload",
+        )
+    if type(payload["version"]) is not int:
+        raise ClaimsJobError(
+            "claims review metrics payload requires an integer version",
+            failure_code="claims_invalid_payload",
+        )
+    version = _version(payload)
+    if not isinstance(payload["owner_user_id"], str):
+        raise ClaimsJobError(
+            "claims review metrics payload requires a canonical owner string",
+            failure_code="claims_missing_owner",
+        )
+    owner = _owner_user_id(payload["owner_user_id"])
+    scheduled_for = payload["scheduled_for"]
+    start_text, end_text = payload["start_date"], payload["end_date"]
+    if not all(isinstance(value, str) for value in (scheduled_for, start_text, end_text)):
+        raise ClaimsJobError(
+            "claims review metrics payload requires timestamp and date strings",
+            failure_code="claims_invalid_payload",
+        )
+    try:
+        scheduled = datetime.fromisoformat(scheduled_for)
+        start, end = date.fromisoformat(start_text), date.fromisoformat(end_text)
+    except ValueError as exc:
+        raise ClaimsJobError(
+            "claims review metrics payload has invalid timestamp or dates",
+            failure_code="claims_invalid_payload",
+        ) from exc
+    if (
+        scheduled.tzinfo != timezone.utc
+        or scheduled.microsecond != 0
+        or scheduled.isoformat(timespec="seconds").replace("+00:00", "Z") != scheduled_for
+        or start.isoformat() != start_text
+        or end.isoformat() != end_text
+        or end == date.max
+        or not 0 <= (end - start).days < 366
+    ):
+        raise ClaimsJobError(
+            "claims review metrics payload requires canonical UTC dates and a bounded window",
+            failure_code="claims_invalid_payload",
+        )
+    return {
+        "version": version,
+        "owner_user_id": owner,
+        "scheduled_for": scheduled_for,
+        "start_date": start_text,
+        "end_date": end_text,
     }
 
 

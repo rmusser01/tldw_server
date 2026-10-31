@@ -46,7 +46,8 @@ vi.mock("@/hooks/useConnectionState", () => ({
 vi.mock("@/hooks/useHomeMilestoneScope", () => ({
   useHomeMilestoneScope: () => "synthetic-owner",
 }));
-vi.mock("@/services/tldw/TldwApiClient", () => ({
+vi.mock("@/services/tldw/TldwApiClient", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/tldw/TldwApiClient")>()),
   tldwClient: {
     getConfig: mocks.getConfig,
     initialize: mocks.initialize,
@@ -167,7 +168,7 @@ const send = () =>
 describe("verified setup model handoff through the real WebUI owner", () => {
   beforeEach(() => {
     window.localStorage.clear();
-    useStoreMessageOption.setState({ selectedModel: null });
+    useStoreMessageOption.getState().setSelectedModel(null);
     mocks.config = {
       serverUrl: "http://setup.test",
       authMode: "single-user",

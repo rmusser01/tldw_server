@@ -34,6 +34,7 @@ import {
   promptModal,
 } from '../notes-manager-utils'
 import type { ConfirmDangerOptions } from '@/components/Common/confirm-danger'
+import { isSameNotesListRowsKind } from '../notes-list-cache'
 
 type ConfirmDanger = (options: ConfirmDangerOptions) => Promise<boolean>
 type NotesAuthorityScope = string | null | undefined
@@ -87,6 +88,12 @@ const useAuthorityOwnedState = <T,>(
   return [value, setValue]
 }
 
+/**
+ * How several tag filters combine (NL-N1): "all" keeps notes that have every
+ * tag, "any" keeps notes that have at least one. Tags match exactly.
+ */
+export type NotesTagMatch = 'all' | 'any'
+
 export interface UseNotesListManagementDeps {
   authorityScope?: string | null
   isOnline: boolean
@@ -115,6 +122,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   } = deps
 
   // ---- list state ----
+  const [tagMatch, setTagMatch] = React.useState<NotesTagMatch>('all')
   const [query, setQuery] = React.useState('')
   const [queryInput, setQueryInput] = React.useState('')
   const [searchTipsQuery, setSearchTipsQuery] = React.useState('')
@@ -237,7 +245,8 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     q: string,
     toks: string[],
     fetchPage: number,
-    fetchPageSize: number
+    fetchPageSize: number,
+    signal?: AbortSignal
   ): Promise<{ items: any[]; total: number }> => {
     const requestOwner = authorityOwner
     if (!isCurrentAuthority(requestOwner)) {
@@ -255,16 +264,22 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     params.set('include_keywords', 'true')
     params.set('sort_by', NOTE_SORT_API_PARAMS[sortOption].sortBy)
     params.set('sort_order', NOTE_SORT_API_PARAMS[sortOption].sortOrder)
+    let tokenCount = 0
     toks.forEach((tok) => {
       const v = tok.trim()
       if (v.length > 0) {
         params.append('tokens', v)
+        tokenCount += 1
       }
     })
+    if (tokenCount > 1) params.set('tokens_match', tagMatch)
+    // `items` is all the list reads; skip the duplicate arrays (NS-04).
+    params.set('legacy_aliases', 'false')
 
     const abs = await bgRequest<any>({
       path: `/api/v1/notes/search/?${params.toString()}` as any,
-      method: 'GET' as any
+      method: 'GET' as any,
+      abortSignal: signal
     })
     if (!isCurrentAuthority(requestOwner)) {
       return { items: [], total: 0 }
@@ -295,7 +310,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     }
 
     return { items: sortNoteRows(items, sortOption), total: totalVal }
-  }, [authorityOwner, isCurrentAuthority, sortOption])
+  }, [authorityOwner, isCurrentAuthority, sortOption, tagMatch])
 
   const fetchNotes = React.useCallback(async (): Promise<NoteListItem[]> => {
     const requestOwner = authorityOwner
@@ -334,6 +349,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       params.set('include_keywords', 'true')
       params.set('sort_by', NOTE_SORT_API_PARAMS[sortOption].sortBy)
       params.set('sort_order', NOTE_SORT_API_PARAMS[sortOption].sortOrder)
+      params.set('legacy_aliases', 'false')
       const res = await bgRequest<any>({
         path: `/api/v1/notes/trash?${params.toString()}` as any,
         method: 'GET' as any
@@ -391,18 +407,29 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       setTotal(totalVal)
       return items.map(mapNoteListItem)
     }
-    const browsePath =
-      (`/api/v1/notes/?page=${page}&results_per_page=${pageSize}` +
-        `&sort_by=${NOTE_SORT_API_PARAMS[sortOption].sortBy}` +
-        `&sort_order=${NOTE_SORT_API_PARAMS[sortOption].sortOrder}`) as `/${string}`
+    // GET /api/v1/notes/ pages with limit/offset and sorts the whole library
+    // server-side; it ignores page/results_per_page.
+    const params = new URLSearchParams()
+    params.set('limit', String(pageSize))
+    params.set('offset', String((page - 1) * pageSize))
+    params.set('include_keywords', 'true')
+    params.set('sort_by', NOTE_SORT_API_PARAMS[sortOption].sortBy)
+    params.set('sort_order', NOTE_SORT_API_PARAMS[sortOption].sortOrder)
+    params.set('legacy_aliases', 'false')
     const res = await bgRequest<any>({
-      path: browsePath,
+      path: `/api/v1/notes/?${params.toString()}` as `/${string}`,
       method: 'GET' as any
     })
     if (!isCurrentAuthority(requestOwner)) return []
     const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : [])
-    const pagination = res?.pagination
-    setTotal(Number(pagination?.total_items || items.length || 0))
+    const totalItems =
+      Number(
+        res?.pagination?.total ??
+          res?.total ??
+          res?.pagination?.total_items ??
+          items.length
+      ) || 0
+    setTotal(totalItems)
     return sortNoteRows(items, sortOption).map(mapNoteListItem)
   }, [authorityOwner, effectiveKeywordTokens, fetchFilteredNotesRaw, isCurrentAuthority, listMode, listViewMode, page, pageSize, query, selectedMoodboardId, setTotal, sortOption])
 
@@ -417,6 +444,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     sortOption,
     selectedNotebookId ?? 'none',
     effectiveKeywordTokens.join('|'),
+    tagMatch,
     ...(authorityScope === undefined
       ? []
       : ['authority', authorityScope, 'generation', authorityOwner.generation])
@@ -432,9 +460,11 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     queryKey: listQueryKey,
     queryFn: fetchNotes,
     placeholderData: (previousData, previousQuery) => {
+      const previousKey = previousQuery?.queryKey ?? []
+      // Trash or another collection must not show the previous list's rows (NS-04).
+      if (!isSameNotesListRowsKind(previousKey, listQueryKey)) return undefined
       if (authorityScope === undefined) return previousData
       if (authorityScope === null) return undefined
-      const previousKey = previousQuery?.queryKey ?? []
       return previousKey.at(-4) === 'authority' &&
         previousKey.at(-3) === authorityScope &&
         previousKey.at(-2) === 'generation' &&
@@ -498,6 +528,15 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     if (page <= moodboardTotalPages) return
     setPage(moodboardTotalPages)
   }, [listMode, listViewMode, moodboardTotalPages, page])
+
+  // Step back when the current page has emptied past the end of the list,
+  // e.g. after deleting the only note on the last page. Waiting for an empty,
+  // settled page means a stale or missing total never moves the reader.
+  React.useEffect(() => {
+    if (isFetching || isPlaceholderData || rawNotes.length > 0) return
+    if (page <= moodboardTotalPages) return
+    setPage(moodboardTotalPages)
+  }, [isFetching, isPlaceholderData, moodboardTotalPages, page, rawNotes.length])
 
   // ---- moodboard fetch ----
   const fetchMoodboards = React.useCallback(async (): Promise<MoodboardSummary[]> => {
@@ -720,6 +759,39 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       }
     }
   }, [authorityOwner, confirmDanger, isCurrentAuthority, message, refetchMoodboards, selectedMoodboard])
+
+  /** Puts a note in the selected collection; the only add path on /notes (NL-13). */
+  const addNoteToMoodboard = React.useCallback(async (noteId: string | number) => {
+    const requestOwner = authorityOwner
+    if (!isCurrentAuthority(requestOwner)) return
+    if (!selectedMoodboard) {
+      message.warning("Select a collection first")
+      return
+    }
+    try {
+      await bgRequest({
+        path: `/api/v1/notes/moodboards/${selectedMoodboard.id}/notes/${encodeURIComponent(String(noteId))}` as any,
+        method: "POST" as any
+      })
+      if (!isCurrentAuthority(requestOwner)) return
+      await refetch()
+      if (!isCurrentAuthority(requestOwner)) return
+      message.success(
+        t('option:notesSearch.moodboardAddOpenNoteSuccess', {
+          defaultValue: 'Added to "{{name}}"',
+          name: selectedMoodboard.name
+        })
+      )
+    } catch {
+      if (isCurrentAuthority(requestOwner)) {
+        message.error(
+          t('option:notesSearch.moodboardAddOpenNoteError', {
+            defaultValue: 'Could not add the note to this collection'
+          })
+        )
+      }
+    }
+  }, [authorityOwner, isCurrentAuthority, message, refetch, selectedMoodboard, t])
 
   // ---- notebook server operations ----
   const fetchServerNotebooks = React.useCallback(async (): Promise<NotebookFilterOption[]> => {
@@ -1199,6 +1271,8 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     selectedNotebook,
     // derived
     effectiveKeywordTokens,
+    tagMatch,
+    setTagMatch,
     rawNotes, filteredCount,
     orderedVisibleNoteIds,
     bulkSelectedIdSet, selectedBulkNotes,
@@ -1210,7 +1284,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     clearSearchQueryTimeout,
     searchQueryTimeoutRef,
     // callbacks
-    createMoodboard, renameMoodboard, deleteMoodboard,
+    createMoodboard, renameMoodboard, deleteMoodboard, addNoteToMoodboard,
     createNotebookFromCurrentKeywords, removeSelectedNotebook,
     handleClearFilters,
     clearBulkSelection, handleToggleBulkSelection,

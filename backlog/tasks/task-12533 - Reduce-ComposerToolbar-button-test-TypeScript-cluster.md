@@ -32,14 +32,14 @@ Continue reducing the shared UI package-wide TypeScript compiler baseline by fix
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Captured red evidence from `/tmp/task516-tsc-final.txt`: package `tsc` reported two diagnostics in `src/components/Option/Playground/__tests__/ComposerToolbar.test.tsx` where `HTMLElement` results from `screen.getByTestId` were passed to `Array<HTMLButtonElement>.indexOf`.
 - Root cause was test element narrowing only. The surrounding `contextStrip.querySelectorAll("button")` result is a `NodeListOf<HTMLButtonElement>`, while Testing Library returns generic `HTMLElement` for test-id queries.
 - Narrowed the saved and advanced test-id elements to `HTMLButtonElement` before comparing their positions in the button list.
 - Focused verification: `bunx vitest run src/components/Option/Playground/__tests__/ComposerToolbar.test.tsx` passed: 22 tests.
 - Package verification: `bunx tsc --noEmit --pretty false > /tmp/task517-tsc-final.txt 2>&1` still exits nonzero from the known baseline, but diagnostics dropped from 65 in `/tmp/task516-tsc-final.txt` to 63 in `/tmp/task517-tsc-final.txt`; `rg -n 'ComposerToolbar\.test\.tsx' /tmp/task517-tsc-final.txt` returns no matches.
 - Bandit skipped: this is a TypeScript test-only WebUI change with no Python touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

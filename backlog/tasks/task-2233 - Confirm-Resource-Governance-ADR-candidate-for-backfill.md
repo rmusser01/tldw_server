@@ -37,11 +37,7 @@ Review INV-028 source docs and current Resource Governance code paths, policy-st
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Confirmed INV-028 as current for a bounded Resource Governance ADR: claim-first new-endpoint guidance, Resource Governor applicability decisions for latency/cost-sensitive endpoints, route-map ownership, DB policy-store plus YAML route_map merge precedence, and request-ingress denial when a route_map resolves to a missing request policy.
 
 Created Docs/ADR/inventory/2026-06-04-resource-governance-confirmation-audit.md and updated Docs/ADR/inventory/2026-06-03-decision-inventory.md. Created TASK-2234 for the accepted ADR backfill.
@@ -51,7 +47,7 @@ Verification: git diff --check passed. Targeted pytest passed: python -m pytest 
 Bandit: not run because this slice touched documentation and Backlog task records only; no Python/source code changed.
 
 PR review follow-up: normalized Backlog FINAL_SUMMARY markers after review feedback.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

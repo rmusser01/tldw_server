@@ -31,11 +31,11 @@ Address actionable PR #1344 review comments for the product roadmap first-slice 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review surface inspected: GitHub PR comments, review summaries, and inline pull request comments. Actionable scope is two fixes: workspace artifact hydration status mapping and WorkProductTemplateChooser native disabled behavior.
 
 Implemented fixes in workspace-api hydration and WorkProductTemplateChooser. Verification passed: focused rerun bunx vitest run src/store/__tests__/workspace-api-first.test.ts src/components/Option/WorkspacePlayground/__tests__/WorkProductTemplateChooser.test.tsx => 2 files, 19 tests. Broader roadmap UI suite also passed: 6 files, 81 tests. git diff --check passed. Bandit skipped because only TypeScript/WebUI and Backlog markdown files changed; no backend Python files changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -228,6 +228,124 @@ describe("NotesManagerPage stage 3 toolbar and metrics", () => {
     })
   })
 
+  it.each([
+    ["Ctrl", { ctrlKey: true }],
+    ["Cmd", { metaKey: true }]
+  ])(
+    "bolds and italicizes the selection with %s+B and +I, as the shortcut sheet says (XP-07)",
+    async (_label, modifier) => {
+      renderPage()
+      const textarea = screen.getByPlaceholderText(
+        "Write your note here... (Markdown supported)"
+      ) as HTMLTextAreaElement
+      fireEvent.change(textarea, { target: { value: "hello world" } })
+      textarea.focus()
+      textarea.setSelectionRange(0, 5)
+
+      expect(fireEvent.keyDown(textarea, { key: "b", ...modifier })).toBe(false)
+      await waitFor(() => expect(textarea.value).toBe("**hello** world"))
+
+      const start = textarea.value.indexOf("world")
+      textarea.setSelectionRange(start, start + 5)
+      expect(fireEvent.keyDown(textarea, { key: "i", ...modifier })).toBe(false)
+      await waitFor(() => expect(textarea.value).toBe("**hello** *world*"))
+    }
+  )
+
+  it("leaves Ctrl+Shift+B and Alt+B to other shortcuts", () => {
+    renderPage()
+    const textarea = screen.getByPlaceholderText(
+      "Write your note here... (Markdown supported)"
+    ) as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: "hello" } })
+    textarea.setSelectionRange(0, 5)
+    expect(
+      fireEvent.keyDown(textarea, { key: "B", ctrlKey: true, shiftKey: true })
+    ).toBe(true)
+    expect(fireEvent.keyDown(textarea, { key: "b", altKey: true })).toBe(true)
+    expect(textarea.value).toBe("hello")
+  })
+
+  it.each([
+    ["numbered", "1. first\n2. second"],
+    ["checklist", "- [ ] first\n- [ ] second"]
+  ])(
+    "formats complete selected lines with the %s toolbar",
+    async (action, expected) => {
+      renderPage()
+      const textarea = screen.getByPlaceholderText(
+        "Write your note here... (Markdown supported)"
+      ) as HTMLTextAreaElement
+      fireEvent.change(textarea, { target: { value: "first\nsecond" } })
+      textarea.setSelectionRange(2, 9)
+      fireEvent.click(screen.getByTestId(`notes-toolbar-${action}`))
+      await waitFor(() => expect(textarea.value).toBe(expected))
+    }
+  )
+
+  it.each([1, 2, 3])(
+    "offers explicit Heading %s and replaces the existing level",
+    async (level) => {
+      renderPage()
+      const textarea = screen.getByPlaceholderText(
+        "Write your note here... (Markdown supported)"
+      ) as HTMLTextAreaElement
+      fireEvent.change(textarea, { target: { value: "## title suffix" } })
+      textarea.setSelectionRange(5, 5)
+      fireEvent.click(screen.getByTestId("notes-toolbar-heading"))
+      fireEvent.click(await screen.findByText(`Heading ${level}`))
+      await waitFor(() =>
+        expect(textarea.value).toBe(`${"#".repeat(level)} title suffix`)
+      )
+    }
+  )
+
+  it("continues a list through the actual textarea keyboard owner and restores its caret", async () => {
+    renderPage()
+    const textarea = screen.getByPlaceholderText(
+      "Write your note here... (Markdown supported)"
+    ) as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: "- [x] complete" } })
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+    fireEvent.keyDown(textarea, { key: "Enter" })
+    await waitFor(() => {
+      expect(textarea.value).toBe("- [x] complete\n- [ ] ")
+      expect(textarea.selectionStart).toBe(textarea.value.length)
+    })
+    expect(screen.getByTestId("notes-editor-metrics")).toHaveTextContent(
+      `${textarea.value.length} chars`
+    )
+  })
+
+  it.each([
+    { shiftKey: true },
+    { ctrlKey: true },
+    { metaKey: true },
+    { altKey: true },
+    { isComposing: true }
+  ])("does not intercept modified or composing Enter: %j", (options) => {
+    renderPage()
+    const textarea = screen.getByPlaceholderText(
+      "Write your note here... (Markdown supported)"
+    ) as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: "- item" } })
+    textarea.setSelectionRange(6, 6)
+    expect(fireEvent.keyDown(textarea, { key: "Enter", ...options })).toBe(true)
+    expect(textarea.value).toBe("- item")
+  })
+
+  it("leaves a readonly textarea unchanged on Enter", () => {
+    renderPage()
+    const textarea = screen.getByPlaceholderText(
+      "Write your note here... (Markdown supported)"
+    ) as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: "- item" } })
+    textarea.setSelectionRange(6, 6)
+    textarea.readOnly = true
+    expect(fireEvent.keyDown(textarea, { key: "Enter" })).toBe(true)
+    expect(textarea.value).toBe("- item")
+  })
+
   it("shows and updates editor metrics footer", async () => {
     renderPage()
 

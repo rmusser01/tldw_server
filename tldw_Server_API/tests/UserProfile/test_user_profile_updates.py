@@ -131,33 +131,41 @@ def test_committed_quota_status_and_mfa_updates_strictly_advance_profile_version
 
             versions = [await reader.read(user_id)]
             quota_service = StorageQuotaService(db_pool=pool)
-            await quota_service.set_user_quota(user_id, original_quota + 1)
-            versions.append(await reader.read(user_id))
+            try:
+                await quota_service.set_user_quota(user_id, original_quota + 1)
+                versions.append(await reader.read(user_id))
 
-            await users.update_user(user_id, is_active=not original_active)
-            versions.append(await reader.read(user_id))
-            await users.update_user(user_id, is_active=original_active)
+                await users.update_user(user_id, is_active=not original_active)
+                versions.append(await reader.read(user_id))
+                await users.update_user(user_id, is_active=original_active)
 
-            mfa_repo = AuthnzMfaRepo(pool)
-            await mfa_repo.set_mfa_config(
-                user_id=user_id,
-                encrypted_secret="encrypted-test-secret",
-                backup_codes_json="[]",
-                updated_at=datetime.now(timezone.utc),
-            )
-            versions.append(await reader.read(user_id))
+                mfa_repo = AuthnzMfaRepo(pool)
+                await mfa_repo.set_mfa_config(
+                    user_id=user_id,
+                    encrypted_secret="encrypted-test-secret",
+                    backup_codes_json="[]",
+                    updated_at=datetime.now(timezone.utc),
+                )
+                versions.append(await reader.read(user_id))
 
-            await mfa_repo.clear_mfa_config(
-                user_id=user_id,
-                updated_at=datetime.now(timezone.utc),
-            )
-            await quota_service.set_user_quota(user_id, original_quota)
+                await mfa_repo.clear_mfa_config(
+                    user_id=user_id,
+                    updated_at=datetime.now(timezone.utc),
+                )
+            finally:
+                # Always restore "no override" (None): set_user_quota writes a durable
+                # user_config_overrides row that would otherwise leak into later tests.
+                await quota_service.set_user_quota(user_id, None)
             return tuple(versions)
 
         before, after_quota, after_status, after_mfa = _run_async(
             _exercise_writers()
         )
 
+        # set_user_quota now writes a user_config_overrides row instead of the users
+        # table, but ProfileVersionGateway.read() still folds that row's updated_at
+        # into the composite profile_version via the UNION query (version_gateway.py),
+        # so the observed version still strictly advances (spec 2 Sec. 5).
         assert after_quota > before
         assert after_status > after_quota
         assert after_mfa > after_status
@@ -236,6 +244,7 @@ async def test_invalid_identity_email_log_excludes_validation_details(
             membership_context=None,
             is_postgres_backend=False,
             anchor=object(),
+            result=update_service_module.UpdateResult(),
         )
 
     assert debug_calls == [("Invalid email update for user {}", (7,))]
@@ -469,35 +478,42 @@ def test_user_profile_update_default_character_preference_type_validation(
 
 
 def test_admin_profile_update_storage_quota(auth_headers) -> None:
+    from tldw_Server_API.tests.UserProfile._storage_quota_helpers import patch_quota
+
     with TestClient(app) as client:
         user_id = _get_user_id(client, auth_headers)
-        warm_resp = client.get(
-            f"/api/v1/admin/users/{user_id}/profile",
-            params={"sections": "quotas"},
-            headers=auth_headers,
-        )
-        assert warm_resp.status_code == 200
+        try:
+            warm_resp = client.get(
+                f"/api/v1/admin/users/{user_id}/profile",
+                params={"sections": "quotas"},
+                headers=auth_headers,
+            )
+            assert warm_resp.status_code == 200
 
-        resp = client.patch(
-            f"/api/v1/admin/users/{user_id}/profile",
-            headers=auth_headers,
-            json={
-                "updates": [
-                    {"key": "limits.storage_quota_mb", "value": 4096},
-                ]
-            },
-        )
-        assert resp.status_code == 200
-        payload = resp.json()
-        assert "limits.storage_quota_mb" in payload["applied"]
+            resp = client.patch(
+                f"/api/v1/admin/users/{user_id}/profile",
+                headers=auth_headers,
+                json={
+                    "updates": [
+                        {"key": "limits.storage_quota_mb", "value": 4096},
+                    ]
+                },
+            )
+            assert resp.status_code == 200
+            payload = resp.json()
+            assert "limits.storage_quota_mb" in payload["applied"]
 
-        profile_resp = client.get(
-            f"/api/v1/admin/users/{user_id}/profile",
-            params={"sections": "quotas"},
-            headers=auth_headers,
-        )
-        assert profile_resp.status_code == 200
-        profile = profile_resp.json()
+            profile_resp = client.get(
+                f"/api/v1/admin/users/{user_id}/profile",
+                params={"sections": "quotas"},
+                headers=auth_headers,
+            )
+            assert profile_resp.status_code == 200
+            profile = profile_resp.json()
+        finally:
+            # This sets the shared single-user id's override; clear it so later tests
+            # in this worker don't see a stale 4096 quota (spec 2 Sec. 5).
+            patch_quota(client, auth_headers, user_id, None)
 
     assert profile.get("quotas", {}).get("storage_quota_mb") == 4096
 
@@ -871,6 +887,8 @@ def test_admin_profile_update_audio_limits(auth_headers) -> None:
 
 
 def test_admin_profile_update_evaluations_limits(auth_headers) -> None:
+    """limits.evaluations_* are plain platform-admin overrides; the write no longer
+    flips the user to the Evaluations rate limiter's CUSTOM tier (spec 2 §3)."""
     with TestClient(app) as client:
         user_id = _get_user_id(client, auth_headers)
         resp = client.patch(
@@ -890,15 +908,23 @@ def test_admin_profile_update_evaluations_limits(auth_headers) -> None:
 
         profile_resp = client.get(
             f"/api/v1/admin/users/{user_id}/profile",
-            params={"sections": "quotas"},
+            params={"sections": "effective_config"},
             headers=auth_headers,
         )
         assert profile_resp.status_code == 200
-        quotas = profile_resp.json().get("quotas", {})
-        evaluations = quotas.get("evaluations", {})
-        limits = evaluations.get("limits", {})
-        assert limits.get("per_minute", {}).get("evaluations") == 42
-        assert limits.get("daily", {}).get("evaluations") == 900
+        effective = profile_resp.json().get("effective_config", {})
+        assert effective.get("limits.evaluations_per_minute") == 42
+        assert effective.get("limits.evaluations_per_day") == 900
+
+        # The Evaluations rate limiter's own tier/limits are untouched by this write.
+        quotas_resp = client.get(
+            f"/api/v1/admin/users/{user_id}/profile",
+            params={"sections": "quotas"},
+            headers=auth_headers,
+        )
+        assert quotas_resp.status_code == 200
+        evaluations = quotas_resp.json().get("quotas", {}).get("evaluations", {})
+        assert evaluations.get("tier") != "custom"
 
 
 def test_admin_profile_update_identity_locked(auth_headers) -> None:

@@ -41,7 +41,7 @@ Create a repo-grounded implementation plan for the approved v2 OpenWebUI webui.d
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created `Docs/superpowers/plans/2026-05-10-openwebui-db-chat-import-implementation-plan.md`.
 
 The plan is grounded in the current `openwebui.py` adapter, `ChatbookService.import_chatbook`, `chatbooks.py` preview/import endpoints, `jobs_worker.py`, `chatbook_schemas.py`, Chatbooks frontend import UI, and the visible folder system backed by keyword collections plus conversation-keyword links.
@@ -55,7 +55,7 @@ Verification: `git diff --cached --check` completed with no whitespace errors.
 Bandit skip: docs/backlog-only planning slice; implementation plan includes Bandit command for the future Python code slice.
 
 Known skips/blockers: runtime implementation remains future work.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

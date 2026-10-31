@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Persona.visual_starter_catalog import PersonaVisualStarterCatalogService
@@ -36,6 +37,7 @@ def db(tmp_path, monkeypatch):
 def _client(db, user_id=1):
     endpoint = importlib.import_module("tldw_Server_API.app.api.v1.endpoints.buddies")
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(endpoint.router, prefix="/api/v1/buddies")
     app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=user_id)
@@ -48,6 +50,17 @@ def _create(client, **updates):
     response = client.post("/api/v1/buddies", json=payload)
     assert response.status_code == 201, response.text
     return response.json()
+
+
+def _seed_v65_conversation(database: CharactersRAGDB, title: str) -> str:
+    """Insert a row using only columns that existed in the v65 schema."""
+    conversation_id = "retained-v65"
+    with database.transaction() as conn:
+        conn.execute(
+            "INSERT INTO conversations (id, root_id, title, client_id) VALUES (?, ?, ?, ?)",
+            (conversation_id, conversation_id, title, database.client_id),
+        )
+    return conversation_id
 
 
 def _persona(db, user_id="1", persona_id="source-persona"):
@@ -73,14 +86,8 @@ def test_v65_database_upgrade_preserves_conversation_and_adds_independent_storag
     with monkeypatch.context() as patch:
         patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 65)
         database = CharactersRAGDB(path, "1")
+        conversation_id = _seed_v65_conversation(database, "Keep this")
         database.close_connection()
-    # add_conversation writes post-v65 columns (76c5167b35), so seed the v65 row directly.
-    conversation_id = "v65-conversation"
-    with sqlite3.connect(path) as conn:
-        conn.execute(
-            "INSERT INTO conversations (id, root_id, title, client_id) VALUES (?, ?, ?, ?)",
-            (conversation_id, conversation_id, "Keep this", "1"),
-        )
     with monkeypatch.context() as patch:
         patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 66)
         database = CharactersRAGDB(path, "1")
@@ -196,12 +203,7 @@ def test_postgres_v65_upgrade_installs_buddy_storage_and_forced_tenant_policies(
         patch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 65)
         database = CharactersRAGDB(":memory:", client_id="1", backend=backend)
     try:
-        # add_conversation writes post-v65 columns (76c5167b35), so seed the v65 row directly.
-        conversation_id = "pg-v65-conversation"
-        backend.execute(
-            "INSERT INTO conversations (id, root_id, title, client_id) VALUES (%s, %s, %s, %s)",
-            (conversation_id, conversation_id, "Retained", "1"),
-        )
+        conversation_id = _seed_v65_conversation(database, "Retained")
         with monkeypatch.context() as patch:
             patch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 66)
             database._initialize_schema_postgres()
@@ -563,6 +565,7 @@ def test_starter_preview_route_requires_auth_and_never_creates_a_profile(db, mon
     from tldw_Server_API.app.api.v1.endpoints import persona
 
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(persona.router, prefix="/api/v1/persona")
     app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     app.dependency_overrides[check_rate_limit] = lambda: None

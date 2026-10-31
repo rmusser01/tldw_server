@@ -36,11 +36,11 @@ Implement Stage 4 async Jobs support for uploaded OpenWebUI database chat import
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Stage 4 async Jobs worker support for source_format=openwebui_db in tldw_Server_API/app/core/Chatbooks/services/jobs_worker.py. The worker validates selected_openwebui_user_id, resolves uploaded DB files through _resolve_import_upload_path, calls ChatbookService.import_openwebui_db, wraps successful results under openwebui_db_result, marks failures in the Chatbooks import job, and removes the uploaded DB file in the same finally cleanup pattern used by JSON/archive imports.
 
 RED evidence: focused worker tests failed because openwebui_db was rejected as unsupported. Verification: focused worker pytest passed 6 tests; overlapping Chatbooks regression pytest passed 35 tests; Bandit over jobs_worker.py reported 0 findings; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

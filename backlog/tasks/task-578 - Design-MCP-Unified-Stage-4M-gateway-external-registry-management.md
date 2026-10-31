@@ -33,15 +33,11 @@ Write and review the Stage 4M design spec for standalone gateway external-server
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Self-review pass completed. Tightened the draft around typed registry-store requirements, persistent-store atomic create, server-id slug validation for virtual tool names, websocket URL validation, persistent CLI store requirements, and no lifecycle side effects from registry mutations. Subagent review was not dispatched because current tool policy requires explicit user authorization for subagent delegation.
 
 Incorporated the requested review pass before implementation planning: added grant-aware credential-slot patch guards, explicit external registry storage/bootstrap bundle semantics, external-registry store exception contracts, and a clear Stage 4M location for websocket URL validation without broadening the storage model.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

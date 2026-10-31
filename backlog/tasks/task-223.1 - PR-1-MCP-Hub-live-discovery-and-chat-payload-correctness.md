@@ -50,11 +50,11 @@ Stages:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started implementation planning for PR 1 only. No code changes yet. Plan will resolve spec open questions for endpoint path, external federation module-id fallback, delete/disable reconciliation coverage, and verification commands before implementation.
 
 Plan self-review tightened Stage 1 and Stage 2 details: the refresh endpoint remains POST /api/v1/mcp/hub/external-servers/refresh-discovery but should be placed before nearby parameterized routes; ExternalFederationModule.validate_tool_arguments must validate external.tools.refresh server_id and __confirm_write booleans; frontend invalidation should include the exact ["mcp-health"] query family.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

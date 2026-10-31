@@ -5,7 +5,7 @@ import importlib
 import threading
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager, nullcontext, suppress
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -566,23 +566,66 @@ def test_query_system_logs_keeps_entries_with_different_events(
 @pytest.mark.unit
 def test_log_file_lock_uses_runtime_timeout_from_env(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    request: pytest.FixtureRequest,
 ) -> None:
-    log_path = tmp_path / "system_logs.jsonl"
-    lock_path = log_path.with_suffix(log_path.suffix + ".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path.write_text("locked", encoding="utf-8")
-
-    monkeypatch.setenv("SYSTEM_LOG_FILE_ENABLED", "true")
-    monkeypatch.setenv("SYSTEM_LOG_FILE_PATH", str(log_path))
     monkeypatch.setenv("SYSTEM_LOG_FILE_LOCK_TIMEOUT", "0.2")
+    log_buffer, _lock_path = request.getfixturevalue("fallback_log_lock")
 
+    with log_buffer._log_file_lock():
+        started = time.monotonic()
+        with pytest.raises(RuntimeError, match="Failed to acquire system log lock"):
+            with log_buffer._log_file_lock():
+                pass
+        elapsed = time.monotonic() - started
+        assert elapsed < 0.5
+
+
+@pytest.fixture
+def fallback_log_lock(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> tuple[ModuleType, Path]:
+    """Expose the real fallback lock without background file-log appends."""
+    log_path = tmp_path / "fallback_system_logs.jsonl"
+    # Lock tests use real files without unrelated queued log appends competing.
+    monkeypatch.setenv("SYSTEM_LOG_FILE_ENABLED", "false")
+    monkeypatch.setenv("SYSTEM_LOG_FILE_PATH", str(log_path))
+    monkeypatch.setenv("SYSTEM_LOG_FILE_MAX_ENTRIES", "100")
+    monkeypatch.setenv("SYSTEM_LOG_FILE_COMPACT_EVERY_WRITES", "10")
     log_buffer = _reload_log_buffer()
     monkeypatch.setattr(log_buffer, "_HAS_FCNTL", False)
+    return log_buffer, log_path.with_suffix(log_path.suffix + ".lock")
 
-    started = time.monotonic()
-    with pytest.raises(RuntimeError, match="Failed to acquire system log lock"):
+
+@pytest.mark.unit
+def test_failed_log_lock_contender_preserves_held_lock(fallback_log_lock) -> None:
+    log_buffer, lock_path = fallback_log_lock
+    with log_buffer._log_file_lock():
+        held_lock = lock_path.stat()
+        with pytest.raises(RuntimeError, match="Failed to acquire system log lock"):
+            with log_buffer._log_file_lock(timeout=0):
+                pytest.fail("A contender entered another holder's lock")
+
+        assert lock_path.exists()
+        assert lock_path.stat().st_ino == held_lock.st_ino
+        with pytest.raises(RuntimeError, match="Failed to acquire system log lock"):
+            with log_buffer._log_file_lock(timeout=0):
+                pytest.fail("A later contender entered the still-held lock")
+
+    assert not lock_path.exists()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("body_error", [False, True], ids=["normal-exit", "body-error"])
+def test_acquired_log_lock_releases_on_exit(fallback_log_lock, body_error: bool) -> None:
+    log_buffer, lock_path = fallback_log_lock
+    expected_exit = pytest.raises(ValueError, match="body failure") if body_error else nullcontext()
+    with expected_exit:
         with log_buffer._log_file_lock():
-            pass
-    elapsed = time.monotonic() - started
-    assert elapsed < 0.5
+            assert lock_path.exists()
+            if body_error:
+                raise ValueError("body failure")
+
+    assert not lock_path.exists()
+    with log_buffer._log_file_lock(timeout=0):
+        assert lock_path.exists()
+    assert not lock_path.exists()

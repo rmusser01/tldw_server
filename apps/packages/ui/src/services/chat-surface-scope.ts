@@ -38,6 +38,22 @@ export const connectionAuthoritiesMatch = (
     principal === deriveScopedUserId({ authMode, accessToken: previous.accessToken })
 }
 
+/** Credential-free extension IPC identifier with the same refresh semantics. */
+export const deriveConnectionAuthorityId = (config: Partial<TldwConfig> | null | undefined): string => {
+  const authMode = config?.authMode || "single-user"
+  const principal = deriveScopedUserId({ authMode, accessToken: config?.accessToken })
+  const credential = authMode === "single-user"
+    ? ["key", String(config?.apiKey || "").trim()]
+    : principal !== deriveScopedUserId({ authMode })
+      ? ["principal", principal]
+      : ["token", config?.accessToken || ""]
+  const authority = JSON.stringify(config ? [
+    String(config.serverUrl || "").trim().replace(/\/+$/, ""),
+    authMode, config.authSource || "manual", config.orgId ?? null, credential
+  ] : null)
+  return `connection:sha256:${bytesToHex(sha256(utf8ToBytes(`tldw:connection-authority:v1\0${authority}`)))}`
+}
+
 const normalizeAuthMode = (authMode: string | null | undefined): string => {
   const normalized = String(authMode || "").trim().toLowerCase()
   return normalized || "unknown"

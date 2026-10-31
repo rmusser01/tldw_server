@@ -38,11 +38,11 @@ Created backend-only VN scripted generation runtime implementation plan at Docs/
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Notes
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Plan review completed with subagent review. Addressed findings for provider-call transaction recovery, scene_update resolver outcome persistence, profile-map authoring/API source, setup metadata, debug reveal/audit behavior, and usage accounting/rate-limit integration.
 - Created plan at `Docs/superpowers/plans/2026-05-10-vn-scripted-generation-backend-runtime.md`.
 - Mapped current VN Play, VN Scripts, VN Policy, DB, API schema, pagination, adapter, and test seams before proposing task slices.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

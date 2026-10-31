@@ -34,7 +34,7 @@ Follow-up review-fix task for PR #1408. Resolve the accessibility review comment
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review sweep for PR #1408 found three unresolved inline threads from Gemini, Qodo, and CodeRabbit on the same accessibility bug: DiffViewer FileStatusBadge exposed canonical state labels such as Ready/Error/Empty as Badge srLabel. Qodo also raised a PR-level maintainability issue that DiffViewer introduced another local design-system severity to Badge variant mapping.
 
 Red evidence: bunx vitest run src/components/Agent/__tests__/DiffViewer.file-status-badge.test.tsx --reporter=dot failed because NEW still contained hidden text Ready instead of New file.
@@ -44,7 +44,7 @@ Implementation: Added file-operation srLabel values to FILE_STATUS_CONFIG, chang
 Verification: bunx vitest run src/components/Agent/__tests__/DiffViewer.file-status-badge.test.tsx src/components/Common/__tests__/StatusBadge.design-system.test.tsx --reporter=dot passed 5/5; bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot passed 46/46; bun run verify:design-system-state passed with baseline exceptions 511 and local-status-badge 5; git diff --check passed. Full bunx tsc --noEmit --pretty false still fails on existing repo-wide frontend baseline errors, but the touched-file TypeScript filter returned no matches after fixing the DiffViewer test helper typing issue.
 
 Bandit: skipped because this review-fix slice changes TypeScript/TSX and Backlog metadata only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -56,7 +56,7 @@ Created and reviewed the ACP downstream entrypoint strategy design. The spec def
 
 ## Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Wrote design spec at `Docs/superpowers/specs/2026-05-12-acp-downstream-entrypoint-strategy-design.md`.
 - Spec review pass 1 found two blockers: `acp_command` required-vs-inferred was unresolved, and live certification/adapters were in the first implementation scope.
 - Spec review pass 2 found one blocker: Codex/Claude were marked `adapter_acp` without concrete `acp_command` values.
@@ -64,4 +64,4 @@ Created and reviewed the ACP downstream entrypoint strategy design. The spec def
 - Post-approval design critique found two implementation risks and patched the spec: YAML-only strategy fields would miss API/DB-backed dynamic agents, and existing MCP `protocol`/transport fields could be confused with ACP entrypoint metadata.
 - Verification: `git diff --check` passed.
 - Bandit: skipped because this task changed only Markdown/Backlog design artifacts and no Python code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

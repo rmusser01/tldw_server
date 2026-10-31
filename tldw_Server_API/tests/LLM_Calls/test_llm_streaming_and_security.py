@@ -87,8 +87,7 @@ def test_sync_sse_helper_bounds_transport_exception_and_log_detail() -> None:
 
     _assert_bounded_stream_error(chunks, sentinel)
     assert sentinel not in "".join(logs)
-    # log_provider_failure lowercases its bounded labels.
-    assert "runtimeerror" in "".join(logs).lower()
+    assert "error_type=runtimeerror" in "".join(logs)
 
 
 @pytest.mark.asyncio
@@ -111,8 +110,7 @@ async def test_async_sse_helper_bounds_transport_exception_and_log_detail() -> N
 
     _assert_bounded_stream_error(chunks, sentinel)
     assert sentinel not in "".join(logs)
-    # log_provider_failure lowercases its bounded labels.
-    assert "runtimeerror" in "".join(logs).lower()
+    assert "error_type=runtimeerror" in "".join(logs)
 
 
 @pytest.mark.asyncio
@@ -537,11 +535,11 @@ async def test_wrap_sync_stream_logs_close_errors(monkeypatch):
 async def test_wrap_sync_stream_admission_failure_closes_concurrently_and_recovers(
     monkeypatch,
 ):
-    from tldw_Server_API.app.core.Chat import bounded_daemon as bounded_daemon_module
     from tldw_Server_API.app.core.Chat.bounded_daemon import (
         BoundedDaemonPool,
         DaemonCapacityError,
     )
+    from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
     from tldw_Server_API.app.core.LLM_Calls import streaming
 
     both_admissions_rejected = threading.Event()
@@ -675,8 +673,8 @@ async def test_registered_openai_stream_disconnect_drains_blocked_read_before_ru
     from starlette.responses import StreamingResponse
 
     from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
-    from tldw_Server_API.app.core.Chat import bounded_daemon as bounded_daemon_module
     from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
+    from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
     from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
     from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
 

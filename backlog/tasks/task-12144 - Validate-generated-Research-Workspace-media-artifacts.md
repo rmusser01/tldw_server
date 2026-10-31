@@ -27,9 +27,9 @@ Extend the slides fail-closed artifact validation pattern to other Research Work
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the shared placeholder guard in the existing StudioPane artifact generation path. Quiz/flashcard placeholders are rejected before persisted study-material records are created; audio placeholder scripts are rejected before TTS and empty TTS buffers are rejected; data tables must parse and contain at least one non-placeholder data cell.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

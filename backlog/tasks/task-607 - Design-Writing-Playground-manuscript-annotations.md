@@ -32,11 +32,7 @@ Create an approved design spec for durable manuscript-owned Writing Playground a
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Draft spec created at Docs/superpowers/specs/2026-05-24-writing-playground-manuscript-annotations-design.md. Pre-review checks passed: git diff --check passed; ASCII scan returned no matches; placeholder scan returned no matches.
 
 Spec review loop: reviewer returned Approved with no issues. Advisory notes for implementation planning: resolve cap/default/provider/anchor-persistence decisions; keep anchor_status enum explicit as attached/reattached/needs_review/scene_level; tie annotation list pagination to the existing manuscript list response pattern.
@@ -60,7 +56,7 @@ Earlier post-rebase verification found TASK-497 collisions already present on or
 User approved the review findings for follow-up spec hardening. The spec now splits frontend manual annotation work into foundation and margin-rail slices, defines margin-card positioning and collision behavior, constrains broad derived anchor_status filtering, resolves direct annotation access into V1, and adds keyboard/accessibility acceptance criteria for margin comments.
 
 Latest rebase onto origin/dev found new TASK-505 collisions already present upstream. Renumbered this design task to TASK-607 and updated the spec Backlog reference.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

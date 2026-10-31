@@ -1743,6 +1743,38 @@ def test_quiz_attempt_question_assistant_respond_persists_user_and_assistant_mes
     assert payload["thread"]["message_count"] == 2
 
 
+def test_quiz_attempt_question_assistant_respond_refuses_an_over_quota_user(
+    client_with_quizzes_db: TestClient,
+    quizzes_db: CharactersRAGDB,
+    monkeypatch,
+):
+    """An over-quota user gets the 402 and the study assistant never calls the LLM."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    attempt_id, question_ids = _create_attempt_with_missed_questions(quizzes_db)
+    question_id = question_ids[0]
+    calls: list[dict[str, Any]] = []
+
+    async def recording_generate_reply(**kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {"assistant_text": "unused", "structured_payload": {}, "provider": "openai", "model": "gpt-test"}
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.quizzes.generate_study_assistant_reply",
+        recording_generate_reply,
+    )
+    refuse_llm_work(monkeypatch)
+
+    response = client_with_quizzes_db.post(
+        f"/api/v1/quizzes/attempts/{attempt_id}/questions/{question_id}/assistant/respond",
+        json={"action": "explain"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert_llm_quota_402(response)
+    assert calls == []
+
+
 def test_quiz_attempt_question_assistant_respond_returns_409_for_stale_thread_version(
     client_with_quizzes_db: TestClient,
     quizzes_db: CharactersRAGDB,

@@ -11,7 +11,7 @@ This guide covers the configuration and security setup required to deploy the RA
 3. [Performance Tuning](#performance-tuning)
 4. [Rate Limiting](#rate-limiting)
 5. [Audit Logging](#audit-logging)
-6. [Monitoring & Metrics](#monitoring--metrics)
+6. [Monitoring & Metrics](#monitoring-metrics)
 7. [Authentication Setup](#authentication-setup)
 8. [SSL/TLS Configuration](#ssltls-configuration)
 9. [Backup Strategy](#backup-strategy)

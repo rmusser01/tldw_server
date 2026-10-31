@@ -40,11 +40,13 @@ vi.mock("../CapabilityMappingsTab", () => ({
 }))
 
 const serviceMocks = vi.hoisted(() => ({
-  getToolRegistrySummary: vi.fn()
+  getMcpToolsRecoveryStatus: vi.fn()
 }))
 
-vi.mock("@/services/tldw/mcp-hub", () => ({
-  getToolRegistrySummary: serviceMocks.getToolRegistrySummary
+vi.mock("@/services/tldw/domains/setup-onboarding", () => ({
+  setupOnboardingMethods: {
+    getMcpToolsRecoveryStatus: serviceMocks.getMcpToolsRecoveryStatus
+  }
 }))
 
 import { McpHubPage } from "../McpHubPage"
@@ -70,10 +72,9 @@ const renderMcpHubPage = () => {
 describe("McpHubPage FTUX", () => {
   beforeEach(() => {
     localStorage.clear()
-    serviceMocks.getToolRegistrySummary.mockResolvedValue({
-      total_tools: 0,
-      modules: []
-    })
+    serviceMocks.getMcpToolsRecoveryStatus.mockRejectedValue(
+      new Error("First-run status unavailable")
+    )
   })
 
   afterEach(() => {
@@ -88,7 +89,9 @@ describe("McpHubPage FTUX", () => {
   it("shows the explainer card on first visit", () => {
     renderMcpHubPage()
     expect(screen.getByTestId("mcp-hub-explainer")).toBeTruthy()
-    expect(screen.getByTestId("mcp-hub-status-summary")).toBeTruthy()
+    expect(
+      screen.getByRole("navigation", { name: "MCP Hub workflow shortcuts" })
+    ).toBeTruthy()
   })
 
   it("hides the explainer card after dismissal and persists to localStorage", async () => {

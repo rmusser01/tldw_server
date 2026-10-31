@@ -28,13 +28,11 @@ priority: high
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Completion note: AC #4 was satisfied up to push and initial PR check re-check. Remaining current CI checks were intentionally not waited on further because the user explicitly instructed: "Ignore the current CI checks."
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Original reproduction/verification: exact CI-failing test failed locally with the missing request argument, then passed after the test update. Full tldw_Server_API/tests/unit/test_mcp_unified_error_mapping.py passed 10/10. Bandit was skipped because only test/backlog files changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

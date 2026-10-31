@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from tldw_Server_API.app.core.config_sections.slides import SlidesConfig, load_slides_config
-from tldw_Server_API.app.core.Utils.prompt_loader import (
+from tldw_Server_API.app.core.Context_Integrity.prompt_loader import (
     PromptAssetUnavailableError,
     load_prompt_strict,
 )

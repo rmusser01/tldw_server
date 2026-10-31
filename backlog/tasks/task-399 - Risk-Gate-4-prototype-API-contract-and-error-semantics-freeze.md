@@ -44,7 +44,7 @@ Implementation plan: Docs/superpowers/plans/2026-05-15-prototype-workspace-risk-
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-05-15: Created isolated worktree .worktrees/prototype-risk-gate-4-contract-freeze on branch codex/prototype-risk-gate-4-contract-freeze from origin/dev 2df371fbe after Risk Gate 3 PR #1729 was merged and GitHub issue #1455 was closed.
 
 2026-05-15: Baseline verification before implementation: ../../.venv/bin/python -m pytest tldw_Server_API/tests/PrototypeWorkspaces -q passed with 103 passed, 5 warnings in 8.73s.
@@ -58,7 +58,7 @@ Implementation plan: Docs/superpowers/plans/2026-05-15-prototype-workspace-risk-
 2026-05-15: Started PR #1739 review-fix pass after live PR sweep. Actionable technical findings: 422 OpenAPI/default-validation mismatch, preview-renewal raw exception messages, missing 429 public-link rate-limit response metadata, machine-specific verification notes, and duplicated prototype error helper. Human-owned gate remains Frontend/Product signoff; do not fabricate it.
 
 2026-05-15: Implemented PR #1739 technical review fixes: centralized prototype error response metadata/helpers, documented 422 as PrototypeErrorResponse or HTTPValidationError, added public prototype exchange 429 OpenAPI metadata, masked preview-renewal exception text, replaced machine-specific verification command notes, and added regression tests. Verification: targeted 5-test review subset passed; ../../.venv/bin/python -m pytest tldw_Server_API/tests/PrototypeWorkspaces -q passed with 109 passed, 5 warnings in 8.35s; Bandit touched backend paths wrote /tmp/bandit_prototype_risk_gate_4_review_fixes.json with 0 findings; git diff --check was clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

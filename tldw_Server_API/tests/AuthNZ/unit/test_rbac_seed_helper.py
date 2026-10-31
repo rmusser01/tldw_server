@@ -37,7 +37,7 @@ def test_all_production_rbac_seed_callers_own_pool_transactions() -> None:
         if not seed_calls:
             continue
 
-        relative_path = str(path.relative_to(app_root))
+        relative_path = path.relative_to(app_root).as_posix()
         actual_callers[relative_path] = len(seed_calls)
         transaction_owned_calls: set[ast.AST] = set()
         for async_with in (
@@ -119,6 +119,7 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
         expected_permissions = {
             "media.read",
             "media.create",
+            "media.update",
             "media.delete",
             "sql.read",
             "sql.target:media_db",
@@ -147,7 +148,7 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
             SELECT id, name
             FROM permissions
             WHERE name IN (
-                'media.read','media.create','media.delete','system.configure',
+                'media.read','media.create','media.update','media.delete','system.configure',
                 'users.manage_roles','sql.read','sql.target:media_db','modules.read',
                 'prompts.read','tools.execute:*','notifications.read','notifications.control'
                 ,'notes.graph.suggest','notes.link_keyword','keywords.create'
@@ -162,6 +163,8 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
         )
         user_perm_ids = {row[0] for row in await cur.fetchall()}
         assert perm_id["media.read"] in user_perm_ids
+        assert perm_id["media.update"] in user_perm_ids  # nosec B101 - Existing standard-user edit permission must survive bootstrap.
+        assert perm_id["media.delete"] not in user_perm_ids  # nosec B101 - Edit parity does not grant destructive permission.
         assert perm_id["media.create"] in user_perm_ids
         assert perm_id["sql.read"] in user_perm_ids
         assert perm_id["sql.target:media_db"] in user_perm_ids
@@ -189,6 +192,7 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
             (role_id["viewer"],),
         )
         viewer_perm_ids = {row[0] for row in await cur.fetchall()}
+        assert perm_id["media.update"] not in viewer_perm_ids  # nosec B101 - Read-only role remains read-only.
         assert perm_id["media.read"] in viewer_perm_ids
         assert perm_id["notifications.read"] in viewer_perm_ids
         assert perm_id["notifications.control"] in viewer_perm_ids
@@ -201,6 +205,7 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
             (role_id["reviewer"],),
         )
         reviewer_perm_ids = {row[0] for row in await cur.fetchall()}
+        assert perm_id["media.update"] not in reviewer_perm_ids  # nosec B101 - Review role does not acquire general edit permission.
         assert perm_id["notifications.read"] in reviewer_perm_ids
         assert perm_id["notifications.control"] in reviewer_perm_ids
 
@@ -417,7 +422,10 @@ def _create_version_089_rbac_database(db_path: Path) -> None:
 
 
 def _migrate_version_089_database(db_path: Path) -> None:
-    from tldw_Server_API.app.core.AuthNZ.migrations import get_authnz_migrations
+    from tldw_Server_API.app.core.AuthNZ.migrations import (
+        get_authnz_migrations,
+        migration_090_seed_notification_permissions,
+    )
     from tldw_Server_API.app.core.DB_Management.migrations import MigrationManager
 
     manager = MigrationManager(db_path)
@@ -426,6 +434,8 @@ def _migrate_version_089_database(db_path: Path) -> None:
     # efddb3b43c (v97) and c1d54c4e8f (v98) landed. The helper only relies on
     # migrations[-1] being the newest one, which it re-applies for idempotency.
     assert migrations[-1].version == max(migration.version for migration in migrations)
+    notification_migration = next(migration for migration in migrations if migration.version == 90)
+    assert notification_migration.up is migration_090_seed_notification_permissions
     for migration in migrations:
         manager.add_migration(migration)
 
@@ -437,7 +447,7 @@ def _migrate_version_089_database(db_path: Path) -> None:
 
     manager.migrate()
     with sqlite3.connect(db_path) as conn:
-        migrations[-1].apply(conn)
+        notification_migration.apply(conn)
     manager.migrate()
 
 

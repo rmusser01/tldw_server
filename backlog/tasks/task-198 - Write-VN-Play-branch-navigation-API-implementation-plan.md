@@ -43,7 +43,7 @@ Create the implementation plan for GitHub issue #1463 based on the reviewed VN P
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started implementation-plan authoring from the reviewed branch navigation design spec.
 
 Saved the implementation plan at Docs/superpowers/plans/2026-05-09-vn-play-branch-navigation-api-implementation-plan.md.
@@ -53,7 +53,7 @@ Self-review found and patched one compatibility issue: branch-filter warnings ca
 Self-review tightened restore idempotency ordering: completed-action replay must happen before stale scene-version checks, and restore completion must be committed through one repository transaction helper.
 
 Verification for the docs-only planning slice: git diff --check exited 0; plan and Backlog task files exist in the worktree. Bandit is not applicable because this task changed only planning/task markdown and no runtime code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

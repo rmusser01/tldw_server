@@ -47,8 +47,6 @@ export const ParametersSidebar: React.FC = () => {
     setRagSearchMode,
     ragTopK,
     setRagTopK,
-    ragEnableGeneration,
-    setRagEnableGeneration,
     ragEnableCitations,
     setRagEnableCitations
   } = useMessageOption({ forceCompareEnabled: true })
@@ -281,17 +279,12 @@ export const ParametersSidebar: React.FC = () => {
             </div>
           </div>
 
-          {/* Enable Generation */}
-          <div className="flex items-center justify-between">
-            <label className="text-xs text-text-muted">
-              {t("sidepanel:rag.settings.generation", "Enable Answer Generation")}
-            </label>
-            <Switch
-              size="small"
-              checked={ragEnableGeneration}
-              onChange={setRagEnableGeneration}
-            />
-          </div>
+          <p className="text-xs text-text-muted">
+            {t(
+              "playground:workspace.chatRetrievalGeneration",
+              "Chat retrieves sources, then the selected model generates one answer."
+            )}
+          </p>
 
           {/* Include Citations */}
           <div className="flex items-center justify-between">

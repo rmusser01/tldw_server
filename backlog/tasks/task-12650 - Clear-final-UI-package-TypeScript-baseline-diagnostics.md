@@ -27,9 +27,9 @@ Clear the remaining package-wide TypeScript diagnostics in layout, sidepanel hea
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Typed the external shell fixture with optional setOverrides, rendered SidepanelHeaderSimple directly so its props are preserved, and annotated the completed setup fixture as FirstRunState. Full package tsc now exits 0 with empty output. Bandit is not applicable for this JS/TS-only touched scope.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

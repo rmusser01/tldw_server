@@ -652,11 +652,20 @@ def _select_allowed_base_dir_for_path(path: Path, *, label: str) -> Path:
 
 
 def _resolve_safe_input_path(path: Path, *, base_dir: Optional[Path], label: str) -> Path:
+    supplied_base = Path(base_dir) if base_dir is not None else None
     if base_dir is None:
         base_dir = _select_allowed_base_dir_for_path(path, label=label)
     base_resolved = _resolve_allowed_base_dir(base_dir, label=f"{label} base directory")
-    # Resolving first erases the symlink components that this policy rejects.
-    _assert_no_symlink(path if path.is_absolute() else base_resolved / path, label=label)
+    # A caller-supplied base may use a system alias such as macOS /var; reject
+    # symlinks in the untrusted portion below its canonical directory.
+    raw_path = path if path.is_absolute() else Path(base_dir) / path
+    path_to_check = raw_path
+    if supplied_base is not None:
+        try:
+            path_to_check = base_resolved / raw_path.relative_to(supplied_base)
+        except ValueError:
+            pass
+    _assert_no_symlink(path_to_check, label=label)
     safe_path = resolve_safe_local_path(path, base_resolved)
     if safe_path is None:
         raise ValueError(f"{label} must resolve under {base_resolved}")

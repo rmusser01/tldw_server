@@ -6,7 +6,8 @@ import type { TFunction } from "i18next"
 
 import { ChatHeader } from "../ChatHeader"
 
-vi.mock("antd", () => ({
+vi.mock("antd", async (importOriginal) => ({
+  ...await importOriginal<typeof import("antd")>(),
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} />
 }))

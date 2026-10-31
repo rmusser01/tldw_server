@@ -34,13 +34,13 @@ Evaluate and address the Qodo follow-up review on PR #1559. Scope includes previ
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification before commit:
 - Focused/adjacent pytest: 61 passed, 5 warnings in 8.93s.
 - Bandit touched backend scope: 0 findings; JSON report at /private/tmp/bandit_pr1559_qodo_followup.json.
 - git diff --check: passed.
 - Earlier broad Chatbooks sweep hit the existing TestClient shutdown timeout in test_chatbooks_api_path_guard.py, with no assertion failure observed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

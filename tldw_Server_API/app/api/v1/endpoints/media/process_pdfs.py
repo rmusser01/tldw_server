@@ -18,10 +18,12 @@ from fastapi import (
 from loguru import logger
 from starlette.responses import JSONResponse
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import propagate_billing_headers, require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import (
     get_process_pdfs_form,
+    media_analysis_requested,
 )
 from tldw_Server_API.app.api.v1.API_Deps.media_route_deps import (
     media_create_dependencies,
@@ -32,6 +34,7 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
 )
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.API_Deps.validations_deps import (
     file_validator_instance,
 )
@@ -45,7 +48,6 @@ from tldw_Server_API.app.api.v1.endpoints.media.input_contracts import (
     validate_media_inputs,
 )
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ProcessPDFsForm
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     apply_chunking_template_if_any,
@@ -151,6 +153,10 @@ async def process_pdfs_endpoint(
         form_data.urls,
         files,
     )
+
+    if media_analysis_requested(form_data):
+        # Usage quotas (LLM usage accounting spec §4a), before any download or processing.
+        await enforce_llm_quota(current_user.id)
 
     system_prompt = form_data.system_prompt
     # Optional multipart strings normalize empty fields to None. Preserve an

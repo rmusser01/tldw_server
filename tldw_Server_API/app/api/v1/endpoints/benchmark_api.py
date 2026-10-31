@@ -11,7 +11,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_rate_limiter_dep
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
+from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
+    get_eval_request_user,
+    require_eval_permissions,
+)
+from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
 from tldw_Server_API.app.core.Evaluations.benchmark_loaders import load_benchmark_dataset
 from tldw_Server_API.app.core.Evaluations.benchmark_registry import get_registry
 from tldw_Server_API.app.core.Evaluations.evaluation_manager import EvaluationManager
@@ -64,7 +70,11 @@ class BenchmarkSampleResponse(BaseModel):
     total_available: int = Field(..., description="Total samples in dataset")
 
 
-@router.get("/list", response_model=BenchmarkListResponse)
+@router.get(
+    "/list",
+    response_model=BenchmarkListResponse,
+    dependencies=[Depends(require_eval_permissions(EVALS_READ))],
+)
 async def list_benchmarks():
     """
     List all available benchmarks.
@@ -95,7 +105,11 @@ async def list_benchmarks():
         ) from e
 
 
-@router.get("/{benchmark_name}/info", response_model=BenchmarkInfoResponse)
+@router.get(
+    "/{benchmark_name}/info",
+    response_model=BenchmarkInfoResponse,
+    dependencies=[Depends(require_eval_permissions(EVALS_READ))],
+)
 async def get_benchmark_info(benchmark_name: str):
     """
     Get detailed information about a specific benchmark.
@@ -129,7 +143,11 @@ async def get_benchmark_info(benchmark_name: str):
         ) from e
 
 
-@router.get("/{benchmark_name}/samples", response_model=BenchmarkSampleResponse)
+@router.get(
+    "/{benchmark_name}/samples",
+    response_model=BenchmarkSampleResponse,
+    dependencies=[Depends(require_eval_permissions(EVALS_READ))],
+)
 async def get_benchmark_samples(
     benchmark_name: str,
     limit: int = Query(5, ge=1, le=100, description="Number of samples to return")
@@ -179,11 +197,16 @@ async def get_benchmark_samples(
         ) from e
 
 
-@router.post("/{benchmark_name}/run", response_model=BenchmarkRunResponse)
+@router.post(
+    "/{benchmark_name}/run",
+    response_model=BenchmarkRunResponse,
+    dependencies=[Depends(require_eval_permissions(EVALS_MANAGE))],
+)
 async def run_benchmark(
     benchmark_name: str,
     request: BenchmarkRunRequest,
-    user_id: str = Depends(get_rate_limiter_dep)
+    user_id: str = Depends(get_rate_limiter_dep),
+    current_user: User = Depends(get_eval_request_user),
 ):
     """
     Run a benchmark evaluation.
@@ -199,6 +222,8 @@ async def run_benchmark(
     Returns:
         Summary of benchmark results.
     """
+    # Usage quotas (LLM usage accounting spec §4a): checked before any work, as the evaluations route does.
+    await enforce_llm_quota(getattr(current_user, "id", None))
     try:
         registry = get_registry()
         config = registry.get(benchmark_name)
@@ -342,7 +367,10 @@ async def run_benchmark(
 
 
 # Special endpoint for SimpleQA with its grading system
-@router.post("/simpleqa/evaluate")
+@router.post(
+    "/simpleqa/evaluate",
+    dependencies=[Depends(require_eval_permissions(EVALS_MANAGE))],
+)
 async def evaluate_simpleqa(
     question: str = Query(..., description="The question to ask"),
     api_name: str = Query("openai", description="API to use"),

@@ -43,7 +43,7 @@ Implement the first backend slice from the implementation plan: typed llama.cpp 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stale tracker closeout after PR #2116 merged: the llama.cpp admin config facade already exists on `origin/dev` from PR #1727 (`726958be39 Improve llama.cpp WebUI server management`). Provenance check: `git show --stat --oneline --no-renames 726958be39 -- tldw_Server_API/app/core/Local_LLM/llamacpp_config_service.py tldw_Server_API/app/api/v1/endpoints/llamacpp.py tldw_Server_API/app/api/v1/schemas/llamacpp_admin_schemas.py tldw_Server_API/tests/LLM_Local/test_llamacpp_admin_config_api.py` shows the config service, admin schemas, llama.cpp endpoint expansion, and focused config API tests were added there.
 
 Verified current `origin/dev` behavior in a fresh worktree. `GET /api/v1/llamacpp/config`, `PUT /api/v1/llamacpp/config`, and `POST /api/v1/llamacpp/validate` are implemented through `llamacpp_config_service`, typed schemas, and the existing llama.cpp endpoint router. Config writes go through `setup_manager.update_config()` under the llama.cpp config write lock and refresh config caches; binary validation checks the selected local binary without starting a managed server.
@@ -51,7 +51,7 @@ Verified current `origin/dev` behavior in a fresh worktree. `GET /api/v1/llamacp
 Verification: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/LLM_Local/test_llamacpp_admin_config_api.py tldw_Server_API/tests/LLM_Local/test_llamacpp_management_api.py -q` passed with 46 tests and 5 warnings.
 
 Bandit was not rerun for this closeout-only PR because this slice changes only Backlog metadata. PR #1727 carried the implementation; this closeout records current focused test evidence.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

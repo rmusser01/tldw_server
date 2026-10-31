@@ -29,11 +29,11 @@ Rebase PR #2225 on latest dev and address unresolved review comments/check warni
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Initial review context: PR #2225 had unresolved review threads for published user-guide links, Docker compose path wording, task-585 updated_date, and removal of a machine-specific mkdocs path. CodeRabbit also flagged the missing Risk & Rollback PR-description section.
 
 Rebased codex/user-docs-map onto origin/dev. Resolved the Docs/User_Guides/index.md conflict by keeping the PR hub rewrite while carrying dev-added Character Cards, Personas, Bulk Conference Playlist, and Prototype Workspaces links into the workflow map. Fixed still-valid review comments in troubleshooting docs and task-585, refreshed the relevant published troubleshooting copy, restored PR description Risk & Rollback, and kept published hub targets for newly referenced links.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

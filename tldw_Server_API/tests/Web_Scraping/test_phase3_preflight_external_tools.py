@@ -97,6 +97,26 @@ def _short_adapter_timeouts(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(module, "_PROCESS_CLEANUP_GRACE_SECONDS", 0.02)
 
 
+@pytest.fixture
+def controlled_process_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[FakeClock, list[float | None]]:
+    """Record the real timer cap with a distinct local timeout and fake deadline clock."""
+    module = _adapter_module()
+    assert module is not None
+    monkeypatch.setattr(module, "_WAF_TIMEOUT_SECONDS", 0.04)
+    clock = FakeClock()
+    creation_timeouts: list[float | None] = []
+    native_timeout = module._asyncio_timeout
+
+    def recording_timeout(timeout_s: float | None) -> Any:
+        creation_timeouts.append(timeout_s)
+        return native_timeout(timeout_s)
+
+    monkeypatch.setattr(module, "_asyncio_timeout", recording_timeout)
+    return clock, creation_timeouts
+
+
 def _controls(
     *,
     active_probes: int | None = None,
@@ -588,10 +608,21 @@ async def test_communicate_error_and_captured_output_never_enter_logs() -> None:
 
 
 @pytest.mark.asyncio
-async def test_process_creation_is_bounded_by_overall_deadline() -> None:
-    factory = FakeProcessFactory(block_creation=True)
-    loop = asyncio.get_running_loop()
-    controls = _controls(deadline=loop.time() + 0.02, clock=loop.time)
+async def test_process_creation_is_bounded_by_overall_deadline(
+    controlled_process_deadline: tuple[FakeClock, list[float | None]],
+) -> None:
+    clock, creation_timeouts = controlled_process_deadline
+
+    class DeadlineFactory(FakeProcessFactory):
+        async def __call__(self, *args: Any, **kwargs: Any) -> FakeExternalProcess:
+            try:
+                return await super().__call__(*args, **kwargs)
+            except asyncio.CancelledError:
+                clock.advance(0.02)
+                raise
+
+    factory = DeadlineFactory(block_creation=True)
+    controls = _controls(deadline=clock() + 0.02, clock=clock)
 
     with pytest.raises(PreflightDeadlineExceeded):
         await _probe(
@@ -600,6 +631,8 @@ async def test_process_creation_is_bounded_by_overall_deadline() -> None:
         ).run_waf(_URL, find_all=False, enabled=True)
 
     assert factory.creation_cancellations == 1
+    assert creation_timeouts == [0.02]
+    assert controls.deadline_exhausted()
 
 
 @pytest.mark.asyncio
@@ -770,10 +803,21 @@ async def test_communicate_normalizes_python310_asyncio_timeout_and_cleans_proce
 
 
 @pytest.mark.asyncio
-async def test_overall_deadline_timeout_wins_over_local_timeout() -> None:
-    process = FakeExternalProcess(block_communicate=True)
-    loop = asyncio.get_running_loop()
-    controls = _controls(deadline=loop.time() + 0.02, clock=loop.time)
+async def test_overall_deadline_timeout_wins_over_local_timeout(
+    controlled_process_deadline: tuple[FakeClock, list[float | None]],
+) -> None:
+    clock, creation_timeouts = controlled_process_deadline
+
+    class DeadlineProcess(FakeExternalProcess):
+        async def communicate(self) -> tuple[bytes | str, bytes | str]:
+            try:
+                return await super().communicate()
+            except asyncio.CancelledError:
+                clock.advance(0.02)
+                raise
+
+    process = DeadlineProcess(block_communicate=True)
+    controls = _controls(deadline=clock() + 0.02, clock=clock)
 
     with pytest.raises(PreflightDeadlineExceeded):
         await _probe(
@@ -783,6 +827,43 @@ async def test_overall_deadline_timeout_wins_over_local_timeout() -> None:
 
     assert process.terminate_calls == 1
     assert process.wait_calls == 1
+    assert process.communicate_cancellations == 1
+    assert process.kill_calls == 0
+    assert creation_timeouts == [0.02]
+    assert controls.deadline_exhausted()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("boundary", ["creation", "communicate"])
+async def test_process_timeout_before_overall_deadline_remains_analyzer_local(
+    boundary: str,
+    controlled_process_deadline: tuple[FakeClock, list[float | None]],
+) -> None:
+    clock, creation_timeouts = controlled_process_deadline
+    controls = _controls(deadline=clock() + 0.02, clock=clock)
+    process: FakeExternalProcess | None = None
+    if boundary == "creation":
+        factory = FakeProcessFactory(block_creation=True)
+    else:
+        process = FakeExternalProcess(block_communicate=True)
+        factory = FakeProcessFactory([process])
+
+    with pytest.raises(ProbeTimeout):
+        await _probe(
+            controls=controls,
+            process_factory=factory,
+        ).run_waf(_URL, find_all=False, enabled=True)
+
+    assert creation_timeouts == [0.02]
+    assert controls.remaining_seconds() == 0.02
+    assert controls.deadline_exhausted() is False
+    if process is None:
+        assert factory.creation_cancellations == 1
+    else:
+        assert process.communicate_cancellations == 1
+        assert process.terminate_calls == 1
+        assert process.kill_calls == 0
+        assert process.wait_calls == 1
 
 
 @pytest.mark.asyncio

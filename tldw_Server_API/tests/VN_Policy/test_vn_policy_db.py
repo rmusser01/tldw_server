@@ -11,7 +11,6 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.DB_Management.VNPolicy_DB import (
     VNPolicyProfileStore,
     VNPolicyRepository,
-    ensure_vn_policy_tables,
     _question_mark_to_dollar,
 )
 
@@ -209,9 +208,7 @@ async def test_global_profile_create_rolls_back_when_version_history_insert_fail
 
     monkeypatch.setattr(store, "_insert_version_row", fail_insert_version_row)
 
-    # The pool reports a fixed, source-free message since d7bab343d3; the inner
-    # RuntimeError text is deliberately not surfaced.
-    with pytest.raises(TransactionError, match="Transaction failed during: SQLite transaction"):
+    with pytest.raises(TransactionError, match="^Transaction failed during: SQLite transaction$"):
         await store.create_policy_profile(
             profile_id="rollback_policy",
             display_name="Rollback Policy",

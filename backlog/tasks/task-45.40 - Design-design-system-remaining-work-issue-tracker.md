@@ -34,7 +34,7 @@ Design the GitHub epic plus Backlog.md mirror structure for tracking the remaini
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Wrote Docs/superpowers/specs/2026-05-14-design-system-remaining-work-tracker-design.md for the approved GitHub epic plus Backlog mirror tracker. The spec includes product-area and governance issue templates, baseline snapshot rules, ordered path ownership, mutable-state source-of-truth rules, baseline issue-reference format, and close/reopen behavior.
 
 Spec review loop: first review found four issues around reproducible path ownership, duplicated mutable state, baseline issue-reference format, and closed-issue drift. Revised the spec to address all four. Second review approved with no blocker or medium-severity issues.
@@ -44,7 +44,7 @@ Verification: git diff --check passed. Bandit is not applicable because this tas
 User-requested design review after initial approval: self-review found three maintainability risks. The spec now clarifies that GitHub sub-issues are regular linked issues unless native sub-issues are available, adds a human-reviewed issue-body draft gate before public GitHub mutation, and adds long-tail split rules for path groups with five or more findings.
 
 Review verification: git diff --check passed after the self-review patch.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

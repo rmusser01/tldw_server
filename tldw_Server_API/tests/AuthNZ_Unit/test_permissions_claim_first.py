@@ -3,14 +3,14 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_permissions, require_roles
 from tldw_Server_API.app.core.AuthNZ import permissions as perms_mod
 
 # permissions.py stopped importing is_single_user_mode in a20dfcb8a3 (its checks
 # are claim-first and mode-agnostic), so the mode is pinned at its source module.
 from tldw_Server_API.app.core.AuthNZ import settings as authnz_settings
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_permissions, require_roles
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
 
 def test_permissions_module_no_legacy_require_role_helper():

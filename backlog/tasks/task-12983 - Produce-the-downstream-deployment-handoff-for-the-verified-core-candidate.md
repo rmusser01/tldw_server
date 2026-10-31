@@ -36,9 +36,9 @@ Prepare the public, reusable handoff contract for an exact verified core release
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-08-21 scope reconciliation: the owner clarified that commercial deployment is owned by a separate private repository. This public task now stops at an immutable reusable release handoff and does not track or disclose the downstream commercial implementation.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

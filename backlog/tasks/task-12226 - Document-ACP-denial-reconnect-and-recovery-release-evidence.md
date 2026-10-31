@@ -48,13 +48,13 @@ Close the #1501 ACP release-signoff workstream by inventorying existing denial, 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented deterministic useACPSession tests for denial response payload/queue cleanup and transient close retry state.
 Updated ACP_Production_Readiness with a #1501 addendum covering permission denial, reconnect/session replay, failed-run recovery, and explicit live downstream-agent caveats tied to #1504/#1505.
 Verification: Vitest passed for useACPSession, ACPPermissionModal, ACPChatPanel, and AgentTasksPage.connection (19 tests). Pytest passed for selected ACP permission/reconnect/SSE/replay/orchestration diagnostics coverage (18 tests). git diff --check passed. Bandit skipped because touched source is Markdown plus TypeScript test code only; no Python code was changed.
 
 Review follow-up for PR #1517: replaced the reconnect test hardcoded 1000ms timer advance with WS_CONFIG.RECONNECT_DELAY_MS, added an explicit supported downstream-agent table documenting that no live ACP stdio downstream agent/version is certified for this release host, and added the #1500 parent-tracker evidence link to task references.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -1,4 +1,11 @@
 {
+  "mediaHandoff": {
+    "conflictLabel": "媒体导入冲突",
+    "conflict": "消息输入框中已有草稿。请插入媒体来源、替换草稿或取消导入。",
+    "insert": "插入媒体来源",
+    "replace": "替换当前草稿",
+    "cancel": "取消导入"
+  },
   "formError": {
     "noModel": "请选择一个模型",
     "noEmbeddingModel": "请在设置>RAG页面设置一个文本嵌入模型"

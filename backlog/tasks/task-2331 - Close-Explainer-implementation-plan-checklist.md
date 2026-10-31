@@ -40,9 +40,9 @@ Update the Explainer implementation plan checklist to reflect the already comple
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Updated the Explainer implementation plan checklist markers for Tasks 1-3 to match the already completed and committed implementation slices. Verification: rg for unchecked step markers returned no matches, and git diff --check on the plan file exited clean. No implementation code was changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

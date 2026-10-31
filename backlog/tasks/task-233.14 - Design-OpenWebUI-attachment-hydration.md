@@ -35,13 +35,13 @@ Design a v3 follow-up for hydrating OpenWebUI attachment/file bytes after JSON o
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Docs/superpowers/specs/2026-05-11-openwebui-attachment-hydration-design.md covering the approved local-bundle-first hydration design, post-import Jobs workflow, referenced-file scope, hybrid image/Media DB storage, opt-in processing, dedupe policy, and access controls.
 
 Manual design review verified the spec references current Chatbooks/OpenWebUI import extension points, OpenWebUI DB/file docs, non-goals, and later ZIP/live-API extensions. A separate review subagent was not used because this session does not have explicit delegation permission.
 
 Verification: git diff --check passed. TODO/TBD/FIXME scan found no unresolved placeholders. Bandit skipped because this is documentation/task metadata only with no executable code touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

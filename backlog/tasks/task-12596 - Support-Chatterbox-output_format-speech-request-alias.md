@@ -26,7 +26,7 @@ Accept upstream-style Chatterbox output_format on OpenAI-compatible speech reque
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added optional OpenAISpeechRequest.output_format and mapped it in TTSServiceV2._convert_request for Chatterbox-family models only when response_format was not explicitly provided. Explicit response_format keeps precedence, and non-Chatterbox requests ignore output_format. Updated CHATTERBOX_SETUP.md and the parity plan with the alias behavior.
 
 Verification:
@@ -36,7 +36,7 @@ Verification:
 - source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/TTS_NEW/integration/test_custom_voice_resolution.py -v (5 passed)
 - source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/TTS/tts_service_v2.py tldw_Server_API/app/api/v1/schemas/audio_schemas.py -f json -o /tmp/bandit_chatterbox_output_format_task546.json (results: [])
 - git diff --check (clean)
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

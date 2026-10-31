@@ -11,6 +11,7 @@ from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as chat
 from tldw_Server_API.app.api.v1.endpoints import characters_endpoint as characters
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import CharacterRateLimiter
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError, InputError
 
 pytestmark = pytest.mark.integration
@@ -45,6 +46,7 @@ def _seed_defaults(owners):
 
 def _client(db, monkeypatch):
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(characters.router, prefix="/api/v1/characters")
     app.include_router(chats.router, prefix="/api/v1/chats")
     app.dependency_overrides[deps.get_chacha_db_for_user] = lambda: db
@@ -271,7 +273,13 @@ def test_sqlite_shared_file_preserves_sync_client_semantics(tmp_path, existing_f
         character = first.add_character_card({"name": "Shared per-user file"})
         assert second.get_character_card_by_id(character)["client_id"] == "device-first"
         assert second.update_character_card(character, {"description": "Device edit"}, expected_version=1)
-        assert first.get_character_card_by_id(character)["client_id"] == "device-second"
+        edited = first.get_character_card_by_id(character)
+        assert (edited["client_id"], edited["description"], edited["version"]) == ("device-second", "Device edit", 2)
+        reopened = CharactersRAGDB(path, client_id="device-reopened")
+        try:
+            assert reopened.get_character_card_by_id(character) == edited
+        finally:
+            reopened.close_all_connections()
     finally:
         first.close_all_connections()
         second.close_all_connections()

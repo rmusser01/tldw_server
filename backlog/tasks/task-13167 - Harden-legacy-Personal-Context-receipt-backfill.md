@@ -48,9 +48,9 @@ Remediate TASK-13161 by permitting legacy empty wire-identity backfill only afte
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented fail-closed legacy empty-wire receipt validation at the existing publication-journal seam. The validator authenticates and compares exact SQLite types and values across the receipt, source row, manifest sibling, deterministic batch shape and relay state, canonical historical manifest and parent lineage, and current manifest before one checked empty-only CAS. Review round 1 restored the pre-TASK-13167 modern nonempty-receipt source verification path and added real-SQLite record, scope, manifest, pending-proposal, and terminal-proposal coverage. Review round 2 replaced raw protected-body assertion operands with digests and fixed parse diagnostics. Review round 3 made the diagnostic canary itself fail content-free: all safety properties reduce to one boolean, unsafe results use a fixed no-trace pytest failure, and parse helpers raise outside the Pydantic handler so no cause or context is retained. Rounds 2 and 3 changed tests only; production behavior is unchanged. No schema, migration, repository API, dependency, or new ADR was required; ADR-002 governs. Verification: the canary passed; 39 focused receipt tests and 60 combined publication tests passed with 7 existing runtime/configuration warnings; Ruff passed; Bandit passed with no findings; git diff --check passed. The full suite was not run per the task plan; no blockers remain.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

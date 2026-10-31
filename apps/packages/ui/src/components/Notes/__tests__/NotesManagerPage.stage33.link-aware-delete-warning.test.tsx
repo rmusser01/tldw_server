@@ -4,6 +4,35 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
+const notesConnectionConfig = {
+  serverUrl: "https://notes.example.test",
+  authMode: "multi-user" as const,
+  accessToken: "test-access-token"
+}
+
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: notesConnectionConfig,
+    loading: false,
+    authorityLoading: false
+  })
+}))
+
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: {
+    getCurrentUser: vi.fn(async () => ({ id: 1, is_active: true }))
+  }
+}))
+
+vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/Notes/hooks/useNotesGraphAuthorityScope")>()
+  return {
+    ...actual,
+    useNotesGraphAuthorityScope: () =>
+      actual.createNotesGraphAuthorityScope(notesConnectionConfig.serverUrl, 1)
+  }
+})
+
 const {
   mockBgRequest,
   mockMessageSuccess,
@@ -136,7 +165,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 
 vi.mock("@/components/Notes/NotesListPanel", () => ({
-  default: ({ onSelectNote }: any) => (
+  default: ({ onSelectNote }: Pick<React.ComponentProps<typeof import("../NotesListPanel").default>, "onSelectNote">) => (
     <button data-testid="mock-select-note" onClick={() => onSelectNote("note-delete")}>
       Select note
     </button>
@@ -144,7 +173,7 @@ vi.mock("@/components/Notes/NotesListPanel", () => ({
 }))
 
 vi.mock("@/components/Notes/NotesEditorHeader", () => ({
-  default: ({ onDelete }: any) => (
+  default: ({ onDelete }: Pick<React.ComponentProps<typeof import("../NotesEditorHeader").default>, "onDelete">) => (
     <button data-testid="mock-delete-note" onClick={() => onDelete()}>
       Delete note
     </button>
@@ -216,13 +245,14 @@ describe("NotesManagerPage stage 33 link-aware delete warnings", () => {
 
     renderPage()
     fireEvent.click(await screen.findByTestId("mock-select-note"))
+    await screen.findByDisplayValue("Delete me")
     fireEvent.click(await screen.findByTestId("mock-delete-note"))
 
     await waitFor(() => {
       expect(mockConfirmDanger).toHaveBeenCalled()
     })
     const deleteDialogArgs = mockConfirmDanger.mock.calls[0][0]
-    expect(String(deleteDialogArgs.content)).toContain("This note is referenced by 2 other notes")
+    expect(String(deleteDialogArgs.content)).toContain("This note is linked from 2 other notes")
   })
 
   it("keeps baseline delete confirmation copy when inbound links are absent", async () => {
@@ -252,6 +282,7 @@ describe("NotesManagerPage stage 33 link-aware delete warnings", () => {
 
     renderPage()
     fireEvent.click(await screen.findByTestId("mock-select-note"))
+    await screen.findByDisplayValue("Delete me")
     fireEvent.click(await screen.findByTestId("mock-delete-note"))
 
     await waitFor(() => {
@@ -262,6 +293,11 @@ describe("NotesManagerPage stage 33 link-aware delete warnings", () => {
       mockConfirmDanger.mock.invocationCallOrder[0]
     )
     const deleteDialogArgs = mockConfirmDanger.mock.calls[0][0]
-    expect(String(deleteDialogArgs.content)).toBe("Delete this note?")
+    // NL-15: the confirm names the note and says it can be restored from Trash.
+    expect(deleteDialogArgs).toMatchObject({
+      title: "Move to Trash?",
+      content: 'Move "Delete me" to Trash? You can restore it from Trash.',
+      okText: "Move to Trash"
+    })
   })
 })

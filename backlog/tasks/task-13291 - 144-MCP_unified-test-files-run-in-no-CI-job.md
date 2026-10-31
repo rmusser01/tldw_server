@@ -45,7 +45,7 @@ Found by the comprehensive core-module review; independently verified by the orc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 DONE. Two parts.
 
 1) FIXED THE RED TEST. filesystem_module.py:1778 candidate.is_symlink() was unguarded, 15 lines above the correctly guarded stat(follow_symlinks=False) at :1797. Path.is_symlink() lstats and re-raises EACCES/EIO/ESTALE, so one unreadable entry aborted the ENTIRE fs.glob walk instead of degrading that entry. Now wrapped in except OSError with a debug log, falling back to the directory entry kind - which is exactly the shape test_filesystem_glob_marks_file_size_unavailable asserts. Red since 2026-06-03 (5009fc8b95) across 28 commits to that file; now green.
@@ -140,7 +140,7 @@ jobs still skipping the file.
 2026-09-28: AC4 is still unmet, and the gate may never have run. The platform-mcp-inapp shard is defined in ci.yml (full-suite-linux-312/313, macos, windows and release shard jobs), but those jobs run on a PR only when the changes job reports backend_changed == 'true', and none appeared in #3035's 22-job CI run. ci.yml has also not run on a push to dev since February. So no green run of the in-app MCP gate has been observed. The shard-skipping itself is being worked separately (branch fix/ci-shards-skipped-by-admission).
 
 2026-09-29: AC4 met. The platform-mcp-inapp shard had never actually run in CI: every full-suite shard was skipped on pull_request and push because the admission job (workflow_run only) was a skipped ancestor and the shard jobs lacked always(); the summaries counted 'skipped' as a pass. #3036 fixed that. Recorded green run: CI run 36586587382 (PR #3036 head 6fac56a81a), job 109469463723 'Full Suite shard (Ubuntu / Python 3.12 / platform-mcp-inapp)': pytest exit 0, 3439 passed, 3 skipped in 379.94s.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

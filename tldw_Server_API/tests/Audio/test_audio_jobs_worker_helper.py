@@ -6,7 +6,7 @@ import pytest
 async def test_handle_audio_transcribe_stage_uses_normalized_artifact(monkeypatch, tmp_path):
     """
     The audio_jobs_worker transcribe helper should populate segments/text from
-    the normalized STT artifact and attach the full artifact as normalized_stt.
+    the normalized STT artifact and keep the rest of the artifact (not its text and segments again) as normalized_stt.
     """
     import tldw_Server_API.app.services.audio_jobs_worker as worker
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
@@ -47,4 +47,6 @@ async def test_handle_audio_transcribe_stage_uses_normalized_artifact(monkeypatc
     assert next_type == "audio_chunk"
     assert updated_payload["segments"] == fake_segments
     assert updated_payload["text"] == "hello worker"
-    assert updated_payload.get("normalized_stt") == fake_artifact
+    assert updated_payload.get("normalized_stt") == {
+        k: v for k, v in fake_artifact.items() if k not in ("text", "segments")
+    }

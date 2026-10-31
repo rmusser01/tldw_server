@@ -1,4 +1,5 @@
 import type { TldwTtsProvidersInfo } from "@/services/tldw/audio-providers"
+import { toServerTtsProviderKey } from "@/services/tldw/tts-provider-keys"
 
 export type ReadinessState = "ready" | "warning" | "blocked" | "unknown"
 export type CapabilityValue = "supported" | "unsupported" | "unknown"
@@ -401,17 +402,21 @@ export function buildTtsReadinessItems({
     return appendFfmpegWarning()
   }
 
-  const providerInfo = providersInfo?.providers?.[provider]
+  const providerInfo = providersInfo?.providers?.[toServerTtsProviderKey(provider)]
   const formats = providerInfo?.formats?.length
     ? ` Formats: ${providerInfo.formats.join(", ")}.`
     : ""
   items.push({
     id: `${provider}-provider`,
     label: providerInfo?.provider_name || provider,
-    state: providerInfo || provider === "openai" || provider === "tldw"
+    state: providerInfo || provider === "openai"
       ? "ready"
-      : "unknown",
-    detail: `Current provider selected.${formats}`,
+      : providersInfo === undefined ? "unknown" : "blocked",
+    detail: providerInfo || provider === "openai"
+      ? `Current provider selected.${formats}`
+      : providersInfo === undefined
+        ? "Loading server TTS providers."
+        : "No configured TTS provider reported. Open Settings -> Speech and choose a configured provider.",
     source: providerInfo ? "provider" : "unknown"
   })
 

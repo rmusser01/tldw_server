@@ -43,7 +43,7 @@ Source: synthesis F30
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 APPLIED, with the schedule decision recorded as ADR-047.
 
 DECISION (repository owner, 2026-09-22): decorrelated jitter for outbound HTTP only; in-process contention stays on short capped exponential. One algorithm is NOT imposed on both - HTTP retries cross a network to a shared endpoint where jitter de-synchronises a fleet, while SQLite lock contention is single-process with a millisecond window, and decorrelated jitter prev*3 grows faster than capped exponential so it would have lengthened lock retries to solve a problem those sites do not have.
@@ -78,7 +78,7 @@ Regression (tests/http_client + test_backoff_schedules + LLM_Adapters/unit/test_
 ruff: same 7 pre-existing findings in http_client before/after; backoff.py and test file clean. Bandit: uvx bandit -q -ll on backoff.py + http_client.py - no findings.
 Docs: ADR-047 follow-up line records the new split.
 Known/unrelated: _get_project_version catches _HTTPCLIENT_NONCRITICAL_EXCEPTIONS, which lacks importlib.metadata.PackageNotFoundError (an ImportError), so an uninstalled checkout fails every default-header build unless TLDW_VERSION is set - not in scope here. Still open elsewhere: PromptStudioDatabase inline loops (TASK-13318/13319).
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

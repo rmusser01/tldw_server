@@ -37,9 +37,11 @@ Use focused regression tests, make scoped adapter/service/worker/storage fixes, 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented scoped File_Artifacts hardening for review findings: lossy duplicate-column JSON export rejection, invalid XLSX sheet-name validation, server-owned cap resolution for rows/cells/bytes/export TTL, retry-aware worker failure mapping, generated-file quota/accounting registration for non-image/non-spreadsheet URL exports, and finite cfg_scale validation.
-<!-- SECTION:NOTES:END -->
+
+Rebased PR #2453 branch on origin/dev and addressed follow-up review comments: simplified cfg_scale validation issue handling, switched XLSX invalid-character detection to set isdisjoint, added immediate docstrings for modified helper methods, and propagated transient expiry metadata for image export registration with a regression assertion.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -56,9 +58,3 @@ Verification in the PR worktree after rebase/comment fixes: py_compile passed fo
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Rebased PR #2453 branch on origin/dev and addressed follow-up review comments: simplified cfg_scale validation issue handling, switched XLSX invalid-character detection to set isdisjoint, added immediate docstrings for modified helper methods, and propagated transient expiry metadata for image export registration with a regression assertion.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

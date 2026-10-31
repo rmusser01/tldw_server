@@ -37,20 +37,13 @@ Follow-up epic for the fresh 2026-06-25 CDP UAT of `/research-workspace` across 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Planning pass completed under `TASK-12020.1`. Created child tasks `TASK-12020.2` through `TASK-12020.11` and saved `Docs/superpowers/plans/2026-06-25-research-workspace-uat-follow-up-remediation-plan.md`. Parent remains open for implementation and final UAT closure; acceptance criterion #4 remains unchecked until child tasks are completed, split, or explicitly deferred.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

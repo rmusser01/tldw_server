@@ -33,7 +33,7 @@ import {
 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
-import { lastUsedChatModelEnabled } from "@/services/model-settings"
+import { useLoadLocalConversation } from "@/hooks/useLoadLocalConversation"
 import { useDebounce } from "@/hooks/useDebounce"
 import React, { useState, useEffect } from "react"
 import { FolderTree, FolderToolbar } from "@/components/Folders"
@@ -43,16 +43,13 @@ import { useStorage } from "@plasmohq/storage/hook"
 import {
   deleteByHistoryId,
   deleteHistoriesByDateRange,
-  formatToChatHistory,
   updateHistory,
   pinHistory,
-  formatToMessage,
-  getSessionFiles,
-  getPromptById,
   getHistoriesWithMetadata
 } from "@/db/dexie/helpers"
 import { isDatabaseClosedError } from "@/utils/ff-error"
 import { updatePageTitle } from "@/utils/update-page-title"
+import { requestSettingsNavigation } from "@/utils/settings-return"
 import { promptInput } from "@/components/Common/prompt-input"
 import { useConfirmDanger } from "@/components/Common/confirm-danger"
 import { IconButton } from "../Common/IconButton"
@@ -106,7 +103,7 @@ export const Sidebar = ({ onClose, isOpen }: Props) => {
     useFolderActions()
   const [folderPickerOpen, setFolderPickerOpen] = useState(false)
   const [folderPickerChatId, setFolderPickerChatId] = useState<string | null>(null)
-  const folderRefreshInFlightRef = React.useRef<Promise<void> | null>(null)
+  const folderRefreshInFlightRef = React.useRef<ReturnType<typeof refreshFromServer> | null>(null)
   // Load folders when the sidebar is open and folder view is active.
   useEffect(() => {
     if (isConnected && isOpen && viewMode === "folders") {
@@ -335,8 +332,8 @@ export const Sidebar = ({ onClose, isOpen }: Props) => {
       client.invalidateQueries({
         queryKey: ["fetchChatHistory"]
       })
-      if (historyId === history_id) {
-        clearChat()
+      if (useStoreMessageOption.getState().historyId === history_id) {
+        if (clearChat() === false) return
         updatePageTitle()
       }
     }
@@ -366,9 +363,8 @@ export const Sidebar = ({ onClose, isOpen }: Props) => {
           queryKey: ["fetchChatHistory"]
         })
 
-        if (deletedIds.includes(historyId)) {
-          clearChat()
-        }
+        const currentHistoryId = useStoreMessageOption.getState().historyId
+        if (currentHistoryId && deletedIds.includes(currentHistoryId)) clearChat()
 
         message.success(
           t("common:historiesDeleted", { count: deletedIds.length })
@@ -429,7 +425,7 @@ export const Sidebar = ({ onClose, isOpen }: Props) => {
 
   const loadServerChat = React.useCallback(
     (chat: ServerChatSummary) => {
-      selectServerChat(chat)
+      if (selectServerChat(chat) === false) return
       onClose()
     },
     [onClose, selectServerChat]
@@ -463,75 +459,19 @@ export const Sidebar = ({ onClose, isOpen }: Props) => {
     [loadServerChat, serverChatById, t]
   )
 
-  const loadLocalConversation = React.useCallback(
-    async (conversationId: string) => {
-      try {
-        const db = new PageAssistDatabase()
-        const [history, historyDetails] = await Promise.all([
-          db.getChatHistory(conversationId),
-          db.getHistoryInfo(conversationId)
-        ])
-
-        // Switch to a local Dexie-backed chat; clear any active server-backed session id.
-        setServerChatId(null)
-        setHistoryId(conversationId)
-        setHistory(formatToChatHistory(history))
-        setMessages(formatToMessage(history))
-
-        const isLastUsedChatModel = await lastUsedChatModelEnabled()
-        if (isLastUsedChatModel && historyDetails?.model_id) {
-          setSelectedModel(historyDetails.model_id)
-        }
-
-        const lastUsedPrompt = historyDetails?.last_used_prompt
-        if (lastUsedPrompt) {
-          let promptContent = lastUsedPrompt.prompt_content ?? ""
-          if (lastUsedPrompt.prompt_id) {
-            const prompt = await getPromptById(lastUsedPrompt.prompt_id)
-            if (prompt) {
-              setSelectedSystemPrompt(prompt.id)
-              if (!promptContent.trim()) {
-                promptContent = prompt.content
-              }
-            }
-          }
-          setSystemPrompt(promptContent)
-        }
-
-        const session = await getSessionFiles(conversationId)
-        setContextFiles(session)
-
-        updatePageTitle(
-          historyDetails?.title || t("common:untitled", { defaultValue: "Untitled" })
-        )
-        navigate("/")
-        onClose()
-
-        return { history, historyDetails }
-      } catch (error) {
-        console.error("Failed to load local chat history from local storage:", error)
-        message.error(
-          t("common:error.friendlyLocalHistorySummary", {
-            defaultValue: "Something went wrong while loading local chat history."
-          })
-        )
-        return null
-      }
-    },
-    [
-      navigate,
-      onClose,
-      setHistory,
-      setHistoryId,
-      setMessages,
-      setSelectedModel,
-      setSelectedSystemPrompt,
-      setServerChatId,
-      setContextFiles,
-      setSystemPrompt,
-      t
-    ]
+  const openLocalConversation = useLoadLocalConversation(
+    { setHistory, setHistoryId, setMessages, setSelectedModel, setSelectedSystemPrompt,
+      setServerChatId, setContextFiles, setSystemPrompt },
+    { t, errorLogPrefix: "Failed to load local chat history",
+      errorDefaultMessage: "Something went wrong while loading local chat history." }
   )
+  const loadLocalConversation = React.useCallback(async (conversationId: string) => {
+    if (!requestSettingsNavigation("/chat")) return false
+    if (!await openLocalConversation(conversationId)) return false
+    navigate("/chat")
+    onClose()
+    return true
+  }, [openLocalConversation, navigate, onClose])
 
   // Handle folder selection for a chat
   const handleFolderSelect = async (folderIds: number[]) => {
@@ -797,7 +737,7 @@ export const Sidebar = ({ onClose, isOpen }: Props) => {
               event.stopPropagation()
               toggleServerChatPinned(chat.id)
             }}
-            className="rounded p-1 text-text-subtle hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-focus)]"
+            className="rounded p-1 text-text-subtle hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             aria-label={isPinned ? t("common:unpin") : t("common:pin")}
             aria-pressed={isPinned}
           >
@@ -848,7 +788,7 @@ export const Sidebar = ({ onClose, isOpen }: Props) => {
               aria-label={t("common:newChat", { defaultValue: "New Chat" })}
               data-testid="sidebar-new-chat"
               onClick={() => {
-                clearChat()
+                if (clearChat() === false) return
                 onClose()
               }}
             />

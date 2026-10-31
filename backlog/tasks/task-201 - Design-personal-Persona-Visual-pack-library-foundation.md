@@ -39,11 +39,11 @@ Design GitHub issue #1468: a user-scoped personal library layer for Persona/Budd
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Design task complete. Created GitHub issue #1468 and updated epic #1449. Wrote Docs/superpowers/specs/2026-05-09-persona-visual-personal-library-design.md covering reference-backed library entries, user/persona ownership boundaries, API and WebUI flows, source-unavailable handling, migration compatibility, tests, docs, and non-goals. Verification: docs-only change; git diff --check will be run before commit; Bandit not applicable because no backend code changed.
 
 PR review follow-up: Qodo flagged that NOT NULL foreign keys conflicted with stale-entry behavior. Updated the design schema to use nullable source_persona_id/source_pack_id with ON DELETE SET NULL, added source persona/pack snapshot display fields, clarified source_available derivation, adjusted the unique active-entry index, and clarified migration behavior for deleted sources.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -2479,6 +2479,7 @@ class TestContentAdaptersErrorHandling:
                 "llm",
             ),
         ),
+        ids=lambda value: "oversized-json" if isinstance(value, str) and len(value) > 32_000 else None,
     )
     async def test_notes_studio_generate_labels_only_accepted_json_as_llm(
         self,

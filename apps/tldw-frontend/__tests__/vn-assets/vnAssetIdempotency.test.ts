@@ -1,5 +1,14 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createVNAssetIdempotencyKey } from '@web/lib/vnAssetIdempotency';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  clearPendingVNAssetGeneration,
+  createVNAssetIdempotencyKey,
+  readPendingVNAssetGeneration,
+  writePendingVNAssetGeneration,
+} from '@web/lib/vnAssetIdempotency';
+import { createVNCommandScope } from '@web/lib/vnGenerationRecovery';
+
+const scope = { server: 'http://localhost:8000/api/v1', principal: '1' };
+const otherScope = { ...scope, principal: '2' };
 
 describe('VN asset idempotency keys', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -12,5 +21,276 @@ describe('VN asset idempotency keys', () => {
   it('supports self-hosted HTTP without randomUUID', () => {
     vi.stubGlobal('crypto', {});
     expect(createVNAssetIdempotencyKey('vn-generation')).toMatch(/^vn-generation-\d+-[a-z0-9]+$/);
+  });
+});
+
+describe('VN asset pending generation storage', () => {
+  const storageKey = 'vn-assets:pending-generation:v2:http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fv1:1:7';
+
+  beforeEach(() => window.sessionStorage.clear());
+  afterEach(() => vi.restoreAllMocks());
+
+  it('isolates identical principal and pack IDs across servers and full base paths', () => {
+    writePendingVNAssetGeneration(scope, 7, { kind: 'start', key: 'server-a-key' });
+    const serverB = { ...scope, server: 'http://other-server:8000/api/v1' };
+    const pathB = { ...scope, server: 'http://localhost:8000/tenant/api/v1' };
+    expect(readPendingVNAssetGeneration(serverB, 7)).toBeNull();
+    expect(readPendingVNAssetGeneration(pathB, 7)).toBeNull();
+    clearPendingVNAssetGeneration(serverB, 7, 'server-a-key');
+    clearPendingVNAssetGeneration(pathB, 7, 'server-a-key');
+    expect(readPendingVNAssetGeneration(scope, 7)?.key).toBe('server-a-key');
+  });
+
+  it('uses the canonical verified scope for equivalent host-case and trailing-slash bases', () => {
+    const canonical = createVNCommandScope('http://LOCALHOST:8000/api/v1///', 1);
+    writePendingVNAssetGeneration(canonical, 7, { kind: 'start', key: 'canonical-key' });
+    expect(window.sessionStorage.getItem(storageKey)).toBe('{"kind":"start","key":"canonical-key"}');
+    expect(readPendingVNAssetGeneration(scope, 7)?.key).toBe('canonical-key');
+  });
+
+  it.each([
+    { ...scope, server: 'http://LOCALHOST:8000/api/v1/' },
+    { ...scope, server: 'http://localhost:8000/api/v1?token=secret' },
+    { ...scope, server: 'http://user:secret@localhost:8000/api/v1' },
+    { ...scope, principal: '01' },
+    { ...scope, principal: '0' },
+  ])('never accesses storage for a noncanonical scope %j', (invalid) => {
+    const getter = vi.spyOn(window, 'sessionStorage', 'get');
+    writePendingVNAssetGeneration(invalid, 7, { kind: 'start', key: 'private-key' });
+    clearPendingVNAssetGeneration(invalid, 7, 'private-key');
+    expect(readPendingVNAssetGeneration(invalid, 7)).toBeNull();
+    expect(getter).not.toHaveBeenCalled();
+  });
+
+  it.each(['{"kind":"start","key":"old-key"}', '{broken', ''])('leaves literal v1 bytes inert and unchanged: %j', (raw) => {
+    const oldKey = 'vn-assets:pending-generation:v1:1:7';
+    window.sessionStorage.setItem(oldKey, raw);
+    expect(readPendingVNAssetGeneration(scope, 7)).toBeNull();
+    clearPendingVNAssetGeneration(scope, 7, 'old-key');
+    writePendingVNAssetGeneration(scope, 7, { kind: 'start', key: 'new-key' });
+    expect(window.sessionStorage.getItem(oldKey)).toBe(raw);
+  });
+
+  describe('receipt failure diagnosis', () => {
+    function expectSanitizedWarnings(...sensitiveContent: string[]) {
+      expect(console.warn).toHaveBeenCalled();
+      const diagnostics = vi.mocked(console.warn).mock.calls.flat().map(String).join('\n');
+      expect(diagnostics).not.toMatch(
+        /private-request-key|other-request-key|vn-assets:pending-generation:|raw-storage-exception|SecurityError|SyntaxError|"kind"|"key"|"slotId"/,
+      );
+      for (const content of sensitiveContent.filter(Boolean)) {
+        expect(diagnostics).not.toContain(content);
+      }
+    }
+
+    beforeEach(() => vi.spyOn(console, 'warn').mockImplementation(() => {}));
+
+    it.each([
+      { label: 'truncated JSON', raw: '{"kind":"retry","key":"private-request-key","slotId":' },
+      { label: 'empty stored JSON', raw: '' },
+    ])('diagnoses and removes $label only for the selected owner and pack', ({ raw }) => {
+      const otherOwnerKey = 'vn-assets:pending-generation:v2:http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fv1:2:7';
+      const otherPackKey = 'vn-assets:pending-generation:v2:http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fv1:1:8';
+      const otherReceipt = JSON.stringify({ kind: 'start', key: 'other-request-key' });
+      window.sessionStorage.setItem(storageKey, raw);
+      window.sessionStorage.setItem(otherOwnerKey, otherReceipt);
+      window.sessionStorage.setItem(otherPackKey, otherReceipt);
+
+      expect(readPendingVNAssetGeneration(scope, 7)).toBeNull();
+      expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+      expect(window.sessionStorage.getItem(otherOwnerKey)).toBe(otherReceipt);
+      expect(window.sessionStorage.getItem(otherPackKey)).toBe(otherReceipt);
+      expectSanitizedWarnings(raw, storageKey);
+
+      vi.mocked(console.warn).mockClear();
+      expect(readPendingVNAssetGeneration(scope, 7)).toBeNull();
+      expect(console.warn).not.toHaveBeenCalled();
+    });
+
+    it('diagnoses and removes an invalid receipt without logging its payload', () => {
+      const raw = JSON.stringify({ kind: 'unknown', key: 'private-request-key' });
+      window.sessionStorage.setItem(storageKey, raw);
+
+      expect(readPendingVNAssetGeneration(scope, 7)).toBeNull();
+      expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+      expectSanitizedWarnings(raw, storageKey);
+    });
+
+    it.each(['getter', 'getItem'] as const)('diagnoses a storage %s failure without throwing or removing a receipt', (boundary) => {
+      const storage = window.sessionStorage;
+      const storagePrototype = Object.getPrototypeOf(storage) as Storage;
+      const raw = JSON.stringify({ kind: 'retry', slotId: 12, key: 'private-request-key' });
+      storage.setItem(storageKey, raw);
+      const remove = vi.spyOn(storagePrototype, 'removeItem');
+      const failure = new DOMException(`raw-storage-exception: ${storageKey}: ${raw}`, 'SecurityError');
+      const read = boundary === 'getter'
+        ? vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => { throw failure; })
+        : vi.spyOn(storagePrototype, 'getItem').mockImplementation(() => { throw failure; });
+
+      expect(readPendingVNAssetGeneration(scope, 7)).toBeNull();
+      expect(remove).not.toHaveBeenCalled();
+      expectSanitizedWarnings(raw, storageKey, failure.message);
+      read.mockRestore();
+      expect(storage.getItem(storageKey)).toBe(raw);
+    });
+
+    it.each([
+      { label: 'malformed', raw: '{"key":"private-request-key"' },
+      { label: 'invalid', raw: '{"kind":"unknown","key":"private-request-key"}' },
+    ])('diagnoses a $label receipt and a removal failure separately without throwing', ({ raw }) => {
+      const storage = window.sessionStorage;
+      storage.setItem(storageKey, raw);
+      const failure = new DOMException(`raw-storage-exception: ${storageKey}: ${raw}`, 'SecurityError');
+      vi.spyOn(Object.getPrototypeOf(storage) as Storage, 'removeItem').mockImplementation(() => {
+        throw failure;
+      });
+
+      expect(readPendingVNAssetGeneration(scope, 7)).toBeNull();
+      expect(window.sessionStorage.getItem(storageKey)).toBe(raw);
+      expectSanitizedWarnings(raw, storageKey, failure.message);
+      expect(console.warn).toHaveBeenCalledTimes(2);
+    });
+
+    it('removes malformed JSON using the acquired storage handle without rereading its getter', () => {
+      const storage = window.sessionStorage;
+      storage.setItem(storageKey, '{"key":"private-request-key"');
+      const getter = vi.spyOn(window, 'sessionStorage', 'get').mockReturnValueOnce(storage).mockImplementation(() => {
+        throw new DOMException(storageKey, 'SecurityError');
+      });
+
+      expect(readPendingVNAssetGeneration(scope, 7)).toBeNull();
+      expect(storage.getItem(storageKey)).toBeNull();
+      expect(getter).toHaveBeenCalledTimes(1);
+      expectSanitizedWarnings(storageKey, '{"key":"private-request-key"');
+    });
+
+    it.each(['start', 'retry'] as const)('does not diagnose or rewrite a valid %s receipt', (kind) => {
+      const pending = { kind, ...(kind === 'retry' ? { slotId: 12 } : {}), key: 'private-request-key' };
+      const raw = JSON.stringify(pending);
+      window.sessionStorage.setItem(storageKey, raw);
+
+      expect(readPendingVNAssetGeneration(scope, 7)).toEqual(pending);
+      expect(window.sessionStorage.getItem(storageKey)).toBe(raw);
+      expect(console.warn).not.toHaveBeenCalled();
+    });
+
+    it('does not diagnose an absent receipt', () => {
+      expect(readPendingVNAssetGeneration(scope, 7)).toBeNull();
+      expect(console.warn).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { commandScope: null, packId: 7 },
+      { commandScope: scope, packId: Number.NaN },
+    ])('does not access storage or diagnose an invalid owner/pack scope $commandScope/$packId', ({ commandScope, packId }) => {
+      const getter = vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
+        throw new DOMException('Private storage failure', 'SecurityError');
+      });
+
+      expect(readPendingVNAssetGeneration(commandScope, packId)).toBeNull();
+      expect(getter).not.toHaveBeenCalled();
+      expect(console.warn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe.each(['start', 'retry'] as const)('persisted %s key length', (kind) => {
+    it.each([
+      { label: 'empty', key: '' },
+      { label: '161-character ASCII', key: 'k'.repeat(161) },
+      { label: '161-code-point non-BMP', key: '\u{1F600}'.repeat(161) },
+    ])('rejects and removes a $label key only for its owner and pack', ({ key }) => {
+      const pending = { kind, ...(kind === 'retry' ? { slotId: 12 } : {}), key };
+      const otherOwnerKey = 'vn-assets:pending-generation:v2:http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fv1:2:7';
+      const otherPackKey = 'vn-assets:pending-generation:v2:http%3A%2F%2Flocalhost%3A8000%2Fapi%2Fv1:1:8';
+      const otherOwner = JSON.stringify({ kind: 'start', key: 'other-owner-key' });
+      const otherPack = JSON.stringify({ kind: 'retry', slotId: 13, key: 'other-pack-key' });
+      window.sessionStorage.setItem(storageKey, JSON.stringify(pending));
+      window.sessionStorage.setItem(otherOwnerKey, otherOwner);
+      window.sessionStorage.setItem(otherPackKey, otherPack);
+
+      expect(readPendingVNAssetGeneration(scope, 7)).toBeNull();
+      expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+      expect(window.sessionStorage.getItem(otherOwnerKey)).toBe(otherOwner);
+      expect(window.sessionStorage.getItem(otherPackKey)).toBe(otherPack);
+    });
+
+    it.each([
+      { label: 'one-character ASCII', key: 'k' },
+      { label: '160-character ASCII', key: 'k'.repeat(160) },
+      { label: 'one-code-point non-BMP', key: '\u{1F600}' },
+      { label: '160-code-point non-BMP', key: '\u{1F600}'.repeat(160) },
+      { label: '160-code-point mixed', key: `${'k'.repeat(159)}\u{1F600}` },
+    ])('preserves a $label key and its owner/pack-scoped receipt', ({ key }) => {
+      const pending = { kind, ...(kind === 'retry' ? { slotId: 12 } : {}), key };
+      const raw = JSON.stringify(pending);
+      window.sessionStorage.setItem(storageKey, raw);
+
+      expect(readPendingVNAssetGeneration(otherScope, 7)).toBeNull();
+      expect(readPendingVNAssetGeneration(scope, 8)).toBeNull();
+      expect(readPendingVNAssetGeneration(scope, 7)).toEqual(pending);
+      expect(window.sessionStorage.getItem(storageKey)).toBe(raw);
+    });
+  });
+
+  it.each([
+    { label: 'zero', slotId: 0 },
+    { label: 'negative', slotId: -1 },
+    { label: 'negative slot', slotId: -12 },
+    { label: 'unsafe positive', slotId: Number.MAX_SAFE_INTEGER + 1 },
+    { label: 'unsafe negative', slotId: Number.MIN_SAFE_INTEGER - 1 },
+    { label: 'fractional', slotId: 1.5 },
+    { label: 'numeric string', slotId: '12' },
+    { label: 'null', slotId: null },
+    { label: 'missing', slotId: undefined },
+    { label: 'boolean', slotId: true },
+    { label: 'object', slotId: {} },
+    { label: 'array', slotId: [] },
+  ])('rejects and removes a persisted retry with a $label slot ID', ({ slotId }) => {
+    window.sessionStorage.setItem(storageKey, JSON.stringify({ kind: 'retry', slotId, key: 'retry-key' }));
+
+    expect(readPendingVNAssetGeneration(scope, 7)).toBeNull();
+    expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+  });
+
+  it.each([1, 12, Number.MAX_SAFE_INTEGER])('preserves a positive safe retry slot ID %s and its key', (slotId) => {
+    writePendingVNAssetGeneration(scope, 7, { kind: 'retry', slotId, key: 'retry-key' });
+
+    expect(readPendingVNAssetGeneration(scope, 7)).toEqual({ kind: 'retry', slotId, key: 'retry-key' });
+  });
+
+  it('preserves a start receipt without a retry slot ID', () => {
+    writePendingVNAssetGeneration(scope, 7, { kind: 'start', key: 'start-key' });
+
+    expect(readPendingVNAssetGeneration(scope, 7)).toEqual({ kind: 'start', key: 'start-key' });
+  });
+
+  it('keeps retry receipts scoped to their owner and pack', () => {
+    writePendingVNAssetGeneration(scope, 7, { kind: 'retry', slotId: 12, key: 'retry-key' });
+
+    expect(readPendingVNAssetGeneration(otherScope, 7)).toBeNull();
+    expect(readPendingVNAssetGeneration(scope, 8)).toBeNull();
+    expect(readPendingVNAssetGeneration(scope, 7)).toEqual({ kind: 'retry', slotId: 12, key: 'retry-key' });
+  });
+
+  it('clears a retry receipt only for the matching owner, pack, and key', () => {
+    writePendingVNAssetGeneration(scope, 7, { kind: 'retry', slotId: 12, key: 'retry-key' });
+
+    clearPendingVNAssetGeneration(otherScope, 7, 'retry-key');
+    clearPendingVNAssetGeneration(scope, 8, 'retry-key');
+    clearPendingVNAssetGeneration(scope, 7, 'other-key');
+    expect(readPendingVNAssetGeneration(scope, 7)).toEqual({ kind: 'retry', slotId: 12, key: 'retry-key' });
+
+    clearPendingVNAssetGeneration(scope, 7, 'retry-key');
+    expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+  });
+
+  it('does not throw when session storage is disabled', () => {
+    vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
+      throw new DOMException('Storage disabled', 'SecurityError');
+    });
+
+    expect(readPendingVNAssetGeneration(scope, 7)).toBeNull();
+    expect(() => writePendingVNAssetGeneration(scope, 7, { kind: 'retry', slotId: 12, key: 'retry-key' })).not.toThrow();
+    expect(() => clearPendingVNAssetGeneration(scope, 7, 'retry-key')).not.toThrow();
   });
 });

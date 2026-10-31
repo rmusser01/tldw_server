@@ -48,7 +48,7 @@ Implementation approach: add a manual-only failure-drill script flag and workflo
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification: python -m pytest tools/vz-linux-image/tests/test_host_e2e_smoke_script.py -q -> 9 passed, 1 skipped; python -m pytest tldw_Server_API/tests/Infrastructure/test_vz_linux_host_gated_workflow.py -q -> 13 passed; python -m pytest tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py -m vz_linux_host_failure_drill -q -rs -> 1 skipped because TLDW_SANDBOX_VZ_LINUX_E2E is not set locally; git diff --check -> clean; Bandit on touched real-host test with B101 skipped -> 0 results.
 
 Follow-up PR review pass: verified current Qodo findings on brittle helper terminate assertion and workflow_dispatch input access before patching.
@@ -56,7 +56,7 @@ Follow-up PR review pass: verified current Qodo findings on brittle helper termi
 Review fixes completed: the failure drill now verifies VM health before and after helper termination and only skips if helper termination cannot invalidate a still-healthy VM; workflow contract test now validates workflow_dispatch/input shape before indexing.
 
 Review verification: python -m pytest tldw_Server_API/tests/Infrastructure/test_vz_linux_host_gated_workflow.py -q -> 13 passed; python -m pytest tools/vz-linux-image/tests/test_host_e2e_smoke_script.py -q -> 9 passed, 1 skipped; python -m pytest tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py -m vz_linux_host_failure_drill -q -rs -> 1 skipped because TLDW_SANDBOX_VZ_LINUX_E2E is not set locally; git diff --check -> clean; Bandit on touched tests with B101 skipped -> 0 results.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

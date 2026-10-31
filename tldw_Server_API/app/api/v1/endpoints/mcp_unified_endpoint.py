@@ -77,7 +77,7 @@ from tldw_Server_API.app.core.Slides.standalone_html_validation_pool import (
     STANDALONE_HTML_VALIDATION_POOL_METADATA_KEY,
     get_app_standalone_html_validation_pool,
 )
-from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
+from tldw_Server_API.app.core.testing import env_flag_enabled, is_production_like_env, is_test_mode
 from tldw_Server_API.app.services import admin_tool_catalog_service
 
 _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS = (
@@ -291,7 +291,7 @@ def _single_user_test_key_compat_allowed() -> bool:
     except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
         cfg = None
     env = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or os.getenv("ENV") or "").lower()
-    prod_flag = env_flag_enabled("tldw_production")
+    prod_flag = is_production_like_env()
     is_dev_ctx = bool(cfg and getattr(cfg, "debug_mode", False))
     if os.getenv("PYTEST_CURRENT_TEST") is not None:
         is_dev_ctx = True

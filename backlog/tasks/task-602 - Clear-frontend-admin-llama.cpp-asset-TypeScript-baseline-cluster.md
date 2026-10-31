@@ -27,21 +27,19 @@ Remove the remaining frontend standalone tsc diagnostics in the admin llama.cpp 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification recorded for this tsc slice:
 - RED: NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false from apps/tldw-frontend reported 5 diagnostics, all in admin-llamacpp.spec.ts asset metadata/response inference.
 - GREEN: NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false from apps/tldw-frontend exits 0.
 - The mocked llama.cpp admin assets and mutable assets response now use the shared LlamacppAsset and LlamacppAssetsResponse types consumed by the UI.
 - git diff --check exits 0.
 - Bandit not applicable: touched file is a TypeScript Playwright spec only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Cleared the remaining frontend standalone TypeScript baseline by typing admin llama.cpp mocked assets with the shared UI llama.cpp admin contracts. The full apps/tldw-frontend tsc check now exits clean with NODE_OPTIONS=--max-old-space-size=8192.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -38,11 +38,11 @@ Continue GitHub issue #1346 by taking the first narrow dayjs reduction slice aft
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the narrow dayjs reduction slice by replacing apps/packages/ui/src/utils/humanize-milliseconds.ts duration formatting with local millisecond arithmetic and adding src/utils/__tests__/humanize-milliseconds.test.ts. The test first failed on the dependency guard while dayjs imports remained, then passed after implementation.
 
 Verification: bunx vitest run src/utils/__tests__/humanize-milliseconds.test.ts exited 0 from apps/packages/ui; git diff --check exited 0; bun run lint exited 0 from apps/tldw-frontend with existing unrelated warnings only; rg found no dayjs in humanize-milliseconds.ts and 19 remaining shared UI dayjs import lines. Bandit skipped because no Python files changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

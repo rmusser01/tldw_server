@@ -40,9 +40,9 @@ Use the existing PR branch. Rebase on origin/dev, inspect review threads, implem
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Rebased PR branch on origin/dev, inspected GitHub review threads, and fixed the actionable review items in the shared docs discovery/sync paths. Implemented controlled defusedxml exception handling, propagated sitemap parse failures from docs.discover_source, normalized default ports in same-origin checks, denied register/register_and_ingest for query-bearing sitemap seeds when query persistence is disabled, preserved skipped sitemap candidate reason codes, added safe missing-document hash handling, made include_seed functional for page-link discovery, reported the one-hop depth cap, and added small docstring/type/style fixes. Did not add docstrings to every pytest function because that is inconsistent with the existing test style and adds no safety.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

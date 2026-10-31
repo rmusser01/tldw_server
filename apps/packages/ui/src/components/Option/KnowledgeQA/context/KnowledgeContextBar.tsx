@@ -3,9 +3,10 @@ import { useTranslation } from "react-i18next"
 import { getDesignSystemState } from "@/design-system"
 import type { RagPresetName, RagSource } from "@/services/rag/unified-rag"
 import type { KnowledgeSourceHealthState } from "../types"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { cn } from "@/libs/utils"
-import { Popover, Tooltip } from "antd"
+import { Modal, Popover, Tooltip } from "antd"
 import {
   ChevronDown,
   Layers,
@@ -26,6 +27,7 @@ import {
   getRagSourceLabel,
   isRagSource,
 } from "@/services/rag/sourceMetadata"
+import { containDialogTab } from "../dialogKeyboard"
 import { AnswerModelMenu } from "./AnswerModelMenu"
 import {
   EMPTY_SOURCE_HEALTH_STATE,
@@ -225,7 +227,7 @@ const SOURCE_OPTIONS: Array<{ key: RagSource; label: string }> =
     label: getRagSourceLabel(source),
   }))
 
-const MAX_VISIBLE_GRANULAR_RESULTS = 80
+const SOURCE_PAGE_SIZE = 50
 
 function summarizeSources(sources: RagSource[]): string {
   if (!Array.isArray(sources) || sources.length === 0) {
@@ -368,7 +370,13 @@ function extractResponseItems(payload: unknown): unknown[] {
   const record = asRecord(payload)
   if (!record) return []
 
-  const candidates = [record.items, record.media, record.results, record.data]
+  const candidates = [
+    record.items,
+    record.notes,
+    record.media,
+    record.results,
+    record.data,
+  ]
   for (const candidate of candidates) {
     if (Array.isArray(candidate)) return candidate
   }
@@ -487,7 +495,18 @@ export function KnowledgeContextBar({
   const [granularWorkspaceFilter, setGranularWorkspaceFilter] = useState("")
   const [granularLoading, setGranularLoading] = useState(false)
   const [granularError, setGranularError] = useState<string | null>(null)
-  const [granularLoaded, setGranularLoaded] = useState(false)
+  const [granularPage, setGranularPage] = useState(1)
+  const [granularReload, setGranularReload] = useState(0)
+  const [pageTotals, setPageTotals] = useState<{
+    media: number | null
+    notes: number | null
+  }>({ media: null, notes: null })
+  const [libraryTotals, setLibraryTotals] = useState<{
+    media: number | null
+    notes: number | null
+  }>({ media: null, notes: null })
+  const [mediaTitles, setMediaTitles] = useState<Record<number, string>>({})
+  const [noteTitles, setNoteTitles] = useState<Record<string, string>>({})
   const [mediaOptions, setMediaOptions] = useState<GranularSourceOption<number>[]>([])
   const [noteOptions, setNoteOptions] = useState<GranularSourceOption<string>[]>([])
 
@@ -504,6 +523,7 @@ export function KnowledgeContextBar({
   const granularMenuRef = useRef<HTMLDivElement | null>(null)
   const granularSearchInputRef = useRef<HTMLInputElement | null>(null)
   const granularLoadRequestIdRef = useRef(0)
+  const granularAbortRef = useRef<AbortController | null>(null)
 
   const normalizedSources = useMemo(
     () =>
@@ -558,11 +578,17 @@ export function KnowledgeContextBar({
     preset === "custom"
       ? "Custom: Using your manually configured retrieval and generation settings."
       : presetDetail.summary
-  const countableScopeTotal =
-    (normalizedSources.includes("media_db") ? mediaOptions.length : 0) +
-    (normalizedSources.includes("notes") ? noteOptions.length : 0)
-  const hasOnlyCountableSources = normalizedSources.every(
-    (source) => source === "media_db" || source === "notes"
+  const countableScopeTotal = normalizedSources.reduce<number | null>(
+    (total, source) => {
+      const count =
+        source === "media_db"
+          ? libraryTotals.media
+          : source === "notes"
+            ? libraryTotals.notes
+            : null
+      return total === null || count === null ? null : total + count
+    },
+    0,
   )
 
   const workspaceOptions = useMemo(() => {
@@ -581,20 +607,23 @@ export function KnowledgeContextBar({
 
   const filterGranularOptions = useCallback(
     <T extends string | number>(options: GranularSourceOption<T>[]) => {
-      const query = granularQuery.trim().toLowerCase()
-      return options
-        .filter((option) => {
-          if (!granularWorkspaceFilter && option.hiddenByDefault) return false
-          if (granularWorkspaceFilter && option.workspaceId !== granularWorkspaceFilter) return false
-          if (granularStatusFilter !== "all" && option.status !== granularStatusFilter) return false
-          if (granularRecentFilter === "recent" && !option.recent) return false
-          if (!query) return true
-          const haystack = `${option.label} ${option.meta || ""}`.toLowerCase()
-          return haystack.includes(query)
-        })
-        .slice(0, MAX_VISIBLE_GRANULAR_RESULTS)
+      return options.filter((option) => {
+        if (!granularWorkspaceFilter && option.hiddenByDefault) return false
+        if (
+          granularWorkspaceFilter &&
+          option.workspaceId !== granularWorkspaceFilter
+        )
+          return false
+        if (
+          granularStatusFilter !== "all" &&
+          option.status !== granularStatusFilter
+        )
+          return false
+        if (granularRecentFilter === "recent" && !option.recent) return false
+        return true
+      })
     },
-    [granularQuery, granularRecentFilter, granularStatusFilter, granularWorkspaceFilter]
+    [granularRecentFilter, granularStatusFilter, granularWorkspaceFilter],
   )
 
   const filteredMediaOptions = useMemo(() => {
@@ -606,51 +635,116 @@ export function KnowledgeContextBar({
   }, [filterGranularOptions, noteOptions])
 
   const loadGranularOptions = useCallback(async () => {
-    const requestId = granularLoadRequestIdRef.current + 1
-    granularLoadRequestIdRef.current = requestId
+    granularAbortRef.current?.abort()
+    const controller = new AbortController()
+    granularAbortRef.current = controller
+    const requestId = ++granularLoadRequestIdRef.current
+    const isStale = () =>
+      controller.signal.aborted ||
+      granularLoadRequestIdRef.current !== requestId
     setGranularLoading(true)
     setGranularError(null)
+    setMediaOptions([])
+    setNoteOptions([])
+    const query = granularQuery.trim()
     try {
+      const params = {
+        page: granularPage,
+        results_per_page: SOURCE_PAGE_SIZE,
+        include_keywords: false,
+      }
+      const options = { signal: controller.signal }
       const [mediaResponse, notesResponse] = await Promise.all([
-        tldwClient.listMedia({ page: 1, results_per_page: 200, include_keywords: false }),
-        tldwClient.listNotes({ page: 1, results_per_page: 200, include_keywords: false }),
+        query
+          ? tldwClient.searchMedia(
+              { query, fields: ["title"] },
+              params,
+              options,
+            )
+          : tldwClient.listMedia(params, options),
+        query
+          ? tldwClient.searchNotes(
+              query,
+              {
+                limit: SOURCE_PAGE_SIZE,
+                offset: (granularPage - 1) * SOURCE_PAGE_SIZE,
+              },
+              options,
+            )
+          : tldwClient.listNotes(params, options),
       ])
-
-      if (granularLoadRequestIdRef.current !== requestId) {
-        return
+      if (isStale()) return
+      const media = normalizeMediaOptions(mediaResponse)
+      const notes = normalizeNoteOptions(notesResponse)
+      setMediaOptions(media)
+      setNoteOptions(notes)
+      setMediaTitles((previous) => ({
+        ...previous,
+        ...Object.fromEntries(media.map((item) => [item.id, item.label])),
+      }))
+      setNoteTitles((previous) => ({
+        ...previous,
+        ...Object.fromEntries(notes.map((item) => [item.id, item.label])),
+      }))
+      const total = (response: unknown): number | null => {
+        const record = asRecord(response)
+        const pagination = asRecord(record?.pagination)
+        const value = pagination?.total_items ?? record?.total
+        return typeof value === "number" &&
+          Number.isSafeInteger(value) &&
+          value >= 0
+          ? value
+          : null
       }
-      setMediaOptions(normalizeMediaOptions(mediaResponse))
-      setNoteOptions(normalizeNoteOptions(notesResponse))
-      setGranularLoaded(true)
+      const totals = {
+        media: total(mediaResponse),
+        notes: total(notesResponse),
+      }
+      setPageTotals(totals)
+      if (!query) setLibraryTotals(totals)
     } catch (error) {
-      if (granularLoadRequestIdRef.current !== requestId) {
-        return
-      }
-      setGranularError(error instanceof Error ? error.message : "Failed to load source lists")
+      if (isStale()) return
+      setGranularError(
+        error instanceof Error ? error.message : "Failed to load source lists",
+      )
     } finally {
-      if (granularLoadRequestIdRef.current !== requestId) {
-        return
-      }
-      setGranularLoading(false)
+      if (!isStale()) setGranularLoading(false)
     }
-  }, [])
+  }, [granularPage, granularQuery])
+
+  useEffect(
+    () =>
+      watchChatAccountChanges((invalidated) => {
+        if (!invalidated) return
+        granularAbortRef.current?.abort()
+        granularLoadRequestIdRef.current += 1
+        setGranularMenuOpen(false)
+        setGranularQuery("")
+        setGranularPage(1)
+        setMediaOptions([])
+        setNoteOptions([])
+        setMediaTitles({})
+        setNoteTitles({})
+        setLibraryTotals({ media: null, notes: null })
+        setPageTotals({ media: null, notes: null })
+      }),
+    [],
+  )
 
   useEffect(() => {
-    if (!sourceMenuOpen && !granularMenuOpen) return
+    if (!sourceMenuOpen) return
 
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node
       if (sourceMenuRef.current?.contains(target)) return
       if (granularMenuRef.current?.contains(target)) return
       setSourceMenuOpen(false)
-      setGranularMenuOpen(false)
     }
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return
       event.preventDefault()
       event.stopPropagation()
       setSourceMenuOpen(false)
-      setGranularMenuOpen(false)
     }
 
     document.addEventListener("mousedown", handleClickOutside)
@@ -659,20 +753,16 @@ export function KnowledgeContextBar({
       document.removeEventListener("mousedown", handleClickOutside)
       document.removeEventListener("keydown", handleEscape, true)
     }
-  }, [sourceMenuOpen, granularMenuOpen])
-
-  useEffect(() => {
-    if (!granularMenuOpen || granularLoaded || granularLoading) return
-    void loadGranularOptions()
-  }, [granularMenuOpen, granularLoaded, granularLoading, loadGranularOptions])
+  }, [sourceMenuOpen])
 
   useEffect(() => {
     if (!granularMenuOpen) return
-    const focusTimer = window.setTimeout(() => {
-      granularSearchInputRef.current?.focus()
-    }, 0)
-    return () => window.clearTimeout(focusTimer)
-  }, [granularMenuOpen, granularTab])
+    void loadGranularOptions()
+    return () => {
+      granularAbortRef.current?.abort()
+      granularLoadRequestIdRef.current += 1
+    }
+  }, [granularMenuOpen, granularReload, loadGranularOptions])
 
   const toggleSource = (sourceKey: RagSource) => {
     const exists = normalizedSources.includes(sourceKey)
@@ -791,27 +881,32 @@ export function KnowledgeContextBar({
     onIncludeNoteIdsChange(recentIds)
   }
 
-  const handleGranularMenuKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
-    const target = event.target
-    const targetElement = target instanceof HTMLElement ? target : null
-    const isFormControl =
-      targetElement instanceof HTMLInputElement ||
-      targetElement instanceof HTMLTextAreaElement ||
-      targetElement instanceof HTMLSelectElement
+  const handleGranularMenuKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      const target = event.target
+      const targetElement = target instanceof HTMLElement ? target : null
+      const isFormControl =
+        targetElement instanceof HTMLInputElement ||
+        targetElement instanceof HTMLTextAreaElement ||
+        targetElement instanceof HTMLSelectElement
 
-    if (isFormControl) return
+      if (isFormControl) return
 
-    if (event.key === "]") {
-      event.preventDefault()
-      setGranularTab("notes")
-    } else if (event.key === "[") {
-      event.preventDefault()
-      setGranularTab("media")
-    } else if (event.key === "/") {
-      event.preventDefault()
-      granularSearchInputRef.current?.focus()
-    }
-  }, [])
+      if (event.key === "]") {
+        event.preventDefault()
+        setGranularTab("notes")
+        requestAnimationFrame(() => granularSearchInputRef.current?.focus())
+      } else if (event.key === "[") {
+        event.preventDefault()
+        setGranularTab("media")
+        requestAnimationFrame(() => granularSearchInputRef.current?.focus())
+      } else if (event.key === "/") {
+        event.preventDefault()
+        granularSearchInputRef.current?.focus()
+      }
+    },
+    [],
+  )
 
   // ---- Saved search profile handlers ----
 
@@ -964,7 +1059,10 @@ export function KnowledgeContextBar({
                           className="rounded px-1.5 py-0.5 text-[11px] text-text-muted hover:bg-hover hover:text-text transition-colors"
                           onClick={onRefreshSourceHealth}
                         >
-                          {t("contextBar.refreshSourceHealth", "Refresh source health")}
+                          {t(
+                            "contextBar.refreshSourceHealth",
+                            "Refresh source health",
+                          )}
                         </button>
                       ) : null}
                       <button
@@ -996,7 +1094,7 @@ export function KnowledgeContextBar({
                           onClick={() => toggleSource(option.key)}
                           className={cn(
                             "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs transition-colors",
-                            selected ? "bg-primary/10 text-primaryStrong" : "hover:bg-surface2 text-text"
+                            selected ? "bg-primary/10 text-primaryStrong" : "hover:bg-surface2 text-text",
                           )}
                         >
                           <span className="flex flex-col">
@@ -1026,7 +1124,7 @@ export function KnowledgeContextBar({
                     <p className="mt-2 rounded-md border border-warn/30 bg-warn/10 px-2 py-1.5 text-[11px] text-warn">
                       {t(
                         "contextBar.noSourcesSelected",
-                        "No sources selected. Searches may return empty results."
+                        "No sources selected. Searches may return empty results.",
                       )}
                     </p>
                   ) : null}
@@ -1038,8 +1136,10 @@ export function KnowledgeContextBar({
               <button
                 type="button"
                 onClick={() => {
+                  setSourceMenuOpen(false)
                   setGranularMenuOpen((previous) => !previous)
                   setGranularQuery("")
+                  setGranularPage(1)
                 }}
                 className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text transition-colors"
                 aria-expanded={granularMenuOpen}
@@ -1047,27 +1147,63 @@ export function KnowledgeContextBar({
                 title="Limit retrieval to specific docs or notes"
               >
                 <Filter className="h-3.5 w-3.5 text-text-muted" />
-                Specific: {summarizeSpecificSources(normalizedMediaIds, normalizedNoteIds)}
+                Specific:{" "}
+                {summarizeSpecificSources(
+                  normalizedMediaIds,
+                  normalizedNoteIds,
+                )}
                 <ChevronDown className="h-3.5 w-3.5 text-text-muted" />
               </button>
-              {granularMenuOpen ? (
+              <Modal
+                open={granularMenuOpen}
+                modalRender={(node) => (
+                  <div
+                    onKeyDown={(event) => {
+                      containDialogTab(event)
+                      handleGranularMenuKeyDown(event)
+                    }}
+                  >
+                    {node}
+                  </div>
+                )}
+                title="Specific source selector"
+                onCancel={() => setGranularMenuOpen(false)}
+                width={720}
+                footer={
+                  <button
+                    type="button"
+                    className="rounded-md border border-border px-4 py-2"
+                    onClick={() => setGranularMenuOpen(false)}
+                  >
+                    Done
+                  </button>
+                }
+                styles={{
+                  body: {
+                    maxHeight: "calc(100dvh - 14rem)",
+                    overflowY: "auto",
+                  },
+                }}
+                afterOpenChange={(open) => {
+                  if (open) granularSearchInputRef.current?.focus()
+                }}
+              >
                 <div
                   id="knowledge-granular-source-menu"
-                  role="dialog"
-                  aria-label="Specific source selector"
                   aria-keyshortcuts="[ ] /"
-                  onKeyDown={handleGranularMenuKeyDown}
-                className="absolute left-0 z-30 mt-2 w-[28rem] max-w-[85vw] rounded-lg border border-border/80 bg-surface p-3 shadow-lg"
-              >
+                >
                   <div className="mb-2 flex items-start justify-between gap-3">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-                        {t("contextBar.specificSourceScope", "Specific source scope")}
+                        {t(
+                          "contextBar.specificSourceScope",
+                          "Specific source scope",
+                        )}
                       </p>
                       <p className="text-xs text-text-muted">
                         {t(
                           "contextBar.specificSourceDescription",
-                          "Choose exact docs or notes. Leave this empty to search all items inside selected categories."
+                          "Choose exact docs or notes. Leave this empty to search all items inside selected categories.",
                         )}
                       </p>
                     </div>
@@ -1083,33 +1219,46 @@ export function KnowledgeContextBar({
                   <div className="mb-2 flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => setGranularTab("media")}
+                      onClick={() => {
+                        setGranularTab("media")
+                        requestAnimationFrame(() =>
+                          granularSearchInputRef.current?.focus(),
+                        )
+                        setGranularPage(1)
+                      }}
                       className={cn(
                         "inline-flex h-7 items-center rounded-md px-2 text-[11px] font-medium transition-colors",
                         granularTab === "media"
                           ? "bg-primary text-white"
-                          : "text-text hover:bg-surface2"
+                          : "text-text hover:bg-surface2",
                       )}
                     >
-                      {t("contextBar.documentsAndMedia", "Documents & Media")} ({mediaOptions.length})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setGranularTab("notes")}
-                      className={cn(
-                        "inline-flex h-7 items-center rounded-md px-2 text-[11px] font-medium transition-colors",
-                        granularTab === "notes"
-                          ? "bg-primary text-white"
-                          : "text-text hover:bg-surface2"
-                      )}
-                    >
-                      {t("contextBar.notes", "Notes")} ({noteOptions.length})
+                      {t("contextBar.documentsAndMedia", "Documents & Media")} (
+                      {libraryTotals.media ?? `${mediaOptions.length} loaded`})
                     </button>
                     <button
                       type="button"
                       onClick={() => {
-                        setGranularLoaded(false)
-                        void loadGranularOptions()
+                        setGranularTab("notes")
+                        requestAnimationFrame(() =>
+                          granularSearchInputRef.current?.focus(),
+                        )
+                        setGranularPage(1)
+                      }}
+                      className={cn(
+                        "inline-flex h-7 items-center rounded-md px-2 text-[11px] font-medium transition-colors",
+                        granularTab === "notes"
+                          ? "bg-primary text-white"
+                          : "text-text hover:bg-surface2",
+                      )}
+                    >
+                      {t("contextBar.notes", "Notes")} (
+                      {libraryTotals.notes ?? `${noteOptions.length} loaded`})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setGranularReload((value) => value + 1)
                       }}
                       className="ml-auto inline-flex h-7 items-center rounded-md px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text transition-colors"
                     >
@@ -1120,14 +1269,26 @@ export function KnowledgeContextBar({
                   <label className="mb-2 flex h-9 items-center gap-2 rounded-md border border-border bg-surface2/70 px-2">
                     <Search className="h-3.5 w-3.5 text-text-muted" />
                     <input
+                      aria-label={t("contextBar.findDocumentsOrNotes", {
+                        defaultValue: "Find documents or notes",
+                      })}
                       ref={granularSearchInputRef}
                       type="text"
                       value={granularQuery}
-                      onChange={(event) => setGranularQuery(event.target.value)}
+                      onChange={(event) => {
+                        setGranularQuery(event.target.value)
+                        setGranularPage(1)
+                      }}
                       placeholder={
                         granularTab === "media"
-                          ? t("contextBar.filterDocsPlaceholder", "Filter docs by title")
-                          : t("contextBar.filterNotesPlaceholder", "Filter notes by title")
+                          ? t(
+                              "contextBar.filterDocsPlaceholder",
+                              "Filter docs by title",
+                            )
+                          : t(
+                              "contextBar.filterNotesPlaceholder",
+                              "Filter notes by title",
+                            )
                       }
                       className="w-full bg-transparent text-[11px] text-text outline-none placeholder:text-text-muted"
                     />
@@ -1137,41 +1298,65 @@ export function KnowledgeContextBar({
                     <label className="text-[11px] font-medium text-text-muted">
                       {t("contextBar.sourceStatus", "Source status")}
                       <select
-                        aria-label={t("contextBar.sourceStatus", "Source status")}
+                        aria-label={t(
+                          "contextBar.sourceStatus",
+                          "Source status",
+                        )}
                         value={granularStatusFilter}
                         onChange={(event) => setGranularStatusFilter(event.target.value)}
                         className="mt-1 h-8 w-full rounded-md border border-border bg-surface2 px-2 text-[11px] text-text outline-none focus:border-primary"
                       >
-                        <option value="all">{t("contextBar.allStatuses", "All statuses")}</option>
+                        <option value="all">
+                          {t("contextBar.allStatuses", "All statuses")}
+                        </option>
                         <option value="ready">{READY_STATE_LABEL}</option>
-                        <option value="indexing">{t("contextBar.indexing", "Indexing")}</option>
+                        <option value="indexing">
+                          {t("contextBar.indexing", "Indexing")}
+                        </option>
                         <option value="error">{ERROR_STATE_LABEL}</option>
-                        <option value="unavailable">{UNAVAILABLE_STATE_LABEL}</option>
+                        <option value="unavailable">
+                          {UNAVAILABLE_STATE_LABEL}
+                        </option>
                       </select>
                     </label>
 
                     <label className="text-[11px] font-medium text-text-muted">
                       {t("contextBar.recentImports", "Recent imports")}
                       <select
-                        aria-label={t("contextBar.recentImports", "Recent imports")}
+                        aria-label={t(
+                          "contextBar.recentImports",
+                          "Recent imports",
+                        )}
                         value={granularRecentFilter}
                         onChange={(event) => setGranularRecentFilter(event.target.value)}
                         className="mt-1 h-8 w-full rounded-md border border-border bg-surface2 px-2 text-[11px] text-text outline-none focus:border-primary"
                       >
-                        <option value="all">{t("contextBar.allDates", "All dates")}</option>
-                        <option value="recent">{t("contextBar.recentImports", "Recent imports")}</option>
+                        <option value="all">
+                          {t("contextBar.allDates", "All dates")}
+                        </option>
+                        <option value="recent">
+                          {t("contextBar.recentImports", "Recent imports")}
+                        </option>
                       </select>
                     </label>
 
                     <label className="text-[11px] font-medium text-text-muted">
                       {t("contextBar.workspaceScope", "Workspace scope")}
                       <select
-                        aria-label={t("contextBar.workspaceScope", "Workspace scope")}
+                        aria-label={t(
+                          "contextBar.workspaceScope",
+                          "Workspace scope",
+                        )}
                         value={granularWorkspaceFilter}
                         onChange={(event) => setGranularWorkspaceFilter(event.target.value)}
                         className="mt-1 h-8 w-full rounded-md border border-border bg-surface2 px-2 text-[11px] text-text outline-none focus:border-primary"
                       >
-                        <option value="">{t("contextBar.noWorkspaceScope", "No workspace scope")}</option>
+                        <option value="">
+                          {t(
+                            "contextBar.noWorkspaceScope",
+                            "No workspace scope",
+                          )}
+                        </option>
                         {workspaceOptions.map((workspace) => (
                           <option key={workspace.id} value={workspace.id}>
                             {workspace.label}
@@ -1201,14 +1386,79 @@ export function KnowledgeContextBar({
                       onClick={selectRecentSpecificSources}
                       className="inline-flex h-7 items-center rounded-md border border-border px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text transition-colors"
                     >
-                      {t("contextBar.selectRecentImports", "Select recent imports")}
+                      {t(
+                        "contextBar.selectRecentVisible",
+                        "Select recent visible",
+                      )}
                     </button>
                   </div>
 
+                  <p className="mb-2 text-[11px] text-text-muted">
+                    Status, date, and workspace filters apply to this page.
+                  </p>
+                  {normalizedMediaIds.length + normalizedNoteIds.length > 0 && (
+                    <section
+                      aria-label="Selected sources"
+                      className="mb-2 rounded-md border border-border p-2 text-xs"
+                    >
+                      <p className="font-medium">
+                        Selected sources (
+                        {normalizedMediaIds.length + normalizedNoteIds.length})
+                      </p>
+                      <ul>
+                        {normalizedMediaIds.map((id) => (
+                          <li key={`media-${id}`}>
+                            {mediaTitles[id] ?? `Media ${id}`} (ID: {id})
+                          </li>
+                        ))}
+                        {normalizedNoteIds.map((id) => (
+                          <li key={`note-${id}`}>
+                            {noteTitles[id] ?? `Note ${id}`} (ID: {id})
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
+                  <div className="mb-2 flex items-center justify-between gap-2 text-xs">
+                    <button
+                      type="button"
+                      aria-label="Previous source page"
+                      disabled={granularPage === 1 || granularLoading}
+                      onClick={() => setGranularPage((page) => page - 1)}
+                    >
+                      Previous
+                    </button>
+                    <span>
+                      Page {granularPage}
+                      {pageTotals[granularTab] !== null
+                        ? ` • ${pageTotals[granularTab]} results`
+                        : ` • ${granularTab === "media" ? mediaOptions.length : noteOptions.length} loaded`}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="Next source page"
+                      disabled={
+                        granularLoading ||
+                        Boolean(granularError) ||
+                        (pageTotals[granularTab] !== null
+                          ? granularPage * SOURCE_PAGE_SIZE >=
+                            pageTotals[granularTab]!
+                          : (granularTab === "media"
+                              ? mediaOptions.length
+                              : noteOptions.length) < SOURCE_PAGE_SIZE)
+                      }
+                      onClick={() => setGranularPage((page) => page + 1)}
+                    >
+                      Next
+                    </button>
+                  </div>
                   {granularLoading ? (
                     <div className="flex items-center justify-center gap-2 rounded-md border border-border/80 bg-surface2/60 py-8 text-xs text-text-muted">
                       <LoaderCircle className="h-4 w-4 animate-spin" />
-                      {t("contextBar.loadingAvailableSources", "Loading available sources...")}
+                      {t(
+                        "contextBar.loadingAvailableSources",
+                        "Loading available sources...",
+                      )}
                     </div>
                   ) : null}
 
@@ -1219,12 +1469,18 @@ export function KnowledgeContextBar({
                   ) : null}
 
                   {!granularLoading && !granularError ? (
-                    <div className="max-h-64 overflow-y-auto rounded-md border border-border/80 bg-surface2/40">
+                    <div className="rounded-md border border-border/80 bg-surface2/40">
                       {activeGranularOptions.length === 0 ? (
                         <p className="px-3 py-6 text-center text-xs text-text-muted">
                           {granularTab === "media"
-                            ? t("contextBar.noMatchingDocuments", "No matching documents.")
-                            : t("contextBar.noMatchingNotes", "No matching notes.")}
+                            ? t(
+                                "contextBar.noMatchingDocuments",
+                                "No matching documents.",
+                              )
+                            : t(
+                                "contextBar.noMatchingNotes",
+                                "No matching notes.",
+                              )}
                         </p>
                       ) : (
                         <ul className="divide-y divide-border" role="list">
@@ -1239,7 +1495,7 @@ export function KnowledgeContextBar({
                                 <label
                                   className={cn(
                                     "flex cursor-pointer items-start gap-2 px-2.5 py-2 text-xs transition-colors",
-                                    selected ? "bg-primary/10" : "hover:bg-surface2"
+                                    selected ? "bg-primary/10" : "hover:bg-surface2",
                                   )}
                                 >
                                   <input
@@ -1255,7 +1511,9 @@ export function KnowledgeContextBar({
                                     className="mt-0.5 rounded border-border"
                                   />
                                   <span className="min-w-0 flex-1">
-                                    <span className="block truncate text-text">{option.label}</span>
+                                    <span className="block truncate text-text">
+                                      {option.label}
+                                    </span>
                                     <span className="block text-[11px] text-text-muted">
                                       {[
                                         t("contextBar.itemId", {
@@ -1275,7 +1533,7 @@ export function KnowledgeContextBar({
                     </div>
                   ) : null}
                 </div>
-              ) : null}
+              </Modal>
             </div>
 
             <button
@@ -1300,7 +1558,7 @@ export function KnowledgeContextBar({
                   ? `Searching ${normalizedMediaIds.length + normalizedNoteIds.length} item${
                       normalizedMediaIds.length + normalizedNoteIds.length === 1 ? "" : "s"
                     }`
-                  : granularLoaded && hasOnlyCountableSources
+                  : countableScopeTotal !== null
                     ? `${countableScopeTotal} items in scope`
                     : `${normalizedSources.length} of ${SOURCE_OPTIONS.length} categories selected`}
               </>

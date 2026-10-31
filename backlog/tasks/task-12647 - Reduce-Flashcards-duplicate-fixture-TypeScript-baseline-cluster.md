@@ -27,9 +27,9 @@ Reduce the package-wide TypeScript baseline by removing duplicate Flashcards dec
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Removed duplicate review_prompt_side fields from five Flashcards deck fixtures. Full package tsc dropped from 12 src diagnostics to 7, with no Flashcards TS1117 diagnostics remaining. Bandit is not applicable for this JS/TS-only touched scope.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

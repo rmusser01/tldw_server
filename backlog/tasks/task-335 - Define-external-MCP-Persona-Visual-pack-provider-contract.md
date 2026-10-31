@@ -41,7 +41,7 @@ Create the contract/design slice for external MCP-compatible Persona Visual pack
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation plan created: Docs/superpowers/plans/2026-05-13-persona-visual-external-mcp-provider-contract.md.
 
 Added a design-only external MCP provider contract. The contract keeps providers as review-input sources and defines discovery metadata, result envelopes, portable archive handoff, generated-candidate handoff, manifest patch handoff, draft-pack requests, blocked diagnostics, safety rules, and the relationship to the internal persona_visuals MCP module.
@@ -53,7 +53,7 @@ Verification: git diff --check passed. Targeted scans found no activation_allowe
 Bandit was not run because this slice touched only Markdown documentation and Backlog task text.
 
 PR #1685 review sweep addressed still-valid Qodo, Gemini, and CodeRabbit findings: provider diagnostics examples now use machine-readable warning objects, portable archive examples use the existing Persona Visual vendor zip media type while documenting `application/zip` compatibility, safety rules explicitly reject secrets and require sanitized provenance, and TASK-335 timestamp metadata now satisfies updated_date >= created_date.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

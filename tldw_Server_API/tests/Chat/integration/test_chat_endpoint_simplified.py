@@ -7,6 +7,7 @@ import json
 import os
 import sqlite3
 import threading
+import time
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
@@ -28,6 +29,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     ChatCompletionRequest,
     ChatCompletionUserMessageParam,
 )
+from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.AuthNZ import byok_runtime
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     ByokResolutionError,
@@ -37,7 +39,6 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCredentialRuntime,
 )
-from tldw_Server_API.app.core.Chat import bounded_daemon as bounded_daemon_module
 from tldw_Server_API.app.core.Chat import (
     chat_service,
     chat_target_resolution,
@@ -52,8 +53,10 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
 from tldw_Server_API.app.core.Chat.streaming_utils import StreamingResponseHandler
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.exceptions import ProviderCredentialTerminalError
+from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RouterRequest, RoutingPolicy
 from tldw_Server_API.app.main import app
+from tldw_Server_API.tests.helpers.provider_keys import api_keys_source
 from tldw_Server_API.tests.provider_credential_test_helpers import (
     issue_provider_call_credentials_async,
 )
@@ -211,13 +214,13 @@ def _real_router_inputs(scope: str) -> tuple[
 
 @pytest.fixture(autouse=True)
 def _freeze_legacy_test_api_keys_for_runtime(monkeypatch):
-    """Expose legacy module test keys through the runtime's frozen config seam."""
+    """Expose the test keys set on config_llm_providers.get_api_keys through the runtime's frozen config seam."""
     from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime
     from tldw_Server_API.app.core.AuthNZ.byok_config import PROVIDER_APP_CONFIG_KEYS
 
     def load_snapshot():
         snapshot = {}
-        for provider, api_key in dict(chat_endpoint.API_KEYS).items():
+        for provider, api_key in config_llm_providers.get_api_keys().items():
             section = PROVIDER_APP_CONFIG_KEYS.get(provider)
             if (
                 section is not None
@@ -708,7 +711,7 @@ def test_chat_completion_basic(authenticated_client, mock_chacha_db, setup_depen
     # Mock the LLM call and API keys
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
     ):
         mock_llm.return_value = {
             "id": "chatcmpl-test",
@@ -783,7 +786,7 @@ def test_chat_completion_streaming(authenticated_client, mock_chacha_db):
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
     ):
         mock_llm.return_value = mock_stream()
 
@@ -816,7 +819,7 @@ def test_chat_completion_with_character(authenticated_client, mock_chacha_db, se
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
     ):
         mock_llm.return_value = {
             "id": "chatcmpl-test",
@@ -866,7 +869,7 @@ def test_chat_completion_invalid_model(authenticated_client, mock_chacha_db, set
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
     ):
         # Simulate an error for invalid model
         mock_llm.side_effect = Exception("Invalid model: invalid-model-xyz")
@@ -891,7 +894,7 @@ def test_chat_completion_explicit_model_unavailable_returns_400(
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
         patch(
             "tldw_Server_API.app.api.v1.endpoints.chat.is_model_known_for_provider",
             return_value=False,
@@ -937,7 +940,7 @@ def test_chat_completion_disables_provider_fallback_for_explicit_model(
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call", side_effect=fake_execute_non_stream_call),
         patch("tldw_Server_API.app.api.v1.endpoints.chat.get_provider_manager", return_value=provider_manager),
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
         patch(
             "tldw_Server_API.app.api.v1.endpoints.chat.is_model_known_for_provider",
             return_value=True,
@@ -949,6 +952,49 @@ def test_chat_completion_disables_provider_fallback_for_explicit_model(
         assert captured.get("selected_provider") == "openai"
         assert captured.get("enable_provider_fallback") is False
         provider_manager.get_available_provider.assert_not_called()
+
+
+def test_chat_completion_strict_selection_accepts_a_saved_dotted_anthropic_name(
+    authenticated_client, mock_chacha_db, setup_dependencies, monkeypatch
+):
+    """A conversation saved with claude-sonnet-4.5 is not rejected: the dotted name is an alias of claude-sonnet-4-5 (TASK-13880)."""
+    monkeypatch.setenv("CHAT_ENFORCE_STRICT_MODEL_SELECTION", "1")
+
+    request_data = ChatCompletionRequest(
+        model="claude-sonnet-4.5",
+        api_provider="anthropic",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+    )
+
+    async def fake_execute_non_stream_call(**kwargs):
+        return {
+            "id": "chatcmpl-test",
+            "choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+        }
+
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {}
+    # Strict selection asks Anthropic's live list (TASK-13460), which holds only the dashed ID.
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    monkeypatch.setattr(
+        gateway, "resolve_provider_models_base_url", lambda *_args, **_kwargs: "https://api.anthropic.com/v1",
+    )
+    monkeypatch.setattr(
+        chat_service, "discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready", ("claude-sonnet-4-5",)),
+    )
+    monkeypatch.setattr(gateway, "discover_provider_models", chat_service.discover_provider_models)
+
+    with (
+        patch("tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call", side_effect=fake_execute_non_stream_call),
+        patch("tldw_Server_API.app.api.v1.endpoints.chat.get_provider_manager", return_value=provider_manager),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"anthropic": "test-key"})),
+    ):
+        response = authenticated_client.post("/api/v1/chat/completions", json=request_data.model_dump())
+
+    assert response.status_code == status.HTTP_200_OK, response.text
 
 
 def test_chat_completion_revalidates_default_model(authenticated_client, mock_chacha_db, setup_dependencies):
@@ -966,7 +1012,7 @@ def test_chat_completion_revalidates_default_model(authenticated_client, mock_ch
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
         patch("tldw_Server_API.app.api.v1.endpoints.chat.get_override_default_model", return_value="bad-model"),
         patch("tldw_Server_API.app.api.v1.endpoints.chat.validate_provider_override", side_effect=_fake_validate),
     ):
@@ -1005,7 +1051,7 @@ def test_chat_completion_default_model_tracks_model(authenticated_client, mock_c
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call", side_effect=fake_execute_non_stream_call),
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
         patch("tldw_Server_API.app.api.v1.endpoints.chat.get_override_default_model", return_value="default-model"),
         patch("tldw_Server_API.app.api.v1.endpoints.chat.validate_provider_override", return_value=None),
     ):
@@ -1227,7 +1273,7 @@ def test_chat_completion_downgrades_structured_response_format_before_provider_c
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
     ):
         mock_llm.return_value = {
             "id": "chatcmpl-test",
@@ -1296,7 +1342,7 @@ def test_chat_completion_uses_one_runtime_and_marks_success_once(
             "execute_streaming_call",
             side_effect=fake_execute_streaming_call,
         ),
-        patch.object(chat_endpoint, "API_KEYS", {"openai": "legacy-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "legacy-key"})),
     ):
         response = authenticated_client.post(
             "/api/v1/chat/completions",
@@ -1347,9 +1393,9 @@ def test_chat_completion_resolves_health_fallback_with_same_runtime(
             side_effect=fake_execute_non_stream_call,
         ),
         patch.object(
-            chat_endpoint,
-            "API_KEYS",
-            {"openai": "legacy-openai", "anthropic": "legacy-anthropic"},
+            config_llm_providers,
+            "get_api_keys",
+            api_keys_source({"openai": "legacy-openai", "anthropic": "legacy-anthropic"}),
         ),
     ):
         response = authenticated_client.post(
@@ -1403,7 +1449,7 @@ def test_health_fallback_keeps_model_policy_atomic_during_config_rotation(
                 self._fallback_calls += 1
                 if self._fallback_calls == 1:
                     fallback_resolution_started.set()
-                    await asyncio.to_thread(release_fallback_resolution.wait, 2.0)
+                    await asyncio.to_thread(release_fallback_resolution.wait, 20.0)
             return await issue_provider_call_credentials_async(
                 normalized,
                 api_key=f"{normalized}-runtime-key",
@@ -1461,16 +1507,20 @@ def test_health_fallback_keeps_model_policy_atomic_during_config_rotation(
         patch.object(chat_endpoint, "get_override_default_model", return_value=None),
         patch.object(chat_endpoint, "get_llm_provider_override", return_value=None),
     ):
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(
-                authenticated_client.post,
+        def post_after_slow_start():
+            # Exercise a request startup longer than the old two-second deadline.
+            time.sleep(2.1)
+            return authenticated_client.post(
                 "/api/v1/chat/completions",
                 json=request_data.model_dump(),
             )
-            assert fallback_resolution_started.wait(timeout=2.0)
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(post_after_slow_start)
+            assert fallback_resolution_started.wait(timeout=20.0)
             monkeypatch.setenv("DEFAULT_MODEL_ANTHROPIC", "claude-rotated-model")
             release_fallback_resolution.set()
-            response = future.result(timeout=5.0)
+            response = future.result(timeout=25.0)
 
     assert response.status_code == status.HTTP_200_OK, response.text
     assert captured["model"] == "claude-snapshot-model"
@@ -2790,7 +2840,7 @@ def test_chat_credential_resolution_errors_are_terminal_503(
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type, create=True),
         patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "API_KEYS", {"openai": "legacy-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "legacy-key"})),
         patch.object(chat_endpoint, "perform_chat_api_call") as provider_call,
     ):
         response = authenticated_client.post(
@@ -2821,7 +2871,7 @@ def test_chat_missing_runtime_credentials_are_terminal_503(
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type, create=True),
         patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "API_KEYS", {"openai": "legacy-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "legacy-key"})),
         patch.object(chat_endpoint, "perform_chat_api_call") as provider_call,
     ):
         response = authenticated_client.post(
@@ -2946,7 +2996,7 @@ def test_chat_provider_auth_and_config_errors_are_sanitized_and_terminal(
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type, create=True),
         patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "API_KEYS", {"openai": "legacy-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "legacy-key"})),
         patch.object(
             chat_endpoint,
             "execute_non_stream_call",
@@ -3234,7 +3284,9 @@ def test_chat_closes_runtime_for_every_setup_failure_after_construction(
 
     with ExitStack() as stack:
         stack.enter_context(patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type))
-        stack.enter_context(patch.object(chat_endpoint, "API_KEYS", {"openai": "legacy-key"}))
+        stack.enter_context(
+            patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "legacy-key"}))
+        )
         if failure_point == "auto_router":
             stack.enter_context(
                 patch.object(
@@ -3399,7 +3451,11 @@ def test_chat_closes_runtime_when_rg_refund_fails_after_stream_response_created(
         patch("tldw_Server_API.app.core.config.rg_enabled", return_value=True),
         patch.object(app.state, "rg_governor", governor, create=True),
         patch.object(app.state, "rg_policy_loader", policy_loader, create=True),
-        patch.object(chat_endpoint.sys, "exc_info", return_value=(PendingResponseError, pending_error, None)),
+        patch.object(
+            chat_endpoint,
+            "sys",
+            SimpleNamespace(exc_info=lambda: (PendingResponseError, pending_error, None)),
+        ),
         patch.object(
             chat_endpoint,
             "execute_streaming_call",
@@ -3567,6 +3623,8 @@ def test_real_openai_adapter_nonstream_failure_is_bounded_across_endpoint_logs_a
             patch.object(chat_endpoint, "get_request_queue", return_value=None),
             patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
             patch.object(chat_endpoint, "_shared_is_test_mode", return_value=False),
+            # Production mode turns on strict selection, which asks the live model list (TASK-13460).
+            patch.object(chat_endpoint, "_validate_explicit_model_availability", return_value=None),
             patch.object(adapter_module, "http_client_factory", fail_before_dispatch),
             patch.dict(
                 app.dependency_overrides,
@@ -3590,6 +3648,56 @@ def test_real_openai_adapter_nonstream_failure_is_bounded_across_endpoint_logs_a
     assert runtime_key not in "".join(logs)
     assert sentinel not in serialized_audit_calls
     assert runtime_key not in serialized_audit_calls
+
+
+@pytest.mark.parametrize("finish_reason", ["length", "stop"])
+def test_nonstream_output_limit_guidance_reaches_http_boundary(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+    finish_reason,
+):
+    """The final HTTP sanitizer preserves bounded output-limit guidance only."""
+    sentinel = "hidden-provider-reasoning-must-not-leak"
+    provider_result = {
+        "choices": [
+            {
+                "message": {"role": "assistant", "content": "", "reasoning_content": sentinel},
+                "finish_reason": finish_reason,
+            }
+        ],
+        "usage": {"prompt_tokens": 5, "completion_tokens": 128, "total_tokens": 133},
+    }
+    runtime_type = _credential_runtime_double()
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {"openai": SimpleNamespace(can_attempt_call=lambda: True)}
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
+        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", False),
+        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch.object(chat_service, "get_request_queue", return_value=None),
+        patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
+        patch.object(chat_endpoint, "_shared_is_test_mode", return_value=False),
+        # Production mode turns on strict selection, which asks the live model list (TASK-13460).
+        patch.object(chat_endpoint, "_validate_explicit_model_availability", return_value=None),
+        patch.object(chat_endpoint, "perform_chat_api_call", return_value=provider_result) as provider_call,
+    ):
+        response = authenticated_client.post(
+            "/api/v1/chat/completions",
+            json={
+                "model": "gpt-4o-mini",
+                "api_provider": "openai",
+                "stream": False,
+                "messages": [{"role": "user", "content": "Hello"}],
+            },
+        )
+
+    assert response.status_code == status.HTTP_502_BAD_GATEWAY
+    expected_code = "provider_output_limit" if finish_reason == "length" else "provider_unavailable"
+    assert response.json()["detail"] == chat_endpoint.PROVIDER_STREAM_ERROR_MESSAGES[expected_code]
+    assert sentinel not in response.text
+    assert provider_call.call_count == 1
 
 
 class UnknownAdapterFailure(Exception):
@@ -3955,8 +4063,8 @@ def test_real_openai_401_refreshes_oauth_once_before_stream_output(
 ):
     import httpx
 
-    from tldw_Server_API.app.core.Chat import bounded_daemon as bounded_daemon_module
     from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
+    from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
     from tldw_Server_API.app.core.LLM_Calls.providers import openai_adapter
 
     sentinel = "real-openai-401-secret-/srv/provider"
@@ -3987,7 +4095,7 @@ def test_real_openai_401_refreshes_oauth_once_before_stream_output(
                 raise httpx.HTTPStatusError(
                     sentinel,
                     request=self.request,
-                    response=self,
+                    response=self,  # type: ignore[arg-type]  # a stand-in httpx.Response
                 )
 
         def iter_lines(self):
@@ -5157,7 +5265,7 @@ def test_chat_completion_with_conversation_history(authenticated_client, mock_ch
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
     ):
         mock_llm.return_value = {
             "id": "chatcmpl-test",
@@ -5196,7 +5304,7 @@ def test_chat_completion_rate_limiting(authenticated_client, mock_chacha_db, set
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
     ):
         mock_llm.return_value = {
             "id": "chatcmpl-test",
@@ -5235,7 +5343,10 @@ def test_chat_completion_rg_primary_deny(
 
     gov = getattr(app.state, "rg_governor", None)
     if gov is None:
-        app.state.rg_governor = SimpleNamespace()
+        # RG is disabled by default under pytest, so no governor is attached to the
+        # shared app on startup. Attach a throwaway double via monkeypatch (not a
+        # direct assignment) so it is restored on teardown of this shared app.state.
+        monkeypatch.setattr(app.state, "rg_governor", SimpleNamespace(reserve=None, commit=None), raising=False)
         gov = app.state.rg_governor
 
     if getattr(app.state, "rg_policy_loader", None) is None:
@@ -5244,7 +5355,7 @@ def test_chat_completion_rg_primary_deny(
             def get_policy(self, _policy_id):
                 return {}
 
-        app.state.rg_policy_loader = _Loader()
+        monkeypatch.setattr(app.state, "rg_policy_loader", _Loader(), raising=False)
 
     async def fake_reserve(req, op_id=None):
         categories = getattr(req, "categories", {}) or {}
@@ -5260,9 +5371,10 @@ def test_chat_completion_rg_primary_deny(
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
-        patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS",
-            {"openai": "test-key"},
+        patch.object(
+            config_llm_providers,
+            "get_api_keys",
+            api_keys_source({"openai": "test-key"}),
         ),
     ):
         mock_llm.return_value = {
@@ -5307,7 +5419,10 @@ def test_chat_completion_rg_shadow_vs_primary_behaviour(
 
     gov = getattr(app.state, "rg_governor", None)
     if gov is None:
-        app.state.rg_governor = SimpleNamespace()
+        # RG is disabled by default under pytest, so no governor is attached to the
+        # shared app on startup. Attach a throwaway double via monkeypatch (not a
+        # direct assignment) so it is restored on teardown of this shared app.state.
+        monkeypatch.setattr(app.state, "rg_governor", SimpleNamespace(reserve=None, commit=None), raising=False)
         gov = app.state.rg_governor
 
     if getattr(app.state, "rg_policy_loader", None) is None:
@@ -5316,7 +5431,7 @@ def test_chat_completion_rg_shadow_vs_primary_behaviour(
             def get_policy(self, _policy_id):
                 return {}
 
-        app.state.rg_policy_loader = _Loader()
+        monkeypatch.setattr(app.state, "rg_policy_loader", _Loader(), raising=False)
 
     token_calls = {"count": 0}
 
@@ -5336,9 +5451,10 @@ def test_chat_completion_rg_shadow_vs_primary_behaviour(
 
     with (
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
-        patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS",
-            {"openai": "test-key"},
+        patch.object(
+            config_llm_providers,
+            "get_api_keys",
+            api_keys_source({"openai": "test-key"}),
         ),
     ):
         mock_llm.return_value = {
@@ -5729,6 +5845,12 @@ async def test_stream_prime_allows_finite_metadata_then_output(monkeypatch):
 @pytest.mark.asyncio
 async def test_stream_prime_budget_stops_after_first_output(monkeypatch):
     monkeypatch.setattr(chat_endpoint, "PROVIDER_STREAM_PRIME_MAX_ELAPSED_SECONDS", 0.01, raising=False)
+    monkeypatch.setattr(chat_endpoint, "_provider_stream_monotonic", lambda: 0.0)
+    # Elapsed-time bounds have separate tests; isolate the one-frame budget here.
+    async def await_frame(operation, _timeout):
+        return await operation
+
+    monkeypatch.setattr(chat_endpoint, "_await_provider_stream_operation", await_frame)
     monkeypatch.setattr(chat_endpoint, "PROVIDER_STREAM_PRIME_MAX_BUFFERED_BYTES", 10_000, raising=False)
     monkeypatch.setattr(chat_endpoint, "PROVIDER_STREAM_PRIME_MAX_BUFFERED_CHUNKS", 1, raising=False)
     closed = asyncio.Event()
@@ -6435,15 +6557,27 @@ def test_stream_prime_factory_and_metadata_share_one_absolute_deadline(
     clock = ControlledClock()
     captured_factory_timeouts: list[float] = []
 
+    # Keep fake-clock accounting independent of native timer resolution.
+    async def controlled_await(awaitable: Any, _timeout: float) -> Any:
+        return await awaitable
+
+    async def controlled_factory(factory: Any, *, timeout: float) -> Any:
+        before = clock()
+        result = factory()
+        if clock() - before > timeout:
+            raise asyncio.TimeoutError
+        return result
+
     async def capture_execute_streaming_call(**kwargs):
         captured_factory_timeouts.append(kwargs["provider_factory_timeout"])
         return await chat_service.execute_streaming_call(**kwargs)
 
     async def delayed_output():
         clock.advance(0.04)
+        yield 'data: {"choices":[{"delta":{"role":"assistant"}}]}\n\n'
         yield 'data: {"choices":[{"delta":{"content":"too late"}}]}\n\n'
 
-    def delayed_factory():
+    def delayed_factory(**_kwargs):
         clock.advance(0.04)
         return delayed_output()
 
@@ -6460,6 +6594,9 @@ def test_stream_prime_factory_and_metadata_share_one_absolute_deadline(
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
         patch.object(chat_endpoint, "PROVIDER_STREAM_PRIME_MAX_ELAPSED_SECONDS", 0.06),
         patch.object(chat_endpoint, "_provider_stream_monotonic", clock),
+        patch.object(chat_endpoint, "_await_provider_stream_operation", controlled_await),
+        patch.object(chat_service, "_provider_factory_monotonic", clock),
+        patch.object(chat_service, "_call_stream_factory_bounded", controlled_factory),
         patch.object(
             chat_endpoint,
             "execute_streaming_call",
@@ -6476,6 +6613,7 @@ def test_stream_prime_factory_and_metadata_share_one_absolute_deadline(
     assert "too late" not in response.text
     assert len(captured_factory_timeouts) == 1
     assert captured_factory_timeouts[0] == pytest.approx(0.06)
+    assert clock.now == pytest.approx(100.08)
 
 
 def test_stream_prime_fallback_attempts_share_one_absolute_deadline(
@@ -6505,6 +6643,17 @@ def test_stream_prime_fallback_attempts_share_one_absolute_deadline(
 
     clock = ControlledClock()
     captured_factory_timeouts: list[float] = []
+
+    # Keep fake-clock accounting independent of native timer resolution.
+    async def controlled_await(awaitable: Any, _timeout: float) -> Any:
+        return await awaitable
+
+    async def controlled_factory(factory: Any, *, timeout: float) -> Any:
+        before = clock()
+        result = factory()
+        if clock() - before > timeout:
+            raise asyncio.TimeoutError
+        return result
 
     async def capture_execute_streaming_call(**kwargs):
         captured_factory_timeouts.append(kwargs["provider_factory_timeout"])
@@ -6545,6 +6694,9 @@ def test_stream_prime_fallback_attempts_share_one_absolute_deadline(
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
         patch.object(chat_endpoint, "PROVIDER_STREAM_PRIME_MAX_ELAPSED_SECONDS", 0.06),
         patch.object(chat_endpoint, "_provider_stream_monotonic", clock),
+        patch.object(chat_endpoint, "_await_provider_stream_operation", controlled_await),
+        patch.object(chat_service, "_provider_factory_monotonic", clock),
+        patch.object(chat_service, "_call_stream_factory_bounded", controlled_factory),
         patch.object(
             chat_endpoint,
             "execute_streaming_call",
@@ -6664,6 +6816,156 @@ def test_real_openai_nonstream_auth_status_controls_oauth_refresh(
     assert keys == expected_keys
     assert runtime_type.instances[0].resolve_calls.count(("openai", True)) == refresh_count
     assert sentinel not in response.text
+
+
+def _real_openai_inventory_call(client, *, discover, stream: bool = False, auth_source: str | None = "oauth"):
+    """POST one OpenAI chat through the real adapter; only the model list and generation transport are faked."""
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
+    from tldw_Server_API.app.core.LLM_Calls.providers import openai_adapter
+
+    generation_keys: list[str] = []
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"id": "chatcmpl-inventory", "choices": [{"message": {"role": "assistant", "content": "ok"}}]}
+
+    class Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, _url, *, headers, **_kwargs):
+            generation_keys.append(headers["Authorization"].removeprefix("Bearer "))
+            return Response()
+
+    runtime_type = _credential_runtime_double(auth_source=auth_source)
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {"openai": SimpleNamespace(can_attempt_call=lambda: True)}
+    request_data = ChatCompletionRequest(
+        model="gpt-4o-mini",
+        api_provider="openai",
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+        stream=stream,
+    )
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
+        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
+        patch.object(chat_endpoint, "_shared_is_test_mode", return_value=False),
+        patch.object(chat_endpoint, "_should_enforce_strict_model_selection", return_value=False),
+        patch.object(gateway, "resolve_provider_models_base_url", lambda *_a, **_k: "https://api.openai.com/v1"),
+        patch.object(chat_service, "discover_provider_models", discover),
+        patch.object(gateway, "discover_provider_models", discover),
+        patch.object(openai_adapter, "http_client_factory", lambda **_kwargs: Client()),
+    ):
+        response = client.post("/api/v1/chat/completions", json=request_data.model_dump())
+    return response, runtime_type, generation_keys
+
+
+@pytest.mark.provider_inventory
+def test_discovery_401_reaches_the_openai_oauth_refresh_path(authenticated_client, mock_chacha_db, setup_dependencies):
+    """A rejected OAuth token on the model list refreshes once and retries, like a generation 401 (review I3)."""
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    discovery_keys: list[str] = []
+
+    def discover(_provider, key, **_kwargs):
+        discovery_keys.append(key)
+        if key == "openai-runtime-key":
+            return ModelDiscoveryResult("auth_failed")
+        return ModelDiscoveryResult("ready", ("gpt-4o-mini",))
+
+    response, runtime_type, generation_keys = _real_openai_inventory_call(authenticated_client, discover=discover)
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert discovery_keys[0] == "openai-runtime-key"
+    assert set(discovery_keys[1:]) == {"openai-refreshed-runtime-key"}
+    assert generation_keys == ["openai-refreshed-runtime-key"]
+    assert runtime_type.instances[0].resolve_calls.count(("openai", True)) == 1
+
+
+@pytest.mark.provider_inventory
+def test_discovery_401_without_oauth_is_a_provider_authentication_failure(
+    authenticated_client, mock_chacha_db, setup_dependencies,
+):
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    response, runtime_type, generation_keys = _real_openai_inventory_call(
+        authenticated_client, discover=lambda *_a, **_k: ModelDiscoveryResult("auth_failed"), auth_source=None,
+    )
+
+    assert response.status_code == status.HTTP_502_BAD_GATEWAY
+    assert response.json()["detail"]["error_code"] == "provider_authentication_failed"
+    assert generation_keys == []
+    assert runtime_type.instances[0].resolve_calls.count(("openai", True)) == 0
+
+
+@pytest.mark.provider_inventory
+@pytest.mark.parametrize("outage", ["server_error", "unreachable"])
+def test_inventory_outage_has_its_own_public_status_and_code(
+    authenticated_client, mock_chacha_db, setup_dependencies, outage,
+):
+    """A model-list outage is reported as one, not as a configuration error (review M1)."""
+    from tldw_Server_API.app.core.Chat.streaming_utils import PROVIDER_STREAM_ERROR_MESSAGES
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    response, _runtime_type, generation_keys = _real_openai_inventory_call(
+        authenticated_client, discover=lambda *_a, **_k: ModelDiscoveryResult(outage), auth_source=None,
+    )
+
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert response.json()["detail"] == {
+        "error_code": "provider_model_inventory_unavailable",
+        "message": PROVIDER_STREAM_ERROR_MESSAGES["provider_model_inventory_unavailable"],
+    }
+    assert generation_keys == []
+
+
+@pytest.mark.provider_inventory
+def test_unlisted_model_rejection_names_model_provider_and_fix(
+    authenticated_client, mock_chacha_db, setup_dependencies,
+):
+    """The non-strict rejection says which model, which provider, and how to pick another (review M2)."""
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    response, _runtime_type, generation_keys = _real_openai_inventory_call(
+        authenticated_client, discover=lambda *_a, **_k: ModelDiscoveryResult("ready", ("gpt-other",)), auth_source=None,
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST, response.text
+    text = response.text
+    assert "gpt-4o-mini" in text and "openai" in text
+    assert "api_provider" in text and "<provider>/<model>" in text
+    assert generation_keys == []
+
+
+@pytest.mark.provider_inventory
+def test_streaming_unlisted_model_rejection_matches_the_nonstream_answer(
+    authenticated_client, mock_chacha_db, setup_dependencies,
+):
+    """A non-strict stream for an unlisted model gets the same 400 model_not_available, not 502 (re-review M2)."""
+    from tldw_Server_API.app.core.exceptions import ChatModelNotAvailableError
+    from tldw_Server_API.app.core.LLM_Calls.provider_readiness import ModelDiscoveryResult
+
+    response, _runtime_type, generation_keys = _real_openai_inventory_call(
+        authenticated_client, stream=True, auth_source=None,
+        discover=lambda *_a, **_k: ModelDiscoveryResult("ready", ("gpt-other",)),
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST, response.text
+    detail = response.json()["detail"]
+    assert detail["error_code"] == "model_not_available"
+    assert detail["message"] == ChatModelNotAvailableError.message_for("openai", "gpt-4o-mini")
+    assert generation_keys == []
 
 
 @pytest.mark.asyncio
@@ -6859,10 +7161,10 @@ def test_queued_provider_forged_guardrail_boolean_is_sanitized(
     provider_manager.circuit_breakers = {
         "openai": SimpleNamespace(can_attempt_call=lambda: True)
     }
-    request_data = ChatCompletionRequest(
+    request_data = ChatCompletionRequest(  # type: ignore[call-arg]  # pydantic defaults
         model="gpt-4o-mini",
         api_provider="openai",
-        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],
+        messages=[ChatCompletionUserMessageParam(role="user", content="Hello")],  # type: ignore[call-arg]
         stream=True,
     )
     with (

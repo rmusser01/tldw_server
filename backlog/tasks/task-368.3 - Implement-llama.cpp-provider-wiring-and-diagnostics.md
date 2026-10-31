@@ -56,7 +56,7 @@ Implement the provider diagnostics backend slice from the implementation plan. A
 <!-- DOD:END -->
 
 ## Implementation Notes
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 This is a stale tracker closeout after PR #2119 merged. The llama.cpp provider wiring and diagnostics backend slice is already present on current `origin/dev`; this task record now reflects the shipped state rather than introducing runtime code.
 
 Implementation provenance:
@@ -75,7 +75,7 @@ Verification command:
 
 Known skips:
 - Bandit was not rerun for this closeout branch because it changes only Backlog metadata. The implementation code shipped in the referenced PRs.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 <!-- SECTION:SUMMARY:BEGIN -->

@@ -40,7 +40,7 @@ Continue the shared product-state design-system migration by adapting the Knowle
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline before implementation: after installing apps/packages/ui dependencies in the new worktree, bunx vitest run src/components/Knowledge/__tests__/KnowledgeTabs.test.tsx src/components/Knowledge/__tests__/KnowledgePanelTabRouting.test.tsx src/components/Knowledge/QASearchTab/__tests__/GeneratedAnswerCard.test.tsx src/design-system/__tests__/product-state-guard.test.ts --maxWorkers=1 --reporter=dot passed 45/45 with existing tldw server not configured request warnings. bun run verify:design-system-state exited 0 with 522 allowed legacy exceptions and SearchEmptyState still present as local-empty-state debt.
 
 TDD red/green: added a focused SearchEmptyState test covering the canonical EmptyState marker for initial, no-results, timeout, and disconnected variants plus dismiss/retry action behavior. The red run failed as expected because data-ds-component=EmptyState was missing from the current local wrapper for all variants. Adapted SearchEmptyState to render components/ui/feedback/EmptyState and removed direct AntD Button usage while preserving variant copy, retry callback, dismiss callback, showHint behavior, and translation fallbacks.
@@ -48,7 +48,7 @@ TDD red/green: added a focused SearchEmptyState test covering the canonical Empt
 Verification after implementation: focused SearchEmptyState test passed 5/5; combined focused run for SearchEmptyState, nearby Knowledge tests, GeneratedAnswerCard, and product-state-guard passed 50/50 with existing tldw server not configured request warnings; bun run verify:design-system-state exited 0 with baseline exceptions reduced from 522 to 521 and local-empty-state reduced from 2 to 1; broader bunx vitest run src/components/Knowledge --maxWorkers=1 --reporter=dot passed 12 test files and 38 tests with existing tldw server not configured request warnings; git diff --check exited 0 before final task-record edits. Bandit is not applicable to this frontend-only TypeScript/JSON slice.
 
 PR opened: https://github.com/rmusser01/tldw_server/pull/1350
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

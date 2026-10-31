@@ -45,7 +45,7 @@ Stage 3: Docs, Tracker, And Verification.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Planning started in isolated worktree `.worktrees/persona-visual-starter-catalog` on branch `codex/persona-visual-starter-catalog` from `origin/dev`. Key implementation direction: bundled starter packs create normal user-owned draft pack and asset rows through existing storage/validation paths rather than global mutable pack references or auto-activation.
 
 Stage 1 green: service tests cover listing the bundled starter fixture, copying into an inactive user-owned draft, preserving an existing active pack, remapping fixture asset keys, and rejecting malformed fixture manifests.
@@ -55,7 +55,7 @@ Stage 2 green: API tests cover catalog list/detail, copy-to-draft without activa
 Verification completed: `python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q --tb=short --disable-warnings` -> 53 passed; `python -m py_compile tldw_Server_API/app/core/Persona/visual_starter_catalog.py tldw_Server_API/app/core/Persona/visual_starter_fixtures.py` -> passed; Bandit touched Python scope -> 0 findings in `/tmp/bandit_persona_visual_starter_catalog.json`; `git diff --check` -> passed.
 
 Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1701.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

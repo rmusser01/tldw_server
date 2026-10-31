@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 from fastapi import HTTPException, Request, status
 from loguru import logger
+from starlette.requests import HTTPConnection
 
 from tldw_Server_API.app.core.AuthNZ import User_DB_Handling
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
@@ -26,6 +27,7 @@ from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
     resolve_client_ip,
 )
 from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS, PLATFORM_ADMIN_ROLES
 from tldw_Server_API.app.core.AuthNZ.principal_model import (
     AuthContext,
     AuthPrincipal,
@@ -34,11 +36,9 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import (
 from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.AuthNZ.single_user_session import validate_single_user_session
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, _looks_like_jwt
 from tldw_Server_API.app.core.exceptions import InactiveUserError
 from tldw_Server_API.app.core.testing import env_flag_enabled
-from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_ROLES
-from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 _RESOLVER_MODE_EXCEPTIONS = (
     AttributeError,
@@ -74,16 +74,24 @@ _PLATFORM_ADMIN_ROLES = PLATFORM_ADMIN_ROLES
 _ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 
-def _extract_bearer_token(request: Request) -> Optional[str]:
-    """Extract Bearer token from Authorization header."""
+def bearer_credential(value: Optional[str]) -> Optional[str]:
+    """Return ``<credential>`` from ``Bearer <credential>`` (the scheme in any case), else None.
+
+    The one bearer-scheme parser (TASK-13950.7): endpoints that read a bearer from a header call
+    it rather than splitting the header themselves.
+    """
+    if not isinstance(value, str):
+        return None
+    scheme, _, credential = value.partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+    return credential.strip() or None
+
+
+def _extract_bearer_token(request: HTTPConnection) -> Optional[str]:
+    """Extract Bearer token from Authorization header (of a request or a WebSocket handshake)."""
     try:
-        auth_header = request.headers.get("Authorization")
-        if not auth_header:
-            return None
-        scheme, _, credential = auth_header.partition(" ")
-        if scheme.lower() != "bearer" or not credential:
-            return None
-        return credential.strip()
+        return bearer_credential(request.headers.get("Authorization"))
     except (AttributeError, TypeError):
         return None
 
@@ -96,12 +104,6 @@ def _extract_api_key(request: Request) -> Optional[str]:
             return api_key.strip()
     except (AttributeError, TypeError):
         return None
-
-
-def _looks_like_jwt(token: Optional[str]) -> bool:
-    if not isinstance(token, str):
-        return False
-    return token.count(".") == 2
 
 
 def _peek_jwt_token_type(token: str) -> Optional[str]:
@@ -174,10 +176,7 @@ def _is_test_context() -> bool:
     """Return True when running in pytest or explicit test-mode contexts."""
     if os.getenv("PYTEST_CURRENT_TEST") is not None:
         return True
-    for flag in ("TEST_MODE", "TLDW_TEST_MODE", "TESTING"):
-        if env_flag_enabled(flag):
-            return True
-    return False
+    return any(env_flag_enabled(flag) for flag in ("TEST_MODE", "TLDW_TEST_MODE", "TESTING"))
 
 
 def _build_principal_from_user(
@@ -329,7 +328,8 @@ async def get_auth_principal(request: Request) -> AuthPrincipal:
     # Fast-path: reuse existing AuthContext if present
     existing = getattr(request.state, "auth", None)
     if isinstance(existing, AuthContext):
-        User_DB_Handling.activate_authenticated_content_scope(existing.principal)
+        User_DB_Handling.activate_authenticated_content_scope(existing.principal, request=request)
+        await User_DB_Handling.record_pending_api_key_usage(request)
         return existing.principal
     # Prefer Bearer JWT, fall back to X-API-KEY
     has_authorization_header = request.headers.get("Authorization") is not None
@@ -376,7 +376,7 @@ async def get_auth_principal(request: Request) -> AuthPrincipal:
                 request.state.user_id = identity.user_id
                 request.state.auth = _build_context(principal, request)
                 request.state._auth_user = user
-                User_DB_Handling.activate_authenticated_content_scope(principal)
+                User_DB_Handling.activate_authenticated_content_scope(principal, request=request)
                 return principal
         # Align with existing 401 semantics when no credentials are provided
         raise HTTPException(
@@ -572,7 +572,7 @@ async def get_auth_principal(request: Request) -> AuthPrincipal:
                             "auth_principal_resolver: unable to attach single-user state context: {}",
                             state_exc,
                         )
-                    User_DB_Handling.activate_authenticated_content_scope(principal)
+                    User_DB_Handling.activate_authenticated_content_scope(principal, request=request)
                     return principal
         except _SINGLE_USER_COMPAT_EXCEPTIONS as single_exc:
             logger.debug(

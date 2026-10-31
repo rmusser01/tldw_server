@@ -83,12 +83,9 @@ Task 5 code-quality follow-up strict TDD: added failing utility tests for APSche
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
 Task 1 review clarification: failure-like status tokens (fail, error, missed) take precedence over result-like tokens when both appear in a single backend status string. This keeps states such as output_error in Needs attention rather than Found results. Helper tests now cover output ID aliases, token-boundary matching, and unsafe ID rejection.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

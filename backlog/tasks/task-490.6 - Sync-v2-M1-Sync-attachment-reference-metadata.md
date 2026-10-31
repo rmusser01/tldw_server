@@ -42,11 +42,8 @@ Docs/superpowers/plans/2026-05-23-chatbook-sync-v2-m1-implementation-plan.md#tas
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

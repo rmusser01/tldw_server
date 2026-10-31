@@ -35,13 +35,13 @@ Implement the backend validation slice from TASK-347 Stage 2. Persona Visual spr
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented optional state_catalog validation in Persona Visual sprite frame manifests with declared custom states, reserved built-in protection, safe identifier/kind/label/tag/description bounds, trigger count cap, tool_name trigger support, and fallback depth/cycle validation.
 
 Verification: pytest tldw_Server_API/tests/Persona/test_persona_visuals_core.py -q; pytest focused Persona visual import/manifest/service/starter suite -q; git diff --check; bandit -r tldw_Server_API/app/core/Persona/visuals.py -f json.
 
 Draft PR: https://github.com/rmusser01/tldw_server/pull/1713
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

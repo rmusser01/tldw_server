@@ -30,7 +30,7 @@ Fix Qodo review feedback on PR #2640: use project-specific adapter exception for
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented review fixes:
 - multi-voice concat failure now raises AdapterError("concat_failed") instead of RuntimeError.
 - generated artifact placeholder/empty checks treat non-Latin content as real content.
@@ -42,7 +42,7 @@ Verification:
 - python -m pytest tldw_Server_API/tests/Workflows/adapters/test_audio_adapters.py tldw_Server_API/tests/Watchlists/test_audio_briefing_workflow.py -q -> 112 passed.
 - python -m bandit -r touched files -f json -o /tmp/bandit_audio_workspace_pr_qodo.json -> 0 findings.
 - git diff --check -> clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

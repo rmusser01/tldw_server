@@ -20,14 +20,16 @@ from typing import Any, Optional
 import numpy as np
 from loguru import logger
 
-#
-# Local Imports
-from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
 from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.Logging.log_context import new_request_id
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.Metrics.metrics_manager import MetricDefinition, MetricType
 
+#
+# Local Imports
+from tldw_Server_API.app.core.TTS.speech_schemas import OpenAISpeechRequest
+
+from . import adapter_registry
 from .adapter_registry import (
     TTSAdapterFactory,
     TTSAdapterRegistry,
@@ -3737,7 +3739,14 @@ class TTSServiceV2:
                     pass
 
             try:
-                adapter = await factory.registry.get_adapter(provider)
+                adapter = await asyncio.wait_for(
+                    factory.registry.get_adapter(provider),
+                    timeout=adapter_registry._CAPABILITY_LISTING_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                # Still initializing (the registry shields the load): fail over to a provider that is ready now.
+                logger.debug("Skipping provider {} - its adapter is still initializing", provider.value)
+                continue
             except TTSProviderNotConfiguredError:
                 logger.debug(f"Skipping provider {provider.value} - no adapter configured")
                 continue

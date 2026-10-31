@@ -36,7 +36,7 @@ Create a bounded accepted ADR for the outbound egress/SSRF portion of INV-029. S
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented ADR-026 for the bounded outbound egress/SSRF portion of INV-029. Updated the ADR index, Security module README, INV-029 inventory row, provider/integration owner-review handoff, and the Security confirmation audit to point to ADR-026 while preserving ADR-019 request-edge ownership and the separate secrets/serialization caveat.
 
 Verification recorded on 2026-06-07:
@@ -45,7 +45,7 @@ Verification recorded on 2026-06-07:
 - Portability artifact scan: no developer-machine absolute paths or temporary Bandit report artifact names found in touched docs/task files.
 
 Bandit: not run because this branch only touches Markdown ADR, inventory, audit, Security README, and Backlog task records; no Python files were changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

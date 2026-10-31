@@ -4,6 +4,8 @@
 # Imports
 import asyncio
 import contextlib
+import copy
+from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -18,17 +20,75 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import QuotaExceededError, Stora
 from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import (
     FILE_CATEGORY_VOICE_CLONE,
+    SOURCE_FEATURE_VN_ASSETS,
     AuthnzGeneratedFilesRepo,
+    _TransactionBoundPool,
+    is_vn_item_source_ref,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import (
+    DEFAULT_HARD_LIMIT_PCT,
+    DEFAULT_SOFT_LIMIT_PCT,
     AuthnzStorageQuotasRepo,
 )
 
 #
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
+from tldw_Server_API.app.core.config import usage_quotas_enabled
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import (
+    NativeQuotaConflictError,
+    NativeQuotaOwner,
+    NativeQuotaReservation,
+    NativeQuotaReservationStore,
+)
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
+from tldw_Server_API.app.core.Storage.file_integrity import generated_file_bytes_match
+from tldw_Server_API.app.core.Usage import quota_checks, quota_resolver
+from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
+
+STORAGE_QUOTA_KEY = "limits.storage_quota_mb"
+
+
+def quota_view(used_mb: float, quota_mb: Optional[int]) -> dict[str, Any]:
+    """Quota-derived fields for a usage figure; a None quota means unlimited (spec 2 §5)."""
+    if quota_mb is None:
+        return {"quota_mb": None, "available_mb": None, "usage_percentage": None}
+    return {
+        "quota_mb": quota_mb,
+        "available_mb": round(max(0.0, quota_mb - used_mb), 2),
+        # A zero quota is fully used by definition.
+        "usage_percentage": round(used_mb / quota_mb * 100, 1) if quota_mb > 0 else 100.0,
+    }
+
+
+async def resolved_storage_quota_mb(
+    user_id: Any, *, db_pool: Optional[DatabasePool] = None,
+) -> Optional[int]:
+    """The user's enforced limits.storage_quota_mb (user > team > org); None is unlimited."""
+    uid = quota_checks.as_quota_user_id(user_id)
+    if uid is None:
+        return None
+    value = (
+        await quota_resolver.user_quota(uid, STORAGE_QUOTA_KEY) if db_pool is None
+        else await quota_resolver.user_quota(uid, STORAGE_QUOTA_KEY, db_pool=db_pool)
+    )
+    return None if value is None else int(value)
+
+
+async def with_resolved_storage_quota(user: dict[str, Any]) -> dict[str, Any]:
+    """A copy of a users row whose storage_quota_mb is the enforced value, not the legacy column."""
+    row = dict(user)
+    row["storage_quota_mb"] = await resolved_storage_quota_mb(row.get("id"))
+    uid = quota_checks.as_quota_user_id(row.get('id'))
+    if uid is not None:
+        native = await (await get_storage_service()).native_usage(uid)
+        legacy = float(row.get('legacy_storage_used_mb', row.get('storage_used_mb', 0.0)) or 0.0)
+        row['legacy_storage_used_mb'] = legacy
+        row['native_storage_used_mb'] = native['bytes'] / 1048576
+        row['storage_used_mb'] = legacy + row['native_storage_used_mb']
+    return row
+
 
 #######################################################################################################################
 #
@@ -45,6 +105,7 @@ class StorageQuotaService:
         """Initialize storage quota service"""
         self.settings = settings or get_settings()
         self.db_pool = db_pool
+        self._quota_db_pool: Optional[DatabasePool] = None
 
         # TTL cache for quota checks (5 minutes)
         self.quota_cache = TTLCache(maxsize=1000, ttl=300)
@@ -64,6 +125,111 @@ class StorageQuotaService:
 
         self._initialized = True
         logger.info("StorageQuotaService initialized")
+
+    @contextlib.asynccontextmanager
+    async def _accounting_transaction(self) -> AsyncIterator["StorageQuotaService"]:
+        """Keep required ledger reads and generated-file counter changes on one commit."""
+        if isinstance(self.db_pool, _TransactionBoundPool):
+            yield self
+            return
+        unlinks: list[dict[str, Any]] = []
+        try:
+            async with self.db_pool.transaction() as conn:
+                bound = copy.copy(self)
+                bound.db_pool = _TransactionBoundPool(conn, postgres=self._is_postgres_backend())
+                bound._quota_db_pool = bound.db_pool
+                bound.quota_cache = TTLCache(maxsize=1000, ttl=300)
+                bound.storage_cache = TTLCache(maxsize=1000, ttl=600)
+                # Physical voice cleanup must follow the owning commit, never a rolled-back delete.
+                bound._unlink_voice_clone_file = unlinks.append
+                yield bound
+        finally:
+            self.quota_cache.clear()
+            self.storage_cache.clear()
+        for record in unlinks:
+            self._unlink_voice_clone_file(record)
+
+    async def native_usage(self, user_id: int) -> dict[str, int]:
+        """Read the native ledger fresh even when legacy usage is cached."""
+        if not self._initialized:
+            await self.initialize()
+        return await NativeQuotaReservationStore(self.db_pool).usage(user_id=user_id)
+
+    async def reserve_native_bytes(
+        self, owner: NativeQuotaOwner, candidate_key: str, bytes_count: int,
+    ) -> NativeQuotaReservation:
+        """Reserve the original allocation under existing quota-owner locks."""
+        if isinstance(self.db_pool, _TransactionBoundPool):
+            raise NativeQuotaConflictError("native_quota_requires_committed_authority")
+        from tldw_Server_API.app.core.Usage.quota_resolver import uncached_user_quota
+        if type(bytes_count) is not int or not 0 <= bytes_count <= 2**63 - 1:
+            raise ValueError('native_quota_size_required')
+        NativeQuotaReservationStore.require_key(candidate_key)
+        if not self._initialized:
+            await self.initialize()
+        async with NativeQuotaReservationStore(self.db_pool).transaction(owner) as store:
+            user = await store.user(owner)
+            existing = await store.resolve(owner, candidate_key)
+            if existing is not None:
+                if existing.size_bytes != bytes_count:
+                    raise NativeQuotaConflictError('native_quota_identity_conflict')
+                return existing
+            if not user['is_active']:
+                raise NativeQuotaConflictError('native_quota_user_unavailable')
+            await store.validate_scope(owner)
+            native = await store.usage(user_id=owner.user_id)
+            quota = await uncached_user_quota(owner.user_id, STORAGE_QUOTA_KEY, db_pool=store.db_pool)
+            projected = float(user['storage_used_mb'] or 0) + (native['bytes'] + bytes_count) / 1048576
+            if quota is not None and projected > quota:
+                raise QuotaExceededError(projected, quota)
+            bound = copy.copy(self)
+            bound.db_pool = store.db_pool
+            pools = await bound.get_storage_quotas_repo()
+            for scope in ({'org_id': owner.org_id}, {'team_id': owner.team_id}):
+                if next(iter(scope.values())) is not None:
+                    allowed, _reason = await pools.can_allocate(bytes_count, **scope)
+                    if not allowed and usage_quotas_enabled():
+                        status = await pools.check_quota_status(**scope)
+                        raise QuotaExceededError(status['used_mb'] + bytes_count / 1048576, status['quota_mb'])
+            return await store.insert(owner, candidate_key, bytes_count)
+
+    async def resolve_native_reservation(
+        self, owner: NativeQuotaOwner, candidate_key: str,
+    ) -> NativeQuotaReservation | None:
+        """Resolve exact original authority, including a known released outcome."""
+        if isinstance(self.db_pool, _TransactionBoundPool):
+            raise NativeQuotaConflictError("native_quota_requires_committed_authority")
+        if not self._initialized:
+            await self.initialize()
+        store = NativeQuotaReservationStore(self.db_pool)
+        await store.user(owner)
+        return await store.resolve(owner, candidate_key)
+
+    async def release_native_bytes(
+        self, owner: NativeQuotaOwner, candidate_key: str,
+    ) -> NativeQuotaReservation | None:
+        """Release once only for the original descriptor after verified native removal."""
+        if isinstance(self.db_pool, _TransactionBoundPool):
+            raise NativeQuotaConflictError("native_quota_requires_committed_authority")
+        NativeQuotaReservationStore.require_key(candidate_key)
+        if not self._initialized:
+            await self.initialize()
+        async with NativeQuotaReservationStore(self.db_pool).transaction(owner) as store:
+            await store.user(owner)
+            existing = await store.resolve(owner, candidate_key)
+            if existing is None:
+                return None
+            return await store.release(owner, candidate_key)
+
+    async def _with_native_usage(self, user_id: int, legacy: dict[str, Any]) -> dict[str, Any]:
+        """Combine cached/scanned legacy bytes with current retained reservations once."""
+        native = await self.native_usage(user_id)
+        total_bytes = legacy['total_bytes'] + native['bytes']
+        total_mb = total_bytes / 1048576
+        return {**legacy, 'legacy_bytes': legacy['total_bytes'], 'legacy_mb': legacy['total_bytes'] / 1048576,
+                'native_bytes': native['bytes'], 'native_mb': native['bytes'] / 1048576,
+                'total_bytes': total_bytes, 'total_mb': round(total_mb, 2),
+                **quota_view(total_mb, await resolved_storage_quota_mb(user_id, db_pool=self._quota_db_pool))}
 
     def invalidate_user_cache(self, user_id: int) -> None:
         """Invalidate in-memory quota/storage cache entries for a user."""
@@ -101,13 +267,15 @@ class StorageQuotaService:
         # Check cache first
         cache_key = f"storage_calc:{user_id}"
         if cache_key in self.storage_cache and not update_database:
-            return self.storage_cache[cache_key]
+            cached = self.storage_cache[cache_key]
+            return await self._with_native_usage(user_id, cached)
 
         # Calculate storage in thread pool
         user_dir = Path(self.settings.USER_DATA_BASE_PATH) / str(user_id)
         size_bytes = await asyncio.to_thread(
             self._calculate_directory_size,
-            str(user_dir)
+            str(user_dir),
+            True,
         )
 
         # Also calculate ChromaDB if configured
@@ -122,11 +290,10 @@ class StorageQuotaService:
         total_bytes = size_bytes + chroma_bytes
         total_mb = total_bytes / (1024 * 1024)
 
-        # Get quota from database
+        # Existence check only; the quota itself comes from the resolver, not this column.
         user_info = await self._get_user_storage_info(user_id)
         if not user_info:
             raise UserNotFoundError(f"User {user_id}")
-        quota_mb = user_info['storage_quota_mb']
 
         # Update database if requested
         if update_database:
@@ -153,8 +320,10 @@ class StorageQuotaService:
 
             # Invalidate quota cache
             self.quota_cache.pop(f"quota:{user_id}", None)
+            quota_mb = await resolved_storage_quota_mb(user_id)
             logger.info(
-                f"Recalculated storage for user {user_id}: {total_mb:.2f}MB / {quota_mb}MB"
+                f"Recalculated storage for user {user_id}: {total_mb:.2f}MB / "
+                f"{'unlimited' if quota_mb is None else f'{quota_mb}MB'}"
             )
 
         result = {
@@ -165,15 +334,12 @@ class StorageQuotaService:
             "chromadb_mb": round(chroma_bytes / (1024 * 1024), 2),
             "total_bytes": total_bytes,
             "total_mb": round(total_mb, 2),
-            "quota_mb": quota_mb,
-            "available_mb": round(max(0, quota_mb - total_mb), 2),
-            "usage_percentage": round((total_mb / quota_mb * 100) if quota_mb > 0 else 0, 1),
             "calculated_at": datetime.utcnow().isoformat()
         }
 
-        # Update cache
+        # Update cache (usage figures only; quota is resolved fresh on every read)
         self.storage_cache[cache_key] = result
-        return result
+        return await self._with_native_usage(user_id, result)
 
     async def check_quota(
         self,
@@ -198,27 +364,26 @@ class StorageQuotaService:
         if not self._initialized:
             await self.initialize()
 
-        # Check cache first
+        # Check cache first (usage only; the quota is resolved fresh on every call)
         cache_key = f"quota:{user_id}"
-        if cache_key in self.quota_cache:
-            current_mb, quota_mb = self.quota_cache[cache_key]
-        else:
-            # Fetch from database
+        current_mb = self.quota_cache.get(cache_key)
+        if current_mb is None:
             user_info = await self._get_user_storage_info(user_id)
             if not user_info:
                 raise UserNotFoundError(f"User {user_id}")
-
-            current_mb = float(user_info['storage_used_mb'])
-            quota_mb = user_info['storage_quota_mb']
-
-            # Update cache
-            self.quota_cache[cache_key] = (current_mb, quota_mb)
+            current_mb = float(user_info["storage_used_mb"])
+            self.quota_cache[cache_key] = current_mb
+        legacy_mb = current_mb
+        native_mb = (await self.native_usage(user_id))['bytes'] / 1048576
+        current_mb += native_mb
+        quota_mb = await resolved_storage_quota_mb(user_id, db_pool=self._quota_db_pool)
 
         # Emit gauges for current values
         try:
             reg = get_metrics_registry()
             reg.set_gauge("user_storage_used_mb", float(current_mb), labels={"user_id": str(user_id)})
-            reg.set_gauge("user_storage_quota_mb", float(quota_mb), labels={"user_id": str(user_id)})
+            if quota_mb is not None:
+                reg.set_gauge("user_storage_quota_mb", float(quota_mb), labels={"user_id": str(user_id)})
         except Exception as e:
             logger.debug(f"storage_quota: failed to record gauges for user {user_id}: {e}")
             try:
@@ -232,17 +397,18 @@ class StorageQuotaService:
         # Calculate new usage
         new_mb = new_bytes / (1024 * 1024)
         projected_mb = current_mb + new_mb
-        has_quota = projected_mb <= quota_mb
+        # The resolver already returns None when usage quotas are off (spec 2).
+        has_quota = quota_mb is None or projected_mb <= quota_mb
 
         quota_info = {
             "user_id": user_id,
             "current_usage_mb": round(current_mb, 2),
-            "quota_mb": quota_mb,
+            "legacy_usage_mb": legacy_mb,
+            "native_usage_mb": native_mb,
             "new_size_mb": round(new_mb, 2),
             "projected_usage_mb": round(projected_mb, 2),
-            "available_mb": round(max(0, quota_mb - current_mb), 2),
-            "usage_percentage": round((current_mb / quota_mb * 100) if quota_mb > 0 else 0, 1),
-            "has_quota": has_quota
+            "has_quota": has_quota,
+            **quota_view(current_mb, quota_mb),
         }
 
         if not has_quota and raise_on_exceed:
@@ -275,6 +441,8 @@ class StorageQuotaService:
             mb_delta = -mb_delta
 
         try:
+            # A required ledger read must fail before a legacy counter can commit.
+            native_usage = (await self.native_usage(user_id))['bytes'] / 1048576
             async with self.db_pool.transaction() as conn:
                 gateway = VersionedUserWriteGateway(
                     "postgres" if self._is_postgres_backend() else "sqlite"
@@ -293,11 +461,10 @@ class StorageQuotaService:
                         parameters=(mb_delta, user_id),
                     )
                     result = await conn.fetchrow(
-                        "SELECT storage_used_mb, storage_quota_mb FROM users WHERE id = $1",
+                        "SELECT storage_used_mb FROM users WHERE id = $1",
                         user_id,
                     )
                     new_usage = float(result['storage_used_mb'])
-                    quota = result['storage_quota_mb']
 
                 else:
                     await gateway.execute_update(
@@ -314,7 +481,7 @@ class StorageQuotaService:
                     )
 
                     cursor = await conn.execute(
-                        "SELECT storage_used_mb, storage_quota_mb FROM users WHERE id = ?",
+                        "SELECT storage_used_mb FROM users WHERE id = ?",
                         (user_id,)
                     )
                     result = await cursor.fetchone()
@@ -323,49 +490,58 @@ class StorageQuotaService:
                         raise UserNotFoundError(f"User {user_id}")
 
                     new_usage = float(result[0])
-                    quota = result[1]
 
+            # Normal writes resolve after commit; a VN view reads on its owning
+            # connection while the outer accounting transaction is still open.
+            quota = await resolved_storage_quota_mb(user_id, db_pool=self._quota_db_pool)
 
-                # Check if over quota
-                if new_usage > quota:
-                    logger.warning(
-                        f"User {user_id} exceeded quota: {new_usage:.2f}MB / {quota}MB"
-                    )
+            # Invalidate cache
+            cache_key = f"quota:{user_id}"
+            self.quota_cache.pop(cache_key, None)
 
-                # Invalidate cache
-                cache_key = f"quota:{user_id}"
-                self.quota_cache.pop(cache_key, None)
+            legacy_usage = new_usage
+            new_usage += native_usage
+            # Check if over quota
+            if quota is not None and new_usage > quota:
+                logger.warning(
+                    f"User {user_id} exceeded quota: {new_usage:.2f}MB / {quota}MB"
+                )
 
-                # Log significant changes
-                if abs(mb_delta) > 10:  # Log changes over 10MB
-                    logger.info(
-                        f"Updated storage for user {user_id}: "
-                        f"{operation} {abs(mb_delta):.2f}MB "
-                        f"(new total: {new_usage:.2f}MB / {quota}MB)"
-                    )
+            # Log significant changes
+            if abs(mb_delta) > 10:  # Log changes over 10MB
+                logger.info(
+                    f"Updated storage for user {user_id}: "
+                    f"{operation} {abs(mb_delta):.2f}MB "
+                    f"(new total: {new_usage:.2f}MB / "
+                    f"{'unlimited' if quota is None else f'{quota}MB'})"
+                )
 
-                # Update gauges
-                try:
-                    reg = get_metrics_registry()
-                    reg.set_gauge("user_storage_used_mb", float(new_usage), labels={"user_id": str(user_id)})
+            # Update gauges
+            try:
+                reg = get_metrics_registry()
+                reg.set_gauge("user_storage_used_mb", float(new_usage), labels={"user_id": str(user_id)})
+                if quota is not None:
                     reg.set_gauge("user_storage_quota_mb", float(quota), labels={"user_id": str(user_id)})
-                except Exception as e:
-                    logger.debug(f"storage_quota: failed to record updated gauges for user {user_id}: {e}")
-                    try:
-                        get_metrics_registry().increment(
-                            "app_warning_events_total",
-                            labels={"component": "storage_quota", "event": "metrics_record_failed"},
-                        )
-                    except Exception:
-                        logger.debug("metrics increment failed for storage_quota metrics_record_failed")
+            except Exception as e:
+                logger.debug(f"storage_quota: failed to record updated gauges for user {user_id}: {e}")
+                try:
+                    get_metrics_registry().increment(
+                        "app_warning_events_total",
+                        labels={"component": "storage_quota", "event": "metrics_record_failed"},
+                    )
+                except Exception:
+                    logger.debug("metrics increment failed for storage_quota metrics_record_failed")
 
-                return {
-                    "user_id": user_id,
-                    "storage_used_mb": round(new_usage, 2),
-                    "storage_quota_mb": quota,
-                    "available_mb": round(max(0, quota - new_usage), 2),
-                    "usage_percentage": round((new_usage / quota * 100) if quota > 0 else 0, 1)
-                }
+            view = quota_view(new_usage, quota)
+            return {
+                "user_id": user_id,
+                "storage_used_mb": round(new_usage, 2),
+                "legacy_storage_used_mb": legacy_usage,
+                "native_storage_used_mb": native_usage,
+                "storage_quota_mb": quota,
+                "available_mb": view["available_mb"],
+                "usage_percentage": view["usage_percentage"],
+            }
 
         except Exception as e:
             logger.error(f"Failed to update storage usage: {e}")
@@ -373,7 +549,7 @@ class StorageQuotaService:
 
 
     # ---- Filesystem and reporting helpers ----
-    def _calculate_directory_size(self, path: str) -> int:
+    def _calculate_directory_size(self, path: str, exclude_native: bool = False) -> int:
         """Calculate directory size (runs in thread pool)."""
         total = 0
         path_obj = Path(path)
@@ -381,6 +557,8 @@ class StorageQuotaService:
             return 0
         try:
             for entry in path_obj.rglob('*'):
+                if exclude_native and entry.relative_to(path_obj).parts[0] == 'chat_assets':
+                    continue
                 if entry.is_file():
                     try:
                         total += entry.stat().st_size
@@ -389,6 +567,32 @@ class StorageQuotaService:
         except (OSError, PermissionError) as e:
             logger.error(f"Error calculating size for {path}: {e}")
         return total
+
+    async def user_quota_status(self, user_id: int) -> dict[str, Any]:
+        """The user's quota as a QuotaStatus-shaped dict; has_quota means "a quota is set" (read-only)."""
+        if not self._initialized:
+            await self.initialize()
+        user_info = await self._get_user_storage_info(user_id)
+        if not user_info:
+            raise UserNotFoundError(f"User {user_id}")
+        legacy_used = float(user_info["storage_used_mb"])
+        native_used = (await self.native_usage(user_id))['bytes'] / 1048576
+        used = legacy_used + native_used
+        quota = await resolved_storage_quota_mb(user_id)
+        view = quota_view(used, quota)
+        return {
+            "quota_mb": quota,
+            "used_mb": round(used, 2),
+            "legacy_used_mb": legacy_used,
+            "native_used_mb": native_used,
+            "remaining_mb": view["available_mb"],
+            "usage_pct": view["usage_percentage"] if view["usage_percentage"] is not None else 0.0,
+            "has_quota": quota is not None,
+            "at_soft_limit": view["usage_percentage"] is not None
+            and view["usage_percentage"] >= DEFAULT_SOFT_LIMIT_PCT,
+            "at_hard_limit": view["usage_percentage"] is not None
+            and view["usage_percentage"] >= DEFAULT_HARD_LIMIT_PCT,
+        }
 
     async def get_storage_breakdown(self, user_id: int) -> dict[str, Any]:
         """Get detailed storage breakdown by file type for a user."""
@@ -402,10 +606,14 @@ class StorageQuotaService:
         user_info = await self._get_user_storage_info(user_id)
         if not user_info:
             raise UserNotFoundError(f"User {user_id}")
+        native = await self.native_usage(user_id)
+        breakdown['native'] = {**native, 'mb': native['bytes'] / 1048576}
         breakdown.update({
             "user_id": user_id,
-            "quota_mb": user_info['storage_quota_mb'],
-            "current_usage_mb": float(user_info['storage_used_mb'])
+            "quota_mb": await resolved_storage_quota_mb(user_id),
+            "current_usage_mb": float(user_info['storage_used_mb']) + native['bytes'] / 1048576,
+            "legacy_usage_mb": float(user_info['storage_used_mb']),
+            "native_usage_mb": native['bytes'] / 1048576
         })
         return breakdown
 
@@ -424,6 +632,8 @@ class StorageQuotaService:
             return breakdown
         try:
             for entry in path_obj.rglob('*'):
+                if entry.relative_to(path_obj).parts[0] == 'chat_assets':
+                    continue
                 if entry.is_file():
                     try:
                         size = entry.stat().st_size
@@ -440,63 +650,51 @@ class StorageQuotaService:
             breakdown[category]["mb"] = round(breakdown[category]["bytes"] / (1024 * 1024), 2)
         return breakdown
 
-    async def set_user_quota(self, user_id: int, quota_mb: int) -> dict[str, Any]:
-        """Set storage quota for a user (min 100MB)."""
+    async def set_user_quota(
+        self, user_id: int, quota_mb: Optional[int], *, updated_by: Optional[int] = None
+    ) -> dict[str, Any]:
+        """Set (or, with None, remove) the user's own limits.storage_quota_mb override (spec 2 §5)."""
         if not self._initialized:
             await self.initialize()
-        if quota_mb < 100:
-            quota_mb = 100
+        if quota_mb is not None and int(quota_mb) < 0:
+            raise ValueError("quota_mb must be >= 0, or None to remove the user's value")
+        user_info = await self._get_user_storage_info(user_id)
+        if not user_info:
+            raise UserNotFoundError(f"User {user_id}")
+        repo = UserProfileOverridesRepo(self.db_pool)
         try:
-            async with self.db_pool.transaction() as conn:
-                gateway = VersionedUserWriteGateway(
-                    "postgres" if self._is_postgres_backend() else "sqlite"
+            await repo.ensure_tables()
+            if quota_mb is None:
+                async with self.db_pool.transaction() as conn:
+                    gateway = VersionedUserWriteGateway(
+                        "postgres" if self._is_postgres_backend() else "sqlite"
+                    )
+                    floor = await gateway.capture_floor(conn, user_id=int(user_id))
+                    await repo.delete_override(user_id=int(user_id), key=STORAGE_QUOTA_KEY, db_conn=conn)
+                    await gateway.final_touch(conn, user_id=int(user_id), version_floor=floor)
+            else:
+                await repo.upsert_override(
+                    user_id=int(user_id), key=STORAGE_QUOTA_KEY, value=int(quota_mb), updated_by=updated_by
                 )
-                if self._is_postgres_backend():
-                    await gateway.execute_update(
-                        conn,
-                        user_id=user_id,
-                        profile_visible_fields=("storage_quota_mb",),
-                        statement=
-                        """
-                        UPDATE users
-                        SET storage_quota_mb = $1
-                        WHERE id = $2
-                        """,
-                        parameters=(quota_mb, user_id),
-                    )
-                    result = await conn.fetchrow(
-                        "SELECT storage_used_mb FROM users WHERE id = $1",
-                        user_id,
-                    )
-                    current_usage = float(result['storage_used_mb'])
-                else:
-                    await gateway.execute_update(
-                        conn,
-                        user_id=user_id,
-                        profile_visible_fields=("storage_quota_mb",),
-                        statement="UPDATE users SET storage_quota_mb = ? WHERE id = ?",
-                        parameters=(quota_mb, user_id),
-                    )
-                    cursor = await conn.execute(
-                        "SELECT storage_used_mb FROM users WHERE id = ?",
-                        (user_id,)
-                    )
-                    row = await cursor.fetchone()
-                    if not row:
-                        raise UserNotFoundError(f"User {user_id}")
-                    current_usage = float(row[0])
-            self.quota_cache.pop(f"quota:{user_id}", None)
-            logger.info(f"Set quota for user {user_id}: {quota_mb}MB")
-            return {
-                "user_id": user_id,
-                "storage_quota_mb": quota_mb,
-                "storage_used_mb": round(current_usage, 2),
-                "available_mb": round(max(0, quota_mb - current_usage), 2),
-                "usage_percentage": round((current_usage / quota_mb * 100) if quota_mb > 0 else 0, 1)
-            }
         except Exception as e:
             logger.error(f"Failed to set user quota: {e}")
             raise StorageError(f"Failed to set quota: {e}") from e
+        quota_resolver.invalidate_user(int(user_id))
+        effective = await resolved_storage_quota_mb(user_id)
+        legacy = float(user_info['storage_used_mb'])
+        native = (await self.native_usage(user_id))['bytes'] / 1048576
+        used = legacy + native
+        logger.info(f"Set storage quota for user {user_id}: {quota_mb}MB (effective {effective})")
+        view = quota_view(used, effective)
+        return {
+            "user_id": user_id,
+            "storage_quota_mb": effective,
+            "storage_used_mb": round(used, 2),
+            "legacy_storage_used_mb": legacy,
+            "native_storage_used_mb": native,
+            "available_mb": view["available_mb"],
+            "usage_percentage": view["usage_percentage"],
+        }
 
     async def get_all_users_storage(self) -> list[dict[str, Any]]:
         """List storage usage for all active users, sorted by usage desc."""
@@ -508,7 +706,7 @@ class StorageQuotaService:
                 # PostgreSQL
                 users = await conn.fetch(
                     """
-                    SELECT id, username, storage_used_mb, storage_quota_mb
+                    SELECT id, username, storage_used_mb
                     FROM users
                     WHERE is_active = TRUE
                     ORDER BY storage_used_mb DESC
@@ -518,7 +716,7 @@ class StorageQuotaService:
                 # SQLite
                 cursor = await conn.execute(
                     """
-                    SELECT id, username, storage_used_mb, storage_quota_mb
+                    SELECT id, username, storage_used_mb
                     FROM users
                     WHERE is_active = 1
                     ORDER BY storage_used_mb DESC
@@ -530,17 +728,20 @@ class StorageQuotaService:
 
         result = []
         for user in users:
-            used = float(user.get('storage_used_mb', 0) or 0)
-            quota = user.get('storage_quota_mb', 0) or 0
+            legacy_used = float(user.get('storage_used_mb', 0) or 0)
+            native_used = (await self.native_usage(user['id']))['bytes'] / 1048576
+            used = legacy_used + native_used
+            quota = await resolved_storage_quota_mb(user.get('id'))
             result.append({
                 "user_id": user.get('id'),
                 "username": user.get('username'),
                 "storage_used_mb": round(used, 2),
+                "legacy_storage_used_mb": legacy_used,
+                "native_storage_used_mb": native_used,
                 "storage_quota_mb": quota,
-                "available_mb": round(max(0, quota - used), 2),
-                "usage_percentage": round((used / quota * 100) if quota > 0 else 0, 1)
+                **{k: v for k, v in quota_view(used, quota).items() if k != "quota_mb"},
             })
-        return result
+        return sorted(result, key=lambda user: user['storage_used_mb'], reverse=True)
 
     async def cleanup_temp_files(self, user_id: Optional[int] = None, older_than_hours: int = 24) -> dict[str, Any]:
         """Delete temp files older than the threshold for one or all users."""
@@ -592,7 +793,7 @@ class StorageQuotaService:
     async def _get_user_storage_info(self, user_id: int) -> Optional[dict[str, Any]]:
         """Get user storage info from the database."""
         return await self.db_pool.fetchone(
-            "SELECT storage_used_mb, storage_quota_mb FROM users WHERE id = ?",
+            "SELECT storage_used_mb FROM users WHERE id = ?",
             user_id
         )
 
@@ -733,7 +934,7 @@ class StorageQuotaService:
             org_info["reason"] = reason
 
         # Combined check
-        has_quota = has_user_quota and has_team_quota and has_org_quota
+        has_quota = (has_user_quota and has_team_quota and has_org_quota) or not usage_quotas_enabled()
 
         combined_info = {
             "user_id": user_id,
@@ -755,12 +956,15 @@ class StorageQuotaService:
                 combined_info["blocking_level"] = "org"
 
             if raise_on_exceed:
-                blocking = combined_info["blocking_level"]
-                raise QuotaExceededError(
-                    new_bytes / (1024 * 1024),
-                    user_info.get("quota_mb", 0),
-                    f"Quota exceeded at {blocking} level"
-                )
+                level = combined_info["blocking_level"]
+                if level == "user":
+                    used_mb = user_info.get("projected_usage_mb") or 0
+                    quota_mb = user_info.get("quota_mb") or 0
+                else:
+                    pool = team_info if level == "team" else org_info
+                    used_mb = (pool.get("used_mb") or 0) + new_bytes / (1024 * 1024)
+                    quota_mb = pool.get("quota_mb") or 0
+                raise QuotaExceededError(used_mb, quota_mb)
 
         return has_quota, combined_info
 
@@ -768,6 +972,10 @@ class StorageQuotaService:
         """Update storage usage for an organization."""
         if not self._initialized:
             await self.initialize()
+
+        if not isinstance(self.db_pool, _TransactionBoundPool):
+            async with self._accounting_transaction() as bound:
+                return await bound.update_org_usage(org_id, bytes_delta)
 
         mb_delta = bytes_delta / (1024 * 1024)
         repo = await self.get_storage_quotas_repo()
@@ -782,6 +990,10 @@ class StorageQuotaService:
         if not self._initialized:
             await self.initialize()
 
+        if not isinstance(self.db_pool, _TransactionBoundPool):
+            async with self._accounting_transaction() as bound:
+                return await bound.update_team_usage(team_id, bytes_delta)
+
         mb_delta = bytes_delta / (1024 * 1024)
         repo = await self.get_storage_quotas_repo()
         new_used = await repo.increment_team_used_mb(team_id, mb_delta)
@@ -793,6 +1005,64 @@ class StorageQuotaService:
     # =========================================================================
     # Generated Files Integration
     # =========================================================================
+
+    async def get_vn_generated_file(
+        self, *, user_id: int, source_ref: str,
+    ) -> dict[str, Any] | None:
+        """Resolve an owned VN replay, refusing live rows with missing image bytes."""
+        if not is_vn_item_source_ref(SOURCE_FEATURE_VN_ASSETS, source_ref):
+            return None
+        repo = await self.get_generated_files_repo()
+        record = await repo.get_file_by_source_ref(
+            user_id=user_id, source_feature=SOURCE_FEATURE_VN_ASSETS, source_ref=source_ref,
+        )
+        if record is None:
+            return None
+
+        def bytes_present() -> bool:
+            """Validate the contained registration bytes on the filesystem thread."""
+            root = DatabasePaths.get_user_outputs_dir(user_id).resolve()
+            path = (root / str(record.get("storage_path") or "")).resolve()
+            return (
+                path.is_relative_to(root) and generated_file_bytes_match(
+                    path, expected_size=int(record["file_size_bytes"]), checksum=record.get("checksum"),
+                )
+            )
+
+        try:
+            valid = await asyncio.to_thread(bytes_present)
+        except OSError:
+            valid = False
+        if not valid:
+            raise StorageError(f"Registered VN file {record['id']} has missing or invalid bytes")
+        return record
+
+    async def _register_vn_generated_file(
+        self, file_values: dict[str, Any], *, check_quota: bool,
+    ) -> dict[str, Any]:
+        """Commit a VN file and all applicable usage deltas together."""
+        repo = await self.get_generated_files_repo()
+        user_id = file_values["user_id"]
+        try:
+            async with repo.vn_item_transaction(user_id=user_id, source_ref=file_values["source_ref"]) as bound_repo:
+                # A separate service view keeps concurrent requests on this instance
+                # from sharing the transaction connection or uncommitted quota cache.
+                bound_service = copy.copy(self)
+                bound_service.db_pool = bound_repo.db_pool
+                bound_service._quota_db_pool = bound_repo.db_pool
+                bound_service.quota_cache = TTLCache(maxsize=1000, ttl=300)
+                bound_service.storage_cache = TTLCache(maxsize=1000, ttl=600)
+                existing = await bound_service.get_vn_generated_file(
+                    user_id=user_id, source_ref=file_values["source_ref"],
+                )
+                if existing is not None:
+                    return existing
+                await bound_repo.lock_quota_scopes(
+                    user_id=user_id, org_id=file_values["org_id"], team_id=file_values["team_id"],
+                )
+                return await bound_service._register_and_account_generated_file(file_values, check_quota=check_quota)
+        finally:
+            self.invalidate_user_cache(user_id)
 
     async def register_generated_file(
         self,
@@ -856,35 +1126,57 @@ class StorageQuotaService:
                 f"maximum allowed size of {MAX_FILE_SIZE_BYTES / (1024*1024*1024):.0f} GB"
             )
 
-        # Check quota if requested
+        file_values = {
+            "user_id": user_id,
+            "filename": filename,
+            "storage_path": storage_path,
+            "file_category": file_category,
+            "source_feature": source_feature,
+            "file_size_bytes": file_size_bytes,
+            "org_id": org_id,
+            "team_id": team_id,
+            "original_filename": original_filename,
+            "mime_type": mime_type,
+            "checksum": checksum,
+            "source_ref": source_ref,
+            "folder_tag": folder_tag,
+            "tags": tags,
+            "is_transient": is_transient,
+            "expires_at": expires_at,
+            "retention_policy": retention_policy,
+        }
+
+        if is_vn_item_source_ref(source_feature, source_ref):
+            return await self._register_vn_generated_file(file_values, check_quota=check_quota)
+        async with self._accounting_transaction() as bound:
+            repo = await bound.get_generated_files_repo()
+            await repo.lock_quota_scopes(user_id=user_id, org_id=org_id, team_id=team_id)
+            return await bound._register_and_account_generated_file(file_values, check_quota=check_quota)
+
+    async def _register_and_account_generated_file(
+        self, file_values: dict[str, Any], *, check_quota: bool,
+    ) -> dict[str, Any]:
+        """Apply the existing registration flow using this service's pool."""
+        user_id = file_values["user_id"]
+        file_size_bytes = file_values["file_size_bytes"]
+        org_id = file_values["org_id"]
+        team_id = file_values["team_id"]
         if check_quota:
-            has_quota, quota_info = await self.check_combined_quota(
+            await self.check_combined_quota(
                 user_id, file_size_bytes,
                 org_id=org_id, team_id=team_id,
-                raise_on_exceed=True
+                raise_on_exceed=True,
             )
-
-        # Create file record
         files_repo = await self.get_generated_files_repo()
-        file_record = await files_repo.create_file(
-            user_id=user_id,
-            filename=filename,
-            storage_path=storage_path,
-            file_category=file_category,
-            source_feature=source_feature,
-            file_size_bytes=file_size_bytes,
-            org_id=org_id,
-            team_id=team_id,
-            original_filename=original_filename,
-            mime_type=mime_type,
-            checksum=checksum,
-            source_ref=source_ref,
-            folder_tag=folder_tag,
-            tags=tags,
-            is_transient=is_transient,
-            expires_at=expires_at,
-            retention_policy=retention_policy,
-        )
+        file_record = await files_repo.create_file(**file_values)
+
+        if is_vn_item_source_ref(file_values["source_feature"], file_values["source_ref"]) and (
+            not file_record.get("id") or file_record.get("user_id") != user_id
+            or not file_record.get("storage_path")
+        ):
+            raise StorageError("VN registration did not return a complete file record")
+        if file_record.pop("_idempotent_replay", False):
+            return file_record
 
         # Update usage counters
         await self.update_usage(user_id, file_size_bytes, operation="add")
@@ -896,7 +1188,7 @@ class StorageQuotaService:
             await self.update_team_usage(team_id, file_size_bytes)
 
         logger.info(
-            f"Registered generated file: {file_category}/{filename} "
+            f"Registered generated file: {file_values['file_category']}/{file_values['filename']} "
             f"({file_size_bytes} bytes) for user {user_id}"
         )
 
@@ -946,12 +1238,46 @@ class StorageQuotaService:
                 team_deltas[int(team_id)] = team_deltas.get(int(team_id), 0) + size
 
         org_multiplier = -1 if operation == "remove" else 1
-        for user_id, bytes_delta in user_deltas.items():
+        for user_id, bytes_delta in sorted(user_deltas.items()):
             await self.update_usage(user_id, bytes_delta, operation=operation)
-        for org_id, bytes_delta in org_deltas.items():
+        for org_id, bytes_delta in sorted(org_deltas.items()):
             await self.update_org_usage(org_id, org_multiplier * bytes_delta)
-        for team_id, bytes_delta in team_deltas.items():
+        for team_id, bytes_delta in sorted(team_deltas.items()):
             await self.update_team_usage(team_id, org_multiplier * bytes_delta)
+
+    async def _locked_generated_file_records(
+        self, files_repo: AuthnzGeneratedFilesRepo, file_records: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Reread the same authorized IDs after locking all quota owners in stable order."""
+        selected = {int(record["id"]): record for record in file_records if record.get("id")}
+        current = {}
+        for file_id, selected_record in sorted(selected.items()):
+            record = await files_repo.get_file_by_id(file_id)
+            if record is None:
+                continue
+            if record["user_id"] != selected_record["user_id"]:
+                raise StorageError("generated_file_owner_changed")
+            current[file_id] = record
+        if not current:
+            return []
+        users = sorted({int(record["user_id"]) for record in current.values()})
+        orgs = sorted({int(record["org_id"]) for record in current.values() if record.get("org_id")})
+        teams = sorted({int(record["team_id"]) for record in current.values() if record.get("team_id")})
+        for user_id in users:
+            await files_repo.lock_quota_scopes(user_id=user_id, org_id=None, team_id=None)
+        for org_id in orgs:
+            await files_repo.lock_quota_scopes(user_id=users[0], org_id=org_id, team_id=None)
+        for team_id in teams:
+            await files_repo.lock_quota_scopes(user_id=users[0], org_id=None, team_id=team_id)
+        locked = []
+        for file_id, previous in current.items():
+            record = await files_repo.get_file_by_id(file_id)
+            if record is None:
+                continue
+            if any(record.get(field) != previous.get(field) for field in ("user_id", "org_id", "team_id")):
+                raise StorageError("generated_file_quota_scope_changed")
+            locked.append(record)
+        return locked
 
     async def unregister_generated_file(
         self,
@@ -978,6 +1304,36 @@ class StorageQuotaService:
         if not file_record:
             return False
 
+        user_id = file_record.get("user_id")
+        source_ref = file_record.get("source_ref")
+        if is_vn_item_source_ref(file_record.get("source_feature"), source_ref):
+            try:
+                async with files_repo.vn_item_transaction(user_id=user_id, source_ref=source_ref) as bound_repo:
+                    current = await self._locked_generated_file_records(bound_repo, [file_record])
+                    if not current:
+                        return False
+                    bound_service = copy.copy(self)
+                    bound_service.db_pool = bound_repo.db_pool
+                    bound_service._quota_db_pool = bound_repo.db_pool
+                    bound_service.quota_cache = TTLCache(maxsize=1000, ttl=300)
+                    bound_service.storage_cache = TTLCache(maxsize=1000, ttl=600)
+                    return await bound_service._unregister_generated_file_record(
+                        bound_repo, current[0], hard_delete=hard_delete,
+                    )
+            finally:
+                self.invalidate_user_cache(user_id)
+        async with self._accounting_transaction() as bound:
+            repo = await bound.get_generated_files_repo()
+            current = await bound._locked_generated_file_records(repo, [file_record])
+            if not current:
+                return False
+            return await bound._unregister_generated_file_record(repo, current[0], hard_delete=hard_delete)
+
+    async def _unregister_generated_file_record(
+        self, files_repo: AuthnzGeneratedFilesRepo, file_record: dict[str, Any], *, hard_delete: bool,
+    ) -> bool:
+        """Remove one loaded registration and its usage using this service's pool."""
+        file_id = file_record["id"]
         was_deleted = bool(file_record.get("is_deleted"))
         user_id = file_record.get("user_id")
         org_id = file_record.get("org_id")
@@ -1015,22 +1371,24 @@ class StorageQuotaService:
 
         if not file_records:
             return 0
+        if not isinstance(self.db_pool, _TransactionBoundPool):
+            async with self._accounting_transaction() as bound:
+                return await bound.unregister_generated_files(file_records, hard_delete=hard_delete)
 
         files_repo = await self.get_generated_files_repo()
+        current = await self._locked_generated_file_records(files_repo, file_records)
 
         if hard_delete:
             deleted_records: list[dict[str, Any]] = []
-            for file_record in file_records:
+            for file_record in current:
                 file_id = file_record.get("id")
                 if file_id and await files_repo.hard_delete_file(file_id):
                     deleted_records.append(file_record)
                     self._unlink_voice_clone_file(file_record)
         else:
-            active_records = [record for record in file_records if not bool(record.get("is_deleted"))]
-            deleted_count = await files_repo.bulk_soft_delete(
-                [int(record["id"]) for record in active_records if record.get("id")]
-            )
-            deleted_records = active_records[:deleted_count]
+            active_records = {record["id"]: record for record in current if not bool(record.get("is_deleted"))}
+            deleted_ids = await files_repo.bulk_soft_delete(list(active_records))
+            deleted_records = [active_records[file_id] for file_id in deleted_ids]
 
         usage_records = [record for record in deleted_records if not bool(record.get("is_deleted"))]
         await self._apply_generated_file_usage_delta(usage_records, operation="remove")
@@ -1046,10 +1404,18 @@ class StorageQuotaService:
         if not self._initialized:
             await self.initialize()
 
+        if not isinstance(self.db_pool, _TransactionBoundPool):
+            async with self._accounting_transaction() as bound:
+                return await bound.restore_generated_file(file_id, file_record=file_record)
+
         files_repo = await self.get_generated_files_repo()
         file_record = file_record or await files_repo.get_file_by_id(file_id)
-        if not file_record or not file_record.get("is_deleted"):
+        if not file_record:
             return None
+        current = await self._locked_generated_file_records(files_repo, [file_record])
+        if not current or not current[0].get("is_deleted"):
+            return None
+        file_record = current[0]
 
         success = await files_repo.restore_file(file_id)
         if not success:
@@ -1069,9 +1435,15 @@ class StorageQuotaService:
 
         # Get user quota info
         user_info = await self._get_user_storage_info(user_id)
+        if not user_info:
+            raise UserNotFoundError(f'User {user_id}')
         if user_info:
-            usage["quota_mb"] = user_info.get("storage_quota_mb", 0)
-            usage["quota_used_mb"] = user_info.get("storage_used_mb", 0)
+            usage["quota_mb"] = await resolved_storage_quota_mb(user_id)
+            native = await self.native_usage(user_id)
+            usage['native_bytes'] = native['bytes']
+            usage['native_mb'] = native['bytes'] / 1048576
+            usage['legacy_quota_used_mb'] = float(user_info.get('storage_used_mb', 0))
+            usage['quota_used_mb'] = usage['legacy_quota_used_mb'] + usage['native_mb']
 
         return usage
 
@@ -1208,17 +1580,6 @@ async def get_storage_service() -> StorageQuotaService:
         _storage_service = StorageQuotaService()
         await _storage_service.initialize()
     return _storage_service
-
-
-def invalidate_storage_cache_for_user(user_id: int) -> None:
-    """Best-effort invalidation for module-level storage service singletons."""
-    candidates: list[StorageQuotaService] = []
-    if _storage_service is not None:
-        candidates.append(_storage_service)
-    if _quota_service is not None and _quota_service is not _storage_service:
-        candidates.append(_quota_service)
-    for service in candidates:
-        service.invalidate_user_cache(int(user_id))
 
 
 async def reset_storage_service() -> None:

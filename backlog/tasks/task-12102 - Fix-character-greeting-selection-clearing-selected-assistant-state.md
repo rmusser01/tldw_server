@@ -28,11 +28,11 @@ Using the chat greeting selector after opening a character chat can leave the gr
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause: route character hydration could be blocked by persisted-session restore or by an existing server chat/history state, leaving the route/greeting UI visible while selectedCharacter/server assistant metadata stayed null or stale.
 
 Fix: let explicit character routes take precedence over persisted restore, clear active conversation/server-chat metadata when a bare character route is opened, and then fetch/apply the route character. Draft-only composer state is no longer treated as an active conversation for route hydration, so a typed draft cannot keep invalidating the character fetch.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -43,8 +43,6 @@ Verification:
 - bunx vitest run src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx (38 tests passed)
 - npx playwright test --config=/private/tmp/tldw-miku-storage-probe.config.ts --project=chromium --reporter=line
 - /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r apps/packages/ui/src/components/Option/Playground/Playground.tsx apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx -f json -o /tmp/bandit_task_12102.json (0 findings; TSX parser errors recorded because Bandit is Python-only)
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

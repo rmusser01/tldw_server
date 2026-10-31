@@ -15,12 +15,11 @@ type ServicePromptTarget = Readonly<{
 export const servicePromptTargetsMatch = (
   current: ServicePromptTarget,
   checked: ServicePromptTarget
-): boolean => ([
-  "serverUrl",
-  "authMode",
-  "authSource",
-  "orgId"
-] as const).every((key) => (current[key] ?? null) === (checked[key] ?? null))
+): boolean =>
+  (current.authSource || "manual") === (checked.authSource || "manual") &&
+  (["serverUrl", "authMode", "orgId"] as const).every(
+    (key) => (current[key] ?? null) === (checked[key] ?? null)
+  )
 
 export const servicePromptPrincipalMatches = (
   current: Readonly<{
@@ -33,7 +32,8 @@ export const servicePromptPrincipalMatches = (
   if (current.authMode !== "multi-user") return false
   const expected = String(expectedUserId).trim()
   if (!expected) return false
-  return deriveScopedUserId({
+  return (
+    deriveScopedUserId({
     userId: null,
     authMode: "multi-user",
     accessToken:
@@ -43,6 +43,7 @@ export const servicePromptPrincipalMatches = (
     authMode: "multi-user",
     accessToken: null
   })
+  )
 }
 
 export const servicePromptRefreshLineageMatches = (
@@ -52,8 +53,10 @@ export const servicePromptRefreshLineageMatches = (
   if (expectedRefreshToken === undefined) return true
   if (typeof expectedRefreshToken !== "string") return false
   const expected = expectedRefreshToken.trim()
-  return Boolean(expected) &&
+  return (
+    Boolean(expected) &&
     String(current.refreshToken || "").trim() === expected
+)
 }
 
 export const servicePromptSingleUserApiKeyScopeMatches = (
@@ -67,10 +70,12 @@ export const servicePromptSingleUserApiKeyScopeMatches = (
     return expectedScope === undefined
   }
   if (typeof expectedScope !== "string") return false
-  return deriveSingleUserApiKeyCredentialScope(
+  return (
+    deriveSingleUserApiKeyCredentialScope(
     "single-user",
     typeof current.apiKey === "string" ? current.apiKey : null
   ) === expectedScope
+)
 }
 
 const readCanonicalPathname = (path: unknown): string | null => {
@@ -78,6 +83,7 @@ const readCanonicalPathname = (path: unknown): string | null => {
   if (!pathname.startsWith("/") ||
     pathname.includes("\\") ||
     pathname.includes("//") ||
+    /[\t\r\n]/.test(pathname) ||
     /%(?:2e|2f|5c)/i.test(pathname) ||
     pathname.split("/").some((segment) => segment === "." || segment === "..")
   ) {
@@ -98,19 +104,100 @@ export const isServicePromptRequestPath = (
   const pathname = readCanonicalPathname(path)
   if (!pathname) return false
   const requestMethod = String(method || "GET").toUpperCase()
+  if (pathname === "/openapi.json") return requestMethod === "GET"
+  if (pathname === "/api/v1/config/docs-info") return requestMethod === "GET"
+  if (pathname === "/api/v1/audio-studio/projects") return ["GET", "POST"].includes(requestMethod)
+  if (/^\/api\/v1\/audio-studio\/projects\/[^/]+$/.test(pathname)) return ["GET", "PATCH"].includes(requestMethod)
+  if (requestMethod === "GET" && (
+    ["/api/v1/audio-studio/providers", "/api/v1/audio-studio/workflows", "/api/v1/audio/providers", "/api/v1/audio/voices", "/api/v1/audio/voices/catalog"].includes(pathname) ||
+    /^\/api\/v1\/audio-studio\/projects\/[^/]+\/(?:jobs|artifacts)$/.test(pathname) ||
+    /^\/api\/v1\/audio-studio\/projects\/[^/]+\/artifacts\/[^/]+\/media$/.test(pathname)
+  )) return true
+  if (requestMethod === "PUT" && /^\/api\/v1\/audio-studio\/projects\/[^/]+\/(?:sections|tracks|clips)\/[^/]+$/.test(pathname)) return true
+  if (requestMethod === "POST" && (
+    /^\/api\/v1\/audio-studio\/projects\/[^/]+\/(?:generations|renders|exports)$/.test(pathname) ||
+    /^\/api\/v1\/audio-studio\/projects\/[^/]+\/jobs\/[^/]+\/cancel$/.test(pathname) ||
+    /^\/api\/v1\/audio-studio\/projects\/[^/]+\/artifacts\/[^/]+\/tickets$/.test(pathname)
+  )) return true
+  if (pathname === "/api/v1/workflows") {
+    return ["GET", "POST"].includes(requestMethod)
+  }
+  if (/^\/api\/v1\/workflows\/[1-9][0-9]*$/.test(pathname)) {
+    return requestMethod === "GET"
+  }
+  if (requestMethod === "POST" && (
+    pathname === "/api/v1/workflows/preflight" ||
+    /^\/api\/v1\/workflows\/[1-9][0-9]*\/(?:versions|run)$/.test(pathname) ||
+    /^\/api\/v1\/workflows\/runs\/[^/]+\/(?:pause|resume|cancel)$/.test(pathname) ||
+    /^\/api\/v1\/workflows\/runs\/[^/]+\/steps\/[^/]+\/(?:approve|reject)$/.test(pathname)
+  )) return true
+  if (requestMethod === "GET" && (
+    /^\/api\/v1\/workflows\/runs\/[^/]+(?:\/(?:steps|investigation))?$/.test(pathname) ||
+    /^\/api\/v1\/workflows\/runs\/[^/]+\/steps\/[^/]+\/attempts$/.test(pathname)
+  )) return true
+  if (["PUT", "DELETE"].includes(requestMethod) && /^\/api\/v1\/media\/[0-9]+$/.test(pathname)) return true
+  if (requestMethod === "PATCH" && /^\/api\/v1\/media\/[0-9]+\/keywords$/.test(pathname)) return true
+  if (requestMethod === "POST" && pathname === "/api/v1/media/bulk/keyword-update") return true
+  if (requestMethod === "PATCH" && /^\/api\/v1\/media\/[0-9]+\/metadata$/.test(pathname)) return true
+  if (requestMethod === "POST" && /^\/api\/v1\/media\/[0-9]+\/reprocess$/.test(pathname)) return true
+  if (/^\/api\/v1\/messages\/[^/]+$/.test(pathname)) {
+    if (["GET", "PUT"].includes(requestMethod)) return true
+    if (requestMethod !== "DELETE" || String(path).includes("#")) return false
+    const query = new URLSearchParams(String(path).split("?")[1] || "")
+    const versions = query.getAll("expected_version")
+    const leaves = query.getAll("require_leaf")
+    const revisions = query.getAll("expected_revision")
+    return (
+      versions.length === 1 &&
+      /^[1-9][0-9]*$/.test(versions[0]) &&
+      Number.isSafeInteger(Number(versions[0])) &&
+      Number(versions[0]) < Number.MAX_SAFE_INTEGER &&
+      leaves.length === 1 &&
+      leaves[0] === "true" &&
+      revisions.length === 1 &&
+      revisions[0].length > 0 &&
+      revisions[0].length <= 128
+    )
+  }
+  if (pathname === "/api/v1/chat/dictionaries") return requestMethod === "GET"
+  if (pathname === "/api/v1/files/reference-images") return requestMethod === "GET"
+  if (pathname === "/api/v1/files/create") return requestMethod === "POST"
+  if (requestMethod === "POST" && /^\/api\/v1\/media\/[0-9]+\/versions$/.test(pathname)) return true
+  if (/^\/api\/v1\/workspaces\/[^/]+\/source-views$/.test(pathname))
+    return ["GET", "POST"].includes(requestMethod)
+  if (/^\/api\/v1\/workspaces\/[^/]+\/source-views\/[^/]+$/.test(pathname))
+    return ["PATCH", "DELETE"].includes(requestMethod)
+  if (pathname === "/api/v1/users/storage") return requestMethod === "GET"
   if (pathname === "/api/v1/users/me/profile") return ["GET", "PATCH"].includes(requestMethod)
+  if (pathname === "/api/v1/audio/transcriptions") return requestMethod === "POST"
   if (pathname === "/api/v1/feedback/explicit") return requestMethod === "POST"
+  if (/^\/api\/v1\/web-clipper\/save\/?$/.test(pathname))
+    return requestMethod === "POST"
+  if (pathname === "/api/v1/media/ingest-web-content")
+    return requestMethod === "POST"
+  if (requestMethod === "GET" && (
+    /^\/api\/v1\/web-clipper\/[^/]+\/?$/.test(pathname) ||
+    /^\/api\/v1\/media\/[0-9]+\/versions(?:\/[1-9][0-9]*)?$/.test(pathname) ||
+    /^\/api\/v1\/workspaces\/[^/]+\/sources(?:\/[^/]+\/preview)?$/.test(pathname)
+  )) return true
   if (requestMethod === "GET" && (pathname === "/api/v1/notes/tasks/activity" || /^\/api\/v1\/notes\/[^/]+\/tasks$/.test(pathname))) return true
+  if (requestMethod === "POST" && pathname === "/api/v1/notes/tasks/status") return true
+  if (/^\/api\/v1\/notes\/tasks\/activity\/[^/]+$/.test(pathname)) return requestMethod === "PATCH"
   if (/^\/api\/v1\/chats\/[^/]+$/.test(pathname)) return ["GET", "PUT", "DELETE"].includes(requestMethod)
   if (/^\/api\/v1\/chat\/conversations\/[^/]+$/.test(pathname)) return ["GET", "PATCH"].includes(requestMethod)
   if (/^\/api\/v1\/chat\/conversations\/[^/]+\/share-links$/.test(pathname)) return requestMethod === "POST"
   if (/^\/api\/v1\/chat\/conversations\/[^/]+\/share-links\/[^/]+$/.test(pathname)) return requestMethod === "DELETE"
+  if (/^\/api\/v1\/persona\/profiles\/[^/]+$/.test(pathname) && requestMethod === "PATCH") return true
+  if (/^\/api\/v1\/persona\/profiles\/[^/]+\/(?:voice-commands|connections)$/.test(pathname) && requestMethod === "GET") return true
   if (requestMethod === "GET" && (
+    /^\/api\/v1\/workspaces\/?$/.test(pathname) ||
+    /^\/api\/v1\/workspaces\/[^/]+\/(?:context|artifacts|notes)$/.test(pathname) ||
     /^\/api\/v1\/characters\/[^/]+\/?$/.test(pathname) ||
     /^\/api\/v1\/persona\/profiles\/[^/]+$/.test(pathname) ||
     /^\/api\/v1\/characters(?:\/search)?\/?$/.test(pathname) ||
     pathname === "/api/v1/chat/conversations" ||
     /^\/api\/v1\/chat\/conversations\/[^/]+\/messages-with-context$/.test(pathname) ||
+    pathname === "/api/v1/notes/search/" ||
     pathname === "/api/v1/rag/source-health" ||
     /^\/api\/v1\/chatbooks\/download\/[^/]+$/.test(pathname)
   )) return true
@@ -118,12 +205,22 @@ export const isServicePromptRequestPath = (
     /^\/api\/v1\/chat\/messages\/[^/]+\/rag-context$/.test(pathname) ||
     pathname === "/api/v1/rag/search/stream" || pathname === "/api/v1/chatbooks/export"
   )) return true
-  if (requestMethod === "GET" && (/^\/api\/v1\/media\/ingest\/jobs\/[0-9]+$/.test(pathname) || /^\/api\/v1\/media\/[0-9]+\/file$/.test(pathname) || pathname === "/api/v1/media")) return true
+  if (requestMethod === "GET" && (/^\/api\/v1\/media\/ingest\/jobs\/[0-9]+$/.test(pathname) || /^\/api\/v1\/media\/[0-9]+\/file$/.test(pathname) || pathname === "/api/v1/media"||
+      pathname === "/api/v1/media/" ||
+      pathname === "/api/v1/media/ingest/jobs")) return true
   if (requestMethod === "POST" && (/^\/api\/v1\/media\/(?:ingest\/jobs(?:\/cancel)?|process-(?:audios|videos|pdfs|ebooks|documents|web-scraping)|search|collections)$/.test(pathname) || /^\/api\/v1\/media\/collections\/[0-9]+\/items$/.test(pathname))) return true
   if (requestMethod === "PATCH" && /^\/api\/v1\/media\/collections\/[0-9]+\/items\/[0-9]+$/.test(pathname)) return true
-  if (pathname === "/api/v1/notes/") return requestMethod === "POST"
+  if (pathname === "/api/v1/notes/collections" || pathname === "/api/v1/notes/keywords") return ["GET", "POST"].includes(requestMethod)
+  if (pathname === "/api/v1/notes/collections/keyword-links" || pathname === "/api/v1/notes/conversations/keyword-links") return requestMethod === "GET"
+  if (/^\/api\/v1\/notes\/collections\/[0-9]+$/.test(pathname)) return ["PATCH", "DELETE"].includes(requestMethod)
+  if (/^\/api\/v1\/notes\/keywords\/[0-9]+$/.test(pathname)) return requestMethod === "DELETE"
+  if (/^\/api\/v1\/notes\/(?:collections\/[0-9]+|conversations\/[^/]+)\/keywords$/.test(pathname)) return requestMethod === "GET"
+  if (/^\/api\/v1\/notes\/(?:collections\/[0-9]+|conversations\/[^/]+)\/keywords\/[0-9]+$/.test(pathname)) return ["POST", "DELETE"].includes(requestMethod)
+  if (requestMethod === "POST" && (/^\/api\/v1\/media\/[0-9]+\/restore$/.test(pathname) || /^\/api\/v1\/notes\/(?!tasks\/|collections\/|trash\/|purge\/|permanent\/|keywords\/|folders\/|moodboards\/|templates\/|import\/|export(?:\.csv)?\/|search\/)[^/]+\/(?:provenance\/)?restore$/.test(pathname))) return true
+  if (pathname === "/api/v1/notes/") return ["GET", "POST"].includes(requestMethod)
   if (/^\/api\/v1\/notes\/[^/]+$/.test(pathname)) {
-    return ["GET", "PUT"].includes(requestMethod)
+    return (
+      ["GET", "PUT"].includes(requestMethod) || (requestMethod === "DELETE" && !/^\/api\/v1\/notes\/(?:tasks|collections|trash|purge|permanent|keywords|folders|moodboards|templates|import|export(?:\.csv)?|search)$/.test(pathname)))
   }
   if (pathname === "/api/v1/service-prompts") {
     return requestMethod === "GET"
@@ -131,40 +228,49 @@ export const isServicePromptRequestPath = (
   if (/^\/api\/v1\/service-prompts\/[^/]+$/.test(pathname)) {
     return ["GET", "PUT", "DELETE"].includes(requestMethod)
   }
+  if (/^\/api\/v1\/chats\/[^/]+\/restore$/.test(pathname)) return requestMethod === "POST"
   if (/^\/api\/v1\/chats\/[^/]+\/settings$/.test(pathname)) return ["GET", "PUT"].includes(requestMethod)
   if (requestMethod === "GET" && /^\/api\/v1\/chats\/[^/]+$/.test(pathname)) return true
   if (/^\/api\/v1\/flashcards\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pathname)) return ["GET", "DELETE"].includes(requestMethod)
+  if (requestMethod === "PATCH" && /^\/api\/v1\/flashcards\/decks\/[1-9][0-9]*$/.test(pathname)) return true
   if (requestMethod === "GET") {
-    return pathname === "/api/v1/flashcards/decks" || /^\/api\/v1\/media\/[0-9]+$/.test(pathname) || pathname === "/api/v1/monitoring/alerts" ||
+    return (
+      pathname === "/api/v1/flashcards/decks" || /^\/api\/v1\/media\/[0-9]+$/.test(pathname) || pathname === "/api/v1/monitoring/alerts" ||
       pathname === "/api/v1/scheduled-tasks" ||
       pathname === "/api/v1/scheduled-tasks/results" ||
       pathname === "/api/v1/notifications" ||
+      pathname === "/api/v1/chats/" || pathname === "/api/v1/chats/conversations" ||
       /^\/api\/v1\/chats\/[^/]+\/messages$/.test(pathname) ||
       /^\/api\/v1\/writing\/manuscripts\/(?:scenes\/[^/]+|projects\/[^/]+\/(?:characters|world-info))$/.test(pathname)
+    )
   }
   if (requestMethod !== "POST") return false
   if (pathname === "/api/v1/flashcards/review" || pathname === "/api/v1/flashcards/review-sessions/end") return true
   if (["/api/v1/flashcards", "/api/v1/flashcards/decks", "/api/v1/flashcards/generate", "/api/v1/flashcards/assets", "/api/v1/flashcards/bulk"].includes(pathname)) return true
-  if (/^\/api\/v1\/chats\/[^/]+\/(?:completions\/persist|complete-v2)$/.test(pathname)) return true
+  if (/^\/api\/v1\/chats\/[^/]+\/(?:completions\/persist|complete-v2|roleplay\/messages)$/.test(pathname)) return true
   if (pathname === "/api/v1/chats/") return true
   if (/^\/api\/v1\/chat\/conversations\/[^/]+\/history\/(?:selection|legacy-projection)$/.test(pathname)) return true
   if (/^\/api\/v1\/chats\/[^/]+\/completions\/persist$/.test(pathname)) return true
-  return /^\/api\/v1\/(?:auth\/refresh|chat\/completions|media\/add|rag\/search|research\/websearch)$/.test(pathname) ||
+  return (
+    /^\/api\/v1\/(?:auth\/refresh|chat\/completions|media\/add|rag\/search|research\/websearch)$/.test(pathname) ||
     /^\/api\/v1\/chats\/[^/]+\/messages$/.test(pathname)
+)
 }
 
-export const createServicePromptScopeChangedError = () =>
-  Object.assign(new Error(SCOPE_CHANGED_MESSAGE), {
+export const createServicePromptScopeChangedError = (
+  message = SCOPE_CHANGED_MESSAGE
+) =>
+  Object.assign(new Error(message), {
     status: 412,
     details: {
-      detail: { code: SCOPE_CHANGED_CODE, message: SCOPE_CHANGED_MESSAGE }
+      detail: { code: SCOPE_CHANGED_CODE, message }
     }
   })
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object"
-    ? value as Record<string, unknown>
-    : null
+    ? (value as Record<string, unknown>
+    ) : null
 
 export const isRequestConfigScopeChangedError = (error: unknown): boolean => {
   const seen = new Set<unknown>()

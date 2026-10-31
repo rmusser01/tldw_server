@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,9 @@ from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerEr
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 
 pytestmark = pytest.mark.unit
+requires_posix_snapshots = pytest.mark.skipif(
+    not hasattr(os, "O_NOFOLLOW"), reason="secure snapshots require POSIX confinement"
+)
 
 
 class FakeProcess:
@@ -126,6 +130,7 @@ def test_runner_reports_defined_before_first_start(tmp_path: Path):
     assert runtime.warnings == []
 
 
+@requires_posix_snapshots
 def test_full_cache_changes_snapshot_identity_but_false_matches_omitted(tmp_path):
     from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_compatibility import (
         build_fingerprint,
@@ -148,6 +153,7 @@ def test_full_cache_changes_snapshot_identity_but_false_matches_omitted(tmp_path
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "127.0.0.2", "::1", "[::1]"])
+@requires_posix_snapshots
 async def test_snapshot_launch_generations_and_private_working_path(tmp_path, monkeypatch, host):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as module
     from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore
@@ -183,6 +189,7 @@ async def test_snapshot_launch_generations_and_private_working_path(tmp_path, mo
 
 
 @pytest.mark.parametrize("failure", ["fingerprint", "logs", "spawn"])
+@requires_posix_snapshots
 async def test_failed_snapshot_restart_removes_only_unspawned_launch(tmp_path, monkeypatch, failure):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as module
     from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore
@@ -223,6 +230,7 @@ async def test_failed_snapshot_restart_removes_only_unspawned_launch(tmp_path, m
         assert list(prior_path.parent.iterdir()) == [prior_path]
 
 
+@requires_posix_snapshots
 async def test_failed_snapshot_cleanup_still_closes_startup_log(tmp_path, monkeypatch):
     from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import (
         SnapshotStorageUnavailableError,
@@ -252,6 +260,7 @@ async def test_failed_snapshot_cleanup_still_closes_startup_log(tmp_path, monkey
 
 
 @pytest.mark.parametrize("phase", ["directory", "fingerprint", "spawn", "readiness"])
+@requires_posix_snapshots
 async def test_snapshot_start_cancellation_keeps_only_child_owned_directory(tmp_path, monkeypatch, phase):
     import threading
 
@@ -332,6 +341,7 @@ async def test_snapshot_start_cancellation_keeps_only_child_owned_directory(tmp_
 @pytest.mark.parametrize(
     "host", ["0.0.0.0", "::", "[::]", "192.168.1.10", "8.8.8.8", "2001:db8::1", "localhost", "example.com"]
 )
+@requires_posix_snapshots
 async def test_snapshot_launch_rejects_non_loopback_before_spawn(tmp_path, monkeypatch, host):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as module
     from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore
@@ -386,6 +396,52 @@ else:
     )
     stdout, stderr = await process.communicate()
     assert process.returncode == 0, (stdout + stderr).decode()
+
+
+@pytest.mark.parametrize("ready", [True, False])
+async def test_loading_process_is_not_running_or_admitted_to_chat(tmp_path, monkeypatch, ready):
+    from tldw_Server_API.app.api.v1.endpoints import llamacpp as endpoint
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as module
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_provider_service import ManagedServerNotRunningError
+
+    config = make_config(tmp_path)
+    runner = LlamaCppProcessRunner(config, "loading")
+    child = FakeProcess(77776)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def spawn(*args, **kwargs):
+        return child
+
+    async def readiness(*args, **kwargs):
+        entered.set()
+        await release.wait()
+        return ready
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(module, "wait_for_http_ready", readiness)
+    monkeypatch.setattr(runner, "_is_port_free", lambda *args: True)
+    monkeypatch.setattr(runner, "_signal_managed_process_group", lambda *args: child.terminate())
+    task = asyncio.create_task(runner.start(make_model(config), profile("loading")))
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        loading = runner.status()
+        assert loading.state == LlamaCppRuntimeState.STARTING  # nosec B101 -- verifies readiness admission.
+        assert loading.pid == child.pid  # nosec B101 -- unready child remains owned and stoppable.
+        assert loading.health == {"ready": False}  # nosec B101 -- no readiness inferred from liveness.
+        with pytest.raises(ManagedServerNotRunningError):
+            endpoint._runtime_base_url(loading)
+    finally:
+        release.set()
+        result = (await asyncio.gather(task, return_exceptions=True))[0]
+        await runner.stop()
+
+    if ready:
+        assert result.state == LlamaCppRuntimeState.RUNNING  # nosec B101 -- readiness permits running.
+        assert result.health == {"ready": True}  # nosec B101 -- observed ready contract retained.
+        assert endpoint._runtime_base_url(result) == "http://127.0.0.1:8181"  # nosec B101 -- exact Chat target.
+    else:
+        assert isinstance(result, ServerError)  # nosec B101 -- failed readiness must not succeed.
+        assert child.terminated  # nosec B101 -- failed child is cleaned up through the owned runner.
 
 
 async def test_failed_readiness_keeps_owned_child_stoppable(tmp_path, monkeypatch):
@@ -794,10 +850,37 @@ async def test_runner_drains_pipe_streams_when_no_log_file_is_configured(
     await runner.stop()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group ownership")
+@pytest.mark.parametrize("loop_backend", ["asyncio", "uvloop"])
+def test_runner_spawns_owned_process_group_on_runtime_event_loop(tmp_path: Path, loop_backend: str):
+    factory = asyncio.new_event_loop if loop_backend == "asyncio" else pytest.importorskip("uvloop").new_event_loop
+    runner = LlamaCppProcessRunner(make_config(tmp_path), profile_id="real-owned-child")
+
+    async def check_child():
+        process = await runner._spawn(
+            [sys.executable, "-c", "import os; print(os.getpid(), os.getpgrp(), os.getppid(), flush=True)"],
+            stdout_target=asyncio.subprocess.PIPE,
+            stderr_target=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=5)
+            observed = (process.returncode, list(map(int, stdout.split())))
+            assert observed == (0, [process.pid, process.pid, os.getpid()])  # nosec B101 -- the real child must lead its own group under both runtime loops.
+        finally:
+            if process.returncode is None:
+                process.terminate()
+                await asyncio.wait_for(process.wait(), timeout=5)
+
+    loop = factory()
+    try:
+        loop.run_until_complete(check_child())
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
+
+
 @pytest.mark.asyncio
-async def test_runner_uses_process_group_on_python_311_posix(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    if sys.version_info < (3, 11):
-        pytest.skip("process_group is available on Python 3.11+")
+async def test_runner_uses_owned_session_on_posix(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as runner_module
 
     spawn_kwargs: dict[str, Any] = {}
@@ -819,7 +902,8 @@ async def test_runner_uses_process_group_on_python_311_posix(monkeypatch: pytest
 
     await runner.start(make_model(config), profile=profile("process-group"))
 
-    assert spawn_kwargs["process_group"] == 0
+    assert spawn_kwargs["start_new_session"] is True  # nosec B101 -- POSIX child must own its session and group.
+    assert "process_group" not in spawn_kwargs  # nosec B101 -- uvloop rejects this keyword.
     assert "preexec_fn" not in spawn_kwargs
 
 

@@ -115,6 +115,7 @@ class MockVerifier:
             "claim": claim,
             "query": query,
             "documents": base_documents,
+            "top_k": top_k,
         })
         if self.verification:
             return self.verification
@@ -726,3 +727,90 @@ class TestFVABatchResult:
         assert result.status_changes["verified->contested"] == 1
         assert result.total_time_ms == 500.0
         assert result.budget_exhausted is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_process_batch_does_not_drop_an_llm_quota_refusal():
+    """A refused claim fails the batch; it is not silently left out of the results (TASK-13638)."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    verifier = MockVerifier()
+    verifier.verify = AsyncMock(
+        side_effect=LLMQuotaExceededError(
+            category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+        )
+    )
+    pipeline = FVAPipeline(MockClaimsEngine(verifier), MockRetriever())
+
+    with pytest.raises(LLMQuotaExceededError):
+        await pipeline.process_batch(claims=[MockClaim(id="1", text="Claim 1")], query="test", documents=[])
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_process_claim_lets_an_adjudication_refusal_through():
+    """A refusal during adjudication fails the claim; it does not keep the unchallenged verdict (TASK-13862)."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    low_confidence = MockClaimVerification(
+        claim=MockClaim(id="1", text="Test"),
+        confidence=0.5,
+        evidence=[MockEvidence(doc_id="1", snippet="Evidence")],
+    )
+    claims_engine = MockClaimsEngine(MockVerifier(verification=low_confidence))
+    claims_engine._analyze = AsyncMock(
+        side_effect=LLMQuotaExceededError(
+            category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+        )
+    )
+    anti_docs = [Document(id="anti_1", content="Contradicting evidence", metadata={}, score=0.7)]
+    pipeline = FVAPipeline(claims_engine, MockRetriever(documents=anti_docs))
+
+    with pytest.raises(LLMQuotaExceededError) as refused:
+        await pipeline.process_claim(
+            claim=MockClaim(id="1", text="Test claim"),
+            query="test",
+            documents=[Document(id="1", content="Support", metadata={}, score=0.8)],
+        )
+    assert refused.value.detail["category"] == "llm_tokens_month"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_adjudication_assesses_only_the_verifiers_top_five_supporting_documents():
+    """Each supporting document costs a stance call per falsified claim, so that side is the verifier's window (TASK-13881)."""
+    low_confidence = MockClaimVerification(
+        claim=MockClaim(id="1", text="Test"),
+        confidence=0.5,
+        evidence=[MockEvidence(doc_id="0", snippet="Support 0")],
+    )
+    claims_engine = MockClaimsEngine(MockVerifier(verification=low_confidence))
+    anti_docs = [Document(id="anti_1", content="Contradicting evidence", metadata={}, score=0.7)]
+    pipeline = FVAPipeline(claims_engine, MockRetriever(documents=anti_docs))
+    base_docs = [Document(id=str(i), content=f"Support {i}", metadata={}, score=1.0 - i / 10) for i in range(8)]
+
+    result = await pipeline.process_claim(claim=MockClaim(id="1", text="Test claim"), query="test", documents=base_docs)
+
+    prompts = [call.args[2] for call in claims_engine._analyze.call_args_list]
+    assessed = sorted(d.content for d in base_docs + anti_docs if any(f"Evidence: {d.content}\n" in p for p in prompts))
+    assert assessed == ["Contradicting evidence"] + [f"Support {i}" for i in range(5)]
+    assert {a.document.id for a in result.adjudication.supporting_evidence} == {"0", "1", "2", "3", "4"}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_the_verifier_judges_the_window_adjudication_assesses(monkeypatch):
+    """The cap is passed to the verifier as its top_k, so the two windows cannot drift apart (TASK-13881)."""
+    from tldw_Server_API.app.core.Claims_Extraction import fva_pipeline
+
+    monkeypatch.setattr(fva_pipeline, "_ADJUDICATED_SUPPORTING_DOCS", 3)
+    low_confidence = MockClaimVerification(claim=MockClaim(id="1", text="Test"), confidence=0.5)
+    claims_engine = MockClaimsEngine(MockVerifier(verification=low_confidence))
+    pipeline = FVAPipeline(claims_engine, MockRetriever(documents=[Document(id="anti_1", content="Against", metadata={}, score=0.7)]))
+    base_docs = [Document(id=str(i), content=f"Support {i}", metadata={}, score=1.0 - i / 10) for i in range(8)]
+
+    result = await pipeline.process_claim(claim=MockClaim(id="1", text="Test claim"), query="test", documents=base_docs)
+
+    assert [call["top_k"] for call in claims_engine.verifier.verify_calls] == [3]
+    assert {a.document.id for a in result.adjudication.supporting_evidence} == {"0", "1", "2"}

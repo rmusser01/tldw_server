@@ -2,6 +2,9 @@
   "title": {
     "message": "Evaluations playground"
   },
+  "recoveryPermissionMessage": {
+    "message": "Use an account with access to Evaluations API."
+  },
   "subtitle": {
     "message": "Define evaluations against your tldw server and inspect recent runs."
   },
@@ -877,5 +880,14 @@
   },
   "recipeFailureReferenceLabel": {
     "message": "Reference answer"
+  },
+  "recipePersonaSetupTitle": {
+    "message": "Persona scenario setup"
+  },
+  "recipePersonaSetupDescription": {
+    "message": "Use Advanced JSON to define scenarios and at least one Persona or Character target. This recipe runs offline without candidate models or a judge."
+  },
+  "recipePersonaJsonInvalidDescription": {
+    "message": "Correct the JSON in Advanced JSON before validating or running."
   }
 }

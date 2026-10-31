@@ -4,15 +4,16 @@ import { Clock, MessageSquareText } from "lucide-react";
 
 import {
   useServerChatHistory,
+  SERVER_CHAT_HISTORY_OVERVIEW_PAGE_SIZE,
   type ServerChatHistoryItem,
 } from "@/hooks/useServerChatHistory";
+import { useChatDraftOwner } from "@/hooks/useChatDraftOwner";
+import { useConnectionState } from "@/hooks/useConnectionState";
+import { useConnectionStore } from "@/store/connection";
 import { useSelectServerChat } from "@/hooks/chat/useSelectServerChat";
 import { formatRelativeTime } from "@/utils/dateFormatters";
 import { cn } from "@/libs/utils";
-import {
-  cockpitRailStyles,
-  cockpitRailToneClass,
-} from "./playground-cockpit-rail-styles";
+import { cockpitRailStyles } from "./playground-cockpit-rail-styles";
 import { PlaygroundRailSection } from "./PlaygroundRailSection";
 
 type CharacterChatSessionsPanelProps = {
@@ -24,6 +25,10 @@ type CharacterChatSessionsPanelProps = {
 };
 
 const DEFAULT_SESSION_LIMIT = 5;
+const GLOBAL_CHAT_SCOPE = { type: "global" as const };
+const isGlobalSession = (session: ServerChatHistoryItem) =>
+  (!session.scope_type || session.scope_type === "global") &&
+  !session.workspace_id;
 
 const normalizeId = (value: unknown): string | null => {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -96,37 +101,11 @@ const getSessionCharacterLabel = (
   });
 };
 
-const partitionCharacterSessions = (
-  sessions: ServerChatHistoryItem[],
-  activeCharacterId: string | number | null | undefined,
-): {
-  currentCharacterSessions: ServerChatHistoryItem[];
-  otherCharacterSessions: ServerChatHistoryItem[];
-} => {
-  const normalizedActiveId = normalizeId(activeCharacterId);
-  if (!normalizedActiveId) {
-    return {
-      currentCharacterSessions: sessions,
-      otherCharacterSessions: [],
-    };
-  }
-
-  const currentCharacterSessions: ServerChatHistoryItem[] = [];
-  const otherCharacterSessions: ServerChatHistoryItem[] = [];
-
-  for (const session of sessions) {
-    const sessionCharacterId = getSessionCharacterIdentity(session);
-    if (sessionCharacterId === normalizedActiveId) {
-      currentCharacterSessions.push(session);
-    } else {
-      otherCharacterSessions.push(session);
-    }
-  }
-
-  return {
-    currentCharacterSessions,
-    otherCharacterSessions,
-  };
+const nativeCharacterId = (value: unknown): number | undefined => {
+  const normalized = normalizeId(value);
+  if (!normalized || !/^\d+$/.test(normalized)) return undefined;
+  const id = Number(normalized);
+  return Number.isSafeInteger(id) && id > 0 ? id : undefined;
 };
 
 type SessionListProps = {
@@ -136,6 +115,7 @@ type SessionListProps = {
   activeCharacterName?: string | null;
   activeServerChatId?: string | null;
   onSelectSession: (chat: ServerChatHistoryItem) => void;
+  canResume: boolean;
 };
 
 const CharacterSessionList = ({
@@ -145,10 +125,19 @@ const CharacterSessionList = ({
   activeCharacterName,
   activeServerChatId,
   onSelectSession,
+  canResume,
 }: SessionListProps) => {
   const { t } = useTranslation(["playground", "common"]);
 
   if (sessions.length === 0) return null;
+  const titles = sessions.map(
+    (session) =>
+      session.title?.trim() ||
+      t("characterChatSessions.untitled", "Untitled character chat"),
+  );
+  const duplicateTitles = new Set(
+    titles.filter((title, index) => titles.indexOf(title) !== index),
+  );
 
   return (
     <ul aria-label={label} className="mt-2 space-y-2">
@@ -162,6 +151,14 @@ const CharacterSessionList = ({
           typeof session.title === "string" && session.title.trim().length > 0
             ? session.title.trim()
             : t("characterChatSessions.untitled", "Untitled character chat");
+        const duplicateTitle = duplicateTitles.has(title);
+        const actionTitle = duplicateTitle
+          ? t(
+              "characterChatSessions.titleReference",
+              "{{title}}, session {{id}}",
+              { title, id: session.id },
+            )
+          : title;
         const topic =
           typeof session.topic_label === "string" &&
           session.topic_label.trim().length > 0
@@ -199,15 +196,28 @@ const CharacterSessionList = ({
                 >
                   {title}
                 </p>
+                {duplicateTitle ? (
+                  <p className="mt-1 break-all text-[11px] text-text-muted">
+                    {t(
+                      "characterChatSessions.sessionReference",
+                      "Session {{id}}",
+                      { id: session.id },
+                    )}
+                  </p>
+                ) : null}
                 <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-text-muted">
                   {characterLabel ? (
                     <span className="truncate">{characterLabel}</span>
                   ) : null}
                   {updatedLabel ? (
-                    <span className="inline-flex items-center gap-1">
+                    <time
+                      dateTime={updatedAt ?? undefined}
+                      title={updatedAt ?? undefined}
+                      className="inline-flex items-center gap-1"
+                    >
                       <Clock className="h-3 w-3" aria-hidden="true" />
                       {updatedLabel}
-                    </span>
+                    </time>
                   ) : null}
                   {topic ? <span className="truncate">{topic}</span> : null}
                   {messageCount != null ? (
@@ -224,7 +234,7 @@ const CharacterSessionList = ({
               </div>
               <button
                 type="button"
-                disabled={isActive}
+                disabled={isActive || !canResume}
                 onClick={() => {
                   onSelectSession(session);
                 }}
@@ -234,14 +244,14 @@ const CharacterSessionList = ({
                         "characterChatSessions.currentSessionAction",
                         "Current {{title}}",
                         {
-                          title,
+                          title: actionTitle,
                         },
                       )
                     : t(
                         "characterChatSessions.resumeSessionAction",
                         "Resume {{title}}",
                         {
-                          title,
+                          title: actionTitle,
                         },
                       )
                 }
@@ -272,53 +282,268 @@ export const CharacterChatSessionsPanel = ({
 }: CharacterChatSessionsPanelProps) => {
   const { t } = useTranslation(["playground", "common"]);
   const selectServerChat = useSelectServerChat();
-  const {
-    data = [],
-    isLoading,
-    sidebarRefreshState,
-    hasUsableData,
-    isShowingStaleData,
-  } = useServerChatHistory("", {
-    enabled,
-    mode: "overview",
+  const verified = useChatDraftOwner(() => {});
+  const { isConnected } = useConnectionState();
+  const characterId = nativeCharacterId(activeCharacterId);
+  const hasCharacter = normalizeId(activeCharacterId) != null;
+  const supportedCharacter = !hasCharacter || characterId != null;
+  const owner = React.useMemo(
+    () =>
+      verified.ownerKey && verified.requestScope
+        ? {
+            key: verified.ownerKey,
+            requestScope: verified.requestScope,
+            isCurrent: verified.isCurrent,
+          }
+        : undefined,
+    [verified.ownerKey, verified.requestScope, verified.isCurrent],
+  );
+  // The full-page selector and this transient view belong to the global chat area.
+  const identity = React.useMemo(
+    () => ({ owner, activeCharacterId }),
+    [owner, activeCharacterId],
+  );
+  const [view, setView] = React.useState({
+    identity,
+    all: false,
     page: 1,
-    limit,
+    other: false,
+  });
+  const currentView =
+    view.identity === identity
+      ? view
+      : { identity, all: false, page: 1, other: false };
+  const currentIdentity = React.useRef<object | null>(identity);
+  currentIdentity.current = identity;
+  React.useEffect(
+    () => () => {
+      currentIdentity.current = null;
+    },
+    [],
+  );
+  const ownerCurrent = !!owner?.isCurrent();
+  const canResume = enabled && isConnected && ownerCurrent;
+  const latestEnabled = React.useRef(enabled);
+  latestEnabled.current = enabled;
+  const canDispatch = () =>
+    latestEnabled.current &&
+    useConnectionStore.getState().state.isConnected &&
+    owner?.isCurrent() &&
+    currentIdentity.current === identity;
+  const previewLimit = Math.max(
+    1,
+    Math.min(
+      200,
+      Number.isFinite(limit) ? Math.trunc(limit) : DEFAULT_SESSION_LIMIT,
+    ),
+  );
+  const pageLimit = currentView.all
+    ? SERVER_CHAT_HISTORY_OVERVIEW_PAGE_SIZE
+    : previewLimit;
+  const primary = useServerChatHistory("", {
+    enabled: enabled && ownerCurrent && supportedCharacter,
+    owner,
+    scope: GLOBAL_CHAT_SCOPE,
+    characterId,
+    mode: "overview",
+    page: currentView.page,
+    limit: pageLimit,
     filterMode: "character",
   });
-  const sessions = React.useMemo(
-    () => (Array.isArray(data) ? data.slice(0, limit) : []),
-    [data, limit],
-  );
-  const { currentCharacterSessions, otherCharacterSessions } = React.useMemo(
-    () => partitionCharacterSessions(sessions, activeCharacterId),
-    [activeCharacterId, sessions],
-  );
-  const currentCharacterLabel = activeCharacterName
+  const other = useServerChatHistory("", {
+    enabled: enabled && ownerCurrent && currentView.other,
+    owner,
+    scope: GLOBAL_CHAT_SCOPE,
+    mode: "overview",
+    page: 1,
+    limit: previewLimit,
+    filterMode: "character",
+  });
+  const sessions =
+    ownerCurrent && supportedCharacter
+      ? primary.data.filter((session) => {
+          const id = nativeCharacterId(getSessionCharacterIdentity(session));
+          return (
+            isGlobalSession(session) &&
+            id != null &&
+            (!hasCharacter || id === characterId)
+          );
+        })
+      : [];
+  const otherSessions =
+    ownerCurrent && currentView.other
+      ? other.data.filter((session) => {
+          const id = nativeCharacterId(getSessionCharacterIdentity(session));
+          return isGlobalSession(session) && id != null && id !== characterId;
+        })
+      : [];
+  const unverifiedSessions = sessions.length !== primary.data.length;
+  const pageOffset = (currentView.page - 1) * pageLimit;
+  // The endpoint may report a page-length count when its count lookup fails.
+  const hasNext =
+    primary.data.length >= pageLimit ||
+    primary.total > pageOffset + primary.data.length;
+  const lastSession =
+    !activeServerChatId && currentView.page === 1 ? sessions[0] : null;
+  const lastSessionTitle =
+    lastSession?.title?.trim() ||
+    t("characterChatSessions.untitled", "Untitled character chat");
+  const select = (session: ServerChatHistoryItem) => {
+    if (!canDispatch()) return;
+    selectServerChat(session);
+  };
+  const changeView = (next: Partial<typeof currentView>) => {
+    if (!owner?.isCurrent() || currentIdentity.current !== identity) return;
+    setView({ ...currentView, ...next });
+  };
+  const primaryError =
+    primary.sidebarRefreshState === "recoverable-error" ||
+    primary.sidebarRefreshState === "hard-error";
+  const listLabel = activeCharacterName
     ? t(
-        "characterChatSessions.currentCharacterListLabel",
-        "Recent sessions for {{name}}",
+        currentView.all
+          ? "characterChatSessions.allCharacterListLabel"
+          : "characterChatSessions.currentCharacterListLabel",
+        currentView.all
+          ? "All sessions for {{name}}"
+          : "Recent sessions for {{name}}",
         { name: activeCharacterName },
       )
     : t(
         "characterChatSessions.currentCharacterFallbackLabel",
         "Recent character sessions",
       );
-  const hasSessions = sessions.length > 0;
-  const lastSession = !activeServerChatId && hasSessions ? sessions[0] : null;
-  const lastSessionTitle =
-    typeof lastSession?.title === "string" &&
-    lastSession.title.trim().length > 0
-      ? lastSession.title.trim()
-      : lastSession
-        ? t("characterChatSessions.untitled", "Untitled character chat")
-        : null;
-  const hardErrorWithoutData =
-    sidebarRefreshState === "hard-error" && !hasUsableData;
-  const sessionBadgeTone = hasSessions
-    ? "success"
-    : hardErrorWithoutData
-      ? "danger"
-      : "muted";
+
+  const historyFeedback = (
+    query: typeof primary,
+    count: number,
+    isPrimary: boolean,
+  ) => {
+    const failed =
+      query.sidebarRefreshState === "recoverable-error" ||
+      query.sidebarRefreshState === "hard-error";
+    if (!isConnected && count > 0)
+      return (
+        <p role="status" className={cockpitRailStyles.muted}>
+          {t(
+            "characterChatSessions.offlineCached",
+            "Reconnect to load or resume character sessions. Showing the last loaded page.",
+          )}
+        </p>
+      );
+    if (!isConnected)
+      return (
+        <p role="status" className={cockpitRailStyles.emptyInset}>
+          {t(
+            "characterChatSessions.unavailable",
+            "Connect to your server to view character sessions.",
+          )}
+        </p>
+      );
+    if (!ownerCurrent)
+      return verified.verificationState === "pending" ? (
+        <p role="status" className={cockpitRailStyles.emptyInset}>
+          {t(
+            "characterChatSessions.verifyingAccount",
+            "Verifying your server account...",
+          )}
+        </p>
+      ) : (
+        <div className="space-y-2">
+          <p role="alert" className={cockpitRailStyles.emptyInset}>
+            {t(
+              "characterChatSessions.verificationFailed",
+              "Could not verify your server account. Retry or check your connection settings.",
+            )}
+          </p>
+          <button
+            type="button"
+            disabled={!enabled}
+            onClick={() => {
+              if (
+                latestEnabled.current &&
+                useConnectionStore.getState().state.isConnected &&
+                currentIdentity.current === identity
+              )
+                verified.retryVerification();
+            }}
+            className={cockpitRailStyles.action}
+          >
+            {t(
+              "characterChatSessions.retryVerification",
+              "Retry account verification",
+            )}
+          </button>
+        </div>
+      );
+    if (
+      query.isLoading ||
+      (query.sidebarRefreshState === "idle" && count === 0)
+    )
+      return (
+        <p role="status" className={cockpitRailStyles.emptyInset}>
+          {t("characterChatSessions.loading", "Loading character sessions...")}
+        </p>
+      );
+    if (failed || query.isShowingStaleData)
+      return (
+        <div className="mt-2 space-y-2">
+          <p
+            role={count > 0 ? "status" : "alert"}
+            className={cockpitRailStyles.emptyInset}
+          >
+            {count > 0
+              ? t(
+                  "characterChatSessions.stale",
+                  "Showing character sessions from the last successful refresh.",
+                )
+              : query.sidebarRefreshState === "recoverable-error"
+                ? t(
+                    "characterChatSessions.refreshFailed",
+                    "Unable to refresh character sessions right now.",
+                  )
+                : t(
+                    "characterChatSessions.loadFailed",
+                    "Character sessions could not be loaded.",
+                  )}
+          </p>
+          <button
+            type="button"
+            disabled={!canResume || query.isFetching}
+            className={cockpitRailStyles.action}
+            onClick={() => {
+              if (canDispatch()) void query.refetch();
+            }}
+          >
+            {t("characterChatSessions.retry", "Retry character sessions")}
+          </button>
+        </div>
+      );
+    if (count > 0 || (isPrimary && unverifiedSessions)) return null;
+    return (
+      <p className={cockpitRailStyles.emptyInset}>
+        {!isPrimary
+          ? t(
+              "characterChatSessions.otherEmpty",
+              "No other characters in this recent sample.",
+            )
+          : currentView.page > 1
+            ? t(
+                "characterChatSessions.pageEmpty",
+                "No sessions on this page. Return to the previous page to see earlier results.",
+              )
+            : hasCharacter
+              ? t(
+                  "characterChatSessions.characterEmpty",
+                  "No conversations with this character yet.",
+                )
+              : t(
+                  "characterChatSessions.empty",
+                  "No character conversations yet.",
+                )}
+      </p>
+    );
+  };
 
   return (
     <section
@@ -330,40 +555,22 @@ export const CharacterChatSessionsPanel = ({
     >
       <PlaygroundRailSection
         label={t("characterChatSessions.label", "Character sessions")}
-        title={t("characterChatSessions.title", "Recent character chats")}
+        title={t("characterChatSessions.title", "Character conversations")}
       >
-        <div className="mt-1 flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <p className={cockpitRailStyles.value}>
-              {t("characterChatSessions.resumeTitle", "Resume role-play")}
-            </p>
-            <p className={cockpitRailStyles.muted}>
-              {t(
-                "characterChatSessions.resumeDetail",
-                "Recent character conversations stay separate from saved role-play setups.",
-              )}
-            </p>
-          </div>
-          <span
-            className={cn(
-              "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold",
-              cockpitRailToneClass(sessionBadgeTone),
-            )}
-          >
-            {hasSessions
-              ? t("characterChatSessions.available", "Available")
-              : hardErrorWithoutData
-                ? t("characterChatSessions.errorBadge", "Error")
-                : t("characterChatSessions.emptyBadge", "None")}
-          </span>
-        </div>
-
-        {lastSession && lastSessionTitle ? (
+        <p className={cockpitRailStyles.value}>
+          {t("characterChatSessions.resumeTitle", "Resume role-play")}
+        </p>
+        <p className={cockpitRailStyles.muted}>
+          {t(
+            "characterChatSessions.resumeDetail",
+            "Recent character conversations stay separate from saved role-play setups.",
+          )}
+        </p>
+        {lastSession ? (
           <button
             type="button"
-            onClick={() => {
-              selectServerChat(lastSession);
-            }}
+            disabled={!canResume}
+            onClick={() => select(lastSession)}
             aria-label={t(
               "characterChatSessions.resumeLastAction",
               "Resume last character chat: {{title}}",
@@ -371,87 +578,160 @@ export const CharacterChatSessionsPanel = ({
             )}
             className={cn(
               cockpitRailStyles.action,
-              "mt-3 w-full justify-center border-primary/40 bg-primary/10 text-primary hover:bg-primary/15",
+              "mt-3 w-full justify-center",
             )}
           >
-            {t("characterChatSessions.resumeLast", "Resume last character chat")}
+            {t(
+              "characterChatSessions.resumeLast",
+              "Resume last character chat",
+            )}
           </button>
         ) : null}
-
-        {isLoading && !hasUsableData ? (
-          <div
-            role="status"
-            aria-live="polite"
-            className={cn("mt-3", cockpitRailStyles.emptyInset)}
-          >
-            {t(
-              "characterChatSessions.loading",
-              "Loading character sessions...",
-            )}
-          </div>
-        ) : sidebarRefreshState === "recoverable-error" && !hasUsableData ? (
-          <div role="alert" className={cn("mt-3", cockpitRailStyles.emptyInset)}>
-            {t(
-              "characterChatSessions.refreshFailed",
-              "Unable to refresh character sessions right now.",
-            )}
-          </div>
-        ) : hardErrorWithoutData ? (
-          <div
-            role="alert"
-            className={cn(
-              "mt-3",
-              cockpitRailStyles.emptyInset,
-              "border-danger/30 bg-danger/10 text-danger",
-            )}
-          >
-            {t(
-              "characterChatSessions.loadFailed",
-              "Character sessions could not be loaded.",
-            )}
-          </div>
-        ) : hasSessions ? (
-          <>
-            {isShowingStaleData ? (
-              <p
-                role="status"
-                aria-live="polite"
-                className="mt-2 rounded border border-warning/30 bg-warning/10 px-2 py-1 text-xs text-text-subtle"
-              >
-                {t(
-                  "characterChatSessions.stale",
-                  "Showing character sessions from the last successful refresh.",
-                )}
-              </p>
-            ) : null}
-            <CharacterSessionList
-              label={currentCharacterLabel}
-              sessions={currentCharacterSessions}
-              activeCharacterId={activeCharacterId}
-              activeCharacterName={activeCharacterName}
-              activeServerChatId={activeServerChatId}
-              onSelectSession={selectServerChat}
-            />
-            <CharacterSessionList
-              label={t(
-                "characterChatSessions.otherCharactersListLabel",
-                "Other character sessions",
+        <div
+          className="mt-3 space-y-2"
+          aria-busy={primary.isFetching || undefined}
+        >
+          {!supportedCharacter ? (
+            <p role="status" className={cockpitRailStyles.emptyInset}>
+              {t(
+                "characterChatSessions.localCard",
+                "Server sessions are available for characters saved on this server.",
               )}
-              sessions={otherCharacterSessions}
-              activeCharacterId={activeCharacterId}
+            </p>
+          ) : (
+            historyFeedback(primary, sessions.length, true)
+          )}
+          {unverifiedSessions && supportedCharacter && ownerCurrent ? (
+            <p role="alert" className={cockpitRailStyles.emptyInset}>
+              {t(
+                "characterChatSessions.unverified",
+                "Some sessions in this page could not be verified for this character. Retry to refresh.",
+              )}
+              <button
+                type="button"
+                disabled={!canResume || primary.isFetching}
+                onClick={() => {
+                  if (canDispatch()) void primary.refetch();
+                }}
+                className={cn(cockpitRailStyles.action, "mt-2")}
+              >
+                {t("characterChatSessions.retry", "Retry character sessions")}
+              </button>
+            </p>
+          ) : null}
+          {supportedCharacter ? (
+            <CharacterSessionList
+              label={listLabel}
+              sessions={sessions}
+              activeCharacterId={characterId}
               activeCharacterName={activeCharacterName}
               activeServerChatId={activeServerChatId}
-              onSelectSession={selectServerChat}
+              canResume={canResume}
+              onSelectSession={select}
             />
-          </>
-        ) : (
-          <div className={cn("mt-3", cockpitRailStyles.emptyInset)}>
-            {t(
-              "characterChatSessions.empty",
-              "No character conversations yet.",
-            )}
+          ) : null}
+          {supportedCharacter && ownerCurrent && enabled ? (
+            <button
+              type="button"
+              aria-expanded={currentView.all}
+              onClick={() => changeView({ all: !currentView.all, page: 1 })}
+              className={cockpitRailStyles.action}
+            >
+              {currentView.all
+                ? t(
+                    "characterChatSessions.backToRecent",
+                    "Back to recent sessions",
+                  )
+                : hasCharacter
+                  ? t(
+                      "characterChatSessions.allSessions",
+                      "All sessions for this character",
+                    )
+                  : t(
+                      "characterChatSessions.allCharacters",
+                      "All character sessions",
+                    )}
+            </button>
+          ) : null}
+          {currentView.all && supportedCharacter && ownerCurrent ? (
+            <nav
+              aria-label={t(
+                "characterChatSessions.pagination",
+                "Character sessions pages",
+              )}
+              className="flex flex-wrap items-center gap-2"
+            >
+              <button
+                type="button"
+                className={cockpitRailStyles.action}
+                disabled={currentView.page === 1}
+                aria-label={t(
+                  "characterChatSessions.previousPage",
+                  "Previous sessions page",
+                )}
+                onClick={() => changeView({ page: currentView.page - 1 })}
+              >
+                {t("characterChatSessions.previous", "Previous")}
+              </button>
+              <span role="status" className={cockpitRailStyles.muted}>
+                {t("characterChatSessions.page", "Page {{page}}", {
+                  page: currentView.page,
+                })}
+              </span>
+              <button
+                type="button"
+                className={cockpitRailStyles.action}
+                disabled={
+                  !canResume || primary.isFetching || !hasNext || primaryError
+                }
+                aria-label={t(
+                  "characterChatSessions.nextPage",
+                  "Next sessions page",
+                )}
+                onClick={() => changeView({ page: currentView.page + 1 })}
+              >
+                {t("characterChatSessions.next", "Next")}
+              </button>
+            </nav>
+          ) : null}
+        </div>
+        {hasCharacter && ownerCurrent && enabled ? (
+          <div className="mt-3">
+            <button
+              type="button"
+              aria-expanded={currentView.other}
+              onClick={() => changeView({ other: !currentView.other })}
+              className={cockpitRailStyles.action}
+            >
+              {t(
+                "characterChatSessions.otherRecents",
+                "Recent chats with other characters",
+              )}
+            </button>
+            {currentView.other ? (
+              <div className="mt-2 space-y-2">
+                <p className={cockpitRailStyles.muted}>
+                  {t(
+                    "characterChatSessions.otherSample",
+                    "A sample from the {{count}} most recent character chats; older chats may not appear here.",
+                    { count: previewLimit },
+                  )}
+                </p>
+                {historyFeedback(other, otherSessions.length, false)}
+                <CharacterSessionList
+                  label={t(
+                    "characterChatSessions.otherCharactersListLabel",
+                    "Other character sessions",
+                  )}
+                  sessions={otherSessions}
+                  activeServerChatId={activeServerChatId}
+                  canResume={canResume}
+                  onSelectSession={select}
+                />
+              </div>
+            ) : null}
           </div>
-        )}
+        ) : null}
       </PlaygroundRailSection>
     </section>
   );

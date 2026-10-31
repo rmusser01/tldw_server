@@ -27,6 +27,12 @@ describe('Vitest setup contract', () => {
     expect(typeof File.prototype.text).toBe('function');
   });
 
+  it('keeps independent Dexie table methods available to storage fixtures', async () => {
+    const { db } = await import('@/db/dexie/schema');
+    expect(db.chatHistories).not.toBe(db.messages);
+    expect(typeof db.chatHistories.update).toBe('function');
+  });
+
   it('keeps the setup UI on the bundle-first audio flow', () => {
     const setupUiPath = path.resolve(
       __dirname,
@@ -38,7 +44,7 @@ describe('Vitest setup contract', () => {
       'static',
       'setup',
       'js',
-      'setup.js',
+      'setup.js'
     );
     const source = fs.readFileSync(setupUiPath, 'utf8');
 

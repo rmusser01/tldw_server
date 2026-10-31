@@ -34,7 +34,7 @@ Follow-up review-fix task for the CodeRabbit inline comment on PR #1425. Scope i
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review surface: CodeRabbit inline comment on PR #1425 flagged false success messaging when import commit completed but pack refresh failed.
 
 RED: bunx vitest run src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx failed because the completed success message remained visible after a mocked pack-refresh failure.
@@ -48,7 +48,7 @@ HYGIENE: git diff --check passed.
 TSC: bunx tsc --noEmit --pretty false still exits 2 on existing repo-wide diagnostics; filtered /tmp/persona-visual-import-tsc-coderabbit.log showed no diagnostics for the touched VisualPackEditor, VisualPackEditor test, persona-visuals service, or persona-visuals types files.
 
 BANDIT: not applicable; touched production code is frontend TypeScript only. No docs change required for this review fix.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

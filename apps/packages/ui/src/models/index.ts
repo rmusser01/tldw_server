@@ -1,4 +1,5 @@
 import { ChatTldw } from "./ChatTldw"
+import type { ChatScope } from "@/types/chat-scope"
 import type { ChatResearchContext } from "@/services/tldw/TldwApiClient"
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import {
@@ -35,7 +36,9 @@ type PageAssistModelOptions = {
   extraBody?: string
   researchContext?: ChatResearchContext
   requestScope?: ServicePromptRequestScope
+  scope?: ChatScope
   retryFailedTurn?: boolean
+  refreshImageCapability?: boolean
   clientMessageId?: string
   regenerateFromMessageId?: string
 }
@@ -70,7 +73,9 @@ export const pageAssistModel = async ({
   extraBody,
   researchContext,
   requestScope,
+  scope,
   retryFailedTurn,
+  refreshImageCapability,
   clientMessageId,
   regenerateFromMessageId
 }: PageAssistModelOptions): Promise<ChatTldw> => {
@@ -89,21 +94,41 @@ export const pageAssistModel = async ({
   const resolvedToolChoice = toolChoice ?? storedToolChoice
   const selectedModel = parseProviderQualifiedModelSelection(model)
   const normalizedModelId = selectedModel.modelId.replace(/^tldw:/, "")
+  const rawProvider = apiProvider ?? currentChatModelSettings.apiProvider
+  const explicitProvider =
+    typeof rawProvider === "string" && rawProvider.trim().length > 0
+      ? rawProvider.trim()
+      : undefined
+  const defaultApiProvider =
+    !explicitProvider ? await getDefaultApiProvider() : null
+  const normalizedApiProvider = await resolveApiProviderForModel({
+    modelId: model,
+    explicitProvider: explicitProvider ?? defaultApiProvider ?? undefined
+  })
   let modelSupportsTools = false
   let modelSupportsMultimodal = false
+  // Optional sampling fields the model's provider accepts (#3283).
+  let modelSamplingFields: readonly string[] = []
   try {
-    const modelInfo = selectedModel.provider
-      ? (await tldwModels.getModels()).find(
-          (info) =>
-            normalizeProviderAvailabilityKey(info.provider) ===
-              normalizeProviderAvailabilityKey(selectedModel.provider) &&
-            info.id === normalizedModelId
-        )
+    const matchesModel = (info: { id: string; provider?: string }) =>
+      info.id === normalizedModelId &&
+      (!normalizedApiProvider ||
+        normalizeProviderAvailabilityKey(info.provider) ===
+          normalizeProviderAvailabilityKey(normalizedApiProvider))
+    let modelInfo = selectedModel.provider
+      ? (await tldwModels.getModels()).find(matchesModel)
       : await tldwModels.getModel(normalizedModelId)
+    if (modelInfo && !matchesModel(modelInfo)) {
+      modelInfo = (await tldwModels.getModels()).find(matchesModel)
+    }
+    if (refreshImageCapability && !modelInfo?.capabilities?.includes("vision")) {
+      modelInfo = (await tldwModels.getModels(true, { requireFresh: true })).find(matchesModel)
+    }
     modelSupportsTools = Boolean(modelInfo?.capabilities?.includes("tools"))
     modelSupportsMultimodal = Boolean(
       modelInfo?.capabilities?.includes("vision")
     )
+    modelSamplingFields = modelInfo?.samplingFields ?? []
   } catch {
     modelSupportsTools = false
     modelSupportsMultimodal = false
@@ -153,18 +178,6 @@ export const pageAssistModel = async ({
     resolvedSlashInjectionMode && resolvedSlashInjectionMode.trim().length > 0
       ? resolvedSlashInjectionMode.trim()
       : undefined
-  const rawProvider = apiProvider ?? currentChatModelSettings.apiProvider
-  const explicitProvider =
-    typeof rawProvider === "string" && rawProvider.trim().length > 0
-      ? rawProvider.trim()
-      : undefined
-  const defaultApiProvider = !explicitProvider
-    ? await getDefaultApiProvider()
-    : null
-  const normalizedApiProvider = await resolveApiProviderForModel({
-    modelId: model,
-    explicitProvider: explicitProvider ?? defaultApiProvider ?? undefined
-  })
   const resolvedExtraHeadersBase = parseJsonObject(
     extraHeaders ?? currentChatModelSettings.extraHeaders
   )
@@ -185,6 +198,8 @@ export const pageAssistModel = async ({
   const {
     keepAlive,
     temperature,
+    frequencyPenalty,
+    presencePenalty,
     topK,
     topP,
     numCtx,
@@ -207,6 +222,12 @@ export const pageAssistModel = async ({
     temperature:
       currentChatModelSettings?.temperature ??
       userDefaultModelSettings?.temperature,
+    frequencyPenalty:
+      currentChatModelSettings?.frequencyPenalty ??
+      userDefaultModelSettings?.frequencyPenalty,
+    presencePenalty:
+      currentChatModelSettings?.presencePenalty ??
+      userDefaultModelSettings?.presencePenalty,
     topK: currentChatModelSettings?.topK ?? userDefaultModelSettings?.topK,
     topP: currentChatModelSettings?.topP ?? userDefaultModelSettings?.topP,
     numCtx:
@@ -270,6 +291,16 @@ export const pageAssistModel = async ({
     model: normalizedModelId,
     temperature: payload.temperature,
     topP: payload.topP,
+    frequencyPenalty: modelSettings?.frequencyPenalty ?? frequencyPenalty,
+    presencePenalty: modelSettings?.presencePenalty ?? presencePenalty,
+    // Providers reject fields they don't support, so these go only where the
+    // server says they are accepted (#3283).
+    // The server takes a whole number for top_k.
+    topK:
+      modelSamplingFields.includes("top_k") && typeof payload.topK === "number"
+        ? Math.round(payload.topK)
+        : undefined,
+    minP: modelSamplingFields.includes("min_p") ? payload.minP : undefined,
     maxTokens: payload.numPredict,
     streaming: true,
     reasoningEffort: isValidReasoningEffort(modelSettings?.reasoningEffort)
@@ -290,6 +321,7 @@ export const pageAssistModel = async ({
     extraBody: resolvedExtraBody,
     researchContext,
     requestScope,
+    scope,
     retryFailedTurn,
     clientMessageId,
     regenerateFromMessageId,

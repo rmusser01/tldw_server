@@ -155,6 +155,10 @@ const nextConfig = {
         destination: `${internalApiOrigin}/health`,
       },
       {
+        source: '/openapi.json',
+        destination: `${internalApiOrigin}/openapi.json`,
+      },
+      {
         source: '/api/v1/media',
         destination: `${internalApiOrigin}/api/v1/media/`,
       },
@@ -200,6 +204,12 @@ const nextConfig = {
   },
   // Ensure Next resolves the correct monorepo root when multiple lockfiles exist.
   outputFileTracingRoot: repoWorkspaceRoot,
+  outputFileTracingIncludes: {
+    '/api/documentation/*': [
+      '../../Docs/Published/**/*.{md,mdx}',
+      '../../Docs/User_Documentation/**/*.{md,mdx}',
+    ],
+  },
   transpilePackages: ['@tldw/ui'],
   webpack: (config) => {
     // Support extension-aligned aliases + shims

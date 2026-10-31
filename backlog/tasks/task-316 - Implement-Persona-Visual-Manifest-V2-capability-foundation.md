@@ -56,7 +56,7 @@ Verification targets: focused pytest for persona visual core/API capability beha
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented additive renderer capability metadata in the backend registry/API, including explicit non-activatable live2d future-state metadata, while preserving existing sprite_frames response fields and runtime support boundaries.
 
 Verification: pytest tldw_Server_API/tests/Persona/test_persona_visuals_core.py tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q passed with 59 passed; bun run test -- src/services/__tests__/persona-visuals.test.ts passed with 2 tests; git diff --check passed; Bandit on touched backend files reported 0 findings.
@@ -70,7 +70,7 @@ Review follow-up started for PR #1630. Still-valid findings to address: GIF capa
 Review follow-up fixed PR #1630 comments: shared GIF-capable raster MIME/extension constants now feed both upload validation and renderer capability metadata; role_category_map is converted to an immutable mappingproxy with tuple values at capability construction; setup_status uses the shared Literal alias and invalid values raise ValueError; live2d.disabled_reason is asserted in the API contract test; endpoint mapping now relies on Pydantic coercion for tuple/mapping fields.
 
 Review-fix verification: focused red tests failed before implementation for GIF drift, mutable role_category_map, invalid setup_status, and missing live2d disabled_reason coverage. After fixes, pytest tldw_Server_API/tests/Persona/test_persona_visuals_core.py tldw_Server_API/tests/Persona/test_persona_visuals_api.py tldw_Server_API/tests/Persona/test_persona_visual_service.py -q passed with 75 passed; bun run test -- src/services/__tests__/persona-visuals.test.ts passed with 2 passed; git diff --check passed; Bandit review-fix JSON results length was 0 with all severity/confidence counts 0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

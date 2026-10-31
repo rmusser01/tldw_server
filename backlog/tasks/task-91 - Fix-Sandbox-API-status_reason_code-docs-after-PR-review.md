@@ -51,9 +51,9 @@ Address PR #1330 review feedback that Docs/API-related/Sandbox_API.md documents 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified the PR finding against `tldw_Server_API/app/core/Sandbox/run_status_taxonomy.py` and the existing normalized run status table in `Docs/Sandbox/sandbox-runtime-capability-inventory.md`. Updated `Docs/API-related/Sandbox_API.md` to list the exact returned literals instead of hyphenated or collapsed labels. Verification: `rg` confirmed the exact literals appear in the API guide, capability inventory, and canonical taxonomy; `git diff --check` passed. Bandit skipped because this is a docs/backlog-only change.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

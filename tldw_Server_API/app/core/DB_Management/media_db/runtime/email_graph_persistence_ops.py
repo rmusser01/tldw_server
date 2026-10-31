@@ -99,18 +99,21 @@ def upsert_email_message_graph(
     label_text = ", ".join(normalized_labels) if normalized_labels else None
     has_attachments = bool(attachments)
     raw_metadata_json = json.dumps(metadata_map, ensure_ascii=False) if metadata_map else None
+    # The optional SQL suffix is a backend-selected literal; all message values
+    # remain bound parameters in the four statements below.
+    returning_id = " RETURNING id" if self.backend_type == BackendType.POSTGRESQL else ""
 
     with self.transaction() as conn:
-        self._execute_with_connection(
+        source_cursor = self._execute_with_connection(
             conn,
             (
-                "INSERT INTO email_sources "
+                "INSERT INTO email_sources "  # nosec B608
                 "(tenant_id, provider, source_key, display_name, status) "
                 "VALUES (?, ?, ?, ?, 'active') "
                 "ON CONFLICT(tenant_id, provider, source_key) "
                 "DO UPDATE SET "
                 "display_name = COALESCE(EXCLUDED.display_name, email_sources.display_name), "
-                "updated_at = CURRENT_TIMESTAMP"
+                "updated_at = CURRENT_TIMESTAMP" + returning_id
             ),
             (
                 resolved_tenant,
@@ -119,7 +122,7 @@ def upsert_email_message_graph(
                 resolved_source_key,
             ),
         )
-        source_row = self._fetchone_with_connection(
+        source_row = source_cursor.fetchone() if returning_id else self._fetchone_with_connection(
             conn,
             (
                 "SELECT id FROM email_sources "
@@ -222,14 +225,14 @@ def upsert_email_message_graph(
                 ),
             )
         else:
-            self._execute_with_connection(
+            message_cursor = self._execute_with_connection(
                 conn,
                 (
-                    "INSERT INTO email_messages ("
+                    "INSERT INTO email_messages ("  # nosec B608
                     "tenant_id, media_id, source_id, source_message_id, message_id, "
                     "subject, body_text, internal_date, from_text, to_text, cc_text, bcc_text, "
                     "label_text, has_attachments, raw_metadata_json"
-                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" + returning_id
                 ),
                 (
                     resolved_tenant,
@@ -249,7 +252,7 @@ def upsert_email_message_graph(
                     raw_metadata_json,
                 ),
             )
-            inserted_message = self._fetchone_with_connection(
+            inserted_message = message_cursor.fetchone() if returning_id else self._fetchone_with_connection(
                 conn,
                 (
                     "SELECT id FROM email_messages "
@@ -279,21 +282,24 @@ def upsert_email_message_graph(
                 raise DatabaseError("Failed to resolve email message row after insert.")  # noqa: TRY003
             email_message_id = int(inserted_message["id"])
 
-        self._execute_with_connection(
-            conn,
-            "DELETE FROM email_message_participants WHERE email_message_id = ?",
-            (email_message_id,),
-        )
-        self._execute_with_connection(
-            conn,
-            "DELETE FROM email_message_labels WHERE email_message_id = ?",
-            (email_message_id,),
-        )
-        self._execute_with_connection(
-            conn,
-            "DELETE FROM email_attachments WHERE email_message_id = ?",
-            (email_message_id,),
-        )
+        # New messages cannot have relations yet; replacements must remove the
+        # old graph before rebuilding it in this same transaction.
+        if existing_message is not None:
+            self._execute_with_connection(
+                conn,
+                "DELETE FROM email_message_participants WHERE email_message_id = ?",
+                (email_message_id,),
+            )
+            self._execute_with_connection(
+                conn,
+                "DELETE FROM email_message_labels WHERE email_message_id = ?",
+                (email_message_id,),
+            )
+            self._execute_with_connection(
+                conn,
+                "DELETE FROM email_attachments WHERE email_message_id = ?",
+                (email_message_id,),
+            )
 
         for role_name, value in (
             ("from", resolved_from),
@@ -309,17 +315,18 @@ def upsert_email_message_graph(
                 if not normalized_addr:
                     continue
                 display = str(display_name or "").strip() or None
-                self._execute_with_connection(
+                participant_cursor = self._execute_with_connection(
                     conn,
                     (
-                        "INSERT INTO email_participants (tenant_id, email_normalized, display_name) "
+                        "INSERT INTO email_participants (tenant_id, email_normalized, display_name) "  # nosec B608
                         "VALUES (?, ?, ?) "
                         "ON CONFLICT(tenant_id, email_normalized) "
                         "DO UPDATE SET display_name = COALESCE(EXCLUDED.display_name, email_participants.display_name)"
+                        + returning_id
                     ),
                     (resolved_tenant, normalized_addr, display),
                 )
-                participant_row = self._fetchone_with_connection(
+                participant_row = participant_cursor.fetchone() if returning_id else self._fetchone_with_connection(
                     conn,
                     (
                         "SELECT id FROM email_participants "
@@ -346,17 +353,17 @@ def upsert_email_message_graph(
             label_key = str(label_name).strip().lower()
             if not label_key:
                 continue
-            self._execute_with_connection(
+            label_cursor = self._execute_with_connection(
                 conn,
                 (
-                    "INSERT INTO email_labels (tenant_id, label_key, label_name) "
+                    "INSERT INTO email_labels (tenant_id, label_key, label_name) "  # nosec B608
                     "VALUES (?, ?, ?) "
                     "ON CONFLICT(tenant_id, label_key) "
-                    "DO UPDATE SET label_name = EXCLUDED.label_name, updated_at = CURRENT_TIMESTAMP"
+                    "DO UPDATE SET label_name = EXCLUDED.label_name, updated_at = CURRENT_TIMESTAMP" + returning_id
                 ),
                 (resolved_tenant, label_key, label_name),
             )
-            label_row = self._fetchone_with_connection(
+            label_row = label_cursor.fetchone() if returning_id else self._fetchone_with_connection(
                 conn,
                 (
                     "SELECT id FROM email_labels "

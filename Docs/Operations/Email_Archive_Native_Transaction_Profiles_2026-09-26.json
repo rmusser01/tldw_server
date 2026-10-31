@@ -1,0 +1,268 @@
+{
+  "task": "TASK-13375",
+  "operation_count": 300,
+  "retry_profiles_included": false,
+  "factory_construction_included": false,
+  "profiles": {
+    "sqlite": {
+      "before": {
+        "worker_seconds": 4.754997240000003,
+        "metrics": {
+          "configure_sqlite_connection": {
+            "calls": 1814,
+            "cumulative_seconds": 2.386006197000001
+          },
+          "read_persisted_email_content": {
+            "calls": 300,
+            "cumulative_seconds": 1.4850343230000003
+          }
+        },
+        "diagnostic_http_report": {
+          "backend": "sqlite",
+          "full_app": true,
+          "auth_mode": "multi_user",
+          "test_mode": false,
+          "platform": "macOS-26.5.2-arm64-arm-64bit",
+          "cpu_count": 18,
+          "python": "3.11.13",
+          "runs": [
+            {
+              "batch": 0,
+              "messages": 100,
+              "archive_bytes": 36280,
+              "elapsed_seconds": 1.8782739579910412,
+              "messages_per_second": 53.240369741886695
+            },
+            {
+              "batch": 1,
+              "messages": 100,
+              "archive_bytes": 36280,
+              "elapsed_seconds": 1.8942858329974115,
+              "messages_per_second": 52.79034359971199
+            },
+            {
+              "batch": 2,
+              "messages": 100,
+              "archive_bytes": 36280,
+              "elapsed_seconds": 1.7752332499949262,
+              "messages_per_second": 56.3306258489051
+            }
+          ],
+          "messages": 300,
+          "attachment_ratio": 0,
+          "rerun_messages": 100,
+          "idempotent": true,
+          "cross_user_search_count": 0,
+          "cross_user_detail_status": 404,
+          "outbound_attempts": 0,
+          "model_attempts": 0,
+          "aggregate_messages_per_second": 54.07555721415722,
+          "target_messages_per_second": 50,
+          "root": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-sqlite-w2qfti3i",
+          "all_batches_meet_target": true
+        }
+      },
+      "after": {
+        "worker_seconds": 2.900509887999999,
+        "metrics": {
+          "read_persisted_email_content": {
+            "calls": 300,
+            "cumulative_seconds": 0.120938294
+          },
+          "configure_sqlite_connection": {
+            "calls": 1214,
+            "cumulative_seconds": 1.0115954969999996
+          }
+        },
+        "diagnostic_http_report": {
+          "backend": "sqlite",
+          "full_app": true,
+          "auth_mode": "multi_user",
+          "test_mode": false,
+          "platform": "macOS-26.5.2-arm64-arm-64bit",
+          "cpu_count": 18,
+          "python": "3.11.13",
+          "runs": [
+            {
+              "batch": 0,
+              "messages": 100,
+              "archive_bytes": 36280,
+              "elapsed_seconds": 1.2529245419427752,
+              "messages_per_second": 79.81326620431648
+            },
+            {
+              "batch": 1,
+              "messages": 100,
+              "archive_bytes": 36280,
+              "elapsed_seconds": 1.1935281250625849,
+              "messages_per_second": 83.78520614648801
+            },
+            {
+              "batch": 2,
+              "messages": 100,
+              "archive_bytes": 36280,
+              "elapsed_seconds": 1.1183445419883355,
+              "messages_per_second": 89.4178817399218
+            }
+          ],
+          "messages": 300,
+          "attachment_ratio": 0,
+          "rerun_messages": 100,
+          "idempotent": true,
+          "cross_user_search_count": 0,
+          "cross_user_detail_status": 404,
+          "outbound_attempts": 0,
+          "model_attempts": 0,
+          "aggregate_messages_per_second": 84.15625978474293,
+          "target_messages_per_second": 50,
+          "root": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-sqlite-dqw6u77l",
+          "all_batches_meet_target": true
+        }
+      }
+    },
+    "postgres": {
+      "before": {
+        "worker_seconds": 17.65160952700002,
+        "metrics": {
+          "read_persisted_email_content": {
+            "calls": 300,
+            "cumulative_seconds": 3.408221035
+          },
+          "configure_sqlite_connection": {
+            "calls": 14,
+            "cumulative_seconds": 0.006331836
+          },
+          "get_connection": {
+            "calls": 1200,
+            "cumulative_seconds": 4.182307994
+          },
+          "_apply_scope_settings": {
+            "calls": 1200,
+            "cumulative_seconds": 4.170619305999998
+          }
+        },
+        "diagnostic_http_report": {
+          "backend": "postgresql",
+          "full_app": true,
+          "auth_mode": "multi_user",
+          "test_mode": false,
+          "platform": "macOS-26.5.2-arm64-arm-64bit",
+          "cpu_count": 18,
+          "python": "3.11.13",
+          "runs": [
+            {
+              "batch": 0,
+              "messages": 100,
+              "archive_bytes": 36280,
+              "elapsed_seconds": 7.87278299999889,
+              "messages_per_second": 12.701988610636683
+            },
+            {
+              "batch": 1,
+              "messages": 100,
+              "archive_bytes": 36280,
+              "elapsed_seconds": 5.9844672090839595,
+              "messages_per_second": 16.70992529597417
+            },
+            {
+              "batch": 2,
+              "messages": 100,
+              "archive_bytes": 36280,
+              "elapsed_seconds": 5.725744083058089,
+              "messages_per_second": 17.46497897031237
+            }
+          ],
+          "messages": 300,
+          "attachment_ratio": 0,
+          "rerun_messages": 100,
+          "idempotent": true,
+          "cross_user_search_count": 0,
+          "cross_user_detail_status": 404,
+          "outbound_attempts": 0,
+          "model_attempts": 0,
+          "aggregate_messages_per_second": 15.319414157231115,
+          "target_messages_per_second": 50,
+          "root": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-postgres-4bfe480x",
+          "rls_enabled": true,
+          "rls_forced": true,
+          "superuser": false,
+          "bypass_rls": false,
+          "owner_media_rows": 300,
+          "other_media_rows": 0,
+          "all_batches_meet_target": false
+        }
+      },
+      "after": {
+        "worker_seconds": 10.238244159000006,
+        "metrics": {
+          "read_persisted_email_content": {
+            "calls": 300,
+            "cumulative_seconds": 0.548427668
+          },
+          "configure_sqlite_connection": {
+            "calls": 14,
+            "cumulative_seconds": 0.0048587100000000005
+          },
+          "get_connection": {
+            "calls": 600,
+            "cumulative_seconds": 1.3752246730000013
+          },
+          "_apply_scope_settings": {
+            "calls": 600,
+            "cumulative_seconds": 1.3710512980000011
+          }
+        },
+        "diagnostic_http_report": {
+          "backend": "postgresql",
+          "full_app": true,
+          "auth_mode": "multi_user",
+          "test_mode": false,
+          "platform": "macOS-26.5.2-arm64-arm-64bit",
+          "cpu_count": 18,
+          "python": "3.11.13",
+          "runs": [
+            {
+              "batch": 0,
+              "messages": 100,
+              "archive_bytes": 36280,
+              "elapsed_seconds": 4.105193041963503,
+              "messages_per_second": 24.359390405711657
+            },
+            {
+              "batch": 1,
+              "messages": 100,
+              "archive_bytes": 36280,
+              "elapsed_seconds": 4.016420625033788,
+              "messages_per_second": 24.89779067877353
+            },
+            {
+              "batch": 2,
+              "messages": 100,
+              "archive_bytes": 36280,
+              "elapsed_seconds": 3.6232142919907346,
+              "messages_per_second": 27.599802810740215
+            }
+          ],
+          "messages": 300,
+          "attachment_ratio": 0,
+          "rerun_messages": 100,
+          "idempotent": true,
+          "cross_user_search_count": 0,
+          "cross_user_detail_status": 404,
+          "outbound_attempts": 0,
+          "model_attempts": 0,
+          "aggregate_messages_per_second": 25.54315832020489,
+          "target_messages_per_second": 50,
+          "root": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-postgres-iwz9iwnd",
+          "rls_enabled": true,
+          "rls_forced": true,
+          "superuser": false,
+          "bypass_rls": false,
+          "owner_media_rows": 300,
+          "other_media_rows": 0,
+          "all_batches_meet_target": false
+        }
+      }
+    }
+  }
+}

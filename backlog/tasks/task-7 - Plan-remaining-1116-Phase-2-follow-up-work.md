@@ -35,7 +35,7 @@ Create a staged design/spec for the remaining #1116 earlier-phase follow-up extr
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created spec path: Docs/superpowers/specs/2026-05-03-phase2-followup-stack-design.md
 
 Verified current #1116 with gh issue view on 2026-05-03; Phase 4 stack is closed and remaining work is earlier Phase 2 follow-up debt.
@@ -43,7 +43,7 @@ Verified current #1116 with gh issue view on 2026-05-03; Phase 4 stack is closed
 Ran git diff --check on the new spec and TASK-7 file; no whitespace errors reported.
 
 Bandit skipped: docs/task-only planning change, no production Python source modified.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -84,6 +84,35 @@ def test_saved_materialized_custom_preset_and_sampling_supersede_base():
     assert context["history_sampling"] == {"temperature": 0.2}
 
 
+@pytest.mark.unit
+def test_saved_generation_extensions_use_authoritative_snapshot_sampling():
+    from tldw_Server_API.app.core.Chat.history_context import project_history_context
+
+    captured = state()
+    participant = captured["behavior_snapshot"]["payload"]["participants"][0]
+    participant["prompt"]["prompt_relevant_extensions"]["character_extensions"] = {
+        "tldw": {"generation": {"temperature": "0.9", "stopStrings": ["END"]}}
+    }
+    participant["generation_defaults"]["sampling"] = {"temperature": 0.25, "stop": ["SAVED"]}
+
+    _card, _character_id, context = project_history_context(captured)
+
+    assert context["history_sampling"] == {"temperature": 0.25, "stop": ["SAVED"]}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("generation", [{"future_effect": True}, "not a mapping", None])
+def test_saved_generation_extensions_reject_unknown_or_invalid_carriers(generation):
+    from tldw_Server_API.app.core.Chat.history_context import project_history_context
+
+    captured = state()
+    participant = captured["behavior_snapshot"]["payload"]["participants"][0]
+    participant["prompt"]["prompt_relevant_extensions"]["character_extensions"] = {"tldw": {"generation": generation}}
+
+    with pytest.raises(HistorySelectionError, match="character_extensions"):
+        project_history_context(captured)
+
+
 @pytest.mark.asyncio
 async def test_current_input_image_loss_is_rejected_before_admission():
     from fastapi import HTTPException
@@ -179,11 +208,14 @@ def test_materialized_author_note_gates_only_substantive_active_state(note, unsu
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("metadata", [
-    {"tldw_retry_failed_turn": True},
-    {"tldw_regenerate_from_message_id": "reply"},
-])
-async def test_legacy_retry_flags_cannot_mutate_a_versioned_history_selection(metadata):
+@pytest.mark.parametrize(
+    "metadata,code",
+    [
+        ({"tldw_retry_failed_turn": True}, "unsupported_history_legacy_retry"),
+        ({"tldw_regenerate_from_message_id": "reply"}, "missing_authenticated_history_binding"),
+    ],
+)
+async def test_versioned_actions_require_qualified_admission_before_storage(metadata, code):
     from types import SimpleNamespace
     from fastapi import HTTPException
     from tldw_Server_API.app.core.Chat.chat_service import build_context_and_messages
@@ -193,8 +225,46 @@ async def test_legacy_retry_flags_cannot_mutate_a_versioned_history_selection(me
         await build_context_and_messages(
             chat_db=object(),
             request_data=SimpleNamespace(metadata=metadata, tldw_history_selection_v1=object()),
-            loop=None, metrics=None, default_save_to_db=True,
-            final_conversation_id="conversation", save_message_fn=None,
+            loop=None,
+            metrics=None,
+            default_save_to_db=True,
+            final_conversation_id="conversation",
+            save_message_fn=None,
         )
     assert failure.value.status_code == 409
-    assert failure.value.detail["code"] == "unsupported_history_legacy_retry"
+    assert failure.value.detail["code"] == code
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("character", [False, True])
+@pytest.mark.parametrize("settings", [
+    {"chat_dictionary_ids": [42]},
+    {"conversationContext": {"chat_dictionary_ids": [42]}},
+])
+def test_saved_dictionary_settings_have_no_native_projector(character, settings):
+    """Stored membership cannot certify native completion behavior."""
+    from tldw_Server_API.app.core.Chat.history_context import project_history_context
+
+    captured = state() if character else {
+        "conversation": {}, "behavior_snapshot": {"status": "missing"}
+    }
+    captured["settings"] = settings
+    with pytest.raises(HistorySelectionError, match="unsupported_history_context_dictionaries"):
+        project_history_context(captured)
+
+
+@pytest.mark.parametrize("invalid", [None, "asset", "answered", "assistant", "cursor"])
+def test_b02_saved_question_requires_unanswered_text(invalid):
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Chat.history_context import selected_unanswered_text_question
+    content = ({"id": "question", "message": "saved text", "images": ["image"] if invalid == "asset" else []},)
+    nodes = [{"id": "question", "role": "assistant" if invalid == "assistant" else "user"}]
+    if invalid == "answered":
+        nodes.append({"id": "answer", "role": "assistant", "parent_id": "question"})
+    selection = {"purpose": "send", "cursor": {"kind": "after_message", "message_id": "other" if invalid == "cursor" else "question"}}
+    if invalid:
+        with pytest.raises(HistorySelectionError):
+            selected_unanswered_text_question(SimpleNamespace(nodes=nodes), content, selection)
+    else:
+        assert selected_unanswered_text_question(SimpleNamespace(nodes=nodes), content, selection) == content[0]  # nosec B101 - Preserve exact saved text for one new answer intent.

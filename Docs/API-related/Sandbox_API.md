@@ -428,8 +428,11 @@ for display and operator diagnostics.
 
 ## Stream logs (WebSocket)
 WS `/api/v1/sandbox/runs/{id}/stream`
+- Auth (API keys need the `read` scope): `Authorization: Bearer <token>`, `X-API-KEY: <key>`, or, for browsers, `Sec-WebSocket-Protocol: bearer, <token or key>` (the server echoes `bearer`); or the single-user session cookie. Credentials in the query (`?auth_token=`, or `?token=` with signed URLs off) are no longer read.
 - Optional query: `from_seq=<N>` (1.1 resume)
-- When signed URLs are enabled, include `token` and `exp` query params.
+- When signed URLs are enabled, include `token` and `exp` query params. That `token` is the URL's signature, checked in addition to the auth above.
+- On connect the server replays up to the last 100 buffered frames, then streams live frames. With `from_seq=N`, only buffered frames with `seq >= N` are replayed. Heartbeats are live-only and are never replayed.
+- Each connection receives a frame at most once, in strictly increasing `seq` order. Gaps are expected: heartbeats sent before you connected, history older than the 100-frame buffer, or frames dropped when a slow client's queue overflows.
 Frames:
 - `{ "type": "event", "event": "start" }`
 - `{ "type": "stdout"|"stderr", "encoding": "utf8"|"base64", "data": "...", "seq": 123 }`

@@ -36,7 +36,7 @@ Address reviewed P1/P2 new-user documentation issues in README and Docs/Getting_
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented docs repairs for P1/P2 onboarding review: README preflight wording, QUICKSTART manual local auth init and /setup recovery wording, Local profile WebUI setup commands plus published mirror, TROUBLESHOOTING Windows/no-make compose update and NEXT_PUBLIC_X_API_KEY clarification, and focused docs regression coverage.
 
 Verification: source .venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Docs/test_onboarding_guides_structure.py tldw_Server_API/tests/Docs/test_onboarding_entrypoints.py tldw_Server_API/tests/Docs/test_onboarding_default_contract.py tldw_Server_API/tests/Docs/test_quickstart_same_origin_docs.py tldw_Server_API/tests/Docs/test_public_onboarding_profile_parity.py tldw_Server_API/tests/Docs/test_published_onboarding_parity.py => 30 passed. Local Markdown path check for edited files => MISSING_LINKS=0. Bandit: source .venv/bin/activate && python -m bandit -r tldw_Server_API/tests/Docs/test_onboarding_guides_structure.py -f json -o /tmp/bandit_task_2395.json => 0 issues. Bandit not applicable to Markdown-only touched docs.
@@ -54,7 +54,7 @@ Review-rebase follow-up started 2026-06-29:
 - Quality follow-up: `black --check` and `ruff check` passed for `tldw_Server_API/tests/Docs/test_onboarding_guides_structure.py`; `compileall` passed; `git diff --check` passed; README/top-guide docs path hygiene, onboarding command boundary, and onboarding endpoint drift checks passed.
 - Security follow-up: raw Bandit on the touched pytest file only reported B101 pytest `assert` false positives, which were intentionally introduced to satisfy review feedback for standard pytest assertions. Rerun with `-s B101` on the touched test file wrote `/tmp/bandit_pr2427_skip_b101.json` with 0 findings.
 - Push/review follow-up: pushed rebased branch `codex/fix-onboarding-docs-p1-p2` at `6452b23097`, resolved all previously open review threads, and posted PR summary comment https://github.com/rmusser01/tldw_server/pull/2427#issuecomment-4828456659.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

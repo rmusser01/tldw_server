@@ -86,6 +86,23 @@ def test_the_message_is_unchanged_and_reveals_nothing(sync_db: SyncDatabase) -> 
     assert error.__suppress_context__ or error.__context__ is None
 
 
+def test_sqlite_unique_error_is_typed_without_leaking_details(tmp_path: Path) -> None:
+    from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
+    from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend
+
+    backend = SQLiteBackend(
+        DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=str(tmp_path / "unique.sqlite"))
+    )
+    backend.execute("CREATE TABLE named_items (name TEXT NOT NULL UNIQUE)")
+    backend.execute("INSERT INTO named_items (name) VALUES (?)", (_SENSITIVE,))
+
+    with pytest.raises(UniqueConstraintError) as raised:
+        backend.execute("INSERT INTO named_items (name) VALUES (?)", (_SENSITIVE,))
+
+    assert str(raised.value) == "SQLite query execution failed"
+    assert raised.value.__cause__ is None
+
+
 def test_sqlite_integrity_error_is_the_classification_source() -> None:
     """Pin the driver class this maps from, so the mapping is not silently widened."""
     assert issubclass(sqlite3.IntegrityError, sqlite3.Error)

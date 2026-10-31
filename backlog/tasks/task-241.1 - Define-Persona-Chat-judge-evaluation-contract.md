@@ -54,7 +54,7 @@ Contract-first slice for #1566. Define the optional calibrated Persona Chat judg
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Selected approach for #1566: contract-first docs/test slice before any executable judge harness. Created isolated worktree on codex/persona-chat-judge-contract from origin/dev.
 
 Verification recorded: pytest test_persona_chat_judge_contract.py passed with 3 tests; placeholder scan returned no matches; git diff --check passed; Bandit on the touched pytest validator produced zero findings in /tmp/bandit_persona_chat_judge_contract.json. No runtime Persona Chat or production evaluation execution code was changed.
@@ -62,7 +62,7 @@ Verification recorded: pytest test_persona_chat_judge_contract.py passed with 3 
 Review-fix pass for PR #1569: addressing Qodo and CodeRabbit findings in the Persona Chat judge contract validator. Actionable items are docstrings, required score keys and numeric types, robust taxonomy parsing, expanded local-path redaction checks, and deterministic_labels validation.
 
 Review-fix verification: added regression coverage for markdown taxonomy variants, local path redaction variants, strict score schema, and deterministic label validation. Focused pytest now passes 10 tests; Bandit review-fix report has zero findings; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

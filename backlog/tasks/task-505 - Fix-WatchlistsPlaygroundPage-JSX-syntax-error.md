@@ -34,7 +34,7 @@ priority: high
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause: WatchlistsPlaygroundPage had a stale duplicated Ant Design Alert orientation/teach-point block before the canonical DesignSystemAlert block. The duplicate introduced an impossible JSX close at the former line 2355 and left a dangling fragment close.
 
 Fix: removed the malformed duplicate and restored the watchlistViewsAvailable fragment/WatchlistsHealthBar wrapper around the remaining repeat-actions/orientation/teach-point block, matching the canonical structure in origin/dev while preserving current local content below it.
@@ -45,7 +45,7 @@ Verification:
 - git diff --check passes.
 
 Bandit: not run; touched frontend TSX and Backlog task only, no Python/backend code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -33,7 +33,7 @@ Continue the Skills beginner activation plan after the empty-state and guided-te
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented:
 - Added a dismissible success-action banner after create, text import, eligible file import, and built-in seeding when the API response gives enough skill context.
 - Success actions open the existing SkillPreview modal, open the saved skill for review, and copy the confirmed chat invocation syntax /skill <name>.
@@ -88,7 +88,7 @@ Post-review rebase verification:
 - PASS: ./node_modules/.bin/eslint --no-warn-ignored ../packages/ui/src/components/Option/Skills/Manager.tsx ../packages/ui/src/components/Option/Skills/SkillDrawer.tsx ../packages/ui/src/components/Option/Skills/__tests__/Manager.test.tsx ../packages/ui/src/components/Option/Skills/__tests__/SkillDrawer.test.tsx -> exit 0.
 - PASS: TLDW_WEB_CMD=bun-run-dev-webpack npx playwright test e2e/workflows/tier-5-specialized/skills.spec.ts -g Skills-beginner-journey --reporter=line -> 1 passed.
 - PASS: git diff --check -> exit 0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

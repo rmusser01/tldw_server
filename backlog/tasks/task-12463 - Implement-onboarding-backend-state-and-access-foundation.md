@@ -42,7 +42,7 @@ Task 1-2 slice from the unified onboarding plan. Add durable first-run state, re
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started Task 1 subagent-driven slice: backend first-run state store and setup schemas. Baseline before implementation: tldw_Server_API/tests/Setup/test_setup_deps_remote_admin.py 8 passed; tldw_Server_API/tests/Config/test_config_providers_endpoints.py 33 passed; apps/packages/ui OnboardingConnectForm design-system Vitest 4 passed.
 
 Task 2 slice implemented first-run state/metadata/skip endpoints plus setup write access boundary checks. Red phase captured expected failures before production changes: remote disabled write detail lacked "localhost", `/api/v1/setup/first-run/state` returned 404, and `/api/v1/setup/first-run/skip` was missing; the initial red command timed out during TestClient lifespan shutdown after those failures, so the new integration tests were adjusted to use the existing setup-test pattern of `TestClient(app)` without a context manager.
@@ -62,7 +62,7 @@ Task 2 final metadata/state constraint fix: metadata browser classification now 
 Task 2 final proxy-chain/state-read fix: local-only setup access now rejects mixed X-Forwarded-For chains unless every parsed forwarded client is loopback, and first-run state GET/update/skip responses now project stored state through the public step-data allowlist without mutating persisted files. Red phase captured the mixed-chain write bypass and raw persisted secret exposure; verification after fix passed the required pytest suites, Ruff, Bandit, and `git diff --check`.
 
 Task 2 closeout after review gates: final code-quality review at HEAD 3bd11d4e3f805cce849759319c0407c8711fb7dd reported no Critical, Important, or Minor findings and assessed Task 2 ready to merge. Final verification recorded by controller and reviewer: setup access/API pytest slice passed 42 tests; first-run state/masking pytest slice passed 20 tests; touched-file Ruff passed; Bandit touched setup scope reported 0 findings; git diff --check passed. Final hardening filters whole public first-run state projection including current_step, completed_steps, acknowledged_steps, skipped_steps, skip_reason, and step_data; proxy client evidence is centralized across metadata and write guards.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

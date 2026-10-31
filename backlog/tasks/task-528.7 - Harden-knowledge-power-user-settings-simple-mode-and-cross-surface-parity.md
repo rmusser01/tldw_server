@@ -42,13 +42,13 @@ See Docs/superpowers/plans/2026-06-07-knowledge-power-user-settings-parity-plan.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Compact simple mode now opens a source scope and profiles dialog that reuses shared KnowledgeContextBar controls for source categories, exact document/note scope, saved profiles, preset, web fallback, answer model/provider, and advanced settings.
 - CompactToolbar now summarizes exact selected document/note scope, labels source/profile access for assistive tech, and respects web fallback availability when rendering the web toggle.
 - Settings/provider coverage now exercises reset defaults, Escape close, focus return, Expert All Options filtering, boolean setting updates, provider failure redaction, server default clearing, manual model entry, and restored manual model summary.
 - WebUI and extension empty-recovery E2E specs were updated for the compact source scope flow. WebUI Chromium E2E passed. Extension E2E was attempted, but the WXT production build stalled before any browser test started; the stuck process tree was terminated and this is recorded as a known verification blocker.
 - Bandit is not applicable for TASK-528.7 because only frontend and E2E files were touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

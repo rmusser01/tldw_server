@@ -5560,7 +5560,7 @@ def test_gateway_config_loader_reads_toml_store_config(tmp_path: Path) -> None:
                 "",
                 "[store]",
                 'kind = "sqlite"',
-                f'sqlite_path = "{sqlite_path}"',
+                f"sqlite_path = {json.dumps(str(sqlite_path))}",
             ]
         ),
         encoding="utf-8",

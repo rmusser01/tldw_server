@@ -3,7 +3,7 @@ from __future__ import annotations
 import contextlib
 import hmac
 import os
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any
@@ -16,38 +16,32 @@ from tldw_Server_API.app.core.testing import is_truthy
 class TenantScopeConfig:
     enabled: bool = False
     header: str = "X-TLDW-Tenant"
+    # Parsed for config compatibility only: the tenant is the principal's own org (TASK-13402).
     jwt_claim: str = "tenant_id"
 
 
 def get_tenant_id(
     headers: Mapping[str, str],
-    claims: Mapping[str, Any] | None = None,
+    own_tenant: str | None = None,
     config: TenantScopeConfig | None = None,
+    member_of: Collection[str] = (),
 ) -> str | None:
     """
-    Extract a tenant identifier from request headers or JWT claims.
+    Pick the caller's tenant from a validated principal (TASK-13402).
 
-    This helper performs simple extraction only; caller is responsible for
-    trusting proxy headers and providing validated claims.
+    ``own_tenant`` (the principal's own org, in deps.tenant_claims_from_state's order) and
+    ``member_of`` (the principal's org ids) must come from a validated principal. The
+    header only selects one of ``member_of``; a header naming any other tenant is ignored,
+    so an unvalidated header never names a bucket. Otherwise the tenant is ``own_tenant``.
     """
     cfg = config or TenantScopeConfig()
     if not cfg.enabled:
         return None
 
-    # Header takes precedence when present
-    val = headers.get(cfg.header) or headers.get(cfg.header.lower())
-    if val:
-        s = str(val).strip()
-        return s or None
-
-    # Fallback to JWT claim when present
-    if claims and cfg.jwt_claim in claims:
-        v = claims.get(cfg.jwt_claim)
-        if v is None:
-            return None
-        return str(v).strip() or None
-
-    return None
+    val = str(headers.get(cfg.header) or headers.get(cfg.header.lower()) or "").strip()
+    if val and val in member_of:
+        return val
+    return (str(own_tenant).strip() or None) if own_tenant is not None else None
 
 
 _LOG_HASH_SECRET_WARNED = False

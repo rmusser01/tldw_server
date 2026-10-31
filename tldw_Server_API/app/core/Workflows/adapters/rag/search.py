@@ -17,7 +17,7 @@ from defusedxml import ElementTree as DET
 from defusedxml.common import DefusedXmlException
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
+from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string
 from tldw_Server_API.app.core.http_client import create_client as _wf_create_client
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
 from tldw_Server_API.app.core.Security.egress import is_url_allowed, is_url_allowed_for_tenant
@@ -126,6 +126,8 @@ async def run_rag_search_adapter(config: dict[str, Any], context: dict[str, Any]
     }
     kwargs: dict[str, Any] = {k: v for k, v in (config or {}).items() if k in passthrough_keys}
 
+    # Media DB only: with no notes, character or ChaCha handle passed, the pipeline opens no
+    # ChaCha retriever, so this step needs no ChaCha operation. Passing one needs one (ADR-080, TASK-13897).
     result = await unified_rag_pipeline(
         query=rendered_query,
         sources=sources,

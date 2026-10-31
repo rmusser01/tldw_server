@@ -57,7 +57,11 @@ from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statement
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection_async,
 )
-from tldw_Server_API.app.core.exceptions import TransactionPassthroughError, exception_type_chain
+from tldw_Server_API.app.core.exceptions import (
+    SchemaReadinessError,
+    TransactionPassthroughError,
+    exception_type_chain,
+)
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime, is_test_mode
 
 _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS = (
@@ -1107,6 +1111,11 @@ class DatabasePool:
                             "PostgreSQL AuthNZ bootstrap schema is unavailable"
                         )
 
+                    from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import (
+                        native_quota_schema_statements,
+                    )
+                    for statement in native_quota_schema_statements(postgres=True):
+                        await conn.execute(statement)
                     await ensure_postgres_profile_version_on_connection(conn)
                     await repair_postgres_profile_candidate_timestamps(conn)
                     await validate_postgres_profile_candidate_schema(conn)
@@ -1116,7 +1125,10 @@ class DatabasePool:
                 backend="postgres",
                 operation="authnz_schema_readiness",
                 exception_type=type(exc).__name__,
-            ).error("PostgreSQL AuthNZ schema readiness failed")
+            ).error(
+                "PostgreSQL AuthNZ schema readiness failed{}",
+                f": {exc}" if isinstance(exc, SchemaReadinessError) else "",
+            )
             raise DatabaseError(
                 "PostgreSQL AuthNZ schema readiness failed"
             ) from None
@@ -1147,6 +1159,12 @@ class DatabasePool:
                     logger.info("SQLite schema created successfully")
                 else:
                     logger.debug("SQLite schema already exists")
+                from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import (
+                    native_quota_schema_statements,
+                )
+                for statement in native_quota_schema_statements(postgres=False):
+                    await conn.execute(statement)
+                await conn.commit()
 
             # Ensure AuthNZ migrations are up to date (handles legacy columns)
             try:
@@ -1317,7 +1335,13 @@ class DatabasePool:
                     "PostgreSQL transaction failed: cause={}",
                     exception_type_chain(primary_failure),
                 )
-                raise TransactionError("PostgreSQL transaction") from None
+                # Readiness reasons are fixed text; any other message may carry row data.
+                reason = (
+                    str(primary_failure)
+                    if isinstance(primary_failure, SchemaReadinessError)
+                    else None
+                )
+                raise TransactionError("PostgreSQL transaction", reason) from None
             raise primary_failure from None
 
         conn = None

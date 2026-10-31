@@ -25,22 +25,24 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
     ProviderCallCredentials,
 )
-from tldw_Server_API.app.core.Chat.Chat_Deps import (
-    ChatAPIError,
-    ChatAuthenticationError,
-    ChatConfigurationError,
-    ChatRateLimitError,
-)
-from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
-from tldw_Server_API.app.core.Chat.streaming_utils import _extract_text_from_upstream_sse
 
 #
 # Import Local
 from tldw_Server_API.app.core.Chunking import improved_chunking_process
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_name,
     custom_openai_provider_number,
+)
+from tldw_Server_API.app.core.exceptions import (
+    ChatAPIError,
+    ChatAuthenticationError,
+    ChatBadRequestError,
+    ChatConfigurationError,
+    ChatRateLimitError,
+    EgressPolicyError,
+    NetworkError,
 )
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
@@ -52,7 +54,10 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     resolve_provider_section,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
-from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
+from tldw_Server_API.app.core.LLM_Calls.provider_results import (
+    _extract_text_from_upstream_sse,
+    extract_response_content,
+)
 from tldw_Server_API.app.core.Utils.Utils import logging
 
 #
@@ -106,7 +111,13 @@ _SUMMARIZATION_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ValueError,
     json.JSONDecodeError,
 )
-_SUMMARY_ADAPTER_EXCEPTIONS = (ChatAPIError,) + _SUMMARIZATION_NONCRITICAL_EXCEPTIONS
+# Not ChatAPIErrors, and some adapters let them through untouched: an endpoint the egress policy
+# blocks, and a transport failure such as a local server that is down (it falls through to
+# provider_failure). They are caught only to type them for raise_on_error callers; the other
+# callers still get the exception itself.
+_SUMMARY_PASSTHROUGH_EXCEPTIONS = (EgressPolicyError, NetworkError)
+_TRANSIENT_EGRESS_REASONS = frozenset({"dns_unresolved", "dns_changed", "tls_pin_error"})
+_SUMMARY_ADAPTER_EXCEPTIONS = (ChatAPIError, *_SUMMARY_PASSTHROUGH_EXCEPTIONS) + _SUMMARIZATION_NONCRITICAL_EXCEPTIONS
 
 _SUMMARY_ERROR_CODES = frozenset(
     {
@@ -117,6 +128,8 @@ _SUMMARY_ERROR_CODES = frozenset(
         "authentication",
         "configuration",
         "rate_limit",
+        "provider_quota_exhausted",
+        "request_rejected",
         "provider_failure",
     }
 )
@@ -132,19 +145,45 @@ class SummaryProviderError(Exception):
         super().__init__(f"Summary provider error: {self.code} ({self.provider})")
 
 
-def _summary_error_code(exc: BaseException) -> str:
+def _native_http_disabled(adapter: Any) -> bool:
+    """Whether the adapter's LLM_ADAPTERS_NATIVE_HTTP_<PROVIDER> switch is off.
+
+    An adapter with the switch off raises a bare RuntimeError on every call, before any request.
+    """
+    # ponytail: reads the adapter's own switch instead of retyping its 12 raise sites; a typed
+    # error there is the upgrade if other untyped adapter configuration errors need a code.
+    switch = getattr(adapter, "_use_native_http", None)
+    return callable(switch) and switch() is False
+
+
+def _summary_error_code(exc: BaseException, adapter: Any = None) -> str:
     """Map chat adapter failures to a bounded, detail-free summary taxonomy."""
+    if isinstance(exc, EgressPolicyError):
+        # A host that did not resolve, a resolution that changed mid-request and a connect failure
+        # during TLS-pin verification can pass on a retry, which re-runs the whole policy check. An
+        # endpoint the outbound policy blocks stays blocked until the configuration changes.
+        return "provider_failure" if exc.reason_code in _TRANSIENT_EGRESS_REASONS else "configuration"
     if isinstance(exc, ChatAuthenticationError):
         return "authentication"
     if isinstance(exc, ChatConfigurationError):
         return "configuration"
     if isinstance(exc, ChatRateLimitError):
-        return "rate_limit"
+        return "provider_quota_exhausted" if exc.quota_exhausted is True else "rate_limit"
+    if isinstance(exc, ChatBadRequestError):
+        upstream_status = getattr(exc, "upstream_status_code", None)
+        # 408 (OpenRouter timeout) and 498 (Groq flex capacity) are transient 4xx replies.
+        if upstream_status in {408, 498}:
+            return "provider_failure"
+        # The provider refused this request (an unknown model, a prompt over its context);
+        # sending it again gets the same answer.
+        return "request_rejected"
     if isinstance(exc, ChatAPIError):
         if exc.status_code in {401, 403}:
             return "authentication"
         if exc.status_code == 429:
             return "rate_limit"
+    if isinstance(exc, RuntimeError) and _native_http_disabled(adapter):
+        return "configuration"
     return "provider_failure"
 
 
@@ -332,7 +371,9 @@ def _summarize_via_adapter(
             except _SUMMARY_ADAPTER_EXCEPTIONS as exc:
                 if raise_on_error:
                     logging.error(f"Adapter streaming failed for {provider}")
-                    raise SummaryProviderError(code=_summary_error_code(exc), provider=provider) from None
+                    raise SummaryProviderError(code=_summary_error_code(exc, adapter), provider=provider) from None
+                if isinstance(exc, _SUMMARY_PASSTHROUGH_EXCEPTIONS):
+                    raise
                 logging.error(f"Adapter streaming failed for {provider}")
                 yield f"Error: Provider streaming failed for '{provider}'."
             finally:
@@ -383,7 +424,9 @@ def _summarize_via_adapter(
     except _SUMMARY_ADAPTER_EXCEPTIONS as exc:
         if raise_on_error:
             logging.error(f"Adapter summarization failed for {provider}")
-            raise SummaryProviderError(code=_summary_error_code(exc), provider=provider) from None
+            raise SummaryProviderError(code=_summary_error_code(exc, adapter), provider=provider) from None
+        if isinstance(exc, _SUMMARY_PASSTHROUGH_EXCEPTIONS):
+            raise
         logging.error(f"Adapter summarization failed for {provider}")
         return f"Error: Provider request failed for '{provider}'."
 

@@ -43,7 +43,7 @@ First conservative Phase 2.1 follow-up tranche for #1116. Prove the selected lif
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification completed:
 - RED: test_shutdown_pre_worker_cleanup_drops_registry_stopped_chatbooks_handles failed before implementation because chatbooks_cleanup handles still passed through.
 - GREEN: startup chatbooks focused 4 passed; shutdown pre-worker chatbooks focused 4 passed.
@@ -56,7 +56,7 @@ PR opened: https://github.com/rmusser01/tldw_server/pull/1241
 Review follow-up started for PR #1241: Qodo requested an intent docstring on the new async regression test and centralization of duplicated chatbooks stopped-handle suppression between normal and fallback paths.
 
 Review follow-up verification completed: RED helper test failed with AttributeError before implementation; GREEN helper test passed after adding _filtered_pre_worker_handles; focused Services tests passed with 28 passed; Bandit touched source reported 0 findings in /tmp/bandit_pr1241_review_fixes.json; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

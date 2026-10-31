@@ -58,7 +58,7 @@ Source: TASK-13344 AC1.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 INVESTIGATED FURTHER (no code change). The obvious repair -- teach the exchange-gate fixtures to build a valid conflict -- is NOT the right shape, and this records why so the next attempt does not rediscover it.
 
 The gate tests run on the transport double: _RecordingService / _RecordingRepository in test_sync_v2_personal_context_transport.py, which by its own docstring supplies 'only the canonical proof needed by isolated transport scenarios'. It has sync_integrity_key, apply_sync_object and apply_sync_ingress, and nothing else.
@@ -98,7 +98,7 @@ Also confirmed: simply inserting an envelope whose client_envelope_id is the fab
 remote-envelope-<id> is NOT sufficient. It clears the 'remote is None' check and then fails
 in _validate_candidate, because no journal exists to reconstruct the expected candidate
 from.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

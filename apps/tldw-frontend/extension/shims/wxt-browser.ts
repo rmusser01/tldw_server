@@ -190,14 +190,14 @@ const createStorageArea = (areaName: StorageAreaName) => ({
         if (!storedKey) continue
         const logicalKey = unscopedKey(areaName, storedKey)
         if (logicalKey == null) continue
-        result[logicalKey] = parseStoredValue(backend.getItem(storedKey))
+        const raw = backend.getItem(storedKey)
+        if (raw !== null) result[logicalKey] = parseStoredValue(raw)
       }
     } else {
       const keyList = Array.isArray(keys) ? keys : [keys]
       keyList.forEach((key) => {
-        result[key] = parseStoredValue(
-          backend.getItem(scopedKey(areaName, key))
-        )
+        const raw = backend.getItem(scopedKey(areaName, key))
+        if (raw !== null) result[key] = parseStoredValue(raw)
       })
     }
     callback?.(result)

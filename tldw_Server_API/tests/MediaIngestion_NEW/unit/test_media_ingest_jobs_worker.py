@@ -618,6 +618,7 @@ async def test_media_ingest_worker_updates_progress_fields(monkeypatch, tmp_path
     monkeypatch.setattr(worker, "process_document_like_item", _fake_process_document_like_item, raising=True)
     monkeypatch.setattr(worker, "prepare_chunking_options_dict", lambda _form: None, raising=True)
 
+    (tmp_path / "doc.txt").touch()
     jm = JobManager()
     payload = {
         "batch_id": "batch-2",
@@ -700,6 +701,7 @@ async def test_media_ingest_worker_returns_auto_chunking_plan(monkeypatch, tmp_p
         raising=True,
     )
 
+    (tmp_path / "doc.md").touch()
     jm = JobManager()
     payload = {
         "batch_id": "batch-auto",
@@ -802,6 +804,7 @@ async def test_media_ingest_worker_uses_async_auto_chunking_resolver(monkeypatch
     monkeypatch.setattr(worker, "async_resolve_chunking_options_and_plan", _fake_async_resolver, raising=True)
     monkeypatch.setattr(worker, "process_document_like_item", _fake_process_document_like_item, raising=True)
 
+    (tmp_path / "doc.md").touch()
     jm = JobManager()
     row = jm.create_job(
         domain="media_ingest",
@@ -1121,3 +1124,53 @@ async def test_media_ingest_schedule_embeddings_retries_conflict_without_marking
     assert captured["processed"] == (db, 73)
     assert captured["kwargs"]["user_id"] == "22"
     assert db.errors == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ("denied", "admitted", "url"))
+async def test_media_worker_applies_staged_file_daily_quota(monkeypatch, tmp_path, case):
+    """The Jobs path must reach the same quota boundary before processing."""
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+    source = tmp_path / "staged.txt"
+    source.write_bytes(b"12345")
+    calls = []
+    processed = []
+
+    async def quota_probe(user_id, size, *, op_id):
+        calls.append((user_id, size, op_id))
+        if case == "denied":
+            raise HTTPException(429, "Daily ingestion size budget exceeded.")
+
+    async def process(**kwargs):
+        processed.append(kwargs)
+        return {"status": "Success", "db_id": 9}
+
+    async def chunking(*args, **kwargs):
+        return None, None
+
+    monkeypatch.setattr(worker, "_enforce_and_record_media_bytes", quota_probe, raising=False)
+    monkeypatch.setattr(worker, "_create_db", lambda uid: SimpleNamespace(db_path_str=str(tmp_path / "media.db"), client_id=uid, close_connection=lambda: None))
+    monkeypatch.setattr(worker, "process_document_like_item", process)
+    monkeypatch.setattr(worker, "async_resolve_chunking_options_and_plan", chunking)
+    jm = JobManager()
+    row = jm.create_job(domain="media_ingest", queue="default", job_type="media_ingest_item", owner_user_id="3", payload={"media_type": "document", "source": "https://example.test/document" if case == "url" else str(source), "source_kind": "url" if case == "url" else "file", "temp_dir": str(tmp_path), "cleanup_temp_dir": False, "options": {"media_type": "document"}})
+    job = jm.get_job(row["id"])
+    if case == "denied":
+        with pytest.raises(worker.MediaIngestJobError, match="Daily ingestion size budget exceeded") as caught:
+            await worker._handle_job(job, jm, worker._ProgressState())
+        assert caught.value.retryable is False and not processed  # nosec B101 - Permanent quota refusal precedes processing.
+    else:
+        await worker._handle_job(job, jm, worker._ProgressState())
+        if case == "admitted":
+            await worker._handle_job(job, jm, worker._ProgressState())
+        assert len(processed) == (2 if case == "admitted" else 1)  # nosec B101 - Existing legitimate processing path.
+    expected = [] if case == "url" else [("3", 5, "media-ingestion-job:3:" + job["uuid"])] * (2 if case == "admitted" else 1)
+    assert calls == expected  # nosec B101 - Actual staged size, owner and stable retry receipt.

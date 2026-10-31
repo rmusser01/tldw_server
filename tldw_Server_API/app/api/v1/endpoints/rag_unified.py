@@ -41,6 +41,11 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import (
     managed_media_db_for_owner,
 )
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import (
+    enforce_llm_quota,
+    enforce_rag_query_quota,
+    require_rag_query_quota,
+)
 
 # Schemas
 from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import (
@@ -813,6 +818,9 @@ async def rag_ablate(
     media_db: Any = Depends(get_media_db_for_user),
     chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user)
 ):
+    if request.with_answer:
+        # Usage quotas (LLM usage accounting spec §4a): answer generation is checked before any work.
+        await enforce_llm_quota(getattr(current_user, "id", None))
     try:
         credential_runtime = _build_credential_runtime(request_raw, current_user)
     except _RAG_PROVIDER_FAILURES as exc:
@@ -923,6 +931,8 @@ async def rag_ablate(
         return {"summary": out, "runs": runs}
     except _RAG_PROVIDER_FAILURES as exc:
         raise_detached_error(_rag_provider_http_exception(exc))
+    except HTTPException:
+        raise  # an LLM quota refusal keeps its 402 (LLM usage accounting spec §4b)
     except Exception as exc:  # noqa: BLE001 - convert unexpected endpoint failures
         logger.error("RAG ablation failed")
         raise HTTPException(
@@ -1388,6 +1398,7 @@ async def source_health_endpoint(
         Depends(RequirePermission(MEDIA_READ)),
         Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="rag.search", count_as="call")),
         Depends(require_within_limit(LimitCategory.RAG_QUERIES_DAY, 1)),
+        Depends(require_rag_query_quota(1)),
     ]
 )
 async def unified_search_endpoint(
@@ -1463,6 +1474,10 @@ async def unified_search_endpoint(
             prompts_db=prompts_db,
         )
         strategy_value = str(standard_bundle.resolved_request.strategy).strip().lower()
+        # Usage quotas (LLM usage accounting spec §4a): a request that generates an answer is checked.
+        # The resolved payload is what the pipeline receives; the agentic branch reads the same value.
+        if bool(standard_bundle.resolved_request.payload.get("enable_generation", request.enable_generation)):
+            await enforce_llm_quota(getattr(current_user, "id", None))
 
         # Branch: agentic strategy builds a synthetic chunk at query time
         if strategy_value == 'agentic':
@@ -1667,6 +1682,10 @@ async def unified_batch_endpoint(
             x_tldw_org_id=org_header_id,
             org_id=org_query_id,
         )
+        await enforce_rag_query_quota(getattr(current_user, "id", None), requested_units)
+        if request.enable_generation:
+            # Usage quotas (LLM usage accounting spec §4a): one flag turns generation on for every query.
+            await enforce_llm_quota(getattr(current_user, "id", None))
 
         logger.info(
             f"Batch RAG search: {requested_units} queries, "
@@ -1803,6 +1822,8 @@ async def unified_batch_endpoint(
 
     except _RAG_PROVIDER_FAILURES as exc:
         raise_detached_error(_rag_provider_http_exception(exc))
+    except HTTPException:
+        raise
     except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
         logger.error(f"Batch search error: {e}")
         raise HTTPException(
@@ -1829,6 +1850,7 @@ async def unified_batch_endpoint(
         Depends(check_rate_limit),
         Depends(RequirePermission(MEDIA_READ)),
         Depends(require_within_limit(LimitCategory.RAG_QUERIES_DAY, 1)),
+        Depends(require_rag_query_quota(1)),
     ]
 )
 async def simple_search_endpoint(
@@ -1909,6 +1931,8 @@ async def simple_search_endpoint(
 
     except _RAG_PROVIDER_FAILURES as exc:
         raise_detached_error(_rag_provider_http_exception(exc))
+    except HTTPException:
+        raise  # an LLM quota refusal keeps its 402 (LLM usage accounting spec §4b)
     except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
         logger.error("Simple search failed")
         raise HTTPException(
@@ -2058,6 +2082,10 @@ async def resume_batch_endpoint(
         if owner_user_id is not None:
             resume_config["user_id"] = str(owner_user_id)
             resume_config["feedback_user_id"] = str(owner_user_id)
+        if bool(resume_config.get("enable_generation")):
+            # Usage quotas (LLM usage accounting spec §4a): the saved request generates answers,
+            # and the work runs for the checkpoint's owner.
+            await enforce_llm_quota(getattr(execution_user, "id", None))
 
         db_paths = {
             "media_db_path": execution_media_db.db_path if execution_media_db else None,
@@ -2200,6 +2228,7 @@ async def resume_batch_endpoint(
         Depends(check_rate_limit),
         Depends(RequirePermission(MEDIA_READ)),
         Depends(require_within_limit(LimitCategory.RAG_QUERIES_DAY, 1)),
+        Depends(require_rag_query_quota(1)),
     ],
     response_class=StreamingResponse,
     responses={
@@ -2220,6 +2249,8 @@ async def unified_search_stream_endpoint(
 ):
     if not request.enable_generation:
         raise HTTPException(status_code=400, detail="enable_generation must be true for streaming.")
+    # Usage quotas (LLM usage accounting spec §4a), before the streaming response starts.
+    await enforce_llm_quota(getattr(current_user, "id", None))
     request = _apply_media_collection_scope(request, collections_db)
 
     # Streaming search counts as a single RAG query.
@@ -2351,6 +2382,9 @@ async def advanced_search_endpoint(
     """
     Advanced search with common features enabled.
     """
+    if with_answer:
+        # Usage quotas (LLM usage accounting spec §4a): answer generation is checked before any work.
+        await enforce_llm_quota(getattr(current_user, "id", None))
     try:
         credential_runtime = _build_credential_runtime(request, current_user)
     except _RAG_PROVIDER_FAILURES as exc:
@@ -2395,6 +2429,8 @@ async def advanced_search_endpoint(
 
     except _RAG_PROVIDER_FAILURES as exc:
         raise_detached_error(_rag_provider_http_exception(exc))
+    except HTTPException:
+        raise  # an LLM quota refusal keeps its 402 (LLM usage accounting spec §4b)
     except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
         logger.error("Advanced search failed")
         raise HTTPException(

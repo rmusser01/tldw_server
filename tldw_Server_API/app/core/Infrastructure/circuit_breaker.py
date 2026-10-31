@@ -129,6 +129,10 @@ class CircuitBreakerConfig:
     """Exception type(s) that count as circuit-breaker failures.
     Exceptions *not* matching this are always re-raised without recording."""
 
+    ignored_exceptions: type | tuple = ()
+    """Exception type(s) re-raised without being recorded as a failure or a success:
+    they say nothing about the dependency's health (a per-user quota refusal, say)."""
+
     # Rolling-window mode (disabled when window_size == 0)
     window_size: int = 0
     """Rolling-window size.  ``0`` = counter mode; ``>0`` = rolling-window."""
@@ -820,7 +824,9 @@ class CircuitBreaker:
         try:
             result = func(*args, **kwargs)
         except BaseException as exc:
-            if isinstance(exc, self.config.expected_exception):
+            if isinstance(exc, self.config.expected_exception) and not isinstance(
+                exc, self.config.ignored_exceptions
+            ):
                 with self._lock:
                     self._on_failure(exc)
             raise
@@ -865,7 +871,9 @@ class CircuitBreaker:
                 self._emit_timeout()
             raise
         except BaseException as exc:
-            if isinstance(exc, self.config.expected_exception):
+            if isinstance(exc, self.config.expected_exception) and not isinstance(
+                exc, self.config.ignored_exceptions
+            ):
                 with self._lock:
                     self._on_failure(exc)
             raise

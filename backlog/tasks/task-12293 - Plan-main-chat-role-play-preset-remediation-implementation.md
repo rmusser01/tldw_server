@@ -52,7 +52,7 @@ Plan-document-reviewer subagent approved the plan. Advisory fixes were applied f
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created implementation plan: Docs/superpowers/plans/2026-05-17-main-chat-role-play-preset-remediation-implementation-plan.md
 
 Plan references approved design spec TASK-402 and decomposes work into six PR-sized stages plus setup/final verification. It includes file maps, focused test targets, browser verification expectations, Backlog tracking requirements, and coordination constraints for concurrent chat cockpit/sidebar work.
@@ -60,7 +60,7 @@ Plan references approved design spec TASK-402 and decomposes work into six PR-si
 Plan-document-reviewer subagent approved the plan. Advisory fixes were applied for scene-test placement and Backlog task-file placeholder clarity.
 
 Verification: git diff --check passed; placeholder scan for TODO/TBD/FIXME/ellipsis passed. Bandit skipped because this is documentation-only planning work.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

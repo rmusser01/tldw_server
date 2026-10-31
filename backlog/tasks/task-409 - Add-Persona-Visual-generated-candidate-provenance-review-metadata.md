@@ -43,13 +43,13 @@ Plan saved at Docs/superpowers/plans/2026-05-16-persona-visual-candidate-provena
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification recorded: focused Persona Visual DB/worker/API suite passed (78 passed); py_compile passed; git diff --check passed; Bandit passed with empty results array in /tmp/bandit_persona_visual_candidate_provenance.json. Draft PR: https://github.com/rmusser01/tldw_server/pull/1784
 
 Review fix pass for PR #1784: verify and address unresolved comments on secret/path redaction specificity and Postgres v45/v47 migration drift.
 
 Review fix verification for PR #1784: tightened Persona Visual candidate provenance redaction to match concrete secret/path shapes while preserving normal art-description words; removed generation_provenance_json from the Postgres v44->v45 migration while keeping the v46->v47 addition; added focused sanitizer and migration-drift regression tests. Fresh validation: focused Persona Visual DB/worker/API/provenance suite passed (90 passed); py_compile passed for touched backend modules; git diff --check passed; Bandit passed with empty results array in /tmp/bandit_persona_visual_candidate_provenance.json.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

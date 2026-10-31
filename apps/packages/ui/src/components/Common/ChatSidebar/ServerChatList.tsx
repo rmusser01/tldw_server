@@ -7,6 +7,11 @@ import { FolderPlus, RotateCcw, Tag, Trash2 } from "lucide-react"
 import { browser } from "wxt/browser"
 
 import { useConfirmDanger } from "@/components/Common/confirm-danger"
+import { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+import { useConnectionStore } from "@/store/connection"
+import type { VisibleServerChats } from "@/db/dexie/chat"
 import { useConnectionState } from "@/hooks/useConnectionState"
 import {
   SERVER_CHAT_HISTORY_OVERVIEW_PAGE_SIZE,
@@ -41,6 +46,9 @@ import {
   type SidebarServerChatFilterValue
 } from "@/services/settings/ui-settings"
 import { ServerChatRow } from "./ServerChatRow"
+import { CHAT_RECENCY_GROUP_LABELS, groupChatsByRecency } from "./chat-history-groups"
+import { showMovedToTrashNotice } from "./server-chat-trash-notice"
+import { removeLocalCopyOfServerChat } from "@/components/Sidepanel/Chat/tab-conversation-actions"
 
 const BulkFolderPickerModal = React.lazy(
   () => import("@/components/Sidepanel/Chat/BulkFolderPickerModal")
@@ -59,9 +67,19 @@ interface ServerChatListProps {
   /** Temporary mode: saved chats open read-only, without pin or management actions. */
   readOnly?: boolean
   onConversationSelected?: () => void
+  onVisibleChatsChange?: (receipt: VisibleServerChats | null) => void
+  /** Clears the sidebar search; offered when a search finds nothing (CS-10). */
+  onClearSearch?: () => void
+}
+
+type ServerHistoryAction = {
+  serverScopeKey: string
+  requestScope: ServicePromptRequestScope
+  isCurrent: () => boolean
 }
 
 type UpdateChatRequestPayload = {
+  action: ServerHistoryAction
   chatId: string
   data:
     | { title?: string }
@@ -75,7 +93,9 @@ export function ServerChatList({
   className,
   selectionMode: selectionModeProp,
   readOnly = false,
-  onConversationSelected
+  onConversationSelected,
+  onVisibleChatsChange,
+  onClearSearch
 }: ServerChatListProps) {
   const { t } = useTranslation([
     "common",
@@ -130,6 +150,15 @@ export function ServerChatList({
   const [editingTopicChat, setEditingTopicChat] =
     React.useState<ServerChatHistoryItem | null>(null)
   const [topicValue, setTopicValue] = React.useState("")
+  const restoreRevision = usePlaygroundSessionStore(
+    (state) => state.restoreRevision
+  )
+  const sourceSelectionRevision = usePlaygroundSessionStore(
+    (state) => state.sourceSelectionRevision
+  )
+  const chatDraftRevision = useStoreMessageOption(
+    (state) => state.chatDraftRevision
+  )
   const selectionMode = selectionModeProp ?? false
   const [selectedChatIds, setSelectedChatIds] = React.useState<string[]>([])
   const [currentPage, setCurrentPage] = React.useState(1)
@@ -140,7 +169,8 @@ export function ServerChatList({
   )
   const [bulkFolderPickerOpen, setBulkFolderPickerOpen] = React.useState(false)
   const [bulkTagPickerOpen, setBulkTagPickerOpen] = React.useState(false)
-  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = React.useState(false)
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] =
+    React.useState(false)
   const [bulkConfirmAction, setBulkConfirmAction] =
     React.useState<BulkConfirmAction>("trash")
   const [isBulkDeleting, setIsBulkDeleting] = React.useState(false)
@@ -148,10 +178,42 @@ export function ServerChatList({
   const markPanelEngaged = useChatSurfaceCoordinatorStore(
     (state) => state.markPanelEngaged
   )
-  const serverHistoryOverviewEnabled = useChatSurfaceCoordinatorStore(
-    (state) => shouldEnableOptionalResource(state, "server-history")
+  const serverHistoryOverviewEnabled = useChatSurfaceCoordinatorStore((state) =>
+    shouldEnableOptionalResource(state, "server-history")
   )
   const hasSearchQuery = searchQuery.trim().length > 0
+  const {
+    ownerKey: historyOwnerKey,
+    serverScopeKey: historyServerScopeKey,
+    requestScope: historyRequestScope,
+    isCurrent: historyOwnerCurrent,
+    verificationState: historyVerificationState,
+    retryVerification: retryHistoryVerification
+  } = useChatDraftOwner(() => {
+    setOpenMenuFor(null)
+    setRenamingChat(null)
+    setEditingTopicChat(null)
+    setSelectedChatIds([])
+    setBulkFolderPickerOpen(false)
+    setBulkTagPickerOpen(false)
+    setBulkDeleteConfirmOpen(false)
+  })
+  const ownerReady =
+    historyVerificationState === "ready" &&
+    !!historyOwnerKey &&
+    !!historyRequestScope &&
+    historyOwnerCurrent()
+  const historyOwner = React.useMemo(
+    () =>
+      ownerReady
+        ? {
+            key: historyOwnerKey!,
+            requestScope: historyRequestScope!,
+            isCurrent: historyOwnerCurrent
+          }
+        : undefined,
+    [ownerReady, historyOwnerKey, historyRequestScope, historyOwnerCurrent]
+  )
 
   const openExtensionUrl = React.useCallback(
     (path: `/options.html${string}` | `/sidepanel.html${string}`) => {
@@ -166,7 +228,10 @@ export function ServerChatList({
           return
         }
       } catch (err) {
-        console.debug("[ServerChatList] openExtensionUrl browser API unavailable:", err)
+        console.debug(
+          "[ServerChatList] openExtensionUrl browser API unavailable:",
+          err
+        )
       }
 
       try {
@@ -184,14 +249,20 @@ export function ServerChatList({
           return
         }
       } catch (err) {
-        console.debug("[ServerChatList] openExtensionUrl chrome API unavailable:", err)
+        console.debug(
+          "[ServerChatList] openExtensionUrl chrome API unavailable:",
+          err
+        )
       }
 
       let fallbackUrl: string = path
       try {
         fallbackUrl = new URL(path, window.location.origin).toString()
       } catch (err) {
-        console.warn("[ServerChatList] openExtensionUrl failed to build fallback URL:", err)
+        console.warn(
+          "[ServerChatList] openExtensionUrl failed to build fallback URL:",
+          err
+        )
       }
       console.warn(
         "[ServerChatList] openExtensionUrl runtime API unavailable; falling back to",
@@ -204,20 +275,22 @@ export function ServerChatList({
 
   const { folderApiAvailable } = useFolderStore(
     (state) => ({
-      folderApiAvailable: state.folderApiAvailable
+      folderApiAvailable: state.serverDataScope?.requestScope === historyRequestScope &&
+        state.serverDataScope.isCurrent() ? state.folderApiAvailable : null
     }),
     shallow
   )
 
   const updateChatRequest = React.useCallback(
-    async (payload: UpdateChatRequestPayload): Promise<ServerChatSummary> =>
-      tldwClient.updateChat(
-        payload.chatId,
-        payload.data,
-        payload.expectedVersion != null
-          ? { expectedVersion: payload.expectedVersion }
-          : undefined
-      ),
+    async (payload: UpdateChatRequestPayload): Promise<ServerChatSummary> => {
+      if (!payload.action.isCurrent())
+        throw new Error("server_history_action_expired")
+      return tldwClient.updateChat(payload.chatId, payload.data, {
+        expectedVersion: payload.expectedVersion ?? undefined,
+        requestScope: payload.action.requestScope,
+        scope: { type: "global" }
+      })
+    },
     []
   )
 
@@ -232,7 +305,9 @@ export function ServerChatList({
   >({
     mutationKey: ["updateChatMetadata"],
     mutationFn: updateChatRequest,
-    onSettled: invalidateServerChatHistory
+    onSettled: (_data, _error, payload) => {
+      if (payload.action.isCurrent()) invalidateServerChatHistory()
+    }
   })
   const { mutate: renameChat, isPending: renameLoading } = useMutation<
     ServerChatSummary,
@@ -241,7 +316,9 @@ export function ServerChatList({
   >({
     mutationKey: ["renameChat"],
     mutationFn: updateChatRequest,
-    onSettled: invalidateServerChatHistory
+    onSettled: (_data, _error, payload) => {
+      if (payload.action.isCurrent()) invalidateServerChatHistory()
+    }
   })
   const { mutate: updateChatTopic, isPending: topicLoading } = useMutation<
     ServerChatSummary,
@@ -250,7 +327,9 @@ export function ServerChatList({
   >({
     mutationKey: ["updateChatTopic"],
     mutationFn: updateChatRequest,
-    onSettled: invalidateServerChatHistory
+    onSettled: (_data, _error, payload) => {
+      if (payload.action.isCurrent()) invalidateServerChatHistory()
+    }
   })
 
   const {
@@ -260,16 +339,40 @@ export function ServerChatList({
     hasUsableData,
     isShowingStaleData,
     isLoading,
-    isServerPagedResult = false
+    isServerPagedResult = false,
+    status,
+    isFetching,
+    refetch
   } = useServerChatHistory(searchQuery, {
     deletedOnly: isTrashView,
-    enabled: hasSearchQuery || serverHistoryOverviewEnabled,
+    enabled: ownerReady && (hasSearchQuery || serverHistoryOverviewEnabled),
+    owner: historyOwner,
+    scope: { type: "global" },
     mode: hasSearchQuery ? "search" : "overview",
     page: currentPage,
     limit: SERVER_CHAT_HISTORY_OVERVIEW_PAGE_SIZE,
     filterMode: chatTypeFilter
   })
-  const serverChats = serverChatData || []
+  const serverChats = React.useMemo(
+    () =>
+      ownerReady
+        ? (serverChatData || []).filter(
+            (chat) =>
+              (!chat.scope_type || chat.scope_type === "global") &&
+              !chat.workspace_id
+          )
+        : [],
+    [ownerReady, serverChatData]
+  )
+  const hasForeignScope =
+    ownerReady && serverChats.length !== (serverChatData || []).length
+  const freshResults =
+    ownerReady &&
+    isConnected &&
+    status === "success" &&
+    sidebarRefreshState === "ready" &&
+    !isFetching &&
+    !isShowingStaleData
 
   React.useEffect(() => {
     if (hasSearchQuery) {
@@ -284,11 +387,7 @@ export function ServerChatList({
     [t]
   )
   const resolveChatMutationErrorMessage = React.useCallback(
-    (
-      error: unknown,
-      fallbackKey: string,
-      fallbackDefaultValue: string
-    ) =>
+    (error: unknown, fallbackKey: string, fallbackDefaultValue: string) =>
       isDictionaryVersionConflictError(error)
         ? getChatVersionConflictMessage()
         : t(fallbackKey, {
@@ -332,12 +431,14 @@ export function ServerChatList({
     () => [...pinnedChats, ...unpinnedChats],
     [pinnedChats, unpinnedChats]
   )
-  const totalChatCount = isServerPagedResult ? serverChatTotal : orderedChats.length
+  const totalChatCount = isServerPagedResult
+    ? serverChatTotal
+    : orderedChats.length
   const totalPages = Math.max(
     1,
     Math.ceil(totalChatCount / CHAT_HISTORY_PAGE_SIZE)
   )
-  const currentPageSafe = Math.min(currentPage, totalPages)
+  const currentPageSafe = currentPage
   const pageStartIndex = (currentPageSafe - 1) * CHAT_HISTORY_PAGE_SIZE
   const pagedChats = React.useMemo(
     () =>
@@ -359,11 +460,105 @@ export function ServerChatList({
   )
   const pageStartNumber = pagedChats.length === 0 ? 0 : pageStartIndex + 1
   const pageEndNumber = pageStartIndex + pagedChats.length
-  const hasMultiplePages = totalPages > 1
+  const canLoadNextPage =
+    currentPageSafe < totalPages ||
+    (isServerPagedResult &&
+      freshResults &&
+      (serverChatData || []).length === CHAT_HISTORY_PAGE_SIZE)
+  const hasMultiplePages =
+    currentPageSafe > 1 || totalPages > 1 || canLoadNextPage
   const visibleChatIds = React.useMemo(
     () => Array.from(new Set(pagedChats.map((chat) => chat.id))),
     [pagedChats]
   )
+  const currentPageAndFilter = React.useRef({
+    page: currentPageSafe,
+    filter: chatTypeFilter
+  })
+  currentPageAndFilter.current = {
+    page: currentPageSafe,
+    filter: chatTypeFilter
+  }
+  const visibleReceiptRef = React.useRef<VisibleServerChats | null>(null)
+  const visibleReceipt = React.useMemo<VisibleServerChats | null>(() => {
+    if (!freshResults || !historyServerScopeKey) return null
+    const receipt: VisibleServerChats = {
+      serverScopeKey: historyServerScopeKey,
+      query: searchQuery.trim().toLowerCase(),
+      ids: new Set(visibleChatIds),
+      isCurrent: () =>
+        visibleReceiptRef.current === receipt &&
+        currentPageAndFilter.current.page === currentPageSafe &&
+        currentPageAndFilter.current.filter === chatTypeFilter &&
+        historyOwnerCurrent() &&
+        useConnectionStore.getState().state.isConnected
+    }
+    return receipt
+  }, [
+    freshResults,
+    historyServerScopeKey,
+    historyOwnerCurrent,
+    searchQuery,
+    visibleChatIds,
+    currentPageSafe,
+    chatTypeFilter
+  ])
+  visibleReceiptRef.current = visibleReceipt
+  React.useLayoutEffect(() => {
+    visibleReceiptRef.current = visibleReceipt
+    onVisibleChatsChange?.(visibleReceipt)
+    return () => {
+      visibleReceiptRef.current = null
+    }
+  }, [onVisibleChatsChange, visibleReceipt])
+  const readOnlyNow = React.useRef(readOnly)
+  readOnlyNow.current = readOnly
+  const managementAction = React.useRef<ServerHistoryAction | null>(null)
+  const captureAction = React.useCallback(
+    (ids: string[]): ServerHistoryAction | null => {
+      const receipt = visibleReceiptRef.current
+      if (
+        readOnlyNow.current ||
+        !historyRequestScope ||
+        !receipt?.isCurrent() ||
+        ids.length === 0 ||
+        ids.some((id) => !receipt.ids.has(id))
+      )
+        return null
+      const session = usePlaygroundSessionStore.getState()
+      const draftRevision = useStoreMessageOption.getState().chatDraftRevision
+      return {
+        serverScopeKey: receipt.serverScopeKey,
+        requestScope: historyRequestScope,
+        isCurrent: () =>
+          !readOnlyNow.current &&
+          receipt.isCurrent() &&
+          session.restoreRevision ===
+            usePlaygroundSessionStore.getState().restoreRevision &&
+          session.sourceSelectionRevision ===
+            usePlaygroundSessionStore.getState().sourceSelectionRevision &&
+          draftRevision === useStoreMessageOption.getState().chatDraftRevision
+      }
+    },
+    [historyRequestScope]
+  )
+  React.useLayoutEffect(() => {
+    managementAction.current = null
+    setOpenMenuFor(null)
+    setRenamingChat(null)
+    setEditingTopicChat(null)
+    setSelectedChatIds([])
+    setBulkFolderPickerOpen(false)
+    setBulkTagPickerOpen(false)
+    setBulkDeleteConfirmOpen(false)
+    setIsBulkDeleting(false)
+  }, [
+    visibleReceipt,
+    readOnly,
+    restoreRevision,
+    sourceSelectionRevision,
+    chatDraftRevision
+  ])
   const visibleChatIdSet = React.useMemo(
     () => new Set(visibleChatIds),
     [visibleChatIds]
@@ -383,11 +578,52 @@ export function ServerChatList({
     () => selectedChats.map((chat) => chat.id),
     [selectedChats]
   )
+  const deleteServerChat = React.useCallback(
+    async (
+      chat: ServerChatHistoryItem,
+      action: ServerHistoryAction,
+      hardDelete = false
+    ) => {
+      if (!action.isCurrent()) throw new Error("server_history_action_expired")
+      await tldwClient.deleteChat(chat.id, {
+        requestScope: action.requestScope,
+        scope: { type: "global" },
+        expectedVersion: chat.version ?? undefined,
+        ...(hardDelete ? { hardDelete: true } : {})
+      })
+      if (!action.isCurrent()) return
+      const removed = await removeLocalCopyOfServerChat(
+        chat.id,
+        action.serverScopeKey,
+        {
+          scope: { type: "global" },
+          validate_lease: action.isCurrent
+        }
+      )
+      if (!removed && action.isCurrent())
+        message.warning({
+          key: "chat-device-copy-removal",
+          content: t(
+            "common:chatSidebar.deletedDeviceCopyRetained",
+            "Removed from server history. A cached copy remains on this device because it could not be removed."
+          )
+        })
+    },
+    [t]
+  )
+
   const { openBulkFolderPicker, openBulkTagPicker, applyBulkDelete } =
     useBulkChatOperations({
       selectedConversationIds,
       folderApiAvailable,
-      deleteConversation: (conversationId) => tldwClient.deleteChat(conversationId),
+      deleteConversation: async (conversationId) => {
+        const action = managementAction.current
+        if (!action?.isCurrent())
+          throw new Error("server_history_action_expired")
+        const chat = chatById.get(conversationId)
+        if (!chat) throw new Error("server_history_action_expired")
+        await deleteServerChat(chat, action)
+      },
       t,
       setBulkFolderPickerOpen,
       setBulkTagPickerOpen
@@ -398,17 +634,12 @@ export function ServerChatList({
   }, [searchQuery, chatTypeFilter])
 
   React.useEffect(() => {
-    if (currentPage !== currentPageSafe) {
-      setCurrentPage(currentPageSafe)
-    }
-  }, [currentPage, currentPageSafe])
-
-  React.useEffect(() => {
     setPageJumpValue(String(currentPageSafe))
   }, [currentPageSafe])
 
   const togglePinned = React.useCallback(
     (chatId: string) => {
+      if (!captureAction([chatId])) return
       setPinnedChatIds((prev) => {
         const current = prev || []
         if (current.includes(chatId)) {
@@ -417,7 +648,7 @@ export function ServerChatList({
         return [...current, chatId]
       })
     },
-    [setPinnedChatIds]
+    [captureAction, setPinnedChatIds]
   )
 
   React.useEffect(() => {
@@ -427,7 +658,10 @@ export function ServerChatList({
     }
     setSelectedChatIds((prev) => {
       const next = prev.filter((id) => visibleChatIdSet.has(id))
-      if (next.length === prev.length && next.every((id, idx) => id === prev[idx])) {
+      if (
+        next.length === prev.length &&
+        next.every((id, idx) => id === prev[idx])
+      ) {
         return prev
       }
       return next
@@ -436,11 +670,14 @@ export function ServerChatList({
 
   const handleCreateTable = React.useCallback(
     async (chat: ServerChatHistoryItem) => {
+      const action = captureAction([chat.id])
+      if (!action) return
       const isOptionsPage =
         typeof window !== "undefined" &&
         window.location.pathname.endsWith("options.html")
-      const navigateFn = (window as Window & { __tldwNavigate?: (path: string) => void })
-        .__tldwNavigate
+      const navigateFn = (
+        window as Window & { __tldwNavigate?: (path: string) => void }
+      ).__tldwNavigate
 
       try {
         await startCreateTableFromChat(
@@ -456,10 +693,12 @@ export function ServerChatList({
             addSource,
             setWizardStep,
             queuePrefill: queueDataTablesPrefill,
-            openOptionsPage: () => openExtensionUrl("/options.html#/data-tables")
+            openOptionsPage: () =>
+              openExtensionUrl("/options.html#/data-tables")
           }
         )
       } catch (error) {
+        if (!action.isCurrent()) return
         console.error("[ServerChatList] Failed to start table creation", {
           error,
           chatId: chat.id
@@ -472,13 +711,7 @@ export function ServerChatList({
         )
       }
     },
-    [
-      addSource,
-      openExtensionUrl,
-      resetWizard,
-      setWizardStep,
-      t
-    ]
+    [addSource, captureAction, openExtensionUrl, resetWizard, setWizardStep, t]
   )
 
   React.useEffect(() => {
@@ -492,21 +725,26 @@ export function ServerChatList({
     setBulkConfirmAction("trash")
   }, [selectionMode])
 
-  const toggleChatSelected = React.useCallback((chatId: string) => {
-    setSelectedChatIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(chatId)) {
-        next.delete(chatId)
-      } else {
-        next.add(chatId)
-      }
-      return Array.from(next)
-    })
-  }, [])
+  const toggleChatSelected = React.useCallback(
+    (chatId: string) => {
+      if (!captureAction([chatId])) return
+      setSelectedChatIds((prev) => {
+        const next = new Set(prev)
+        if (next.has(chatId)) {
+          next.delete(chatId)
+        } else {
+          next.add(chatId)
+        }
+        return Array.from(next)
+      })
+    },
+    [captureAction]
+  )
 
   const handleSelectAllVisible = React.useCallback(() => {
+    if (!captureAction(visibleChatIds)) return
     setSelectedChatIds(visibleChatIds)
-  }, [visibleChatIds])
+  }, [captureAction, visibleChatIds])
 
   const clearSelection = React.useCallback(() => {
     setSelectedChatIds([])
@@ -517,8 +755,8 @@ export function ServerChatList({
   }, [])
 
   const handleNextPage = React.useCallback(() => {
-    setCurrentPage((prev) => Math.min(totalPages, prev + 1))
-  }, [totalPages])
+    if (canLoadNextPage) setCurrentPage((page) => page + 1)
+  }, [canLoadNextPage])
 
   const handleJumpToPage = React.useCallback(() => {
     const nextPage = Number.parseInt(pageJumpValue, 10)
@@ -533,6 +771,8 @@ export function ServerChatList({
   const handleRenameSubmit = () => {
     if (renameLoading) return
     if (!renamingChat) return
+    const action = managementAction.current
+    if (!action?.isCurrent()) return
 
     const newTitle = renameValue.trim()
     if (!newTitle) {
@@ -547,12 +787,14 @@ export function ServerChatList({
     setRenameError(null)
     renameChat(
       {
+        action,
         chatId: renamingChat.id,
         data: { title: newTitle },
         expectedVersion: renamingChat.version ?? null
       },
       {
         onSuccess: (updated) => {
+          if (!action.isCurrent()) return
           const resolvedTitle = updated?.title || newTitle
           if (serverChatId === renamingChat.id) {
             setServerChatTitle(resolvedTitle)
@@ -563,6 +805,7 @@ export function ServerChatList({
           setRenameValue("")
         },
         onError: (error) => {
+          if (!action.isCurrent()) return
           message.error(
             resolveChatMutationErrorMessage(
               error,
@@ -578,16 +821,20 @@ export function ServerChatList({
   const handleTopicSubmit = () => {
     if (topicLoading) return
     if (!editingTopicChat) return
+    const action = managementAction.current
+    if (!action?.isCurrent()) return
 
     const nextTopic = topicValue.trim()
     updateChatTopic(
       {
+        action,
         chatId: editingTopicChat.id,
         data: { topic_label: nextTopic || null },
         expectedVersion: editingTopicChat.version ?? null
       },
       {
         onSuccess: (updated) => {
+          if (!action.isCurrent()) return
           const resolvedTopic = updated?.topic_label ?? (nextTopic || null)
           if (serverChatId === editingTopicChat.id) {
             setServerChatTopic(resolvedTopic)
@@ -597,6 +844,7 @@ export function ServerChatList({
           setTopicValue("")
         },
         onError: (error) => {
+          if (!action.isCurrent()) return
           message.error(
             resolveChatMutationErrorMessage(
               error,
@@ -611,14 +859,18 @@ export function ServerChatList({
 
   const handleUpdateState = React.useCallback(
     (chat: ServerChatHistoryItem, nextState: ConversationState) => {
+      const action = captureAction([chat.id])
+      if (!action) return
       updateChatMetadata(
         {
+          action,
           chatId: chat.id,
           data: { state: nextState },
           expectedVersion: chat.version ?? null
         },
         {
           onSuccess: (updated) => {
+            if (!action.isCurrent()) return
             const resolvedState = normalizeConversationState(
               updated?.state ?? nextState
             )
@@ -628,6 +880,7 @@ export function ServerChatList({
             }
           },
           onError: (error) => {
+            if (!action.isCurrent()) return
             message.error(
               resolveChatMutationErrorMessage(
                 error,
@@ -640,6 +893,7 @@ export function ServerChatList({
       )
     },
     [
+      captureAction,
       serverChatId,
       setServerChatState,
       setServerChatVersion,
@@ -648,8 +902,50 @@ export function ServerChatList({
     ]
   )
 
+  // Undo right after Move to Trash restores the chat with the account that
+  // trashed it, even though its row has already left the visible list.
+  const undoMoveToTrash = React.useCallback(
+    async (
+      chat: ServerChatHistoryItem,
+      action: ServerHistoryAction,
+      wasPinned: boolean
+    ) => {
+      try {
+        await tldwClient.restoreChat(chat.id, {
+          requestScope: action.requestScope,
+          scope: { type: "global" }
+        })
+        if (wasPinned)
+          setPinnedChatIds((prev) =>
+            (prev || []).includes(chat.id) ? prev || [] : [...(prev || []), chat.id]
+          )
+        queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
+        message.success(
+          t("common:chatRestored", {
+            defaultValue: "Chat restored."
+          })
+        )
+      } catch (err) {
+        console.error("[ServerChatList] Failed to undo move to trash", {
+          error: err,
+          chatId: chat.id
+        })
+        message.error(
+          resolveChatMutationErrorMessage(
+            err,
+            "common:restoreChatError",
+            "Failed to restore chat."
+          )
+        )
+      }
+    },
+    [queryClient, resolveChatMutationErrorMessage, setPinnedChatIds, t]
+  )
+
   const handleMoveChatToTrash = React.useCallback(
     async (chat: ServerChatHistoryItem) => {
+      const action = captureAction([chat.id])
+      if (!action) return
       const ok = await confirmDanger({
         title: t("common:confirmTitle", { defaultValue: "Please confirm" }),
         content: t("common:deleteHistoryConfirmation", {
@@ -658,21 +954,29 @@ export function ServerChatList({
         okText: t("common:moveToTrash", { defaultValue: "Move to trash" }),
         cancelText: t("common:cancel", { defaultValue: "Cancel" })
       })
-      if (!ok) return
+      if (!ok || !action.isCurrent()) return
 
       try {
-        await tldwClient.deleteChat(chat.id, {
-          expectedVersion: chat.version ?? undefined
-        })
-        setPinnedChatIds((prev) =>
-          (prev || []).filter((id) => id !== chat.id)
-        )
+        await deleteServerChat(chat, action)
+        if (!action.isCurrent()) return
+        const wasPinned = (pinnedChatIds || []).includes(chat.id)
+        setPinnedChatIds((prev) => (prev || []).filter((id) => id !== chat.id))
         queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
         setOpenMenuFor(null)
         if (serverChatId === chat.id) {
           clearChat()
         }
+        showMovedToTrashNotice({
+          t,
+          onUndo: () => {
+            void undoMoveToTrash(chat, action, wasPinned)
+          },
+          onViewTrash: () => {
+            void setChatTypeFilter("trash")
+          }
+        })
       } catch (err) {
+        if (!action.isCurrent()) return
         console.error("[ServerChatList] Failed to delete chat", {
           error: err,
           chatId: chat.id
@@ -687,21 +991,32 @@ export function ServerChatList({
       }
     },
     [
+      captureAction,
       clearChat,
+      deleteServerChat,
       confirmDanger,
+      pinnedChatIds,
       queryClient,
       resolveChatMutationErrorMessage,
       serverChatId,
-      setPinnedChatIds
+      setChatTypeFilter,
+      setPinnedChatIds,
+      t,
+      undoMoveToTrash
     ]
   )
 
   const handleRestoreChat = React.useCallback(
     async (chat: ServerChatHistoryItem) => {
+      const action = captureAction([chat.id])
+      if (!action) return
       try {
         await tldwClient.restoreChat(chat.id, {
+          requestScope: action.requestScope,
+          scope: { type: "global" },
           expectedVersion: chat.version ?? undefined
         })
+        if (!action.isCurrent()) return
         queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
         message.success(
           t("common:chatRestored", {
@@ -709,6 +1024,7 @@ export function ServerChatList({
           })
         )
       } catch (err) {
+        if (!action.isCurrent()) return
         console.error("[ServerChatList] Failed to restore chat", {
           error: err,
           chatId: chat.id
@@ -722,11 +1038,13 @@ export function ServerChatList({
         )
       }
     },
-    [queryClient, resolveChatMutationErrorMessage]
+    [captureAction, queryClient, resolveChatMutationErrorMessage]
   )
 
   const handleHardDeleteChat = React.useCallback(
     async (chat: ServerChatHistoryItem) => {
+      const action = captureAction([chat.id])
+      if (!action) return
       const ok = await confirmDanger({
         title: t("common:confirmTitle", { defaultValue: "Please confirm" }),
         content: t("common:deleteHistoryPermanentlyConfirmation", {
@@ -737,20 +1055,24 @@ export function ServerChatList({
         }),
         cancelText: t("common:cancel", { defaultValue: "Cancel" })
       })
-      if (!ok) return
+      if (!ok || !action.isCurrent()) return
 
       try {
-        await tldwClient.deleteChat(chat.id, {
-          expectedVersion: chat.version ?? undefined,
-          hardDelete: true
-        })
+        await deleteServerChat(chat, action, true)
+        if (!action.isCurrent()) return
         setPinnedChatIds((prev) => (prev || []).filter((id) => id !== chat.id))
         queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
         setOpenMenuFor(null)
         if (serverChatId === chat.id) {
           clearChat()
         }
+        message.success(
+          t("common:chatSidebar.permanentlyDeleted", {
+            defaultValue: "Chat permanently deleted."
+          })
+        )
       } catch (err) {
+        if (!action.isCurrent()) return
         console.error("[ServerChatList] Failed to permanently delete chat", {
           error: err,
           chatId: chat.id
@@ -765,7 +1087,9 @@ export function ServerChatList({
       }
     },
     [
+      captureAction,
       clearChat,
+      deleteServerChat,
       confirmDanger,
       queryClient,
       resolveChatMutationErrorMessage,
@@ -776,19 +1100,26 @@ export function ServerChatList({
 
   const handleOpenSettings = React.useCallback(
     (chat: ServerChatHistoryItem) => {
+      if (!captureAction([chat.id])) return
+      const receipt = visibleReceiptRef.current
       if (serverChatId !== chat.id) {
-        selectServerChat(chat)
+        if (selectServerChat(chat) === false) return
       }
       if (typeof window === "undefined") return
       if (openSettingsTimeoutRef.current !== null) {
         window.clearTimeout(openSettingsTimeoutRef.current)
       }
       openSettingsTimeoutRef.current = window.setTimeout(() => {
+        if (
+          !receipt?.isCurrent() ||
+          useStoreMessageOption.getState().serverChatId !== chat.id
+        )
+          return
         window.dispatchEvent(new CustomEvent("tldw:open-model-settings"))
         openSettingsTimeoutRef.current = null
       }, 0)
     },
-    [selectServerChat, serverChatId]
+    [captureAction, selectServerChat, serverChatId]
   )
 
   React.useEffect(() => {
@@ -802,32 +1133,54 @@ export function ServerChatList({
 
   const handleRenameChat = React.useCallback(
     (chat: ServerChatHistoryItem) => {
+      const action = captureAction([chat.id])
+      if (!action) return
+      managementAction.current = action
       setRenamingChat(chat)
       setRenameValue(chat.title || "")
       setRenameError(null)
     },
-    []
+    [captureAction]
   )
 
   const handleEditTopic = React.useCallback(
     (chat: ServerChatHistoryItem) => {
+      const action = captureAction([chat.id])
+      if (!action) return
+      managementAction.current = action
       setEditingTopicChat(chat)
       setTopicValue(chat.topic_label || "")
     },
-    []
+    [captureAction]
   )
 
   const handleRowClick = React.useCallback(
     (chat: ServerChatHistoryItem) => {
+      if (
+        !freshResults ||
+        !historyOwnerCurrent() ||
+        !useConnectionStore.getState().state.isConnected ||
+        !visibleChatIdSet.has(chat.id)
+      )
+        return
       if (selectionMode) {
         toggleChatSelected(chat.id)
         return
       }
       if (isTrashView) return
-      selectServerChat(chat)
+      if (selectServerChat(chat) === false) return
       onConversationSelected?.()
     },
-    [isTrashView, onConversationSelected, selectionMode, selectServerChat, toggleChatSelected]
+    [
+      freshResults,
+      historyOwnerCurrent,
+      visibleChatIdSet,
+      isTrashView,
+      onConversationSelected,
+      selectionMode,
+      selectServerChat,
+      toggleChatSelected
+    ]
   )
 
   const selectionPropsForChat = React.useCallback(
@@ -843,14 +1196,20 @@ export function ServerChatList({
   )
 
   const openBulkDeleteConfirm = React.useCallback(() => {
+    const action = captureAction(selectedConversationIds)
+    if (!action) return
+    managementAction.current = action
     setBulkConfirmAction("trash")
     setBulkDeleteConfirmOpen(true)
-  }, [])
+  }, [captureAction, selectedConversationIds])
 
   const openBulkHardDeleteConfirm = React.useCallback(() => {
+    const action = captureAction(selectedConversationIds)
+    if (!action) return
+    managementAction.current = action
     setBulkConfirmAction("hard_delete")
     setBulkDeleteConfirmOpen(true)
-  }, [])
+  }, [captureAction, selectedConversationIds])
 
   const handleBulkFolderPickerClose = React.useCallback(() => {
     setBulkFolderPickerOpen(false)
@@ -865,17 +1224,21 @@ export function ServerChatList({
   }, [])
 
   const handleBulkRestore = React.useCallback(async () => {
-    if (selectedChats.length === 0) return
+    const action = captureAction(selectedConversationIds)
+    if (!action) return
 
     setIsBulkDeleting(true)
     try {
       const results = await Promise.allSettled(
         selectedChats.map((chat) =>
           tldwClient.restoreChat(chat.id, {
+            requestScope: action.requestScope,
+            scope: { type: "global" },
             expectedVersion: chat.version ?? undefined
           })
         )
       )
+      if (!action.isCurrent()) return
       const restoredConversationIds = new Set<string>()
       const failedConversationIds = new Set<string>()
       results.forEach((result, index) => {
@@ -918,6 +1281,7 @@ export function ServerChatList({
           .filter((id) => failedConversationIds.has(id))
       )
     } catch (error) {
+      if (!action.isCurrent()) return
       console.error("[ServerChatList] Failed to bulk restore chats", {
         error,
         selectedCount: selectedChats.length
@@ -928,24 +1292,23 @@ export function ServerChatList({
         })
       )
     } finally {
-      setIsBulkDeleting(false)
+      if (action.isCurrent()) setIsBulkDeleting(false)
     }
-  }, [queryClient, selectedChats, t])
+  }, [captureAction, queryClient, selectedChats, selectedConversationIds, t])
 
   const handleBulkDelete = React.useCallback(async () => {
-    if (selectedChats.length === 0) return
+    const action = managementAction.current
+    if (selectedChats.length === 0 || !action?.isCurrent()) return
 
     setIsBulkDeleting(true)
     try {
       if (bulkConfirmAction === "hard_delete") {
         const results = await Promise.allSettled(
           selectedChats.map((chat) =>
-            tldwClient.deleteChat(chat.id, {
-              expectedVersion: chat.version ?? undefined,
-              hardDelete: true
-            })
+            deleteServerChat(chat, action, true)
           )
         )
+        if (!action.isCurrent()) return
         const deletedConversationIds = new Set<string>()
         const failedConversationIds = new Set<string>()
         results.forEach((result, index) => {
@@ -983,13 +1346,15 @@ export function ServerChatList({
           (prev || []).filter((id) => !deletedConversationIds.has(id))
         )
         const selectedIds = selectedChats.map((chat) => chat.id)
-        setSelectedChatIds(selectedIds.filter((id) => failedConversationIds.has(id)))
+        setSelectedChatIds(
+          selectedIds.filter((id) => failedConversationIds.has(id))
+        )
         if (serverChatId && deletedConversationIds.has(serverChatId)) {
           clearChat()
         }
       } else {
-        const result = await applyBulkDelete()
-        if (!result) return
+        const result = await applyBulkDelete(action.isCurrent)
+        if (!result || !action.isCurrent()) return
         const { deletedConversationIds, failedConversationIds } = result
         setPinnedChatIds((prev) =>
           (prev || []).filter((id) => !deletedConversationIds.has(id))
@@ -1004,6 +1369,7 @@ export function ServerChatList({
       queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
       setBulkDeleteConfirmOpen(false)
     } catch (error) {
+      if (!action.isCurrent()) return
       console.error("[ServerChatList] Failed to bulk delete chats", {
         error,
         selectedCount: selectedChats.length
@@ -1014,12 +1380,13 @@ export function ServerChatList({
         })
       )
     } finally {
-      setIsBulkDeleting(false)
+      if (action.isCurrent()) setIsBulkDeleting(false)
     }
   }, [
     applyBulkDelete,
     bulkConfirmAction,
     clearChat,
+    deleteServerChat,
     queryClient,
     selectedChats,
     selectedConversationIds,
@@ -1028,101 +1395,241 @@ export function ServerChatList({
     t
   ])
 
-  // Not connected state
-  if (!isConnected) {
+  const filterControl = (
+    <div className="px-2 pt-1">
+      <label id="chat-sidebar-type-filter-label" className="sr-only">
+        {t("common:chatSidebar.filter.label", {
+          defaultValue: "Chat type filter"
+        })}
+      </label>
+      <Select<SidebarServerChatFilterValue>
+        value={chatTypeFilter}
+        onChange={(value) => {
+          void setChatTypeFilter(value)
+        }}
+        size="small"
+        className="w-full"
+        aria-labelledby="chat-sidebar-type-filter-label"
+        options={[
+          {
+            value: "all",
+            label: t("common:chatSidebar.filter.allChats", {
+              defaultValue: "All Chats"
+            })
+          },
+          {
+            value: "character",
+            label: t("common:chatSidebar.filter.characterChats", {
+              defaultValue: "Character Chats"
+            })
+          },
+          {
+            value: "non_character",
+            label: t("common:chatSidebar.filter.nonCharacterChats", {
+              defaultValue: "Non-Character Chats"
+            })
+          },
+          {
+            value: "trash",
+            label: t("common:chatSidebar.filter.trash", {
+              defaultValue: "Trash"
+            })
+          }
+        ]}
+      />
+    </div>
+  )
+  const recoveryActions = (
+    retry = () => {
+      void refetch()
+    }
+  ) => (
+    <div className="mt-2 flex flex-wrap gap-2">
+      <button
+        type="button"
+        onClick={retry}
+        className="rounded-md border border-border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-focus">
+        {t("common:retry", { defaultValue: "Retry" })}
+      </button>
+      {freshResults && canLoadNextPage && (
+        <button
+          type="button"
+          onClick={handleNextPage}
+          className="rounded-md border border-border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-focus">
+          {t("common:next", { defaultValue: "Next" })}
+        </button>
+      )}
+      {currentPageSafe > 1 && (
+        <button
+          type="button"
+          onClick={handlePreviousPage}
+          className="rounded-md border border-border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-focus">
+          {t("common:previous", { defaultValue: "Previous" })}
+        </button>
+      )}
+    </div>
+  )
+  // Today / This week / Older, newest first (CS-08).
+  const pagedUnpinnedRecencyGroups = groupChatsByRecency(pagedUnpinnedChats)
+  const renderServerChatRow = (chat: ServerChatHistoryItem) => (
+    <ServerChatRow
+      key={chat.id}
+      chat={chat}
+      showReference={pagedChats.some(
+        (other) => other.id !== chat.id && other.title === chat.title
+      )}
+      isTrashView={isTrashView}
+      isPinned={pinnedChatSet.has(chat.id)}
+      isActive={serverChatId === chat.id}
+      readOnly={readOnly || !freshResults}
+      disabled={!freshResults}
+      openMenuFor={openMenuFor}
+      setOpenMenuFor={setOpenMenuFor}
+      onSelectChat={handleRowClick}
+      onTogglePinned={togglePinned}
+      onOpenSettings={handleOpenSettings}
+      onRenameChat={handleRenameChat}
+      onCreateTable={handleCreateTable}
+      onEditTopic={handleEditTopic}
+      onDeleteChat={isTrashView ? handleHardDeleteChat : handleMoveChatToTrash}
+      onRestoreChat={handleRestoreChat}
+      onUpdateState={handleUpdateState}
+      {...selectionPropsForChat(chat.id)}
+      t={t}
+    />
+  )
+  if (!ownerReady)
     return (
-      <div className={cn("flex justify-center items-center py-8", className)}>
-        <Empty
-          description={t("common:serverChatsUnavailableNotConnected", {
-            defaultValue:
-              "Server chats are available once you connect to your tldw server."
+      <div
+        className={cn("p-3 text-sm", className)}
+        role={historyVerificationState === "error" ? "alert" : "status"}>
+        {filterControl}
+        {historyVerificationState === "error"
+          ? t("common:chatSidebar.discovery.verifyError", {
+              defaultValue: "Could not verify the account for Server history."
+            })
+          : t("common:chatSidebar.discovery.verifying", {
+              defaultValue: "Verifying the account for Server history…"
+            })}
+        {historyVerificationState === "error" &&
+          recoveryActions(retryHistoryVerification)}
+      </div>
+    )
+  if (!isConnected)
+    return (
+      <div
+        role="status"
+        className={cn("p-3 text-sm text-text-muted", className)}>
+        {filterControl}
+        {t("common:chatSidebar.discovery.offline", {
+          defaultValue:
+            "Server history is offline. Owned cached copies remain available in On this device."
+        })}
+      </div>
+    )
+  if (!hasSearchQuery && !serverHistoryOverviewEnabled)
+    return (
+      <div className={cn("p-3 text-sm", className)}>
+        {filterControl}
+        {t("common:chatSidebar.loadServerChatsHint", {
+          defaultValue:
+            "Load server conversations on demand to keep the chat page lighter."
+        })}
+        <button
+          type="button"
+          data-testid="server-history-engage-button"
+          onClick={() => markPanelEngaged("server-history")}
+          className="rounded-md border border-border px-3 py-2 text-sm">
+          {t("common:chatSidebar.loadServerChats", {
+            defaultValue: "Load conversations"
           })}
-        />
+        </button>
       </div>
     )
-  }
-
-  if (!hasSearchQuery && !serverHistoryOverviewEnabled) {
+  if (isLoading && !hasUsableData)
     return (
-      <div className={cn("flex justify-center items-center py-8 px-4", className)}>
-        <div className="flex flex-col items-center gap-3 text-center">
-          <span className="text-xs text-text-subtle">
-            {t("common:chatSidebar.loadServerChatsHint", {
-              defaultValue:
-                "Load server conversations on demand to keep the chat page lighter."
-            })}
-          </span>
-          <button
-            type="button"
-            data-testid="server-history-engage-button"
-            onClick={() => markPanelEngaged("server-history")}
-            className="rounded-md border border-border px-3 py-2 text-sm text-text hover:bg-surface"
-          >
-            {t("common:chatSidebar.loadServerChats", {
-              defaultValue: "Load conversations"
-            })}
-          </button>
-        </div>
-      </div>
-    )
-  }
-
-  // Loading state
-  if (isLoading && !hasUsableData) {
-    return (
-      <div className={cn("flex justify-center items-center py-8", className)}>
+      <div
+        role="status"
+        aria-label={t("common:loading.title", "Loading…")}
+        className={className}>
+        {filterControl}
         <Skeleton active paragraph={{ rows: 4 }} />
       </div>
     )
-  }
-
-  // Error state
-  if (sidebarRefreshState === "hard-error") {
+  if (
+    (sidebarRefreshState === "hard-error" ||
+      sidebarRefreshState === "recoverable-error") &&
+    serverChats.length === 0
+  )
     return (
-      <div className={cn("flex justify-center items-center py-8 px-2", className)}>
-        <span className="text-xs text-text-subtle text-center">
-          {t("common:serverChatsUnavailableServerError", {
-            defaultValue:
-              "Server chats unavailable right now. Check your server logs or try again."
-          })}
-        </span>
+      <div role="alert" className={cn("p-3 text-sm", className)}>
+        {filterControl}
+        {t("common:chatSidebar.discovery.refreshError", {
+          defaultValue:
+            "Could not refresh Server history. Try again; cached copies remain in On this device."
+        })}
+        {recoveryActions()}
       </div>
     )
-  }
-
-  if (sidebarRefreshState === "recoverable-error" && !hasUsableData) {
+  if (orderedChats.length === 0)
     return (
-      <div className={cn("flex justify-center items-center py-8 px-2", className)}>
-        <span className="text-xs text-text-subtle text-center">
-          {t("common:serverChatsUnavailableRecoverable", {
-            defaultValue: "Unable to refresh server chats right now. Try again shortly."
-          })}
-        </span>
-      </div>
-    )
-  }
-
-  // Empty state
-  if (serverChats.length === 0) {
-    return (
-      <div className={cn("flex justify-center items-center py-8", className)}>
-        <Empty
-          description={
-            isTrashView
+      <div className={cn("p-3 text-sm", className)}>
+        {filterControl}
+        <p role="status">
+          {hasSearchQuery
+            ? t("common:chatSidebar.noSearchMatches", {
+                defaultValue: "No chats match “{{query}}”",
+                query: searchQuery.trim()
+              })
+            : isTrashView
               ? t("common:chatSidebar.trashEmpty", {
                   defaultValue: "Trash is empty."
                 })
               : t("common:chatSidebar.noServerChats", {
                   defaultValue: "No server chats yet"
-                })
-          }
-        />
+                })}
+        </p>
+        {hasForeignScope && (
+          <p role="alert">
+            {t("common:chatSidebar.discovery.foreignScope", {
+              defaultValue:
+                "Some Server results were excluded because they belong to a different chat scope."
+            })}
+          </p>
+        )}
+        {hasSearchQuery && onClearSearch && (
+          <button
+            type="button"
+            onClick={onClearSearch}
+            className="mt-2 rounded-md border border-border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-focus">
+            {t("common:chatSidebar.clearSearch", { defaultValue: "Clear search" })}
+          </button>
+        )}
+        {(currentPageSafe > 1 || canLoadNextPage) && recoveryActions()}
       </div>
     )
-  }
 
   return (
-    <div className={cn("flex flex-col gap-2", className)}>
+    <div
+      className={cn("flex flex-col gap-2", className)}
+      aria-busy={isFetching}>
+      {!freshResults && !isFetching && (
+        <div role="alert" className="p-3 text-sm">
+          {t("common:chatSidebar.discovery.refreshError", {
+            defaultValue:
+              "Could not refresh Server history. Try again; cached copies remain in On this device."
+          })}
+          {recoveryActions()}
+        </div>
+      )}
+      {hasForeignScope && (
+        <p role="alert" className="p-3 text-sm">
+          {t("common:chatSidebar.discovery.foreignScope", {
+            defaultValue:
+              "Some Server results were excluded because they belong to a different chat scope."
+          })}
+        </p>
+      )}
       {renamingChat && (
         <Modal
           title={t("common:renameChat", { defaultValue: "Rename chat" })}
@@ -1137,8 +1644,7 @@ export function ServerChatList({
           confirmLoading={renameLoading}
           okButtonProps={{
             disabled: renameLoading || !renameValue.trim()
-          }}
-        >
+          }}>
           <Input
             autoFocus
             value={renameValue}
@@ -1170,8 +1676,7 @@ export function ServerChatList({
           }}
           onOk={handleTopicSubmit}
           confirmLoading={topicLoading}
-          okButtonProps={{ disabled: topicLoading }}
-        >
+          okButtonProps={{ disabled: topicLoading }}>
           <Input
             autoFocus
             value={topicValue}
@@ -1184,48 +1689,7 @@ export function ServerChatList({
           />
         </Modal>
       )}
-      <div className="px-2 pt-1">
-        <label id="chat-sidebar-type-filter-label" className="sr-only">
-          {t("common:chatSidebar.filter.label", {
-            defaultValue: "Chat type filter"
-          })}
-        </label>
-        <Select<SidebarServerChatFilterValue>
-          value={chatTypeFilter}
-          onChange={(value) => {
-            void setChatTypeFilter(value)
-          }}
-          size="small"
-          className="w-full"
-          aria-labelledby="chat-sidebar-type-filter-label"
-          options={[
-            {
-              value: "all",
-              label: t("common:chatSidebar.filter.allChats", {
-                defaultValue: "All Chats"
-              })
-            },
-            {
-              value: "character",
-              label: t("common:chatSidebar.filter.characterChats", {
-                defaultValue: "Character Chats"
-              })
-            },
-            {
-              value: "non_character",
-              label: t("common:chatSidebar.filter.nonCharacterChats", {
-                defaultValue: "Non-Character Chats"
-              })
-            },
-            {
-              value: "trash",
-              label: t("common:chatSidebar.filter.trash", {
-                defaultValue: "Trash"
-              })
-            }
-          ]}
-        />
-      </div>
+      {filterControl}
       {sidebarRefreshState === "recoverable-error" && isShowingStaleData && (
         <div className="mx-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-text-subtle">
           {t("common:serverChatsShowingStaleData", {
@@ -1248,16 +1712,18 @@ export function ServerChatList({
                 type="button"
                 onClick={handleSelectAllVisible}
                 className="text-text-subtle hover:text-text"
-                disabled={visibleChatIds.length === 0}
-              >
+                disabled={
+                  readOnly || !freshResults || visibleChatIds.length === 0
+                }>
                 {t("sidepanel:multiSelect.selectAll", "Select all")}
               </button>
               <button
                 type="button"
                 onClick={clearSelection}
                 className="text-text-subtle hover:text-text"
-                disabled={selectedChatIds.length === 0}
-              >
+                disabled={
+                  readOnly || !freshResults || selectedChatIds.length === 0
+                }>
                 {t("sidepanel:multiSelect.clear", "Clear")}
               </button>
             </div>
@@ -1267,19 +1733,33 @@ export function ServerChatList({
               <>
                 <button
                   type="button"
-                  onClick={openBulkFolderPicker}
+                  onClick={() => {
+                    const action = captureAction(selectedConversationIds)
+                    if (action) {
+                      managementAction.current = action
+                      openBulkFolderPicker()
+                    }
+                  }}
                   className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-text hover:bg-surface2"
-                  disabled={selectedChatIds.length === 0}
-                >
+                  disabled={
+                    readOnly || !freshResults || selectedChatIds.length === 0
+                  }>
                   <FolderPlus className="size-3.5" />
                   {t("sidepanel:multiSelect.addToFolder", "Add to folders")}
                 </button>
                 <button
                   type="button"
-                  onClick={openBulkTagPicker}
+                  onClick={() => {
+                    const action = captureAction(selectedConversationIds)
+                    if (action) {
+                      managementAction.current = action
+                      openBulkTagPicker()
+                    }
+                  }}
                   className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-text hover:bg-surface2"
-                  disabled={selectedChatIds.length === 0}
-                >
+                  disabled={
+                    readOnly || !freshResults || selectedChatIds.length === 0
+                  }>
                   <Tag className="size-3.5" />
                   {t("sidepanel:multiSelect.addTags", "Add tags")}
                 </button>
@@ -1287,8 +1767,9 @@ export function ServerChatList({
                   type="button"
                   onClick={openBulkDeleteConfirm}
                   className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-danger hover:bg-surface2"
-                  disabled={selectedChatIds.length === 0}
-                >
+                  disabled={
+                    readOnly || !freshResults || selectedChatIds.length === 0
+                  }>
                   <Trash2 className="size-3.5" />
                   {t("common:moveToTrash", "Move to trash")}
                 </button>
@@ -1300,8 +1781,12 @@ export function ServerChatList({
                   type="button"
                   onClick={handleBulkRestore}
                   className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-text hover:bg-surface2"
-                  disabled={selectedChatIds.length === 0 || isBulkDeleting}
-                >
+                  disabled={
+                    readOnly ||
+                    !freshResults ||
+                    selectedChatIds.length === 0 ||
+                    isBulkDeleting
+                  }>
                   <RotateCcw className="size-3.5" />
                   {t("common:restore", "Restore")}
                 </button>
@@ -1309,8 +1794,9 @@ export function ServerChatList({
                   type="button"
                   onClick={openBulkHardDeleteConfirm}
                   className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-danger hover:bg-surface2"
-                  disabled={selectedChatIds.length === 0}
-                >
+                  disabled={
+                    readOnly || !freshResults || selectedChatIds.length === 0
+                  }>
                   <Trash2 className="size-3.5" />
                   {t("common:deletePermanently", "Delete permanently")}
                 </button>
@@ -1330,74 +1816,38 @@ export function ServerChatList({
                     ? "No non-character chats found."
                     : chatTypeFilter === "trash"
                       ? "Trash is empty."
-                    : "No chats found."
+                      : "No chats found."
             })}
           />
         </div>
       ) : (
         <>
           {pagedPinnedChats.length > 0 && (
-            <div className="flex flex-col gap-2">
-              <div className="px-2 text-[11px] font-medium text-text-subtle uppercase tracking-wide">
+            <div className="mx-2 flex flex-col gap-0.5">
+              <div className="px-2 py-1 text-xs font-semibold text-text-muted">
                 {t("common:pinned", { defaultValue: "Pinned" })}
               </div>
-              {pagedPinnedChats.map((chat) => (
-                <ServerChatRow
-                  key={chat.id}
-                  chat={chat}
-                  isTrashView={isTrashView}
-                  isPinned={pinnedChatSet.has(chat.id)}
-                  isActive={serverChatId === chat.id}
-                  readOnly={readOnly}
-                  openMenuFor={openMenuFor}
-                  setOpenMenuFor={setOpenMenuFor}
-                  onSelectChat={handleRowClick}
-                  onTogglePinned={togglePinned}
-                  onOpenSettings={handleOpenSettings}
-                  onRenameChat={handleRenameChat}
-                  onCreateTable={handleCreateTable}
-                  onEditTopic={handleEditTopic}
-                  onDeleteChat={isTrashView ? handleHardDeleteChat : handleMoveChatToTrash}
-                  onRestoreChat={handleRestoreChat}
-                  onUpdateState={handleUpdateState}
-                  {...selectionPropsForChat(chat.id)}
-                  t={t}
-                />
-              ))}
+              {pagedPinnedChats.map(renderServerChatRow)}
             </div>
           )}
-          {pagedUnpinnedChats.length > 0 && (
+          {pagedUnpinnedRecencyGroups.map(({ group, chats }, index) => (
             <div
+              key={group}
               className={cn(
-                "flex flex-col gap-2",
-                pagedPinnedChats.length > 0 && "mt-3"
-              )}
-            >
-              {pagedUnpinnedChats.map((chat) => (
-                <ServerChatRow
-                  key={chat.id}
-                  chat={chat}
-                  isTrashView={isTrashView}
-                  isPinned={pinnedChatSet.has(chat.id)}
-                  isActive={serverChatId === chat.id}
-                  readOnly={readOnly}
-                  openMenuFor={openMenuFor}
-                  setOpenMenuFor={setOpenMenuFor}
-                  onSelectChat={handleRowClick}
-                  onTogglePinned={togglePinned}
-                  onOpenSettings={handleOpenSettings}
-                  onRenameChat={handleRenameChat}
-                  onCreateTable={handleCreateTable}
-                  onEditTopic={handleEditTopic}
-                  onDeleteChat={isTrashView ? handleHardDeleteChat : handleMoveChatToTrash}
-                  onRestoreChat={handleRestoreChat}
-                  onUpdateState={handleUpdateState}
-                  {...selectionPropsForChat(chat.id)}
-                  t={t}
-                />
-              ))}
+                "mx-2 flex flex-col gap-0.5",
+                (pagedPinnedChats.length > 0 || index > 0) && "mt-3"
+              )}>
+              <div
+                data-testid="server-chat-recency-group"
+                className="px-2 py-1 text-xs font-semibold text-text-muted">
+                {t(
+                  CHAT_RECENCY_GROUP_LABELS[group].key,
+                  CHAT_RECENCY_GROUP_LABELS[group].defaultLabel
+                )}
+              </div>
+              {chats.map(renderServerChatRow)}
             </div>
-          )}
+          ))}
           {hasMultiplePages && (
             <div className="mt-3 border-t border-border px-2 pt-3">
               <div className="mb-2 text-xs text-text-subtle">
@@ -1413,23 +1863,20 @@ export function ServerChatList({
                   type="button"
                   onClick={handlePreviousPage}
                   disabled={currentPageSafe <= 1}
-                  className="rounded-md border border-border px-2 py-1 text-xs text-text hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50"
-                >
+                  className="rounded-md border border-border px-2 py-1 text-xs text-text hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50">
                   {t("common:previous", { defaultValue: "Previous" })}
                 </button>
                 <button
                   type="button"
                   onClick={handleNextPage}
-                  disabled={currentPageSafe >= totalPages}
-                  className="rounded-md border border-border px-2 py-1 text-xs text-text hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50"
-                >
+                  disabled={!canLoadNextPage || isFetching}
+                  className="rounded-md border border-border px-2 py-1 text-xs text-text hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50">
                   {t("common:next", { defaultValue: "Next" })}
                 </button>
                 <span className="text-xs text-text-subtle">
-                  {t("common:pageOf", {
-                    defaultValue: "Page {{page}} of {{pages}}",
-                    page: currentPageSafe,
-                    pages: totalPages
+                  {t("common:chatSidebar.discovery.page", {
+                    defaultValue: "Page {{page}}",
+                    page: currentPageSafe
                   })}
                 </span>
                 <Input
@@ -1446,8 +1893,7 @@ export function ServerChatList({
                 <button
                   type="button"
                   onClick={handleJumpToPage}
-                  className="rounded-md border border-border px-2 py-1 text-xs text-text hover:bg-surface2"
-                >
+                  className="rounded-md border border-border px-2 py-1 text-xs text-text hover:bg-surface2">
                   {t("common:go", { defaultValue: "Go" })}
                 </button>
               </div>
@@ -1456,17 +1902,19 @@ export function ServerChatList({
         </>
       )}
       <React.Suspense fallback={null}>
-        {bulkFolderPickerOpen && (
+        {bulkFolderPickerOpen && managementAction.current?.isCurrent() && (
           <BulkFolderPickerModal
             open={bulkFolderPickerOpen}
+            operation={managementAction.current}
             conversationIds={selectedConversationIds}
             onClose={handleBulkFolderPickerClose}
             onSuccess={clearSelection}
           />
         )}
-        {bulkTagPickerOpen && (
+        {bulkTagPickerOpen && managementAction.current?.isCurrent() && (
           <BulkTagPickerModal
             open={bulkTagPickerOpen}
+            operation={managementAction.current}
             conversationIds={selectedConversationIds}
             onClose={handleBulkTagPickerClose}
             onSuccess={clearSelection}
@@ -1474,7 +1922,7 @@ export function ServerChatList({
         )}
       </React.Suspense>
       <Modal
-        open={bulkDeleteConfirmOpen}
+        open={bulkDeleteConfirmOpen && !!managementAction.current?.isCurrent()}
         onCancel={handleBulkDeleteConfirmClose}
         onOk={handleBulkDelete}
         okText={
@@ -1495,8 +1943,7 @@ export function ServerChatList({
                 "Move selected chats to trash?"
               )
         }
-        destroyOnHidden
-      >
+        destroyOnHidden>
         <p>
           {bulkConfirmAction === "hard_delete"
             ? t(

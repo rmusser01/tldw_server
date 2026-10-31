@@ -32,17 +32,22 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom")
-  const ReactModule = await import("react")
   return {
     ...actual,
-    useNavigate: () => mocks.navigate,
-    useBlocker: () => ({ state: "unblocked", proceed: undefined, reset: undefined }),
-    unstable_usePrompt: function usePrompt(...args: unknown[]) {
-      mocks.usePrompt(...args)
+    useNavigate: () => mocks.navigate
+  }
+})
+
+vi.mock("@/entries/shared/route-leave-prompt", async () => {
+  const ReactModule = await import("react")
+  return {
+    RouteLeavePrompt: (props: { when: boolean; message: string }) => {
+      mocks.usePrompt(props)
       ReactModule.useEffect(() => {
-        mocks.promptActive = true
+        mocks.promptActive = props.when
         return () => { mocks.promptActive = false }
-      }, [])
+      }, [props.when])
+      return null
     }
   }
 })

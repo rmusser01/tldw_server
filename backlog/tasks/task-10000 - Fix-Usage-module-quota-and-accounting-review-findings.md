@@ -42,7 +42,7 @@ Address the current-code review findings in `tldw_Server_API/app/core/Usage`: Re
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Manual Backlog task-file exception approved by the user because the Backlog CLI hung on task create/list/search in this repository during this session.
 
 Implemented fixes:
@@ -59,7 +59,7 @@ PR review follow-up:
 - Moved endpoint legacy quota fallback decision logic into `app/core/Usage/audio_quota.py`, leaving endpoint helpers as shim resolution plus core delegation.
 - Updated unlimited-tier minute consumption so ledger unavailability cannot trigger bounded fail-open denial for users with `daily_minutes=None`.
 - Added regression coverage for unlimited-tier ledger unavailability and core-owned legacy fallback behavior.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

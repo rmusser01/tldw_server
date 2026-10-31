@@ -28,18 +28,13 @@ Migrate the WorkflowRunInspector null/empty state and status tags from AntD Empt
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Migrated WorkflowRunInspector's no-diagnostics state from AntD Empty to the canonical EmptyState primitive and replaced workflow failure/attempt AntD Tags with shared Badge variants while preserving existing failure summary, attempts, evidence, and recommended actions. Removed the two matching WorkflowRunInspector entries from the design-system product-state baseline, reducing the current baseline from 335 to 333 allowed legacy exceptions. Verification: RED WorkflowRunInspector test failed on missing EmptyState/Badge markers before implementation; focused WorkflowRunInspector Vitest passed 2 tests; product-state guard Vitest passed 52 tests; bun run verify:design-system-state passed with 333 allowed legacy exceptions and no blocked findings; git diff --check passed; full UI TypeScript still fails on existing repo-wide debt and touched-file filtering returned no WorkflowRunInspector/baseline/task diagnostics; Bandit skipped because touched files are UI TypeScript/JSON and Backlog markdown only.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

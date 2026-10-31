@@ -32,9 +32,9 @@ Follow up on PR #1325 review comments by clarifying the no-confirmation test beh
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented PR #1325 review fix in the branch worktree: getDeleteConfirmConfig now waits for any Modal.confirm call and returns the most recent config. The no-acceptance test no longer calls a nonexistent onCancel handler; it asserts onCancel is undefined and verifies no delete side effects occur until confirmation is accepted.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

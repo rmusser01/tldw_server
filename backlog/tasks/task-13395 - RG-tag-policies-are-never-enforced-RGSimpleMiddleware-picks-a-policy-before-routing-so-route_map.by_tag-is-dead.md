@@ -3,9 +3,10 @@ id: TASK-13395
 title: >-
   RG tag policies are never enforced: RGSimpleMiddleware picks a policy before
   routing, so route_map.by_tag is dead
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-29 15:45'
+updated_date: '2026-09-30 07:03'
 labels:
   - resource-governance
   - security
@@ -34,17 +35,29 @@ Recommendation: (a), because the policy file states the intent that these routes
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Owner decision recorded: (a) enforce tag policies pre-routing, or (b) audits count only enforceable mappings
-- [ ] #2 Whichever is chosen, the coverage audit and startup audit agree with what RGSimpleMiddleware actually enforces
-- [ ] #3 A request-level test: an included route with a tag-only policy, no path policy and no heuristic match is governed under (a), or reported unprotected under (b)
+- [x] #1 Owner decision recorded: (a) enforce tag policies pre-routing, or (b) audits count only enforceable mappings
+- [x] #2 Whichever is chosen, the coverage audit and startup audit agree with what RGSimpleMiddleware actually enforces
+- [x] #3 A request-level test: an included route with a tag-only policy, no path policy and no heuristic match is governed under (a), or reported unprotected under (b)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Owner decision 2026-09-29: option (a). The resolver enforces by_tag before routing, using a served-route index: path first, then the innermost tag, then default. Both audits call the same resolver.
+- Request-level test: test_middleware_tag_enforcement.py (tag-only route through nested includes).
+- Also in PR B: ingress charges the validated principal (tenant keeps precedence); unvalidated credentials no longer mint buckets; route-map lint in CI; WebUI replay test with zero 429s (min headroom 6.8x).
+- Verification: broad suites (RG, AuthNZ_Unit, Embeddings, lint, Utils; -n 8): 3170 passed. The four remaining failures reproduce identically on origin/dev 955b1d9626 (xdist pollution, TASK-13400).
+- Bandit -ll on touched files: clean.
+- Follow-ups: TASK-13399 (route-auth ratchet blind to flag-gated routers).
+Spec: Docs/Design/2026-09-29-rg-ingress-safety-net-design.md.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

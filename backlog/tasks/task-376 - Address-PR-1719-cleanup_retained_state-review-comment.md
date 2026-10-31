@@ -33,9 +33,9 @@ Address the live PR #1719 review finding that cleanup_retained_state fails when 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red-green verification: added test_cleanup_retained_state_runs_inside_existing_transaction, confirmed it failed before implementation with RuntimeError from _TransactionBoundPool lacking transaction(), then added _cleanup_transaction() so transaction-bound repos reuse self while top-level repos still open an atomic transaction. Verification passed: focused red/green regression, full test_prototype_repo.py 21 passed, git diff --check passed, Bandit JSON at /tmp/bandit_prototype_repo_1719_review_fix.json reported errors=0 and results=0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

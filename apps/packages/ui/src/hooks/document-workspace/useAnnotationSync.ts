@@ -1,9 +1,14 @@
 import { useEffect, useRef, useCallback, useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { tldwClient } from "@/services/tldw"
-import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
+import {
+  resolveBrowserRequestTransport,
+  resolveTldwRequestHeaders
+} from "@/services/tldw/request-core"
+import type { AllowedPath } from "@/services/tldw/openapi-guard"
 import { useConnectionStore } from "@/store/connection"
 import { useDocumentWorkspaceStore } from "@/store/document-workspace"
+import { buildMediaNavigationScopeKey } from "@/utils/media-navigation-scope"
 import type { Annotation, AnnotationColor } from "@/components/DocumentWorkspace/types"
 
 // Retry configuration
@@ -11,69 +16,110 @@ const MAX_RETRY_ATTEMPTS = 3
 const INITIAL_RETRY_DELAY_MS = 1000 // 1 second
 const MAX_RETRY_DELAY_MS = 8000 // 8 seconds
 
+// The Fetch spec caps in-flight keepalive bodies at 64 KiB, so larger unload
+// payloads are only persisted and replayed on the next load.
+const MAX_UNLOAD_PAYLOAD_BYTES = 60_000
+
+const syncPath = (mediaId: number): AllowedPath => `/api/v1/media/${mediaId}/annotations/sync`
+
+const pendingStorageKey = (scopeKey: string, mediaId: number) =>
+  `tldw:document-workspace:pending-annotations:${scopeKey}:${mediaId}`
+
+const toSyncPayload = (annotations: Annotation[]) => ({
+  annotations: annotations.map((ann) => ({
+    location: String(ann.location),
+    text: ann.text,
+    color: ann.color,
+    note: ann.note,
+    annotation_type: ann.annotationType ?? "highlight"
+  })),
+  client_ids: annotations.map((ann) => ann.id)
+})
+
 /**
- * Sync annotations using navigator.sendBeacon for guaranteed delivery on page unload.
- * sendBeacon is specifically designed for this use case - it queues the request
- * and guarantees delivery even if the page is closed immediately.
- *
- * @returns true if sendBeacon was used, false if not available or failed
+ * Prepared ahead of time by useAnnotationSyncOnClose, because beforeunload
+ * cannot await the async config that the auth headers and the per-user
+ * storage scope come from. Headers are null when credentials are unavailable.
  */
-function syncAnnotationsWithBeacon(
+const unloadContextRef: {
+  current: { scopeKey: string; headers: Record<string, string> | null } | null
+} = { current: null }
+
+function readPersistedAnnotations(key: string): Annotation[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || "[]")
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+/** Merge pending annotations into the persisted set (replay is idempotent on client id). */
+function persistPendingAnnotations(key: string, pending: Annotation[]): Annotation[] {
+  const pendingIds = new Set(pending.map((ann) => ann.id))
+  const merged = [
+    ...readPersistedAnnotations(key).filter((ann) => !pendingIds.has(ann.id)),
+    ...pending
+  ]
+  try {
+    localStorage.setItem(key, JSON.stringify(merged))
+  } catch (error) {
+    console.error("Persisting pending annotations failed:", error)
+  }
+  return merged
+}
+
+async function replayPersistedAnnotations(key: string, mediaId: number): Promise<boolean> {
+  const stored = localStorage.getItem(key)
+  const persisted = readPersistedAnnotations(key)
+  if (persisted.length === 0) return false
+  const { annotations, client_ids } = toSyncPayload(persisted)
+  await tldwClient.syncAnnotations(mediaId, annotations, client_ids)
+  // An unload during the replay may have persisted more; keep those for next time.
+  if (localStorage.getItem(key) === stored) localStorage.removeItem(key)
+  return true
+}
+
+/**
+ * Sync pending annotations on page unload. They are persisted locally first
+ * (replayed on the next load), then sent with an authenticated keepalive fetch.
+ *
+ * @returns "sent" when the keepalive request was queued; "deferred" when no
+ * request was made (payload over 60KB, credentials or context not ready).
+ */
+export function syncAnnotationsOnUnload(
   serverUrl: string | null,
   mediaId: number,
-  pendingAnnotations: Annotation[]
-): boolean {
-  if (!serverUrl || pendingAnnotations.length === 0) {
-    return false
+  pending: Annotation[]
+): "sent" | "deferred" {
+  const context = unloadContextRef.current
+  if (!serverUrl || pending.length === 0 || !context) {
+    return "deferred"
   }
 
   try {
+    const toSend = persistPendingAnnotations(
+      pendingStorageKey(context.scopeKey, mediaId),
+      pending
+    )
+    const body = JSON.stringify(toSyncPayload(toSend))
+    if (!context.headers || new Blob([body]).size > MAX_UNLOAD_PAYLOAD_BYTES) {
+      return "deferred"
+    }
     const url = resolveBrowserRequestTransport({
       config: { serverUrl },
-      path: `/api/v1/media/${mediaId}/annotations/sync`
+      path: syncPath(mediaId)
     }).url
-    const payload = JSON.stringify({
-      annotations: pendingAnnotations.map((ann) => ({
-        location: String(ann.location),
-        text: ann.text,
-        color: ann.color,
-        note: ann.note,
-        annotation_type: ann.annotationType ?? "highlight"
-      })),
-      client_ids: pendingAnnotations.map((ann) => ann.id)
-    })
-
-    const blob = new Blob([payload], { type: "application/json" })
-
-    // Guard: sendBeacon has a ~64KB limit in most browsers.
-    // If payload exceeds 60KB, fall back to fetch with keepalive.
-    const MAX_BEACON_SIZE = 60_000
-    if (blob.size > MAX_BEACON_SIZE) {
-      // fetch with keepalive behaves like sendBeacon but has no size limit
-      fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: payload,
-        keepalive: true
-      }).catch((err) => console.error("keepalive fetch for annotations failed:", err))
-      return true
-    }
-
-    // sendBeacon is not available in all environments
-    if (typeof navigator === "undefined" || !navigator.sendBeacon) {
-      fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: payload,
-        keepalive: true
-      }).catch((err) => console.error("keepalive fetch for annotations failed:", err))
-      return true
-    }
-
-    return navigator.sendBeacon(url, blob)
+    fetch(url, {
+      method: "POST",
+      keepalive: true,
+      headers: context.headers,
+      body
+    }).catch((err) => console.error("keepalive fetch for annotations failed:", err))
+    return "sent"
   } catch (error) {
-    console.error("syncAnnotationsWithBeacon failed:", error)
-    return false
+    console.error("syncAnnotationsOnUnload failed:", error)
+    return "deferred"
   }
 }
 
@@ -268,13 +314,15 @@ export function useAnnotationSync(
  * Call this from the document workspace page component and pass the
  * forceSync function returned by useAnnotationSync.
  *
- * Uses navigator.sendBeacon for page unload events to guarantee delivery,
- * since regular async requests may not complete before the page closes.
+ * On page unload, pending annotations are persisted locally and sent with an
+ * authenticated keepalive fetch; persisted annotations are replayed on the
+ * next load (the sync endpoint is idempotent on client id).
  */
 export function useAnnotationSyncOnClose(
   mediaId: number | null,
   forceSync: () => void
 ) {
+  const queryClient = useQueryClient()
   const annotationSyncStatus = useDocumentWorkspaceStore(
     (s) => s.annotationSyncStatus
   )
@@ -282,6 +330,8 @@ export function useAnnotationSyncOnClose(
     (s) => s.pendingAnnotations
   )
   const serverUrl = useConnectionStore((s) => s.state.serverUrl)
+  const configUpdatedAt = useConnectionStore((s) => s.state.lastConfigUpdatedAt)
+  const replayedKeyRef = useRef<string | null>(null)
   const previousMediaIdRef = useRef<number | null>(mediaId)
   const forceSyncRef = useRef(forceSync)
   const statusRef = useRef(annotationSyncStatus)
@@ -309,6 +359,36 @@ export function useAnnotationSyncOnClose(
     mediaIdRef.current = mediaId
   }, [mediaId])
 
+  // Prepare unload headers and storage scope whenever the pending set or auth
+  // config changes; on first preparation for a document, replay what a
+  // previous page persisted.
+  useEffect(() => {
+    if (mediaId === null) return
+    let cancelled = false
+    void (async () => {
+      const cfg = await tldwClient.getConfig()
+      if (!cfg) return
+      const headers = await resolveTldwRequestHeaders(
+        { path: syncPath(mediaId), method: "POST", body: {} },
+        { getConfig: async () => cfg }
+      )
+      if (cancelled) return
+      const scopeKey = buildMediaNavigationScopeKey(cfg)
+      unloadContextRef.current = { scopeKey, headers }
+      const key = pendingStorageKey(scopeKey, mediaId)
+      if (replayedKeyRef.current === key) return
+      replayedKeyRef.current = key
+      if (await replayPersistedAnnotations(key, mediaId)) {
+        queryClient.invalidateQueries({ queryKey: ["document-annotations", mediaId] })
+      }
+    })().catch((error) => {
+      console.warn("Annotation unload preparation or replay failed:", error)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [mediaId, serverUrl, configUpdatedAt, pendingAnnotations, queryClient])
+
   // Sync when document changes (normal async sync is fine here)
   useEffect(() => {
     if (previousMediaIdRef.current !== mediaId && statusRef.current === "pending") {
@@ -318,18 +398,16 @@ export function useAnnotationSyncOnClose(
   }, [mediaId])
 
   // Sync on unmount / page close
-  // Use sendBeacon for beforeunload to guarantee delivery
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (statusRef.current === "pending" && mediaIdRef.current !== null) {
-        // Try sendBeacon first (guaranteed delivery on page close)
-        const beaconSent = syncAnnotationsWithBeacon(
+        const result = syncAnnotationsOnUnload(
           serverUrlRef.current,
           mediaIdRef.current,
           pendingRef.current
         )
-        // Fall back to regular sync if beacon fails (might not complete)
-        if (!beaconSent) {
+        // Best effort only (may not complete); the persisted copy is replayed next load.
+        if (result === "deferred") {
           forceSyncRef.current()
         }
       }

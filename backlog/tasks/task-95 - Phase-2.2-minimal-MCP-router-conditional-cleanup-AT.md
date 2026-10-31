@@ -39,11 +39,11 @@ Convert the minimal-test mcp_unified_endpoint mcp_catalogs_manage and mcp_hub_ma
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED: pytest test_router_groups_contract.py -k 'mcp and (attr_lookup or missing_import_failures or runtime_import_failures)' failed with three expected failures against eager MCP imports. GREEN: the same selector passed after the minimal.py change. Broader validation: router_groups_contract 113 passed, main_lifecycle_contract 54 passed, openapi_contracts 69 passed, Bandit results 0, git diff --check clean. No documentation change needed because this is an internal router registration cleanup. No known blockers.
 
 Opened PR #1337 against dev: https://github.com/rmusser01/tldw_server/pull/1337
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

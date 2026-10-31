@@ -27,7 +27,8 @@ Note:
 - Alias: `/api/v1/chats/conversations` maps to the conversation list/update/tree endpoints above.
 
 Parameter glossary:
-- `query`: full-text search term applied to conversation title.
+- `query`: full-text search term, matched against the fields named by `search_in`.
+- `search_in`: comma-separated fields that `query` is matched against: `title` (default) and/or `content` (the text of live messages). With `content`, title matches rank first, then content-only matches by the chosen ordering, and each item reports `matched_in`, `match_snippet` (a plain-text excerpt of the earliest matching message) and `match_message_id`. Deleted messages and trashed conversations never match; with `include_deleted` or `deleted_only` the search stays on title, topic and state.
 - `state`: conversation lifecycle state (`in-progress`, `resolved`, `backlog`, `non-viable`).
 - `topic_label`: exact topic label match; append `*` for prefix search.
 - `keywords`: repeatable query parameter; all values must match (AND).
@@ -271,6 +272,8 @@ When continuation is active, stream metadata payloads include `tldw_continuation
 
 Note: Stream chunks follow OpenAI-style `choices[].delta.content` for maximum client compatibility.
 
+A stream's usage (the provider's token counts for the whole request) arrives on a usage chunk, and the usage record is costed from it whether or not the client receives it. OpenAI sends it only when asked, as a last chunk whose `choices` array is empty. The server asks OpenAI for it on every `/chat/completions` stream to `api.openai.com` and OpenAI's data-residency hosts (such as `eu.api.openai.com`), but forwards it only to a client that asked for it itself with `"stream_options": {"include_usage": true}`, at the top level of the request (as the OpenAI SDKs send it) or in `extra_body`. A client that asks must not assume `choices[0]` exists on that chunk. Every other OpenAI chunk carries `"usage": null`, as in OpenAI's own streams. OpenRouter always sends usage, on a last chunk with one content-free choice, and that chunk is forwarded unchanged. Other providers send usage only if they do so unasked or `extra_body` asks for it.
+
 ### Streaming Event Format
 
 | Event/Line     | Shape/Fields                                                                 | Notes                                         |
@@ -278,6 +281,7 @@ Note: Stream chunks follow OpenAI-style `choices[].delta.content` for maximum cl
 | `event: stream_start` | `data: { conversation_id, model, timestamp }`                                | Emitted once at start                         |
 | Heartbeat      | `: heartbeat <ISO-8601>`                                                      | Comment line; no `data:` payload              |
 | Delta chunk    | `data: {"choices":[{"delta":{"content":"..."}}]}`                           | Repeats for each text delta                   |
+| Usage chunk    | `data: {"choices":[],"usage":{"prompt_tokens":...,"completion_tokens":...}}` | Last provider chunk; sent only to a client that set `stream_options.include_usage` |
 | Error          | `data: {"error": {"message": "..."}}`                                       | Emitted and stream terminates                 |
 | `event: stream_end` | `data: { conversation_id, success, timestamp }`                                 | Emitted on graceful completion                |
 

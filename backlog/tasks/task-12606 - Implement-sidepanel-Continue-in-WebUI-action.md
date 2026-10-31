@@ -38,9 +38,9 @@ Implement Task 2 from the sidepanel chat WebUI handoff plan: add a sidepanel Con
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented chat-continue-in-webui in ControlRow.tsx using the Task 1 handoff service and existing full-app route opener. Added draftMessage, hasVisiblePageContextForHandoff, and getVisiblePageContextForHandoff props to ControlRow. Added selected-document and active-tab title/URL context construction in form.tsx; no page body text is captured. Added ControlRow.chat-handoff.test.tsx covering route-only full-app behavior, handoff creation, character route merge, URL privacy, disabled empty state, stale context warning, storage failure, and duplicate-click prevention. Spec compliance review passed. Code-quality review requested an in-flight guard; fixed with a synchronous ref guard plus pending UI state and deferred-promise regression, then re-review passed. Verification: focused sidepanel suite passed with 14 tests; broader handoff suite passed with 24 tests after including service tests; UI typecheck passed after TASK-550 fixed service parser narrowing. Bandit is not applicable to TypeScript/TSX UI changes; worker attempt produced parser errors for TSX.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

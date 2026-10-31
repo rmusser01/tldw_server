@@ -34,7 +34,7 @@ Create the design/spec for GitHub issue #1346, which asks to reduce WebUI packag
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Wrote approved design spec for issue #1346 at Docs/superpowers/specs/2026-05-07-webui-dependency-trimming-design.md. No runtime or dependency files changed in this design slice.
 
 Spec review loop result: Approved. Reviewer confirmed the spec preserves audit -> quick cleanup -> axios replacement order, splits work into reviewable units, names target package surfaces and issue/task references, and includes guardrails plus verification expectations.
@@ -42,7 +42,7 @@ Spec review loop result: Approved. Reviewer confirmed the spec preserves audit -
 Verification for design slice: git diff --check passed. Bandit skipped because this slice changes docs/backlog task metadata only and touches no Python code.
 
 Manual design review before implementation planning found and fixed three risks: default api/baseURL compatibility for axios replacement, per-request config compatibility, and extension impact checks for shared @tldw/ui dependency changes. Also clarified that clsx should split into its own PR if compatibility work is non-mechanical.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -28,7 +28,7 @@ Continue #1116 Phase 2.2 by deferring the remaining kanban router imports in ite
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added focused router contract coverage for the nine kanban endpoint modules. The test failed red before implementation because iter_content_router_specs eagerly imported the modules and touched each router attribute during spec construction.
 
 Converted the kanban block in content.py to lazy ImportedRouterSpec entries for kanban_boards, kanban_lists, kanban_cards, kanban_labels, kanban_checklists, kanban_comments, kanban_search, kanban_links, and kanban_workflow.
@@ -36,7 +36,7 @@ Converted the kanban block in content.py to lazy ImportedRouterSpec entries for 
 Verification: focused red failed as expected; focused green passed 1 selected; full router group contract passed 61; main router contract passed 6; OpenAPI contract suite passed 69; Bandit content router group source reported 0 results and 0 errors; git diff --check passed.
 
 Review follow-up: collapsed the repetitive nine-entry kanban ImportedRouterSpec block into a loop over module names after Gemini review. The existing focused kanban laziness contract still covers module names, metadata, lazy imports, and attr lookup behavior.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

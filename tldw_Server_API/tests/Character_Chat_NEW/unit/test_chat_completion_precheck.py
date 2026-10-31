@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions
+from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
 )
@@ -18,6 +19,7 @@ from tldw_Server_API.app.core.LLM_Calls.routing.models import (
     RoutingDecision,
     RoutingPolicy,
 )
+from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
 
 
 @pytest.mark.integration
@@ -60,6 +62,38 @@ def test_complete_v2_neutral_sampling_works_with_local_adapter_validation(
     assert response.status_code == expected_status, response.text
 
 
+@pytest.mark.integration
+@pytest.mark.parametrize("stream", [False, True])
+def test_complete_v2_refuses_an_over_quota_user_before_any_llm_call(
+    monkeypatch, test_client, auth_headers, populated_character_db, stream
+):
+    """An over-quota user gets the 402, streaming or not, and the provider is never called."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    characters = test_client.get("/api/v1/characters/", headers=auth_headers)
+    assert characters.status_code == 200, characters.text
+    created = test_client.post(
+        "/api/v1/chats/", headers=auth_headers, json={"character_id": characters.json()[0]["id"]}
+    )
+    assert created.status_code == 201, created.text
+    calls: list[dict] = []
+
+    def _recording_completion(**kwargs):
+        calls.append(kwargs)
+        return {"choices": [{"message": {"content": "unused"}}]}
+
+    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", _recording_completion)
+    monkeypatch.setattr(character_chat_sessions, "is_model_known_for_provider", lambda *args: None)
+    refuse_llm_work(monkeypatch)
+    response = test_client.post(
+        f"/api/v1/chats/{created.json()['id']}/complete-v2",
+        headers=auth_headers,
+        json={"provider": "llama", "model": "garden-model", "append_user_message": "Hi", "save_to_db": False, "stream": stream},
+    )
+    assert_llm_quota_402(response)
+    assert calls == []
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("captured_key", ["router-key-a", None], ids=["a-to-b", "absent-to-b"])
@@ -99,17 +133,18 @@ async def test_auto_router_dispatch_keeps_one_static_credential_snapshot(
         async def close(self) -> None:
             lifecycle.append("close")
 
+    router_flags: list[bool] = []
+
     async def provider_call(**kwargs: Any) -> dict[str, Any]:
         captured.update(kwargs)
+        router_flags.append(current_llm_call_context().records_itself)
         return {
             "choices": [{"message": {"content": '{"provider":"local-llm","model":"routed"}'}}],
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
         }
 
-    from tldw_Server_API.app.api.v1.schemas import chat_request_schemas
-
     monkeypatch.setattr(
-        chat_request_schemas,
+        config_llm_providers,
         "get_api_keys",
         lambda: {"local-llm": current_key["value"]},
     )
@@ -155,6 +190,8 @@ async def test_auto_router_dispatch_keeps_one_static_credential_snapshot(
         current_user=SimpleNamespace(id=1),
     )
 
+    assert router_flags
+    assert all(router_flags)
     assert captured["api_key"] == captured_key
     assert captured["app_config"] == config_a
     assert captured["credentials_resolved"] is True

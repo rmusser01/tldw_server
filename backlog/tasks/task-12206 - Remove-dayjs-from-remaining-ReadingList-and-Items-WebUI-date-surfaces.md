@@ -37,7 +37,7 @@ Continue GitHub issue #1346 after the merged Media FilterPanel cleanup by removi
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented in isolated worktree branch codex/webui-final-dayjs-native-dates-1346. ReadingItemsList and ItemsWorkspace now use native date inputs backed by shared date-input helpers for local start/end day ISO conversion. ItemsWorkspace published_at display now uses native Date formatting and preserves invalid raw labels. The exact shared UI dayjs import guard now expects zero direct imports.
 
 Removed direct dayjs declarations from apps/packages/ui/package.json, apps/tldw-frontend/package.json, and apps/extension/package.json after exact active-code import scans across apps returned no direct package imports. Regenerated apps/bun.lock with scripts disabled; dayjs remains only through transitive lockfile ownership from Ant Design, ExcelJS, Mermaid, and optional picker peer metadata.
@@ -47,7 +47,7 @@ Verification: focused Vitest first failed on missing native ReadingList/Items da
 PR #1446 review follow-up: Gemini Code Assist flagged hardcoded native date filter labels and aria-labels in ItemsWorkspace. ItemsWorkspace already uses useTranslation, so the date labels now use t("items:dateFrom", "Date from") and t("items:dateTo", "Date to") like the sibling ReadingList filters.
 
 PR #1446 review fix verification: focused ItemsWorkspace test passed with 7 tests, focused dependency cleanup Vitest slice passed with 3 files and 10 tests, git diff --check exited 0, and an exact grep for hardcoded Items date aria/text labels returned no matches.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

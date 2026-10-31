@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     ChatCompletionRequest,
 )
+from tldw_Server_API.app.core.AuthNZ.byok_helpers import load_server_config_snapshot
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import resolve_byok_credentials
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAuthenticationError,
@@ -28,7 +29,7 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call_async,
     resolve_provider_api_key,
 )
-from tldw_Server_API.app.core.exceptions import PromptImprovementDispatchError
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, PromptImprovementDispatchError
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
     list_registered_providers,
@@ -37,6 +38,7 @@ from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
 from tldw_Server_API.app.core.Prompt_Management.prompt_improvement import (
     PROMPT_IMPROVEMENT_LIMITS,
 )
+from tldw_Server_API.app.core.Usage.llm_call_context import billed_credential_source, llm_call_context
 
 PROMPT_IMPROVEMENT_MAX_OUTPUT_TOKENS = 1024
 PROMPT_IMPROVEMENT_CALL_POLICY = ProviderCallPolicy(
@@ -109,7 +111,7 @@ async def dispatch_prompt_improvement(
         ) from exc
 
     try:
-        provider_listing = configured_providers_getter()
+        provider_listing = await asyncio.to_thread(configured_providers_getter)
         if not isinstance(provider_listing, Mapping):
             raise TypeError("configured provider listing must be a mapping")
         default_provider = str(provider_listing.get("default_provider") or "").strip()
@@ -200,18 +202,26 @@ async def dispatch_prompt_improvement(
 
     try:
         try:
-            provider_response = await perform_chat_api_call_async(
-                api_endpoint=provider,
-                messages_payload=messages,
-                api_key=api_key,
-                model=model,
-                max_tokens=PROMPT_IMPROVEMENT_MAX_OUTPUT_TOKENS,
-                streaming=False,
-                tools=None,
-                user_identifier=str(user_id if user_id is not None else "prompt-improvement"),
-                app_config=getattr(byok, "app_config", None),
-                call_policy=PROMPT_IMPROVEMENT_CALL_POLICY,
+            # Whose key and whose endpoint decide whether the call counts toward the user's LLM quota. The adapter
+            # takes a raw key here, so its base URL is the app_config's or else the environment's (in the snapshot).
+            credential_source = billed_credential_source(
+                provider, getattr(byok, "source", None), getattr(byok, "app_config", None), load_server_config_snapshot()
             )
+            with llm_call_context(credential_source=credential_source):
+                provider_response = await perform_chat_api_call_async(
+                    api_endpoint=provider,
+                    messages_payload=messages,
+                    api_key=api_key,
+                    model=model,
+                    max_tokens=PROMPT_IMPROVEMENT_MAX_OUTPUT_TOKENS,
+                    streaming=False,
+                    tools=None,
+                    user_identifier=str(user_id if user_id is not None else "prompt-improvement"),
+                    app_config=getattr(byok, "app_config", None),
+                    call_policy=PROMPT_IMPROVEMENT_CALL_POLICY,
+                )
+        except LLMQuotaExceededError:
+            raise  # the user's limit, not a provider outage: the route answers the 402
         except Exception as exc:  # noqa: BLE001 - translate all provider SDK failures
             raise _map_provider_exception(exc) from exc
     finally:

@@ -643,9 +643,31 @@ const handlePopupOpen = async (payload?: PopupPayload) => {
   }
 }
 
+/**
+ * Publish the popup handler on globalThis so a tiny every-page content
+ * script stub can lazily `import()` a web-accessible chunk containing this
+ * module and delegate `tldw:popup:open` messages to it.
+ */
+export const COPILOT_POPUP_HANDLE_KEY = "__tldwCopilotPopupHandle"
+
+export const registerCopilotPopupHandler = (): void => {
+  ;(globalThis as Record<string, unknown>)[COPILOT_POPUP_HANDLE_KEY] =
+    handlePopupOpen
+}
+
+export const getCopilotPopupHandler = ():
+  | ((payload?: PopupPayload) => Promise<void>)
+  | undefined => {
+  const handle = (globalThis as Record<string, unknown>)[
+    COPILOT_POPUP_HANDLE_KEY
+  ]
+  return typeof handle === "function"
+    ? (handle as (payload?: PopupPayload) => Promise<void>)
+    : undefined
+}
+
 export default defineContentScript({
   matches: ["http://*/*", "https://*/*"],
-  allFrames: true,
   main() {
     try {
       ;(window as any).__tldwCopilotPopupReady = true
@@ -653,6 +675,7 @@ export default defineContentScript({
     } catch {
       // ignore readiness flag failures
     }
+    registerCopilotPopupHandler()
     browser.runtime.onMessage.addListener((message: any) => {
       if (message?.type !== "tldw:popup:open") return
       void handlePopupOpen(message.payload || {})

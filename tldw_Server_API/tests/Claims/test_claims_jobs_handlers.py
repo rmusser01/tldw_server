@@ -2,7 +2,10 @@ import errno
 import json
 import sqlite3
 import threading
+from configparser import ConfigParser
 from contextlib import contextmanager
+from datetime import date
+from types import SimpleNamespace
 
 import pytest
 
@@ -18,11 +21,13 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_job_contracts import (
     ClaimsJobError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.base import (
-    DatabaseError as BackendDatabaseError,
-)
-from tldw_Server_API.app.core.DB_Management.backends.base import (
+    BackendType,
     NotSupportedError,
 )
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    DatabaseError as BackendDatabaseError,
+)
+from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     ConflictError,
     InputError,
@@ -31,6 +36,10 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError as MediaDatabaseError,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.app.core.DB_Management.media_db.runtime import defaults as media_db_runtime_defaults
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.factory import MediaDbRuntimeConfig
+from tldw_Server_API.app.core.DB_Management.scope_context import get_scope, scoped_context
 
 pytestmark = pytest.mark.unit
 
@@ -807,3 +816,382 @@ async def test_unsupported_claims_job_type_remains_terminal() -> None:
 
     assert excinfo.value.retryable is False
     assert excinfo.value.failure_code == "claims_unsupported_job_type"
+
+
+def _review_metrics_job(**overrides):
+    return {
+        "id": 92,
+        "job_type": "claims_aggregate_review_metrics",
+        "owner_user_id": "42",
+        "payload": {
+            "version": 1, "owner_user_id": "42", "scheduled_for": "2026-09-07T00:00:00Z",
+            "start_date": "2026-09-06", "end_date": "2026-09-07",
+        },
+        **overrides,
+    }
+
+
+@pytest.mark.parametrize("row_owner", [True, False, "043", "43", 42, None])
+async def test_review_metrics_handler_rejects_row_owner_before_db_routing(monkeypatch, row_owner) -> None:
+    def _unexpected_open(**_kwargs):
+        pytest.fail("database must not be resolved on an owner mismatch")
+
+    monkeypatch.setattr(claims_job_handlers, "managed_media_database", _unexpected_open)
+    with pytest.raises(ClaimsJobError) as excinfo:
+        await claims_job_handlers.process_claims_job(_review_metrics_job(owner_user_id=row_owner))
+    assert excinfo.value.failure_code == "claims_owner_scope_violation"
+    assert excinfo.value.retryable is False
+
+
+@pytest.mark.parametrize("postgres", [False, True])
+@pytest.mark.parametrize("written,expected", [(3, {"outcome": "ok", "groups_written": 3}), (0, {"outcome": "skipped", "reason": "no_activity", "groups_written": 0})])
+async def test_review_metrics_handler_uses_captured_window_and_scoped_thread_session(monkeypatch, postgres, written, expected) -> None:
+    events = []
+    parent_thread = threading.get_ident()
+    db = SimpleNamespace(backend_type=BackendType.POSTGRESQL if postgres else BackendType.SQLITE)
+
+    @contextmanager
+    def _session(**kwargs):
+        events.append(("open", get_scope(), threading.get_ident(), kwargs))
+        try:
+            yield db
+        finally:
+            events.append(("close", get_scope(), threading.get_ident(), {}))
+
+    def _aggregate(**kwargs):
+        events.append(("aggregate", get_scope(), threading.get_ident(), kwargs))
+        return written
+
+    monkeypatch.setattr(media_db_runtime_defaults, "postgres_content_mode", postgres)
+    monkeypatch.setattr(claims_job_handlers, "managed_media_database", _session)
+    monkeypatch.setattr(claims_job_handlers, "aggregate_claims_review_metrics_window", _aggregate, raising=False)
+    monkeypatch.setattr(claims_job_handlers, "get_user_media_db_path", lambda _owner: pytest.fail("creating path resolver must not run"))
+    job = _review_metrics_job()
+    job["payload"] = json.dumps(job["payload"])
+    with scoped_context(user_id=99, org_ids=[5], team_ids=[6], active_org_id=5, active_team_id=6):
+        prior = get_scope()
+        result = await claims_job_handlers.process_claims_job(job)
+        assert get_scope() is prior
+
+    assert result == {**expected, "start_date": "2026-09-06", "end_date": "2026-09-07"}
+    assert [event[0] for event in events] == ["open", "aggregate", "close"]
+    for _, scope, thread, _ in events:
+        assert thread != parent_thread
+        assert scope.user_id == 42 and scope.is_admin is True
+        assert scope.org_ids == [] and scope.team_ids == []
+        assert scope.active_org_id is None and scope.active_team_id is None
+        assert scope.session_role is None
+    open_kwargs = events[0][3]
+    assert open_kwargs["initialize"] is False
+    assert open_kwargs["existing_only"] is True
+    assert "suppress_init_exceptions" not in open_kwargs
+    assert "suppress_close_exceptions" not in open_kwargs
+    if postgres:
+        assert "db_path" not in open_kwargs
+    else:
+        assert open_kwargs["db_path"].endswith("/42/Media_DB_v2.db")
+    assert events[1][3] == {"db": db, "owner_user_id": "42", "start_date": date(2026, 9, 6), "end_date": date(2026, 9, 7)}
+
+
+@pytest.mark.parametrize("postgres", [False, True])
+@pytest.mark.parametrize("error", [FileNotFoundError(errno.ENOENT, "private-path"), OSError(errno.ENOENT, "private-path")])
+async def test_review_metrics_missing_database_skips_only_sqlite_open(monkeypatch, postgres, error) -> None:
+    @contextmanager
+    def _session(**_kwargs):
+        raise error
+        yield
+
+    monkeypatch.setattr(media_db_runtime_defaults, "postgres_content_mode", postgres)
+    monkeypatch.setattr(claims_job_handlers, "managed_media_database", _session)
+    if postgres:
+        with pytest.raises(ClaimsJobError) as excinfo:
+            await claims_job_handlers.process_claims_job(_review_metrics_job())
+        assert excinfo.value.retryable is False
+    else:
+        assert await claims_job_handlers.process_claims_job(_review_metrics_job()) == {
+            "outcome": "skipped", "reason": "owner_database_missing", "groups_written": 0,
+            "start_date": "2026-09-06", "end_date": "2026-09-07",
+        }
+
+
+async def test_review_metrics_path_resolution_never_creates_missing_owner_directory(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(media_db_runtime_defaults, "postgres_content_mode", False)
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+
+    @contextmanager
+    def _session(**kwargs):
+        assert not (tmp_path / "42").exists()
+        assert kwargs["db_path"] == str(tmp_path / "42" / "Media_DB_v2.db")
+        raise FileNotFoundError(kwargs["db_path"])
+        yield
+
+    monkeypatch.setattr(claims_job_handlers, "managed_media_database", _session)
+    result = await claims_job_handlers.process_claims_job(_review_metrics_job())
+    assert result["reason"] == "owner_database_missing"
+    assert not (tmp_path / "42").exists()
+
+
+@pytest.mark.parametrize("error", [PermissionError(errno.EACCES, "token=secret"), sqlite3.OperationalError("unable to open database file"), sqlite3.DatabaseError("file is not a database"), RuntimeError("token=secret"), sqlite3.OperationalError("database is locked")])
+async def test_review_metrics_storage_errors_are_sanitized_and_scope_restored(monkeypatch, error) -> None:
+    events = []
+    logs = []
+
+    @contextmanager
+    def _session(**_kwargs):
+        try:
+            yield object()
+        finally:
+            events.append(get_scope())
+
+    def _aggregate(**_kwargs):
+        raise error
+
+    class _Logger:
+        def bind(self, **kwargs):
+            logs.append(kwargs)
+            return self
+
+        def warning(self, message):
+            logs.append(message)
+
+    monkeypatch.setattr(media_db_runtime_defaults, "postgres_content_mode", False)
+    monkeypatch.setattr(claims_job_handlers, "managed_media_database", _session)
+    monkeypatch.setattr(claims_job_handlers, "aggregate_claims_review_metrics_window", _aggregate, raising=False)
+    monkeypatch.setattr(claims_job_handlers, "logger", _Logger())
+    with scoped_context(user_id=99, org_ids=[5], team_ids=[6]):
+        prior = get_scope()
+        with pytest.raises(ClaimsJobError) as excinfo:
+            await claims_job_handlers.process_claims_job(_review_metrics_job())
+        assert get_scope() is prior
+    assert events[0].user_id == 42 and events[0].is_admin is True
+    transient = isinstance(error, sqlite3.OperationalError) and str(error) == "database is locked"
+    assert excinfo.value.retryable is transient
+    assert excinfo.value.failure_code == ("claims_review_metrics_storage_unavailable" if transient else "claims_review_metrics_failed")
+    assert str(error) not in str(excinfo.value)
+    assert "token=secret" not in repr(logs)
+    assert logs[0]["operation"] == "aggregate_review_metrics"
+    assert logs[0]["owner_user_id"] == "42" and logs[0]["job_id"] == 92
+
+
+async def test_review_metrics_aggregation_file_not_found_is_not_missing_owner_skip(monkeypatch) -> None:
+    @contextmanager
+    def _session(**_kwargs):
+        yield object()
+
+    def _aggregate(**_kwargs):
+        raise FileNotFoundError("aggregation artifact missing")
+
+    monkeypatch.setattr(media_db_runtime_defaults, "postgres_content_mode", False)
+    monkeypatch.setattr(claims_job_handlers, "managed_media_database", _session)
+    monkeypatch.setattr(claims_job_handlers, "aggregate_claims_review_metrics_window", _aggregate, raising=False)
+    with pytest.raises(ClaimsJobError) as excinfo:
+        await claims_job_handlers.process_claims_job(_review_metrics_job())
+    assert excinfo.value.failure_code == "claims_review_metrics_failed"
+
+
+def _legacy_storage_matrix():
+    cases = []
+    for code in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+        cases.append((_sqlite_operational_error("private", code=code), True))
+        cases.append((_sqlite_operational_error("private", code=code | 256), True))
+    for message in ("database is busy", "database is locked", "database schema is locked", "database table is locked"):
+        cases.append((sqlite3.OperationalError(message.upper() + " "), True))
+        cases.append((_sqlite_operational_error(message, code=sqlite3.SQLITE_ERROR), False))
+    for state in ("40001", "40P01", "53300", "55P03", "57P01", "57P02", "57P03", "08000", "08006", "23505", "42P01", "XX000"):
+        cases.append((_caused_by(MediaDatabaseError("private"), _PostgresFailure(state, "private")), state not in {"23505", "42P01", "XX000"}))
+        cases.append((_PostgresFailure(state, "private"), False))
+    for name in ("EAGAIN", "EBUSY", "ECONNABORTED", "ECONNRESET", "EHOSTUNREACH", "EINTR", "ENETDOWN", "ENETUNREACH", "ETIMEDOUT", "EWOULDBLOCK", "ENOENT", "EACCES", "ENOSPC"):
+        cases.append((OSError(getattr(errno, name), "private"), name not in {"ENOENT", "EACCES", "ENOSPC"}))
+    for error in (ConnectionError("private"), TimeoutError("private")):
+        cases.append((error, True))
+        cases.append((_caused_by(BackendDatabaseError("private"), error), True))
+        cases.append((_caused_by(RuntimeError("private"), error), False))
+    for error in (ValueError("private"), TypeError("private"), KeyError("private"), AttributeError("private"), RuntimeError("private"), sqlite3.DatabaseError("private"), sqlite3.IntegrityError("private"), InputError("private"), ConflictError("private"), SchemaError("private"), NotSupportedError("private")):
+        cases.append((error, False))
+    context_error = BackendDatabaseError("private")
+    context_error.__context__ = TimeoutError("private")
+    cases.append((context_error, True))
+    suppressed = BackendDatabaseError("private")
+    suppressed.__context__ = TimeoutError("private")
+    suppressed.__suppress_context__ = True
+    cases.append((suppressed, False))
+    cyclic = BackendDatabaseError("private")
+    cyclic.__cause__ = cyclic
+    cases.append((cyclic, False))
+    return cases
+
+
+@pytest.mark.parametrize("error,expected", _legacy_storage_matrix())
+def test_export_storage_classifier_legacy_matrix(error, expected) -> None:
+    assert claims_job_handlers._is_transient_export_storage_error(error) is expected
+
+
+@pytest.mark.parametrize("error,expected", _legacy_storage_matrix())
+def test_shared_claims_storage_classifier_preserves_export_matrix(error, expected) -> None:
+    assert claims_job_handlers._is_transient_claims_storage_error(error) is expected
+
+
+@pytest.mark.parametrize("error_name,transient", [("SerializationFailure", True), ("DeadlockDetected", True), ("ConnectionFailure", True), ("LockNotAvailable", True), ("UndefinedTable", False), ("UniqueViolation", False)])
+async def test_review_metrics_handler_classifies_native_psycopg_errors_without_changing_export_gate(monkeypatch, error_name, transient) -> None:
+    psycopg = pytest.importorskip("psycopg")
+    error = getattr(psycopg.errors, error_name)("token=secret")
+
+    @contextmanager
+    def _session(**_kwargs):
+        raise error
+        yield
+
+    monkeypatch.setattr(media_db_runtime_defaults, "postgres_content_mode", True)
+    monkeypatch.setattr(claims_job_handlers, "managed_media_database", _session)
+    assert claims_job_handlers._is_transient_export_storage_error(error) is False
+    with pytest.raises(ClaimsJobError) as excinfo:
+        await claims_job_handlers.process_claims_job(_review_metrics_job())
+    assert excinfo.value.retryable is transient
+    assert "token=secret" not in str(excinfo.value)
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+async def test_review_metrics_native_connection_timeouts_are_retryable_without_export_change(monkeypatch, wrapped):
+    error = pytest.importorskip("psycopg").errors.ConnectionTimeout("token=secret")
+    if wrapped:
+        error = _caused_by(BackendDatabaseError("private storage detail"), error)
+
+    @contextmanager
+    def session(**kwargs):
+        raise error
+        yield
+
+    monkeypatch.setattr(media_db_runtime_defaults, "postgres_content_mode", True)
+    monkeypatch.setattr(claims_job_handlers, "managed_media_database", session)
+    assert claims_job_handlers._is_transient_export_storage_error(error) is False
+    with pytest.raises(ClaimsJobError) as excinfo:
+        await claims_job_handlers.process_claims_job(_review_metrics_job())
+    assert excinfo.value.retryable is True
+    assert excinfo.value.failure_code == "claims_review_metrics_storage_unavailable"
+    assert "token=secret" not in str(excinfo.value)
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_review_metrics_sync_scope_restores_inherited_scope_after_close(monkeypatch, failure) -> None:
+    scopes = []
+
+    @contextmanager
+    def _session(**_kwargs):
+        try:
+            yield object()
+        finally:
+            scopes.append(get_scope())
+
+    def _aggregate(**_kwargs):
+        if failure:
+            raise RuntimeError("private")
+        return 1
+
+    monkeypatch.setattr(media_db_runtime_defaults, "postgres_content_mode", True)
+    monkeypatch.setattr(claims_job_handlers, "managed_media_database", _session)
+    monkeypatch.setattr(claims_job_handlers, "aggregate_claims_review_metrics_window", _aggregate)
+    with scoped_context(user_id=99, org_ids=[5], team_ids=[6], session_role="caller-role"):
+        prior = get_scope()
+        kwargs = {"owner_user_id": "42", "start_date": "2026-09-06", "end_date": "2026-09-07", "job_id": 92}
+        if failure:
+            with pytest.raises(ClaimsJobError):
+                claims_job_handlers._aggregate_review_metrics(**kwargs)
+        else:
+            claims_job_handlers._aggregate_review_metrics(**kwargs)
+        assert get_scope() is prior
+    assert scopes[0].user_id == 42 and scopes[0].is_admin is True
+    assert scopes[0].org_ids == [] and scopes[0].team_ids == []
+    assert scopes[0].session_role is None
+
+
+async def test_review_metrics_handler_real_existing_only_open_does_not_create_missing_owner(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(media_db_runtime_defaults, "postgres_content_mode", False)
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+    result = await claims_job_handlers.process_claims_job(_review_metrics_job())
+    assert result["reason"] == "owner_database_missing"
+    assert not (tmp_path / "42").exists()
+
+
+@pytest.mark.parametrize("ddl_allowed", [True, False])
+async def test_review_metrics_postgres_real_constructor_never_bootstraps_schema(
+    monkeypatch, tmp_path, ddl_allowed,
+) -> None:
+    events = []
+    backend = SimpleNamespace(backend_type=BackendType.POSTGRESQL)
+    unused_path = tmp_path / "absent" / "unused.db"
+    runtime = MediaDbRuntimeConfig(
+        default_db_path=str(unused_path),
+        default_config=ConfigParser(),
+        postgres_content_mode=True,
+        backend_loader=lambda: backend,
+    )
+    close_connection = MediaDatabase.close_connection
+
+    def _bootstrap(_db):
+        events.append("schema_bootstrap")
+        if not ddl_allowed:
+            raise PermissionError("schema bootstrap denied to runtime role")
+
+    def _aggregate(**kwargs):
+        assert isinstance(kwargs["db"], MediaDatabase)
+        assert kwargs["db"].backend is backend
+        assert kwargs["owner_user_id"] == "42"
+        events.append("aggregate")
+        return 2
+
+    def _close(db):
+        events.append("close")
+        assert get_scope().user_id == 42 and get_scope().is_admin is True
+        close_connection(db)
+
+    monkeypatch.setattr(media_db_runtime_defaults, "postgres_content_mode", True)
+    monkeypatch.setattr(media_db_api, "build_media_runtime_config", lambda: runtime)
+    monkeypatch.setattr(MediaDatabase, "_initialize_schema", _bootstrap)
+    monkeypatch.setattr(MediaDatabase, "close_connection", _close)
+    monkeypatch.setattr(claims_job_handlers, "aggregate_claims_review_metrics_window", _aggregate)
+
+    result = await claims_job_handlers.process_claims_job(_review_metrics_job())
+
+    assert events == ["aggregate", "close"]
+    assert result == {
+        "outcome": "ok", "start_date": "2026-09-06", "end_date": "2026-09-07",
+        "groups_written": 2,
+    }
+    assert not unused_path.parent.exists()
+
+
+@pytest.mark.integration
+@pytest.mark.postgres
+async def test_review_metrics_postgres_restricted_role_job_never_bootstraps_schema(
+    pg_restricted_backend, monkeypatch, tmp_path,
+) -> None:
+    with scoped_context(user_id=42, is_admin=True):
+        setup_db = MediaDatabase(
+            db_path=":memory:", client_id="42", backend=pg_restricted_backend,
+        )
+        setup_db.close_connection()
+
+    runtime = MediaDbRuntimeConfig(
+        default_db_path=str(tmp_path / "absent" / "unused.db"),
+        default_config=ConfigParser(),
+        postgres_content_mode=True,
+        backend_loader=lambda: pg_restricted_backend,
+    )
+
+    def _forbid_bootstrap(_db):
+        pytest.fail("Metrics workers must not bootstrap PostgreSQL schemas")
+
+    monkeypatch.setattr(media_db_runtime_defaults, "postgres_content_mode", True)
+    monkeypatch.setattr(media_db_api, "build_media_runtime_config", lambda: runtime)
+    monkeypatch.setattr(MediaDatabase, "_initialize_schema", _forbid_bootstrap)
+
+    with scoped_context(user_id=99, org_ids=[5], team_ids=[6], session_role="caller-role"):
+        prior = get_scope()
+        result = await claims_job_handlers.process_claims_job(_review_metrics_job())
+        assert get_scope() is prior
+
+    assert result == {
+        "outcome": "skipped", "reason": "no_activity", "groups_written": 0,
+        "start_date": "2026-09-06", "end_date": "2026-09-07",
+    }
+    assert not (tmp_path / "absent").exists()

@@ -41,11 +41,11 @@ Write implementation plan in Docs/superpowers/plans/2026-05-09-embeddings-rag-re
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan review pass added hardening for secret-free candidate/apply payloads, no FastAPI endpoint calls from helpers, missing-key candidate status, RecipeRunReport/dict normalization, explicit component manifest fixture, env-var override blocking for live apply, and preview/copy fallback if live mutation is not approved or safe.
 
 Verification recorded during planning closeout: ASCII scan of the plan and task file returned no matches for non-ASCII bytes; plan header and tracking task were reread after edits. Bandit is not applicable because this task changed only docs and Backlog tracking files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

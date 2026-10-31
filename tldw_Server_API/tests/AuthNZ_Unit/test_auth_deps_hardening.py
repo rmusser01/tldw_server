@@ -573,6 +573,11 @@ async def test_admin_rate_limit_bypass_is_principal_first(
 
     monkeypatch.setenv("TEST_MODE", "0")
     monkeypatch.setenv("TLDW_TEST_MODE", "0")
+    # check_rate_limit's fallback now honors the RG single switch (R27): under
+    # pytest, rg_enabled() defaults to False unless RG_ENABLED is set explicitly,
+    # which would short-circuit before get_auth_governor(). Pin it on so this
+    # test keeps exercising principal-first ordering, independent of the switch.
+    monkeypatch.setenv("RG_ENABLED", "1")
     # Compatibility: these helpers may no longer be imported by auth_deps in
     # claim-first paths; patch with raising=False so the assertion remains valid
     # regardless of symbol exposure.
@@ -609,9 +614,17 @@ async def test_admin_rate_limit_bypass_is_principal_first(
 
 
 @pytest.mark.asyncio
-async def test_check_rate_limit_enforces_fallback_limiter_when_rg_disabled(
+async def test_check_rate_limit_fallback_is_off_when_rg_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """R27 / ADR-056: RG_ENABLED=false must silence the general fallback too.
+
+    Previously this fallback kept enforcing a hidden 120/min cap even with RG
+    fully disabled, breaking the one-switch rule. It now honors the switch
+    (``honor_rg_switch=True`` in ``check_rate_limit``); ``check_auth_rate_limit``
+    deliberately does not (see the sibling tests below) since it is the
+    auth-endpoint brute-force floor, not RG enforcement.
+    """
     monkeypatch.setenv("RG_ENABLED", "0")
     monkeypatch.setenv("TEST_MODE", "0")
     monkeypatch.setenv("TLDW_TEST_MODE", "0")
@@ -619,10 +632,10 @@ async def test_check_rate_limit_enforces_fallback_limiter_when_rg_disabled(
     monkeypatch.setenv("AUTH_DEPS_FALLBACK_RATE_LIMIT", "1")
     monkeypatch.setenv("AUTH_DEPS_FALLBACK_RATE_WINDOW_SECONDS", "60")
 
-    async def _fake_get_auth_governor() -> object:
-        return object()
+    async def _boom_get_auth_governor() -> object:
+        raise AssertionError("get_auth_governor should not run once RG_ENABLED=false short-circuits")
 
-    monkeypatch.setattr(auth_deps, "get_auth_governor", _fake_get_auth_governor)
+    monkeypatch.setattr(auth_deps, "get_auth_governor", _boom_get_auth_governor)
     auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
 
     request = _DummyRequest()
@@ -640,10 +653,9 @@ async def test_check_rate_limit_enforces_fallback_limiter_when_rg_disabled(
             _ = kwargs
             raise AssertionError("legacy limiter should not be used by auth_deps fallback")
 
+    # limit=1/min: a leftover enforcement path would 429 on the second call.
     await auth_deps.check_rate_limit(request=request, rate_limiter=_StubLimiter())
-    with pytest.raises(HTTPException) as exc_info:
-        await auth_deps.check_rate_limit(request=request, rate_limiter=_StubLimiter())
-    assert exc_info.value.status_code == 429
+    await auth_deps.check_rate_limit(request=request, rate_limiter=_StubLimiter())
 
 
 @pytest.mark.asyncio

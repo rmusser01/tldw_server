@@ -40,11 +40,11 @@ Wire the Stage 5 report evidence contract into Watchlists output creation. New r
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started Stage 5B in worktree .worktrees/watchlists-stage1a. Scope is output creation snapshot persistence plus evidence/readiness APIs, using real Watchlists API tests and existing output artifact storage.
 
 Verification recorded for Stage 5B. Red check: test_watchlist_reports_api.py initially failed for missing report metadata/endpoints. Green checks: Stage 5B API tests pass; combined Watchlists report/output regression set reports 15 passed and 5 warnings. git diff --check passes. Bandit on touched backend files reports 0 errors and 0 findings. API reference docs are deferred to Stage 5E per plan; the Stage 5 plan checklist was updated for this slice. No frontend/browser QA was run because this is a backend API slice.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

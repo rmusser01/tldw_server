@@ -44,7 +44,7 @@ Implement the first quick-cleanup slice from the merged WebUI dependency audit f
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Removed direct pubsub-js and @types/pubsub-js declarations from apps/tldw-frontend/package.json and apps/extension/package.json, then regenerated apps/bun.lock with bun install from apps/.
 
 Focused search returned no pubsub-js, @types/pubsub-js, or PubSub matches in apps/tldw-frontend, apps/packages/ui, apps/extension, or apps/bun.lock after removal.
@@ -54,7 +54,7 @@ Verification: bun install --frozen-lockfile passed in apps/; bun run lint passed
 Extension compile check: bun run compile in apps/extension failed on unchanged baseline config, wxt.config.ts import of ./scripts/post-build-tasks.mjs lacks a declaration file under tsconfig.compile.json. This slice did not modify wxt.config.ts, tsconfig.compile.json, or the helper module, so the blocker is documented rather than fixed here.
 
 Bandit skipped: touched source consists only of WebUI package metadata, apps/bun.lock, and Backlog task documentation; no Python code changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

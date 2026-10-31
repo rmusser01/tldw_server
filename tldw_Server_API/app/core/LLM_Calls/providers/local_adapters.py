@@ -8,14 +8,16 @@ from typing import Any, Callable
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
 )
-from tldw_Server_API.app.core.Chat.Chat_Deps import (
+from tldw_Server_API.app.core.config import load_settings
+from tldw_Server_API.app.core.exceptions import (
+    ChatAuthenticationError,
     ChatBadRequestError,
     ChatConfigurationError,
     ChatProviderError,
+    ChatRateLimitError,
+    EgressPolicyError,
+    raise_detached_error,
 )
-from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
-from tldw_Server_API.app.core.config import load_settings
-from tldw_Server_API.app.core.exceptions import EgressPolicyError, raise_detached_error
 from tldw_Server_API.app.core.http_client import (
     RetryPolicy as _HC_RetryPolicy,
 )
@@ -42,6 +44,7 @@ from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
 from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import (
     resolve_trusted_provider_endpoint,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_results import extract_response_content
 from tldw_Server_API.app.core.LLM_Calls.sse import (
     finalize_stream,
     is_done_line,
@@ -104,6 +107,7 @@ _LOCAL_ADAPTERS_NONCRITICAL_EXCEPTIONS = (
 _LOCAL_PROVIDER_UNAVAILABLE_MESSAGE = (
     "The local model provider is currently unavailable."
 )
+_LOCAL_PROVIDER_AUTH_MESSAGE = "The local model provider rejected the credentials."
 
 
 def _bounded_local_provider_name(value: Any) -> str:
@@ -153,15 +157,22 @@ def _close_local_provider_resource(
         _log_local_provider_failure(provider_name, exc, phase=phase)
 
 
-def _local_provider_stream_error_frame(provider_name: Any) -> str:
-    """Build the canonical bounded SSE error for local-provider failures."""
+def _local_provider_stream_error_frame(provider_name: Any, status: int | None = None) -> str:
+    """Build the canonical bounded SSE error for local-provider failures.
+
+    A 401 or 403 reply gets the code a remote provider's stream gets for one; every other
+    failure, a 429 included, is ``provider_unavailable``, as it is for a remote provider.
+    """
 
     provider = _bounded_local_provider_name(provider_name)
+    auth_failed = status in (401, 403)
     return sse_data(
         {
             "error": {
-                "code": "provider_unavailable",
-                "message": _LOCAL_PROVIDER_UNAVAILABLE_MESSAGE,
+                "code": "provider_authentication_failed" if auth_failed else "provider_unavailable",
+                "message": (
+                    _LOCAL_PROVIDER_AUTH_MESSAGE if auth_failed else _LOCAL_PROVIDER_UNAVAILABLE_MESSAGE
+                ),
                 "type": f"{provider}_stream_error",
             }
         }
@@ -211,12 +222,20 @@ def _raise_sanitized_local_provider_error(
     if isinstance(exc, ChatBadRequestError) or (
         isinstance(status, int) and 400 <= status < 500
     ):
-        raise_detached_error(
-            ChatBadRequestError(
+        # The types a remote provider's 401, 403 and 429 get, so chat answers them alike.
+        if status in (401, 403):
+            error = ChatAuthenticationError(provider=provider, status_code=status)
+        elif status == 429:
+            error = ChatRateLimitError(provider=provider)
+        else:
+            error = ChatBadRequestError(
                 provider=provider,
                 message="The local model provider rejected the request.",
             )
-        )
+        if status is not None:
+            # As ChatProvider._raise_sanitized_provider_failure.
+            error.upstream_status_code = status
+        raise_detached_error(error)
     public_status = 504 if is_network_error(exc) else 502
     raise_detached_error(
         ChatProviderError(
@@ -452,6 +471,7 @@ def _chat_with_openai_compatible_local_server(
         def stream_generator():
             upstream_done = False
             error_pending = False
+            error_status = None
             response_obj = None
             session = None
             try:
@@ -501,9 +521,10 @@ def _chat_with_openai_compatible_local_server(
                             phase="stream_request",
                         )
                         error_pending = True
+                        error_status = get_http_status_from_exception(exc)
 
                 if error_pending:
-                    yield _local_provider_stream_error_frame(safe_provider_name)
+                    yield _local_provider_stream_error_frame(safe_provider_name, error_status)
                 # Defer the terminal marker until the response context exits. This
                 # prevents cleanup failures from producing DONE -> error -> DONE.
                 yield from finalize_stream(response_obj, done_already=False)
@@ -741,7 +762,6 @@ def _local_llm_request(
     )
 
 
-
 def _llama_request(
         input_data: list[dict[str, Any]],
         api_key: str | None = None, # from map
@@ -901,33 +921,33 @@ def _llama_request(
     )
 
 
-
 # System prompts not supported through API requests.
 # https://lite.koboldai.net/koboldcpp_api#/api%2Fv1/post_api_v1_generate
 def _kobold_request(
-        input_data: list[dict[str, Any]],
-        api_key: str | None = None,
-        custom_prompt_input: str | None = None, # Mapped from 'prompt'
-        temp: float | None = None, # Mapped from 'temp'
-        system_message: str | None = None, # Mapped
-        streaming: bool | None = False, # Mapped
-        model: str | None = None, # Mapped
-        top_k: int | None = None, # Mapped
-        top_p: float | None = None, # Mapped
-        max_length: int | None = None, # Mapped from 'max_tokens'
-        stop_sequence: str | list[str] | None = None, # Mapped from 'stop'
-        num_responses: int | None = None, # Mapped from 'n'
-        seed: int | None = None, # Mapped from 'seed'
-        app_config: dict[str, Any] | None = None,
-        http_client_factory: Callable[[int], Any] | None = None,
-        http_fetcher: Callable[..., Any] | None = None,
-        http_streamer: Callable[..., Any] | None = None,
-        configured_endpoint_base_url: str | None = None,
-        configured_endpoint_scope: ConfiguredEndpointScope | None = None,
-        extra_headers: dict[str, str] | None = None,
-        extra_body: dict[str, Any] | None = None,
-        credentials_resolved: bool = False,
-        timeout: float | None = None,
+    input_data: list[dict[str, Any]],
+    api_key: str | None = None,
+    custom_prompt_input: str | None = None,  # Mapped from 'prompt'
+    temp: float | None = None,  # Mapped from 'temp'
+    system_message: str | None = None,  # Mapped
+    streaming: bool | None = False,  # Mapped
+    model: str | None = None,  # Mapped
+    top_k: int | None = None,  # Mapped
+    top_p: float | None = None,  # Mapped
+    max_length: int | None = None,  # Mapped from 'max_tokens'
+    stop_sequence: str | list[str] | None = None,  # Mapped from 'stop'
+    num_responses: int | None = None,  # Mapped from 'n'
+    seed: int | None = None,  # Mapped from 'seed'
+    app_config: dict[str, Any] | None = None,
+    http_client_factory: Callable[[int], Any] | None = None,
+    http_fetcher: Callable[..., Any] | None = None,
+    http_streamer: Callable[..., Any] | None = None,
+    configured_endpoint_base_url: str | None = None,
+    configured_endpoint_scope: ConfiguredEndpointScope | None = None,
+    extra_headers: dict[str, str] | None = None,
+    extra_body: dict[str, Any] | None = None,
+    credentials_resolved: bool = False,
+    timeout: float | None = None,
+    repetition_penalty: float | None = None,
 ):
     if model and (model.lower() == "none" or model.strip() == ""):
         model = None
@@ -938,7 +958,7 @@ def _kobold_request(
     )
     cfg = loaded_config_data.get('kobold_api', {})
 
-    current_api_key = api_key or cfg.get('api_key')
+    current_api_key = api_key or cfg.get("api_key")
     api_url = configured_endpoint_base_url or cfg.get('api_ip')
     # Kobold's native /api/v1/generate doesn't take 'model' in payload, it's server-fixed.
     # The 'model' param from chat_api_call is noted here if cfg needs it for other reasons.
@@ -947,13 +967,13 @@ def _kobold_request(
     if not api_url:
         raise ChatConfigurationError(provider="kobold", message="KoboldAI API URL (api_ip) is required but not found.")
 
-    current_temp = temp if temp is not None else float(cfg.get('temperature', 0.7)) # Kobold native 'temp'
-    current_top_k = top_k if top_k is not None else cfg.get('top_k')
-    current_top_p = top_p if top_p is not None else cfg.get('top_p')
+    current_temp = temp if temp is not None else float(cfg.get("temperature", 0.7))  # Kobold native 'temp'
+    current_top_k = top_k if top_k is not None else cfg.get("top_k")
+    current_top_p = top_p if top_p is not None else cfg.get("top_p")
     current_max_length = max_length if max_length is not None else int(cfg.get('max_length', 200))
     current_stop_sequence = stop_sequence if stop_sequence is not None else cfg.get('stop_sequence')
     current_num_responses = num_responses if num_responses is not None else cfg.get('num_responses')
-    current_seed = seed if seed is not None else cfg.get('seed')
+    current_seed = seed if seed is not None else cfg.get("seed")
 
     # Kobold native streaming for /generate is not standard SSE and can be complex.
     # Original code forced it to False. Maintaining that unless KoboldCPP has improved this significantly
@@ -988,10 +1008,9 @@ def _kobold_request(
         logging.warning("Kobold: Failed to coerce seed='%s' to int; sending as-is", current_seed)
 
     max_context_length = int(cfg.get('max_context_length', 2048)) # Kobold uses max_context_length for context window
-    effective_timeout = timeout if timeout is not None else int(cfg.get('api_timeout', 180))
+    effective_timeout = timeout if timeout is not None else int(cfg.get("api_timeout", 180))
     api_retries = int(cfg.get('api_retries', 1))
     api_retry_delay = int(cfg.get('api_retry_delay', 1))
-
 
     # Construct a single prompt string from messages_payload for Kobold's native API
     full_prompt_parts = []
@@ -1039,8 +1058,9 @@ def _kobold_request(
     payload = merge_extra_body(payload, {"extra_body": extra_body})
 
     # Kobold specific params (can be added from cfg if needed and supported)
-    if cfg.get('rep_pen') is not None:
-        payload['rep_pen'] = float(cfg['rep_pen'])
+    rep_pen = repetition_penalty if repetition_penalty is not None else cfg.get("rep_pen")
+    if rep_pen is not None:
+        payload["rep_pen"] = float(rep_pen)
     # Other kobold params: typical_p, tfs, top_a, etc. could be added from cfg
 
     logging.debug(
@@ -1053,7 +1073,6 @@ def _kobold_request(
         text_keys=("prompt",),
     )
     logging.debug(f"KoboldAI (Native) payload metadata: {payload_metadata}")
-
 
     try:
         policy = _HC_RetryPolicy(attempts=max(1, int(api_retries) + 1), backoff_base_ms=max(50, int(api_retry_delay * 1000)))
@@ -2187,6 +2206,7 @@ class KoboldAdapter(_LocalAdapterBase):
             "model": request.get("model"),
             "top_k": request.get("top_k"),
             "top_p": request.get("top_p"),
+            "repetition_penalty": request.get("repetition_penalty"),
             "max_length": request.get("max_tokens"),
             "stop_sequence": request.get("stop"),
             "num_responses": request.get("n"),

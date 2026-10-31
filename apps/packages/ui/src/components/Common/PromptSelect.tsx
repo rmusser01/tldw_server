@@ -1,13 +1,15 @@
+import { usePromptInventory } from "@/hooks/usePromptInventory"
+import { usePromptLocalAuthority } from "@/hooks/usePromptLocalAuthority"
+import { resolvePromptOwnerId } from "@/services/prompt-local-owner"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Dropdown, Empty, Input, Modal, Tooltip } from "antd"
 import type { InputRef } from "antd"
 import type { TextAreaRef } from "antd/es/input/TextArea"
 import type { ItemType, MenuItemType } from "antd/es/menu/interface"
-import { BookIcon, ComputerIcon, ZapIcon, Search } from "lucide-react"
+import { BookIcon, CloudIcon, ComputerIcon, ZapIcon, Search } from "lucide-react"
 import React, { useState, useMemo, useRef, useEffect } from "react"
 import { useTranslation } from "react-i18next"
-import { getAllPrompts } from "@/db/dexie/helpers"
-import type { Prompt } from "@/db/dexie/types"
+import { upsertServerLibraryPromptCopy } from "@/db/dexie/helpers"
 import { getDesignSystemState } from "@/design-system"
 import { useStorage } from "@plasmohq/storage/hook"
 import {
@@ -31,6 +33,22 @@ import {
   revalidatePromptCapabilities
 } from "@/services/prompts-api"
 import { useRecipePersistenceOwner } from "@/hooks/useRecipePersistenceOwner"
+import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
+import { useStoreMessageOption } from "@/store/option"
+import {
+  getServerPromptDetail,
+  isServerPromptLibraryUnconfiguredError,
+  listAllServerPrompts,
+  type ServerPromptBrief
+} from "@/services/server-prompt-library"
+import {
+  matchesLocalPromptSearch,
+  matchesServerPromptSearch,
+  mergePromptLibraries,
+  resolveServerPromptApplication,
+  type LocalPromptPickerEntry
+} from "./prompt-select-library"
 import {
   captureSystemPromptOverrideSnapshot,
   normalizeSystemPromptOverrideValue,
@@ -58,9 +76,25 @@ type Props = {
   promptAssistBackendKey?: string | null
   promptAssistAuthorizationRevision?: string | null
   onSelectModel?: () => void
+  onOpenChange?: (open: boolean) => void
   className?: string
   iconClassName?: string
 }
+
+type ServerPromptSelection = {
+  key: string
+  status: "loading" | "error"
+  isCurrent: () => boolean
+}
+
+const serverPromptMenuKey = (prompt: ServerPromptBrief) =>
+  `__server_prompt__:${prompt.uuid || prompt.id}`
+
+const PromptSourceBadge: React.FC<{ label: string }> = ({ label }) => (
+  <span className="ml-auto flex-shrink-0 rounded border border-border px-1 text-[10px] leading-4 text-text-subtle">
+    {label}
+  </span>
+)
 
 type SystemPromptUndoSnapshot = {
   override: SystemPromptOverrideSnapshot
@@ -71,7 +105,13 @@ type RecipeSystemPromptUndoSnapshot = SystemPromptUndoSnapshot & {
   selectedSystemPrompt: string | undefined
 }
 
-export const PromptSelect: React.FC<Props> = ({
+export const PromptSelect: React.FC<Props> = (props) => {
+  const authority = usePromptLocalAuthority()
+  return <PromptSelectForOwner key={authority.ready ? authority.ownerId ?? "local" : "resolving"} {...props} expectedOwnerId={authority.ownerId} />
+}
+
+const PromptSelectForOwner: React.FC<Props & { expectedOwnerId: string | null }> = ({
+  expectedOwnerId,
   setSelectedQuickPrompt,
   setSelectedSystemPrompt,
   selectedSystemPrompt,
@@ -83,14 +123,30 @@ export const PromptSelect: React.FC<Props> = ({
   promptAssistBackendKey = null,
   promptAssistAuthorizationRevision = null,
   onSelectModel,
+  onOpenChange,
   className = "text-text-muted",
   iconClassName = "size-5"
 }) => {
   const { t } = useTranslation("option")
   const [menuDensity] = useStorage("menuDensity", "comfortable")
   const [searchText, setSearchText] = useState("")
-  const [dropdownOpen, setDropdownOpen] = useState(false)
+  const historySelection = useHistorySelectionContext()
+  const renderedHistoryFence = historySelection?.fence()
+  const draftRevision = useStoreMessageOption(state => state.chatDraftRevision)
+  const quickPromptRevision = useStoreMessageOption(state => state.quickPromptRevision)
+  const [serverPromptSelection, setServerPromptSelection] =
+    useState<ServerPromptSelection | null>(null)
+  const serverPromptSelectionRef = useRef<ServerPromptSelection | null>(null)
+  const dropdownRevisionRef = useRef(0)
+  const [dropdownOpen, setDropdownOpenState] = useState(false)
+  const setDropdownOpen = React.useCallback((open: boolean) => {
+    dropdownRevisionRef.current += 1
+    if (!open) serverPromptSelectionRef.current = null
+    setDropdownOpenState(open)
+  }, [])
   const [editorOpen, setEditorOpen] = useState(false)
+  const disclosureOpen = dropdownOpen || editorOpen
+  useEffect(() => { onOpenChange?.(disclosureOpen) }, [disclosureOpen, onOpenChange])
   const [editorLoading, setEditorLoading] = useState(false)
   const [editorDraft, setEditorDraft] = useState("")
   const [editorTemplateContent, setEditorTemplateContent] = useState("")
@@ -145,6 +201,12 @@ export const PromptSelect: React.FC<Props> = ({
     editorLifecycleKeyRef.current = editorLifecycleKey
     editorLookupEpochRef.current += 1
   }
+
+  const serverSelectionIsCurrent = serverPromptSelection?.isCurrent() ?? true
+  React.useLayoutEffect(() => {
+    serverPromptSelectionRef.current = null
+    setServerPromptSelection(null)
+  }, [draftRevision, quickPromptRevision, editorLifecycleKey, normalizedPromptAssistAuthorizationRevision, serverSelectionIsCurrent])
 
   const { data: promptCapabilities } = useQuery({
     queryKey: [
@@ -316,12 +378,12 @@ export const PromptSelect: React.FC<Props> = ({
     editorInputRef.current?.focus()
   }, [editorOpen, recipeMode, promptAssist.state.status])
 
-  const restorePromptSelectFocus = React.useCallback(() => {
+  const restorePromptSelectFocus = React.useCallback((isCurrent: () => boolean = () => true) => {
     const returnFocusSelector =
       returnFocusSelectorRef.current ?? "[data-testid='chat-prompt-select']"
     returnFocusSelectorRef.current = null
 
-    scheduleFocusFirstVisibleElement(returnFocusSelector)
+    scheduleFocusFirstVisibleElement(returnFocusSelector, undefined, isCurrent)
   }, [])
 
   const {
@@ -329,24 +391,53 @@ export const PromptSelect: React.FC<Props> = ({
     isLoading: promptsLoading,
     isError: promptsError,
     refetch: refetchPrompts
+  } = usePromptInventory("getAllPromptsForSelect")
+
+  // The user's server prompt library, listed in full once the picker opens.
+  const {
+    data: serverLibrary,
+    isFetching: serverPromptsFetching,
+    isError: serverPromptsFailed,
+    error: serverPromptsError,
+    refetch: refetchServerPrompts
   } = useQuery({
-    queryKey: ["getAllPromptsForSelect"],
-    queryFn: getAllPrompts
+    queryKey: ["promptSelectServerLibrary", normalizedPromptAssistBackendKey, expectedOwnerId],
+    queryFn: ({ signal }) => listAllServerPrompts({ signal, expectedOwnerId }),
+    enabled: dropdownOpen && Boolean(expectedOwnerId),
+    staleTime: 60_000,
+    retry: false
   })
+  const serverPromptsPending = serverPromptsFetching && !serverLibrary
+  // "No server configured" is not an outage: the picker just stays local.
+  const serverPromptsUnavailable =
+    serverPromptsFailed &&
+    !serverPromptsFetching &&
+    !isServerPromptLibraryUnconfiguredError(serverPromptsError)
+
+  const mergedLibrary = useMemo(
+    () => mergePromptLibraries(data ?? [], serverLibrary?.prompts ?? []),
+    [data, serverLibrary]
+  )
 
   // Filter prompts based on search text
-  const filteredData = useMemo<Prompt[]>(() => {
-    if (!data) return []
-    if (!searchText.trim()) return data
-    const q = searchText.toLowerCase()
-    return data.filter(
-      (prompt) =>
-        prompt.title?.toLowerCase().includes(q) ||
-        prompt.content?.toLowerCase().includes(q)
-    )
-  }, [data, searchText])
+  const filteredData = useMemo<LocalPromptPickerEntry[]>(
+    () =>
+      mergedLibrary.localEntries.filter((entry) =>
+        matchesLocalPromptSearch(entry.prompt, searchText)
+      ),
+    [mergedLibrary, searchText]
+  )
+  const filteredServerPrompts = useMemo<ServerPromptBrief[]>(
+    () =>
+      mergedLibrary.serverOnly.filter((prompt) =>
+        matchesServerPromptSearch(prompt, searchText)
+      ),
+    [mergedLibrary, searchText]
+  )
 
   const handlePromptChange = React.useCallback((value?: string) => {
+    serverPromptSelectionRef.current = null
+    setServerPromptSelection(null)
     if (!value) {
       setSelectedSystemPrompt(undefined)
       setSelectedQuickPrompt(undefined)
@@ -380,6 +471,124 @@ export const PromptSelect: React.FC<Props> = ({
     "promptSelect.retryPromptLibrary",
     "Retry prompt library"
   )
+  const serverLibraryLabel = t("promptSelect.serverLibrary", "Server library")
+  const serverSourceLabel = t("promptSelect.sourceServer", "Server")
+  const localAndServerSourceLabel = t(
+    "promptSelect.sourceLocalAndServer",
+    "Local + server"
+  )
+  const serverLoadingLabel = t(
+    "promptSelect.loadingServerPrompts",
+    "Loading server prompts"
+  )
+  const serverUnavailableLabel = t(
+    "promptSelect.serverLibraryUnavailable",
+    "Server prompts unavailable"
+  )
+  const serverRetryLabel = t(
+    "promptSelect.retryServerPrompts",
+    "Retry server prompts"
+  )
+  const noLocalPromptsLabel = t(
+    "promptSelect.noLocalPrompts",
+    "No prompts on this device"
+  )
+  const serverPromptApplyingLabel = t(
+    "promptSelect.loadingServerPrompt",
+    "Loading prompt…"
+  )
+  const serverPromptFailedLabel = t(
+    "promptSelect.serverPromptLoadFailed",
+    "Couldn't load this prompt from the server. Select it to retry."
+  )
+
+  // antd closes the dropdown after any menu click; server actions keep it open
+  // so their loading and error feedback stays visible.
+  const keepMenuOpenRef = useRef(false)
+  const holdMenuOpen = React.useCallback(() => {
+    keepMenuOpenRef.current = true
+    queueMicrotask(() => {
+      keepMenuOpenRef.current = false
+    })
+  }, [])
+
+  // Apply a server prompt the way a local one is applied: system prompts are
+  // selected by local id (via a linked local copy, which is what the chat
+  // pipeline resolves), quick prompts by their text.
+  const applyServerPrompt = React.useCallback(
+    async (serverPrompt: ServerPromptBrief) => {
+      const state = useStoreMessageOption.getState()
+      if (state.chatDraftRevision !== draftRevision || state.quickPromptRevision !== quickPromptRevision) return
+      const selectionKey = serverPromptMenuKey(serverPrompt)
+      if (serverPromptSelectionRef.current?.key === selectionKey) return
+      const lookupEpoch = editorLookupEpochRef.current
+      const source = captureChatDraftSource(() => editorMountedRef.current && (renderedHistoryFence?.() ?? true))
+      if (!source.isCurrent()) return
+      const attempt: ServerPromptSelection = {
+        key: selectionKey, status: "loading", isCurrent: source.isQuickPromptCurrent
+      }
+      serverPromptSelectionRef.current = attempt
+      setServerPromptSelection(attempt)
+      const isCurrent = () => source.isQuickPromptCurrent() &&
+        editorLookupEpochRef.current === lookupEpoch && serverPromptSelectionRef.current === attempt
+      const focusOwner = document.activeElement
+      try {
+        const detail = await getServerPromptDetail(serverPrompt.id, expectedOwnerId)
+        await resolvePromptOwnerId(expectedOwnerId)
+        const application = resolveServerPromptApplication(detail)
+        if (application.kind === "empty") {
+          throw new Error("Server prompt has no prompt text")
+        }
+        if (!isCurrent()) return
+        if (application.kind === "system") {
+          const localCopy = await upsertServerLibraryPromptCopy(detail, expectedOwnerId)
+          await recipeQueryClient.invalidateQueries({
+            queryKey: ["getAllPromptsForSelect"]
+          })
+          void recipeQueryClient.invalidateQueries({
+            queryKey: ["fetchAllPrompts"]
+          })
+          if (!isCurrent()) return
+          setSelectedSystemPrompt(localCopy.id)
+          if (!source.isQuickPromptCurrent()) return
+        } else {
+          setSelectedSystemPrompt(undefined)
+          if (!source.isQuickPromptCurrent() || serverPromptSelectionRef.current !== attempt) return
+          const publicationRevision = useStoreMessageOption.getState().quickPromptRevision
+          setSelectedQuickPrompt(application.content)
+          const published = useStoreMessageOption.getState()
+          if (!source.isCurrent() || published.quickPromptRevision !== publicationRevision + 1 ||
+            published.selectedQuickPrompt !== application.content) return
+        }
+        if (!source.isCurrent() || serverPromptSelectionRef.current !== attempt) return
+        const publishedRevision = useStoreMessageOption.getState().quickPromptRevision
+        serverPromptSelectionRef.current = null
+        setServerPromptSelection(null)
+        setDropdownOpen(false)
+        const closedRevision = dropdownRevisionRef.current
+        restorePromptSelectFocus(() => source.isCurrent() &&
+          useStoreMessageOption.getState().quickPromptRevision === publishedRevision &&
+          dropdownRevisionRef.current === closedRevision &&
+          (document.activeElement === focusOwner ||
+            (document.activeElement === document.body && !focusOwner?.isConnected)))
+      } catch {
+        if (!isCurrent()) return
+        serverPromptSelectionRef.current = null
+        setServerPromptSelection({ ...attempt, status: "error" })
+      }
+    },
+    [
+      draftRevision,
+      quickPromptRevision,
+      renderedHistoryFence,
+      expectedOwnerId,
+      recipeQueryClient,
+      restorePromptSelectFocus,
+      setDropdownOpen,
+      setSelectedQuickPrompt,
+      setSelectedSystemPrompt
+    ]
+  )
 
   const openSystemPromptEditor = React.useCallback(async () => {
     setDropdownOpen(false)
@@ -410,7 +619,7 @@ export const PromptSelect: React.FC<Props> = ({
     setEditorDraft(resolved.effectiveContent)
     setEditorOverrideActive(resolved.overrideActive)
     setEditorLoading(false)
-  }, [promptAssist, selectedSystemPrompt, systemPrompt])
+  }, [promptAssist, selectedSystemPrompt, systemPrompt, setDropdownOpen])
 
   const handleEditorSave = React.useCallback(() => {
     const nextValue = normalizeSystemPromptOverrideValue({
@@ -576,8 +785,112 @@ export const PromptSelect: React.FC<Props> = ({
       ]
     }
 
+    const withRecoveryItems = (items: ItemType[]): ItemType[] => [
+      ...items,
+      ...(currentSystemPromptRecoveryItems.length > 0
+        ? [
+            {
+              key: "__current_system_prompt_divider__",
+              type: "divider" as const
+            },
+            ...currentSystemPromptRecoveryItems
+          ]
+        : [])
+    ]
+
+    const createServerPromptItem = (
+      serverPrompt: ServerPromptBrief
+    ): MenuItemType => {
+      const key = serverPromptMenuKey(serverPrompt)
+      const selectionStatus =
+        serverPromptSelection?.key === key ? serverPromptSelection.status : null
+      return {
+        key,
+        label: (
+          <div className="w-56 py-0.5">
+            <div className="flex items-center gap-2">
+              <CloudIcon className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+              <span className="truncate font-medium">{serverPrompt.name}</span>
+              <PromptSourceBadge label={serverSourceLabel} />
+            </div>
+            {selectionStatus === "loading" ? (
+              <p
+                role="status"
+                className="text-xs text-text-subtle line-clamp-1 mt-0.5 ml-6">
+                {serverPromptApplyingLabel}
+              </p>
+            ) : selectionStatus === "error" ? (
+              <p role="alert" className="text-xs text-danger mt-0.5 ml-6">
+                {serverPromptFailedLabel}
+              </p>
+            ) : serverPrompt.author ? (
+              <p className="text-xs text-text-subtle line-clamp-1 mt-0.5 ml-6">
+                {t("promptSelect.serverPromptAuthor", {
+                  defaultValue: "by {{author}}",
+                  author: serverPrompt.author
+                })}
+              </p>
+            ) : null}
+          </div>
+        ),
+        onClick: () => {
+          holdMenuOpen()
+          void applyServerPrompt(serverPrompt)
+        }
+      }
+    }
+
+    // Server library: its prompts (copies already on this device are shown
+    // once, as the local entry) or its loading / unavailable state.
+    const serverSectionItems: ItemType[] = []
+    if (filteredServerPrompts.length > 0) {
+      serverSectionItems.push({
+        key: "__server_library__",
+        type: "group",
+        label: serverLibraryLabel,
+        children: filteredServerPrompts.map(createServerPromptItem)
+      })
+      if (serverLibrary?.truncated) {
+        serverSectionItems.push({
+          key: "__server_prompts_truncated__",
+          disabled: true,
+          label: t("promptSelect.serverLibraryTruncated", {
+            defaultValue: "Showing the first {{shown}} of {{total}} server prompts",
+            shown: serverLibrary.prompts.length,
+            total: serverLibrary.totalItems
+          })
+        })
+      }
+    } else if (serverPromptsPending) {
+      serverSectionItems.push({
+        key: "__server_prompts_loading__",
+        disabled: true,
+        label: (
+          <span role="status" aria-label={serverLoadingLabel}>
+            {serverLoadingLabel}
+          </span>
+        )
+      })
+    } else if (serverPromptsUnavailable) {
+      serverSectionItems.push(
+        {
+          key: "__server_prompts_error__",
+          disabled: true,
+          label: serverUnavailableLabel
+        },
+        {
+          key: "__server_prompts_retry__",
+          label: serverRetryLabel,
+          onClick: () => {
+            holdMenuOpen()
+            void refetchServerPrompts()
+          }
+        }
+      )
+    }
+
     if (promptsError) {
-      return [
+      return withRecoveryItems([
         {
           key: "__prompts_error__",
           label: promptUnavailableLabel
@@ -589,20 +902,14 @@ export const PromptSelect: React.FC<Props> = ({
             void refetchPrompts()
           }
         },
-        ...(currentSystemPromptRecoveryItems.length > 0
-          ? [
-              {
-                key: "__current_system_prompt_divider__",
-                type: "divider" as const
-              },
-              ...currentSystemPromptRecoveryItems
-            ]
-          : [])
-      ]
+        ...serverSectionItems
+      ])
     }
 
-    if (filteredData.length === 0) {
-      return [
+    if (filteredData.length === 0 && filteredServerPrompts.length === 0) {
+      // Never claim the library is empty while the server's answer is pending.
+      if (serverPromptsPending) return withRecoveryItems(serverSectionItems)
+      return withRecoveryItems([
         {
           key: "empty",
           label: (
@@ -610,32 +917,29 @@ export const PromptSelect: React.FC<Props> = ({
               description={
                 searchText
                   ? t("noMatchingPrompts", "No matching prompts")
-                  : t("promptSelect.noSavedPrompts", "No saved prompts")
+                  : serverPromptsUnavailable
+                    ? noLocalPromptsLabel
+                    : t("promptSelect.noSavedPrompts", "No saved prompts")
               }
             />
           )
         },
-        ...(currentSystemPromptRecoveryItems.length > 0
-          ? [
-              {
-                key: "__current_system_prompt_divider__",
-                type: "divider" as const
-              },
-              ...currentSystemPromptRecoveryItems
-            ]
-          : [])
-      ]
+        ...serverSectionItems
+      ])
     }
 
-    const favorites = filteredData.filter((prompt) => prompt.favorite)
+    const favorites = filteredData.filter(({ prompt }) => prompt.favorite)
     const systemPrompts = filteredData.filter(
-      (prompt) => !prompt.favorite && prompt.is_system
+      ({ prompt }) => !prompt.favorite && prompt.is_system
     )
     const quickPrompts = filteredData.filter(
-      (prompt) => !prompt.favorite && !prompt.is_system
+      ({ prompt }) => !prompt.favorite && !prompt.is_system
     )
 
-    const createPromptItem = (prompt: Prompt): MenuItemType => ({
+    const createPromptItem = ({
+      prompt,
+      source
+    }: LocalPromptPickerEntry): MenuItemType => ({
       key: prompt.id,
       label: (
         <div className="w-56 py-0.5">
@@ -649,6 +953,9 @@ export const PromptSelect: React.FC<Props> = ({
               <span className="text-warn flex-shrink-0" title="Favorite">★</span>
             )}
             <span className="truncate font-medium">{prompt.title}</span>
+            {source === "both" ? (
+              <PromptSourceBadge label={localAndServerSourceLabel} />
+            ) : null}
           </div>
           {prompt.content && (
             <p className="text-xs text-text-subtle line-clamp-1 mt-0.5 ml-6">
@@ -694,6 +1001,8 @@ export const PromptSelect: React.FC<Props> = ({
       })
     }
 
+    items.push(...serverSectionItems)
+
     if (items.length > 0) {
       items.push({
         key: "__prompt_actions_divider__",
@@ -713,14 +1022,10 @@ export const PromptSelect: React.FC<Props> = ({
       items.push(...currentSystemPromptRecoveryItems)
     }
 
-    // If no groups (shouldn't happen, but fallback)
-    if (items.length === 0) {
-      return filteredData.map(createPromptItem)
-    }
-
     return items
   }, [
     filteredData,
+    filteredServerPrompts,
     searchText,
     selectedSystemPrompt,
     systemPrompt,
@@ -730,6 +1035,22 @@ export const PromptSelect: React.FC<Props> = ({
     promptUnavailableLabel,
     promptRetryLabel,
     refetchPrompts,
+    serverLibrary,
+    serverPromptsPending,
+    serverPromptsUnavailable,
+    serverPromptSelection,
+    serverLibraryLabel,
+    serverSourceLabel,
+    localAndServerSourceLabel,
+    serverLoadingLabel,
+    serverUnavailableLabel,
+    serverRetryLabel,
+    noLocalPromptsLabel,
+    serverPromptApplyingLabel,
+    serverPromptFailedLabel,
+    refetchServerPrompts,
+    applyServerPrompt,
+    holdMenuOpen,
     t,
     handlePromptChange,
     openSystemPromptEditor,
@@ -755,11 +1076,14 @@ export const PromptSelect: React.FC<Props> = ({
     return () => {
       window.removeEventListener(OPEN_PROMPT_SELECT_EVENT, handleOpenPromptSelect)
     }
-  }, [])
+  }, [setDropdownOpen])
 
   useEffect(() => {
     if (!dropdownOpen) {
       setSearchText("") // Clear search when closed
+      // Closing the picker abandons a server prompt that is still loading.
+      serverPromptSelectionRef.current = null
+      setServerPromptSelection(null)
       return
     }
 
@@ -803,7 +1127,7 @@ export const PromptSelect: React.FC<Props> = ({
       window.removeEventListener("keydown", handleEscape)
       window.removeEventListener("keyup", handleEscape)
     }
-  }, [dropdownOpen, restorePromptSelectFocus])
+  }, [dropdownOpen, restorePromptSelectFocus, setDropdownOpen])
 
   const triggerLabel = promptsLoading
     ? promptLoadingLabel
@@ -820,7 +1144,11 @@ export const PromptSelect: React.FC<Props> = ({
     <>
       <Dropdown
         open={dropdownOpen}
-        onOpenChange={(nextOpen) => {
+        onOpenChange={(nextOpen, info) => {
+          if (!nextOpen && info?.source === "menu" && keepMenuOpenRef.current) {
+            keepMenuOpenRef.current = false
+            return
+          }
           setDropdownOpen(nextOpen)
           if (!nextOpen) {
             restorePromptSelectFocus()
@@ -873,7 +1201,9 @@ export const PromptSelect: React.FC<Props> = ({
         )}
         placement={"topLeft"}
         trigger={["click"]}>
-        <Tooltip title={triggerAriaLabel}>
+        {/* Hover help sits where the upward menu opens; hide it while the
+            menu is open so it never covers a menu item. */}
+        <Tooltip title={triggerAriaLabel} open={dropdownOpen ? false : undefined}>
           <IconButton
             ariaLabel={triggerAriaLabel}
             hasPopup="menu"

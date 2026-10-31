@@ -42,18 +42,19 @@ Improve the user-facing documentation that explains what each API module can do.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Design review before implementation identified two scope controls: keep the guide comprehensive at the module/tag level rather than documenting every endpoint, and avoid letting main.py become a full API manual. OpenAPI metadata should summarize discoverability, while detailed usage stays in markdown docs. Verification update: Docs/Published/API-related/API_Tags_Index.md is generated output and is intentionally left unchanged; fresh verification confirmed no Published branch diff, source markdown links resolve, main.py py_compile passes, OpenAPI schema smoke reports openapi tags=170 groups=10, and Bandit reports errors=0 results=0 in /tmp/bandit_api_module_docs.json.
 
 PR: https://github.com/rmusser01/tldw_server/pull/2637
-<!-- SECTION:NOTES:END -->
+
+Reopened for PR follow-up: rebase PR #2637 on latest dev and evaluate/address review comments and checks before pushing an updated branch.
+PR follow-up completed: rebased PR #2637 onto latest origin/dev (39e9d1d1c8250d62ee22732f85c17f541b735760), removing unrelated Chat, MCP, UserProfiles, Web_Scraping, and test files from the PR diff. Current diff is limited to Docs/API-related/API_Tags_Index.md, Docs/superpowers API-docs plan/spec files, tldw_Server_API/app/main.py, and this Backlog task record. Gemini's Query import and Qodo code comments are obsolete after rebase because those referenced files are no longer in the PR diff; the source-doc links in API_Tags_Index.md were verified to resolve against source docs. Verification after rebase: py_compile passes for tldw_Server_API/app/main.py; API_Tags_Index local markdown links resolve; Docs/Published is unchanged against origin/dev; git diff --check origin/dev...HEAD exits cleanly; no old code-surface files remain in the PR diff; OpenAPI smoke passes with a local dummy SINGLE_USER_API_KEY and reports tags=174 groups=10; Bandit on tldw_Server_API/app/main.py reports errors=0 results=0 in /tmp/bandit_api_module_docs_rebase.json.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Expanded the source API tag index into a grouped module capability guide and aligned OpenAPI tag descriptions/ReDoc groups so users can browse by goal. Generated Published docs were left unchanged for the publishing process. Endpoint behavior, routes, schemas, and security settings were unchanged.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
@@ -65,10 +66,3 @@ Expanded the source API tag index into a grouped module capability guide and ali
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Reopened for PR follow-up: rebase PR #2637 on latest dev and evaluate/address review comments and checks before pushing an updated branch.
-PR follow-up completed: rebased PR #2637 onto latest origin/dev (39e9d1d1c8250d62ee22732f85c17f541b735760), removing unrelated Chat, MCP, UserProfiles, Web_Scraping, and test files from the PR diff. Current diff is limited to Docs/API-related/API_Tags_Index.md, Docs/superpowers API-docs plan/spec files, tldw_Server_API/app/main.py, and this Backlog task record. Gemini's Query import and Qodo code comments are obsolete after rebase because those referenced files are no longer in the PR diff; the source-doc links in API_Tags_Index.md were verified to resolve against source docs. Verification after rebase: py_compile passes for tldw_Server_API/app/main.py; API_Tags_Index local markdown links resolve; Docs/Published is unchanged against origin/dev; git diff --check origin/dev...HEAD exits cleanly; no old code-surface files remain in the PR diff; OpenAPI smoke passes with a local dummy SINGLE_USER_API_KEY and reports tags=174 groups=10; Bandit on tldw_Server_API/app/main.py reports errors=0 results=0 in /tmp/bandit_api_module_docs_rebase.json.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

@@ -35,9 +35,17 @@ Implement the reviewed and planned VZ helper launchd validation drill. Add an ex
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-05-15 PR #1720 review fix: verified the JSON-mode subprocess-output finding. Added a failing regression for launchd-drill --json wiring a captured launchd runner through the CLI path, then added a captured command runner for JSON mode only so child stdout/stderr cannot reach the JSON stream while human dry-run output stays unchanged. Verification so far: regression failed before implementation; focused JSON pytest passed; full helperctl pytest passed 124 passed, 1 skipped; git diff --check passed; Bandit JSON at /tmp/bandit_vz_launchd_drill_1720_review_fix.json reported errors=0 and results=0.
-<!-- SECTION:NOTES:END -->
+
+- Implementation follows `Docs/superpowers/plans/2026-05-15-vz-helper-launchd-validation-drill.md`.
+- Review process: each implementation/docs task received spec-compliance and code-quality/doc-quality review; Task 4 and Task 5 review findings were fixed and re-approved.
+- Verification: `python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -q` passed with 123 passed and 1 skipped.
+- Verification: `git diff --check` passed.
+- Verification: `python -m bandit -r tools/macos-vz-helper/scripts/vz-helperctl.py -f json -o /tmp/bandit_vz_launchd_drill.json` completed with 0 errors and 0 findings.
+- Host-gated real launchd/VM smoke: not run in this final portable verification pass; documented as an explicit prepared-host/manual validation path.
+- PR review fix: addressed Qodo findings by adding a docstring for `run_vz_linux_host_smoke()` and capturing the bundle-smoke pytest subprocess when `launchd-drill --json` is used. Verification: focused helperctl review-fix tests passed with 19 passed; full helperctl tests passed with 125 passed and 1 skipped; `git diff --check` passed; Bandit completed with 0 errors and 0 findings.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -56,15 +64,3 @@ PR #1720 review follow-up: JSON mode now injects a captured launchd command runn
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Notes
-
-<!-- SECTION:NOTES:BEGIN -->
-- Implementation follows `Docs/superpowers/plans/2026-05-15-vz-helper-launchd-validation-drill.md`.
-- Review process: each implementation/docs task received spec-compliance and code-quality/doc-quality review; Task 4 and Task 5 review findings were fixed and re-approved.
-- Verification: `python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -q` passed with 123 passed and 1 skipped.
-- Verification: `git diff --check` passed.
-- Verification: `python -m bandit -r tools/macos-vz-helper/scripts/vz-helperctl.py -f json -o /tmp/bandit_vz_launchd_drill.json` completed with 0 errors and 0 findings.
-- Host-gated real launchd/VM smoke: not run in this final portable verification pass; documented as an explicit prepared-host/manual validation path.
-- PR review fix: addressed Qodo findings by adding a docstring for `run_vz_linux_host_smoke()` and capturing the bundle-smoke pytest subprocess when `launchd-drill --json` is used. Verification: focused helperctl review-fix tests passed with 19 passed; full helperctl tests passed with 125 passed and 1 skipped; `git diff --check` passed; Bandit completed with 0 errors and 0 findings.
-<!-- SECTION:NOTES:END -->

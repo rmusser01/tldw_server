@@ -51,9 +51,9 @@ Implement the UI shell slice from the Stage 1 first-class Watchlists plan. Scope
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented selected Watchlist loading/default selection and a metadata shell on /watchlists, including create and edit flows. Threaded selected watchlist_id through overview, sources, jobs, runs, items, outputs, template usage, bulk import, job forms, and related polling where Stage 1C services support it. Added container-level loading, error, and empty states. Added constrained-viewport containment around the page shell and active tab area. Verification recorded: focused Watchlists Vitest component tree passed, service and route focused tests passed, git diff check passed, and Playwright/CDP smoke at 390px passed with mocked API routes and observed scoped watchlist_id requests. Documentation update was not needed for this frontend shell slice. Bandit is not applicable because touched implementation files are frontend TypeScript/React; package-wide TypeScript still has existing unrelated baseline failures outside Watchlists.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

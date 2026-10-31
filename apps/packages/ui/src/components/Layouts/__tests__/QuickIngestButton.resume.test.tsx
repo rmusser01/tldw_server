@@ -17,6 +17,8 @@ import {
   QuickIngestModalHost,
 } from "../QuickIngestButton"
 import { resolvePresetMap } from "@/components/Common/QuickIngest/presets"
+import { ResultsList } from "@/components/Media/ResultsList"
+import { MediaReviewResultsList } from "@/components/Review/MediaReviewResultsList"
 import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
 
 const presetStorage = vi.hoisted(() => ({
@@ -60,7 +62,8 @@ vi.mock("react-i18next", () => ({
   }),
 }))
 
-vi.mock("lucide-react", () => ({
+vi.mock("lucide-react", async (importOriginal) => ({
+  ...await importOriginal<typeof import("lucide-react")>(),
   UploadCloud: () => <span data-testid="upload-cloud" />,
 }))
 
@@ -120,6 +123,24 @@ describe("QuickIngestButton resume behavior", () => {
     }
     presetStorage.value = resolvePresetMap()
     presetStorage.isLoading = false
+  })
+
+  it.each(["inspector", "review"])("hands an empty %s URL to the mounted session host", async (surface) => {
+    localStorage.removeItem("tldw:media:first-ingest-dismissed")
+    const user = userEvent.setup()
+    render(<><QuickIngestModalHost />{surface === "inspector" ? <ResultsList results={[]} selectedId={null} onSelect={vi.fn()} totalCount={0} loadedCount={0} isLoading={false} onOpenQuickIngest={requestQuickIngestOpen} /> : <MediaReviewResultsList state={{ t: (_key: string, value: string) => value, allResults: [], hasResults: false, selectedIds: [], previewedId: null, isFetching: false, query: "", total: 0, page: 1, pageSize: 10, listParentRef: { current: null } } as any} actions={{} as any} />}</>)
+    await user.type(screen.getByPlaceholderText(/youtube/i), "https://example.com/article")
+    await user.keyboard("{Enter}")
+    expect(useQuickIngestSessionStore.getState().session?.queueItems.map(item => item.url)).toEqual(["https://example.com/article"])
+  })
+
+  it("appends an ordinary handoff once and preserves draft settings", () => {
+    useQuickIngestSessionStore.getState().createDraftSession({ ...createEmptyQuickIngestSession(), visibility: "hidden", queueItems: [{ id: "prior", url: "https://example.com/prior", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } }], presetConfig: { ...resolvePresetMap().standard, common: { ...resolvePresetMap().standard.common, overwrite_existing: true }, advancedValues: { api_name: "draft-provider" } } })
+    render(<QuickIngestModalHost />)
+    act(() => { requestQuickIngestOpen({ source: "manual", url: "https://example.com/article" }) })
+    expect(useQuickIngestSessionStore.getState().session?.queueItems.map(item => item.url)).toEqual(["https://example.com/prior", "https://example.com/article"])
+    expect(useQuickIngestSessionStore.getState().session?.presetConfig.advancedValues?.api_name).toBe("draft-provider")
+    expect(useQuickIngestSessionStore.getState().session?.presetConfig.common.overwrite_existing).toBe(true)
   })
 
   it("waits for preset storage before consuming a pending open", () => {
@@ -274,7 +295,7 @@ describe("QuickIngestButton resume behavior", () => {
     expect(modal).toHaveAttribute("data-standard-provider", "openai")
   })
 
-  it("rebases and seeds an existing named draft in one playlist open", () => {
+  it("preserves settings and seeds an existing named draft in one playlist open", () => {
     presetStorage.value = resolvePresetMap({
       standard: {
         ...resolvePresetMap().standard,
@@ -304,7 +325,7 @@ describe("QuickIngestButton resume behavior", () => {
     })
 
     const session = useQuickIngestSessionStore.getState().session
-    expect(session?.presetConfig.advancedValues?.api_name).toBe("openai")
+    expect(session?.presetConfig.advancedValues?.api_name).toBe("stale-provider")
     expect(session?.openDetail).toMatchObject({
       action: "playlist_preflight",
       url: "https://www.youtube.com/playlist?list=PL123",

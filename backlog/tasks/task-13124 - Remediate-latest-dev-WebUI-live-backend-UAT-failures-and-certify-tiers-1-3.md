@@ -48,11 +48,7 @@ Execute the approved five-stage implementation plan inline: remediate TASK-13124
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Pre-implementation review revised the design to: compare bundlers with bounded memory/responsiveness criteria before selecting a default; inventory mocked/intercepted tier cases separately from live-backend evidence; use the repository mock OpenAI-compatible service through the real backend; coverage-map and delete redundant legacy live tests; gate saved views only on narrow workspace existence; re-prove the Prompt layout issue cleanly; use the generic Kanban error mechanism; and synchronize with then-current origin/dev before final certification.
 
 2026-08-25: Requester confirmed the revised design. Detailed implementation plan completed and self-reviewed; execution proceeds inline without subagent delegation.
@@ -60,16 +56,12 @@ Pre-implementation review revised the design to: compare bundlers with bounded m
 Final exact-commit certification used 81a36bef786eed82540b23e59a4d6c485db51321, which contains origin/dev b1d0aed671dcf45bbe4211a9690022c083c99feb as an ancestor. Full typecheck has no diagnostics in touched files; remaining baseline diagnostics are documented. Two focused backend tests were environment-dependent skips; the live browser certification had no skips.
 
 Closeout review corrected the typecheck acceptance criterion to match the scoped gate actually verified; it does not claim the unrelated repository-wide baseline is green.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 All 43 child tasks are complete. Exact-commit real-backend UAT passed Tier 1 34/34, Tier 2 104/104, and Tier 3 37/37 with zero retries, skips, failures, or interruptions; health before/after and teardown all passed. Review, regression, build, lint, security, isolation, and evidence results are recorded in Docs/superpowers/reviews/2026-08-25-tier-1-3-live-uat-results.md.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -1,11 +1,13 @@
+import { usePromptInventory } from "@/hooks/usePromptInventory"
+import { usePromptLocalAuthority } from "@/hooks/usePromptLocalAuthority"
+import { resolvePromptOwnerId } from "@/services/prompt-local-owner"
 import React from 'react'
 import { Input, List, Tag, Space, Tooltip, Modal, Checkbox, Button, message, Select, Dropdown } from 'antd'
 import type { MenuProps } from 'antd'
 import { ChevronDown } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import {
-  getAllPrompts,
   savePrompt,
   updatePrompt,
   updateLastUsedPrompt as updateLastUsedPromptDB
@@ -13,7 +15,7 @@ import {
 import { useStorage } from '@plasmohq/storage/hook'
 import { tldwClient } from '@/services/tldw/TldwApiClient'
 import { autoSyncPrompt, shouldAutoSyncWorkspacePrompts } from '@/services/prompt-sync'
-import { useMessageOption } from "@/hooks/useMessageOption"
+import { useStoreMessageOption } from "@/store/option"
 import { Link } from 'react-router-dom'
 
 type PromptItem = { id?: string; title: string; content: string; is_system?: boolean; source: 'local' | 'server' }
@@ -26,9 +28,14 @@ type Props = {
   ariaLabelledby?: string
 }
 
-export const PromptSearch: React.FC<Props> = ({ onInsertMessage, onInsertSystem, inputId, ariaLabel, ariaLabelledby }) => {
+export const PromptSearch: React.FC<Props> = (props) => {
+  const authority = usePromptLocalAuthority()
+  return <PromptSearchForOwner key={authority.ready ? authority.ownerId ?? "local" : "resolving"} {...props} expectedOwnerId={authority.ownerId} />
+}
+
+const PromptSearchForOwner: React.FC<Props & { expectedOwnerId: string | null }> = ({ expectedOwnerId, onInsertMessage, onInsertSystem, inputId, ariaLabel, ariaLabelledby }) => {
   const { t } = useTranslation(['option'])
-  const { historyId } = useMessageOption()
+  const historyId = useStoreMessageOption((s) => s.historyId)
   const [remote, setRemote] = useStorage('promptSearchIncludeServer', false)
   const [q, setQ] = React.useState('')
   const [open, setOpen] = React.useState(false)
@@ -44,7 +51,7 @@ export const PromptSearch: React.FC<Props> = ({ onInsertMessage, onInsertSystem,
   const savingRef = React.useRef(false)
   const queryClient = useQueryClient()
 
-  const { data: localPrompts } = useQuery({ queryKey: ['promptSearchAll'], queryFn: getAllPrompts })
+  const { data: localPrompts } = usePromptInventory('promptSearchAll')
 
   const refreshPromptQueries = React.useCallback(async () => {
     await Promise.all([
@@ -59,7 +66,8 @@ export const PromptSearch: React.FC<Props> = ({ onInsertMessage, onInsertSystem,
         const autoSyncEnabled = await shouldAutoSyncWorkspacePrompts()
         if (!autoSyncEnabled) return
 
-        const syncResult = await autoSyncPrompt(localId)
+        const ownerId = await resolvePromptOwnerId(expectedOwnerId)
+        const syncResult = await autoSyncPrompt(localId, undefined, ownerId ? { expectedOwnerId: ownerId } : undefined)
         if (!syncResult.success) {
           message.warning(
             syncResult.error ||
@@ -75,7 +83,7 @@ export const PromptSearch: React.FC<Props> = ({ onInsertMessage, onInsertSystem,
         )
       }
     },
-    [t]
+    [expectedOwnerId, t]
   )
 
   const runSearch = React.useCallback(async (query: string) => {
@@ -87,7 +95,8 @@ export const PromptSearch: React.FC<Props> = ({ onInsertMessage, onInsertSystem,
           if (remote) {
             try {
               await tldwClient.initialize()
-              const srv = await tldwClient.searchPrompts(query).catch(() => [])
+              const srv = await tldwClient.searchPrompts(query, { expectedOwnerId }).catch(() => [])
+              await resolvePromptOwnerId(expectedOwnerId)
               const serverList = Array.isArray(srv) ? srv : (srv?.results || srv?.prompts || [])
               const norm = (serverList as any[]).map((x) => {
                 const name = x.name || x.title || 'Untitled'
@@ -123,7 +132,7 @@ export const PromptSearch: React.FC<Props> = ({ onInsertMessage, onInsertSystem,
     } finally {
       setLoading(false)
     }
-  }, [localPrompts, remote])
+  }, [expectedOwnerId, localPrompts, remote])
 
   React.useEffect(() => {
     const id = setTimeout(() => { void runSearch(q) }, 250)
@@ -183,6 +192,7 @@ export const PromptSearch: React.FC<Props> = ({ onInsertMessage, onInsertSystem,
           void runWithSaving(async () => {
             try {
               await updatePrompt({
+                expectedOwnerId,
                 id: String(selected.id),
                 title: editTitle || 'Untitled',
                 content: editContent,
@@ -214,7 +224,7 @@ export const PromptSearch: React.FC<Props> = ({ onInsertMessage, onInsertSystem,
                 title: editTitle || 'Untitled',
                 content: editContent,
                 is_system: !!editIsSystem
-              })
+              }, { expectedOwnerId })
               message.success(t('promptSearch.saveServerSuccess') || 'Saved')
             } catch (e: unknown) {
               message.error(
@@ -240,6 +250,7 @@ export const PromptSearch: React.FC<Props> = ({ onInsertMessage, onInsertSystem,
           void runWithSaving(async () => {
             try {
               const savedPrompt = await savePrompt({
+                expectedOwnerId,
                 title: editTitle || 'Untitled',
                 content: editContent,
                 is_system: !!editIsSystem,
@@ -270,6 +281,7 @@ export const PromptSearch: React.FC<Props> = ({ onInsertMessage, onInsertSystem,
             try {
               if (localOverwriteId) {
                 await updatePrompt({
+                expectedOwnerId,
                   id: localOverwriteId,
                   title: editTitle || 'Untitled',
                   content: editContent,
@@ -278,6 +290,7 @@ export const PromptSearch: React.FC<Props> = ({ onInsertMessage, onInsertSystem,
                 await syncPromptIfConfigured(localOverwriteId)
               } else {
                 const savedPrompt = await savePrompt({
+                expectedOwnerId,
                   title: editTitle || 'Untitled',
                   content: editContent,
                   is_system: !!editIsSystem,
@@ -307,7 +320,7 @@ export const PromptSearch: React.FC<Props> = ({ onInsertMessage, onInsertSystem,
                 title: editTitle || 'Untitled',
                 content: editContent,
                 is_system: !!editIsSystem
-              })
+              }, { expectedOwnerId })
               message.success(t('promptSearch.saveServerSuccess') || 'Saved')
             } catch (e: unknown) {
               message.error(
@@ -323,6 +336,7 @@ export const PromptSearch: React.FC<Props> = ({ onInsertMessage, onInsertSystem,
     }
     return items
   }, [
+    expectedOwnerId,
     editContent,
     editIsSystem,
     editTitle,

@@ -37,9 +37,9 @@ priority: high
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Rebased branch onto origin/dev without conflicts. Addressed actionable PR feedback in ScheduledTasks capability helpers and Create panel: immutable default capability map, safe missing source-family fallback, distinct unknown notification metadata copy, adapter-only availability explanation, non-Watchlists capability metadata rendering, non-secret-looking redaction fixtures, stale Backlog checklist metadata, and slow recurring form test timeouts. Verification: focused ScheduledTasks batch passed with 69 tests; route-state regression passed with 8 tests; git diff --check exited 0; touched product placeholder scan had no matches. Bandit skipped because no Python files are touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

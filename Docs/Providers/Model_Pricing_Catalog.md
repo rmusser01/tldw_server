@@ -21,26 +21,17 @@ and available to the Chat API as `provider/model`.
 
 ## Editing the Catalog
 
-- Format: JSON object by provider, then model id → `{prompt: number, completion: number}` (USD per 1K tokens).
-- Example (OpenAI text models only):
-
-```
-{
-  "openai": {
-    "gpt-4o":        { "prompt": 0.005,  "completion": 0.015 },
-    "gpt-4o-mini":   { "prompt": 0.001,  "completion": 0.002 },
-    "gpt-4.1":       { "prompt": 0.010,  "completion": 0.030 },
-    "o3-mini":       { "prompt": 0.001,  "completion": 0.002 }
-  }
-}
-```
+- Format: JSON object by provider, then model id → `{prompt: number, completion: number}` (USD per 1K tokens), with optional `cache_read`, `cache_write` and `cache_write_1h`: the prompt-cache read, 5-minute write and 1-hour write rates, also per 1K tokens (a missing `cache_write_1h` falls back to `cache_write`). Without them, cached tokens cost the `prompt` rate. An optional `long_prompt` object (`above_tokens` plus a full rate set) replaces the entry's rates for a request whose whole prompt is longer than `above_tokens`. A tier without a positive `above_tokens` or without both `prompt` and `completion` is ignored with a warning, and the base rates apply. A tier applies only where the caller knows the prompt length (usage costing), not in the no-length estimators `get_rates` and `compute_token_cost`, which use the base rates. An optional `"hidden": true` prices a model without listing it in selectors. Anthropic dotted names such as `claude-sonnet-4.5` need no entry: lookups, the model-availability check and the outgoing request map them to the dashed API ID (`claude-sonnet-4-5`). An override replaces the whole entry, so an override of an entry that has cache rates, a `long_prompt` or `hidden` must repeat them: an override of `claude-haiku-5-5` without `long_prompt` silently loses the tier.
+- Service tiers: an optional `service_tiers` object maps a tier name, as the provider reports it in `service_tier` (OpenAI: `flex`, or `priority` for Fast; `batch` for a usage block that reports it, which no documented OpenAI response does), to a full rate set: `prompt`, `completion`, optional cache rates and an optional `long_prompt`. A call that reports that tier costs those rates. A call that reports any other tier costs the entry's standard rates. So does a prompt over the entry's `long_prompt.above_tokens` on a tier with no `long_prompt` of its own. A tier without both `prompt` and `completion`, or with a malformed `long_prompt`, is ignored with a warning. Anthropic entries need no `service_tiers`: Anthropic's `batch` halves every category in code (`ANTHROPIC_BATCH_MULTIPLIER`), and adding a `batch` tier to an Anthropic entry would halve it twice. An override must repeat `service_tiers` too.
 
 Tip: Keep values conservative if you’re unsure, then update with exact rates from provider pricing pages.
 
 ## Provider Quick Links
 
-- Anthropic: https://docs.claude.com/en/docs/about-claude/models/overview
-- OpenAI (text models): https://platform.openai.com/docs/pricing
+- Anthropic: https://platform.claude.com/docs/en/about-claude/pricing (model IDs: https://platform.claude.com/docs/en/about-claude/models/overview)
+- OpenAI (text models): https://developers.openai.com/api/docs/pricing (Batch, Flex and Fast tables for `service_tiers`)
+- Google Gemini: https://ai.google.dev/gemini-api/docs/pricing (`cache_read` is the "Context caching price")
+- OpenRouter: entries are a fallback only; a call is costed from the `usage.cost` OpenRouter reports (https://openrouter.ai/docs/use-cases/usage-accounting)
 - Z.ai: https://docs.z.ai/guides/overview/pricing
 - Moonshot (Kimi): https://platform.moonshot.ai/docs/pricing/chat#generation-model-kimi-k2
 - Cohere: https://docs.cohere.com/docs/models
@@ -50,25 +41,27 @@ Tip: Keep values conservative if you’re unsure, then update with exact rates f
 
 These examples illustrate the expected shape. Replace with current values from the linked pages above.
 
-Anthropic (Claude 4.5/4.1 family):
+Anthropic (keys are API model IDs; an override repeats the cache rates, the 1-hour rate and any `long_prompt`):
 ```
 {
   "anthropic": {
-    "claude-opus-4.1":   { "prompt": 0.015,  "completion": 0.075 },
-    "claude-sonnet-4.5": { "prompt": 0.003,  "completion": 0.015 },
-    "claude-haiku-4.5":  { "prompt": 0.001,  "completion": 0.005 }
+    "claude-opus-4-7":   { "prompt": 0.005, "completion": 0.025, "cache_read": 0.0005, "cache_write": 0.00625, "cache_write_1h": 0.01 },
+    "claude-sonnet-4-6": { "prompt": 0.003, "completion": 0.015, "cache_read": 0.0003, "cache_write": 0.00375, "cache_write_1h": 0.006 },
+    "claude-haiku-5-5":  { "prompt": 0.0001, "completion": 0.0005, "cache_read": 0.00001, "cache_write": 0.000125, "cache_write_1h": 0.0002,
+                           "long_prompt": { "above_tokens": 100000, "prompt": 0.0005, "completion": 0.0025, "cache_read": 0.00005, "cache_write": 0.000625, "cache_write_1h": 0.001 } }
   }
 }
 ```
 
-OpenAI (text models only – do not include embeddings here):
+OpenAI (text models only – do not include embeddings here; an override repeats `cache_read` and `service_tiers`):
 ```
 {
   "openai": {
-    "gpt-4o":      { "prompt": 0.005, "completion": 0.015 },
-    "gpt-4o-mini": { "prompt": 0.001, "completion": 0.002 },
-    "gpt-4.1":     { "prompt": 0.010, "completion": 0.030 },
-    "o3-mini":     { "prompt": 0.001, "completion": 0.002 }
+    "gpt-4.1":     { "prompt": 0.002, "completion": 0.008, "cache_read": 0.0005,
+                     "service_tiers": { "batch": { "prompt": 0.001, "completion": 0.004 },
+                                        "priority": { "prompt": 0.0035, "completion": 0.014, "cache_read": 0.000875 } } },
+    "gpt-4o-mini": { "prompt": 0.00015, "completion": 0.0006, "cache_read": 0.000075 },
+    "o3-mini":     { "prompt": 0.0011, "completion": 0.0044, "cache_read": 0.00055 }
   }
 }
 ```

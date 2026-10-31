@@ -32,9 +32,9 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified the review concern against current code: start_worker_groups dropped the return values from start_cleanup_workers and start_compactor_websub_workers while both downstream helpers still expose worker_inventory=None branches that create legacy tasks/stop handles. Chose the fail-fast contract because initialize_startup_worker_bootstrap always constructs WorkerRegistry and the existing startup worker group tests only cover inventory-backed startup. Red/green: added test_start_worker_groups_requires_worker_inventory_before_starting_legacy_workers and confirmed it failed before the guard because start_worker_groups accepted worker_inventory=None and proceeded into helper startup. Implemented a top-level RuntimeError guard in start_worker_groups before any helper invocation. Verification: pytest tldw_Server_API/tests/Services/test_startup_worker_groups.py -q -> 2 passed, 5 warnings; pytest tldw_Server_API/tests/Services/test_startup_worker_bootstrap.py -q -> 2 passed, 5 warnings; Bandit on startup_worker_groups.py -> 0 findings; git diff --check -> clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

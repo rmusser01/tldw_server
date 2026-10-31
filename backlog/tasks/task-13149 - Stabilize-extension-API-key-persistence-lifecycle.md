@@ -39,13 +39,13 @@ Reason: This is a routine reliability fix within the existing extension test and
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Reproduced the 180-second lifecycle timeout on the unmodified `dev` baseline and traced it to reseeding extension storage after reopening the same persistent Chromium profile.
 - Made startup seeding optional for restart checks and changed the save helper to wait for the credential in its actual storage area, removing both the restart hang and the session-save race without changing product persistence semantics.
 - Verified the focused ESLint check and nine serial Playwright lifecycle cases (`--repeat-each=3 --workers=1`); all passed. `git diff --check` also passed.
 - No user documentation update was needed because this is test-harness stabilization. Bandit is not applicable to the TypeScript-only change. No known skips or blockers remain.
 - ADR required: no. ADR path: N/A. This change stays inside the existing test and storage lifecycle boundaries.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

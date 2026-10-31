@@ -80,7 +80,7 @@ except ImportError:
 
 from tldw_Server_API.app.core.Claims_Extraction.claims_engine import ClaimsEngine
 from tldw_Server_API.app.core.Evaluations.circuit_breaker import CircuitOpenError, llm_circuit_breaker
-from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
     SummaryProviderError,
 )
@@ -360,7 +360,7 @@ class RAGEvaluator:
                 probe_name = metric_names.pop(probe_index)
                 try:
                     probe_result: Any = await probe_factory()
-                except (SummaryProviderError, DaemonCapacityError):
+                except (SummaryProviderError, DaemonCapacityError, LLMQuotaExceededError):
                     raise
                 except Exception as exc:  # noqa: BLE001 - preserve per-metric partial results
                     probe_result = exc
@@ -382,7 +382,7 @@ class RAGEvaluator:
             )
             for i, result in enumerate(metric_results):
                 if isinstance(result, Exception):
-                    if isinstance(result, (SummaryProviderError, DaemonCapacityError)):
+                    if isinstance(result, (SummaryProviderError, DaemonCapacityError, LLMQuotaExceededError)):
                         raise result
                     # Log the failure but continue with other metrics
                     metric_name = metric_names[i] if i < len(metric_names) else f"metric_{i}"

@@ -1,3 +1,4 @@
+import { requestSettingsNavigation } from "@/utils/settings-return"
 import React from "react"
 import {
   Input,
@@ -177,11 +178,18 @@ export type PlaygroundComposerNoticesProps = {
   sessionInsightsTotalTokens: number
   jsonMode: boolean
   isConnectionReady: boolean
+  /**
+   * The first server check is still running and nothing has failed yet
+   * (CC-03). Show "Connecting…" instead of the offline notice until then.
+   */
+  connectionPending?: boolean
+  showDisconnectedNotice?: boolean
   connectionUxState: string
   isProMode: boolean
   selectedModel: string | null | undefined
   systemPrompt: string | null | undefined
   selectedCharacter: unknown
+  deferCharacterAppearanceSetup?: boolean
   serverScope?: unknown
   userScope?: unknown
   ragPinnedResultsLength: number
@@ -388,6 +396,8 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
     sessionInsightsTotalTokens,
     jsonMode,
     isConnectionReady,
+    connectionPending = false,
+    showDisconnectedNotice = true,
     connectionUxState,
     isProMode,
     selectedModel,
@@ -418,13 +428,13 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
   return (
     <>
       <ChatFirstRunNudge />
-      <CharacterExpressionSetupNudge
+      {!props.deferCharacterAppearanceSetup && <CharacterExpressionSetupNudge
         selectedCharacter={selectedCharacter}
         selectedCharacterName={selectedCharacterName}
         serverScope={serverScope}
         userScope={userScope}
         t={t}
-      />
+      />}
       {modeAnnouncement && (
         <div
           role="status"
@@ -728,7 +738,22 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
           </button>
         </div>
       )}
-      {!isConnectionReady && (
+      {!isConnectionReady && showDisconnectedNotice && connectionPending && (
+        // Announced but not drawn: the model chip already reads "Connecting…",
+        // and a block that vanishes once connected would make the composer jump.
+        <span
+          role="status"
+          aria-live="polite"
+          className="sr-only"
+          data-testid="playground-composer-connecting-status"
+        >
+          {t(
+            "playground:composer.connectingNotice",
+            "Connecting to your tldw server\u2026"
+          )}
+        </span>
+      )}
+      {!isConnectionReady && showDisconnectedNotice && !connectionPending && (
         <Alert
           variant="info"
           role="status"
@@ -745,6 +770,10 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
             </span>
             <Link
               to="/settings/tldw"
+              onClick={event => {
+                if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+                if (!requestSettingsNavigation("/settings/tldw")) event.preventDefault()
+              }}
               className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text"
             >
               {t(
@@ -836,6 +865,10 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
             </Button>
             <Select
               size="small"
+              aria-label={t(
+                "playground:composer.startupTemplatesLaunch",
+                "Launch saved template"
+              )}
               placeholder={t(
                 "playground:composer.startupTemplatesLaunch",
                 "Launch saved template"

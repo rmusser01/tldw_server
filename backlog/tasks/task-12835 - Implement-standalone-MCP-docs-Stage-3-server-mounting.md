@@ -35,7 +35,7 @@ Implement the Stage 3 standalone MCP docs server mounting slice from the approve
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation completed from `Docs/superpowers/plans/2026-07-01-standalone-mcp-docs-stage3-server-mounting-plan.md` in isolated worktree `/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/codex-mcp-docs-stage1` on branch `codex/mcp-docs-stage1`.
 
 TDD evidence:
@@ -53,7 +53,7 @@ Verification:
 - `git diff --check` passed.
 
 Known skips/blockers: none. Warnings are existing test-suite warnings/logging behavior and did not fail the focused verification.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

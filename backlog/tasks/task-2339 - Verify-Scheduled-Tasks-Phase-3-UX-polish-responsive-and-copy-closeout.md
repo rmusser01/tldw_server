@@ -39,7 +39,7 @@ Docs/superpowers/plans/2026-06-09-scheduled-tasks-phase3-results-inbox-home-surf
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 7 copy and UX closeout completed.
 
 - Fixed projected-mode copy in ScheduledTaskResultsPanel so it says result history and item actions appear when the results API is available, avoiding durable-review language in task-list projection mode.
@@ -49,7 +49,7 @@ Stage 7 copy and UX closeout completed.
 - Verified result/detail drawers use accessible titles and existing tests cover capability-aware action visibility.
 - Browser smoke used WebUI on http://localhost:18001 plus a temporary read-only mock API on http://127.0.0.1:8000 for health, OpenAPI, scheduled-task, and notification empty responses. /scheduled-tasks and /scheduled-tasks?tab=results rendered without the readiness gate. Results empty state and Create action were visible on desktop and 390px viewport. /companion rendered Automation Inbox before Inbox Preview with personalization unavailable on desktop and 390px viewport.
 - Bandit skipped because this stage touched frontend, docs, and Backlog task files only; no Python/backend files changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

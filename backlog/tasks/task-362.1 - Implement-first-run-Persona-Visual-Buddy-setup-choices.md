@@ -48,7 +48,7 @@ Implement the approved first-run Visual Buddy setup choices for Persona Garden. 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Implementation plan created after user approval of the patched design spec.
 - Plan explicitly calls out an implementation trap discovered during planning: current import/portability controls are guarded by `selectedPack`, but first-run Import pack must be reachable with zero packs, so the import preview/commit UI needs to be split from selected-pack-only upload/export/editing controls.
 
@@ -75,7 +75,7 @@ Second PR #1725 review pass started after push. CodeRabbit added two still-valid
 Second PR #1725 review pass completed. Fixed the still-valid sidepanel detour comments by routing visual/live detour notice and return-label copy through sidepanel locale keys and by deriving effectiveActiveTab so setup visual detour selection and lazy-rendered tab content stay aligned. Verified the repeated loadPacks(selectedPack?.id) thread is stale: current VisualPackEditor refresh uses loadPacks({ preferredPackId: selectedPack?.id }).
 
 Post-review rebase cleanup completed. Reconciled the dev starter-pack panel with the setup-choice card flow by keeping the shared first-run import preview panel as the only no-pack import surface, updating stale starter-copy tests to the setup card behavior, and preserving the bundled default inactive-draft path.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

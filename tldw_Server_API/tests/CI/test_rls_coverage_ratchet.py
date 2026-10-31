@@ -74,6 +74,15 @@ def test_scan_finds_the_tables_and_policies_that_exist(report):
     assert "prompt_studio_projects" in report.policy_tables
 
 
+def test_workspace_startup_receipts_are_covered_without_baseline_exemption(report):
+    """Permanent retry tombstones must participate in the standard tenant ratchet."""
+    table = "workspace_chat_startup_receipts"
+    assert table in report.owned_tables
+    assert table in report.policy_tables
+    assert table not in load_baseline(BASELINE)
+    assert table not in load_exemptions(DEFAULT_EXEMPTIONS)
+
+
 def test_baseline_only_lists_tables_the_scan_still_finds():
     """A stale baseline entry hides a table that was renamed or dropped."""
     current = scan_source([APP_ROOT])
@@ -218,3 +227,81 @@ def test_policy_and_enable_without_force_is_not_owner_safe_coverage():
         "ALTER TABLE owner_bound ENABLE ROW LEVEL SECURITY;\n"
     )])
     assert "owner_bound" in report.uncovered  # nosec B101 - regression assertion
+
+
+def test_native_accounting_authority_is_explicit_and_does_not_exempt_chat_intents(report):
+    """Multi-user accounting and tenant chat intents have different authorities."""
+    ledger = "native_chat_quota_reservations"
+    intents = "native_chat_quota_intents"
+    exemptions = load_exemptions(DEFAULT_EXEMPTIONS)
+    assert ledger in report.owned_tables and ledger in exemptions
+    assert ledger not in load_baseline(BASELINE)
+    assert intents in report.policy_tables and intents not in exemptions
+
+
+_HELPER_POLICY_MODULE = '''
+def build():
+    stmts = []
+
+    def add(sql):
+        stmts.append(sql)
+
+    def add_tenant_policy(table, predicate):
+        add(f"ALTER TABLE IF EXISTS {table} ENABLE ROW LEVEL SECURITY;")
+        add(f"ALTER TABLE IF EXISTS {table} FORCE ROW LEVEL SECURITY;")
+        add(f"CREATE POLICY {table}_tenant_isolation ON {table} USING ({predicate});")
+
+    def add_policy_only(table):
+        add(f"CREATE POLICY {table}_iso ON {table} USING (true);")
+
+    add_tenant_policy("t_direct", "client_id = 'x'")
+    for table in ("t_x", "t_y"):
+        add_tenant_policy(table, "client_id = 'x'")
+    owners = {"t_dict": "client_id = 'x'"}
+    for table, predicate in owners.items():
+        add_tenant_policy(table, predicate)
+    names = ("t_named",)
+    for table in names:
+        add_tenant_policy(table=table, predicate="client_id = 'x'")
+    for table in ("t_inline",):
+        add(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+        add(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
+        add(f"CREATE POLICY {table}_iso ON {table} USING (true)")
+    add_policy_only("t_unforced")
+    return stmts
+'''
+
+_HELPER_POLICY_TABLES = ("t_direct", "t_x", "t_y", "t_dict", "t_named", "t_inline", "t_unforced")
+
+
+def test_policies_built_by_helper_calls_and_loops_are_coverage(tmp_path):
+    """Seeded self-test: a regex over source text cannot see these policies.
+
+    ``add_tenant_policy("t", ...)`` and ``for table in (...)`` build the DDL from
+    f-string placeholders, so the table name never appears next to CREATE
+    POLICY. The scanner has to resolve them through the AST, or every table
+    protected this way reads as uncovered and can never leave the baseline.
+    """
+    (tmp_path / "schema.sql").write_text("".join(
+        f"CREATE TABLE {table} (id INT, client_id TEXT);\n" for table in _HELPER_POLICY_TABLES
+    ))
+    (tmp_path / "policies.py").write_text(_HELPER_POLICY_MODULE)
+
+    report = scan_source([tmp_path])
+
+    for table in ("t_direct", "t_x", "t_y", "t_dict", "t_named", "t_inline"):
+        assert table in report.policy_tables, table  # nosec B101 - regression assertion
+    # A helper that never enables and forces RLS is still not coverage.
+    assert "t_unforced" in report.uncovered  # nosec B101 - regression assertion
+
+
+def test_an_unresolvable_helper_argument_is_not_coverage(tmp_path):
+    """A table name computed at runtime cannot be credited with a policy."""
+    (tmp_path / "schema.sql").write_text("CREATE TABLE t_runtime (id INT, client_id TEXT);\n")
+    (tmp_path / "policies.py").write_text(
+        _HELPER_POLICY_MODULE + "\n\ndef runtime(name):\n    add_tenant_policy(name.lower(), 'x')\n"
+    )
+
+    report = scan_source([tmp_path])
+
+    assert "t_runtime" in report.uncovered  # nosec B101 - regression assertion

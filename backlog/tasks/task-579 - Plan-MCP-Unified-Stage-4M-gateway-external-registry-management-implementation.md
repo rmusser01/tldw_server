@@ -32,11 +32,11 @@ Create the implementation plan for MCP Unified Stage 4M gateway external registr
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created a dedicated implementation plan at Docs/superpowers/plans/2026-05-31-mcp-unified-stage4m-gateway-external-registry-management-implementation-plan.md.
 
 The plan was reviewed against current package APIs and tightened for worktree venv activation plus explicit credential-grant fail-closed behavior.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

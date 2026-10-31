@@ -266,23 +266,18 @@ class PreflightRuntimeControls:
             self._graceful_cleanup(entries),
             name="preflight-cleanup-graceful",
         )
-        deadline_task = asyncio.create_task(
-            asyncio.sleep(max(0.0, graceful_deadline - loop.time())),
-            name="preflight-cleanup-deadline",
-        )
-
         done, _ = await asyncio.wait(
-            {graceful_task, deadline_task},
+            {graceful_task},
+            timeout=max(0.0, graceful_deadline - loop.time()),
             return_when=asyncio.FIRST_COMPLETED,
         )
         if graceful_task in done:
             self._consume_cleanup_task(graceful_task)
-            deadline_task.cancel()
         else:
             graceful_task.cancel()
 
         force_tasks = self._start_force_cleanup(entries)
-        cleanup_tasks = force_tasks | {graceful_task, deadline_task}
+        cleanup_tasks = force_tasks | {graceful_task}
         await self._consume_cleanup_tasks_by_deadline(
             cleanup_tasks,
             deadline=grace_deadline,

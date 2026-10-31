@@ -60,6 +60,24 @@ def test_auxiliary_worker_specs_match_legacy_scheduler_contract() -> None:
         assert spec.factory is not None
 
 
+@pytest.mark.parametrize("env_value,setting_value,expected", [
+    ("false", True, False), (None, "false", False), ("true", False, True),
+])
+def test_review_metrics_lifecycle_flag_has_strict_environment_precedence(
+    monkeypatch, env_value, setting_value, expected,
+) -> None:
+    startup_aux = _import_startup_auxiliary_services()
+    key = "CLAIMS_REVIEW_METRICS_SCHEDULER_ENABLED"
+    monkeypatch.delenv(key, raising=False)
+    if env_value is not None:
+        monkeypatch.setenv(key, env_value)
+    monkeypatch.setattr(startup_aux, "_legacy_get", lambda key, default: default)
+    context = _context()
+    context.settings[key] = setting_value
+    spec = _specs_by_name(startup_aux)["claims_review_metrics_task"]
+    assert spec.enabled(context) is expected
+
+
 @pytest.mark.asyncio
 async def test_auxiliary_worker_spec_factory_starts_and_cancels_scheduler_task(
     monkeypatch: pytest.MonkeyPatch,

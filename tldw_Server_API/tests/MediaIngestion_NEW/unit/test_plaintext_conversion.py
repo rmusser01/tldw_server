@@ -6,6 +6,29 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext import Plaint
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("extension", ["txt", "md", "markdown"])
+@pytest.mark.parametrize("content", ["Final line\n", "  indented\ttext\n\n\n", "first\r\nsecond\r\n"])
+def test_text_document_conversion_preserves_original_whitespace(tmp_path, extension, content):
+    source = tmp_path / f"source.{extension}"
+    source.write_bytes(content.encode("utf-8"))
+
+    converted, _source_format, _metadata = docs.convert_document_to_text(source)
+
+    assert converted == content
+
+
+@pytest.mark.unit
+def test_text_document_processing_preserves_source_and_unchunked_content(tmp_path):
+    content = "  original\ttext\n\n\nFinal line\n"
+    source = tmp_path / "source.txt"
+    source.write_bytes(content.encode("utf-8"))
+
+    result = docs.process_document_content(source, False, None, False, False, None, None, None, None)
+
+    assert (result["content"], result["chunks"][0]["text"]) == (content, content)
+
+
+@pytest.mark.unit
 def test_convert_document_to_text_requires_defusedxml(monkeypatch, tmp_path):
     xml_path = tmp_path / "sample.xml"
     xml_path.write_text("<root><value>1</value></root>", encoding="utf-8")

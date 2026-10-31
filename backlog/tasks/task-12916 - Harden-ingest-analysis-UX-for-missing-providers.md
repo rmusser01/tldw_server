@@ -40,9 +40,9 @@ Address UX/HCI findings from the analysis-provider error investigation: prevent 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the UX/HCI recommendations by adding an early Quick Ingest provider preflight for analysis, aligning the check with the backend api_name contract, and surfacing the warning in both the classic modal and wizard before work starts. Web ingest now records missing-provider and analyzer error-string outcomes as structured analysis_status/analysis_error warnings instead of returning Error: text as analysis content. Quick Ingest result normalization now suppresses analysis error markers from the analysis text slot and shows recoverable warnings in result rows. The media Analysis modal now maps the missing-provider failure to actionable retry copy.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

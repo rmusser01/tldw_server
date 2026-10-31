@@ -44,7 +44,7 @@ Task 4 closeout plan: verify the existing audit follow-up sections against the f
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Wrote implementation plan for the first issue #1346 work unit: create Docs/Design/WebUI_Dependency_Audit.md without package or runtime edits.
 
 Plan review before commit found and fixed two issues: usage-scan commands now exclude manifests/docs/generated artifacts so declaration mentions are not counted as usage, and Backlog documentation commands now preserve both spec and plan links. Final task closeout command now checks DoD and marks TASK-104 Done after audit completion.
@@ -70,7 +70,7 @@ Task 3 data-quality correction completed: postcss-import now counts the direct P
 Task 4 closeout completed: confirmed the ranked follow-up queue already satisfied the plan, made only narrow wording edits to clarify cleanup attempt order and follow-up verification, and removed the temporary Task 4 pending blocker from Known Skips. Final verification run: rg -n "pubsub-js|buffer|stream-browserify|clsx|axios|dompurify|defer-design|remove-now|replace-later" Docs/Design/WebUI_Dependency_Audit.md; git diff --check; git status --short; merge-policy gate checked. Bandit remains skipped because this slice changed only documentation and Backlog task metadata, with no Python or runtime code changes. A human-authored Change summary is not present in this AI-authored closeout, so the PR must remain draft/not merge-ready until the requester supplies it.
 
 PR review correction completed: restacked the branch on current origin/dev to remove unrelated CodeGraph/workflow documentation from the PR diff, renamed this task to TASK-104 to avoid task IDs already present on dev and sibling review work, reclassified zero-evidence complex package declarations as investigate-lockfile rather than defer-design, and recorded the AI-authored PR merge gate. A human-authored Change summary is still required before this PR is merge-ready; this task records the gate but does not satisfy it.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

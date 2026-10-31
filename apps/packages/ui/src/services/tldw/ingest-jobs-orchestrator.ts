@@ -167,9 +167,47 @@ export const createIngestJobsTracker = <TMeta>() => {
   }
 }
 
-type PollTrackedIngestJobsOptions<TMeta, TResult> = {
-  tracker: ReturnType<typeof createIngestJobsTracker<TMeta>>
+type LegacyPerJobFetch = {
+  /**
+   * Per-job status fetch (legacy N+1 path). At least one of `fetchJob` /
+   * `fetchJobs` must be provided; `fetchJob` is ignored when `fetchJobs` is
+   * present. Omitting both is a caller bug that previously spun silently to
+   * the poll timeout (PR #3210 review follow-up).
+   */
   fetchJob: (jobId: number) => Promise<IngestJobStatusResponse | undefined>
+  fetchJobs?: never
+}
+
+type BatchedJobsFetch = {
+  fetchJob?: LegacyPerJobFetch["fetchJob"]
+  /**
+   * Batched status fetch: ONE request per tracked batch per poll cycle. The
+   * returned response is expected to carry the reconciled status of every
+   * requested job under `data.jobs` (an array of job status objects with an
+   * `id` field, matching `GET /api/v1/media/ingest/jobs?batch_id=...`).
+   * A job missing from `data.jobs` is treated like the per-job 404 path
+   * (stays pending until the poll timeout).
+   */
+  fetchJobs: (
+    batchId: string,
+    jobIds: number[]
+  ) => Promise<IngestJobStatusResponse | undefined>
+}
+
+type PollTrackedIngestJobsBase<TMeta, TResult> = {
+  tracker: ReturnType<typeof createIngestJobsTracker<TMeta>>
+  /**
+   * Batched status fetch: ONE request per tracked batch per poll cycle. The
+   * returned response is expected to carry the reconciled status of every
+   * requested job under `data.jobs` (an array of job status objects with an
+   * `id` field, matching `GET /api/v1/media/ingest/jobs?batch_id=...`).
+   * A job missing from `data.jobs` is treated like the per-job 404 path
+   * (stays pending until the poll timeout).
+   */
+  fetchJobs?: (
+    batchId: string,
+    jobIds: number[]
+  ) => Promise<IngestJobStatusResponse | undefined>
   timeoutMs: number
   pollIntervalMs?: number
   isCancelled: () => boolean
@@ -192,6 +230,14 @@ type PollTrackedIngestJobsOptions<TMeta, TResult> = {
   ) => TResult | undefined
 }
 
+/**
+ * At least one fetch strategy is required; batching takes priority. Omitting both is a
+ * compile error instead of a silent spin to the poll timeout (PR #3210
+ * review follow-up).
+ */
+type PollTrackedIngestJobsOptions<TMeta, TResult> = PollTrackedIngestJobsBase<TMeta, TResult> &
+  (LegacyPerJobFetch | BatchedJobsFetch)
+
 export const pollTrackedIngestJobs = async <TMeta, TResult>(
   options: PollTrackedIngestJobsOptions<TMeta, TResult>
 ): Promise<TResult[]> => {
@@ -201,6 +247,129 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
     options.tracker.getItems().map((item) => [item.jobId, item])
   )
   const results: TResult[] = []
+
+  const consumeJobResponse = (
+    jobId: number,
+    item: IngestJobTrackerItem<TMeta>,
+    response: IngestJobStatusResponse | undefined
+  ): boolean => {
+    if (!response?.ok) {
+      const mapped = options.mapRequestError?.(item, response)
+      if (typeof mapped !== "undefined") {
+        unresolved.delete(jobId)
+        options.tracker.clearJob(jobId)
+        results.push(mapped)
+        return true
+      }
+      return false
+    }
+
+    const status = String(response.data?.status || "").toLowerCase()
+    if (!TERMINAL_INGEST_JOB_STATUSES.has(status)) {
+      return false
+    }
+
+    unresolved.delete(jobId)
+    options.tracker.clearJob(jobId)
+
+    if (status === "completed") {
+      if (completedIngestJobIndicatesFailure(response.data)) {
+        results.push(
+          options.mapFailure(item, {
+            status: "failed",
+            data: extractCompletedIngestJobTerminalData(response.data),
+            error:
+              extractCompletedIngestJobError(response.data) ||
+              "Ingest completed with an error result.",
+            response
+          })
+        )
+      } else {
+        results.push(
+          options.mapCompleted(
+            item,
+            extractCompletedIngestJobTerminalData(response.data),
+            response
+          )
+        )
+      }
+      return true
+    }
+    if (status === "cancelled") {
+      results.push(options.mapCancelled(item, response.data, response))
+      return true
+    }
+
+    const errorText =
+      String(response.data?.error_message || "").trim() ||
+      String(response.data?.cancellation_reason || "").trim() ||
+      `Ingest ${status || "failed"}`
+    results.push(
+      options.mapFailure(item, {
+        status,
+        data: response.data,
+        error: errorText,
+        response
+      })
+    )
+    return true
+  }
+
+  // Fetch the current status of every unresolved job with ONE request per
+  // tracked batch (instead of one request per job) and reconcile each job
+  // from the batch response.
+  const consumeBatchResponses = async (): Promise<boolean> => {
+    const jobsByBatch = new Map<string, number[]>()
+    for (const [jobId, item] of unresolved.entries()) {
+      const batchJobIds = jobsByBatch.get(item.batchId) ?? []
+      batchJobIds.push(jobId)
+      jobsByBatch.set(item.batchId, batchJobIds)
+    }
+
+    const responsesByJob = new Map<
+      number,
+      IngestJobStatusResponse | undefined
+    >()
+    for (const [batchId, batchJobIds] of jobsByBatch) {
+      const response = await options.fetchJobs?.(batchId, batchJobIds)
+      const jobs = response?.ok ? response.data?.jobs : null
+      if (Array.isArray(jobs)) {
+        for (const job of jobs) {
+          const id = Number((job as any)?.id)
+          if (!Number.isFinite(id) || !unresolved.has(Math.trunc(id))) continue
+          responsesByJob.set(Math.trunc(id), {
+            ok: true,
+            status: response?.status,
+            data: job,
+            error: response?.error
+          })
+        }
+      } else if (response || options.fetchJobs) {
+        // Batch request itself failed: surface the same error response to
+        // every tracked job of the batch, mirroring the per-job error path.
+        for (const jobId of batchJobIds) {
+          responsesByJob.set(jobId, response)
+        }
+      }
+    }
+
+    let observedTerminal = false
+    for (const [jobId, item] of Array.from(unresolved.entries())) {
+      const response =
+        responsesByJob.get(jobId) ??
+        // Job missing from the batch listing: treat like the per-job 404
+        // path (kept pending; mapRequestError sees a 404-shaped response).
+        ({
+          ok: false,
+          status: 404,
+          error: "Ingest job missing from batch status response."
+        } as IngestJobStatusResponse)
+      if (consumeJobResponse(jobId, item, response)) {
+        observedTerminal = true
+      }
+    }
+    return observedTerminal
+  }
 
   while (unresolved.size > 0) {
     if (options.isCancelled()) {
@@ -214,68 +383,15 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
     }
 
     let observedTerminal = false
-    for (const [jobId, item] of Array.from(unresolved.entries())) {
-      const response = await options.fetchJob(jobId)
-      if (!response?.ok) {
-        const mapped = options.mapRequestError?.(item, response)
-        if (typeof mapped !== "undefined") {
+    if (options.fetchJobs) {
+      observedTerminal = await consumeBatchResponses()
+    } else {
+      for (const [jobId, item] of Array.from(unresolved.entries())) {
+        const response = await options.fetchJob?.(jobId)
+        if (consumeJobResponse(jobId, item, response)) {
           observedTerminal = true
-          unresolved.delete(jobId)
-          options.tracker.clearJob(jobId)
-          results.push(mapped)
         }
-        continue
       }
-
-      const status = String(response.data?.status || "").toLowerCase()
-      if (!TERMINAL_INGEST_JOB_STATUSES.has(status)) {
-        continue
-      }
-
-      observedTerminal = true
-      unresolved.delete(jobId)
-      options.tracker.clearJob(jobId)
-
-      if (status === "completed") {
-        if (completedIngestJobIndicatesFailure(response.data)) {
-          results.push(
-            options.mapFailure(item, {
-              status: "failed",
-              data: extractCompletedIngestJobTerminalData(response.data),
-              error:
-                extractCompletedIngestJobError(response.data) ||
-                "Ingest completed with an error result.",
-              response
-            })
-          )
-        } else {
-          results.push(
-            options.mapCompleted(
-              item,
-              extractCompletedIngestJobTerminalData(response.data),
-              response
-            )
-          )
-        }
-        continue
-      }
-      if (status === "cancelled") {
-        results.push(options.mapCancelled(item, response.data, response))
-        continue
-      }
-
-      const errorText =
-        String(response.data?.error_message || "").trim() ||
-        String(response.data?.cancellation_reason || "").trim() ||
-        `Ingest ${status || "failed"}`
-      results.push(
-        options.mapFailure(item, {
-          status,
-          data: response.data,
-          error: errorText,
-          response
-        })
-      )
     }
 
     options.onPendingJobIds?.(Array.from(unresolved.keys()))

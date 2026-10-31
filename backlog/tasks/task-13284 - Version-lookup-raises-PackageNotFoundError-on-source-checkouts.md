@@ -30,9 +30,9 @@ The HTTP client builds a user-agent by reading installed package metadata. When 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-09-23: fixed in 7039432940 (tracked there as TASK-13366, a duplicate filed before this task was noticed). _get_project_version now catches ImportError (PackageNotFoundError), falling back to pyproject.toml. test_http_client_project_version.py covers the not-installed path (red on the pre-fix code). tests/http_client without TLDW_VERSION: 69 failed -> 1 (pre-existing, unrelated).
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

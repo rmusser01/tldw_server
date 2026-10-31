@@ -32,13 +32,13 @@ Execute implementation plan Task 4: align offline checks, cancel/close behavior,
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Canonical completed record: `backlog/completed/task-394.4 - Correct-Quick-Ingest-offline-cancel-and-progress-states.md`. This `backlog/tasks/` file is a tracker mirror retained for PR visibility and should not be treated as a separate closeout record.
 
 Latest origin/dev already contains the Task 4 Quick Ingest recovery behavior. Verified Add step disables quick processing while disconnected, shows server-offline recovery copy with retry, still allows Configure for queued items, and guards handleQuickProcess while offline/checking. Verified ProcessingStep uses neutral global copy (`Processing and indexing content`) and FloatingProgressWidget splits Done, Failed, Cancelled, and Interrupted minimized terminal states.
 
 Verification: `bun run test src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.session.test.tsx src/components/Common/QuickIngest/__tests__/FloatingProgressWidget.test.tsx --maxWorkers=1 --no-file-parallelism` passed 61 tests after `bun install` under `apps/` repaired copied worktree package links. Verification: `npx playwright test e2e/workflows/media-ingest.spec.ts --grep "quick ingest can be dismissed during processing" --project=chromium --reporter=line` passed 1 test in 57.1s. Bandit is not applicable because this closeout branch only updates Backlog task metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -40,10 +40,13 @@ def _ensure_postgres_rls(db: Any, conn: Any) -> None:
     backend = db.backend
     ident = backend.escape_identifier
 
-    org_array = "COALESCE(string_to_array(NULLIF(current_setting('app.org_ids', true), ''), ',')::BIGINT[], ARRAY[]::BIGINT[])"
-    team_array = "COALESCE(string_to_array(NULLIF(current_setting('app.team_ids', true), ''), ',')::BIGINT[], ARRAY[]::BIGINT[])"
-    current_user = "current_setting('app.current_user_id', true)"
-    is_admin = "COALESCE(current_setting('app.is_admin', true), '0') = '1'"
+    # Uncorrelated scalar reads become statement InitPlans. Scope installation
+    # still replaces these values on every pool checkout; no session identity
+    # or membership result is cached between statements.
+    org_array = "COALESCE(string_to_array(NULLIF((SELECT current_setting('app.org_ids', true)), ''), ',')::BIGINT[], ARRAY[]::BIGINT[])"
+    team_array = "COALESCE(string_to_array(NULLIF((SELECT current_setting('app.team_ids', true)), ''), ',')::BIGINT[], ARRAY[]::BIGINT[])"
+    current_user = "(SELECT current_setting('app.current_user_id', true))"
+    is_admin = "COALESCE((SELECT current_setting('app.is_admin', true)), '0') = '1'"
     not_deleted_predicate = f"COALESCE({ident('media')}.deleted, FALSE) = FALSE"
 
     personal_predicate = (

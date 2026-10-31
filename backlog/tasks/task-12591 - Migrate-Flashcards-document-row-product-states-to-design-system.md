@@ -38,7 +38,7 @@ Migrate the remaining Flashcards document row Alert and Tag product-state afford
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Replaced FlashcardDocumentRow Ant Design Alert usage with shared design-system Alert for upload errors, conflict recovery, and validation/not-found errors.
 - Replaced FlashcardDocumentRow direct Ant Design Tag usage with shared design-system Badge for saving status, card type, deck, user tags, and source chips.
 - Migrated FlashcardQueueStateBadge from Ant Design Tag to shared design-system Badge so row queue-state metadata uses the same design-system chip contract.
@@ -52,7 +52,7 @@ Verification:
 - rg confirmed no FlashcardDocumentRow entries remain in design-system-product-state-baseline.json.
 - Bandit skipped: no Python files touched.
 - bun run verify:design-system-state still exits 1 on unrelated existing non-Flashcards blocked/stale findings; Flashcards exceptions dropped from 28 to 24.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -56,9 +56,9 @@ Implement Task 7 from Docs/superpowers/plans/2026-05-18-first-time-readiness-set
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Live walkthrough follow-up completed. First-run WebUI testing exposed and this branch fixes: profile-only readiness payloads now expand through the backend profile contract instead of previewing/provisioning as a no-op, speech verification uses the install manager keyword-only resource_profile argument, setup config rewriting preserves line breaks for adjacent key updates, and the WebUI immediately reflects preview lane state with empty install plans shown as no work.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -48,9 +48,9 @@ Migrate the remaining Sidepanel Chat StatusDot local-status-badge adapter so con
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification: focused StatusBadges design-system test passed 9/9; product-state guard test passed 49/49; verify:design-system-state passed with 511 baseline exceptions and no StatusDot local-status-badge entry; git diff --check passed. Full UI tsc exited 2 on existing repo-wide test typing debt; /tmp/tldw_ui_tsc_sidepanel_status_dot.txt has 236 lines and no diagnostics matching StatusDot, StatusBadges, or design-system-product-state-baseline. Bandit skipped because touched files are TS/TSX/JSON UI files only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -1,7 +1,8 @@
-import os
 import base64
 import io
+import os
 import wave
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -15,6 +16,7 @@ def client(monkeypatch):
     monkeypatch.setenv("TEST_MODE", "true")
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "test-api-key-1234567890")
+    monkeypatch.setenv("SINGLE_USER_TEST_API_KEY", "test-api-key-1234567890")
     monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
     # Keep errors as HTTP, not embedded in audio
     monkeypatch.setenv("TTS_STREAM_ERRORS_AS_AUDIO", "0")
@@ -48,8 +50,8 @@ def _small_wav_bytes(duration_sec: float = 0.2, sr: int = 16000) -> bytes:
 
 def test_neutts_endpoint_success(client: TestClient):
     # Skip if NeuTTS provider is not available in this runtime
-    h = client.get("/api/v1/audio/health")
-    assert h.status_code == 200
+    h = client.get("/api/v1/audio/health", headers={"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]})
+    assert h.status_code == 200, h.text
     details = (h.json().get("providers") or {}).get("details") or {}
     neutts = details.get("neutts") or {}
     if neutts.get("status") != "available":
@@ -75,8 +77,8 @@ def test_neutts_endpoint_success(client: TestClient):
 
 def test_neutts_endpoint_missing_reference_text(client: TestClient):
     # Skip if NeuTTS provider is not available in this runtime
-    h = client.get("/api/v1/audio/health")
-    assert h.status_code == 200
+    h = client.get("/api/v1/audio/health", headers={"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]})
+    assert h.status_code == 200, h.text
     details = (h.json().get("providers") or {}).get("details") or {}
     neutts = details.get("neutts") or {}
     if neutts.get("status") != "available":
@@ -101,7 +103,7 @@ def test_neutts_endpoint_missing_reference_text(client: TestClient):
 
 
 def test_audio_health_includes_capabilities_envelope(client: TestClient):
-    r = client.get("/api/v1/audio/health")
+    r = client.get("/api/v1/audio/health", headers={"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]})
     assert r.status_code == 200, r.text
     data = r.json()
     assert "capabilities_envelope" in data

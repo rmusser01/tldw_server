@@ -43,7 +43,7 @@ Follow the staged recertification plan in Docs/superpowers/plans/2026-05-15-chat
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented recertification fixes for issue #1646 strict gaps: real-server prompt proof, real persona/character runtime rail proof, provider:model model setting scope handoff and persist/restore proof, MCP populated/unavailable state counts, assistant transition matrix coverage, mobile/focus screenshots, and no-route-stubbing guard.
 
 Verification recorded:
@@ -56,7 +56,7 @@ Verification recorded:
 - Issue #1646 was updated checkbox-by-checkbox and closed with recertification evidence.
 - PR review reopened the tracker from Done to In Progress; final Done waits for maintainer sign-off and PR #1721 closeout.
 - PR review fixes verified locally: focused Vitest review slice passed, design-system state verifier passed with existing allowed baseline exceptions, `git diff --check` passed, and the trailing-whitespace pre-commit hook passed for touched files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

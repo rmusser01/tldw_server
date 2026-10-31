@@ -18,9 +18,6 @@ priority: high
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-<!-- SECTION:DESCRIPTION:BEGIN -->
-<!-- SECTION:DESCRIPTION:END -->
-
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -29,11 +26,7 @@ priority: high
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Second PR #2571 CI pass: current logs show docs MCP policy/config failures, Guardian notify timestamp mutation failure, UI playground a11y mock drift, and home-route smoke seed drift. Sandbox macOS/Python 3.12 cap failures are not reproduced locally on macOS/Python 3.11; collecting more evidence before changing that path.
 
 User requested all current CodeQL issues be addressed. Expanding this task from test-failure fixes into CodeQL remediation/baseline cleanup for PR #2571.
@@ -69,7 +62,11 @@ Release prep follow-up: updated FastAPI app metadata version in tldw_Server_API/
 Review follow-up: verified visual identity idempotency workflow decisions still lived in the endpoint helpers. Added a red service-layer regression test for claim/replay/conflict/release ownership before moving the logic into VisualIdentityService.
 
 Implemented review follow-up: moved visual identity idempotency claim/replay/record/release decisions into VisualIdentityService. Endpoint now calls service methods and only maps service errors to HTTP responses/model validation. Added service regression coverage. Validation: new red test failed before service API existed; focused idempotency tests passed 5; full visual identity service + API files passed 49; py_compile for endpoint/service passed; git diff --check passed; Bandit on endpoint/service reported zero findings; endpoint grep shows no direct repository idempotency calls.
-<!-- SECTION:NOTES:END -->
+
+PR #2596 review pass: verified unresolved threads. Stale/already-fixed: access-log redaction import is module-level in main.py, PyPI publish has test-suite gate, visualIsAnimated is persisted/hydrated through chat metadata. Still-valid minimal fixes: PyPI lookup should catch TimeoutError/JSONDecodeError, mobile cockpit rail toggles need ARIA state, visual identity preview FileResponse should be inline, resolver refresh should clear in-flight maps, and expression availability should avoid parallel resolve fanout.
+PR #2596 review comments addressed. Fixed still-valid findings: publish-pypi detect-version catches TimeoutError and json.JSONDecodeError during retry fallback; visual identity previews set content_disposition_type=inline; resolver refresh clears per-key in-flight requests; expression availability resolves sequentially instead of Promise.all fanout; mobile cockpit rail buttons expose aria-pressed and aria-controls. Added regression tests for each fixed behavior. Skipped/resolved as stale after verification: access-log redaction import is already module-level, publish workflow already has a test-suite gate, and visualIsAnimated already persists to metadata_extra and hydrates in useServerChatLoader. Validation: UI Vitest files passed 30 tests; Python workflow/API files passed 25 tests; py_compile visual_identities.py passed; Bandit on visual_identities.py reported zero findings; git diff --check passed.
+Release prep continuation: rebased the release-prep branch onto current origin/dev, resolved frontend/app and PyPI workflow contract conflicts in favor of current dev behavior plus the existing release test-suite gate, and cherry-picked the main-only #2624 tracked node_modules cleanup so the main-bound release PR does not reintroduce those symlinks. Updating the 0.1.35 changelog/README rollup next to cover PRs merged after #2594 through #2654 plus #2624 and the current release-branch follow-ups.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -90,11 +87,3 @@ Release changelog update: expanded the 0.1.34 entry to cover PRs #2570, #2573, #
 - [x] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-PR #2596 review pass: verified unresolved threads. Stale/already-fixed: access-log redaction import is module-level in main.py, PyPI publish has test-suite gate, visualIsAnimated is persisted/hydrated through chat metadata. Still-valid minimal fixes: PyPI lookup should catch TimeoutError/JSONDecodeError, mobile cockpit rail toggles need ARIA state, visual identity preview FileResponse should be inline, resolver refresh should clear in-flight maps, and expression availability should avoid parallel resolve fanout.
-PR #2596 review comments addressed. Fixed still-valid findings: publish-pypi detect-version catches TimeoutError and json.JSONDecodeError during retry fallback; visual identity previews set content_disposition_type=inline; resolver refresh clears per-key in-flight requests; expression availability resolves sequentially instead of Promise.all fanout; mobile cockpit rail buttons expose aria-pressed and aria-controls. Added regression tests for each fixed behavior. Skipped/resolved as stale after verification: access-log redaction import is already module-level, publish workflow already has a test-suite gate, and visualIsAnimated already persists to metadata_extra and hydrates in useServerChatLoader. Validation: UI Vitest files passed 30 tests; Python workflow/API files passed 25 tests; py_compile visual_identities.py passed; Bandit on visual_identities.py reported zero findings; git diff --check passed.
-Release prep continuation: rebased the release-prep branch onto current origin/dev, resolved frontend/app and PyPI workflow contract conflicts in favor of current dev behavior plus the existing release test-suite gate, and cherry-picked the main-only #2624 tracked node_modules cleanup so the main-bound release PR does not reintroduce those symlinks. Updating the 0.1.35 changelog/README rollup next to cover PRs merged after #2594 through #2654 plus #2624 and the current release-branch follow-ups.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

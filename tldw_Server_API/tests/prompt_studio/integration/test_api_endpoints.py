@@ -145,6 +145,9 @@ async def test_list_evaluations_honors_non_multiple_offset() -> None:
         def __init__(self) -> None:
             self.calls: list[dict[str, int | None]] = []
 
+        def get_project(self, project_id):
+            return {"id": project_id, "user_id": "pagination-owner"}
+
         def list_evaluations(self, *, project_id, prompt_id=None, status=None, page=1, per_page=20):
             self.calls.append(
                 {
@@ -174,7 +177,7 @@ async def test_list_evaluations_honors_non_multiple_offset() -> None:
         limit=3,
         offset=4,
         db=db,
-        user_context={},
+        user_context={"user_id": "pagination-owner", "is_admin": False},
     )
 
     assert [item.id for item in response["evaluations"]] == [4, 5, 6]
@@ -1742,9 +1745,11 @@ class TestWebSocketEndpoints:
 class TestErrorHandling:
     """Test API error handling."""
 
-    def test_unauthorized_access(self, client):
+    def test_unauthorized_access(self, client, monkeypatch):
 
         """Test accessing endpoints without authentication."""
+        monkeypatch.setenv("TEST_MODE", "false")
+        monkeypatch.setenv("TLDW_TEST_MODE", "false")
         response = client.get("/api/v1/prompt-studio/projects")
         assert response.status_code == 401
 

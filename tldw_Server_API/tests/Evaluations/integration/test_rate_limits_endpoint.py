@@ -33,19 +33,18 @@ def test_get_rate_limits_shape():
         "evaluations_per_minute",
         "evaluations_per_day",
         "tokens_per_day",
-        "cost_per_day",
-        "cost_per_month",
     ]:
         assert k in lim, f"Missing limits key: {k}"
-        assert isinstance(lim[k], int)
+        if k in ("evaluations_per_day", "tokens_per_day"):
+            assert lim[k] is None or isinstance(lim[k], int)  # None is unlimited
+        else:
+            assert isinstance(lim[k], int)
 
     # Usage keys
     usage = j["usage"]
     for k in [
         "evaluations_today",
         "tokens_today",
-        "cost_today",
-        "cost_month",
     ]:
         assert k in usage, f"Missing usage key: {k}"
         assert isinstance(usage[k], int)
@@ -55,8 +54,29 @@ def test_get_rate_limits_shape():
     for k in [
         "daily_evaluations",
         "daily_tokens",
-        "daily_cost",
-        "monthly_cost",
     ]:
         assert k in rem, f"Missing remaining key: {k}"
-        assert isinstance(rem[k], int)
+        assert rem[k] is None or isinstance(rem[k], int)  # None is unlimited
+
+    # Evaluation cost caps were removed (TASK-13436): no cost fields anywhere.
+    assert set(lim) == {"evaluations_per_minute", "evaluations_per_day", "tokens_per_day"}
+    assert set(usage) == {"evaluations_today", "tokens_today"}
+    assert set(rem) == {"daily_evaluations", "daily_tokens"}
+
+
+def test_rate_limits_daily_caps_are_null_when_unlimited(monkeypatch):
+    """With no limits.* daily caps resolved, the view reports null, not the tier's numbers."""
+    from tldw_Server_API.app.core.Evaluations import user_rate_limiter
+
+    async def _no_cap(user_id, key):
+        """No cap for any key."""
+        return None
+
+    monkeypatch.setattr(user_rate_limiter, "user_quota", _no_cap)
+    r = TestClient(app).get("/api/v1/evaluations/rate-limits")
+    assert r.status_code == 200
+    j = r.json()
+    assert j["limits"]["evaluations_per_day"] is None
+    assert j["limits"]["tokens_per_day"] is None
+    assert j["remaining"]["daily_evaluations"] is None
+    assert j["remaining"]["daily_tokens"] is None

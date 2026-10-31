@@ -47,7 +47,6 @@ from tldw_Server_API.app.core.Storage.generated_file_helpers import (
     save_and_register_tts_audio,
 )
 from tldw_Server_API.app.core.Usage.audio_quota import (
-    active_streams_count,
     add_daily_minutes,
     bytes_to_seconds,
     can_start_job,
@@ -57,6 +56,8 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     finish_job,
     finish_stream,
     get_daily_minutes_used,
+    get_monthly_minutes_used,
+    monthly_minutes_exhausted,
     get_job_heartbeat_interval_seconds,
     get_limits_for_user,
     get_user_tier,

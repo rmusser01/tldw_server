@@ -37,7 +37,7 @@ Produce a reusable public-core release candidate from dev with enforced CI, clos
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created from remote origin/dev 2e0815c1e4577902a220044619822ab6b1cb395f on 2026-08-21. Ten focused child tasks own the reusable readiness work; TASK-12116 remains the frontend-safety dependency; TASK-12983 now stops at the public downstream handoff.
 
 Backlog CLI validation passed. The selected public graph contains 12 program and handoff records with a 13-record dependency closure, no missing dependency, and no cycle. Staged diff checking and prohibited-private-identifier scanning passed. Application tests and Bandit were not run because this change creates task and documentation records only and changes no executable code.
@@ -45,7 +45,7 @@ Backlog CLI validation passed. The selected public graph contains 12 program and
 Initial task-graph materialization committed as eaa3d8e91f on codex/core-release-readiness-backlog. The epic remains In Progress because the release-readiness child tasks are intentionally not executed by this backlog-only change.
 
 Draft PR opened at https://github.com/rmusser01/tldw_server/pull/2795 for review. The repository policy human-authored Change summary remains an explicit merge gate; the epic remains In Progress.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

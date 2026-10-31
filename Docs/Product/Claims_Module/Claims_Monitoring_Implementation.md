@@ -70,6 +70,51 @@ Register in a dedicated claims monitoring module:
   - `CLAIMS_REVIEW_METRICS_INTERVAL_SEC`
   - `CLAIMS_REVIEW_METRICS_LOOKBACK_DAYS`
 
+Stage 2B adds `CLAIMS_REVIEW_METRICS_JOBS_ENABLED` (default false). With both this
+flag and `CLAIMS_JOBS_ENABLED` enabled, a UTC APScheduler callback admits one
+`claims_aggregate_review_metrics` Job per owner and captured execution window.
+Claims owns aggregation and persisted metrics; Jobs owns execution, retries,
+leases, cancellation, and administration. The existing local route remains
+available for one release, tracked by `TASK-9935.2`, and never runs after an
+admission attempt in Jobs mode.
+
+The seven metrics/Jobs settings are available in the `[ClaimsMonitoring]`
+section of `config.txt`; environment values take precedence, including explicit
+false flags and malformed numeric values handled by the consuming module.
+Configuration is captured when the scheduler starts. The default interval is
+86400 seconds, positive intervals have a 60-second minimum, and unsupported
+numeric datetime intervals disable only this scheduler. Lookback defaults to two
+inclusive UTC days and is capped at 366. The first callback is deferred by five
+seconds; callbacks coalesce after downtime with no misfire expiry. Dates are
+captured once per callback, not recomputed by delayed workers. Overlapping
+windows repair recent gaps but do not provide arbitrary historical backfill.
+
+For cutover, deploy Claims workers on the same Jobs database and
+`CLAIMS_JOBS_QUEUE` (default `default`), then enable both Jobs flags and restart
+the producer. `CLAIMS_JOBS_WORKER_ENABLED` is independent: a producer-only API
+process may leave it disabled while external workers execute Jobs. The execution
+retry budget is `CLAIMS_JOBS_MAX_RETRIES_REVIEW_METRICS` (default 3, range 0..100).
+Admission retries are separately bounded to three attempts for transient failures
+only. Replays use the same idempotency key; producer failure never triggers local
+execution.
+
+Before changing the queue, stop producers, drain or cancel outstanding review
+metrics Jobs through Jobs administration, and restart workers/producers on the
+new queue. Use the same barrier for rollback, then disable the metrics Jobs flag
+and restart in compatibility-local mode. A controlled restart avoids overlap
+with any already-running local aggregation. Queued cancellation prevents
+execution, but cancellation after aggregation starts may still commit metrics;
+Jobs rejects stale completion. Scheduler shutdown does not cancel admitted Jobs.
+
+Each owner window is atomic. SQLite aggregation uses `BEGIN IMMEDIATE`, so large
+windows may contend with API writes; keep the default lookback unless repair
+requires more. Existing-only sessions cannot recreate an absent owner database.
+PostgreSQL uses a per-owner transaction advisory lock and a single source
+statement snapshot. Trusted background discovery/aggregation use bounded
+maintenance scopes with explicit owner filtering; request team/org scopes are
+not inherited. Producer/handler diagnostics and Job errors omit raw storage
+exceptions and paths; this guarantee does not cover unrelated shared DB logs.
+
 ## API Surface
 - `GET /api/v1/claims/monitoring/config`
 - `PATCH /api/v1/claims/monitoring/config`

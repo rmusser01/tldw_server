@@ -46,7 +46,7 @@ Reason: ADR-002 already defines the peer contract and exact conformance boundary
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Restored the server Shared Core snapshot by reverting only the server-only import-order and blank-line drift in packages/tldw_profile_core/src/tldw_profile_core/models.py. The resulting file is byte-for-byte identical to current Chatbook origin/dev fce1774490, with matching SHA-256 e6ced5cd8ae3ab5d4d458d30567635c4ddd2cdf76d456d9844e0bb2dd4df8fdb. No test, digest, schema, API, serialization, dependency, or runtime behavior was changed.
 
 Root cause and TDD: untouched server origin/dev abdc60ae89 reproduced test_server_pins_exact_chatbook_profile_core_contract RED with actual digest 6bfc0521da2646ff55d00f92f5562db54aea616cfe84f718ed11fd6d0ef1883e versus pinned 421672c5cc0e43481280b3cf5a5a63fe01f44bf33255353e1cd9a6dbc2f2e7d0. Server-only commit f51f2ac2bd had changed exactly these bytes. After the minimal edit, the unchanged exact test passed.
@@ -54,7 +54,7 @@ Root cause and TDD: untouched server origin/dev abdc60ae89 reproduced test_serve
 After dev advanced, the four commits were cleanly rebased onto current server origin/dev 8140c679f3. Fresh rebased verification at code commit 24ccb5acb0: exact pinned parity 1 passed; full server Personal Context contract module 3 passed; Shared Core public contract 4 passed; current Chatbook origin/dev canonical package suite 151 passed from a clean temporary clone; byte comparison passed; compileall passed; Ruff passed every applicable rule with only I001 excluded because applying that import-sort rule recreates the proven byte-parity defect; Bandit scanned 256 LOC with zero findings, errors, nosec suppressions, or skipped tests; origin/dev ancestry, git diff --check, scope review, and whole-range self-review passed. The default Ruff I001 diagnostic is a deliberate exact-contract exception, not an unreviewed skip; server CI lints tldw_Server_API rather than the vendored packages tree. No required verification was skipped; a full unrelated repository sweep was not run because the requested complete contract and canonical suites were executed.
 
 ADR required: no. Existing backlog/decisions/002-personal-context-profile-authority-sync-and-encryption.md applies. No documentation beyond this task record was needed. PR #2856, https://github.com/rmusser01/tldw_server/pull/2856, must remain unmerged until the requester supplies the repository-required human-authored Change summary explaining what changed and why.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

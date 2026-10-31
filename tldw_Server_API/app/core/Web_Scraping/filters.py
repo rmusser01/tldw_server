@@ -9,6 +9,8 @@ from urllib.robotparser import RobotFileParser
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import EgressPolicyError
+
 try:
     # Local HTTP client used across the project; enforces egress policy internally
     from tldw_Server_API.app.core.http_client import fetch as http_fetch
@@ -164,7 +166,7 @@ class URLPatternFilter(URLFilter):
         return True
 
 
-_RobotsStatus = Literal["allowed", "disallowed", "egress_denied", "unreachable"]
+_RobotsStatus = Literal["allowed", "disallowed", "egress_denied", "egress_error", "unreachable"]
 
 
 @dataclass(slots=True, frozen=True)
@@ -202,11 +204,13 @@ class RobotsFilter:
         ttl_seconds: int = 1800,
         backend: str = "httpx",
         timeout: float = 5.0,
+        credential_free: bool = False,
     ) -> None:
         self.user_agent = user_agent
         self.ttl_seconds = int(ttl_seconds)
         self.backend = backend
         self.timeout = float(timeout)
+        self.credential_free = credential_free
         # host -> (RobotFileParser|None, fetched_at_epoch_seconds)
         self._cache: dict[str, tuple[RobotFileParser | None, float]] = {}
         # Lock to avoid stampede on first fetch per host
@@ -233,8 +237,8 @@ class RobotsFilter:
         if cached is not None:
             parser, ts = cached
             if (now - ts) < self.ttl_seconds:
-                status: Literal["ok", "unreachable"] = "ok" if parser is not None else "unreachable"
-                return _RobotsFetchResult(parser=parser, status=status)
+                cached_status: Literal["ok", "unreachable"] = "ok" if parser is not None else "unreachable"
+                return _RobotsFetchResult(parser=parser, status=cached_status)
 
         # Ensure only one fetch in-flight per host
         lock = self._locks.setdefault(host, asyncio.Lock())
@@ -244,8 +248,8 @@ class RobotsFilter:
             if cached is not None:
                 parser, ts = cached
                 if (time.time() - ts) < self.ttl_seconds:
-                    status: Literal["ok", "unreachable"] = "ok" if parser is not None else "unreachable"
-                    return _RobotsFetchResult(parser=parser, status=status)
+                    cached_status = "ok" if parser is not None else "unreachable"
+                    return _RobotsFetchResult(parser=parser, status=cached_status)
 
             robots_url = self._robots_url_for(url)
             try:
@@ -255,20 +259,34 @@ class RobotsFilter:
                     return _RobotsFetchResult(parser=None, status="unreachable")
 
                 # Use thread offload to keep interface consistent with other code paths
-                resp = await asyncio.to_thread(
-                    http_fetch,
-                    method="GET",
-                    url=robots_url,
-                    timeout=self.timeout,
-                    allow_redirects=True,
-                )
+                if self.credential_free:
+                    from tldw_Server_API.app.core.Web_Scraping.ua_profiles import build_browser_headers
+
+                    resp = await asyncio.to_thread(
+                        http_fetch,
+                        robots_url,
+                        timeout=self.timeout,
+                        backend=self.backend,
+                        headers=build_browser_headers("chrome_120_win", accept_lang="en-US,en;q=0.9"),
+                        follow_redirects=True,
+                        trust_env=False,
+                        max_response_bytes=1_000_000,
+                    )
+                else:
+                    resp = await asyncio.to_thread(
+                        http_fetch,
+                        method="GET",
+                        url=robots_url,
+                        timeout=self.timeout,
+                        allow_redirects=True,
+                    )
                 if isinstance(resp, dict):
                     text = resp.get("text")
-                    status = resp.get("status")
+                    http_status = resp.get("status")
                 else:
                     text = getattr(resp, "text", None)
-                    status = getattr(resp, "status_code", None)
-                if not text or (isinstance(status, int) and status >= 400):
+                    http_status = getattr(resp, "status_code", None)
+                if not text or (isinstance(http_status, int) and http_status >= 400):
                     # Treat missing/unreadable robots as unreachable and let the caller
                     # decide whether to fail open or closed.
                     self._cache[host] = (None, time.time())
@@ -277,7 +295,7 @@ class RobotsFilter:
                 rp.parse(text.splitlines())
                 self._cache[host] = (rp, time.time())
                 return _RobotsFetchResult(parser=rp, status="ok")
-            except _WEB_FILTER_NONCRITICAL_EXCEPTIONS as e:  # pragma: no cover - network/parse errors fail open
+            except (EgressPolicyError, *_WEB_FILTER_NONCRITICAL_EXCEPTIONS) as e:  # network/parse errors
                 logger.debug(f"Robots fetch failed for host={host}: {e}")
                 self._cache[host] = (None, time.time())
                 return _RobotsFetchResult(parser=None, status="unreachable")

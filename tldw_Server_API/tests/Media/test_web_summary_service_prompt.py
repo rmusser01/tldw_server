@@ -16,15 +16,16 @@ from tldw_Server_API.app.api.v1.endpoints.media import ingest_web_content as ing
 from tldw_Server_API.app.api.v1.endpoints.media import process_web_scraping as endpoint
 from tldw_Server_API.app.api.v1.schemas.media_request_models import IngestWebContentRequest
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.Context_Integrity import prompt_loader
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
 from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as summary
 from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
-from tldw_Server_API.app.core.Utils import prompt_loader
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as legacy
 from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping as scraper_mod
 from tldw_Server_API.app.services import enhanced_web_scraping_service as enhanced
 from tldw_Server_API.app.services import web_scraping_service as service
 from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
+from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
 
 pytestmark = pytest.mark.integration
 PROMPT_ID = "media.web.summarization"
@@ -109,13 +110,12 @@ def context(
     monkeypatch.setattr(service, "get_web_scraping_service", lambda: state.service)
     monkeypatch.setattr(legacy, "scrape_article", page)
     monkeypatch.setattr(service, "scrape_article", page)
-    monkeypatch.setattr(
-        service, "scrape_from_sitemap", lambda *args, **kwargs: [article(), article("https://example.com/b")]
-    )
-    monkeypatch.setattr(
-        service, "scrape_by_url_level", lambda *args, **kwargs: [article(), article("https://example.com/b")]
-    )
-    monkeypatch.setattr(service, "recursive_scrape", pages)
+    def sitemap(url: str, **kwargs: Any) -> list[dict[str, Any]]:
+        """Replace the legacy sitemap fetch; it runs in a worker thread."""
+        state.fetches.append(url)
+        return [article(), article("https://example.com/b")]
+
+    monkeypatch.setattr(service, "scrape_from_sitemap", sitemap)
     monkeypatch.setattr(summary, "loaded_config_data", {"openai_api": {"model": "test-model"}})
     monkeypatch.setattr(
         prompt_loader, "_prompts_dir", lambda: str(Path(__file__).resolve().parents[2] / "Config_Files" / "Prompts")
@@ -179,22 +179,13 @@ def ingest(context: SimpleNamespace, method: str = "individual", **options: Any)
 
 
 @pytest.mark.parametrize("method", INGEST_METHODS)
-@pytest.mark.parametrize("fallback", [False, True])
 def test_ingest_saved_pair_and_real_crawl_results(
-    context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, method: str, fallback: bool
+    context: SimpleNamespace, method: str
 ) -> None:
     """Saved owner instructions must reach every article, including stored crawl results."""
     save(context, 1)
     save(context, 2)
     context.owner = 2
-    if fallback:
-
-        def unavailable() -> None:
-            """Select the compatibility engine without mocking its result envelope."""
-            raise RuntimeError("enhanced unavailable")
-
-        monkeypatch.setattr(service, "get_web_scraping_service", unavailable)
-        monkeypatch.setenv("TLDW_ENABLE_LEGACY_WEB_SCRAPING_FALLBACK", "1")
     result = ingest(context, method)
     assert [item["analysis"] for item in result["results"]] == ["Summary result."] * 2
     assert all(item.get("ingested_at") for item in result["results"])
@@ -283,20 +274,9 @@ def test_ingest_reset_restores_engine_defaults(context: SimpleNamespace, method:
 
 
 @pytest.mark.parametrize("method", METHODS)
-@pytest.mark.parametrize("fallback", [False, True])
-def test_saved_pair_reaches_all_pages(
-    context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, method: str, fallback: bool
-) -> None:
+def test_saved_pair_reaches_all_pages(context: SimpleNamespace, method: str) -> None:
     """Every supported engine/method must consume both owner instructions."""
     save(context)
-    if fallback:
-
-        def unavailable() -> None:
-            """Select the existing compatibility engine."""
-            raise RuntimeError("enhanced unavailable")
-
-        monkeypatch.setattr(service, "get_web_scraping_service", unavailable)
-        monkeypatch.setenv("TLDW_ENABLE_LEGACY_WEB_SCRAPING_FALLBACK", "1")
     result = process(context, method)
     assert [item["summary"] for item in result["articles"]] == ["Summary result."] * 2
     assert len(context.calls) == 2
@@ -445,25 +425,24 @@ def test_saved_pair_does_not_load_unused_deployment_defaults(
 
 
 @pytest.mark.parametrize("method", METHODS)
-def test_legacy_reset_preserves_existing_defaults(
-    context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, method: str
-) -> None:
-    """Compatibility-engine defaults remain distinct from deployed crawl prompts."""
+def test_reset_restores_builtin_defaults(context: SimpleNamespace, method: str) -> None:
+    """After reset, the enhanced engine serves its builtin defaults (no saved pair)."""
     row = save(context)
     context.databases[1].reset_service_prompt_override(PROMPT_ID, row.revision)
-
-    def unavailable() -> None:
-        """Force selection of the legacy scraping engine."""
-        raise RuntimeError("enhanced unavailable")
-
-    monkeypatch.setattr(service, "get_web_scraping_service", unavailable)
-    monkeypatch.setenv("TLDW_ENABLE_LEGACY_WEB_SCRAPING_FALLBACK", "1")
     process(context, method)
-    expected = "Act as a professional summarizer and summarize this article." if method == "Individual URLs" else ""
-    assert {call["system_message"] for call in context.calls} == {expected}
-    assert {call["messages"][0]["content"] for call in context.calls} == {
-        "Article facts." + ("\n\n\n\n" + expected if expected else "")
-    }
+    if method == "Individual URLs":
+        expected_system = "Summarize this article concisely."
+        expected_user = "Article facts."
+    else:
+        expected_system = (
+            "You are a professional summarizer who produces accurate, concise summaries of web content."
+        )
+        expected_user = (
+            "Article facts.\n\n\n\n"
+            "Summarize this article concisely. Focus on the main points, facts, and any actionable insights."
+        )
+    assert {call["system_message"] for call in context.calls} == {expected_system}
+    assert {call["messages"][0]["content"] for call in context.calls} == {expected_user}
 
 
 def test_missing_deployment_assets_preserves_builtin_defaults(
@@ -550,3 +529,74 @@ def test_persistence_uses_authenticated_prompt_owner(
     assert response.json()["stored_articles"] == 1
     assert owners == [2]
     assert {call["system_message"] for call in context.calls} == {"Owner 2 system {literal}"}
+
+
+WEB_SUMMARY_REQUESTS = [
+    pytest.param(
+        "/api/v1/media/ingest-web-content",
+        {"urls": ["https://example.com/a"], "scrape_method": "individual", "api_name": "openai", "perform_chunking": False},
+        "perform_analysis",
+        id="ingest-web-content",
+    ),
+    # The crawl methods summarize with a default provider when none is named (TASK-13864 review I1).
+    pytest.param(
+        "/api/v1/media/ingest-web-content",
+        {"urls": ["https://example.com/a"], "scrape_method": "url_level", "perform_chunking": False},
+        "perform_analysis",
+        id="ingest-web-content-url-level-default-provider",
+    ),
+    pytest.param(
+        "/api/v1/media/ingest-web-content",
+        {"urls": ["https://example.com/a"], "scrape_method": "recursive_scraping", "perform_chunking": False},
+        "perform_analysis",
+        id="ingest-web-content-recursive-default-provider",
+    ),
+    # No provider named: LLM extraction can still run, and its refusal would discard the scraped pages (TASK-13889).
+    pytest.param(
+        "/api/v1/media/ingest-web-content",
+        {"urls": ["https://example.com/a"], "scrape_method": "individual", "perform_chunking": False},
+        "perform_analysis",
+        id="ingest-web-content-individual-no-provider",
+    ),
+    pytest.param(
+        "/api/v1/media/ingest-web-content",
+        {"urls": ["https://example.com/a"], "scrape_method": "sitemap", "perform_chunking": False},
+        "perform_analysis",
+        id="ingest-web-content-sitemap-no-provider",
+    ),
+    pytest.param(
+        "/api/v1/media/process-web-scraping",
+        {
+            "scrape_method": "Individual URLs",
+            "url_input": "https://example.com/a",
+            "api_name": "openai",
+            "mode": "ephemeral",
+            "perform_chunking": False,
+        },
+        "summarize_checkbox",
+        id="process-web-scraping",
+    ),
+]
+
+
+@pytest.mark.parametrize(("path", "body", "summarize_flag"), WEB_SUMMARY_REQUESTS)
+def test_summaries_for_an_over_quota_user_are_refused_before_any_page_is_fetched(
+    context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, path: str, body: dict[str, Any], summarize_flag: str
+) -> None:
+    """The 402 comes first, so no page is fetched and then discarded (TASK-13864)."""
+    refuse_llm_work(monkeypatch)
+    response = context.client.post(path, json={**body, summarize_flag: True})
+    assert_llm_quota_402(response)
+    assert context.fetches == []
+    assert context.calls == []
+
+
+@pytest.mark.parametrize(("path", "body", "summarize_flag"), WEB_SUMMARY_REQUESTS)
+def test_scraping_without_summaries_is_not_refused(
+    context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, path: str, body: dict[str, Any], summarize_flag: str
+) -> None:
+    """Without summaries there is no LLM work to refuse, so the page comes back."""
+    refuse_llm_work(monkeypatch)
+    response = context.client.post(path, json={**body, summarize_flag: False})
+    assert response.status_code == 200, response.text
+    assert context.fetches == ["https://example.com/a"]

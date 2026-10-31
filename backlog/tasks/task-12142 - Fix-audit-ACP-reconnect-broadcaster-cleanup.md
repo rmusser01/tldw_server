@@ -53,7 +53,7 @@ Address audit finding MCP-002: ACP reconnect WebSocket replay creates a temporar
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Validation notes:
 - Original PR branch was stale after latest dev advanced; fetched origin/dev and rebased cleanly onto fd5c152b065c408e4e8ee5f08da41589f21cb7f5. Post-rebase merge-base matched origin/dev before validation.
 - Red check failed as expected before the original implementation: reconnect endpoint left `ws_broadcaster` in the session event bus and WSBroadcaster did not accept a custom `consumer_id`.
@@ -64,7 +64,7 @@ Validation notes:
 - `git diff --check` passed.
 - Broader file command on latest dev still has one unrelated baseline failure: `test_acp_websocket.py::TestACPRunnerClientPermissions::test_determine_permission_tier_batch` expects `fs.write` to be `batch`, but current dev returns `individual`; the focused ACP reconnect and broadcaster regressions pass.
 PR opened: https://github.com/rmusser01/tldw_server/pull/2619 (draft against dev). Draft status is intentional until the human-authored Change summary required by project policy is added.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

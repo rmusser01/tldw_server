@@ -37,7 +37,7 @@ Continue the tldw_server WebUI design-system migration by routing the remaining 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation completed on branch codex/design-system-next-slice-6 in the dedicated design-system worktree.
 
 Persona Buddy diagnostics now consume READY_STATE_LABEL and LOADING_STATE_LABEL from the design-system registry exports, preserving the existing diagnostic ordering and state logic.
@@ -47,7 +47,7 @@ Focused coverage mocks the design-system registry labels to prove Persona Buddy 
 Removed Persona Buddy diagnostics canonical-state-label exceptions from apps/packages/ui/scripts/design-system-product-state-baseline.json.
 
 PR opened against dev: https://github.com/rmusser01/tldw_server/pull/1722.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -35,9 +35,9 @@ Verify and address still-valid review findings on PR #1749 for the llama.cpp man
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified current PR review threads, fixed the still-valid runtime/API/UI defects, skipped two non-code-change findings with inline reasons, pushed the branch, and resolved all 16 open review threads.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

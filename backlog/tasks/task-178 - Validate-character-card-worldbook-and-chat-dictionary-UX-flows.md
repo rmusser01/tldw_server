@@ -42,9 +42,9 @@ Audit and validate the current web UI behavior for worldbooks and chat dictionar
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Validated seeded character-card worldbook and chat dictionary workflows against live local backend/frontend with Puppeteer/Chrome and API probes. Evidence saved under Docs/Reviews/assets/2026-05-09-character-card-worldbooks-dictionaries/. Key reliability results: worldbook attachment persisted; worldbook processing and character prompt preview injected Echo Vault lore with diagnostics; dictionary explicit and active processing replaced EV with Echo Vault; dictionary settings persisted for global and workspace-scoped character chats; dictionary usage API listed both linked chats. Key gaps: prompt preview has lorebook diagnostics but no dictionary diagnostics; dictionary assignment is chat-session scoped and not visible from character card preview; quick assign UI omitted the workspace-scoped chat despite usage count showing two active chats; Workspace Playground has no visible worldbook/dictionary controls; invalid workspace chat creation initially returned a 500 FK failure before creating the workspace record.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

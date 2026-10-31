@@ -44,7 +44,7 @@ Migrate the shared Common StatusBadge adapter onto the design-system Badge primi
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red verification was performed before implementation: the new StatusBadge design-system test failed because Common/StatusBadge did not render the shared Badge primitive; the new guard test failed because StatusBadge adapters returning Badge were still reported as local-status-badge.
 
 Implemented Common/StatusBadge as a compatibility adapter over the shared Badge primitive with variant mapping through getDesignSystemState. The product-state guard now only allows status-badge adapters when the same owner directly returns Badge and uses the state registry.
@@ -54,7 +54,7 @@ Fresh focused verification passed: bunx vitest run src/components/Common/__tests
 Ran bunx tsc --noEmit --pretty false; it failed with existing unrelated package-wide TypeScript errors in audio, chat composer, flashcards, playground, services, routes, and store tests. No visible errors were from the touched StatusBadge, guard, or design-system test files.
 
 Bandit was not run because this slice only touches TypeScript/TSX/JavaScript/JSON and Backlog task metadata; no Python files were changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

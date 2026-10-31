@@ -1,0 +1,239 @@
+{
+  "report_version": 1,
+  "generated_at": "2026-09-26T01:30:39.134347+00:00",
+  "duration_seconds": 8.03,
+  "environment": {
+    "platform": "macOS-26.5.2-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "python_version": "3.11.13",
+    "cpu_count": 18
+  },
+  "benchmark": {
+    "backend": "postgresql",
+    "db_path": null,
+    "scope_user_id": 42,
+    "client_id": "42",
+    "tenant_id": "user:42",
+    "limit": 50,
+    "offset": 0,
+    "query_mix_source": "query_mix_file",
+    "query_mix_file": "/tmp/email_pg_nfr_mix_13369.json",
+    "workload_trace_file": null,
+    "workload_top_n": 20,
+    "workload_min_count": 1
+  },
+  "dataset_profile": {
+    "total_messages": 10000,
+    "total_attachments": 2487,
+    "distinct_labels": 23,
+    "min_internal_date": "2026-05-29T00:59:48+00:00",
+    "max_internal_date": "2026-06-04T23:43:50+00:00",
+    "top_sender": "sender0@bench.example",
+    "top_recipient": "recipient0@bench.example",
+    "top_label": "Inbox",
+    "sample_subject": "Invoice Notice #9999"
+  },
+  "query_mix": [
+    {
+      "name": "from_filter",
+      "query": "from:sender0@bench.example",
+      "notes": "Participant sender filter"
+    },
+    {
+      "name": "subject_filter",
+      "query": "subject:Invoice",
+      "notes": "Subject field filter"
+    },
+    {
+      "name": "label_filter",
+      "query": "label:Inbox",
+      "notes": "Label filter"
+    },
+    {
+      "name": "has_attachment",
+      "query": "has:attachment",
+      "notes": "Attachment existence filter"
+    },
+    {
+      "name": "after_date",
+      "query": "after:2026-06-01",
+      "notes": "Date lower bound"
+    },
+    {
+      "name": "before_date",
+      "query": "before:2026-06-01",
+      "notes": "Date upper bound"
+    }
+  ],
+  "cold_pass": {
+    "queries": [
+      {
+        "name": "from_filter",
+        "query": "from:sender0@bench.example",
+        "latency_ms": 13.448667014017701,
+        "total_matches": 50
+      },
+      {
+        "name": "subject_filter",
+        "query": "subject:Invoice",
+        "latency_ms": 29.574666055850685,
+        "total_matches": 1667
+      },
+      {
+        "name": "label_filter",
+        "query": "label:Inbox",
+        "latency_ms": 97.85124997142702,
+        "total_matches": 10000
+      },
+      {
+        "name": "has_attachment",
+        "query": "has:attachment",
+        "latency_ms": 41.125457966700196,
+        "total_matches": 2487
+      },
+      {
+        "name": "after_date",
+        "query": "after:2026-06-01",
+        "latency_ms": 36.450207931920886,
+        "total_matches": 5744
+      },
+      {
+        "name": "before_date",
+        "query": "before:2026-06-01",
+        "latency_ms": 35.41175008285791,
+        "total_matches": 4256
+      }
+    ],
+    "summary": {
+      "count": 6,
+      "min_ms": 13.448667014017701,
+      "max_ms": 97.85124997142702,
+      "avg_ms": 42.3103331704624,
+      "p50_ms": 35.41175008285791,
+      "p95_ms": 97.85124997142702
+    }
+  },
+  "warm_pass": {
+    "warmup_runs_per_query": 5,
+    "measured_runs_per_query": 15,
+    "queries": [
+      {
+        "name": "from_filter",
+        "query": "from:sender0@bench.example",
+        "notes": "Participant sender filter",
+        "total_matches": 50,
+        "latency": {
+          "count": 15,
+          "min_ms": 11.854124953970313,
+          "max_ms": 28.4938330296427,
+          "avg_ms": 14.39117225818336,
+          "p50_ms": 13.076875009573996,
+          "p95_ms": 16.574791981838644
+        },
+        "sqlite_query_plan": null
+      },
+      {
+        "name": "subject_filter",
+        "query": "subject:Invoice",
+        "notes": "Subject field filter",
+        "total_matches": 1667,
+        "latency": {
+          "count": 15,
+          "min_ms": 24.974999949336052,
+          "max_ms": 38.44445804134011,
+          "avg_ms": 30.175991596964497,
+          "p50_ms": 29.05291598290205,
+          "p95_ms": 37.54045790992677
+        },
+        "sqlite_query_plan": null
+      },
+      {
+        "name": "label_filter",
+        "query": "label:Inbox",
+        "notes": "Label filter",
+        "total_matches": 10000,
+        "latency": {
+          "count": 15,
+          "min_ms": 86.60937496460974,
+          "max_ms": 107.31591703370214,
+          "avg_ms": 94.22614998960246,
+          "p50_ms": 95.14574997592717,
+          "p95_ms": 98.25670800637454
+        },
+        "sqlite_query_plan": null
+      },
+      {
+        "name": "has_attachment",
+        "query": "has:attachment",
+        "notes": "Attachment existence filter",
+        "total_matches": 2487,
+        "latency": {
+          "count": 15,
+          "min_ms": 39.38633401412517,
+          "max_ms": 51.932708942331374,
+          "avg_ms": 44.752005666183926,
+          "p50_ms": 44.17487501632422,
+          "p95_ms": 48.9474170608446
+        },
+        "sqlite_query_plan": null
+      },
+      {
+        "name": "after_date",
+        "query": "after:2026-06-01",
+        "notes": "Date lower bound",
+        "total_matches": 5744,
+        "latency": {
+          "count": 15,
+          "min_ms": 20.27129102498293,
+          "max_ms": 54.217583034187555,
+          "avg_ms": 30.90958041138947,
+          "p50_ms": 26.716000051237643,
+          "p95_ms": 43.68516698013991
+        },
+        "sqlite_query_plan": null
+      },
+      {
+        "name": "before_date",
+        "query": "before:2026-06-01",
+        "notes": "Date upper bound",
+        "total_matches": 4256,
+        "latency": {
+          "count": 15,
+          "min_ms": 18.4159999480471,
+          "max_ms": 45.11991597246379,
+          "avg_ms": 28.238861115338903,
+          "p50_ms": 24.00733297690749,
+          "p95_ms": 40.717917028814554
+        },
+        "sqlite_query_plan": null
+      }
+    ],
+    "summary": {
+      "count": 90,
+      "min_ms": 11.854124953970313,
+      "max_ms": 107.31591703370214,
+      "avg_ms": 40.44896017294377,
+      "p50_ms": 29.901959002017975,
+      "p95_ms": 96.84820799157023
+    },
+    "query_plan_summary": {
+      "enabled": false,
+      "captured_queries": 0,
+      "queries_with_index_hits": 0,
+      "total_explained_statements": 0,
+      "total_index_hit_rows": 0
+    }
+  },
+  "targets": {
+    "nfr_p50_ms": 250.0,
+    "nfr_p95_ms": 900.0,
+    "warm_pass_met_p50": true,
+    "warm_pass_met_p95": true,
+    "required_mailbox_messages": 1000000,
+    "mailbox_size_met": false,
+    "operator_coverage_met": true,
+    "operator_latency_met": true,
+    "nfr_performance_gate_met": false
+  }
+}

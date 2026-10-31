@@ -39,9 +39,9 @@ Docs/superpowers/plans/2026-05-23-research-workspace-source-status-capabilities-
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented a read-computed status projector backed by workspace source membership, optional Media DB readiness, and optional recent media_ingest Jobs. Jobs own in-flight ingestion/extraction/chunking/indexing progress; Media DB owns text/index readiness; capability gates fail closed for MCP/ACP/sandbox until workspace bindings exist. Live route validation used uvicorn with lifespan disabled to isolate API behavior from unrelated startup services.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

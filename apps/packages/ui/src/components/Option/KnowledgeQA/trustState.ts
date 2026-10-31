@@ -1,3 +1,7 @@
+import {
+  getResultEvidenceText,
+  getUnavailableEvidenceMessage,
+} from "./sourceListUtils"
 import type {
   CitationRef,
   EvidenceOrigin,
@@ -161,9 +165,16 @@ export function normalizeKnowledgeAnswerTrust(
   if (input.syncFailed) return trustResult("unsynced_local_result")
 
   const backendTrust = normalizeBackendTrust(input.backendTrust)
-  if (backendTrust) return backendTrust
+  // Backend qualifications remain authoritative. A positive label also needs
+  // answer citations that this view can map to inspectable returned evidence.
+  if (backendTrust && backendTrust.state !== "cited_answer") return backendTrust
 
-  if (!input.hasRequiredMetadata) return trustResult("unknown_trust")
+  if (!backendTrust && !input.hasRequiredMetadata)
+    return trustResult("unknown_trust")
+  const evidenceOrigin =
+    backendTrust?.evidenceOrigin ??
+    inferEvidenceOriginFromResults(input.results)
+  const reasonCodes = backendTrust?.reasonCodes ?? []
   if (input.results.length === 0) {
     return trustResult("no_results", ["no_evidence"], "local_library")
   }
@@ -177,16 +188,36 @@ export function normalizeKnowledgeAnswerTrust(
   if (input.answer && input.citations.length === 0) {
     return trustResult(
       "uncited_degraded_answer",
-      ["missing_citations"],
-      inferEvidenceOriginFromResults(input.results)
+      Array.from(new Set([...reasonCodes, "missing_citations"])),
+      evidenceOrigin
     )
   }
   if (input.answer && input.citations.length > 0) {
-    return trustResult(
-      "cited_answer",
-      [],
-      inferEvidenceOriginFromResults(input.results)
+    const citedSources = input.citations.map((citation) =>
+      input.results.find((result) => result.id === citation.documentId)
     )
+    if (citedSources.some((source) => !source)) {
+      return trustResult(
+        "uncited_degraded_answer",
+        Array.from(new Set([...reasonCodes, "citation_source_not_returned"])),
+        evidenceOrigin
+      )
+    }
+    if (
+      citedSources.some(
+        (source) =>
+          source &&
+          (!getResultEvidenceText(source) ||
+            getUnavailableEvidenceMessage(source))
+      )
+    ) {
+      return trustResult(
+        "no_answer_insufficient_evidence",
+        Array.from(new Set([...reasonCodes, "missing_inspectable_evidence"])),
+        evidenceOrigin
+      )
+    }
+    return trustResult("cited_answer", reasonCodes, evidenceOrigin)
   }
   return trustResult("unknown_trust", ["unclassified"])
 }

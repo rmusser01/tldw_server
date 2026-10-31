@@ -218,4 +218,4 @@ async def test_reattach_allows_next_sync_to_apply_pending_upstream_note_change(
 
         note_after_reattach = notes_db.get_note_by_id(note_id=note_id)
         assert note_after_reattach is not None
-        assert note_after_reattach["content"] == "# Alpha\n\nupstream changed body"
+        assert note_after_reattach["content"] == "# Alpha\n\nupstream changed body\n"

@@ -32,7 +32,7 @@ Execute implementation plan Task 6: update or replace stale selectors/tests and 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Canonical completed record: `backlog/completed/task-394.6 - Refresh-current-Quick-Ingest-wizard-verification-coverage.md`. This `backlog/tasks/` file is a tracker mirror retained for PR visibility and should not be treated as a separate closeout record.
 
 Latest origin/dev already contains the Task 6 Quick Ingest coverage refresh. During closeout verification, the full WebUI Quick Ingest sweep exposed one stale helper assertion: `assertQuickIngestCompletedResults` accepted the older short summary shape but not the current full summary with skipped, not submitted, failed, and cancelled counts. Updated the helper regex to accept the current summary while preserving the older shorter shape.
@@ -40,7 +40,7 @@ Latest origin/dev already contains the Task 6 Quick Ingest coverage refresh. Dur
 Verification: `bun run test src/components/Common/QuickIngest/__tests__ src/services/__tests__/quick-ingest-batch.test.ts src/services/__tests__/quick-ingest-session-reattach.test.ts --maxWorkers=1 --no-file-parallelism` passed 208 tests after `bun install` under `apps/` repaired copied worktree package links. Verification: `npx playwright test e2e/workflows/media-ingest.spec.ts --grep "quick ingest restores skipped duplicate URL results after reopen" --project=chromium --reporter=line` passed 1 test in 48.5s. Verification: `npx playwright test e2e/workflows/media-ingest.spec.ts --grep "Quick Ingest" --project=chromium --reporter=line` passed 13 tests in 4.4m after rebasing onto latest origin/dev. Bandit is not applicable because this closeout branch only updates frontend Playwright helper code and Backlog metadata.
 
 Known verification gap retained from the completed record: focused extension Playwright is still blocked by the extension build/globalSetup harness before tests start, not by the Task 6 migrated specs.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -1,8 +1,13 @@
 import React from "react"
-import { act, render, renderHook, screen } from "@testing-library/react"
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useModelSelector } from "../useModelSelector"
+import { ConfigProvider } from "antd"
+import userEvent from "@testing-library/user-event"
+import { MemoryRouter } from "react-router-dom"
+import { ChatModelSelectorDropdown } from "@/components/Option/Playground/ChatModelSelectorDropdown"
+import { validateNativeCharacterConfiguration } from "@/hooks/chat/native-character-preflight"
 import { normalizeTldwModels } from "@/services/tldw/model-normalization"
 
 const chatModelSettingsState = vi.hoisted(() => ({
@@ -58,10 +63,6 @@ vi.mock("@plasmohq/storage/hook", () => ({
   }
 }))
 
-vi.mock("antd", () => ({
-  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>
-}))
-
 vi.mock("@/components/Common/ProviderIcon", () => ({
   ProviderIcons: ({ provider }: { provider?: string }) => (
     <span data-testid={`provider-icon-${provider || "unknown"}`} />
@@ -100,6 +101,55 @@ describe("useModelSelector capability rendering", () => {
     storageSeed.values.clear()
     chatModelSettingsState.apiProvider = null
     chatModelSettingsState.numCtx = null
+  })
+
+  it("keeps an unqualified model and its raw scope through catalog arrival and reordering", () => {
+    const setSelectedModel = vi.fn()
+    const openai = { model: "tldw:gpt-4o-mini", id: "gpt-4o-mini", provider: "openai", details: { capabilities: ["vision"] }, context_length: 128000 }
+    const custom = { ...openai, provider: "custom-openai-api", details: { capabilities: ["tools"] } }
+    const { result, rerender } = renderHook(({ models }) => useModelSelector({
+      composerModels: models, selectedModel: "tldw:gpt-4o-mini", setSelectedModel, navigate: vi.fn()
+    }), { initialProps: { models: [] as Array<typeof openai> } })
+    for (const models of [[], [openai, custom], [custom, openai], [openai]]) {
+      rerender({ models })
+      expect(result.current.selectedModelMeta).toBeNull()
+      expect(result.current.selectedModelKey).toBe("tldw:gpt-4o-mini")
+      expect(result.current.modelCapabilities).toEqual([])
+      expect(result.current.modelContextLength).toBeNull()
+      expect(result.current.modelSelectorWarning).toBe(true)
+      expect(result.current.apiModelLabel).toBe("gpt-4o-mini")
+      expect(result.current.modelDropdownMenuItems.some(item => item?.key === "current-model")).toBe(false)
+    }
+    expect(setSelectedModel).not.toHaveBeenCalled()
+    const customItem = result.current.modelDropdownMenuItems.flatMap(item => item?.type === "group" ? item.children : [item]).find(item => item?.key === "openai:gpt-4o-mini")
+    act(() => customItem?.onClick?.())
+    expect(setSelectedModel).toHaveBeenCalledWith("openai:gpt-4o-mini")
+    expect(validateNativeCharacterConfiguration({ temporary: false, clientToolCount: 0, settings: {}, model: "openai:gpt-4o-mini" })).toMatchObject({ provider: "openai", model: "gpt-4o-mini" })
+  })
+
+  it("uses a genuine provider preference with internal model prefixes and catalog aliases", () => {
+    chatModelSettingsState.apiProvider = "llama_cpp"
+    const selected = { model: "tldw:Gemma:Q4", provider: "llama", details: { capabilities: ["vision"] } }
+    const { result, rerender } = renderHook(({ models }) => useModelSelector({
+      composerModels: models, selectedModel: "tldw:Gemma:Q4", setSelectedModel: vi.fn(), navigate: vi.fn()
+    }), { initialProps: { models: [{ ...selected, provider: "openai" }, selected] } })
+    expect(result.current.selectedModelMeta).toBe(selected)
+    expect(result.current.selectedModelKey).toBe("llama:Gemma:Q4")
+    expect(result.current.modelSelectorWarning).toBe(false)
+    rerender({ models: [selected, { ...selected, provider: "openai" }] })
+    expect(result.current.selectedModelMeta).toBe(selected)
+  })
+
+  it.each([null, "openai"])("keeps an exact opaque catalog choice ahead of a stale %s provider", provider => {
+    chatModelSettingsState.apiProvider = provider
+    const model = { model: "Model:Q4", provider: "chrome" }
+    const { result, rerender } = renderHook(({ selectedModel }) => useModelSelector({
+      composerModels: [model], selectedModel, setSelectedModel: vi.fn(), navigate: vi.fn()
+    }), { initialProps: { selectedModel: "chrome:Model:Q4" } })
+    expect(result.current.selectedModelMeta).toBe(model)
+    expect(result.current.selectedModelKey).toBe("chrome:Model:Q4")
+    rerender({ selectedModel: "chrome:model:Q4" })
+    expect(result.current.selectedModelMeta).toBeNull()
   })
 
   it("includes vision/tools/streaming/context and price badges in dropdown items", () => {
@@ -171,6 +221,80 @@ describe("useModelSelector capability rendering", () => {
       "configured-model",
       "catalog-model"
     ])
+  })
+
+  it("CC-06: 'All models' adds the server's full catalog and marks models that are not set up", async () => {
+    const ready = { model: "tldw:ready-model", provider: "openai", is_configured: true }
+    const loadCatalogModels = vi.fn(async () => [
+      ready,
+      { model: "tldw:claude-catalog", provider: "anthropic", is_configured: false, catalog_only: true }
+    ])
+    const { result } = renderHook(() =>
+      useModelSelector({
+        composerModels: [ready],
+        selectedModel: "openai:ready-model",
+        setSelectedModel: vi.fn(),
+        navigate: vi.fn(),
+        loadCatalogModels
+      })
+    )
+    expect(loadCatalogModels).not.toHaveBeenCalled()
+    expect(result.current.filteredModels).toHaveLength(1)
+
+    act(() => {
+      result.current.setModelListScope("catalog")
+    })
+
+    await waitFor(() =>
+      expect(result.current.filteredModels.map((model: any) => model.model).sort()).toEqual([
+        "tldw:claude-catalog",
+        "tldw:ready-model"
+      ])
+    )
+    const items = result.current.modelDropdownMenuItems.flatMap((item: any) =>
+      item?.type === "group" ? item.children : [item]
+    )
+    const catalogItem = items.find((item: any) => item?.key === "anthropic:claude-catalog")
+    render(<>{catalogItem?.label}</>)
+    expect(screen.getByText("Not set up")).toBeInTheDocument()
+
+    act(() => {
+      result.current.setModelListScope("configured")
+    })
+    expect(result.current.filteredModels.map((model: any) => model.model)).toEqual([
+      "tldw:ready-model"
+    ])
+  })
+
+  it.each([null, "tldw"])("CC-06: never names the tldw transport as the provider (stored provider %s)", (provider) => {
+    chatModelSettingsState.apiProvider = provider
+    const { result } = renderHook(() =>
+      useModelSelector({
+        composerModels: [],
+        selectedModel: "tldw:gemma3:1b",
+        setSelectedModel: vi.fn(),
+        navigate: vi.fn()
+      })
+    )
+
+    expect(result.current.apiModelLabel).toBe("gemma3:1b")
+  })
+
+  it("CC-06: names the provider on promoted rows, where no provider group heading does", () => {
+    const { result } = renderHook(() =>
+      useModelSelector({
+        composerModels: [{ model: "gpt-4o-mini", provider: "openai", is_configured: true }],
+        selectedModel: "openai:gpt-4o-mini",
+        setSelectedModel: vi.fn(),
+        navigate: vi.fn()
+      })
+    )
+
+    const current = result.current.modelDropdownMenuItems.find(
+      (item: any) => item?.key === "current-model"
+    )
+    render(<>{current?.children?.[0]?.label}</>)
+    expect(screen.getByText("OPENAI")).toBeInTheDocument()
   })
 
   it("uses provider-qualified menu keys and selected metadata when model ids collide", () => {
@@ -271,7 +395,7 @@ describe("useModelSelector capability rendering", () => {
         navigate: vi.fn()
       }))
       expect(result.current.selectedModelMeta).toBe(configured)
-      expect(result.current.apiModelLabel).toBe("LLAMACPP / Gemma local")
+      expect(result.current.apiModelLabel).toBe("Gemma local (LLAMACPP)")
       expect(result.current.selectedModelKey).toBe(`llamacpp:${modelId}`)
       expect(setSelectedModel).not.toHaveBeenCalled()
     }
@@ -294,7 +418,7 @@ describe("useModelSelector capability rendering", () => {
       setSelectedModel: vi.fn(), navigate: vi.fn()
     }))
     expect(result.current.selectedModelMeta).toBe(model)
-    expect(result.current.apiModelLabel).toBe("LLAMA / Gemma local")
+    expect(result.current.apiModelLabel).toBe("Gemma local (LLAMA)")
     expect(result.current.modelCapabilities).toContain("vision")
     expect(result.current.modelContextLength).toBe(8192)
     expect(result.current.selectedModelKey).toBe("llama:Gemma-4:Q4_K_M")
@@ -318,7 +442,7 @@ describe("useModelSelector capability rendering", () => {
       setSelectedModel: vi.fn(),
       navigate: vi.fn()
     }))
-    expect(result.current.apiModelLabel).toBe("LLAMACPP / Gemma-4:Q4_K_M")
+    expect(result.current.apiModelLabel).toBe("Gemma-4:Q4_K_M (LLAMACPP)")
     expect(result.current.selectedModelKey).toBe("llamacpp:Gemma-4:Q4_K_M")
   })
 
@@ -333,7 +457,7 @@ describe("useModelSelector capability rendering", () => {
       navigate: vi.fn()
     }))
     expect(result.current.selectedModelMeta).toBeNull()
-    expect(result.current.apiModelLabel).toBe("LLAMACPP / Gemma-4")
+    expect(result.current.apiModelLabel).toBe("Gemma-4 (LLAMACPP)")
   })
 
   it("shows a loading affordance (not the connect-server error) while models load", () => {
@@ -446,5 +570,73 @@ describe("useModelSelector capability rendering", () => {
     expect(groups[1]?.key).toBe("recent-models")
     expect(groups[1]?.children?.[0]?.key).toBe("google:gemini-1.5-pro")
     expect(groups.some((group: any) => group.key === "group-anthropic")).toBe(true)
+  })
+})
+
+
+describe("actual model row keyboard actions", () => {
+  function Selector({ select, alternative = false }: { select: (key: string) => void; alternative?: boolean }) {
+    const models = useModelSelector({
+      composerModels: [{ model: "gpt-test", provider: "openai" }, ...(alternative ? [{ model: "other-test", provider: "openai" }] : [])],
+      selectedModel: "openai:gpt-test",
+      setSelectedModel: select,
+      navigate: () => undefined
+    })
+    return <ChatModelSelectorDropdown {...models} selectedModel="openai:gpt-test" connectionStatusLabel="Healthy" />
+  }
+  const open = async (select: (key: string) => void) => {
+    storageSeed.values.clear()
+    render(<MemoryRouter><ConfigProvider theme={{ token: { motion: false } }}><Selector select={select} /></ConfigProvider></MemoryRouter>)
+    const trigger = screen.getByRole("button", { name: "gpt-test (OPENAI)" })
+    fireEvent.click(trigger)
+    const favorite = await screen.findByRole("button", { name: "Add to favorites" })
+    await waitFor(() => expect(favorite).toBeVisible())
+    return { trigger, favorite }
+  }
+
+  it.each([['Enter', 13], [' ', 32]] as const)("favorites with %s without selecting or closing the model chooser", async (key, keyCode) => {
+    const select = vi.fn()
+    const { trigger, favorite } = await open(select)
+    favorite.focus()
+    fireEvent.keyDown(favorite, { key, keyCode, which: keyCode })
+    expect(select).not.toHaveBeenCalled()
+    // Native button activation dispatches a click after its keyboard event.
+    fireEvent.click(favorite)
+    expect(await screen.findByRole("button", { name: "Remove from favorites" })).toBeVisible()
+    expect(trigger).toHaveAttribute("aria-expanded", "true")
+    expect(select).not.toHaveBeenCalled()
+  })
+
+  it.each(["{Enter}", " "])("keeps Favorite focus when an unselected row changes groups with %s", async key => {
+    storageSeed.values.clear()
+    const select = vi.fn()
+    const user = userEvent.setup()
+    render(<MemoryRouter><ConfigProvider theme={{ token: { motion: false } }}><Selector select={select} alternative /></ConfigProvider></MemoryRouter>)
+    const trigger = screen.getByRole("button", { name: "gpt-test (OPENAI)" })
+    fireEvent.click(trigger)
+    await screen.findByRole("textbox", { name: "Search models" })
+    const otherRow = () => screen.getAllByTestId("model-selector-option").find(row => row.dataset.modelKey === "openai:other-test")!
+    const favorite = within(otherRow()).getByRole("button", { name: "Add to favorites" })
+    favorite.focus()
+    await user.keyboard(key)
+    const remove = within(otherRow()).getByRole("button", { name: "Remove from favorites" })
+    expect(favorite.isConnected).toBe(false)
+    expect(remove).toHaveFocus()
+    await user.keyboard(key)
+    expect(remove.isConnected).toBe(false)
+    expect(within(otherRow()).getByRole("button", { name: "Add to favorites" })).toHaveFocus()
+    expect(trigger).toHaveAttribute("aria-expanded", "true")
+    expect(select).not.toHaveBeenCalled()
+  })
+
+  it("selects a keyboard-focused row once and returns focus to the visible trigger", async () => {
+    const select = vi.fn()
+    const { trigger, favorite } = await open(select)
+    const row = favorite.closest('[role="menuitem"]') as HTMLElement
+    row.focus()
+    fireEvent.keyDown(row, { key: "Enter", keyCode: 13, which: 13 })
+    expect(select).toHaveBeenCalledExactlyOnceWith("openai:gpt-test")
+    await waitFor(() => expect(trigger).toHaveAttribute("aria-expanded", "false"))
+    expect(trigger).toHaveFocus()
   })
 })

@@ -59,16 +59,18 @@ from tldw_Server_API.app.core.DB_Management.content_backend import (
     get_content_backend,
     load_content_db_settings,
 )
+from tldw_Server_API.app.core.Utils.keyword_identity import dedupe_keywords
 from tldw_Server_API.app.core.Watchlists.briefing_delivery_state import (
     aggregate_delivery_stage,
     aggregate_delivery_status,
 )
 
-from .backends.base import BackendType, DatabaseBackend, DatabaseConfig, DatabaseError as _DatabaseError
-from .backends.base import ConstraintViolationError as _ConstraintViolationError
+from .backends.base import BackendType, DatabaseBackend, DatabaseConfig, DatabaseError as _DatabaseError, UniqueConstraintError
 from .backends.factory import DatabaseBackendFactory
 from .backends.query_utils import prepare_backend_statement
 from .db_path_utils import DatabasePaths
+from .tag_identity import WATCHLIST_TAGS, ensure_tag_identity, match_tag_ids, tags_containing
+from .tag_identity import ensure_tag_ids as ensure_owner_tag_ids
 
 _WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS = (
     OSError,
@@ -124,11 +126,6 @@ _OUTPUT_PRESET_TOP_LEVEL_KEYS = {
     "template_name",
     "delivery_config",
 }
-_OUTPUT_PRESET_NAME_CONSTRAINT_MARKERS = (
-    "ux_output_presets_user_name",
-    "watchlist_output_presets_user_id_lower_idx",
-    "watchlist_output_presets_user_id_name_key",
-)
 _NESTED_REGEX_QUANTIFIER_RE = re.compile(
     r"\((?:[^()\\]|\\.)*(?:\*|\+|\{\d+(?:,\d*)?\})(?:[^()\\]|\\.)*\)\s*(?:\*|\+|\{\d+(?:,\d*)?\})"
 )
@@ -506,7 +503,7 @@ class WatchlistsDatabase:
             self._ensure_schema_for_key(self._backend, db_key)
         else:
             # If we couldn't derive a key, fall back to ensuring schema once here
-            self.ensure_schema()
+            self._ensure_schema_and_tag_identity()
 
     @classmethod
     def for_user(cls, user_id: int | str) -> WatchlistsDatabase:
@@ -582,14 +579,18 @@ class WatchlistsDatabase:
         it here anyway would fall through to the full DDL on every call.
         """
         if self._backend.backend_type == BackendType.POSTGRESQL:
-            self.ensure_schema()
+            self._ensure_schema_and_tag_identity()
             return
         ensure_once(
             "watchlists",
             getattr(getattr(self._backend, "config", None), "sqlite_path", None),
-            self.ensure_schema,
+            self._ensure_schema_and_tag_identity,
             verify=self._watchlists_schema_present,
         )
+
+    def _ensure_schema_and_tag_identity(self) -> None:
+        self.ensure_schema()
+        ensure_tag_identity(self.backend, WATCHLIST_TAGS)
 
     def ensure_schema_once(self) -> None:
         """Ensure the schema, skipping the work when it is demonstrably present.
@@ -681,7 +682,9 @@ class WatchlistsDatabase:
         cfg = DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=db_path)
         return DatabaseBackendFactory.create_backend(cfg), f"sqlite:{db_path}", False
 
-    def _execute_insert(self, query: str, params: tuple[Any, ...]) -> Any:
+    def _execute_insert(
+        self, query: str, params: tuple[Any, ...], connection: Any | None = None
+    ) -> Any:
         if self.backend.backend_type == BackendType.POSTGRESQL:
             prepared_query, prepared_params = prepare_backend_statement(
                 BackendType.POSTGRESQL,
@@ -690,8 +693,8 @@ class WatchlistsDatabase:
                 apply_default_transform=True,
                 ensure_returning=True,
             )
-            return self.backend.execute(prepared_query, prepared_params)
-        return self.backend.execute(query, params)
+            return self.backend.execute(prepared_query, prepared_params, connection=connection)
+        return self.backend.execute(query, params, connection=connection)
 
     @staticmethod
     def _extract_lastrowid(result: Any) -> int | None:
@@ -1480,25 +1483,6 @@ class WatchlistsDatabase:
                     "ALTER TABLE scraped_items ADD COLUMN queued_for_briefing INTEGER NOT NULL DEFAULT 0",
                     (),
                 )
-    # ------------------------
-    # Tags helpers
-    # ------------------------
-    def _normalize_tag(self, name: str) -> str:
-        return name.strip().lower()
-
-    def _normalize_tag_names(self, names: Iterable[str] | None) -> list[str]:
-        out: list[str] = []
-        seen: set[str] = set()
-        for raw in names or []:
-            if not raw:
-                continue
-            nm = self._normalize_tag(str(raw))
-            if not nm or nm in seen:
-                continue
-            seen.add(nm)
-            out.append(nm)
-        return out
-
     def _restore_expires_at(self, undo_window_seconds: int) -> str:
         seconds = max(1, int(undo_window_seconds))
         return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
@@ -1549,17 +1533,7 @@ class WatchlistsDatabase:
         return value
 
     def _normalize_watchlist_tags(self, tags: Iterable[str] | None) -> list[str]:
-        out: list[str] = []
-        seen: set[str] = set()
-        for raw in tags or []:
-            value = str(raw).strip()
-            if not value:
-                continue
-            if value in seen:
-                continue
-            seen.add(value)
-            out.append(value)
-        return out
+        return dedupe_keywords(tags or [])
 
     def create_watchlist(
         self,
@@ -1896,118 +1870,20 @@ class WatchlistsDatabase:
         )
 
     def _ensure_tag_ids_with_connection(self, names: list[str], connection: Any) -> list[int]:
-        normalized = self._normalize_tag_names(names)
-        ids: list[int] = []
-        for nm in normalized:
-            row = self.backend.execute(
-                "SELECT id FROM tags WHERE user_id = ? AND name = ?",
-                (self.user_id, nm),
-                connection=connection,
-            ).first
-            if row and row.get("id") is not None:
-                ids.append(int(row.get("id")))
-                continue
-
-            insert_exc: Exception | None = None
-            try:
-                self.backend.execute(
-                    """
-                    INSERT INTO tags (user_id, name) VALUES (?, ?)
-                    ON CONFLICT(user_id, name) DO NOTHING
-                    """,
-                    (self.user_id, nm),
-                    connection=connection,
-                )
-            except _WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS as exc:
-                insert_exc = exc
-
-            row = self.backend.execute(
-                "SELECT id FROM tags WHERE user_id = ? AND name = ?",
-                (self.user_id, nm),
-                connection=connection,
-            ).first
-            if row and row.get("id") is not None:
-                ids.append(int(row.get("id")))
-                continue
-            if insert_exc:
-                raise insert_exc
-            raise RuntimeError("failed_to_ensure_tag_id")
-        return ids
+        return ensure_owner_tag_ids(self.backend, WATCHLIST_TAGS, self.user_id, names, connection=connection)
 
     def ensure_tag_ids(self, names: list[str]) -> list[int]:
-        normed = [self._normalize_tag(n) for n in names if n and n.strip()]
-        ids: list[int] = []
-        select_sql = "SELECT id FROM tags WHERE user_id = ? AND name = ?"
-        insert_sql = "INSERT INTO tags (user_id, name) VALUES (?, ?)"
-        for nm in normed:
-            params = (self.user_id, nm)
-            row = self.backend.execute(select_sql, params).first
-            if row:
-                ids.append(int(row.get("id")))
-                continue
-            insert_exc: Exception | None = None
-            tag_id: int | None = None
-            try:
-                res = self._execute_insert(insert_sql, params)
-                tag_id = self._extract_lastrowid(res)
-            except _WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS as exc:
-                insert_exc = exc
-            if tag_id is None:
-                row = self.backend.execute(select_sql, params).first
-                if row:
-                    tag_id = int(row.get("id"))
-            if tag_id is None:
-                if insert_exc:
-                    raise insert_exc
-                raise RuntimeError("failed_to_ensure_tag_id")
-            ids.append(tag_id)
-        return ids
-
-    def _lookup_tag_ids(self, names: Iterable[str]) -> dict[str, int]:
-        normed: list[str] = []
-        seen: set[str] = set()
-        for raw in names or []:
-            if not raw:
-                continue
-            nm = self._normalize_tag(str(raw))
-            if not nm or nm in seen:
-                continue
-            seen.add(nm)
-            normed.append(nm)
-        if not normed:
-            return {}
-
-        placeholders = ",".join("?" for _ in normed)
-        params = [self.user_id, *normed]
-        rows = self.backend.execute(
-            f"SELECT name, id FROM tags WHERE user_id = ? AND name IN ({placeholders})",  # nosec B608
-            tuple(params),
-        ).rows
-        out: dict[str, int] = {}
-        for row in rows:
-            name_val = row.get("name")
-            tag_id = row.get("id")
-            if name_val is None or tag_id is None:
-                continue
-            try:
-                out[str(name_val)] = int(tag_id)
-            except _WATCHLISTS_DB_NONCRITICAL_EXCEPTIONS:
-                continue
-        return out
+        """Return this owner's tag ids for ``names``, matched by identity; new tags keep their casing."""
+        return ensure_owner_tag_ids(self.backend, WATCHLIST_TAGS, self.user_id, names)
 
     def list_tags(self, q: str | None, limit: int, offset: int) -> tuple[list[TagRow], int]:
-        where = ["user_id = ?"]
-        params: list[Any] = [self.user_id]
-        if q:
-            where.append("name LIKE ?")
-            params.append(f"%{q}%")
-        where_sql = " AND ".join(where)
-        total = int(self.backend.execute(f"SELECT COUNT(*) AS cnt FROM tags WHERE {where_sql}", tuple(params)).scalar or 0)  # nosec B608
-        rows = self.backend.execute(
-            f"SELECT id, user_id, name FROM tags WHERE {where_sql} ORDER BY name LIMIT ? OFFSET ?",  # nosec B608
-            tuple(params + [limit, offset]),
-        ).rows
-        return [TagRow(**r) for r in rows], total
+        """List this owner's tags by identity; ``q`` matches an identity substring ("ss" finds "Straße").
+
+        ``%`` and ``_`` in ``q`` are literal characters (not LIKE wildcards), and tags are ordered
+        by identity code point, then id.
+        """
+        rows = tags_containing(self.backend, WATCHLIST_TAGS, self.user_id, q or "")
+        return [TagRow(**row) for row in rows[offset : offset + limit]], len(rows)
 
     # ------------------------
     # Sources
@@ -2185,24 +2061,15 @@ class WatchlistsDatabase:
             )
             params.append(int(watchlist_id))
         # Tag filter: require all tags
-        if tag_names:
-            normalized_tags = []
-            for tag in tag_names:
-                if not tag:
-                    continue
-                nm = self._normalize_tag(str(tag))
-                if nm and nm not in normalized_tags:
-                    normalized_tags.append(nm)
-            if normalized_tags:
-                tag_map = self._lookup_tag_ids(normalized_tags)
-                if len(tag_map) < len(normalized_tags):
-                    return [], 0
-                for nm in normalized_tags:
-                    tid = tag_map[nm]
-                    where.append(
-                        "EXISTS (SELECT 1 FROM source_tags st WHERE st.source_id = sources.id AND st.tag_id = ?)"
-                    )
-                    params.append(tid)
+        wanted_tags = dedupe_keywords(tag_names or [])
+        if wanted_tags:
+            tag_map = match_tag_ids(self.backend, WATCHLIST_TAGS, self.user_id, wanted_tags, all_matches=True)
+            if len(tag_map) < len(wanted_tags):
+                return [], 0
+            for ids in tag_map.values():
+                marks = ", ".join("?" for _ in ids)
+                where.append(f"EXISTS (SELECT 1 FROM source_tags st WHERE st.source_id = sources.id AND st.tag_id IN ({marks}))")  # nosec B608
+                params.extend(ids)
         where_sql = " AND ".join(where)
         total = int(self.backend.execute(f"SELECT COUNT(*) AS cnt FROM sources WHERE {where_sql}", tuple(params)).scalar or 0)  # nosec B608
         rows = self.backend.execute(
@@ -2520,7 +2387,8 @@ class WatchlistsDatabase:
 
         created_at = str(payload.get("created_at") or _utcnow_iso())
         updated_at = str(payload.get("updated_at") or created_at)
-        tags = self._normalize_tag_names(payload.get("tags") if isinstance(payload.get("tags"), list) else [])
+        raw_tags = payload.get("tags")
+        tags = dedupe_keywords(raw_tags if isinstance(raw_tags, list) else [])
         group_ids: list[int] = []
         for raw_gid in payload.get("group_ids") if isinstance(payload.get("group_ids"), list) else []:
             try:
@@ -4296,30 +4164,14 @@ class WatchlistsDatabase:
             return False
         return exclude_id is None or int(existing_id) != int(exclude_id)
 
-    @staticmethod
-    def _is_output_preset_name_constraint_error(exc: _DatabaseError) -> bool:
-        message = str(exc).lower()
-        if any(marker in message for marker in _OUTPUT_PRESET_NAME_CONSTRAINT_MARKERS):
-            return True
-        if "duplicate key value" in message and "watchlist_output_presets" in message:
-            return True
-        return "unique constraint failed" in message and "watchlist_output_presets" in message and "name" in message
-
     def _raise_output_preset_constraint_error(
-        self,
-        exc: _DatabaseError,
-        *,
-        name: str | None = None,
-        exclude_id: int | None = None,
+        self, exc: _DatabaseError, *, name: str | None, exclude_id: int | None = None
     ) -> None:
-        # Backends redact driver messages (constraint names included), so a
-        # lost name race is recognised by re-reading the conflicting row.
-        if self._is_output_preset_name_constraint_error(exc) or (
-            isinstance(exc, _ConstraintViolationError)
-            and name is not None
-            and self._output_preset_name_taken(name=name, exclude_id=exclude_id)
-        ):
-            raise ValueError("output_preset_name_exists") from exc
+        if isinstance(exc, UniqueConstraintError) and name is not None:
+            try:
+                self._check_output_preset_name_available(name=name, exclude_id=exclude_id)
+            except ValueError as conflict:
+                raise conflict from exc
         raise exc
 
     def create_output_preset(
@@ -4335,28 +4187,31 @@ class WatchlistsDatabase:
         clean_output_prefs = self._normalize_output_prefs_payload(output_prefs)
         self._check_output_preset_name_available(name=clean_name)
         now = _utcnow_iso()
-        if is_default:
-            self.backend.execute(
-                "UPDATE watchlist_output_presets SET is_default = 0, updated_at = ? WHERE user_id = ?",
-                (now, self.user_id),
-            )
         try:
-            res = self._execute_insert(
-                """
-                INSERT INTO watchlist_output_presets
-                    (user_id, name, description, output_prefs_json, is_default, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    self.user_id,
-                    clean_name,
-                    clean_description,
-                    json.dumps(clean_output_prefs, sort_keys=True),
-                    1 if is_default else 0,
-                    now,
-                    now,
-                ),
-            )
+            with self.transaction() as conn:
+                if is_default:
+                    self.backend.execute(
+                        "UPDATE watchlist_output_presets SET is_default = ?, updated_at = ? WHERE user_id = ?",
+                        (0, now, self.user_id),
+                        connection=conn,
+                    )
+                res = self._execute_insert(
+                    """
+                    INSERT INTO watchlist_output_presets
+                        (user_id, name, description, output_prefs_json, is_default, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        self.user_id,
+                        clean_name,
+                        clean_description,
+                        json.dumps(clean_output_prefs, sort_keys=True),
+                        1 if is_default else 0,
+                        now,
+                        now,
+                    ),
+                    connection=conn,
+                )
         except _DatabaseError as exc:
             self._raise_output_preset_constraint_error(exc, name=clean_name)
         preset_id = self._extract_lastrowid(res)
@@ -4400,6 +4255,8 @@ class WatchlistsDatabase:
             return current
         sets: list[str] = []
         params: list[Any] = []
+        clean_name: str | None = None
+        make_default = False
         if "name" in fields and fields["name"] is not None:
             clean_name = self._normalize_output_preset_name(str(fields["name"]))
             self._check_output_preset_name_available(name=clean_name, exclude_id=int(preset_id))
@@ -4413,39 +4270,37 @@ class WatchlistsDatabase:
             sets.append("output_prefs_json = ?")
             params.append(json.dumps(clean_output_prefs, sort_keys=True))
         if "is_default" in fields and fields["is_default"] is not None:
-            is_default = bool(fields["is_default"])
-            if is_default:
-                now = _utcnow_iso()
-                self.backend.execute(
-                    """
-                    UPDATE watchlist_output_presets
-                    SET is_default = 0, updated_at = ?
-                    WHERE user_id = ? AND id != ?
-                    """,
-                    (now, self.user_id, int(preset_id)),
-                )
+            make_default = bool(fields["is_default"])
             sets.append("is_default = ?")
-            params.append(1 if is_default else 0)
+            params.append(1 if make_default else 0)
         if not sets:
             return current
         sets.append("updated_at = ?")
         params.append(_utcnow_iso())
         params.extend([int(preset_id), self.user_id])
         try:
-            self.backend.execute(
-                f"""
-                UPDATE watchlist_output_presets
-                SET {', '.join(sets)}
-                WHERE id = ? AND user_id = ?
-                """,  # nosec B608
-                tuple(params),
-            )
+            with self.transaction() as conn:
+                if make_default:
+                    self.backend.execute(
+                        """
+                        UPDATE watchlist_output_presets
+                        SET is_default = ?, updated_at = ?
+                        WHERE user_id = ? AND id != ?
+                        """,
+                        (0, _utcnow_iso(), self.user_id, int(preset_id)),
+                        connection=conn,
+                    )
+                self.backend.execute(
+                    f"""
+                    UPDATE watchlist_output_presets
+                    SET {', '.join(sets)}
+                    WHERE id = ? AND user_id = ?
+                    """,  # nosec B608
+                    tuple(params),
+                    connection=conn,
+                )
         except _DatabaseError as exc:
-            self._raise_output_preset_constraint_error(
-                exc,
-                name=fields.get("name") and self._normalize_output_preset_name(str(fields["name"])),
-                exclude_id=int(preset_id),
-            )
+            self._raise_output_preset_constraint_error(exc, name=clean_name, exclude_id=int(preset_id))
         return self.get_output_preset(preset_id=int(preset_id))
 
     def delete_output_preset(self, *, preset_id: int) -> bool:

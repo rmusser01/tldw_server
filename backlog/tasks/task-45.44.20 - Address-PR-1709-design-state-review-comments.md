@@ -31,7 +31,7 @@ Resolve actionable review comments on PR 1709 without broadening the design-syst
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Resolved PR 1709 review threads by exporting defensive READY/EMPTY/DEGRADED/ERROR state-label constants from the design-system registry and reusing them across the Playground status surfaces. ExtensionStartPanel now translates Ready and Empty status labels with design-system fallbacks.
 
 Verification passing: bunx vitest run src/design-system/__tests__/states.test.ts src/components/Option/PresentationStudio/__tests__/ExtensionStartPanel.design-system.test.tsx src/components/Option/Playground/__tests__/playground-cockpit-summaries.test.ts src/components/Option/Playground/__tests__/PlaygroundContextRail.first-slice.test.tsx src/design-system/__tests__/product-state-guard.test.ts --reporter=dot; bunx vitest run src/design-system/__tests__/product-state-guard.chat-playground-migration.test.ts --reporter=dot; bun run verify:design-system-state; git diff --check.
@@ -39,7 +39,7 @@ Verification passing: bunx vitest run src/design-system/__tests__/states.test.ts
 TypeScript note: bunx tsc --noEmit --pretty false still exits 2 on existing package-wide type debt, including current Playground errors outside the touched lines.
 
 Bandit not run: touched runtime scope is UI TypeScript plus JSON baseline and Backlog metadata, with no Python execution path.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

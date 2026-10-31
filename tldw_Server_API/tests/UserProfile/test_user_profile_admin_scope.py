@@ -4,6 +4,7 @@ import sqlite3
 import uuid
 
 import pytest
+from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints.admin import _load_bulk_user_candidates
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
@@ -16,6 +17,38 @@ from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+from tldw_Server_API.app.services import admin_profiles_service
+
+
+@pytest.mark.unit
+async def test_profile_admin_scope_enterprise_mode_denies_single_user_principal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Enterprise mode's denial of single-user platform-admin rights must apply here too
+    (same bug class as Qodo Q2; round 2 finding).
+
+    subject="single_user" makes the real is_single_user_principal() return True for
+    every caller, so this exercises the real enterprise-mode gate, not a per-module mock.
+    user_id=None means the only way past is_platform_admin() is the old single-user
+    short-circuit; with it removed, the function falls through to its own "no user_id"
+    403 instead of granting full scope.
+    """
+    monkeypatch.setenv("ADMIN_UI_ENTERPRISE_MODE", "1")
+    principal = AuthPrincipal(kind="user", user_id=None, is_admin=False, subject="single_user")
+    with pytest.raises(HTTPException) as exc:
+        await admin_profiles_service._get_profile_admin_scope(principal)
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.unit
+async def test_profile_admin_scope_allows_single_user_principal_outside_enterprise_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Outside enterprise mode, the single-user principal keeps full profile-admin scope."""
+    monkeypatch.delenv("ADMIN_UI_ENTERPRISE_MODE", raising=False)
+    principal = AuthPrincipal(kind="user", user_id=None, is_admin=False, subject="single_user")
+    scope = await admin_profiles_service._get_profile_admin_scope(principal)
+    assert scope.is_platform_admin is True
 
 
 @pytest.mark.asyncio

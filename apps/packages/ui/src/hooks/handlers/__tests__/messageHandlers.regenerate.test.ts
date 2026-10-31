@@ -1,5 +1,12 @@
+import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import { describe, expect, it, vi } from "vitest"
-import type { ChatHistory, Message } from "@/store/option"
+import { useStoreMessageOption, type ChatHistory, type Message } from "@/store/option"
+import type { ActorSceneSend } from "@/hooks/chat/actor-scene-source"
+import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
+import { freshChatDraftAddress } from "@/utils/chat-draft-address"
+import { createDefaultActorSettings } from "@/types/actor"
+import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
+import type { HistorySelectionCaptureV1, HistoryViewSelectionV1 } from "@/types/history-selection"
 import { createRegenerateLastMessage } from "../messageHandlers"
 
 const buildMessages = (): Message[] => [
@@ -28,7 +35,164 @@ const buildHistory = (): ChatHistory => [
   }
 ]
 
+// The helper forwards an issued private Scene as an opaque command proof.
+// It creates no selected-history owner/view from transcript or server IDs.
+const originalSceneProof = (isCurrent = () => true): ActorSceneSend => {
+  const requestScope = { config: {
+    serverUrl: "https://chat.test", authMode: "single-user" as const,
+    expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope("single-user", "synthetic-a")!
+  }, userId: null }
+  const target = captureActorSettingsTarget({ address: freshChatDraftAddress(false),
+    requestScope, accountIsCurrent: isCurrent, isCurrent })!
+  const settings = createDefaultActorSettings()
+  const proof: ActorSceneSend = { scene: { target, settings,
+    originalRecord: { value: settings, updatedAt: 1700000000000 },
+    origin: "scene", profileUnavailable: false }, requestScope, isCurrent,
+    commandIsCurrent: isCurrent }
+  return Object.freeze(proof)
+}
+
 describe("createRegenerateLastMessage", () => {
+  it("forwards the exact original SDK Scene through held regenerate preparation", async () => {
+    const original = originalSceneProof()
+    let release!: () => void
+    const pending = new Promise<void>(resolve => { release = resolve })
+    const onSubmit = vi.fn().mockResolvedValue({ status: "submitted" })
+    const regenerate = createRegenerateLastMessage({
+      allowOrdinaryRetry: true, validateBeforeSubmitFn: () => true,
+      history: buildHistory(), messages: buildMessages(),
+      setHistory: vi.fn(), setMessages: vi.fn(), onSubmit,
+      beforeSubmit: async () => { await pending }
+    })
+    const result = regenerate({ actorSceneSend: original })
+    expect(onSubmit).not.toHaveBeenCalled()
+    release()
+    await result
+    expect(onSubmit.mock.calls[0][0].actorSceneSend).toBe(original)
+    expect(onSubmit.mock.calls[0][0].actorSceneSend.scene.originalRecord).toBe(original.scene.originalRecord)
+  })
+
+  it.each(["entry", "preparation"] as const)(
+    "refuses a retired supplied SDK Scene during %s before truncation or submission",
+    async boundary => {
+      let current = true
+      const original = originalSceneProof(() => current)
+      let release!: () => void
+      const pending = new Promise<void>(resolve => { release = resolve })
+      const onSubmit = vi.fn()
+      const setHistory = vi.fn(), setMessages = vi.fn()
+      const regenerate = createRegenerateLastMessage({
+        allowOrdinaryRetry: true, validateBeforeSubmitFn: () => true,
+        history: buildHistory(), messages: buildMessages(), setHistory, setMessages, onSubmit,
+        beforeSubmit: async () => { await pending }
+      })
+      if (boundary === "entry") current = false
+      const result = regenerate({ actorSceneSend: original })
+      current = false
+      release()
+      expect(await result).toMatchObject({ status: "skipped" })
+      expect(onSubmit).not.toHaveBeenCalled()
+      expect(setHistory).not.toHaveBeenCalled()
+      expect(setMessages).not.toHaveBeenCalled()
+    }
+  )
+  it("rechecks the original SDK Scene after a synchronous Retry setter subscriber replaces work", async () => {
+    const before = useStoreMessageOption.getState()
+    let current = true
+    const original = originalSceneProof(() => current)
+    const history = buildHistory(), messages = buildMessages()
+    const replacement = [{ ...messages[0], message: "Keep replacement work" }]
+    useStoreMessageOption.setState({ history, messages, streaming: false, isProcessing: false })
+    const state = useStoreMessageOption.getState()
+    const onSubmit = vi.fn(), setMessages = vi.fn(state.setMessages)
+    const regenerate = createRegenerateLastMessage({
+      allowOrdinaryRetry: true, validateBeforeSubmitFn: () => true,
+      history, messages, setHistory: state.setHistory, setMessages, onSubmit
+    })
+    const unsubscribe = useStoreMessageOption.subscribe(next => {
+      if (next.history === history) return
+      unsubscribe()
+      current = false
+      next.startNewChatDraft(false)
+      useStoreMessageOption.setState({ messages: replacement })
+    })
+    try {
+      expect(await regenerate({ actorSceneSend: original })).toMatchObject({ status: "skipped" })
+      expect(useStoreMessageOption.getState().messages).toBe(replacement)
+      expect(setMessages).not.toHaveBeenCalled()
+      expect(onSubmit).not.toHaveBeenCalled()
+    } finally {
+      unsubscribe()
+      useStoreMessageOption.setState(before, true)
+    }
+  })
+
+  it("retirement during regenerate preparation prevents truncation and submission", async () => {
+    let release!: () => void
+    const pending = new Promise<void>((resolve) => { release = resolve })
+    const onSubmit = vi.fn()
+    const setHistory = vi.fn()
+    const setMessages = vi.fn()
+    const regenerate = createRegenerateLastMessage({
+      allowOrdinaryRetry: true, validateBeforeSubmitFn: () => true,
+      history: buildHistory(), messages: buildMessages(), setHistory, setMessages, onSubmit,
+      beforeSubmit: async () => { await pending }
+    })
+    const controller = new AbortController()
+    const result = regenerate({ controller }).catch((error: Error) => error)
+    controller.abort()
+    release()
+    await result
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(setHistory).not.toHaveBeenCalled()
+    expect(setMessages).not.toHaveBeenCalled()
+  })
+
+  it("Regenerate uses reviewed legacy adjacency and keeps original display rows during submission", async () => {
+    const messages = [
+      { id: "question", isBot: false, name: "You", message: "Why?", sources: [] },
+      { id: "answer", isBot: true, name: "Assistant", message: "Because", sources: [] }
+    ] as Message[]
+    const history = [
+      { role: "user", content: "Why?" },
+      { role: "assistant", content: "Because" }
+    ] as ChatHistory
+    const setMessages = vi.fn()
+    const setHistory = vi.fn()
+    const onSubmit = vi.fn(async () => ({ status: "submitted" as const }))
+    const owner = { kind: "local", conversation_id: "chat", owner_key: "owner" }
+    const view = {
+      view_session_id: "view", owner_key: "owner", conversation_id: "chat",
+      interpretation: { kind: "legacy_linear_v1", projection_id: "reviewed" },
+      cursor: { kind: "after_message", message_id: "answer" }, selection_revision: 1
+    }
+    const regenerate = createRegenerateLastMessage({
+      validateBeforeSubmitFn: () => true, history, messages, setHistory, setMessages, onSubmit,
+      historySelection: {
+        getCurrent: () => ({ status: "ready", owner, view, capture: {
+          status: "captured", rows: [
+            { id: "question", revision: "q-revision", role: "user", parent_id: null },
+            { id: "answer", revision: "a-revision", role: "assistant", parent_id: null }
+          ],
+          selected_content: [
+            { id: "question", revision: "q-revision", message: "Why?", images: [] },
+            { id: "answer", revision: "a-revision", message: "Because", images: [] }
+          ]
+        } }),
+        fence: () => () => true
+      } as unknown as NonNullable<Parameters<typeof createRegenerateLastMessage>[0]["historySelection"]>
+    })
+    await regenerate()
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      message: "Why?", historyRegenerateBoundary: expect.objectContaining({
+        answerId: "answer", questionId: "question", questionRevision: "q-revision"
+      })
+    }))
+    expect(setMessages).not.toHaveBeenCalled()
+    expect(setHistory).not.toHaveBeenCalled()
+    expect(messages.map((row) => row.id)).toEqual(["question", "answer"])
+  })
+
   it("rejects before truncation when selection exists but has no captured path", async () => {
     const setHistory = vi.fn()
     const setMessages = vi.fn()
@@ -50,48 +214,76 @@ describe("createRegenerateLastMessage", () => {
     expect(onSubmit).not.toHaveBeenCalled()
   })
 
-  it("captures the selected assistant boundary and never invokes the old copy/resubmit callback", async () => {
+  it("submits the captured existing question boundary without the old copy/resubmit callback", async () => {
     const setHistory = vi.fn()
     const setMessages = vi.fn()
-    const onSubmit = vi.fn()
+    const onSubmit = vi.fn().mockResolvedValue({ status: "submitted" })
     const beforeSubmit = vi.fn()
+    const owner = {
+      kind: "local" as const, profile_id: "profile", owner_key: "owner", conversation_id: "chat"
+    }
+    const view: HistoryViewSelectionV1 = {
+      view_session_id: "view", owner_key: owner.owner_key, conversation_id: owner.conversation_id,
+      interpretation: { kind: "parent_graph_v1" },
+      cursor: { kind: "after_message", message_id: "selected-assistant" }, selection_revision: 1
+    }
+    const rows: HistorySelectionCaptureV1["rows"] = [
+      { id: "user", revision: "question-revision", parent_id: null, role: "user", settled: true },
+      { id: "selected-assistant", revision: "answer-revision", parent_id: "user", role: "assistant", settled: true }
+    ]
+    const capture: HistorySelectionCaptureV1 = {
+      status: "captured", view, purpose: "send", rows, storage_context_digest: "storage",
+      snapshot: {
+        version: 1, owner_key: owner.owner_key, conversation_id: owner.conversation_id,
+        fences: { conversation: "1", history: "1", settings: "1" }, nodes: rows,
+        source_digest: "source", storage_context_digest: "storage",
+        interpretation_status: { kind: "parent_graph_v1" }
+      },
+      selected_content: [
+        { id: "user", revision: "question-revision", message: "Hello", images: [] },
+        { id: "selected-assistant", revision: "answer-revision", message: "Hi", images: [] }
+      ]
+    }
+    const originalStore = useStoreMessageOption.getState()
+    const originIsCurrent = vi.fn(() => true)
     const regenerate = createRegenerateLastMessage({
       validateBeforeSubmitFn: () => true,
-      history: [
-        { role: "user", content: "Hello" },
-        { role: "assistant", content: "Hi" }
-      ],
+      history: [{ role: "user", content: "Hello" }, { role: "assistant", content: "Hi" }],
       messages: [
-        {
-          id: "user",
-          isBot: false,
-          name: "You",
-          message: "Hello",
-          sources: []
-        },
-        {
-          id: "selected-assistant",
-          parentMessageId: "user",
-          isBot: true,
-          name: "Assistant",
-          message: "Hi",
-          sources: []
-        }
+        { id: "user", isBot: false, name: "You", message: "Hello", sources: [] },
+        { id: "selected-assistant", parentMessageId: "user", isBot: true, name: "Assistant", message: "Hi", sources: [] }
       ],
-      setHistory,
-      setMessages,
-      onSubmit,
-      beforeSubmit,
-      historySelection: { getCurrent: () => ({ status: "ready", capture: { status: "captured" } }) } as any
+      setHistory, setMessages, onSubmit, beforeSubmit,
+      captureSourceFence: () => captureChatDraftSource().isCurrent,
+      historySelection: {
+        getCurrent: () => ({ status: "ready", owner, view, capture }),
+        fence: () => originIsCurrent
+      } as unknown as NonNullable<Parameters<typeof createRegenerateLastMessage>[0]["historySelection"]>
     })
-    await expect(regenerate()).rejects.toMatchObject({
-      message: "unsupported_history_regeneration",
-      boundary: { kind: "before_message", message_id: "selected-assistant" }
-    })
-    expect(beforeSubmit).not.toHaveBeenCalled()
-    expect(onSubmit).not.toHaveBeenCalled()
-    expect(setHistory).not.toHaveBeenCalled()
-    expect(setMessages).not.toHaveBeenCalled()
+    try {
+      await expect(regenerate()).resolves.toEqual({ status: "submitted" })
+      expect(onSubmit).toHaveBeenCalledOnce()
+      expect(onSubmit).toHaveBeenCalledWith({
+        message: "Hello", image: "",
+        historyRegenerateBoundary: {
+          answerId: "selected-assistant", questionId: "user", questionRevision: "question-revision",
+          owner, originView: view, originIsCurrent: expect.any(Function)
+        }
+      })
+      expect(beforeSubmit).not.toHaveBeenCalled()
+      expect(setHistory).not.toHaveBeenCalled()
+      expect(setMessages).not.toHaveBeenCalled()
+      const submittedOriginIsCurrent = onSubmit.mock.calls[0][0].historyRegenerateBoundary.originIsCurrent
+      expect(submittedOriginIsCurrent()).toBe(true)
+      originIsCurrent.mockReturnValue(false)
+      expect(submittedOriginIsCurrent()).toBe(false)
+      originIsCurrent.mockReturnValue(true)
+      expect(submittedOriginIsCurrent()).toBe(true)
+      useStoreMessageOption.getState().startNewChatDraft(false)
+      expect(submittedOriginIsCurrent()).toBe(false)
+    } finally {
+      useStoreMessageOption.setState(originalStore, true)
+    }
   })
 
   it("removes the latest assistant turn and resubmits the previous user turn", async () => {
@@ -110,8 +302,11 @@ describe("createRegenerateLastMessage", () => {
       onSubmit
     })
 
-    await regenerate()
+    const controller = new AbortController()
+    const assertCurrent = vi.fn()
+    await regenerate({ controller, assertCurrent })
 
+    expect(assertCurrent).toHaveBeenCalledTimes(2)
     expect(setHistory).toHaveBeenCalledWith([])
     expect(setMessages).toHaveBeenCalledWith([messages[0]])
     expect(onSubmit).toHaveBeenCalledTimes(1)
@@ -120,6 +315,8 @@ describe("createRegenerateLastMessage", () => {
         message: "Hello",
         image: "",
         isRegenerate: true,
+        controller,
+        assertCurrent,
         memory: [],
         messages: [messages[0]],
         messageType: undefined,

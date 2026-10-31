@@ -37,7 +37,7 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented recovery adapter recognition in the product-state guard by collecting returned JSX-tree owners for canonical RecoveryCallout and StatePanel imports. Added focused tests that prove canonical adapters are allowed while bespoke recovery banners remain findings. Removed the now-stale Sidepanel ConnectionBanner local-recovery-banner baseline entry.
 
 Verification: RED run of bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot failed the two new canonical adapter tests with local-recovery-banner findings. GREEN/final run passed 51/51 tests. bun run verify:design-system-state passed with Baseline exceptions: 510 and local-recovery-banner: 3. node --check apps/packages/ui/scripts/design-system-product-state-rules.mjs passed. git diff --check passed. bunx tsc --noEmit --pretty false exited 2 with 236 lines of pre-existing unrelated UI type errors; touched-file filter for design-system-product-state-rules, product-state-guard, design-system-product-state-baseline, task-45.32, RecoveryCallout, StatePanel, and ConnectionBanner returned no diagnostics. Bandit skipped because touched implementation/test/config files are UI JS/TS/JSON/Markdown only, with no Python execution surface. No standalone docs update was needed; the executable guard tests and baseline update document the rule behavior.
@@ -53,7 +53,7 @@ PR #1451 second review follow-up: CodeRabbit identified the recovery exemption i
 Second PR #1451 review fix implemented: added a mixed bespoke recovery markup regression test that fails under the old tree-wide recovery exemption, then replaced the recovery owner collection with a boundary helper. Recovery adapters are now exempt only when the returned JSX is the canonical primitive itself or a single returned wrapper whose only substantive child is RecoveryCallout/StatePanel. Mixed bespoke markup plus nested canonical recovery UI remains flagged as local-recovery-banner.
 
 Second review-fix verification: RED run of bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot failed the mixed recovery test because findings were empty. GREEN/final run passed 52/52. bun run verify:design-system-state passed with Baseline exceptions: 510 and local-recovery-banner: 3. node --check apps/packages/ui/scripts/design-system-product-state-rules.mjs passed. git diff --check passed. bunx tsc --noEmit --pretty false still exits 2 on 236 lines of unrelated existing UI type errors, with no touched-file filter hits.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

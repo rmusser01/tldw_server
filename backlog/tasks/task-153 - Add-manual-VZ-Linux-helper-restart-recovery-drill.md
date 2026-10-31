@@ -53,7 +53,7 @@ Review-fix pass for PR #1406: verify each open Qodo/Gemini item against current 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created design spec: Docs/superpowers/specs/2026-05-09-vz-linux-helper-restart-recovery-drill-design.md. Key design decision: keep the lower-level smoke script as helper lifecycle owner and add an explicit restart lease/pid-file for manual failure drills instead of refactoring all smoke startup through vz-helperctl in this PR.
 
 Design self-review completed. Reviewed the spec for lifecycle ownership, private pid-file cleanup, direct pytest safety, default scheduled CI behavior, and scope creep. The design intentionally avoids host reboot automation, launchd bootstrap/install, networking changes, and broad repair generalization. Bandit is not applicable for this design-only checkpoint.
@@ -69,7 +69,7 @@ Verification after rebase on origin/dev: focused pytest suite passed with 108 pa
 PR review fix pass completed for Qodo/Gemini comments. Added regression coverage proving dry-run and early validation failures do not kill a pre-existing helper.pid process, socket timeouts keep waiting for helper shutdown, and ProcessLookupError during SIGTERM becomes a clear skip. Hardened smoke cleanup so it only trusts pid files recorded by this invocation, created shell pid files under umask 077, wrote replacement helper pid files with os.open/fchmod 0600, removed the redundant symlink check after lstat, wrapped long skip strings, added missing test type hints, and documented the restart helpers.
 
 Review-fix verification: the new red tests failed before the fix and passed after; touched host-independent suite passed with 112 passed, 2 skipped, 5 deselected; bash -n, py_compile, git diff --check passed; host-gated failure-drill selection skipped 2 tests without TLDW_SANDBOX_VZ_LINUX_E2E; Bandit first pass only reported existing test-harness B404/B603/B108 baseline findings, and the test-file baseline-skipped report /tmp/bandit_vz_helper_restart_recovery_review_skips.json had zero findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

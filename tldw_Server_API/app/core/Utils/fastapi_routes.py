@@ -14,7 +14,7 @@ example in an ASGI middleware ahead of the router) neither is populated yet.
 ``iter_served_routes`` flattens included routers through FastAPI's
 ``iter_route_contexts`` and ``served_route_for_scope`` resolves the route serving a
 request; both report the full served path and the effective tags and dependencies,
-including those added by ``include_router``. Those values live on FastAPI 0.141 private
+including those added by ``include_router``. Those values live on FastAPI 0.141-0.142 private
 state (``RouteContext._effective_route`` and ``scope["fastapi"]["effective_route_context"]``,
 whose ``starlette_route`` is the merged copy for websocket, plain Starlette and Mount
 routes). The pin in pyproject.toml is one minor version wide, and

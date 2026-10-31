@@ -47,7 +47,7 @@ Remediate TASK-13161 by requiring deterministic home-authority replay and client
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added a canonical HMAC attestation over every stable stage-derived authority envelope field, the authenticated payload digest, source identity, and any originating cross-store ingress receipt. One complete verifier is reused for deterministic staging and finalization; final verification and pending/applied CAS now share one guarded Sync transaction. Randomized AEAD bytes remain verified by restore rather than regenerated for equality.
 - Reads the Sync receipt by exact cursor first, then reads the Personalization receipt through its `(dataset_id, device_id, client_envelope_id)` primary key and verifies the exact batch, source, and manifest facts. Semantic, companion-manifest, and purge-barrier authorities all retain the correct originating receipt identity; purge wire versions compare in canonical string form.
 - Added real temporary Personalization and Sync SQLite coverage for persisted authority-envelope mutations, first-stage and post-stage receipt mutations, staged relay-resume tampering, semantic and manifest companions, exact purge confirmation, duplicate same-batch receipts, deterministic retry, and the existing new/updated/repeated publication paths. Tamper failures remain retryable and neither apply nor acknowledge source rows or create durable poison.
@@ -60,7 +60,7 @@ Remediate TASK-13161 by requiring deterministic home-authority replay and client
 - Added a real two-store deleted-origin regression proving an ingress-derived `batch_size=2` manifest remains pending with no Sync manifest insert/apply/source acknowledgement or durable poison, plus a real direct single-row manifest preservation case proving receipt-free completion with both ingress-receipt stores empty.
 - Round-4 TDD evidence: valid RED was `1 failed, 8 warnings`, with actual state complete/1 staged/applied/acknowledged/no attention; focused GREEN was `1 passed, 7 warnings`. Final targeted identity, relay, and materializer run passed `73 tests, 7 warnings in 6.59s`. Ruff passed with `--no-cache`; Bandit exited 0 with existing parser warnings; `git diff --check` passed.
 - Round 4 modified `service.py` and `test_sync_v2_personal_context_authority_identity.py` plus task/report hygiene. No schema, migration, dependency, later remediation, or ADR change was needed; ADR-002 remains governing. No full suite was run per instruction.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

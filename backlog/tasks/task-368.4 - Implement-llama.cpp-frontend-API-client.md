@@ -58,7 +58,7 @@ Implement the frontend API client and type slice from the implementation plan. A
 <!-- DOD:END -->
 
 ## Implementation Notes
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 This is mostly a stale tracker closeout after PR #2120 merged, with one metadata fix made in this branch. The llama.cpp frontend API client, shared TypeScript types, and admin page test coverage are already present on current `origin/dev`; this branch refreshes `TRANSITIONAL_DOMAIN_OVERLAPS` so the ownership guard reflects the actual client/domain overlap inventory.
 
 Implementation provenance:
@@ -80,7 +80,7 @@ Verification commands:
 
 Known skips:
 - Bandit was not run because this branch changes TypeScript/Backlog metadata only and no Python runtime code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 <!-- SECTION:SUMMARY:BEGIN -->

@@ -6,6 +6,7 @@ import asyncio
 import errno
 import json
 import sqlite3
+from datetime import date
 from typing import Any
 
 from loguru import logger
@@ -13,12 +14,17 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
-from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
+from tldw_Server_API.app.core.DB_Management.db_path_utils import (
+    DatabasePaths,
+    get_user_media_db_path,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError as MediaDatabaseError,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.runtime import defaults as media_db_runtime_defaults
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import MEDIA_NONCRITICAL_EXCEPTIONS
+from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 
 from .claims_alert_delivery import (
     build_claims_alert_delivery_payload,
@@ -30,6 +36,7 @@ from .claims_analytics_exports import (
     process_export_artifact,
 )
 from .claims_job_contracts import (
+    CLAIMS_AGGREGATE_REVIEW_METRICS_JOB_TYPE,
     CLAIMS_DELIVER_ALERT_JOB_TYPE,
     CLAIMS_DELIVER_REVIEW_NOTIFICATION_JOB_TYPE,
     CLAIMS_GENERATE_ANALYTICS_EXPORT_JOB_TYPE,
@@ -40,13 +47,25 @@ from .claims_job_contracts import (
     validate_alert_delivery_payload,
     validate_analytics_export_payload,
     validate_rebuild_media_payload,
+    validate_review_metrics_payload,
     validate_review_notification_payload,
 )
 from .claims_notifications import deliver_claim_review_notifications_now
 from .claims_rebuild_service import rebuild_claims_for_media
+from .claims_review_metrics import aggregate_claims_review_metrics_window
+
+try:
+    from psycopg import Error as PsycopgError
+    from psycopg.errors import ConnectionTimeout as PsycopgConnectionTimeout
+except ImportError:
+    _CLAIMS_NATIVE_POSTGRES_ERROR_TYPES: tuple[type[BaseException], ...] = ()
+    _CLAIMS_POSTGRES_TIMEOUT_TYPES: tuple[type[BaseException], ...] = ()
+else:
+    _CLAIMS_NATIVE_POSTGRES_ERROR_TYPES = (PsycopgError,)
+    _CLAIMS_POSTGRES_TIMEOUT_TYPES = (PsycopgConnectionTimeout,)
 
 _CLAIMS_HANDLER_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
-_CLAIMS_EXPORT_STORAGE_ERROR_TYPES: tuple[type[BaseException], ...] = (
+_CLAIMS_STORAGE_ERROR_TYPES: tuple[type[BaseException], ...] = (
     sqlite3.OperationalError,
     BackendDatabaseError,
     MediaDatabaseError,
@@ -175,9 +194,9 @@ def _exception_chain(exc: BaseException) -> list[BaseException]:
     return chain
 
 
-def _is_transient_export_storage_error(exc: BaseException) -> bool:
+def _is_transient_claims_storage_error(exc: BaseException) -> bool:
     """Classify only explicit temporary database and storage failures."""
-    if not isinstance(exc, _CLAIMS_EXPORT_STORAGE_ERROR_TYPES):
+    if not isinstance(exc, _CLAIMS_STORAGE_ERROR_TYPES):
         return False
 
     for current in _exception_chain(exc):
@@ -197,6 +216,23 @@ def _is_transient_export_storage_error(exc: BaseException) -> bool:
         if isinstance(current, OSError) and current.errno in _TRANSIENT_OS_ERRNOS:
             return True
     return False
+
+
+# Preserve the export classifier's original root-exception gate for callers.
+_is_transient_export_storage_error = _is_transient_claims_storage_error
+
+
+def _is_transient_review_metrics_storage_error(exc: BaseException) -> bool:
+    """Recognize native PostgreSQL deadlines without changing export policy."""
+    if not isinstance(exc, _CLAIMS_STORAGE_ERROR_TYPES + _CLAIMS_NATIVE_POSTGRES_ERROR_TYPES):
+        return False
+    if any(isinstance(current, _CLAIMS_POSTGRES_TIMEOUT_TYPES) for current in _exception_chain(exc)):
+        return True
+    if isinstance(exc, _CLAIMS_NATIVE_POSTGRES_ERROR_TYPES):
+        wrapped = BackendDatabaseError("Claims review metrics storage failure")
+        wrapped.__cause__ = exc
+        return _is_transient_claims_storage_error(wrapped)
+    return _is_transient_claims_storage_error(exc)
 
 
 def _db_path(owner_user_id: Any) -> str:
@@ -334,7 +370,7 @@ def _process_analytics_export(
             failure_code=exc.code,
         ) from exc
     except Exception as exc:  # noqa: BLE001 - translate worker failures without leaking raw text.
-        retryable = _is_transient_export_storage_error(exc)
+        retryable = _is_transient_claims_storage_error(exc)
         failure_code = "claims_export_storage_unavailable" if retryable else "claims_export_failed"
         public_message = (
             "Claims analytics export storage is temporarily unavailable."
@@ -355,6 +391,62 @@ def _process_analytics_export(
         ) from exc
 
 
+def _aggregate_review_metrics(
+    *,
+    owner_user_id: str,
+    start_date: str,
+    end_date: str,
+    job_id: int,
+) -> dict[str, Any]:
+    """Open, aggregate, and close an explicit owner window in maintenance scope."""
+    is_postgres = media_db_runtime_defaults.postgres_content_mode
+    opened = False
+    result = {"start_date": start_date, "end_date": end_date, "groups_written": 0}
+    try:
+        with scoped_context(user_id=int(owner_user_id), is_admin=True):
+            options: dict[str, Any] = {
+                "client_id": "claims_jobs_worker",
+                "initialize": False,
+                "existing_only": True,
+            }
+            if not is_postgres:
+                owner_dir = DatabasePaths.resolve_user_base_directory(int(owner_user_id))
+                options.update(
+                    db_path=str(owner_dir / DatabasePaths.MEDIA_DB_NAME),
+                )
+            with managed_media_database(**options) as db:
+                opened = True
+                written = aggregate_claims_review_metrics_window(
+                    db=db,
+                    owner_user_id=owner_user_id,
+                    start_date=date.fromisoformat(start_date),
+                    end_date=date.fromisoformat(end_date),
+                )
+        if written == 0:
+            return {**result, "outcome": "skipped", "reason": "no_activity"}
+        return {**result, "outcome": "ok", "groups_written": written}
+    except Exception as exc:  # noqa: BLE001 - sanitize all domain/storage failures at the worker boundary.
+        if not is_postgres and not opened and (
+            isinstance(exc, FileNotFoundError)
+            or (isinstance(exc, OSError) and exc.errno == errno.ENOENT)
+        ):
+            return {**result, "outcome": "skipped", "reason": "owner_database_missing"}
+        retryable = _is_transient_review_metrics_storage_error(exc)
+        failure_code = "claims_review_metrics_storage_unavailable" if retryable else "claims_review_metrics_failed"
+        logger.bind(
+            operation="aggregate_review_metrics",
+            owner_user_id=owner_user_id,
+            job_id=job_id,
+            error_code=failure_code,
+            error_type=type(exc).__name__,
+        ).warning("Claims review metrics worker failed")
+        raise ClaimsJobError(
+            "Claims review metrics storage is temporarily unavailable." if retryable else "Claims review metrics failed.",
+            retryable=retryable,
+            failure_code=failure_code,
+        ) from exc
+
+
 async def process_claims_job(job: dict[str, Any]) -> dict[str, Any]:
     """Validate and dispatch one Claims job through the Jobs worker runtime.
 
@@ -370,6 +462,18 @@ async def process_claims_job(job: dict[str, Any]) -> dict[str, Any]:
             Claims operation cannot be processed by this worker.
     """
     job_type = str(job.get("job_type") or "").strip()
+    if job_type == CLAIMS_AGGREGATE_REVIEW_METRICS_JOB_TYPE:
+        payload = validate_review_metrics_payload(_payload(job))
+        owner_user_id = _assert_owner(job, payload["owner_user_id"])
+        if job.get("owner_user_id") != owner_user_id:
+            raise _owner_scope_error()
+        return await asyncio.to_thread(
+            _aggregate_review_metrics,
+            owner_user_id=owner_user_id,
+            start_date=payload["start_date"],
+            end_date=payload["end_date"],
+            job_id=_positive_job_id(job.get("id")),
+        )
     if job_type == CLAIMS_REBUILD_MEDIA_JOB_TYPE:
         payload = validate_rebuild_media_payload(_payload(job))
         owner_user_id = _assert_owner(job, payload["owner_user_id"])

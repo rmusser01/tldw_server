@@ -40,7 +40,7 @@ Fix the current-code Security module review findings: DNS rebinding/check-then-u
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Manual Backlog task creation was approved because Backlog MCP resources were unavailable and `backlog search`, `backlog task list`, and `backlog task create` hung in this workspace.
 - Added pinned DNS drift detection to egress policy and updated the central HTTP client to reuse cached resolutions as pins for later policy checks.
 - Replaced process-global DNS timeout mutation with a bounded daemon-thread resolver wrapper.
@@ -50,7 +50,7 @@ Fix the current-code Security module review findings: DNS rebinding/check-then-u
 - Removed ineffective setup CSP nonce generation/injection state and updated tests/docs around the intentionally relaxed setup CSP.
 - Moved the finished work to a clean worktree from `origin/dev` on branch `codex/security-module-review-fixes-12008`.
 - Rebasing follow-up: addressed Qodo review comments by adding test classification markers/import cleanup, moving async egress validation off the event loop, replacing per-call DNS resolver threads with a bounded executor, logging invalid AES key configuration without leaking key material, aligning docs/tests to strict 32-byte AES-256 keys, skipping malformed trusted-proxy XFF entries, and reading JWT secrets from `[AuthNZ]`.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Verification
 

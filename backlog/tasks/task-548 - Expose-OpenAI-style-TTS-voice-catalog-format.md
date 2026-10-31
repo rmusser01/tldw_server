@@ -26,15 +26,11 @@ Add an opt-in OpenAI-compatible flattened response shape for the provider voice 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Implemented opt-in OpenAI-style voice catalog formatting on GET /api/v1/audio/voices/catalog?format=openai. The formatter flattens provider voice mappings to object=list with data entries, preserves provider filtering, includes provider/name/language and extra voice fields under metadata, and leaves the default catalog response unchanged. Added endpoint tests covering flattened catalog, provider-filtered flattened catalog, and the existing /api/v1/audio/voices custom voice route with a format query. Updated CHATTERBOX_SETUP.md and the Chatterbox upstream parity plan.
 
 Verification: RED focused endpoint test failed on missing object wrapper; GREEN focused endpoint test passed 3 tests. Broader endpoint slice passed 8 tests with ProviderManagementEndpoints or VoiceManagementEndpoints. Bandit on audio_tts.py wrote /tmp/bandit_chatterbox_voice_catalog_task548.json with results empty. git diff --check clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

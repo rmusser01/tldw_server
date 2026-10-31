@@ -43,7 +43,7 @@ async def ensure_test_user(
         role: Role for a newly created user.
         password_hash: Stored verbatim; these users never authenticate.
         is_active: Active flag for a newly created user.
-        is_verified: Verified flag for a newly created user.
+        is_verified: Verification flag for a newly created user.
         is_superuser: Superuser flag for a newly created user.
 
     Returns:

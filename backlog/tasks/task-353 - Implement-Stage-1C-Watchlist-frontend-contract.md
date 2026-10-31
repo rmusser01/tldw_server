@@ -51,7 +51,7 @@ Implement the frontend contract slice from the Stage 1 first-class Watchlists pl
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added apps/packages/ui/src/services/__tests__/watchlists-first-class.test.ts for Watchlist CRUD service paths, watchlist_id child fetch params, typed source/job create payloads, and store container state/actions. Extended apps/packages/ui/src/services/__tests__/watchlists-overview.test.ts to verify overview aggregation forwards watchlist_id to child fetches.
 
 Implemented WatchlistContainer, WatchlistCreate, WatchlistUpdate, domain/status/priority types, source watchlist_ids, and source/job watchlist_id fields in apps/packages/ui/src/types/watchlists.ts.
@@ -61,7 +61,7 @@ Implemented fetchWatchlists, getWatchlist, createWatchlist, updateWatchlist, del
 Added watchlist_id parameter support to fetchWatchlistsOverviewData and threaded it through source/job/item/run/output aggregate fetches. Added watchlists/loading/error/selected container state and mutators to the Watchlists Zustand store.
 
 Verification: bunx vitest run apps/packages/ui/src/services/__tests__/watchlists-first-class.test.ts apps/packages/ui/src/services/__tests__/watchlists-overview.test.ts -> 2 files passed, 8 tests passed. git diff --check -> clean. Bandit is not applicable because this stage only touches frontend TypeScript and Backlog task files. Attempted bunx tsc --noEmit -p apps/packages/ui/tsconfig.json, but bunx resolved TypeScript 7 and stopped on the existing tsconfig baseUrl deprecation before checking project types.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

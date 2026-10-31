@@ -30,11 +30,11 @@ Fix still-valid PR #2195 review findings for Stage 4L editable profile CRUD: nar
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified current PR review findings against rebased branch after syncing with origin/dev. All five reported code-level issues remain valid: broad Pydantic catches, whitespace create id/name behavior, create read-then-upsert TOCTOU, guarded delete unknown/status failure handling, and policy_document None patch crash.
 
 Implemented PR review fixes after rebasing on origin/dev: create now uses store-level create_profile conflict handling; create id/name are normalized; validation catches are narrowed; guarded delete translates store failures and unknown results; policy_document patches handle missing stored policies.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

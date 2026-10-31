@@ -40,11 +40,20 @@ Track GitHub issue #1564 as the narrowed commercial ACP live-certification rollu
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-06-03: PR #2224 merged Codex CLI via pinned codex-acp 0.15.0 as supported_with_caveats/live_e2e_tested for the verified macOS host profile. Narrowed GitHub issue #1564 without closing it and created #2244 for the remaining Claude Code entrypoint or adapter decision.
 2026-06-03: TASK-256.1 classified Claude Code as an external ACP adapter candidate using pinned @agentclientprotocol/claude-agent-acp 0.40.0. Local Claude Code 2.1.142 has no native ACP command and local claude-agent-acp is missing, so the profile remains documented_unverified/documented_only with adapter_missing evidence.
 2026-06-03: Opened draft PR #2248 for the Claude adapter decision and commented on #1564/#2244. Keep #1564 open until PR #2248 lands and issue state is reconciled.
-<!-- SECTION:NOTES:END -->
+
+- Created `Docs/Development/ACP_Commercial_CLI_Certification_2026_05_11.md` with explicit blocker evidence for Claude Code and Codex CLI on macOS host stdio.
+- Kept both registry rows at `documented_unverified` / `documented_only`; no live support claim was made.
+- Validation: `python -m pytest tldw_Server_API/tests/Agent_Client_Protocol/test_acp_agent_registry.py tldw_Server_API/tests/Agent_Client_Protocol/test_acp_health.py tldw_Server_API/tests/Agent_Client_Protocol/test_acp_status_schema.py tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py -q` passed, 55 tests.
+- Validation: `tools/tldw-agent/scripts/verify-local-build.sh` passed.
+- Validation: `python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile live-e2e --format json` emitted the expected manifest.
+- Validation: `python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile live-e2e --run` refused without required live env, exit 2.
+- Validation: `git diff --check` passed.
+- Bandit: skipped because this task touched only Markdown, YAML, and Backlog task metadata; no Python scope changed.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
@@ -55,16 +64,3 @@ Track GitHub issue #1564 as the narrowed commercial ACP live-certification rollu
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Notes
-
-<!-- SECTION:NOTES:BEGIN -->
-- Created `Docs/Development/ACP_Commercial_CLI_Certification_2026_05_11.md` with explicit blocker evidence for Claude Code and Codex CLI on macOS host stdio.
-- Kept both registry rows at `documented_unverified` / `documented_only`; no live support claim was made.
-- Validation: `python -m pytest tldw_Server_API/tests/Agent_Client_Protocol/test_acp_agent_registry.py tldw_Server_API/tests/Agent_Client_Protocol/test_acp_health.py tldw_Server_API/tests/Agent_Client_Protocol/test_acp_status_schema.py tldw_Server_API/tests/Helper_Scripts/test_acp_certification_smoke.py -q` passed, 55 tests.
-- Validation: `tools/tldw-agent/scripts/verify-local-build.sh` passed.
-- Validation: `python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile live-e2e --format json` emitted the expected manifest.
-- Validation: `python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile live-e2e --run` refused without required live env, exit 2.
-- Validation: `git diff --check` passed.
-- Bandit: skipped because this task touched only Markdown, YAML, and Backlog task metadata; no Python scope changed.
-<!-- SECTION:NOTES:END -->

@@ -32,7 +32,6 @@ Rebase the Explainer workspace PR onto latest dev and address unresolved review 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Rebasing onto `origin/dev` made the old `main.py` direct `_HAS_EXPLAINER` route-registration comments obsolete; Explainer now registers through `router_groups/content.py`.
 - Moved the raw-SQL Explainer repository implementation under `core/DB_Management/Explainer_Repository.py` and kept `core/Explainer/repository.py` as a compatibility shim.
@@ -43,10 +42,9 @@ Rebase the Explainer workspace PR onto latest dev and address unresolved review 
 - Moved Explainer job polling cache invalidation out of the query function, used index access for question option records, added detail-panel regression coverage, and widened the notes-search E2E mock to allow an optional trailing slash.
 - Corrected TASK-546/TASK-547 DoD checkboxes and TASK-548 duplicated description sentinels.
 - Verification so far: targeted Explainer/Chatbook pytest suite passed 52 tests; router/OpenAPI smoke passed 2 tests; Explainer Vitest suite passed 9 tests; Explainer Playwright E2E passed 3 tests; Bandit on touched backend scope reported 0 findings; `git diff --check` passed.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 CI follow-up: e2e-required exposed a stale output-template seed-name snapshot that could attempt a duplicate insert for watchlist templates. Collections seeding now rechecks by name before insert and falls back to the existing-row path if another initializer wins insertion; added regression coverage for the stale snapshot case. Verification: output-template seeding pytest passed 6 tests; combined Collections/Explainer/Chatbook focused pytest passed 58 tests; Bandit on Collections_DB reported 0 issues; git diff --check passed; critical in-process E2E passed 15 tests with 276 skipped when run unsandboxed with Redis access.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

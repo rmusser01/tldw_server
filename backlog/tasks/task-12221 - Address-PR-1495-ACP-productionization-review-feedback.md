@@ -33,9 +33,9 @@ Resolve actionable reviewer feedback on PR #1495 for the ACP productionization w
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Resolved PR #1495 review feedback across hosted-mode Agent Tasks auth, task diagnostics cancellation, ACP readiness empty-agent status, schedule misfire grace validation, audit readback/admin scope access, orchestration artifact summaries, workspace 403 path disclosure, completion/review marker validation, stable failure reason storage, Agent Registry stale health clearing, docstrings, and Backlog markdown cleanup. Verification: compileall for touched backend production modules; focused pytest for ACP schedules, ACP endpoints, orchestration API, and workspace helper tests; focused Vitest for Agent Tasks hosted transport and readiness; Bandit on touched backend production files; git diff --check.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

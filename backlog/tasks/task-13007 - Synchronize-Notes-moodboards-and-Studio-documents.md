@@ -78,8 +78,8 @@ Reason: The work changes persistent schema tenant scope sync authority lifecycle
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 The corrected design was independently reviewed, approved by the requester on 2026-08-25, and accepted as ADR-040. Five dependency-ordered implementation plans now cover TASK-13007.1 through TASK-13007.5.
 
 The required independent plan review found and drove corrections for the existing DSR hard-delete seam, bootstrap origin/phase admission, direct keyword/collection/conversation invalidation, bounded resumable PostgreSQL migrations, server-owned portable timestamps, an authenticated fleet-attestation operator workflow, and complete changed-scope verification. A final re-review approved the stable bundle with no blocking findings. Production implementation has not started.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

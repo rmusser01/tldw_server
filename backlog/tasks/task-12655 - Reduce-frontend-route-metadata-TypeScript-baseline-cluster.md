@@ -30,7 +30,7 @@ Restore route metadata heading-governance TypeScript compatibility and remove th
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification recorded for this tsc slice:
 - RED: NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false from apps/tldw-frontend reported 12 diagnostics, including 3 route metadata/getRouteHeadingPolicy diagnostics.
 - RED: bunx vitest run __tests__/smoke/route-heading-governance.metadata.test.ts failed because getRouteHeadingPolicy was missing at runtime.
@@ -39,7 +39,7 @@ Verification recorded for this tsc slice:
 - Focused metadata test now reaches route coverage assertions and documents an existing broader gap: 54 active inventory routes lack metadata rows, mostly nested admin/settings/connector routes. That is outside this tsc slice.
 - git diff --check exits 0.
 - Bandit not applicable: touched files are TypeScript route metadata and Playwright spec imports only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

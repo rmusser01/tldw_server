@@ -941,10 +941,7 @@ async def test_rag_module_jsonrpc_tools_call_smoke(monkeypatch: pytest.MonkeyPat
     protocol.rbac_policy = _AllowAllRBAC()
     protocol.rate_limiter = _NoopRateLimiter()
     _install_source_tool_registry(protocol, "media.search")
-    # RagModule resolves source modules/permissions through the global MCP
-    # server's protocol; point it at this one so the smoke test does not
-    # depend on whatever global server earlier tests left behind.
-    monkeypatch.setattr(rag_module_impl._McpRagControls, "_protocol", lambda self: protocol)
+    monkeypatch.setattr(mcp_server_module, "_server", SimpleNamespace(protocol=protocol))
     context = RequestContext(request_id="rag-jsonrpc-smoke", user_id="1", client_id="unit")
 
     search = await protocol.process_request(

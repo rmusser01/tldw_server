@@ -13,6 +13,7 @@ export default defineConfig({
       '@': path.resolve(__dirname, '../packages/ui/src'),
       '~': path.resolve(__dirname, '../packages/ui/src'),
       '@web': path.resolve(__dirname, '.'),
+      'pa-tesseract.js': path.resolve(__dirname, './node_modules/pa-tesseract.js'),
       '@plasmohq/storage/hook': path.resolve(
         __dirname,
         './extension/shims/plasmo-storage-hook.tsx'

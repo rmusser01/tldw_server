@@ -47,7 +47,7 @@ async def run_email_send_adapter(config: dict[str, Any], context: dict[str, Any]
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
 
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     # Email validation pattern
     EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')

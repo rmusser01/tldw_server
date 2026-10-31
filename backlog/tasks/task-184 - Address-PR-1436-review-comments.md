@@ -46,7 +46,7 @@ Address actionable reviewer comments on PR #1436 for the Media FilterPanel dayjs
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Inspected PR #1436 review surface. Actionable findings are: duplicated text-textMuted label-token comments, timezone-sensitive date display fixture, and process.cwd()/path-separator sensitivity in FilterPanel.dayjs-imports.test.ts. CodeRabbit status is passing; GitHub Actions checks are still pending.
 
 Implemented the three review fixes on PR #1436: replaced both text-textMuted classes with text-text-muted, changed the date display fixture to isoForLocalDate local-boundary fixtures, and made FilterPanel.dayjs-imports.test.ts derive srcRoot from __dirname with forward-slash relative path normalization.
@@ -58,7 +58,7 @@ TypeScript baseline note: `node_modules/.bin/tsc --noEmit --project tsconfig.jso
 Bandit skipped because this review-fix slice changed TypeScript/tests and Backlog metadata only; no Python files were modified.
 
 Resolved all six PR #1436 review threads after pushing a2a7761b4. Qodo's top-level review summary now reports Bugs (0), and CodeRabbit status is pass/skipped with no unresolved actionable inline threads. GitHub Actions checks are still pending, not failed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

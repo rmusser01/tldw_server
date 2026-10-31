@@ -25,11 +25,11 @@ from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
 )
 from tldw_Server_API.app.core.AuthNZ.alerting import get_security_alert_dispatcher
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import NativeQuotaUnavailableError, native_storage_system_stats
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.rbac import get_effective_permissions
 from tldw_Server_API.app.core.Logging.system_log_buffer import query_system_logs
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
-from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.services import admin_scope_service
 from tldw_Server_API.app.services.admin_data_ops_service import (
     build_audit_log_csv as svc_build_audit_log_csv,
@@ -135,14 +135,6 @@ async def get_security_alert_status() -> SecurityAlertStatusResponse:
     )
 
 
-def _empty_system_stats_response() -> SystemStatsResponse:
-    return SystemStatsResponse(
-        users={"total": 0, "active": 0, "verified": 0, "admins": 0, "new_last_30d": 0},
-        storage={"total_used_mb": 0.0, "total_quota_mb": 0.0, "average_used_mb": 0.0, "max_used_mb": 0.0},
-        sessions={"active": 0, "unique_users": 0},
-    )
-
-
 async def get_system_stats(db) -> SystemStatsResponse:
     """Get system statistics."""
     try:
@@ -171,17 +163,7 @@ async def get_system_stats(db) -> SystemStatsResponse:
                 """
             )
 
-            storage_stats = await db.fetchrow(
-                """
-                SELECT
-                    SUM(storage_used_mb) as total_used_mb,
-                    SUM(storage_quota_mb) as total_quota_mb,
-                    AVG(storage_used_mb) as avg_used_mb,
-                    MAX(storage_used_mb) as max_used_mb
-                FROM users
-                WHERE is_active = TRUE
-                """
-            )
+            storage_stats = await native_storage_system_stats(db, postgres=True)
 
             session_stats = await db.fetchrow(
                 """
@@ -208,18 +190,7 @@ async def get_system_stats(db) -> SystemStatsResponse:
             )
             user_stats = await cursor.fetchone()
 
-            cursor = await db.execute(
-                """
-                SELECT
-                    SUM(storage_used_mb) as total_used_mb,
-                    SUM(storage_quota_mb) as total_quota_mb,
-                    AVG(storage_used_mb) as avg_used_mb,
-                    MAX(storage_used_mb) as max_used_mb
-                FROM users
-                WHERE is_active = 1
-                """
-            )
-            storage_stats = await cursor.fetchone()
+            storage_stats = await native_storage_system_stats(db, postgres=False)
 
             cursor = await db.execute(
                 """
@@ -233,7 +204,7 @@ async def get_system_stats(db) -> SystemStatsResponse:
             session_stats = await cursor.fetchone()
 
         user_keys = ["total_users", "active_users", "verified_users", "admin_users", "new_users_30d"]
-        storage_keys = ["total_used_mb", "total_quota_mb", "avg_used_mb", "max_used_mb"]
+        storage_keys = ["total_used_mb", "avg_used_mb", "max_used_mb"]
         session_keys = ["active_sessions", "unique_users"]
         us = _row_to_dict(user_stats, user_keys)
         ss = _row_to_dict(storage_stats, storage_keys)
@@ -258,8 +229,8 @@ async def get_system_stats(db) -> SystemStatsResponse:
                         COALESCE(SUM(prompt_tokens), 0) as prompt,
                         COALESCE(SUM(completion_tokens), 0) as completion,
                         COALESCE(SUM(total_tokens), 0) as total
-                    FROM llm_usage_v2
-                    WHERE date(created_at) = CURRENT_DATE
+                    FROM llm_usage_log
+                    WHERE ts >= CURRENT_DATE
                     """
                 )
             else:
@@ -269,8 +240,8 @@ async def get_system_stats(db) -> SystemStatsResponse:
                         COALESCE(SUM(prompt_tokens), 0) as prompt,
                         COALESCE(SUM(completion_tokens), 0) as completion,
                         COALESCE(SUM(total_tokens), 0) as total
-                    FROM llm_usage_v2
-                    WHERE date(created_at) = date('now')
+                    FROM llm_usage_log
+                    WHERE ts >= date('now')
                     """
                 )
                 token_row = await cursor.fetchone()
@@ -282,7 +253,7 @@ async def get_system_stats(db) -> SystemStatsResponse:
                     "total": int(td.get("total") or 0),
                 }
         except Exception as exc:
-            logger.debug(f"Skipping token usage stats in system overview: {exc}")
+            logger.warning(f"Skipping token usage stats in system overview: {exc}")
 
         return SystemStatsResponse(
             users={
@@ -294,7 +265,7 @@ async def get_system_stats(db) -> SystemStatsResponse:
             },
             storage={
                 "total_used_mb": float(ss.get("total_used_mb") or 0.0),
-                "total_quota_mb": float(ss.get("total_quota_mb") or 0.0),
+                "total_quota_mb": None,
                 "average_used_mb": float(ss.get("avg_used_mb") or 0.0),
                 "max_used_mb": float(ss.get("max_used_mb") or 0.0),
             },
@@ -307,15 +278,11 @@ async def get_system_stats(db) -> SystemStatsResponse:
             mcp_invocations_today=None,  # MCP metrics are Prometheus-only; defer until parsed
         )
 
+    except NativeQuotaUnavailableError:
+        raise
     except Exception as exc:
-        logger.error(f"Failed to get system stats: {exc}")
-        try:
-            if is_test_mode():
-                return _empty_system_stats_response()
-        except Exception as db_summary_error:
-            logger.debug("Admin system service failed to resolve test-mode fallback", exc_info=db_summary_error)
-        logger.warning("Returning empty system stats snapshot after backend query failure")
-        return _empty_system_stats_response()
+        logger.error("Failed to get system stats ({})", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="System statistics unavailable") from exc
 
 
 async def get_dashboard_activity(
@@ -522,7 +489,7 @@ async def get_audit_log(
                 pagination=build_offset_pagination_meta(total=0, limit=limit, offset=offset, count=0),
             )
 
-        if user_id:
+        if user_id is not None:
             await admin_scope_service.enforce_admin_user_scope(principal, user_id, require_hierarchy=False)
             param_count += 1
             conditions.append(f"a.user_id = ${param_count}" if is_pg else "a.user_id = ?")

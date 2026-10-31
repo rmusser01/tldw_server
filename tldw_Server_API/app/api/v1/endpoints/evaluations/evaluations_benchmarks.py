@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel, Field
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
 from tldw_Server_API.app.core.Evaluations.benchmark_loaders import load_benchmark_dataset
@@ -103,6 +104,9 @@ async def run_benchmark(
     user_id: str = Depends(verify_api_key),
     current_user: User = Depends(get_eval_request_user),
 ):
+    # Usage quotas (LLM usage accounting spec §4a): every item is an LLM call, so the run is
+    # checked here, before the dataset loads, and then runs to completion.
+    await enforce_llm_quota(getattr(current_user, "id", None))
     try:
         identity = get_evaluation_identity(current_user)
         evaluation_manager = _get_evaluation_manager_for_user(identity)

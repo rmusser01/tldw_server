@@ -55,13 +55,13 @@ Found by the comprehensive core-module review; independently reproduced by the o
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Premise partly already fixed: 9061081c0c (earlier on this branch) deduped aliases inside RAGEvaluator._calculate_overall_score and added tests/Evaluations/unit/test_rag_evaluator_alias_scoring.py (1.0/0.0 -> 0.5, 0.9/0.3 -> 0.6 < 0.7). That covers overall_score, which unified_evaluation_service and the eval_runner pipeline path (overall_score at eval_runner.py ~810) consume.
 
 Remaining bug found while verifying AC3/AC4: EvaluationRunner._eval_rag never reads overall_score; it averages every key in result['metrics'] itself, and on the runner path (explicit metrics) the alias keys are always present, so avg_score, the aggregate mean_score built from it, and the pass decision still double-counted relevance/faithfulness. Fixed in 0123ee97d6: avg_score skips an alias whose canonical twin is present (reuses rag_evaluator._CANONICAL_METRIC_FOR_ALIAS); the per-sample scores dict keeps the alias keys.
 
 Test test_runner_avg_score_and_pass_gate_ignore_alias_keys drives the real RAGEvaluator.evaluate (stubbed metric calls) through runner._eval_rag with explicit metrics relevance=1.0, faithfulness=0.0, context_relevance=0.0 and threshold 0.35. RED before 0123ee97d6: avg_score 0.4 != 1/3 (and would pass the 0.35 gate). GREEN: avg_score 1/3, passed False, aggregate mean_score 1/3, pass_rate 0.0, alias keys still in scores. (A symmetric 1.0/0.0 pair hides the bug because both aliases are added, so the test uses three metrics.) Evaluations/unit with RUN_EVALUATIONS=1: 268 passed after. Bandit -ll on eval_runner.py: no findings. Ruff: 2 pre-existing findings, same count on ea1cbc6941.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -1,4 +1,4 @@
-"""Regression tests for the ChaChaNotes SQLite v73 companion migration."""
+"""Verify SQLite companion upgrades remain valid through the current registry."""
 
 import sqlite3
 from pathlib import Path
@@ -7,7 +7,6 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statements
-
 
 pytestmark = pytest.mark.unit
 
@@ -29,7 +28,7 @@ def test_v73_migrates_prior_dev_and_enforces_companion_constraints(
     monkeypatch: pytest.MonkeyPatch,
     source_version: int,
 ) -> None:
-    """Legacy and current dev catalogs retain their migrations and companion constraints."""
+    """Prior catalogs reach the current version and retain companion constraints."""
     db_path = tmp_path / "persona_companion_v73.sqlite"
     _seed_database(db_path, monkeypatch, source_version)
 
@@ -44,7 +43,7 @@ def test_v73_migrates_prior_dev_and_enforces_companion_constraints(
         assert "companion_behavior_json" in pack_columns
         assert "persona_buddy_preferences" in tables
         assert "persona_visual_pack_reviews" in tables
-        assert migrated._get_db_version(conn) == 73
+        assert migrated._get_db_version(conn) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
         workspace_columns = {
             row["name"] for row in conn.execute("PRAGMA table_info('workspaces')")
         }
@@ -108,7 +107,7 @@ def test_v73_migrates_prior_dev_and_enforces_companion_constraints(
 def test_published_companion_v69_lineage_preserves_preferences_and_reopens(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The old PR's v69 catalog is not dev's Persona opt-out v69 catalog."""
+    """The old companion v69 lineage reaches the current registry without data loss."""
     db_path = tmp_path / "published_companion.sqlite"
     _seed_database(db_path, monkeypatch, 68)
     with sqlite3.connect(db_path) as conn:
@@ -126,7 +125,7 @@ def test_published_companion_v69_lineage_preserves_preferences_and_reopens(
         db = CharactersRAGDB(db_path, "legacy-owner")
         try:
             conn = db.get_connection()
-            assert db._get_db_version(conn) == 73
+            assert db._get_db_version(conn) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
             assert tuple(conn.execute(
                 "SELECT ambient_mode, version FROM persona_buddy_preferences WHERE user_id = ?",
                 ("legacy-owner",),

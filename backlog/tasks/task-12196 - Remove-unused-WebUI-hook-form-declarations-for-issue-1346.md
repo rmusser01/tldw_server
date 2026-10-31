@@ -44,7 +44,7 @@ Implement the next quick-cleanup slice from the WebUI dependency audit for issue
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Removed direct @hookform/resolvers and react-hook-form declarations from apps/tldw-frontend/package.json, then regenerated apps/bun.lock with bun install from apps/.
 
 Focused pre-removal import/config search found no direct package usage for @hookform/resolvers or react-hook-form in apps/tldw-frontend, apps/packages/ui, or apps/extension source/config/script files. Post-removal manifest and lockfile search found no remaining direct declarations or package records for either package.
@@ -52,7 +52,7 @@ Focused pre-removal import/config search found no direct package usage for @hook
 Verification: bun install --frozen-lockfile passed in apps/ with 1846 installs across 1953 packages; bun run compile passed in apps/extension; NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run compile passed in apps/tldw-frontend and token-sync passed; bun run lint passed in apps/tldw-frontend with 127 existing warnings and 0 errors; bunx vitest run --changed=origin/dev exited 0 with no changed test files; package JSON parse check passed; git diff --check passed.
 
 Bandit skipped: this slice changes only WebUI package metadata, apps/bun.lock, and Backlog task documentation; no Python code changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

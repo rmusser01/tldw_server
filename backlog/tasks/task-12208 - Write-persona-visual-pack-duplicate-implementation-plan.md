@@ -36,13 +36,13 @@ Write an implementation plan for GitHub issue #1450: duplicate a Persona Visual 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created implementation plan at Docs/superpowers/plans/2026-05-09-persona-visual-duplicate-to-persona-implementation-plan.md. Self-review checked code paths for PersonaVisualService, persona_state_store, persona endpoint/schema, VisualPackEditor, sidepanel persona switching, and existing test commands. Patched the plan to make the proposed DB status helper reject active status so activation validation cannot be bypassed.
 
 Reviewed the plan against existing PersonaVisualService, persona_state_store, persona endpoint/schema, visual portability importer/exporter, VisualPackEditor, and sidepanel wiring. Patched the plan to normalize blank duplicate titles before DB creation, map missing/checksum-mismatched source assets to 409 conflict responses, and require failure-cleanup coverage so copied files are removed and no failed duplicate is exposed as a draft or active pack. Formal subagent review was not run in this turn.
 
 Verification: git diff --check passed for the plan and Backlog task updates. Bandit was not run because this task changed only Markdown planning/tracking files and no Python implementation code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

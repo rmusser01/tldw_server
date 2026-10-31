@@ -28,7 +28,7 @@ Remove the chat-specific collapsed rail edge button from the web layout because 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation notes:
 - Removed the dedicated chat-sidebar-edge-expand rail button from both the Next WebLayout and the shared extension Layout.
 - Removed the special desktop chat collapse path so the normal shared ChatSidebar collapsed state remains the app-wide control.
@@ -43,7 +43,7 @@ Verification:
 - Green: npx playwright test e2e/workflows/chat-rails-collapse.spec.ts --project=chromium --reporter=line --workers=1
 - Green: git diff --check
 - Bandit: /tmp/bandit_task12097.json, zero findings; touched scope is TS/Playwright so 0 Python LOC.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

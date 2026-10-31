@@ -34,13 +34,13 @@ Write the implementation plan for the approved Next dev server memory leak inves
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created implementation plan at Docs/superpowers/plans/2026-05-17-next-dev-server-memory-leak-investigation-implementation-plan.md.
 
 Local plan review found and fixed unsafe broad staging/diff commands for backlog/tasks in a dirty checkout. Added guardrails for process-tool permission escalation and exact evidence task paths.
 
 Verification: git diff --check passed for the plan and TASK-423 files. Bandit skipped because the touched files are Markdown/Backlog metadata only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

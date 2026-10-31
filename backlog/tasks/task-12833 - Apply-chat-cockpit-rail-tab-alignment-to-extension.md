@@ -30,11 +30,11 @@ Extend the WebUI collapsed chat rail alignment fix to the browser extension surf
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 PR: https://github.com/rmusser01/tldw_server/pull/2562
 
 Implemented shared rail positioning constants in packages/ui and consumed them from WebLayout, Layout, and PlaygroundCockpitShell so WebUI and extension option surfaces use the same collapsed Chats and context rail placement. Verification: focused Vitest WebUI/shared tests passed; extension Vitest config guard passed; WebUI Playwright chat rail collapse spec passed; extension build smoke passed and built bundle contains the new edge-positioning classes/test IDs. Extension Playwright smoke skipped at runtime because no service worker target appeared in this environment. Bandit ran on touched files with zero findings; TS/TSX files reported AST parse errors because Bandit is Python-oriented.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

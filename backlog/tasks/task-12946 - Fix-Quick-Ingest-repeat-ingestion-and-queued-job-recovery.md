@@ -38,13 +38,11 @@ Docs/superpowers/plans/2026-07-10-quick-ingest-pr-2709-review-remediation-plan.m
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-07-10 follow-up UAT isolated the repeat YouTube Shorts failure to stale yt-dlp in the project venv. Before updating, yt-dlp 2025.8.11 quarantined `https://www.youtube.com/shorts/6-rf_YXDpPg` at 20% with "content is not available on this app." After updating the venv to yt-dlp 2026.7.4, the same Quick Ingest browser flow completed the YouTube job at 100% and added media id 5. Raised `pyproject.toml` yt-dlp floor to `>=2026.7.4` so fresh installs pick up the extractor fix.
 
 Draft PR: https://github.com/rmusser01/tldw_server/pull/2709
 2026-07-10: Rebasing review follow-up completed cleanly onto current origin/dev. Approved remediation design committed at Docs/superpowers/specs/2026-07-10-quick-ingest-pr-2709-review-remediation-design.md; implementation remains pending spec/plan gates.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 2026-07-10: Corrected the remediation design after tracing both public web ingestion contracts. No new strategy request field will be added; existing perform_analysis/summarize_checkbox intent will be propagated to the internal extraction pipeline.
 
@@ -63,7 +61,7 @@ Task 5 complete at f4e6e81c33: added a thread-safe, exactly-once, nonblocking yt
 2026-07-11 approved architecture fix and fresh host-side UAT: Ingest More now calls the existing replaceWithNewDraft path, creating a new session/provider key instead of reusing completed reducer and run refs. Draft upserts also clear stale direct-job tracking. One mounted WebUI walkthrough passed PDF, RFC 9110 link, repeated RFC link, exact YouTube Short https://www.youtube.com/shorts/6-rf_YXDpPg, and repeated YouTube Short. First submissions succeeded; repeats were classified as skipped existing. pageErrors and consoleErrors were empty. PDF and YouTube jobs began within one second of creation, confirming the media worker 2-second default idle-backoff ceiling removes the observed 28-second queued-at-0-percent delay. Jobs DB: three completed 100-percent jobs with Success, Success, Skipped. Media DB: exactly three rows for PDF, RFC link, and YouTube Short. Evidence: /tmp/task12946_quick_ingest_uat_10_evidence.json and /tmp/task12946_quick_ingest_uat_10_final.png. Focused UI Vitest passed 46/46, media worker pytest passed 19/19, extension TypeScript compile passed, and Bandit reported zero findings. The focused extension Playwright test could not be completed locally after three launch attempts: two headless attempts exposed no MV3 targets and the required headful attempt timed out; repository CI uses xvfb with TLDW_E2E_EXTENSION_HEADLESS=0, so this test remains for CI verification after push.
 
 2026-07-11 closeout: rebased cleanly onto latest origin/dev, reran 46/46 UI tests, 19/19 media worker tests, and extension TypeScript compile successfully, force-pushed head 9ccf66c89a, posted UAT evidence to PR #2709, and resolved all 13 inline review threads. GitHub reports the PR mergeable; 20 checks are queued, 1 succeeded, and 2 skipped. Human Change summary remains the merge gate.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -33,16 +33,14 @@ Review-fix plan: keep the rebased PR branch isolated; evaluate each PR comment a
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Rebased codex/workspace-runtime-bindings onto origin/dev and addressed PR #2383 review feedback. Added regressions for env metadata, nested path redaction, client redaction_report spoofing, unsafe JSON decode logging, and archived-status writes. Implemented safe logging, fixed runtime-binding SQL strings with bound params, threadpool-wrapped runtime-binding route DB calls, system-managed archived status, server-derived redaction reports, and normalized request model fields with raw persistence payload preservation.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Rebased PR #2383 onto latest origin/dev and addressed all actionable review comments found from Qodo and Gemini. Verification: focused runtime-binding tests passed (18 passed); broader Workspace regression passed (117 passed, 6 warnings); touched-scope Bandit JSON showed 0 results and 0 errors; git diff --check and git diff --cached --check were clean.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

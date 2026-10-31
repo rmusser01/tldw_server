@@ -43,10 +43,10 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     InputError,
 )
-from tldw_Server_API.app.core.Utils.metadata_utils import (
-    normalize_safe_metadata,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.safe_metadata_write_ops import (
     update_version_safe_metadata_in_transaction,
 )
+from tldw_Server_API.app.core.Utils.metadata_utils import normalize_safe_metadata
 
 router = APIRouter(tags=["Media Versioning"])
 

@@ -18,6 +18,13 @@ const mocks = vi.hoisted(() => ({
   messageInfo: vi.fn(),
 }));
 
+vi.mock('@/services/tldw/quick-ingest-authority', () => ({
+  useQuickIngestAuthority: () => 'owned-analysis',
+  quickIngestAuthority: { capture: () => ({ authorityRevision: 1,
+    requestScope: { config: { serverUrl: 'http://owned-server', authMode: 'multi-user', expectedUserId: 'alice' } },
+    signal: new AbortController().signal, assertCurrent: () => {} }) }
+}))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (

@@ -47,7 +47,7 @@ Add standalone structured profile-resolution and effective-policy result primiti
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Baseline before edits: profile registry/preset/runtime package tests passed: 20 passed, 3 warnings.
 - RED profile-resolution test run failed as expected: resolve_profile_result was missing on StoreBackedProfileResolver.
 - RED effective-policy/preset test run failed as expected: build_effective_policy_result was missing and bundled presets had no workspace-binding resource constraints.
@@ -56,7 +56,7 @@ Add standalone structured profile-resolution and effective-policy result primiti
 - Mypy passed for mcp_unified/profiles, storage protocol, and the structured-resolution test.
 - Bandit runtime touched scope reported 0 findings.
 - git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -39,6 +39,10 @@ os.environ["MPLBACKEND"] = "Agg"
 # Full-app TestClient fixtures should not trigger CI embedding model preloads.
 # Tests that exercise model downloads can opt in explicitly.
 os.environ.setdefault("AUTO_DOWNLOAD_MODELS", "false")
+# Usage quotas are off by default in production (spec 2). The existing quota suites
+# test enforcement, so keep it on for the test session through the legacy spelling,
+# which tests can still flip with setenv. Stock-default tests clear both variables.
+os.environ.setdefault("LIMIT_ENFORCEMENT_ENABLED", "true")
 # Provide an explicit, deterministic API key for tests that rely on single-user/test-mode shortcuts.
 # Production code no longer assumes a default for SINGLE_USER_TEST_API_KEY.
 os.environ.setdefault("SINGLE_USER_TEST_API_KEY", "test-api-key-12345")
@@ -303,12 +307,67 @@ def _restore_risky_env_and_logging():
         logging.getLogger(__name__).debug("system_log_buffer reset failed: %s", exc)
 
 
+@pytest.fixture(autouse=True)
+def _offline_provider_model_inventory(request, monkeypatch):
+    """Skip the live provider model check (TASK-13460) unless a test opts in.
+
+    Cloud generation now confirms the selected model against the provider's
+    live model list first. Most tests fake only the generation transport, so
+    that check would reach the network and fail closed. Tests of the check
+    itself mark ``provider_inventory`` and stub discovery.
+
+    Each test starts with empty inventory caches. An unmarked test that still
+    reaches discovery (a lazy import, a listing) hits a fetch that raises
+    instead of the network (review M5).
+    """
+    from tldw_Server_API.app.core.LLM_Calls import provider_model_inventory
+
+    provider_model_inventory._CACHE.clear()
+    provider_model_inventory._FAILED.clear()
+    if request.node.get_closest_marker("provider_inventory"):
+        return
+
+    def live_discovery(**_kwargs):
+        raise AssertionError("unmarked test reached live provider discovery")
+
+    monkeypatch.setattr(provider_model_inventory, "_http_fetch", live_discovery)
+    for name in (
+        "tldw_Server_API.app.core.LLM_Calls.gateway",
+        "tldw_Server_API.app.api.v1.endpoints.messages",
+    ):
+        module = sys.modules.get(name)
+        if module is not None and hasattr(module, "_validate_provider_model_selection"):
+            monkeypatch.setattr(module, "_validate_provider_model_selection", lambda _provider, _request, **_kw: None)
+
+
 @pytest.fixture()
 def auth_headers():
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 
     settings = get_settings()
     return {"X-API-KEY": settings.SINGLE_USER_API_KEY}
+
+
+@pytest.fixture(autouse=True)
+def _reset_usage_quota_resolver_cache():
+    """Clear the Usage quota resolver's per-user cache before each test.
+
+    `quota_resolver.user_quota` caches each user's effective ``limits.*``
+    values for 60s in a module-level dict (keyed by user id, not by test or
+    event loop). Any earlier test or request that reads a user's profile can
+    prime that cache, which then leaks into a later test still inside the
+    60s window and makes its resolver reads return stale data. This is cheap
+    insurance for every suite; test files that also exercise the resolver
+    directly may still keep their own local reset for clarity.
+    """
+    try:
+        from tldw_Server_API.app.core.Usage import quota_checks, quota_resolver
+
+        quota_resolver.invalidate_all()
+        quota_checks.reset_ledger_cache()
+    except Exception:
+        _ = None
+    yield
 
 
 @pytest.fixture(autouse=True)
@@ -868,15 +927,38 @@ def healthy_no_override_tts_credential_snapshot():
             llm_provider_overrides._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS
         )
 
-    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests({})
+    # Bound now: a test may patch this setter, and its monkeypatch can be undone after this teardown.
+    set_overrides_cache = llm_provider_overrides.set_llm_provider_overrides_cache_for_tests
+    set_overrides_cache({})
     try:
         yield
     finally:
-        llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+        set_overrides_cache(
             original_overrides,
             healthy=original_healthy,
             ttl_enabled=not original_ttl_disabled,
         )
+
+
+@pytest.fixture(autouse=True)
+def _healthy_empty_llm_provider_override_store(request):
+    """Every test starts with the healthy, empty override store app startup gives production (TASK-13950.13).
+
+    Mark a test ``ambient_llm_provider_override_store`` to see the import-time (unloaded, unhealthy) store instead.
+    """
+    if request.node.get_closest_marker("ambient_llm_provider_override_store") is None:
+        request.getfixturevalue("healthy_no_override_tts_credential_snapshot")
+
+
+@pytest.fixture()
+def billing_repo_wired(monkeypatch):
+    """Simulate the hosted product: a billing repository is wired into SubscriptionService."""
+    from tldw_Server_API.app.core.Billing import subscription_service
+
+    async def _wired() -> bool:
+        return True
+
+    monkeypatch.setattr(subscription_service, "billing_repo_configured", _wired)
 
 
 class _TestUsageLogger:

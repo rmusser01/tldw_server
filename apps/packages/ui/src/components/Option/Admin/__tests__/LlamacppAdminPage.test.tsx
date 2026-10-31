@@ -1,7 +1,16 @@
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import LlamacppAdminPage from "../LlamacppAdminPage"
+
+const connection = vi.hoisted(() => ({
+  config: { serverUrl: "http://server-a.test", authMode: "single-user", apiKey: "test-owner-a" },
+  authorityLoading: false,
+  start: null as null | ((id: string) => void)
+}))
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => connection
+}))
 
 const apiMock = vi.hoisted(() => ({
   getLlamacppConfig: vi.fn(),
@@ -156,6 +165,7 @@ vi.mock("../LlamacppRuntimePanel", async () => {
     onStop,
     onUseInChat
   }: RuntimePanelProps) => {
+    connection.start = onStart
     const nameByProfile = new Map(profiles.map((profile) => [profile.profile_id, profile.name]))
     return React.createElement(
       "section",
@@ -452,9 +462,14 @@ const completedDownloadJob = {
   error_message: null
 }
 
+const requestOptions = () => expect.objectContaining({ configSnapshot: connection.config, abortSignal: expect.any(AbortSignal) })
+
 describe("LlamacppAdminPage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    connection.config = { serverUrl: "http://server-a.test", authMode: "single-user", apiKey: "test-owner-a" }
+    connection.authorityLoading = false
+    connection.start = null
 
     if (!window.matchMedia) {
       Object.defineProperty(window, "matchMedia", {
@@ -633,14 +648,12 @@ describe("LlamacppAdminPage", () => {
       expect(apiMock.startLlamacppModel).toHaveBeenCalled()
     })
 
-    expect(apiMock.startLlamacppModel).toHaveBeenCalledWith(
-      "gguf:toy-model-id",
-      expect.objectContaining({
+    expect(apiMock.startLlamacppModel).toHaveBeenCalledWith("gguf:toy-model-id", expect.objectContaining({
         ctx_size: 4096,
         n_gpu_layers: 0,
         cache_type_k: "f16",
         cache_type_v: "f16"
-      })
+      }), requestOptions()
     )
     expect(apiMock.startLlamacppServer).not.toHaveBeenCalled()
   })
@@ -688,9 +701,9 @@ describe("LlamacppAdminPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Use runtime default" }))
 
     await waitFor(() => {
-      expect(apiMock.stopLlamacppProfile).toHaveBeenCalledWith("default")
-      expect(apiMock.startLlamacppProfile).toHaveBeenCalledWith("analysis")
-      expect(apiMock.useLlamacppProfileInChat).toHaveBeenCalledWith("default")
+      expect(apiMock.stopLlamacppProfile).toHaveBeenCalledWith("default", requestOptions())
+      expect(apiMock.startLlamacppProfile).toHaveBeenCalledWith("analysis", requestOptions())
+      expect(apiMock.useLlamacppProfileInChat).toHaveBeenCalledWith("default", requestOptions())
     })
   })
 
@@ -715,7 +728,7 @@ describe("LlamacppAdminPage", () => {
         port: 8190,
         port_policy: "explicit",
         server_args: {}
-      })
+      }, requestOptions())
       expect(apiMock.listLlamacppProfiles).toHaveBeenCalledTimes(1)
       expect(apiMock.listLlamacppInstances).toHaveBeenCalledTimes(1)
     })
@@ -730,7 +743,7 @@ describe("LlamacppAdminPage", () => {
         name: "Edited profile",
         port: 8191,
         server_args: { ctx_size: 8192 }
-      })
+      }, requestOptions())
       expect(apiMock.listLlamacppProfiles).toHaveBeenCalledTimes(1)
       expect(apiMock.listLlamacppInstances).toHaveBeenCalledTimes(1)
     })
@@ -741,7 +754,7 @@ describe("LlamacppAdminPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete saved profile" }))
 
     await waitFor(() => {
-      expect(apiMock.deleteLlamacppProfile).toHaveBeenCalledWith("analysis")
+      expect(apiMock.deleteLlamacppProfile).toHaveBeenCalledWith("analysis", requestOptions())
       expect(apiMock.listLlamacppProfiles).toHaveBeenCalledTimes(1)
       expect(apiMock.listLlamacppInstances).toHaveBeenCalledTimes(1)
     })
@@ -749,6 +762,37 @@ describe("LlamacppAdminPage", () => {
     expect(apiMock.startLlamacppProfile).not.toHaveBeenCalled()
     expect(apiMock.useLlamacppProfileInChat).not.toHaveBeenCalled()
     expect(apiMock.startLlamacppModel).not.toHaveBeenCalled()
+  })
+
+  it.each(["server", "account", "loading"])("retires runtime rows and callbacks when canonical %s changes", async (change) => {
+    const view = render(<LlamacppAdminPage />)
+    await screen.findByRole("button", { name: "Start runtime analysis" })
+    const staleStart = connection.start!
+    apiMock.listLlamacppProfiles.mockReturnValue(new Promise(() => {}))
+    apiMock.listLlamacppInstances.mockReturnValue(new Promise(() => {}))
+    connection.config = {
+      ...connection.config,
+      ...(change === "server" ? { serverUrl: "http://server-b.test" } : {}),
+      ...(change === "account" ? { apiKey: "test-owner-b" } : {})
+    }
+    connection.authorityLoading = change === "loading"
+    view.rerender(<LlamacppAdminPage />)
+    expect(screen.queryByRole("button", { name: "Start runtime analysis" })).toBeNull()
+    await act(async () => { staleStart("analysis") })
+    expect(apiMock.startLlamacppProfile).not.toHaveBeenCalled()
+  })
+
+  it("does not publish late inventory into a successor authority", async () => {
+    let finish!: (value: typeof mockInventory) => void
+    apiMock.getLlamacppInventory.mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
+    const view = render(<LlamacppAdminPage />)
+    await screen.findByRole("button", { name: "Start runtime analysis" })
+    apiMock.getLlamacppInventory.mockResolvedValue({ models: [], warnings: [] })
+    connection.config = { ...connection.config, apiKey: "test-owner-b" }
+    view.rerender(<LlamacppAdminPage />)
+    await act(async () => { finish(mockInventory) })
+    await waitFor(() => expect(apiMock.getLlamacppInventory).toHaveBeenCalledTimes(2))
+    expect((screen.getByRole("button", { name: "Start Server" }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it("keeps single-server controls when runtime instance APIs are unavailable", async () => {
@@ -822,7 +866,7 @@ describe("LlamacppAdminPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Register path" }))
 
     await waitFor(() => {
-      expect(apiMock.registerLlamacppModelPath).toHaveBeenCalledWith("/external/model.gguf")
+      expect(apiMock.registerLlamacppModelPath).toHaveBeenCalledWith("/external/model.gguf", requestOptions())
       expect(apiMock.getLlamacppInventory).toHaveBeenCalledTimes(2)
     })
   })
@@ -849,7 +893,7 @@ describe("LlamacppAdminPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Register asset" }))
 
     await waitFor(() => {
-      expect(apiMock.registerLlamacppAssetPath).toHaveBeenCalledWith("/external/model.gguf")
+      expect(apiMock.registerLlamacppAssetPath).toHaveBeenCalledWith("/external/model.gguf", requestOptions())
       expect(apiMock.getLlamacppAssets).toHaveBeenCalledTimes(2)
       expect(apiMock.getLlamacppInventory).toHaveBeenCalledTimes(2)
     })
@@ -864,7 +908,7 @@ describe("LlamacppAdminPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preview folder" }))
 
     await waitFor(() => {
-      expect(apiMock.previewLlamacppAssetFolder).toHaveBeenCalledWith("/srv/models/imported")
+      expect(apiMock.previewLlamacppAssetFolder).toHaveBeenCalledWith("/srv/models/imported", requestOptions())
     })
 
     expect(screen.getByText("Import preview")).toBeTruthy()
@@ -876,7 +920,7 @@ describe("LlamacppAdminPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm import" }))
 
     await waitFor(() => {
-      expect(apiMock.importLlamacppAssetFolder).toHaveBeenCalledWith("/srv/models/imported")
+      expect(apiMock.importLlamacppAssetFolder).toHaveBeenCalledWith("/srv/models/imported", requestOptions())
       expect(apiMock.getLlamacppAssets).toHaveBeenCalledTimes(2)
     })
   })
@@ -902,7 +946,7 @@ describe("LlamacppAdminPage", () => {
         url: "https://example.com/toy.gguf",
         destination_dir: "/srv/models",
         filename: "toy.gguf"
-      })
+      }, requestOptions())
       expect(apiMock.listLlamacppAssetDownloads).toHaveBeenCalledTimes(2)
     })
     expect(apiMock.createLlamacppProfile).not.toHaveBeenCalled()
@@ -1026,7 +1070,32 @@ describe("LlamacppAdminPage", () => {
     expect(screen.getAllByText("Toy 7B Q4_K_M").length).toBeGreaterThan(0)
   })
 
-  it("loads config status inventory assets and hardware only once during strict-mode mount", async () => {
+  it.each(["resolve", "reject"])("renews strict-mode inventory and ignores a retired %s completion", async (outcome) => {
+    let complete!: (value: typeof mockInventory) => void
+    let fail!: (error: Error) => void
+    const old = new Promise<typeof mockInventory>((resolve, reject) => { complete = resolve; fail = reject })
+    apiMock.getLlamacppInventory.mockReturnValueOnce(old)
+    render(<React.StrictMode><LlamacppAdminPage /></React.StrictMode>)
+    try {
+      await waitFor(() => expect((screen.getByRole("button", { name: "Start Server" }) as HTMLButtonElement).disabled).toBe(false))
+      expect(apiMock.getLlamacppInventory).toHaveBeenCalledTimes(2)
+      const firstScope = apiMock.getLlamacppInventory.mock.calls[0][0]
+      const secondScope = apiMock.getLlamacppInventory.mock.calls[1][0]
+      expect(firstScope.abortSignal.aborted).toBe(true)
+      expect(secondScope.abortSignal.aborted).toBe(false)
+      await act(async () => {
+        if (outcome === "resolve") complete({ ...mockInventory, models: [] })
+        else fail(new Error("Retired inventory read failed"))
+        await old.catch(() => {})
+      })
+      expect((screen.getByRole("button", { name: "Start Server" }) as HTMLButtonElement).disabled).toBe(false)
+      expect(screen.queryByText("Retired inventory read failed")).toBeNull()
+    } finally {
+      await act(async () => { complete(mockInventory); await old.catch(() => {}) })
+    }
+  })
+
+  it("renews retired initial reads during strict-mode mount without lifecycle side effects", async () => {
     render(
       <React.StrictMode>
         <LlamacppAdminPage />
@@ -1034,15 +1103,18 @@ describe("LlamacppAdminPage", () => {
     )
 
     await waitFor(() => {
-      expect(apiMock.getLlamacppConfig).toHaveBeenCalledTimes(1)
-      expect(apiMock.getLlamacppStatus).toHaveBeenCalledTimes(1)
-      expect(apiMock.getLlamacppInventory).toHaveBeenCalledTimes(1)
-      expect(apiMock.getLlamacppAssets).toHaveBeenCalledTimes(1)
-      expect(apiMock.getLlamacppHardware).toHaveBeenCalledTimes(1)
-      expect(apiMock.listLlamacppProfiles).toHaveBeenCalledTimes(1)
-      expect(apiMock.listLlamacppInstances).toHaveBeenCalledTimes(1)
-      expect(apiMock.listLlamacppAssetDownloads).toHaveBeenCalledTimes(1)
+      expect((screen.getByRole("button", { name: "Start Server" }) as HTMLButtonElement).disabled).toBe(false)
+      expect(apiMock.getLlamacppConfig).toHaveBeenCalledTimes(2)
+      expect(apiMock.getLlamacppStatus).toHaveBeenCalledTimes(2)
+      expect(apiMock.getLlamacppInventory).toHaveBeenCalledTimes(2)
+      expect(apiMock.getLlamacppAssets).toHaveBeenCalledTimes(2)
+      expect(apiMock.getLlamacppHardware).toHaveBeenCalledTimes(2)
+      expect(apiMock.listLlamacppProfiles).toHaveBeenCalledTimes(2)
+      expect(apiMock.listLlamacppInstances).toHaveBeenCalledTimes(2)
+      expect(apiMock.listLlamacppAssetDownloads).toHaveBeenCalledTimes(2)
     })
+    expect(apiMock.startLlamacppModel).not.toHaveBeenCalled()
+    expect(apiMock.startLlamacppProfile).not.toHaveBeenCalled()
   })
 
   it("keeps the page usable and names the runtime outage on a 503", async () => {
@@ -1062,6 +1134,30 @@ describe("LlamacppAdminPage", () => {
       )
     ).toBeTruthy()
     expect(screen.queryByText("Admin APIs not available")).toBeNull()
+  })
+
+  it.each(["runtime", "profile"])("keeps recovery controls after a missing %s mutation target", async (target) => {
+    const error = Object.assign(new Error("This saved profile no longer exists."), { status: 404 })
+    if (target === "runtime") apiMock.startLlamacppProfile.mockRejectedValueOnce(error)
+    else apiMock.deleteLlamacppProfile.mockRejectedValueOnce(error)
+    render(<LlamacppAdminPage />)
+    const action = target === "runtime" ? "Start runtime analysis" : "Delete saved profile"
+    const button = await screen.findByRole("button", { name: action })
+    await act(async () => { fireEvent.click(button) })
+    const mutation = target === "runtime" ? apiMock.startLlamacppProfile : apiMock.deleteLlamacppProfile
+    expect(mutation).toHaveBeenCalledTimes(1)
+    expect(mutation).toHaveBeenCalledWith("analysis", requestOptions())
+    expect(screen.getByText("Inventory")).toBeTruthy()
+    expect(screen.queryByText("Admin APIs not available")).toBeNull()
+    expect(screen.getByRole("button", { name: "Start Server" })).toBeTruthy()
+  })
+
+  it("retains the forbidden guard after a lifecycle mutation denial", async () => {
+    apiMock.startLlamacppProfile.mockRejectedValueOnce(Object.assign(new Error("Forbidden"), { status: 403 }))
+    render(<LlamacppAdminPage />)
+    fireEvent.click(await screen.findByRole("button", { name: "Start runtime analysis" }))
+    expect(await screen.findByText("Admin access required")).toBeTruthy()
+    expect(screen.queryByText("Inventory")).toBeNull()
   })
 
   it("gates controls when admin APIs are genuinely missing (404)", async () => {

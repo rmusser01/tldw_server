@@ -34,9 +34,9 @@ Docs/superpowers/plans/2026-05-22-omnivoice-sidecar-smoke-helper-plan.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented a repo-native OmniVoice managed sidecar smoke helper that exercises OmniVoiceSidecarSupervisor plus OmniVoiceAdapter, preserves sidecar Python symlinks when building config, validates parseable non-silent 24 kHz mono WAV output, and always shuts down the supervisor. Updated the TTS setup guide with model path examples, provider config, smoke command, opt-in pytest caveats, and common failure notes. Addressed PR #1969 review fixes with typed/docstring cleanup, bounded WAV sample analysis, executable sidecar-python validation, positive speed/num_step validation, shutdown error preservation, and Backlog metadata corrections.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

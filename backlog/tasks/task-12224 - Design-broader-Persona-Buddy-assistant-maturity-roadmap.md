@@ -58,14 +58,14 @@ Create the approved staged design spec for the broader Persona/Buddy assistant f
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added `Docs/superpowers/specs/2026-05-10-persona-buddy-assistant-maturity-roadmap-design.md` with the approved staged roadmap.
 - First implementation target is Stage 1 reliability/UX baseline, preceded by Stage 0 current-state audit and issue-tree refresh.
 - Spec grounds the roadmap in closed Persona/Buddy visual/runtime trackers and the open/stale #635 Persona Chat tracker.
 - Verification: `git diff --check` passed.
 - Bandit: skipped because this is a docs/backlog-only design change with no touched Python code.
 - Spec review status: approved by reviewer subagent `019e109f-5507-7a21-8c63-acb055cf5b54` after the first review attempt stalled and was shut down without a verdict.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

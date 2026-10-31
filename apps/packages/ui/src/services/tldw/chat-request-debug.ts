@@ -35,13 +35,60 @@ type CaptureChatRequestDebugSnapshotInput = {
   metadata?: ChatRequestDebugMetadata
 }
 
-let lastChatRequestDebugSnapshot: ChatRequestDebugSnapshot | null = null
+type PendingChatRequestDebugSnapshot = {
+  endpoint: string
+  method: string
+  mode: ChatRequestDebugMode
+  sentAt: string
+  // Raw references are cloned lazily on first read (TASK-13511): the capture
+  // path used to JSON deep-clone the full conversation payload on every chat
+  // request even though the raw preview is the only reader. Cloning at read
+  // time removes that synchronous per-request cost entirely.
+  rawBody: unknown
+  rawMetadata?: ChatRequestDebugMetadata
+  clonedBody?: unknown
+  clonedMetadata?: ChatRequestDebugMetadata
+  cloned: boolean
+}
+
+let pendingSnapshot: PendingChatRequestDebugSnapshot | null = null
+
+// WP-22: the debug pipeline is opt-in. The only production consumer is the
+// Playground raw-request preview; everything else is tests. While disabled,
+// capture is a no-op — chat requests pay nothing (not even the pending
+// snapshot allocation or its reference retention of the conversation payload).
+let chatRequestDebugEnabled = false
+
+export const setChatRequestDebugEnabled = (enabled: boolean): void => {
+  chatRequestDebugEnabled = enabled
+  if (!enabled) pendingSnapshot = null
+}
 
 const clonePayload = (body: unknown): unknown => {
   try {
     return JSON.parse(JSON.stringify(body))
   } catch {
     return body
+  }
+}
+
+const resolveSnapshot = (): ChatRequestDebugSnapshot | null => {
+  const pending = pendingSnapshot
+  if (!pending) return null
+  if (!pending.cloned) {
+    pending.clonedBody = clonePayload(pending.rawBody)
+    pending.clonedMetadata = pending.rawMetadata
+      ? (clonePayload(pending.rawMetadata) as ChatRequestDebugMetadata)
+      : undefined
+    pending.cloned = true
+  }
+  return {
+    endpoint: pending.endpoint,
+    method: pending.method,
+    mode: pending.mode,
+    sentAt: pending.sentAt,
+    body: pending.clonedBody,
+    metadata: pending.clonedMetadata
   }
 }
 
@@ -52,20 +99,19 @@ export const captureChatRequestDebugSnapshot = ({
   body,
   metadata
 }: CaptureChatRequestDebugSnapshotInput) => {
-  lastChatRequestDebugSnapshot = {
+  if (!chatRequestDebugEnabled) return
+  pendingSnapshot = {
     endpoint,
     method,
     mode,
     sentAt: new Date().toISOString(),
-    body: clonePayload(body),
-    metadata: metadata
-      ? (clonePayload(metadata) as ChatRequestDebugMetadata)
-      : undefined
+    rawBody: body,
+    rawMetadata: metadata,
+    cloned: false
   }
 }
 
-export const getLastChatRequestDebugSnapshot = () =>
-  lastChatRequestDebugSnapshot
+export const getLastChatRequestDebugSnapshot = () => resolveSnapshot()
 
 // Backward-compatible helper for prior /chat/completions-only consumers.
 export type ChatCompletionDebugSnapshot = {
@@ -78,7 +124,7 @@ export type ChatCompletionDebugSnapshot = {
 
 export const getLastChatCompletionDebugSnapshot =
   (): ChatCompletionDebugSnapshot | null => {
-    const snapshot = lastChatRequestDebugSnapshot
+    const snapshot = resolveSnapshot()
     if (!snapshot || snapshot.endpoint !== "/api/v1/chat/completions") {
       return null
     }

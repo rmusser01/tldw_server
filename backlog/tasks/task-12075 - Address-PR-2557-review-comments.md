@@ -32,9 +32,9 @@ Verify and address actionable review comments on PR #2557. Fix only still-valid 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified PR #2557 review threads. Fixed the still-valid pytest marker issue, TASK-12073/TASK-12074 incomplete task records, and the evaluations-docs fallback guard. For the remaining findings, kept the repo's Backlog.md `task-id - Title.md` filename convention, left MkDocs strict mode disabled because `python -m mkdocs build --strict -f Docs/mkdocs.yml` currently aborts on 106 existing docs warnings unrelated to this PR, and treated CodeRabbit's docstring-coverage warning as not applicable because this PR does not add new production Python functions requiring docstrings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

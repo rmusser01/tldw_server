@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next"
 import type { PersonaInfo } from "@/routes/personaTypes"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
 import { useStoreMessageOption } from "@/store/option"
@@ -18,11 +19,12 @@ import {
   type AssistantSelectTab
 } from "@/utils/assistant-select-events"
 import {
+  isProtectedTrackedPersonaUnavailable,
   characterToAssistantSelection,
   personaToAssistantSelection,
   type AssistantSelection
 } from "@/types/assistant-selection"
-import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return"
+import { focusFirstVisibleElement } from "@/utils/focus-return"
 import {
   buildAssistantOverlaySnapshotFromSelection,
   resolveAssistantOverlaySnapshot
@@ -32,15 +34,19 @@ type Props = {
   className?: string
   iconClassName?: string
   showLabel?: boolean
+  onOpenChange?: (open: boolean) => void
   variant?: "inline" | "dropdown"
   labelOverride?: string
   selectionModePreference?: "tracked" | "overlay"
   initialTab?: AssistantSelectTab
   selection?: AssistantSelection | null
   onSelectionChange?: (selection: AssistantSelection) => void | Promise<void>
-  onSelectionComplete?: (
-    selection: AssistantSelection
-  ) => void | Promise<void>
+  trackedSelectionLoading?: boolean
+  onTrackedSelection?: (
+    selection: AssistantSelection,
+    isCurrent?: () => boolean
+  ) => boolean | void | Promise<boolean | void>
+  onSelectionComplete?: (selection: AssistantSelection) => void | Promise<void>
 }
 
 type CharacterSummary = Record<string, unknown> & {
@@ -86,8 +92,7 @@ const normalizeCharacterSelection = (
 const normalizePersonaSelection = (
   persona: PersonaInfo
 ): AssistantSelection | null => {
-  const normalizedId =
-    persona.id != null ? String(persona.id) : null
+  const normalizedId = persona.id != null ? String(persona.id) : null
   const normalizedName =
     typeof persona.name === "string" && persona.name.trim().length > 0
       ? persona.name.trim()
@@ -106,8 +111,7 @@ const byAssistantName = (left: AssistantSelection, right: AssistantSelection) =>
 const normalizeFavoriteEntry = (
   favorite: FavoriteCharacter
 ): FavoriteCharacter | null => {
-  const name =
-    typeof favorite.name === "string" ? favorite.name.trim() : ""
+  const name = typeof favorite.name === "string" ? favorite.name.trim() : ""
   if (!name) return null
   return {
     id: typeof favorite.id === "string" ? favorite.id : undefined,
@@ -120,25 +124,37 @@ export const AssistantSelect: React.FC<Props> = ({
   className = "text-text-muted",
   iconClassName = "size-5",
   showLabel = true,
+  onOpenChange,
   variant = "inline",
   labelOverride,
   selectionModePreference = "tracked",
   initialTab,
   selection,
   onSelectionChange,
+  onTrackedSelection,
+  trackedSelectionLoading = false,
   onSelectionComplete
 }) => {
-  const { t } = useTranslation(["option", "common"])
+  const { t } = useTranslation(["option", "common", "playground"])
+  const historySelection = useHistorySelectionContext()
+  const personaGuidanceId = React.useId()
   const [storedAssistant, setSelectedAssistant, assistantMeta] =
     useSelectedAssistant(null)
-  const selectedAssistant = selection === undefined ? storedAssistant : selection
-  const selectionPending = !onSelectionChange && Boolean(assistantMeta?.isLoading)
+  const selectedAssistant =
+    selection === undefined ? storedAssistant : selection
+  const [trackedSelectionPending, setTrackedSelectionPending] =
+    React.useState(false)
+  const selectionPending =
+    !onSelectionChange &&
+    (Boolean(assistantMeta?.isLoading) || trackedSelectionPending)
   const historyId = useStoreMessageOption((state) => state.historyId)
   const serverChatId = useStoreMessageOption((state) => state.serverChatId)
   const setHistoryId = useStoreMessageOption((state) => state.setHistoryId)
   const setHistory = useStoreMessageOption((state) => state.setHistory)
   const setMessages = useStoreMessageOption((state) => state.setMessages)
-  const setServerChatId = useStoreMessageOption((state) => state.setServerChatId)
+  const setServerChatId = useStoreMessageOption(
+    (state) => state.setServerChatId
+  )
   const serverChatAssistantKind = useStoreMessageOption(
     (state) => state.serverChatAssistantKind
   )
@@ -168,13 +184,36 @@ export const AssistantSelect: React.FC<Props> = ({
     serverChatId
   })
   const [open, setOpen] = React.useState(false)
+  React.useEffect(() => {
+    onOpenChange?.(open)
+  }, [open, onOpenChange])
+  const trackedSelectionPendingRef = React.useRef<object | null>(null)
+  const selectionLifetimeRef = React.useRef(0)
+  const invalidateSelectionLifetime = React.useCallback(() => {
+    selectionLifetimeRef.current++
+    trackedSelectionPendingRef.current = null
+    setTrackedSelectionPending(false)
+  }, [])
+  React.useLayoutEffect(() => {
+    invalidateSelectionLifetime()
+    return invalidateSelectionLifetime
+  }, [open, selectionModePreference, invalidateSelectionLifetime])
   const [searchText, setSearchText] = React.useState("")
   const selectionModeIntentRef = React.useRef<"tracked" | "overlay">(
     selectionModePreference
   )
+  const [requestedSelectionMode, setRequestedSelectionMode] = React.useState(selectionModePreference)
+  const publishSelectionModeIntent = React.useCallback((mode: "tracked" | "overlay") => {
+    selectionModeIntentRef.current = mode
+    setRequestedSelectionMode(mode)
+  }, [])
+  const trackedPersonaUnavailable = isProtectedTrackedPersonaUnavailable(Boolean(historySelection), "persona", requestedSelectionMode)
   const [activeTab, setActiveTab] = React.useState<"character" | "persona">(
     initialTab ?? selectedAssistant?.kind ?? "character"
   )
+  const waitingForTrackedModels = Boolean(trackedSelectionLoading && onTrackedSelection &&
+    !onSelectionChange && requestedSelectionMode === "tracked" &&
+    !(activeTab === "persona" && trackedPersonaUnavailable))
   React.useEffect(() => {
     if (initialTab) setActiveTab(initialTab)
   }, [initialTab])
@@ -214,20 +253,38 @@ export const AssistantSelect: React.FC<Props> = ({
     ]
   )
 
+  const popupRef = React.useRef<HTMLDivElement>(null)
+  const returnFrameRef = React.useRef<number | null>(null)
+  const returnLifetimeRef = React.useRef(0)
+  const retireReturnFocus = React.useCallback(() => {
+    returnLifetimeRef.current++
+    if (returnFrameRef.current !== null) {
+      window.cancelAnimationFrame(returnFrameRef.current)
+      returnFrameRef.current = null
+    }
+  }, [])
+  React.useLayoutEffect(() => {
+    if (open) retireReturnFocus()
+  }, [open, retireReturnFocus])
+  React.useLayoutEffect(() => () => retireReturnFocus(), [retireReturnFocus])
   const restoreReturnFocus = React.useCallback(() => {
+    retireReturnFocus()
+    const lifetime = returnLifetimeRef.current
     const selector = returnFocusSelectorRef.current
     returnFocusSelectorRef.current = null
-    if (!selector) {
-      if (variant === "dropdown" && typeof window !== "undefined") {
-        window.requestAnimationFrame(() => {
-          triggerButtonRef.current?.focus()
-        })
-      }
-      return
-    }
-
-    scheduleFocusFirstVisibleElement(selector)
-  }, [variant])
+    const ownedFocus = () =>
+      document.activeElement === document.body ||
+      document.activeElement === triggerButtonRef.current ||
+      Boolean(popupRef.current?.contains(document.activeElement))
+    if (!ownedFocus()) return
+    returnFrameRef.current = window.requestAnimationFrame(() => {
+      if (returnLifetimeRef.current !== lifetime) return
+      returnFrameRef.current = null
+      if (!ownedFocus()) return
+      if (selector) focusFirstVisibleElement(selector)
+      else if (variant === "dropdown") triggerButtonRef.current?.focus()
+    })
+  }, [variant, retireReturnFocus])
 
   const trackedSelectionMatchesActiveChat = React.useCallback(
     (entry: AssistantSelection) => {
@@ -271,19 +328,23 @@ export const AssistantSelect: React.FC<Props> = ({
   ])
 
   React.useEffect(() => {
-    if (selectedAssistant?.kind === "character" || selectedAssistant?.kind === "persona") {
+    if (
+      selectedAssistant?.kind === "character" ||
+      selectedAssistant?.kind === "persona"
+    ) {
       setActiveTab(selectedAssistant.kind)
     }
   }, [selectedAssistant?.kind])
 
   React.useEffect(() => {
-    selectionModeIntentRef.current = selectionModePreference
-  }, [selectionModePreference])
+    publishSelectionModeIntent(selectionModePreference)
+  }, [publishSelectionModeIntent, selectionModePreference])
 
   React.useEffect(() => {
     if (typeof window === "undefined") return
 
     const handleOpen = (event: Event) => {
+      invalidateSelectionLifetime()
       const detail = (event as CustomEvent<AssistantSelectOpenDetail>).detail
       const requestedTab = detail?.tab
       if (requestedTab === "character" || requestedTab === "persona") {
@@ -295,7 +356,7 @@ export const AssistantSelect: React.FC<Props> = ({
           ? detail.returnFocusSelector.trim()
           : null
       const requestedMode = detail?.applyAs ?? selectionModePreference
-      selectionModeIntentRef.current = requestedMode
+      publishSelectionModeIntent(requestedMode)
       pendingSelectionModeIntentRef.current = detail?.applyAs ?? null
       eventOpenIntentRef.current = true
       setSearchText("")
@@ -306,7 +367,7 @@ export const AssistantSelect: React.FC<Props> = ({
     return () => {
       window.removeEventListener(OPEN_ASSISTANT_SELECT_EVENT, handleOpen)
     }
-  }, [selectionModePreference])
+  }, [invalidateSelectionLifetime, publishSelectionModeIntent, selectionModePreference])
 
   React.useEffect(() => {
     if (!open || typeof window === "undefined") return
@@ -336,64 +397,79 @@ export const AssistantSelect: React.FC<Props> = ({
     }
   }, [open])
 
+  const catalogOwnerIsCurrent = assistantMeta?.isCurrent
+  React.useLayoutEffect(() => {
+    invalidateSelectionLifetime()
+    setCharacters([])
+    setPersonas([])
+  }, [assistantMeta?.assistantKey, catalogOwnerIsCurrent, invalidateSelectionLifetime])
+
   const loadCharacters = React.useCallback(
     async (isCancelled: () => boolean = () => false) => {
+      const current = () => !isCancelled() && (catalogOwnerIsCurrent?.() ?? true)
+      if (!current()) return
       setCharactersLoading(true)
       setCharactersError(false)
       try {
         await tldwClient.initialize()
+        if (!current()) return
         if (typeof tldwClient.listAllCharacters !== "function") {
-          if (!isCancelled()) {
+          if (current()) {
             setCharacters([])
           }
           return
         }
         const result = await tldwClient.listAllCharacters()
-        if (!isCancelled()) {
-          setCharacters(Array.isArray(result) ? (result as CharacterSummary[]) : [])
+        if (current()) {
+          setCharacters(
+            Array.isArray(result) ? (result as CharacterSummary[]) : []
+          )
         }
       } catch {
-        if (!isCancelled()) {
+        if (current()) {
           setCharacters([])
           setCharactersError(true)
         }
       } finally {
-        if (!isCancelled()) {
+        if (current()) {
           setCharactersLoading(false)
         }
       }
     },
-    []
+    [catalogOwnerIsCurrent]
   )
 
   const loadPersonas = React.useCallback(
     async (isCancelled: () => boolean = () => false) => {
+      const current = () => !isCancelled() && (catalogOwnerIsCurrent?.() ?? true)
+      if (!current()) return
       setPersonasLoading(true)
       setPersonasError(false)
       try {
         await tldwClient.initialize()
+        if (!current()) return
         if (typeof tldwClient.listPersonaProfiles !== "function") {
-          if (!isCancelled()) {
+          if (current()) {
             setPersonas([])
           }
           return
         }
         const result = await tldwClient.listPersonaProfiles()
-        if (!isCancelled()) {
+        if (current()) {
           setPersonas(Array.isArray(result) ? (result as PersonaInfo[]) : [])
         }
       } catch {
-        if (!isCancelled()) {
+        if (current()) {
           setPersonas([])
           setPersonasError(true)
         }
       } finally {
-        if (!isCancelled()) {
+        if (current()) {
           setPersonasLoading(false)
         }
       }
     },
-    []
+    [catalogOwnerIsCurrent]
   )
 
   React.useEffect(() => {
@@ -474,7 +550,8 @@ export const AssistantSelect: React.FC<Props> = ({
         const list = Array.isArray(previousFavorites) ? previousFavorites : []
         const nextFavorites = list.filter((favorite) => {
           if (nextFavorite.id && favorite.id === nextFavorite.id) return false
-          if (nextFavorite.slug && favorite.slug === nextFavorite.slug) return false
+          if (nextFavorite.slug && favorite.slug === nextFavorite.slug)
+            return false
           if (favorite.name === nextFavorite.name) return false
           return true
         })
@@ -526,26 +603,22 @@ export const AssistantSelect: React.FC<Props> = ({
 
   const handleSelect = React.useCallback(
     async (entry: AssistantSelection) => {
-      if (selectionPending) return
+      if (selectionPending || waitingForTrackedModels || trackedSelectionPendingRef.current) return
       const nextMode =
         pendingSelectionModeIntentRef.current ?? selectionModeIntentRef.current
+      if (isProtectedTrackedPersonaUnavailable(Boolean(historySelection), entry.kind, nextMode)) return
       const isTrackedMode =
         effectiveAssistantState.mode === "tracked_character" ||
         effectiveAssistantState.mode === "tracked_persona"
       if (nextMode === "overlay" && isTrackedMode) {
         setOpen(false)
         setSearchText("")
-        selectionModeIntentRef.current = selectionModePreference
+        publishSelectionModeIntent(selectionModePreference)
         pendingSelectionModeIntentRef.current = null
         restoreReturnFocus()
         return
       }
 
-      setOpen(false)
-      setSearchText("")
-      selectionModeIntentRef.current = selectionModePreference
-      pendingSelectionModeIntentRef.current = null
-      restoreReturnFocus()
       const nextEntry: AssistantSelection = {
         ...entry,
         metadata: {
@@ -553,6 +626,40 @@ export const AssistantSelect: React.FC<Props> = ({
           selectionMode: nextMode
         }
       }
+      if (!onSelectionChange && nextMode === "tracked" && onTrackedSelection) {
+        const attempt = {}
+        trackedSelectionPendingRef.current = attempt
+        setTrackedSelectionPending(true)
+        const lifetime = selectionLifetimeRef.current
+        try {
+          if (
+            (await onTrackedSelection(
+              nextEntry,
+              () => selectionLifetimeRef.current === lifetime
+            )) === false ||
+            selectionLifetimeRef.current !== lifetime
+          )
+            return
+          await onSelectionComplete?.(nextEntry)
+          if (selectionLifetimeRef.current !== lifetime) return
+        } finally {
+          if (trackedSelectionPendingRef.current === attempt) {
+            trackedSelectionPendingRef.current = null
+            setTrackedSelectionPending(false)
+          }
+        }
+        setOpen(false)
+        setSearchText("")
+        publishSelectionModeIntent(selectionModePreference)
+        pendingSelectionModeIntentRef.current = null
+        restoreReturnFocus()
+        return
+      }
+      setOpen(false)
+      setSearchText("")
+      publishSelectionModeIntent(selectionModePreference)
+      pendingSelectionModeIntentRef.current = null
+      restoreReturnFocus()
       if (onSelectionChange) {
         await onSelectionChange(nextEntry)
         return
@@ -572,7 +679,8 @@ export const AssistantSelect: React.FC<Props> = ({
       }
       await setSelectedAssistant(nextEntry)
       if (nextMode === "overlay") {
-        let overlaySnapshot = buildAssistantOverlaySnapshotFromSelection(nextEntry)
+        let overlaySnapshot =
+          buildAssistantOverlaySnapshotFromSelection(nextEntry)
         try {
           overlaySnapshot = await resolveAssistantOverlaySnapshot(nextEntry)
         } catch (error) {
@@ -596,10 +704,14 @@ export const AssistantSelect: React.FC<Props> = ({
       await onSelectionComplete?.(nextEntry)
     },
     [
+      historySelection,
+      publishSelectionModeIntent,
       selectionPending,
+      waitingForTrackedModels,
       effectiveAssistantState.mode,
       clearActiveServerChat,
       onSelectionChange,
+      onTrackedSelection,
       onSelectionComplete,
       restoreReturnFocus,
       selectionModePreference,
@@ -610,28 +722,31 @@ export const AssistantSelect: React.FC<Props> = ({
     ]
   )
 
-  const handleOpenChange = React.useCallback((nextOpen: boolean) => {
-    setOpen(nextOpen)
-    if (nextOpen) {
-      if (eventOpenIntentRef.current) {
-        eventOpenIntentRef.current = false
-      } else if (pendingSelectionModeIntentRef.current) {
-        selectionModeIntentRef.current = pendingSelectionModeIntentRef.current
-      } else {
-        selectionModeIntentRef.current = selectionModePreference
+  const handleOpenChange = React.useCallback(
+    (nextOpen: boolean) => {
+      setOpen(nextOpen)
+      if (nextOpen) {
+        if (eventOpenIntentRef.current) {
+          eventOpenIntentRef.current = false
+        } else if (pendingSelectionModeIntentRef.current) {
+          publishSelectionModeIntent(pendingSelectionModeIntentRef.current)
+        } else {
+          publishSelectionModeIntent(selectionModePreference)
+        }
       }
-    }
-    if (!nextOpen) {
-      setSearchText("")
-      eventOpenIntentRef.current = false
-      restoreReturnFocus()
-    }
-  }, [restoreReturnFocus, selectionModePreference])
+      if (!nextOpen) {
+        setSearchText("")
+        eventOpenIntentRef.current = false
+        restoreReturnFocus()
+      }
+    },
+    [publishSelectionModeIntent, restoreReturnFocus, selectionModePreference]
+  )
 
   const openActorSettings = React.useCallback(() => {
     setOpen(false)
     setSearchText("")
-    selectionModeIntentRef.current = selectionModePreference
+    publishSelectionModeIntent(selectionModePreference)
     restoreReturnFocus()
     try {
       if (typeof window !== "undefined") {
@@ -640,7 +755,7 @@ export const AssistantSelect: React.FC<Props> = ({
     } catch {
       // no-op
     }
-  }, [restoreReturnFocus, selectionModePreference])
+  }, [publishSelectionModeIntent, restoreReturnFocus, selectionModePreference])
 
   const buttonLabel =
     labelOverride ||
@@ -661,7 +776,10 @@ export const AssistantSelect: React.FC<Props> = ({
       key: "character" as const,
       label: t("option:assistant.charactersTab", "Characters"),
       emptyLabel: searchText.trim()
-        ? t("option:assistant.noCharacterMatches", "No characters match your search.")
+        ? t(
+            "option:assistant.noCharacterMatches",
+            "No characters match your search."
+          )
         : t("option:assistant.noCharacters", "No characters available."),
       entries: sortedCharacterEntries,
       showFavorites: true
@@ -670,13 +788,17 @@ export const AssistantSelect: React.FC<Props> = ({
       key: "persona" as const,
       label: t("option:assistant.personasTab", "Personas"),
       emptyLabel: searchText.trim()
-        ? t("option:assistant.noPersonaMatches", "No personas match your search.")
+        ? t(
+            "option:assistant.noPersonaMatches",
+            "No personas match your search."
+          )
         : t("option:assistant.noPersonas", "No personas available."),
       entries: sortedPersonaEntries,
       showFavorites: false
     }
   ]
-  const activeTabDefinition = tabs.find((tab) => tab.key === activeTab) ?? tabs[0]
+  const activeTabDefinition =
+    tabs.find((tab) => tab.key === activeTab) ?? tabs[0]
   const activeTabEntries = activeTabDefinition?.entries ?? []
   const activeTabEmptyLabel =
     activeTabDefinition?.emptyLabel ??
@@ -690,10 +812,7 @@ export const AssistantSelect: React.FC<Props> = ({
     activeTab === "character" ? loadCharacters : loadPersonas
   const activeTabErrorLabel =
     activeTab === "character"
-      ? t(
-          "option:assistant.charactersLoadError",
-          "Could not load characters."
-        )
+      ? t("option:assistant.charactersLoadError", "Could not load characters.")
       : t("option:assistant.personasLoadError", "Could not load personas.")
   const activeTabRetryLabel =
     activeTab === "character"
@@ -708,134 +827,184 @@ export const AssistantSelect: React.FC<Props> = ({
     "Loading characters and personas"
   )
 
-  const activeTabContent =
-    activeTabLoading ? (
-      <div
-        role="status"
-        aria-label={catalogLoadingLabel}
-        className="px-3 py-4 text-center text-sm text-text-subtle"
-      >
-        {activeTabLoadingLabel}
-      </div>
-    ) : activeTabError ? (
-      <div className="space-y-2 px-3 py-4 text-center text-sm text-text-subtle">
-        <p>{activeTabErrorLabel}</p>
-        <button
-          type="button"
-          className="rounded-md border border-border bg-surface px-2 py-1 text-xs font-medium text-text hover:bg-surface2"
-          onClick={() => {
-            void retryActiveTabLoad()
-          }}
-        >
-          {activeTabRetryLabel}
-        </button>
-      </div>
-    ) : activeTabEntries.length === 0 ? (
-      <div className="px-3 py-4 text-center text-sm text-text-subtle">
-        {activeTabEmptyLabel}
-      </div>
-    ) : (
-      <div
-        data-testid="assistant-select-menu"
-        className="max-h-80 overflow-y-auto px-2 py-2"
-      >
-        <div className="flex flex-col gap-1">
-          {activeTabEntries.map((entry) => {
-            const isActive =
-              selectedAssistant?.kind === entry.kind &&
-              selectedAssistant?.id === entry.id
-            const isFavorite =
-              activeTabShowsFavorites && isFavoriteCharacter(entry)
-            const favoriteLabel = isFavorite
-              ? t(
-                  "option:assistant.favoriteRemove",
-                  `Remove ${entry.name} from favorites`
-                )
-              : t(
-                  "option:assistant.favoriteAdd",
-                  `Add ${entry.name} to favorites`
-                )
-
-            return (
-              <div
-                key={`${entry.kind}:${entry.id}`}
-                className="flex items-center gap-2"
-              >
-                <button
-                  type="button"
-                  aria-label={entry.name}
-                  disabled={selectionPending}
-                  className={`flex min-w-0 flex-1 items-center gap-2 rounded-md border px-3 py-2 text-left text-sm transition ${
-                    isActive
-                      ? "border-primary bg-primary/10 text-text"
-                      : "border-border bg-background text-text hover:bg-surface2"
-                  }`}
-                  onPointerDown={(event) => {
-                    event.stopPropagation()
-                  }}
-                  onMouseDown={(event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                  }}
-                  onClick={() => {
-                    void handleSelect(entry)
-                  }}
-                >
-                  {entry.avatar_url ? (
-                    <img
-                      src={entry.avatar_url}
-                      alt={entry.name}
-                      className="h-5 w-5 rounded-full"
-                    />
-                  ) : (
-                    <UserCircle2 className="h-5 w-5 flex-shrink-0 text-text-subtle" />
-                  )}
-                  <span className="min-w-0 flex-1 truncate font-medium">
-                    {entry.name}
-                  </span>
-                  <span
-                    aria-hidden="true"
-                    className="text-xs text-text-subtle"
-                  >
-                    {entry.kind === "persona" ? "Persona" : "Character"}
-                  </span>
-                </button>
-                {activeTabShowsFavorites ? (
-                  <Tooltip title={favoriteLabel}>
-                    <button
-                      type="button"
-                      className="rounded-md p-1.5 text-text-subtle transition hover:bg-surface2"
-                      aria-label={favoriteLabel}
-                      onMouseDown={(event) => {
-                        event.preventDefault()
-                        event.stopPropagation()
-                      }}
-                      onClick={(event) => {
-                        event.preventDefault()
-                        event.stopPropagation()
-                        toggleFavoriteCharacter(entry)
-                      }}
-                    >
-                      <Star
-                        className={`h-4 w-4 ${
-                          isFavorite ? "fill-warn text-warn" : "text-text-subtle"
-                        }`}
-                      />
-                    </button>
-                  </Tooltip>
-                ) : null}
-              </div>
-            )
-          })}
+  const activeTabContent = assistantMeta?.verificationState === "error" ? (
+    <div
+      role="alert"
+      className="space-y-2 px-3 py-4 text-center text-sm text-text-subtle">
+      <p>
+        {t(
+          "playground:characterChatSessions.verificationFailed",
+          "Could not verify your server account. Retry or check your connection settings."
+        )}
+      </p>
+      <button
+        type="button"
+        className="rounded-md border border-border bg-surface px-2 py-1 text-xs font-medium text-text hover:bg-surface2"
+        onClick={assistantMeta.retryVerification}>
+        {t(
+          "playground:characterChatSessions.retryVerification",
+          "Retry account verification"
+        )}
+      </button>
+    </div>
+  ) : activeTabLoading ? (
+    <div
+      role="status"
+      aria-label={catalogLoadingLabel}
+      className="px-3 py-4 text-center text-sm text-text-subtle">
+      {activeTabLoadingLabel}
+    </div>
+  ) : activeTabError ? (
+    <div className="space-y-2 px-3 py-4 text-center text-sm text-text-subtle">
+      <p>{activeTabErrorLabel}</p>
+      <button
+        type="button"
+        className="rounded-md border border-border bg-surface px-2 py-1 text-xs font-medium text-text hover:bg-surface2"
+        onClick={() => {
+          void retryActiveTabLoad()
+        }}>
+        {activeTabRetryLabel}
+      </button>
+    </div>
+  ) : activeTabEntries.length === 0 ? (
+    <div className="px-3 py-4 text-center text-sm text-text-subtle">
+      {activeTabEmptyLabel}
+    </div>
+  ) : (
+    <div
+      data-testid="assistant-select-menu"
+      aria-busy={selectionPending || waitingForTrackedModels}
+      className="max-h-80 overflow-y-auto px-2 py-2">
+      {waitingForTrackedModels && <p role="status" className="px-2 pb-2 text-sm text-text-muted">
+        {t("option:assistant.trackedModelsLoading", "Loading models before tracked chat selection. Wait for discovery to finish, or retry in the model picker.")}
+      </p>}
+      {activeTab === "persona" && trackedPersonaUnavailable && (
+        <div className="px-2 pb-2 text-sm text-text-muted">
+          <p id={personaGuidanceId} role="status">
+            {t("option:assistant.trackedPersonaUnavailable", "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat.")}
+          </p>
+          {!onSelectionChange && effectiveAssistantState.mode !== "tracked_character" && effectiveAssistantState.mode !== "tracked_persona" && (
+            <button type="button" disabled={selectionPending} className="mt-2 min-h-[44px] rounded-md border border-border px-3 text-text hover:bg-surface2"
+              onClick={() => {
+                invalidateSelectionLifetime()
+                pendingSelectionModeIntentRef.current = "overlay"
+                publishSelectionModeIntent("overlay")
+              }}>
+              {t("option:assistant.usePersonaOverlay", "Use a persona prompt overlay")}
+            </button>
+          )}
         </div>
+      )}
+      {trackedSelectionPending && (
+        <p role="status" className="px-2 pb-2 text-sm text-text-subtle">
+          {t("option:assistant.checkingSetup", "Checking setup…")}
+        </p>
+      )}
+      <div className="flex flex-col gap-1">
+        {activeTabEntries.map((entry) => {
+          const isActive =
+            selectedAssistant?.kind === entry.kind &&
+            selectedAssistant?.id === entry.id
+          const isFavorite =
+            activeTabShowsFavorites && isFavoriteCharacter(entry)
+          const favoriteLabel = isFavorite
+            ? t(
+                "option:assistant.favoriteRemove",
+                `Remove ${entry.name} from favorites`
+              )
+            : t(
+                "option:assistant.favoriteAdd",
+                `Add ${entry.name} to favorites`
+              )
+
+          return (
+            <div
+              key={`${entry.kind}:${entry.id}`}
+              className="flex items-center gap-2">
+              <button
+                type="button"
+                aria-label={entry.name}
+                disabled={selectionPending || waitingForTrackedModels || (entry.kind === "persona" && trackedPersonaUnavailable)}
+                aria-describedby={entry.kind === "persona" && trackedPersonaUnavailable ? personaGuidanceId : undefined}
+                className={`flex min-w-0 flex-1 items-center gap-2 rounded-md border px-3 py-2 text-left text-sm transition ${
+                  isActive
+                    ? "border-primary bg-primary/10 text-text"
+                    : "border-border bg-background text-text hover:bg-surface2"
+                }`}
+                onPointerDown={(event) => {
+                  event.stopPropagation()
+                }}
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                }}
+                onClick={() => {
+                  void handleSelect(entry)
+                }}>
+                {entry.avatar_url ? (
+                  <img
+                    src={entry.avatar_url}
+                    alt={entry.name}
+                    className="h-5 w-5 rounded-full"
+                  />
+                ) : (
+                  <UserCircle2 className="h-5 w-5 flex-shrink-0 text-text-subtle" />
+                )}
+                <span className="min-w-0 flex-1 truncate font-medium">
+                  {entry.name}
+                </span>
+                <span aria-hidden="true" className="text-xs text-text-subtle">
+                  {entry.kind === "persona" ? "Persona" : "Character"}
+                </span>
+              </button>
+              {activeTabShowsFavorites ? (
+                <Tooltip title={favoriteLabel}>
+                  <button
+                    type="button"
+                    className="rounded-md p-1.5 text-text-subtle transition hover:bg-surface2"
+                    aria-label={favoriteLabel}
+                    onMouseDown={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                    }}
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      toggleFavoriteCharacter(entry)
+                    }}>
+                    <Star
+                      className={`h-4 w-4 ${
+                        isFavorite ? "fill-warn text-warn" : "text-text-subtle"
+                      }`}
+                    />
+                  </button>
+                </Tooltip>
+              ) : null}
+            </div>
+          )
+        })}
       </div>
-    )
+    </div>
+  )
 
   const content = (
     <div
+      ref={popupRef}
       data-testid="assistant-select-panel"
-      className="w-[320px] max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-surface text-text shadow-lg"
-    >
+      onKeyDown={(event) => {
+        if (
+          variant !== "dropdown" ||
+          event.key !== "Escape" ||
+          event.defaultPrevented ||
+          event.nativeEvent.isComposing
+        )
+          return
+        event.preventDefault()
+        event.stopPropagation()
+        setOpen(false)
+        restoreReturnFocus()
+      }}
+      className="w-[320px] max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-surface text-text shadow-lg">
       <div className="border-b border-border p-2">
         <Input
           ref={searchInputRef}
@@ -859,8 +1028,7 @@ export const AssistantSelect: React.FC<Props> = ({
       <div
         role="tablist"
         aria-label={t("option:assistant.tabList", "Character or persona")}
-        className="flex items-center gap-1 border-b border-border px-2 pt-2"
-      >
+        className="flex items-center gap-1 border-b border-border px-2 pt-2">
         {tabs.map((tab) => {
           const isActive = tab.key === activeTab
           return (
@@ -876,8 +1044,7 @@ export const AssistantSelect: React.FC<Props> = ({
                   ? "bg-surface2 font-medium text-text"
                   : "text-text-subtle hover:text-text"
               }`}
-              onClick={() => setActiveTab(tab.key)}
-            >
+              onClick={() => setActiveTab(tab.key)}>
               {tab.label}
             </button>
           )
@@ -886,16 +1053,14 @@ export const AssistantSelect: React.FC<Props> = ({
       <div
         id={`assistant-tabpanel-${activeTab}`}
         role="tabpanel"
-        aria-labelledby={`assistant-tab-${activeTab}`}
-      >
+        aria-labelledby={`assistant-tab-${activeTab}`}>
         {activeTabContent}
       </div>
       <div className="border-t border-border p-2">
         <button
           type="button"
           className="w-full rounded-md px-3 py-2 text-left text-sm font-medium text-text transition hover:bg-surface2"
-          onClick={openActorSettings}
-        >
+          onClick={openActorSettings}>
           {actorLabel}
         </button>
       </div>
@@ -916,8 +1081,7 @@ export const AssistantSelect: React.FC<Props> = ({
         root: "assistant-select-dropdown bg-surface text-text shadow-lg"
       }}
       placement="topLeft"
-      trigger={["click"]}
-    >
+      trigger={["click"]}>
       <Tooltip title={buttonLabel}>
         <button
           ref={triggerButtonRef}
@@ -928,12 +1092,13 @@ export const AssistantSelect: React.FC<Props> = ({
           aria-expanded={open}
           onClick={() => {
             pendingSelectionModeIntentRef.current = null
-            selectionModeIntentRef.current = selectionModePreference
-          }}
-        >
+            publishSelectionModeIntent(selectionModePreference)
+          }}>
           <UserCircle2 className={iconClassName} />
           {showLabel ? (
-            <span className="max-w-[180px] truncate text-sm">{buttonLabel}</span>
+            <span className="max-w-[180px] truncate text-sm">
+              {buttonLabel}
+            </span>
           ) : null}
         </button>
       </Tooltip>

@@ -8,6 +8,7 @@ from tldw_Server_API.app.core.AuthNZ import byok_helpers
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError, ChatConfigurationError, ChatProviderError
 from tldw_Server_API.app.core.exceptions import EgressPolicyError
+from tldw_Server_API.app.core.LLM_Calls import gateway
 
 
 def _base_args() -> dict:
@@ -25,7 +26,7 @@ def test_base_url_override_allowed(monkeypatch):
     monkeypatch.setattr(byok_helpers, "validate_base_url_override", lambda value: value)
     args = _base_args()
     args.update({"base_url": "https://example.com/v1", "trusted_base_url_override": True})
-    provider, request, _internal = chat_service._build_adapter_request_from_chat_args(args)
+    provider, request, _internal = gateway._build_adapter_request_from_chat_args(args)
     assert provider == "openai"  # nosec B101
     assert request["base_url"] == "https://example.com/v1"  # nosec B101
 
@@ -42,7 +43,7 @@ def test_base_url_override_allowlist_accepts_provider_alias(monkeypatch):
         }
     )
 
-    provider, request, _internal = chat_service._build_adapter_request_from_chat_args(args)
+    provider, request, _internal = gateway._build_adapter_request_from_chat_args(args)
 
     assert provider == "openai"  # nosec B101
     assert request["base_url"] == "https://example.com/v1"  # nosec B101
@@ -53,7 +54,7 @@ def test_base_url_override_rejected_when_untrusted(monkeypatch):
     args = _base_args()
     args.update({"base_url": "https://example.com/v1"})
     with pytest.raises(ChatBadRequestError):
-        chat_service._build_adapter_request_from_chat_args(args)
+        gateway._build_adapter_request_from_chat_args(args)
 
 
 def test_base_url_override_rejected_when_not_allowlisted(monkeypatch):
@@ -61,7 +62,7 @@ def test_base_url_override_rejected_when_not_allowlisted(monkeypatch):
     args = _base_args()
     args.update({"base_url": "https://example.com/v1", "trusted_base_url_override": True})
     with pytest.raises(ChatBadRequestError):
-        chat_service._build_adapter_request_from_chat_args(args)
+        gateway._build_adapter_request_from_chat_args(args)
 
 
 @pytest.mark.parametrize(
@@ -89,7 +90,7 @@ def test_local_provider_request_url_overrides_rejected(
     )
 
     with pytest.raises(ChatBadRequestError) as exc_info:
-        chat_service._build_adapter_request_from_chat_args(args)
+        gateway._build_adapter_request_from_chat_args(args)
 
     assert exc_info.value.provider == expected_provider  # nosec B101
     assert override_key in exc_info.value.message  # nosec B101
@@ -107,7 +108,7 @@ def test_build_adapter_request_omits_internal_chat_metadata() -> None:
         }
     )
 
-    provider, request, _internal = chat_service._build_adapter_request_from_chat_args(args)
+    provider, request, _internal = gateway._build_adapter_request_from_chat_args(args)
 
     assert provider == "openai"  # nosec B101
     assert not any(key.startswith("_chat_") for key in request)  # nosec B101
@@ -126,7 +127,7 @@ def test_chat_request_cannot_select_local_transport_or_scope() -> None:
         }
     )
 
-    _provider, request, internal = chat_service._build_adapter_request_from_chat_args(args)
+    _provider, request, internal = gateway._build_adapter_request_from_chat_args(args)
 
     assert not {
         "configured_endpoint_base_url",
@@ -138,8 +139,29 @@ def test_chat_request_cannot_select_local_transport_or_scope() -> None:
     assert internal == {}
 
 
+@pytest.mark.parametrize("stream", [False, True], ids=["chat", "stream"])
+def test_a_custom_provider_without_a_base_url_is_a_configuration_error(
+    monkeypatch: pytest.MonkeyPatch,
+    stream: bool,
+) -> None:
+    """A caller with no credential handle gets the error a credentialed caller already gets."""
+    from tldw_Server_API.app.core.LLM_Calls.providers import custom_openai_adapter
+
+    monkeypatch.setattr(custom_openai_adapter, "resolve_trusted_provider_endpoint", lambda _name: None)
+
+    with pytest.raises(ChatConfigurationError):
+        result = chat_service.perform_chat_api_call(
+            api_provider="custom-openai-api-2",
+            messages=[{"role": "user", "content": "hi"}],
+            model="model",
+            stream=stream,
+        )
+        if stream:
+            list(result)
+
+
 def test_dns_unresolved_maps_to_sanitized_reachability_error() -> None:
-    mapped = chat_service._map_provider_egress_error(
+    mapped = gateway._map_provider_egress_error(
         "custom-openai-api",
         EgressPolicyError("secret host", reason_code="dns_unresolved"),
     )
@@ -150,7 +172,7 @@ def test_dns_unresolved_maps_to_sanitized_reachability_error() -> None:
 
 
 def test_policy_denial_maps_to_sanitized_configuration_error() -> None:
-    mapped = chat_service._map_provider_egress_error(
+    mapped = gateway._map_provider_egress_error(
         "custom-openai-api",
         EgressPolicyError("secret host", reason_code="origin_mismatch"),
     )
@@ -177,7 +199,7 @@ def test_sync_stream_maps_egress_errors_raised_during_iteration(
             raise EgressPolicyError("secret endpoint", reason_code=reason_code)
 
     registry = SimpleNamespace(get_adapter=lambda _provider: _LazyFailingAdapter())
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
 
     stream = chat_service.perform_chat_api_call(
         api_provider="custom-openai-api",
@@ -211,7 +233,7 @@ async def test_async_stream_maps_egress_errors_raised_during_iteration(
             raise EgressPolicyError("secret endpoint", reason_code=reason_code)
 
     registry = SimpleNamespace(get_adapter=lambda _provider: _LazyFailingAdapter())
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
 
     stream = await chat_service.perform_chat_api_call_async(
         api_provider="custom-openai-api",
@@ -239,7 +261,7 @@ async def test_async_stream_sync_fallback_maps_lazy_egress_error(
             raise EgressPolicyError("secret endpoint", reason_code="origin_mismatch")
 
     registry = SimpleNamespace(get_adapter=lambda _provider: _SyncFallbackAdapter())
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
 
     stream = await chat_service.perform_chat_api_call_async(
         api_provider="custom-openai-api",

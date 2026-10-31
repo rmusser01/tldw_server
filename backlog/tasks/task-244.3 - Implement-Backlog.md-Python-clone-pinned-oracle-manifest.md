@@ -48,7 +48,7 @@ Implement Task 2 from the Backlog.md Python compatibility clone implementation p
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - 2026-05-10: Red-first oracle manifest test run captured the expected missing package failure: `ModuleNotFoundError: No module named 'backlog_py.oracle'`.
 - 2026-05-10: Added `backlog_py.oracle` package, pinned `manifest.yml` for `backlog.md@1.44.0`, and typed dataclass loader using `yaml.safe_load`.
 - 2026-05-10: Updated `tools/backlog-py/README.md` with the pinned oracle fixture policy and the normal-runtime Node/Bun-free constraint.
@@ -72,7 +72,7 @@ Code-quality review follow-up 2026-05-10:
 - Re-ran root focused tests after the fix: inventory + oracle tests -> 4 passed.
 - Re-ran Bandit and git diff --check after the fix; both exit 0.
 - Non-blocking reviewer suggestions kept for later hardening: stricter boolean/scalar manifest validation.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

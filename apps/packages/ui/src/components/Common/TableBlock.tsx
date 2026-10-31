@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next"
 import { IconButton } from "./IconButton"
 import { useArtifactsStore, type ArtifactTableData } from "@/store/artifacts"
 import { useUiModeStore } from "@/store/ui-mode"
+import { useHorizontalOverflow } from "./useHorizontalOverflow"
 
 interface TableProps {
   children: React.ReactNode
@@ -21,11 +22,39 @@ interface TableData {
   rows: string[][]
 }
 
+/** Header cells named in a table region's label; more are left out. */
+const LABEL_COLUMN_LIMIT = 4
+
+/** The table's first column headers, joined for its region label. */
+function columnSummary(table: HTMLTableElement | null): string {
+  if (!table) return ""
+  const headers = Array.from(table.querySelectorAll("thead th"))
+    .map((cell) => (cell.textContent || "").trim())
+    .filter(Boolean)
+  const shown = headers.slice(0, LABEL_COLUMN_LIMIT).join(", ")
+  return headers.length > LABEL_COLUMN_LIMIT ? `${shown}, …` : shown
+}
+
+/** The table's caption when it has one, otherwise its columns. */
+function tableRegionName(table: HTMLTableElement | null): string {
+  const caption = table?.querySelector("caption")?.textContent?.replace(/\s+/g, " ").trim()
+  return caption || columnSummary(table)
+}
+
 export const TableBlock: FC<TableProps> = ({ children }) => {
   const [copyStatus, setCopyStatus] = useState<string>("")
   const [artifactOriginId, setArtifactOriginId] = useState<string | null>(null)
   const { t } = useTranslation("common")
-  const ref = useRef<HTMLDivElement>(null)
+  const ref = useRef<HTMLTableElement>(null)
+  const scrollRegionRef = useRef<HTMLDivElement>(null)
+  const { hasMoreRight } = useHorizontalOverflow(scrollRegionRef)
+  // Several tables in one answer need distinct region names (AX-10, XS-14),
+  // so the label uses the caption, or else the columns once they render.
+  const [tableLabel, setTableLabel] = useState("")
+  useEffect(() => {
+    const next = tableRegionName(ref.current)
+    setTableLabel((current) => (current === next ? current : next))
+  })
   const { openArtifact, isPinned } = useArtifactsStore()
   const uiMode = useUiModeStore((state) => state.mode)
   const isProMode = uiMode === "pro"
@@ -194,11 +223,16 @@ export const TableBlock: FC<TableProps> = ({ children }) => {
     >
       <div className="my-4 bg-surface rounded-xl border border-border overflow-hidden">
         <div className="flex flex-row px-4 py-2 rounded-t-xl bg-surface2 border-b border-border">
-          <div className="flex items-center gap-2 flex-1">
+          <div className="flex min-w-0 items-center gap-2 flex-1">
             <TableIcon className="size-4 text-text-muted" />
             <span className="font-mono text-xs text-text-muted">
               Table
             </span>
+            {hasMoreRight && (
+              <span className="truncate text-[11px] text-text-muted">
+                {t("table.scrollForMore", "Scroll for more columns →")}
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-1">
@@ -216,7 +250,7 @@ export const TableBlock: FC<TableProps> = ({ children }) => {
               <IconButton
                 ariaLabel={t('table.copyCsv', 'Copy as CSV') as string}
                 onClick={handleCopyCSV}
-                className="flex gap-1.5 items-center rounded bg-none p-1 text-xs text-text-muted hover:bg-surface2 hover:text-text focus:outline-none transition-colors h-11 w-11 sm:h-7 sm:w-7 sm:min-w-0 sm:min-h-0">
+                className="flex gap-1.5 items-center rounded bg-none p-1 text-xs text-text-muted hover:bg-surface2 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus transition-colors h-11 w-11 sm:h-7 sm:w-7 sm:min-w-0 sm:min-h-0">
                 {copyStatus === "csv" ? (
                   <CopyCheckIcon className="size-4 text-success" />
                 ) : (
@@ -242,7 +276,7 @@ export const TableBlock: FC<TableProps> = ({ children }) => {
                 <IconButton
                   ariaLabel={t('table.downloadCsv', 'Download CSV') as string}
                   onClick={handleDownloadCSV}
-                  className="flex gap-1.5 items-center rounded bg-none p-1 text-xs text-text-muted hover:bg-surface2 hover:text-text focus:outline-none transition-colors h-11 w-11 sm:h-7 sm:w-7 sm:min-w-0 sm:min-h-0">
+                  className="flex gap-1.5 items-center rounded bg-none p-1 text-xs text-text-muted hover:bg-surface2 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus transition-colors h-11 w-11 sm:h-7 sm:w-7 sm:min-w-0 sm:min-h-0">
                   <DownloadIcon className="size-4" />
                 </IconButton>
               </Tooltip>
@@ -250,12 +284,38 @@ export const TableBlock: FC<TableProps> = ({ children }) => {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="relative">
+          {/* A real <table> keeps row/column semantics for screen readers (AX-10);
+              the focusable region lets keyboard users scroll wide tables. */}
           <div
-            ref={ref}
-            className={`prose dark:prose-invert max-w-none [&_table]:table-fixed [&_table]:text-sm [&_table]:w-full [&_table]:border-collapse [&_thead]:bg-surface2 [&_th]:px-6 [&_th]:py-4 [&_th]:text-left [&_th]:font-semibold [&_th]:text-text [&_th]:text-xs [&_th]:uppercase [&_th]:tracking-wider [&_th]:whitespace-nowrap [&_th:nth-child(1)]:w-1/2 [&_th:nth-child(2)]:w-1/2 [&_th:nth-child(3)]:w-1/3 [&_th]:border-b [&_th]:border-border [&_td]:px-6 [&_td]:py-4 [&_td]:text-text-muted [&_td]:text-sm [&_td]:text-left [&_td]:whitespace-nowrap  [&_td]:border-b [&_td]:border-border [&_tr:last-child_td]:border-b-0`}>
-            {children}
+            ref={scrollRegionRef}
+            data-testid="table-scroll-region"
+            role="region"
+            aria-label={
+              tableLabel
+                ? t("table.labelWithColumns", {
+                    defaultValue: "Table: {{columns}}",
+                    columns: tableLabel
+                  })
+                : t("table.label", "Table")
+            }
+            tabIndex={0}
+            className="overflow-x-auto rounded-b-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus">
+            <div className="prose dark:prose-invert max-w-none">
+              <table
+                ref={ref}
+                className="my-0 table-fixed text-sm w-full border-collapse [&_thead]:bg-surface2 [&_th]:px-6 [&_th]:py-4 [&_th]:text-left [&_th]:font-semibold [&_th]:text-text [&_th]:text-xs [&_th]:uppercase [&_th]:tracking-wider [&_th]:whitespace-nowrap [&_th:nth-child(1)]:w-1/2 [&_th:nth-child(2)]:w-1/2 [&_th:nth-child(3)]:w-1/3 [&_th]:border-b [&_th]:border-border [&_td]:px-6 [&_td]:py-4 [&_td]:text-text-muted [&_td]:text-sm [&_td]:text-left [&_td]:whitespace-nowrap [&_td]:border-b [&_td]:border-border [&_tr:last-child_td]:border-b-0">
+                {children}
+              </table>
+            </div>
           </div>
+          {hasMoreRight && (
+            <div
+              aria-hidden="true"
+              data-testid="table-scroll-fade"
+              className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-surface to-transparent"
+            />
+          )}
         </div>
       </div>
     </div>

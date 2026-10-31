@@ -16,6 +16,9 @@ export type HistoryInfo = {
   model_id?: string;
   server_chat_id?: string;
   server_scope_key?: string;
+  /** Captured chat namespace of a verified mirror; absent on older copies. */
+  server_scope_type?: "global" | "workspace";
+  server_workspace_id?: string;
   local_owner_key?: string;
   // External settings writers register before writing; abandoned tokens block fork certification.
   local_settings_guard?: {
@@ -131,6 +134,7 @@ export type Message = {
   history_admission?: HistoryAdmissionV1;
   history_provenance?: { version: 1; owner_key: string; projection_id: string | null };
   history_settlement?: { input_message_id: string; selection_digest: string; result_revision: string };
+  history_existing_settlement?: { selection: import("@/types/history-selection").HistorySelectionV1; intent_digest: string; result_revision: string };
   id: string;
   history_id: string;
   name: string;
@@ -214,6 +218,8 @@ export type StructuredPromptDefinition = Record<string, any>;
 
 export type Prompt = {
   // Identity - Local
+  /** Opaque server/account identity; absent only for shared, unlinked legacy data. */
+  ownerId?: string | null;
   id: string;
   title: string;
   content: string;
@@ -250,6 +256,10 @@ export type Prompt = {
   lastSyncedAt?: number | null;       // Timestamp of last successful sync
   serverUpdatedAt?: string | null;    // Server's updated_at for conflict detection
 
+  // ─── Server prompt library link (/api/v1/prompts, not Prompt Studio) ───
+  serverLibraryId?: number | null;    // Library prompt id this local copy was made from
+  serverLibraryUuid?: string | null;  // Library prompt uuid; the stable link used for de-duplication
+
   // ─── Studio-specific Fields (progressive disclosure) ───
   promptFormat?: PromptFormat;
   promptSchemaVersion?: number | null;
@@ -264,8 +274,11 @@ export type Prompt = {
 };
 
 export type HistoryBookmarkScope = { profile_id: string; client_session_id: string };
-/** Recovery text is never a message, selected history, or persisted write capability. */
+export type HistoryTurnOutcome = "complete" | "interrupted" | "stopped";
+/** A retained turn is scoped data; its settlement payload has no runtime owner capability. */
 export type HistoryTurnRecovery = {
+  /** Explicit alternatives remain in review until the user opens their result. */
+  action?: 'edit_resend' | 'regenerate';
   operation_id: string;
   origin_view: HistoryViewSelectionV1;
   selection_digest: string;
@@ -276,8 +289,37 @@ export type HistoryTurnRecovery = {
   input_text: string;
   input_images: string[];
   result_text: string;
-  state: "dispatching" | "unknown" | "accepted_unsent" | "generated_unsaved";
+  /** Earlier returned replies remain copyable across an explicit original-request retry. */
+  retained_result_texts?: string[];
+  recovery_storage?: "memory";
+  state:
+    | "dispatching"
+    | "unknown"
+    | "accepted_unsent"
+    | "generated_unsaved"
+    | "refused";
   admission?: import("@/types/history-selection").HistoryAdmissionReferenceV1;
+  roleplay_resume?: import("@/services/tldw/roleplay-resume").RoleplayResumeRecovery;
+  existing_selection?: import("@/types/history-selection").HistorySelectionV1;
+  /** Exact credential-free assistant write, retained before its first settlement. */
+  settlement_payload?: Message;
+  /**
+   * Set when the reply belongs back in the transcript rather than in review
+   * (CS-04, #3104): "complete" (it finished but its view was gone),
+   * "interrupted" (cut off: reload, dropped connection, navigation) or
+   * "stopped" (the user stopped it). Absent for failures that need review.
+   */
+  outcome?: HistoryTurnOutcome;
+  interruption_reason?: string;
+  /** Friendly failure guidance only; raw provider diagnostics are excluded. */
+  failure_reason?: string;
+  /** The recovery the failure points to, e.g. choosing another model (CC-02). */
+  failure_action?: "open-model-selector";
+  /** The reply was already written to the owner; only the view must follow it. */
+  settled_message_id?: string;
+  /** Display identity of the model that wrote the reply. */
+  model_name?: string;
+  model_id?: string;
 } & (
   | { persistence?: "client"; input_id: string; assistant_id: string }
   | { persistence: "server"; input_id?: string; assistant_id?: string }
@@ -428,6 +470,8 @@ export type DraftSource = {
 }
 
 export type DraftAsset = {
+  /** Absent on legacy rows, which remain hidden until their owner is known. */
+  ownerScope?: string
   id: string
   draftId: string
   kind: "file"
@@ -439,6 +483,8 @@ export type DraftAsset = {
 }
 
 export type ContentDraft = {
+  /** Absent on legacy rows, which remain hidden until their owner is known. */
+  ownerScope?: string
   id: string
   batchId: string
   source: DraftSource
@@ -469,6 +515,8 @@ export type ContentDraft = {
   updatedAt: number
   reviewedAt?: number
   committedAt?: number
+  /** Canonical admission retained until local commit finalization succeeds. */
+  pendingMediaId?: string
   expiresAt?: number
   analysis?: string
   prompt?: string
@@ -477,6 +525,8 @@ export type ContentDraft = {
 }
 
 export type DraftBatch = {
+  /** Absent on legacy rows, which remain hidden until their owner is known. */
+  ownerScope?: string
   id: string
   name?: string
   source: "url_list" | "file_upload" | "quick_ingest" | "manual"
@@ -544,6 +594,7 @@ export type AudiobookChapterAsset = {
 
 export type SttRecordingRow = {
   id: string
+  ownerKey?: string // Legacy unassigned rows remain preserved but inaccessible.
   blob: Blob
   mimeType: string
   durationMs: number

@@ -96,6 +96,8 @@ def _to_quota_status(data: dict) -> QuotaStatus:
     return QuotaStatus(
         quota_mb=data.get("quota_mb"),
         used_mb=data.get("used_mb", 0.0),
+        legacy_used_mb=data.get("legacy_used_mb", 0.0),
+        native_used_mb=data.get("native_used_mb", 0.0),
         remaining_mb=data.get("remaining_mb"),
         usage_pct=data.get("usage_pct", 0.0),
         at_soft_limit=data.get("at_soft_limit", False),

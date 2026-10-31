@@ -51,7 +51,7 @@ Continue the sandbox module roadmap Phase 2 security-hardening work by making sa
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 User asked to continue after PR #1438 merged. Existing trust-level and runtime capability contracts already cover the initially considered security-policy slice, so this task targets the remaining Phase 2 audit metadata contract gap from the sandbox security matrix.
 
 Implemented shared run-completion audit metadata helper and wired endpoint/background service paths. Red check: focused audit test file failed on missing helper and missing spec argument. Green checks: python -m pytest tldw_Server_API/tests/sandbox/test_sandbox_run_limit_audit.py -q passed 4 tests; endpoint smoke test passed 1 test; py_compile passed for touched production modules; git diff --check passed; Bandit on touched production files reported 0 results and 0 errors at /tmp/bandit_sandbox_audit_metadata_contract.json.
@@ -61,7 +61,7 @@ PR review follow-up verified against current branch. Plan: add focused regressio
 PR review fixes applied and verified. Red check failed on Windows drive-relative base_image redaction and omitted requested_runtime. Green checks passed: audit pytest 8 passed, endpoint smoke 1 passed, py_compile passed for touched production modules, git diff --check passed, Bandit reported 0 results and 0 errors in /tmp/bandit_sandbox_audit_metadata_contract_review.json.
 
 Post-merge hygiene: PR #1441 has merged into dev and the umbrella GitHub tracker was created at https://github.com/rmusser01/tldw_server/issues/1442.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

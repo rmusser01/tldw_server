@@ -41,13 +41,13 @@ Review-driven unblock from PR #1683: replace the unbaselined WorkspaceACPHistory
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 PR #1683 review surfaced a full-verifier blocker in WorkspaceACPHistoryModal. This narrow change is being handled inside the Chat/Playground PR only to restore verifier pass status; it does not complete the broader MCP/ACP migration area.
 
 PR #1683 review unblock completed: after rebasing onto current dev, WorkspaceACPHistoryModal uses the shared design-system Alert primitive for the load-error product state. Full bun run verify:design-system-state exits 0. The broader MCP/ACP baseline migration remains open.
 
 Closeout verification on 2026-05-31: current `apps/packages/ui/scripts/design-system-product-state-baseline.json` contains 82 allowed repo-wide exceptions and 0 MCP/ACP-owned hits for MCP, ACP, AgentTasks, WorkspaceACP, ACPPlayground, MCPHub, `Option/MCP`, and `Option/ACP` labels. The linked GitHub issue #1661 was refreshed with the current public status and zero owned-exception count. No additional implementation child tasks are required for this closeout because the current owned bucket is already zero; the prior implementation path is recorded through PR #1683 and later merged MCP/ACP route-alignment work.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -43,11 +43,11 @@ Fix the JobsTab undo-delete test so it models the production Modal.confirm gate.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified the review target in origin/dev: JobsTab production deletion is gated through Modal.confirm with onOk executing executeDelete(job.id). The focused test baseline failed because the antd mock did not expose Modal, so clicking delete never reached a valid confirmation path.
 
 Updated JobsTab.undo-delete.test.tsx only: added a Modal.confirm mock that records config without auto-confirming, added a helper to assert/retrieve the confirm config, explicitly invokes onOk in delete-path tests, and added cancel/dismiss coverage that does not call deleteWatchlistJob.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

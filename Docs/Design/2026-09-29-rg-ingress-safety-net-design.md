@@ -1,7 +1,8 @@
 # Resource Governor ingress: enforce tag policies and make the defaults a safety net
 
 - **Date:** 2026-09-29
-- **Status:** Draft for owner review
+- **Status:** Implemented
+- **Delivered in:** PR #3066 (PR A, relief); PR B (open); PR C (open)
 - **Backlog:** TASK-13395 (tag policies never enforced). Implementation tasks are filed after this spec is approved.
 - **Scope:** Spec 1 of 2. This spec covers the ingress governor. Spec 2 (usage-quota posture) is described under [Out of scope](#out-of-scope).
 

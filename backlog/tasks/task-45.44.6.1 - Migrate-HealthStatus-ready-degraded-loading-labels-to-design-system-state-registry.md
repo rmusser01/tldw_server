@@ -52,7 +52,7 @@ Replace the remaining HealthStatus hardcoded ready, degraded, and loading produc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation replaced HealthStatus ready/degraded/loading translation fallback literals with getDesignSystemState labels and added focused coverage that mocks registry labels for summary plus per-check status surfaces.
 
 Verified red before implementation: focused HealthStatus design-system test failed for per-check Ready, per-check Degraded, and Loading registry labels while HealthStatus still used hardcoded fallbacks.
@@ -62,7 +62,7 @@ Verification passing: bunx vitest run src/components/Option/Settings/__tests__/h
 TypeScript note: bunx tsc --noEmit --pretty false exits 2 on existing package-wide type debt in unrelated tests/modules; no touched HealthStatus files appeared in the reported errors.
 
 Bandit not run: touched runtime scope is UI TypeScript plus JSON baseline and Backlog metadata, with no Python execution path.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

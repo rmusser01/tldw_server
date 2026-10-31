@@ -32,7 +32,7 @@ Resolve actionable code-review findings on PR 1516 for the VN platform API branc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Addressed PR #1516 review follow-up: removed scripted generation placeholders by requiring literal persisted text/regeneration text for V1 script opcodes; added cleanup blocker provider wiring for published script manifests plus active play sessions/checkpoints; tightened VN asset idempotency to claim/replay/release with required keys for mutating operations; fixed upload duplicate in-progress claim handling and import-commit enqueue-failure claim release; added VN policy backend/conversion hardening; serialized save-slot creation through the session-action lock; replayed duplicate non-completed turn requests as errors instead of 200 payloads; and pinned scripted-session policy checks to published script/pack metadata with mismatch rejection.
 
 Verification: python -m pytest tldw_Server_API/tests/VN_Assets tldw_Server_API/tests/VN_Play tldw_Server_API/tests/VN_Platform tldw_Server_API/tests/VN_Scripts tldw_Server_API/tests/VN_Policy -q passed with 467 passed, 5 warnings. Focused frontend Vitest passed for VN asset/play tests with 32 passed. compileall passed for touched backend/test modules. Bandit over touched backend scope wrote /tmp/bandit_vn_pr1516.json with 0 results. git diff --check passed.
@@ -42,7 +42,7 @@ Reopened after final review-thread sweep found additional actionable items: debu
 Final review-thread sweep addressed remaining prompt tokenizer fallback, debug-state response typing, and VN asset content MIME contract issues. Verification after final fixes: focused prompt/generation slice 34 passed; full VN backend suite 470 passed, 5 warnings; focused VN frontend Vitest 32 passed; compileall passed; Bandit /tmp/bandit_vn_pr1516.json 0 results; git diff --check passed.
 
 Post-push hardening for remaining non-outdated review threads: made legacy create_idempotency_record conflict-tolerant for same payloads and moved save-slot checkpoint, event, slot upsert, and action completion into a single repository transaction. Verification after hardening: focused idempotency/save-slot tests 17 passed; full VN backend suite 472 passed, 5 warnings; compileall passed; Bandit /tmp/bandit_vn_pr1516.json 0 results; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

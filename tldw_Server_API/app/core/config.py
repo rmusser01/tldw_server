@@ -31,17 +31,17 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_section_name,
     iter_custom_openai_provider_numbers,
 )
-from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled,
     is_explicit_pytest_runtime,
+    is_production_like_env,
     is_test_mode,
     is_truthy,
 )
+from tldw_Server_API.app.core.Utils.provider_identity import canonical_provider_name
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.config_sections import ConfigSections
-    from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 
 _CONFIG_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -923,6 +923,26 @@ openai_tts_mappings = {
 
 
 # --- Helper Function (Optional but can keep dictionary creation clean) ---
+def _load_claims_review_metrics_settings(parser: configparser.ConfigParser | None) -> dict[str, Any]:
+    """Load Claims production flags while leaving numeric bounds to consumers."""
+    defaults = {
+        "CLAIMS_REVIEW_METRICS_SCHEDULER_ENABLED": "false",
+        "CLAIMS_REVIEW_METRICS_INTERVAL_SEC": "86400",
+        "CLAIMS_REVIEW_METRICS_LOOKBACK_DAYS": "2",
+        "CLAIMS_REVIEW_METRICS_JOBS_ENABLED": "false",
+        "CLAIMS_JOBS_ENABLED": "false",
+        "CLAIMS_JOBS_QUEUE": "default",
+        "CLAIMS_JOBS_MAX_RETRIES_REVIEW_METRICS": "3",
+    }
+    resolved: dict[str, Any] = {}
+    for key, default in defaults.items():
+        raw = os.getenv(key)
+        if raw is None:
+            raw = parser.get("ClaimsMonitoring", key, raw=True, fallback=default) if parser else default
+        resolved[key] = is_truthy(raw) if key.endswith("_ENABLED") else raw
+    return resolved
+
+
 def load_settings():
     """
     Assembles application configuration from environment variables and configuration files into a single mapping.
@@ -1826,6 +1846,7 @@ def load_settings():
         "CLAIMS_REBUILD_POLICY": os.getenv("CLAIMS_REBUILD_POLICY", "missing"),
         "CLAIMS_STALE_DAYS": int(os.getenv("CLAIMS_STALE_DAYS", "7")),
 
+        **_load_claims_review_metrics_settings(load_comprehensive_config()),
         # Claims monitoring (alerts/config)
         **(lambda: (
             (lambda _cp, _env: (
@@ -2869,9 +2890,42 @@ def rg_enabled(default: bool = True) -> bool:
     return _as_bool(v, default)
 
 
-def get_llamacpp_handler_config() -> Optional["LlamaCppConfig"]:
+_USAGE_QUOTAS_LEGACY_WARNED = False
+
+
+def usage_quotas_enabled() -> bool:
     """
-    Build a LlamaCppConfig from environment variables or [LlamaCpp] section in config.txt.
+    Master switch for usage quotas (Docs/Design/2026-10-02-usage-quota-posture-design.md §1).
+
+    Resolution order:
+      1) Env var USAGE_QUOTAS_ENABLED
+      2) Env var LIMIT_ENFORCEMENT_ENABLED, when explicitly set (legacy spelling; warns once)
+      3) [Usage-Quotas] enabled in config.txt
+      4) False: quotas are off unless an operator turns them on
+    """
+    global _USAGE_QUOTAS_LEGACY_WARNED
+    v = os.getenv("USAGE_QUOTAS_ENABLED")
+    if v is None:
+        legacy = os.getenv("LIMIT_ENFORCEMENT_ENABLED")
+        if legacy is not None:
+            if not _USAGE_QUOTAS_LEGACY_WARNED:
+                _USAGE_QUOTAS_LEGACY_WARNED = True
+                logger.warning("LIMIT_ENFORCEMENT_ENABLED is deprecated; set USAGE_QUOTAS_ENABLED instead")
+            v = legacy
+    if v is None:
+        try:
+            cp = load_comprehensive_config()
+            v = cp.get("Usage-Quotas", "enabled", fallback="false") if cp else "false"
+        except (FileNotFoundError, configparser.Error, KeyError, ValueError) as exc:
+            _log_debug(f"usage_quotas_enabled: config read failed, quotas stay off: {exc}")
+            v = "false"
+    return _as_bool(v, False)
+
+
+def get_llamacpp_handler_settings() -> dict[str, Any] | None:
+    """
+    Return the LlamaCppConfig keyword arguments from environment variables or the
+    [LlamaCpp] section in config.txt, or None when the handler is disabled.
 
     Env overrides (precedence over config.txt):
         LLAMACPP_ENABLED
@@ -2889,12 +2943,6 @@ def get_llamacpp_handler_config() -> Optional["LlamaCppConfig"]:
         LLAMACPP_ALLOWED_PATHS  (comma separated)
         LLAMACPP_LOG_OUTPUT_FILE
     """
-    try:
-        from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
-    except _CONFIG_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
-        _log_warning(f"llama.cpp handler config unavailable (import failed): {exc}")
-        return None
-
     try:
         cp = load_comprehensive_config()
     except _CONFIG_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
@@ -2918,7 +2966,7 @@ def get_llamacpp_handler_config() -> Optional["LlamaCppConfig"]:
     if not enabled:
         return None
 
-    kwargs: dict[str, object] = {"enabled": True}
+    kwargs: dict[str, Any] = {"enabled": True}
 
     exe = _get("executable_path", "LLAMACPP_EXECUTABLE_PATH")
     models_dir = _get("models_dir", "LLAMACPP_MODELS_DIR")
@@ -2970,11 +3018,7 @@ def get_llamacpp_handler_config() -> Optional["LlamaCppConfig"]:
     if log_output_file:
         kwargs["log_output_file"] = Path(str(log_output_file))
 
-    try:
-        return LlamaCppConfig(**kwargs)
-    except _CONFIG_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
-        _log_warning(f"llama.cpp handler config invalid; disabling handler: {exc}")
-        return None
+    return kwargs
 
 
 _GOVERNANCE_ROLLOUT_MODES = {"off", "shadow", "enforce"}
@@ -3398,20 +3442,9 @@ def should_allow_cors_credentials() -> bool:
     return value
 
 
-@lru_cache(maxsize=1)
 def is_production_environment() -> bool:
     """Return True when runtime environment should use production safety guards."""
-    if is_truthy(os.getenv("tldw_production")):
-        return True
-
-    for env_key in ("ENV", "APP_ENV", "TLDW_ENV", "ENVIRONMENT"):
-        raw_value = os.getenv(env_key)
-        if raw_value is None:
-            continue
-        normalized = str(raw_value).strip().lower()
-        if normalized in {"prod", "production"}:
-            return True
-    return False
+    return is_production_like_env()
 
 
 def _resolve_disable_cors_value_and_source() -> tuple[bool, str]:
@@ -4883,9 +4916,14 @@ def load_and_log_configs(
         def _section_items_dict(section_name: str) -> dict[str, Any]:
             try:
                 if hasattr(config_parser_object, "has_section") and config_parser_object.has_section(section_name):
-                    return dict(config_parser_object.items(section_name))
+                    sections = getattr(config_parser_object, "_sections", None)
+                    if isinstance(sections, Mapping):
+                        explicit_items = sections.get(section_name)
+                        if isinstance(explicit_items, Mapping):
+                            return {key: value for key, value in explicit_items.items() if key != "__name__"}
+                    return dict(config_parser_object.items(section_name, raw=True))
             except _CONFIG_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug("Failed to read config section '{}': {}", section_name, exc)
+                logger.debug("Failed to read config section '{}' ({})", section_name, type(exc).__name__)
             return {}
 
         from tldw_Server_API.app.core.config_sections.stt import load_stt_config
@@ -5642,6 +5680,7 @@ def load_and_log_configs(
                 'analyze_search_results_prompt': analyze_search_results_prompt,
             },
             'web_scraper':{
+                **_section_items_dict('Web-Scraper'),
                 'web_scraper_api_key': web_scraper_api_key,
                 'web_scraper_api_url': web_scraper_api_url,
                 'web_scraper_api_timeout': web_scraper_api_timeout,
@@ -5940,7 +5979,6 @@ def refresh_config_cache() -> None:
     _route_toggle_policy.cache_clear()
     should_disable_cors.cache_clear()
     should_allow_cors_credentials.cache_clear()
-    is_production_environment.cache_clear()
 
 
 def clear_config_cache() -> None:

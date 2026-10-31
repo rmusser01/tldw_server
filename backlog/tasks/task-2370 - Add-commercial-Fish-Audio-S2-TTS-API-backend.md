@@ -32,7 +32,7 @@ Add hosted Fish Audio S2 commercial API support to the existing fish_s2 TTS prov
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented hosted Fish Audio commercial_api support behind the existing fish_s2 provider while preserving native_http.
 
 Verification:
@@ -41,7 +41,9 @@ Verification:
 - Bandit touched production TTS scope: 0 findings, report at /tmp/bandit_fish_s2_commercial_api.json.
 
 Known skips/blockers: no live Fish API call was run; automated coverage uses mocked HTTP transports.
-<!-- SECTION:NOTES:END -->
+
+Review follow-up complete after latest CodeRabbit pass. Addressed blank BYOK API key fail-closed behavior for Fish S2/OpenAI/ElevenLabs TTS paths, Fish S2 direct-dict/env API key initialization, adapter ERROR status on initialization exceptions, sanitized native HTTP upstream error logging, and forced managed-reference metadata cleanup after deleting stale Fish remote IDs. Verification: 7 red-step regressions now pass; 75 Fish/reference/audio selected tests passed; 54 route/OAuth selected tests passed; git diff --check clean; Bandit on touched production files reported zero findings.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -58,9 +60,3 @@ Fish Audio S2 now supports a hosted commercial API backend via `backend: commerc
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Review follow-up complete after latest CodeRabbit pass. Addressed blank BYOK API key fail-closed behavior for Fish S2/OpenAI/ElevenLabs TTS paths, Fish S2 direct-dict/env API key initialization, adapter ERROR status on initialization exceptions, sanitized native HTTP upstream error logging, and forced managed-reference metadata cleanup after deleting stale Fish remote IDs. Verification: 7 red-step regressions now pass; 75 Fish/reference/audio selected tests passed; 54 route/OAuth selected tests passed; git diff --check clean; Bandit on touched production files reported zero findings.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

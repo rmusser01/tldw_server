@@ -149,9 +149,10 @@ class MediaDbFactory:
         if backend is None:
             return
         self.backend = None
+        # Retirement removes the registry entry while central cleanup owns the pool.
         if (
             getattr(backend, "backend_type", None) == BackendType.SQLITE
-            and is_factory_managed_backend(backend)
+            and (getattr(backend, "_retired", False) or is_factory_managed_backend(backend))
         ):
             release_managed_backend(backend)
             return

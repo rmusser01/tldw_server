@@ -18,6 +18,7 @@ from starlette.responses import StreamingResponse
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.chat_documents_deps import get_document_generator_service
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.document_generator_schemas import (
     AsyncGenerationResponse,
@@ -66,6 +67,7 @@ from tldw_Server_API.app.core.Chat.document_generator import (
 )
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     invoke_stream_close_bounded,
+    is_empty_choices_usage_chunk,
     normalize_provider_stream_error,
     provider_stream_error_payload,
 )
@@ -360,6 +362,8 @@ async def generate_document(
         user_id_int, team_ids, org_ids, trusted_base_url_override = (
             derive_trusted_credential_scope(http_request, principal)
         )
+        # Usage quotas (LLM usage accounting spec §4a), before the job branch and any generation.
+        await enforce_llm_quota(user_id_int)
         credential_runtime = ProviderCredentialRuntime(
             user_id=user_id_int,
             team_ids=team_ids,
@@ -516,6 +520,9 @@ async def generate_document(
                             if terminal_kind == "done":
                                 await stream.done()
                                 return
+                            if is_empty_choices_usage_chunk(payload):
+                                # OpenAI's usage chunk, which this request cannot ask for: not sent (TASK-13951).
+                                continue
                             if successful and not stream_success_state.get("terminal_error"):
                                 stream_success_state["successful"] = True
                             if not payload:
@@ -623,6 +630,9 @@ async def generate_document(
                         if terminal_kind == "done":
                             yield _encode_sse(payload)
                             return
+                        if is_empty_choices_usage_chunk(payload):
+                            # OpenAI's usage chunk, which this request cannot ask for: not sent (TASK-13951).
+                            continue
                         if successful and not stream_success_state.get("terminal_error"):
                             stream_success_state["successful"] = True
                         if payload:

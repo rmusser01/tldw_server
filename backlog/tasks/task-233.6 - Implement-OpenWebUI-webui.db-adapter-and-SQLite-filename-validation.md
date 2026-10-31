@@ -35,7 +35,7 @@ Implement Stage 1 of the OpenWebUI webui.db import plan: add a safe read-only SQ
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Stage 1 adapter and validator changes. Red verification: focused pytest collection failed on missing tldw_Server_API.app.core.Chatbooks.import_adapters.openwebui_db module before production code. Worktree does not have its own .venv, so subsequent verification used /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv.
 
 Verification:
@@ -44,7 +44,7 @@ Verification:
 - git diff --check -> clean
 
 Scope note: service/API/frontend/user docs wiring remains deferred to later implementation stages by plan; no blocker for this adapter-only slice.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

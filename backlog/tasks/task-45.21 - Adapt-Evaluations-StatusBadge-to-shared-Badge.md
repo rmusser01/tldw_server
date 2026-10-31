@@ -36,7 +36,7 @@ Migrate the Evaluations run-status badge adapter from AntD Tag to the shared des
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red verification was performed before implementation: bunx vitest run src/components/Option/Evaluations/components/__tests__/StatusBadge.design-system.test.tsx --reporter=dot failed 5 tests because the existing component did not render the shared Badge primitive.
 
 Migrated Evaluations StatusBadge from AntD Tag to the shared Badge primitive. Known run statuses now map through getDesignSystemState before selecting Badge variants: pending -> loading, running -> retrying, completed -> ready, failed -> error, cancelled -> degraded, and unknown statuses -> empty. Running status keeps the Loader2 animate-spin affordance.
@@ -48,7 +48,7 @@ Fresh focused verification passed: bunx vitest run src/components/Option/Evaluat
 Ran bunx tsc --noEmit --pretty false. It still fails on unrelated existing package-wide TypeScript errors in audio, chat composer, flashcards, playground, services, routes, store, etc.; after fixing the touched-file StatusBadge config type, no visible remaining errors are from the touched Evaluations StatusBadge files.
 
 Bandit was not run because this slice only touches TypeScript/TSX/JSON and Backlog metadata; no Python files were changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

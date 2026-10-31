@@ -74,7 +74,7 @@ def test_starlette_dependency_floor_excludes_badhost_cve_versions():
 
 
 def test_fastapi_dependency_floor_supports_starlette_1_series():
-    _expect_project_dependency("fastapi", "fastapi>=0.141.1,<0.142.0")
+    _expect_project_dependency("fastapi", "fastapi>=0.142.1,<0.143.0")
 
 
 def test_httpcore_dependency_floor_supports_validated_network_backend():

@@ -44,13 +44,13 @@ Plan saved at Docs/superpowers/plans/2026-05-13-persona-buddy-sprite-atlas-v11.m
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created implementation plan after inspecting current backend validation and Buddy renderer support. Current code already supports frames[].region cropping and known-dimension bounds checks, so this slice should mostly harden contract tests and docs unless focused tests expose a gap.
 
 Completed implementation as a contract/docs hardening slice. Added backend coverage for activatable atlas manifests with known dimensions, retained existing rejection coverage for out-of-bounds regions, and added missing-dimension fail-open coverage for draft/import metadata gaps. Added Buddy renderer registry-path atlas rendering coverage and unsupported-region diagnostics coverage. Added docs example defining sprite_sheet as an asset role under sprite_frames, not a renderer_type.
 
 Verification: git diff --check passed. Backend focused test passed with 20 tests. Frontend focused test passed with 17 tests after running from apps/packages/ui so Vitest used the UI package dependency context. Bandit against Persona visual source files reported zero findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

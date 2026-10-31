@@ -26,9 +26,9 @@ Address live PR #1866 review comments for Character Chat Phase 2 readiness, incl
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified live PR #1866 review threads via GitHub GraphQL. Addressed Gemini comments by removing the nested prompt-loading role=status span, switching missing restored character copy to i18next interpolation options, and removing manual placeholder interpolation from the readiness copy helper. Updated local test translation mocks to support i18next-style options.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

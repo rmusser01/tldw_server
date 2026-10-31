@@ -37,11 +37,11 @@ Add the frontend service, type, and metadata-helper contract for Stage 5 report 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started Stage 5C in worktree .worktrees/watchlists-stage1a. Scope is frontend types, service functions, output metadata helpers, and focused Vitest coverage only; no Reports tab workflow/layout changes in this slice.
 
 Implemented Stage 5C frontend contract in .worktrees/watchlists-stage1a: added report evidence/readiness TypeScript types, output creation fields, evidence/readiness service functions, and defensive output metadata helpers. Added focused service and metadata tests; no Reports tab workflow/layout changes were made. Verification: focused Vitest contract/regression run passed (43 tests), git diff --check passed, full tsc still has existing repo-wide failures but no Stage 5C touched-file errors after fixture correction. Bandit skipped because this slice touches frontend TypeScript and Backlog/plan docs only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

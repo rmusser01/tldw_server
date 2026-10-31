@@ -8,6 +8,7 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from threading import Lock
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -97,14 +98,61 @@ def test_atomic_save_fsyncs_file_replace_and_parent(
     store = {"incidents": [], "webhooks": []}
     service._atomic_write_store(path, store)
 
-    assert calls == ["write-temp", "flush", "fsync-file", "replace", "fsync-parent"]
+    expected_calls = ["write-temp", "flush", "fsync-file", "replace"]
+    if os.name != "nt":
+        expected_calls.append("fsync-parent")
+    assert calls == expected_calls
     assert json.loads(path.read_text(encoding="utf-8")) == store
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    if os.name != "nt":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert temporary_paths[0].parent == path.parent
     assert not temporary_paths[0].exists()
 
 
-@pytest.mark.parametrize("failure_point", ["before_write", "write", "replace"])
+@pytest.mark.parametrize("fchmod_available", [False, True])
+@pytest.mark.unit
+def test_atomic_save_windows_retains_file_durability_without_unix_operations(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fchmod_available: bool,
+) -> None:
+    path = tmp_path / "system_ops.json"
+    path.write_text('{"version": "old"}', encoding="utf-8")
+    calls: list[str] = []
+    windows_os = SimpleNamespace(**vars(os))
+    windows_os.name = "nt"
+    if fchmod_available:
+        windows_os.fchmod = lambda *_args: None
+    else:
+        vars(windows_os).pop("fchmod", None)
+
+    def open_without_directories(name: Path, flags: int) -> int:
+        if name == path.parent:
+            raise PermissionError(errno.EACCES, "Windows cannot open a directory")
+        return os.open(name, flags)
+
+    def fsync_file(fd: int) -> None:
+        assert stat.S_ISREG(os.fstat(fd).st_mode)
+        calls.append("fsync-file")
+        os.fsync(fd)
+
+    def replace(source: Path, destination: Path) -> None:
+        calls.append("replace")
+        os.replace(source, destination)
+
+    windows_os.open = open_without_directories
+    windows_os.fsync = fsync_file
+    windows_os.replace = replace
+    monkeypatch.setattr(service, "os", windows_os)
+
+    service._atomic_write_store(path, {"version": "new"})
+
+    assert calls == ["fsync-file", "replace"]
+    assert json.loads(path.read_text(encoding="utf-8")) == {"version": "new"}
+    assert list(tmp_path.glob(".system_ops.json.*")) == []
+
+
+@pytest.mark.parametrize("failure_point", ["before_write", "fdopen", "write", "fsync", "replace"])
 @pytest.mark.unit
 def test_atomic_save_never_publishes_partial_destination(
     monkeypatch: pytest.MonkeyPatch,
@@ -118,7 +166,11 @@ def test_atomic_save_never_publishes_partial_destination(
     real_fdopen = os.fdopen
     real_fsync = os.fsync
     real_replace = os.replace
+    real_close = os.close
     file_fsynced = False
+    temporary_fds: list[int] = []
+    opened_streams: list[Any] = []
+    closed_fds: list[int] = []
 
     class FailingWriteStream(_TrackedBinaryStream):
         def write(self, payload: bytes) -> int:
@@ -127,16 +179,23 @@ def test_atomic_save_never_publishes_partial_destination(
     def failing_mkstemp(*args: Any, **kwargs: Any) -> tuple[int, str]:
         if failure_point == "before_write":
             raise OSError("injected temporary-file failure")
-        return real_mkstemp(*args, **kwargs)
+        fd, name = real_mkstemp(*args, **kwargs)
+        temporary_fds.append(fd)
+        return fd, name
 
     def maybe_failing_fdopen(fd: int, *args: Any, **kwargs: Any) -> Any:
+        if failure_point == "fdopen":
+            raise OSError("injected descriptor-open failure")
         opened = real_fdopen(fd, *args, **kwargs)
+        opened_streams.append(opened)
         if failure_point == "write":
             return FailingWriteStream(opened, [])
         return opened
 
     def tracked_fsync(fd: int) -> None:
         nonlocal file_fsynced
+        if failure_point == "fsync":
+            raise OSError("injected file-fsync failure")
         file_fsynced = True
         real_fsync(fd)
 
@@ -146,7 +205,14 @@ def test_atomic_save_never_publishes_partial_destination(
             raise OSError("injected replace failure")
         real_replace(source, destination)
 
-    monkeypatch.setattr(tempfile, "mkstemp", failing_mkstemp)
+    def tracked_close(fd: int) -> None:
+        real_close(fd)
+        closed_fds.append(fd)
+
+    monkeypatch.setattr(service, "os", SimpleNamespace(**vars(os)))
+    monkeypatch.setattr(service, "tempfile", SimpleNamespace(**vars(tempfile)))
+    monkeypatch.setattr(service.tempfile, "mkstemp", failing_mkstemp)
+    monkeypatch.setattr(service.os, "close", tracked_close)
     monkeypatch.setattr(service.os, "fdopen", maybe_failing_fdopen)
     monkeypatch.setattr(service.os, "fsync", tracked_fsync)
     monkeypatch.setattr(service.os, "replace", maybe_failing_replace)
@@ -156,6 +222,8 @@ def test_atomic_save_never_publishes_partial_destination(
 
     assert json.loads(path.read_text(encoding="utf-8")) == original
     assert list(tmp_path.glob(".system_ops.json.*")) == []
+    assert all(stream.closed for stream in opened_streams)
+    assert closed_fds == (temporary_fds if failure_point == "fdopen" else [])
 
 
 @pytest.mark.unit
@@ -164,6 +232,16 @@ def test_atomic_save_only_tolerates_unsupported_directory_fsync(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "system_ops.json"
+    posix_os = SimpleNamespace(**vars(os))
+    posix_os.name = "posix"
+
+    def open_directory(name: Path, flags: int) -> int:
+        assert name == path.parent
+        # Windows hosts exercise the directory-fsync contract with a real file fd.
+        return os.open(path if os.name == "nt" else name, flags)
+
+    posix_os.open = open_directory
+    monkeypatch.setattr(service, "os", posix_os)
     real_fsync = os.fsync
     calls = 0
 

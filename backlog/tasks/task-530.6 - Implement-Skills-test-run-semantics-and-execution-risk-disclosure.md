@@ -41,7 +41,7 @@ Docs/Plans/IMPLEMENTATION_PLAN_skills_test_run_semantics_TASK_530_6.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added focused SkillPreview coverage for test-run title/action copy, execution-risk disclosure, executeSkill argument forwarding, and alert-based error rendering.
 - Added SkillsManager coverage that the row play action is labeled as a test run instead of Preview.
 - Updated SkillPreview to use Test run / Run test language, disclose fork-mode model/tool execution risk before execution, render execution failures with AntD Alert semantics, and replace deprecated Modal destroyOnClose with destroyOnHidden.
@@ -53,7 +53,7 @@ Docs/Plans/IMPLEMENTATION_PLAN_skills_test_run_semantics_TASK_530_6.md
 - Optional UI typecheck was run with NODE_OPTIONS=--max-old-space-size=8192 and fails on existing unrelated Notes, ScheduledTasks, background, and voice-cloning TypeScript errors; no Skills diagnostics were reported.
 - Bandit is not applicable for this frontend-only TypeScript/TSX and markdown slice.
 - Known skip/blocker: no backend dry-run semantics are claimed or changed in this task.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

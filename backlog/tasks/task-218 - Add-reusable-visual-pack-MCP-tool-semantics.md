@@ -51,7 +51,7 @@ Implement GitHub issue #1496: extend the existing internal persona_visuals MCP/t
 
 ## Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added `persona_visuals.library_items` for read-only reference-backed personal library discovery.
 - Added `persona_visuals.use_library_item` for creating inactive target-persona drafts through `PersonaVisualLibraryService`.
 - Updated Persona Visual Packs docs and PRD MCP contract copy, including removing stale display-snapshot wording.
@@ -63,7 +63,7 @@ Implement GitHub issue #1496: extend the existing internal persona_visuals MCP/t
   - CodeRabbit: reject out-of-range `persona_visuals.library_items` offsets instead of silently capping.
   - Qodo: reject provided-but-blank `target_persona_id` instead of falling back to persona scope.
 - Review fixes added targeted regression coverage and were verified with focused pytest, `git diff --check`, and Bandit.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

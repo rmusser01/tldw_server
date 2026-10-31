@@ -42,13 +42,13 @@ Docs/superpowers/specs/2026-06-06-chat-mermaid-card-artifact-rail-design.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Drafted a PRD/design spec for opening assistant Mermaid diagram blocks into the existing chat artifact rail as diagram artifacts. The design intentionally avoids backend persistence, keeps Mermaid source canonical, preserves assistant-only markdown gating, and documents markdown-only verification with Bandit not applicable for this design-only change.
 
 Verification: git diff --check passed. Bandit skipped because this change only adds Markdown design/task documentation and touches no executable Python code.
 
 Design review update: tightened the PRD to make Mermaid artifact actions explicitly opt-in per markdown surface, keep QuickChat/reasoning/fallback surfaces unchanged by default, and require message/context-aware artifact ids so jump-to-source cannot collide across repeated diagrams.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

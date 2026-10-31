@@ -45,9 +45,9 @@ Revise the Phase 2B Watch/Ingest product contract after UX review. Tighten previ
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Revised the Phase 2B Watch/Ingest product contract after UX review. The spec now makes preview a hard gate for Available, defines Limited availability, splits template capability/task lifecycle/run/result state models, adds source-intent capability, notification, ingest destination, duplicate policy, result-destination, and redaction contracts, and clarifies that the 2B.2 frontend shell cannot promote Watch/Ingest to Available before all gates pass.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

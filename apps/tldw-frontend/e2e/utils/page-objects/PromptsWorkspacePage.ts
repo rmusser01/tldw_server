@@ -183,30 +183,21 @@ export class PromptsWorkspacePage extends BasePage {
       const saveBtn = this.page.getByTestId("prompt-full-page-editor")
         .getByRole("button", { name: /save/i }).first()
       await saveBtn.click()
+      // Successful creation publishes the durable local ID before leaving the
+      // editor. Never remove portals: that masks broken close/save behavior.
+      await expect(this.page).toHaveURL(/[?&]edit=[^&]+/, { timeout: 30_000 })
       await expect(saveBtn).toBeEnabled({ timeout: 15_000 })
-
-      // Close any auto-opened details drawer after save
-      await this.page.keyboard.press("Escape")
-      await expect(this.fullPageEditor).toBeHidden({ timeout: 2_000 }).catch(() => {})
-      // Force-remove any lingering drawer/dialog portals
-      await this.page.evaluate(() => {
-        document.querySelectorAll('.ant-drawer-root, .ant-drawer-mask').forEach(el => el.remove())
-      }).catch(() => {})
+      await this.page.getByTestId("full-editor-back").click()
+      await expect(this.fullPageEditor).toBeHidden({ timeout: 10_000 })
     } else {
       // Drawer path (fallback)
       await expect(this.drawerNameInput).toBeVisible({ timeout: 10_000 })
       await this.drawerNameInput.locator("input").fill(opts.name)
 
-      const userInput = this.drawerUserInput
-      if (await userInput.isVisible().catch(() => false)) {
-        await userInput.locator("textarea").first().fill(opts.template)
-      } else {
-        const systemInput = this.drawerSystemInput
-        await systemInput.locator("textarea").first().fill(opts.template)
-      }
-
+      // Match the full-page editor: template means the system instruction.
+      await this.drawerSystemInput.locator("textarea").first().fill(opts.template)
       await this.drawerSaveButton.click()
-      await expect(this.drawerSaveButton).toBeEnabled({ timeout: 15_000 })
+      await expect(this.drawerNameInput).toBeHidden({ timeout: 30_000 })
     }
   }
 

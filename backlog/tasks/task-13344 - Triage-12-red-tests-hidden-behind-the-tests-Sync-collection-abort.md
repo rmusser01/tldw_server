@@ -50,7 +50,7 @@ RUNTIME IS PART OF THE PROBLEM: 3h 01m is why nobody runs this directory. Any CI
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 TRIAGE COMPLETE. All four acceptance criteria met. Follow-ups: TASK-13349, 13350, 13351, 13352.
 
 AC2 -- ENUMERATION (and a correction). Run in a detached git worktree at HEAD so my working-tree edits could not disturb it, with --junit-xml. The count is 18, not 12: the original figure came from a run where 7 of the names were lost to the output buffer, so it was never a full enumeration. All 18 were then re-run SERIALLY and all 18 reproduce, in 42 seconds -- none is a parallelism artifact.
@@ -120,7 +120,7 @@ AC4 -- RUNTIME. The premise that a CI remedy "must be a scoped subset or a night
 METHOD NOTE: the enumeration ran in a detached worktree at HEAD, removed afterwards, and the
 source instrumentation used to diagnose AC1 was restored from a file copy, not git stash --
 stashes are per-repository and this checkout has five worktrees.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

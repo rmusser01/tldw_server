@@ -55,6 +55,10 @@ class _CoreSchedulerStub:
         self.task_id = task_id
         self.submissions: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
         self.stop_calls = 0
+        self.worker_pool = self
+
+    def get_status(self) -> dict[str, Any]:
+        return {"workers_by_queue": {"workflows": 1, "watchlists": 1}}
 
     async def submit(self, *args: Any, **kwargs: Any) -> str:
         self.submissions.append((args, kwargs))
@@ -460,6 +464,12 @@ async def test_run_schedule_submits_with_resolved_owner_user_id(monkeypatch):
             return None
 
     class _StubScheduler:
+        def __init__(self) -> None:
+            self.worker_pool = self
+
+        def get_status(self) -> dict[str, Any]:
+            return {"workers_by_queue": {"workflows": 1}}
+
         async def submit(self, *args: Any, **kwargs: Any) -> str:
             captured["payload"] = kwargs.get("payload")
             captured["metadata"] = kwargs.get("metadata")
@@ -495,6 +505,12 @@ def test_run_now_routes_watchlist_backed_schedules_to_watchlists_queue(client_ad
     captured: dict[str, Any] = {}
 
     class _StubScheduler:
+        def __init__(self) -> None:
+            self.worker_pool = self
+
+        def get_status(self) -> dict[str, Any]:
+            return {"workers_by_queue": {"watchlists": 1}}
+
         async def submit(self, handler: str, *args: Any, **kwargs: Any) -> str:
             captured["handler"] = handler
             captured["payload"] = kwargs.get("payload")

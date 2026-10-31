@@ -5,6 +5,8 @@ import { useConnectionStore } from "@/store/connection"
 import { isRecoverableAuthConfigError } from "@/services/auth-errors"
 import { tldwClient, type ServerChatSummary } from "@/services/tldw/TldwApiClient"
 import type { ChatScope } from "@/types/chat-scope"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
 export type ServerChatHistoryItem = ServerChatSummary & {
   createdAtMs: number
@@ -14,6 +16,9 @@ export type ServerChatHistoryItem = ServerChatSummary & {
 const SERVER_CHAT_FETCH_LIMIT = 200
 const SERVER_CHAT_FETCH_MAX_PAGES = 50
 const SERVER_CHAT_SEARCH_LIMIT = 50
+// Find a chat by what was said in it, not only by its title. Servers that
+// predate content search ignore the parameter and search titles as before.
+const SERVER_CHAT_SEARCH_FIELDS = "title,content"
 export const SERVER_CHAT_HISTORY_OVERVIEW_PAGE_SIZE = 25
 
 type FetchServerChatsPage = (params: {
@@ -89,6 +94,11 @@ export const filterServerChatHistoryItems = (
   }
 
   return items.filter((item) => {
+    // The server already matched this chat on its messages; the text is not in
+    // the row, so a title check here would wrongly drop it.
+    if (item.matched_in?.includes("content")) {
+      return true
+    }
     const haystack = `${item.title || ""} ${item.topic_label || ""} ${item.state || ""}`.toLowerCase()
     return haystack.includes(normalizedQuery)
   })
@@ -96,10 +106,12 @@ export const filterServerChatHistoryItems = (
 
 export const deriveServerChatHistoryViewState = ({
   previousData,
+  total,
   error
 }: {
-  previousData: ServerChatHistoryItem[]
-  error: unknown
+  total: number;
+  previousData: ServerChatHistoryItem[];
+  error: unknown;
 }): {
   data: ServerChatHistoryItem[]
   total: number
@@ -108,7 +120,7 @@ export const deriveServerChatHistoryViewState = ({
   isShowingStaleData: boolean
 } => ({
   data: previousData,
-  total: previousData.length,
+  total,
   sidebarRefreshState: "recoverable-error",
   hasUsableData: previousData.length > 0,
   isShowingStaleData: previousData.length > 0
@@ -170,7 +182,13 @@ export const fetchAllServerChatPages = async (
 }
 
 type UseServerChatHistoryOptions = {
+  owner?: {
+    key: string
+    requestScope: ServicePromptRequestScope
+    isCurrent: () => boolean
+  }
   enabled?: boolean
+  characterId?: number
   includeDeleted?: boolean
   deletedOnly?: boolean
   scope?: ChatScope
@@ -216,8 +234,11 @@ export const useServerChatHistory = (
   const includeDeleted = options?.includeDeleted ?? false
   const deletedOnly = options?.deletedOnly ?? false
   const scope = options?.scope
+  const owner = options?.owner
+  const ownerCurrent = !owner || owner.isCurrent()
   const filterMode = options?.filterMode ?? (deletedOnly ? "trash" : "all")
   const characterScope = getCharacterScopeForFilterMode(filterMode)
+  const characterId = options?.characterId
   const overviewPage = Math.max(1, Math.trunc(options?.page ?? 1))
   const overviewLimit = Math.max(
     1,
@@ -245,6 +266,7 @@ export const useServerChatHistory = (
       ? "overview-page"
       : "overview-full"
   const isEnabled =
+    ownerCurrent &&
     isConnected &&
     (options?.enabled ?? true) &&
     (mode !== "search" || normalizedQuery.length > 0)
@@ -269,27 +291,36 @@ export const useServerChatHistory = (
             : overviewLimit
           : null,
         filterMode,
+        ...(characterId != null ? { characterId } : {}),
+        ...(owner ? { ownerKey: owner.key } : {}),
         scope
       }
     ],
     enabled: isEnabled,
     queryFn: async ({ signal }): Promise<ServerChatHistoryQueryData> => {
+      const assertOwner = () => {
+        if (owner && !owner.isCurrent()) throw createServicePromptScopeChangedError()
+      }
+      assertOwner()
       await tldwClient.initialize().catch(() => null)
+      assertOwner()
       try {
         if (canUseConversationSearch) {
           const response = await tldwClient.searchConversationsWithMeta(
             {
               query: normalizedQuery,
+              search_in: SERVER_CHAT_SEARCH_FIELDS,
               limit: searchLimit,
               offset: (searchPage - 1) * searchLimit,
               order_by: "recency",
               ...(includeDeleted || deletedOnly ? { include_deleted: true } : {}),
               ...(deletedOnly ? { deleted_only: true } : {}),
-              ...(characterScope ? { character_scope: characterScope } : {})
+              ...(characterScope ? { character_scope: characterScope } : {}),
+              ...(characterId != null ? { character_id: characterId } : {})
             },
-            { signal, scope }
+            { signal, scope, ...(owner ? { requestScope: owner.requestScope } : {}) }
           )
-
+          assertOwner()
           return {
             items: mapServerChatHistoryItems(response.chats),
             total:
@@ -305,12 +336,13 @@ export const useServerChatHistory = (
               ordering: "-updated_at",
               include_message_counts: false,
               ...(characterScope ? { character_scope: characterScope } : {}),
+              ...(characterId != null ? { character_id: characterId } : {}),
               ...(includeDeleted ? { include_deleted: true } : {}),
               ...(deletedOnly ? { deleted_only: true } : {})
             },
-            { signal, scope }
+            { signal, scope, ...(owner ? { requestScope: owner.requestScope } : {}) }
           )
-
+          assertOwner()
           return {
             items: mapServerChatHistoryItems(response.chats),
             total: response.total
@@ -326,16 +358,18 @@ export const useServerChatHistory = (
                 ordering: "-updated_at",
                 include_message_counts: false,
                 ...(characterScope ? { character_scope: characterScope } : {}),
+                ...(characterId != null ? { character_id: characterId } : {}),
                 ...(includeDeleted ? { include_deleted: true } : {}),
                 ...(deletedOnly ? { deleted_only: true } : {})
               },
-              { signal: pageSignal, scope }
+              { signal: pageSignal, scope, ...(owner ? { requestScope: owner.requestScope } : {}) }
             ),
           {
             signal
           }
         )
 
+        assertOwner()
         const items = mapServerChatHistoryItems(chats)
         return {
           items,
@@ -357,24 +391,25 @@ export const useServerChatHistory = (
     },
     staleTime: 60_000,
     gcTime: 5 * 60_000,
-    refetchOnMount: false,
+    refetchOnMount: (cached) => cached.state.isInvalidated,
     retry: (failureCount, error) =>
       !isRecoverableServerChatHistoryError(error) && failureCount < 1
   })
 
   const filteredData = useMemo(
     () =>
-      canUseConversationSearch
+      !ownerCurrent ? [] : canUseConversationSearch
         ? query.data?.items || []
         : filterServerChatHistoryItems(query.data?.items || [], normalizedQuery),
-    [canUseConversationSearch, query.data, normalizedQuery]
+    [ownerCurrent, canUseConversationSearch, query.data, normalizedQuery]
   )
   const resolvedTotal = useMemo(() => {
+    if (!ownerCurrent) return 0
     if (isServerPagedResult) {
       return query.data?.total ?? filteredData.length
     }
     return filteredData.length
-  }, [filteredData.length, isServerPagedResult, query.data])
+  }, [ownerCurrent, filteredData.length, isServerPagedResult, query.data])
 
   const sidebarState = useMemo(() => {
     if (query.status === "success") {
@@ -391,6 +426,7 @@ export const useServerChatHistory = (
       if (isRecoverableServerChatHistoryError(query.error)) {
         return deriveServerChatHistoryViewState({
           previousData: filteredData,
+          total: resolvedTotal,
           error: query.error
         })
       }

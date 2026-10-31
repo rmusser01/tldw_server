@@ -32,9 +32,9 @@ Fix verified review feedback on PR #2074 after rebasing onto origin/dev: queryab
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented verified PR #2074 review fixes: queryable-source gating/counts, i18next interpolation, folder map performance, skip-link pane focusing, IndexedDB-aware migration signatures, preflighted destructive migration deletion, per-session tombstone cleanup caching, valid source status dl semantics, checkbox focus cleanup, migration missing-chunk diagnostics, provider runtime fallback, contextual service-probe logging, selected-source capability gating, and strict preview-context monkeypatching.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

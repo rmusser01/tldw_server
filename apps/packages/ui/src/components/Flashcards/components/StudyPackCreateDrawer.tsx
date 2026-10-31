@@ -1,6 +1,6 @@
 import React from "react"
 import { Button, Drawer, Input, Select, Space, Typography } from "antd"
-import { Trash2 } from "lucide-react"
+import { ChevronDown, ChevronRight, FileText, Film, MessageSquare, Trash2 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 
@@ -23,6 +23,12 @@ type StudyPackCreateDrawerProps = {
 }
 
 const DEFAULT_SOURCE_TYPE: StudyPackSourceType = "media"
+
+const SOURCE_TYPE_ICONS: Record<StudyPackSourceType, React.ComponentType<{ className?: string }>> = {
+  media: Film,
+  note: FileText,
+  message: MessageSquare
+}
 
 const normalizeIntentSources = (
   intent: StudyPackIntent | null | undefined
@@ -55,6 +61,10 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
   const [sourceId, setSourceId] = React.useState("")
   const [sourceTitle, setSourceTitle] = React.useState("")
   const [jobId, setJobId] = React.useState<number | null>(null)
+  // Typing a raw ID is the fallback. Hide it when the drawer opens with
+  // sources already chosen elsewhere (NE-08).
+  const [manualEntryOpen, setManualEntryOpen] = React.useState(true)
+  const manualSourceId = React.useId()
 
   const jobQuery = useStudyPackJobQuery(jobId, {
     enabled: open && jobId != null
@@ -82,11 +92,18 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
     ],
     [t]
   )
+  const sourceTypeLabel = React.useCallback(
+    (type: StudyPackSourceType) =>
+      sourceTypeOptions.find((option) => option.value === type)?.label ?? type,
+    [sourceTypeOptions]
+  )
 
   React.useEffect(() => {
     if (!open) return
     setTitle(initialIntent?.title ?? "")
-    setSourceItems(normalizeIntentSources(initialIntent))
+    const intentSources = normalizeIntentSources(initialIntent)
+    setSourceItems(intentSources)
+    setManualEntryOpen(intentSources.length === 0)
     setSourceType(DEFAULT_SOURCE_TYPE)
     setSourceId("")
     setSourceTitle("")
@@ -266,46 +283,69 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
             </Text>
           </div>
 
-          <Space.Compact className="w-full">
-            <Select
-              aria-label="Source Type"
-              value={sourceType}
-              onChange={(value) => setSourceType(value)}
-              options={sourceTypeOptions}
-              className="min-w-[120px]"
-            />
-            <Input
-              aria-label={t("option:flashcards.studyPackSourceIdAdvancedLabel", {
-                defaultValue: "Source ID (advanced/manual)"
-              })}
-              value={sourceId}
-              onChange={(event) => setSourceId(event.target.value)}
-              placeholder={t("option:flashcards.studyPackSourceIdAdvancedPlaceholder", {
-                defaultValue: "Source ID (advanced/manual)"
-              })}
-            />
-            <Input
-              aria-label="Source Title"
-              value={sourceTitle}
-              onChange={(event) => setSourceTitle(event.target.value)}
-              placeholder={t("option:flashcards.studyPackSourceTitlePlaceholder", {
-                defaultValue: "Optional title"
-              })}
-            />
-            <Button onClick={handleAddSource}>
-              {t("common:add", { defaultValue: "Add source" })}
-            </Button>
-          </Space.Compact>
-          <Text
-            type="secondary"
-            className="mt-2 block text-xs"
-            data-testid="study-pack-source-id-guidance"
+          <button
+            type="button"
+            className="mb-2 inline-flex items-center gap-1 text-sm text-text-muted hover:text-text"
+            aria-expanded={manualEntryOpen}
+            aria-controls={manualSourceId}
+            onClick={() => setManualEntryOpen((current) => !current)}
+            data-testid="study-pack-manual-source-toggle"
           >
-            {t("option:flashcards.studyPackSourceIdGuidance", {
-              defaultValue:
-                "Advanced/manual source reference. Choose Media, Note, or Message, then paste the item ID from that source."
+            {manualEntryOpen ? (
+              <ChevronDown className="size-4" aria-hidden="true" />
+            ) : (
+              <ChevronRight className="size-4" aria-hidden="true" />
+            )}
+            {t("option:flashcards.studyPackManualSourceToggle", {
+              defaultValue: "Add a source by ID"
             })}
-          </Text>
+          </button>
+          <div id={manualSourceId} hidden={!manualEntryOpen}>
+            {manualEntryOpen ? (
+              <>
+                <Space.Compact className="w-full">
+                  <Select
+                    aria-label="Source Type"
+                    value={sourceType}
+                    onChange={(value) => setSourceType(value)}
+                    options={sourceTypeOptions}
+                    className="min-w-[120px]"
+                  />
+                  <Input
+                    aria-label={t("option:flashcards.studyPackSourceIdAdvancedLabel", {
+                      defaultValue: "Source ID (advanced/manual)"
+                    })}
+                    value={sourceId}
+                    onChange={(event) => setSourceId(event.target.value)}
+                    placeholder={t("option:flashcards.studyPackSourceIdAdvancedPlaceholder", {
+                      defaultValue: "Source ID (advanced/manual)"
+                    })}
+                  />
+                  <Input
+                    aria-label="Source Title"
+                    value={sourceTitle}
+                    onChange={(event) => setSourceTitle(event.target.value)}
+                    placeholder={t("option:flashcards.studyPackSourceTitlePlaceholder", {
+                      defaultValue: "Optional title"
+                    })}
+                  />
+                  <Button onClick={handleAddSource}>
+                    {t("common:add", { defaultValue: "Add source" })}
+                  </Button>
+                </Space.Compact>
+                <Text
+                  type="secondary"
+                  className="mt-2 block text-xs"
+                  data-testid="study-pack-source-id-guidance"
+                >
+                  {t("option:flashcards.studyPackSourceIdGuidance", {
+                    defaultValue:
+                      "Advanced/manual source reference. Choose Media, Note, or Message, then paste the item ID from that source."
+                  })}
+                </Text>
+              </>
+            ) : null}
+          </div>
 
           <div className="mt-3 space-y-2">
             {sourceItems.length === 0 ? (
@@ -316,29 +356,40 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
                 })}
               </Text>
             ) : (
-              sourceItems.map((item, index) => (
-                <div
-                  key={`${item.source_type}-${item.source_id}-${index}`}
-                  className="flex items-start justify-between gap-3 rounded border border-border bg-background p-2"
-                >
-                  <div className="min-w-0">
-                    <Text className="block">
-                      {item.source_type} · {item.source_id}
-                    </Text>
-                    {item.source_title ? (
-                      <Text type="secondary" className="block truncate">
-                        {item.source_title}
-                      </Text>
-                    ) : null}
+              sourceItems.map((item, index) => {
+                const TypeIcon = SOURCE_TYPE_ICONS[item.source_type] ?? FileText
+                const typeLabel = sourceTypeLabel(item.source_type)
+                const title = item.source_title?.trim()
+                return (
+                  <div
+                    key={`${item.source_type}-${item.source_id}-${index}`}
+                    className="flex items-start justify-between gap-3 rounded border border-border bg-background p-2"
+                    data-testid={`study-pack-source-${index}`}
+                  >
+                    <div className="flex min-w-0 items-start gap-2">
+                      <TypeIcon className="mt-0.5 size-4 shrink-0 text-text-muted" aria-hidden="true" />
+                      <div className="min-w-0">
+                        {/* Name a source by its title; fall back to the ID
+                            only when nothing else identifies it (NE-08). */}
+                        <Text className="block truncate">
+                          {title || `${typeLabel} ${item.source_id}`}
+                        </Text>
+                        {title ? (
+                          <Text type="secondary" className="block text-xs">
+                            {typeLabel}
+                          </Text>
+                        ) : null}
+                      </div>
+                    </div>
+                    <Button
+                      type="text"
+                      aria-label={t("common:remove", { defaultValue: "Remove" })}
+                      icon={<Trash2 className="size-4" />}
+                      onClick={() => handleRemoveSource(index)}
+                    />
                   </div>
-                  <Button
-                    type="text"
-                    aria-label={t("common:remove", { defaultValue: "Remove" })}
-                    icon={<Trash2 className="size-4" />}
-                    onClick={() => handleRemoveSource(index)}
-                  />
-                </div>
-              ))
+                )
+              })
             )}
           </div>
         </div>

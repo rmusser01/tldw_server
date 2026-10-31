@@ -20,9 +20,12 @@ vi.mock("../server-health-probe", () => ({ probeServerHealth: vi.fn().mockResolv
 vi.mock("react-i18next", () => ({ useTranslation: () => ({
   t: (key: string, fallback: unknown) => typeof fallback === "string" ? fallback : key
 }) }))
-vi.mock("react-router-dom", () => ({
+vi.mock("react-router-dom", async (importOriginal) => ({
+  ...await importOriginal<typeof import("react-router-dom")>(),
   Link: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  useNavigate: () => vi.fn()
+  useNavigate: () => vi.fn(),
+  useBlocker: () => ({ state: "unblocked", proceed: undefined, reset: undefined }),
+  unstable_usePrompt: vi.fn()
 }))
 
 type TimeoutConfig = TldwConfig & {
@@ -52,17 +55,35 @@ const load = async (config = target) => {
   await storage.set("tldwConfig", config)
   await tldwClient.initialize()
   mount()
-  const server = await screen.findByRole("textbox", { name: "Server URL" })
-  await waitFor(() => expect(server).toHaveValue(target.serverUrl))
+  const server = await screen.findByLabelText("Server URL", { selector: "input" })
+  await waitFor(() => {
+    expect(server).toHaveRole("textbox")
+    expect(server).toHaveAccessibleName("Server URL")
+    expect(server).toBeVisible()
+    expect(server.closest('[aria-hidden="true"]')).toBeNull()
+    expect(server).toHaveValue(target.serverUrl)
+  })
 }
 const save = async () => {
   const update = vi.spyOn(tldwClient, "updateConfig")
   const previousCalls = update.mock.calls.length
-  fireEvent.click(screen.getByRole("button", { name: "common:save", exact: true }))
+  const saveButton = screen.getByText("common:save", { exact: true }).closest("button")!
+  expect(saveButton).toHaveRole("button")
+  expect(saveButton).toHaveAccessibleName("common:save")
+  expect(saveButton).toBeVisible()
+  expect(saveButton.closest('[aria-hidden="true"]')).toBeNull()
+  fireEvent.click(saveButton)
   await waitFor(() => expect(update.mock.calls.length).toBeGreaterThan(previousCalls))
   await update.mock.results[previousCalls].value
   await waitFor(async () => expect((await storage.get<TimeoutConfig>("tldwConfig"))?.ragRequestTimeoutMs).toBeDefined())
-  await waitFor(() => expect(screen.getByRole("button", { name: "common:save", exact: true })).not.toBeDisabled())
+  await waitFor(() => {
+    expect(saveButton).toBeInTheDocument()
+    expect(saveButton).toHaveRole("button")
+    expect(saveButton).toHaveAccessibleName("common:save")
+    expect(saveButton).toBeVisible()
+    expect(saveButton.closest('[aria-hidden="true"]')).toBeNull()
+    expect(saveButton).not.toBeDisabled()
+  })
   return (await storage.get<TimeoutConfig>("tldwConfig"))!
 }
 const generation = (config: TimeoutConfig) => [config.chatRequestTimeoutMs, config.chatStartupTimeoutMs, config.ragRequestTimeoutMs]

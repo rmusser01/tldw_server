@@ -48,7 +48,7 @@ Task 1 backend atlas manifest characterization
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 1 backend characterization complete. Added atlas activation coverage for frames[].region without known asset dimensions and malformed region validation coverage in tldw_Server_API/tests/Persona/test_persona_visuals_core.py. Focused pytest passed: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_core.py -q (23 passed, 5 warnings). visuals.py was not changed because existing validation already satisfies the characterization. Bandit hygiene: raw test-file run reports expected pytest assert B101 findings; B101-skipped test-scope run exited 0 and wrote /tmp/bandit_task302_task1_skip_b101.json.
 
 Task 2 WebUI characterization complete. Added atlas preview_frame coverage for shared sprite sheet assets, registry renderability coverage for atlas-backed sprite_frames packs including malformed regions, and diagnostics coverage for unsupported_region renderer errors. Focused Vitest passed from apps/packages/ui: bunx vitest run src/components/Common/PersonaBuddy/__tests__/SpriteFrameRenderer.test.tsx src/components/Common/PersonaBuddy/__tests__/personaVisualRenderers.test.tsx src/components/Common/PersonaBuddy/__tests__/personaVisualDiagnostics.test.ts (3 files passed, 27 tests passed).
@@ -58,7 +58,7 @@ Task 3 documentation update complete. Added the Sprite Atlas Packs section to Do
 Final verification after rebasing onto origin/dev completed on 2026-05-12: backend pytest passed with 70 passed and 5 warnings for test_persona_visuals_core.py, test_persona_visuals_api.py, and test_persona_visual_portability.py. Frontend Vitest passed with 5 files and 50 tests for SpriteFrameRenderer, personaVisualRenderers, personaVisualDiagnostics, BuddyShellHost, and persona-visuals; observed the existing react-i18next NO_I18NEXT_INSTANCE warning in BuddyShellHost coverage. Bandit passed for tldw_Server_API/app/core/Persona/visuals.py and tldw_Server_API/tests/Persona/test_persona_visuals_core.py with B101 excluded; JSON output is /tmp/bandit_persona_buddy_sprite_atlas_v1.json. git diff --check exited 0. No blockers remain for this implementation slice.
 
 Post-PR rebase verification completed on 2026-05-13 after rebasing onto the latest origin/dev. Backend pytest passed with 74 passed and 5 warnings for test_persona_visuals_core.py, test_persona_visuals_api.py, and test_persona_visual_portability.py. Frontend Vitest passed with 5 files and 52 tests for SpriteFrameRenderer, personaVisualRenderers, personaVisualDiagnostics, BuddyShellHost, and persona-visuals; observed the existing react-i18next NO_I18NEXT_INSTANCE warning in BuddyShellHost coverage. Bandit passed with B101 excluded and wrote /tmp/bandit_persona_buddy_sprite_atlas_v1.json. git diff --check exited 0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

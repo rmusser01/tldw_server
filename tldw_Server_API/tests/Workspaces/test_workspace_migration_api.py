@@ -1,4 +1,6 @@
 """Tests for Research Workspace migration protocol endpoints."""
+import json
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -10,8 +12,7 @@ from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
     WORKSPACES_WRITE_RATE_LIMIT,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError, InputError
 
 _MANIFEST_HASH = "a" * 64
 _CHUNK_HASH = "b" * 64
@@ -33,7 +34,7 @@ def workspace_fastapi_app():
 
 
 @pytest.fixture
-def workspace_client(workspace_fastapi_app, db):
+def workspace_client(workspace_fastapi_app: FastAPI, db: CharactersRAGDB):
     async def _allow_rate_limit() -> None:
         return None
 
@@ -425,3 +426,45 @@ def test_workspace_migration_rejects_oversized_chunk_receipt(workspace_client):
     )
 
     assert response.status_code == 422, response.text
+
+
+@pytest.mark.integration
+def test_workspace_migration_missing_receipt_byte_count_precedes_session_lookup(db):
+    with pytest.raises(InputError, match="byte_count must be an integer"):
+        db.add_workspace_migration_chunk("missing-migration", "chunk-1", {"sha256": _CHUNK_HASH, "byte_count": None})
+
+
+@pytest.mark.integration
+def test_workspace_migration_stored_missing_declared_byte_count_remains_ineligible(db):
+    payload = _session_payload()
+    db.upsert_workspace_migration_session(payload)
+    receipt = {"sha256": _CHUNK_HASH, "byte_count": 64, "chunk_kind": "workspace_bundle"}
+    db.add_workspace_migration_chunk("mig-1", "chunk-1", receipt)
+    payload["declared_chunks"][0]["byte_count"] = None
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE workspace_migration_sessions SET declared_chunks_json = ? WHERE id = ?",
+            (json.dumps(payload["declared_chunks"]), "mig-1"),
+        )
+
+    with pytest.raises(ConflictError, match="invalid byte count") as exc_info:
+        db.add_workspace_migration_chunk("mig-1", "chunk-1", receipt)
+    assert exc_info.value.entity == "workspace_migration_chunks"
+    assert exc_info.value.entity_id == "chunk-1"
+    session = db.get_workspace_migration_session("mig-1")
+    assert session is not None
+    verification = db._verify_workspace_migration_delete_eligibility(session)
+    assert verification["eligible"] is False
+    assert verification["mismatch_chunk_ids"] == ["chunk-1"]
+
+
+@pytest.mark.integration
+def test_workspace_migration_missing_decoded_receipt_byte_count_remains_ineligible(db):
+    db.upsert_workspace_migration_session(_session_payload())
+    db.add_workspace_migration_chunk("mig-1", "chunk-1", {"sha256": _CHUNK_HASH, "byte_count": 64})
+    session = db.get_workspace_migration_session("mig-1")
+    assert session is not None
+    session["_chunks"][0]["byte_count"] = None
+    verification = db._verify_workspace_migration_delete_eligibility(session)
+    assert verification["eligible"] is False
+    assert verification["mismatch_chunk_ids"] == ["chunk-1"]

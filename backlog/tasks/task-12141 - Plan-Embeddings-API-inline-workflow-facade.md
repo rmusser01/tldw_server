@@ -33,9 +33,9 @@ Write the implementation plan for Stage 1 of the canonical Embeddings workflow a
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation plan written at Docs/superpowers/plans/2026-07-03-embeddings-api-inline-workflow-facade-implementation-plan.md. Plan scope is Stage 1 only: workflow contracts, no-op/in-memory trace collectors, inline runner, pre-execute RG boundary hook, feature-flagged endpoint integration, isolated tests, endpoint parity coverage, and verification. Self-review completed: spec coverage mapped to tasks, placeholder scan passed, type/signature consistency checked, git diff --check passed. Bandit not run because this task only adds planning documentation and Backlog task records. Implementation execution task created as TASK-12142.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

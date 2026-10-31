@@ -9,6 +9,7 @@ import { createWithEqualityFn } from "zustand/traditional"
 import { persist, createJSONStorage, type StateStorage } from "zustand/middleware"
 import { useShallow } from "zustand/react/shallow"
 import type { Folder, Keyword, FolderKeywordLink, ConversationKeywordLink } from "@/db/dexie/types"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import { db } from "@/db/dexie/schema"
 import {
   fetchFolders,
@@ -59,12 +60,21 @@ const findKeywordByName = (keywords: Keyword[], value: string): Keyword | null =
   )
 }
 
+export type FolderOperation = Readonly<{
+  requestScope: ServicePromptRequestScope
+  isCurrent: () => boolean
+}>
+
 interface FolderState {
   // Server data (cached)
   folders: Folder[]
   keywords: Keyword[]
   folderKeywordLinks: FolderKeywordLink[]
   conversationKeywordLinks: ConversationKeywordLink[]
+
+  // Fresh history picker data is qualified only for this transient operation.
+  serverDataScope: FolderOperation | null
+  releaseServerData: (operation: FolderOperation) => void
 
   // Loading state
   isLoading: boolean
@@ -94,16 +104,16 @@ interface FolderState {
   collapseAllFolders: () => void
 
   // Actions - Server operations
-  refreshFromServer: () => Promise<void>
-  createFolder: (name: string, parentId?: number | null) => Promise<Folder | null>
+  refreshFromServer: (operation?: FolderOperation) => Promise<void | "scope-changed">
+  createFolder: (name: string, parentId?: number | null, operation?: FolderOperation) => Promise<Folder | null>
   updateFolder: (id: number, data: { name?: string; parent_id?: number | null }) => Promise<boolean>
   deleteFolder: (id: number) => Promise<boolean>
-  createKeyword: (keyword: string) => Promise<Keyword | null>
-  ensureKeyword: (keyword: string) => Promise<Keyword | null>
-  addKeywordToConversation: (conversationId: string, keywordId: number) => Promise<boolean>
+  createKeyword: (keyword: string, operation?: FolderOperation) => Promise<Keyword | null>
+  ensureKeyword: (keyword: string, operation?: FolderOperation) => Promise<Keyword | null>
+  addKeywordToConversation: (conversationId: string, keywordId: number, operation?: FolderOperation) => Promise<boolean>
   removeKeywordFromConversation: (conversationId: string, keywordId: number) => Promise<boolean>
-  addKeywordToFolder: (folderId: number, keywordId: number) => Promise<boolean>
-  addConversationToFolder: (conversationId: string, folderId: number) => Promise<boolean>
+  addKeywordToFolder: (folderId: number, keywordId: number, operation?: FolderOperation) => Promise<boolean>
+  addConversationToFolder: (conversationId: string, folderId: number, operation?: FolderOperation) => Promise<boolean>
   removeConversationFromFolder: (conversationId: string, folderId: number) => Promise<boolean>
 
   // Computed helpers
@@ -243,8 +253,50 @@ const createThrottledLocalStorage = (delay = 1000): StateStorage => {
 
 export const useFolderStore = createWithEqualityFn<FolderState>()(
   persist(
-    (set, get) => ({
+    (setState, get) => {
+      let refreshGeneration = 0
+      let ownedRefresh: { operation: FolderOperation; controller: AbortController } | null = null
+      const set = (patch: Partial<FolderState> | ((state: FolderState) => Partial<FolderState>)) => {
+        setState((state) => {
+          const next = typeof patch === "function" ? patch(state) : patch
+          // Legacy/cache publications cannot retain a verified picker's authority.
+          const publishesServerData = ["folders", "keywords", "folderKeywordLinks", "conversationKeywordLinks", "folderApiAvailable", "error", "isLoading"]
+            .some((key) => Object.prototype.hasOwnProperty.call(next, key))
+          return publishesServerData && !Object.prototype.hasOwnProperty.call(next, "serverDataScope")
+            ? { ...next, serverDataScope: null }
+            : next
+        })
+      }
+      const canUse = (operation?: FolderOperation) => !operation || (
+        operation.isCurrent() && get().serverDataScope === operation &&
+        !get().isLoading && !get().error && get().folderApiAvailable === true
+      )
+      const canAcceptResult = (operation: FolderOperation | undefined, status?: number) => {
+        if (operation && status === 412) get().releaseServerData(operation)
+        return canUse(operation)
+      }
+      const optionsFor = (operation?: FolderOperation) => operation
+        ? { requestScope: operation.requestScope }
+        : undefined
+      return ({
       // Initial state
+      serverDataScope: null,
+      releaseServerData: (operation) => {
+        const releasesRead = ownedRefresh?.operation === operation
+        if (releasesRead && ownedRefresh) {
+          ownedRefresh.controller.abort()
+          ownedRefresh = null
+        }
+        if (get().serverDataScope !== operation) {
+          if (releasesRead) {
+            ++refreshGeneration
+            set({ isLoading: false })
+          }
+          return
+        }
+        ++refreshGeneration
+        set({ serverDataScope: null, folders: [], keywords: [], folderKeywordLinks: [], conversationKeywordLinks: [], isLoading: false, error: null, folderApiAvailable: null })
+      },
       folders: [],
       keywords: [],
       folderKeywordLinks: [],
@@ -307,16 +359,24 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
       }),
 
       // Server sync
-      refreshFromServer: async () => {
+      refreshFromServer: async (operation) => {
+        if (operation && !operation.isCurrent()) return
         const state = get()
 
         // Skip if we already know the folder API is not available
-        if (state.folderApiAvailable === false) {
+        if (!operation && state.folderApiAvailable === false) {
           return
         }
 
-        set({ isLoading: true, error: null })
+        ownedRefresh?.controller.abort()
+        ownedRefresh = null
         const controller = new AbortController()
+        if (operation) ownedRefresh = { operation, controller }
+        const generation = ++refreshGeneration
+        const canPublish = () => generation === refreshGeneration &&
+          (!operation || (operation.isCurrent() && get().serverDataScope === operation))
+        set({ isLoading: true, error: null, serverDataScope: operation ?? null,
+          ...(operation ? { folders: [], keywords: [], folderKeywordLinks: [], conversationKeywordLinks: [], folderApiAvailable: null } : {}) })
         const timeoutMs = 15000
         const timeoutId = setTimeout(() => {
           try {
@@ -327,13 +387,15 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
         }, timeoutMs)
 
         try {
+          if (!canPublish()) return
           const [foldersRes, keywordsRes, folderKeywordLinksRes, conversationKeywordLinksRes] = await Promise.all([
-            fetchFolders({ abortSignal: controller.signal, timeoutMs }),
-            fetchKeywords({ abortSignal: controller.signal, timeoutMs }),
-            fetchFolderKeywordLinks({ abortSignal: controller.signal, timeoutMs }),
-            fetchConversationKeywordLinks(undefined, { abortSignal: controller.signal, timeoutMs })
+            fetchFolders({ abortSignal: controller.signal, timeoutMs, ...optionsFor(operation) }),
+            fetchKeywords({ abortSignal: controller.signal, timeoutMs, ...optionsFor(operation) }),
+            fetchFolderKeywordLinks({ abortSignal: controller.signal, timeoutMs, ...optionsFor(operation) }),
+            fetchConversationKeywordLinks(undefined, { abortSignal: controller.signal, timeoutMs, ...optionsFor(operation) })
           ])
 
+          if (!canPublish()) return
           const responses = [
             foldersRes,
             keywordsRes,
@@ -343,11 +405,17 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
           const anyError = responses.some((res) => !res.ok)
           const hasNotFound = responses.some((res) => res.status === 404)
 
+          if (operation && responses.some(res => res.status === 412)) {
+            get().releaseServerData(operation)
+            return "scope-changed"
+          }
+
           if (hasNotFound) {
             // Folder API not available (404) - disabling folder sync
             set({
               isLoading: false,
-              folderApiAvailable: false
+              folderApiAvailable: false,
+              serverDataScope: operation ?? null
             })
             clearTimeout(timeoutId)
             return
@@ -368,7 +436,7 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
           const conversationKeywordLinks = conversationKeywordLinksRes.data || []
 
           // Cache to Dexie (atomic)
-          await db.transaction(
+          if (!operation) await db.transaction(
             "rw",
             db.folders,
             db.keywords,
@@ -391,7 +459,9 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
             }
           )
 
+          if (!canPublish()) return
           set({
+            serverDataScope: operation ?? null,
             folders,
             keywords,
             folderKeywordLinks,
@@ -401,18 +471,24 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
             folderApiAvailable: true // Mark API as available
           })
         } catch (error) {
+          if (!canPublish()) return
           const errorMsg = error instanceof Error ? error.message : String(error)
           const errorStatus =
             typeof (error as { status?: number | string })?.status !== "undefined"
               ? Number((error as { status?: number | string }).status)
               : undefined
+          if (operation && errorStatus === 412) {
+            get().releaseServerData(operation)
+            return "scope-changed"
+          }
           const is404 = errorStatus === 404 || errorMsg.includes('404')
 
           if (is404) {
             // Folder API not available (404) - disabling folder sync
             set({
               isLoading: false,
-              folderApiAvailable: false
+              folderApiAvailable: false,
+              serverDataScope: operation ?? null
             })
             clearTimeout(timeoutId)
             return
@@ -421,8 +497,12 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
           console.error('Failed to refresh folders from server:', error)
           set({
             error: errorMsg,
-            isLoading: false
+            isLoading: false,
+            serverDataScope: operation ?? null
           })
+
+          // Account-owned pickers never fall back to this unqualified cache.
+          if (operation) return
 
           // Fall back to cached data
           try {
@@ -432,6 +512,7 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
               db.folderKeywordLinks.toArray(),
               db.conversationKeywordLinks.toArray()
             ])
+            if (!canPublish()) return
             set((state) => {
               const prevLastSynced = state.lastSynced
               if (prevLastSynced) {
@@ -477,23 +558,30 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
             // Ignore cache read errors
           }
         } finally {
+          if (ownedRefresh?.controller === controller) {
+            ownedRefresh = null
+            if (generation === refreshGeneration && get().isLoading) set({ isLoading: false })
+          }
           clearTimeout(timeoutId)
         }
       },
 
       // CRUD operations
-      createFolder: async (name, parentId) => {
-        const result = await apiCreateFolder(name, parentId)
+      createFolder: async (name, parentId, operation) => {
+        if (!canUse(operation)) return null
+        const result = await apiCreateFolder(name, parentId, optionsFor(operation))
+        if (!canAcceptResult(operation, result.status)) return null
         if (result.ok && result.data) {
           const folder = result.data
           set((state) => ({
-            folders: [...state.folders, folder],
+            serverDataScope: operation ?? null,
+            folders: state.folders.some((item) => item.id === folder.id) ? state.folders : [...state.folders, folder],
             uiPrefs: {
               ...state.uiPrefs,
               [folder.id]: { isOpen: true }
             }
           }))
-          await db.folders.put(folder)
+          if (!operation) await db.folders.put(folder)
           return folder
         }
         return null
@@ -530,32 +618,41 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
         return false
       },
 
-      createKeyword: async (keyword) => {
-        const result = await apiCreateKeyword(keyword)
+      createKeyword: async (keyword, operation) => {
+        if (!canUse(operation)) return null
+        const result = await apiCreateKeyword(keyword, optionsFor(operation))
+        if (!canAcceptResult(operation, result.status)) return null
         if (result.ok && result.data) {
           const kw = result.data
           set((state) => ({
-            keywords: [...state.keywords, kw]
+            serverDataScope: operation ?? null,
+            keywords: state.keywords.some((item) => item.id === kw.id) ? state.keywords : [...state.keywords, kw]
           }))
-          await db.keywords.put(kw)
+          if (!operation) await db.keywords.put(kw)
           return kw
         }
         return null
       },
 
-      ensureKeyword: async (keyword) => {
+      ensureKeyword: async (keyword, operation) => {
+        if (!canUse(operation)) return null
         const trimmed = keyword.trim()
         if (!trimmed) return null
         const existing = findKeywordByName(get().keywords, trimmed)
         if (existing) return existing
-        return await get().createKeyword(trimmed)
+        return await get().createKeyword(trimmed, operation)
       },
 
-      addKeywordToConversation: async (conversationId, keywordId) => {
+      addKeywordToConversation: async (conversationId, keywordId, operation) => {
+        if (!canUse(operation)) return false
+        if (operation && get().conversationKeywordLinks.some((link) =>
+          link.conversation_id === conversationId && link.keyword_id === keywordId)) return true
         const result = await apiLinkKeywordToConversation(
           conversationId,
-          keywordId
+          keywordId,
+          optionsFor(operation)
         )
+        if (!canAcceptResult(operation, result.status)) return false
         if (result.ok) {
           const link: ConversationKeywordLink = {
             conversation_id: conversationId,
@@ -569,9 +666,9 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
             )
             return exists
               ? state
-              : { conversationKeywordLinks: [...state.conversationKeywordLinks, link] }
+              : { serverDataScope: operation ?? null, conversationKeywordLinks: [...state.conversationKeywordLinks, link] }
           })
-          await db.conversationKeywordLinks.put(link)
+          if (!operation) await db.conversationKeywordLinks.put(link)
           return true
         }
         return false
@@ -609,8 +706,10 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
         return false
       },
 
-      addKeywordToFolder: async (folderId, keywordId) => {
-        const result = await apiLinkKeywordToFolder(folderId, keywordId)
+      addKeywordToFolder: async (folderId, keywordId, operation) => {
+        if (!canUse(operation)) return false
+        const result = await apiLinkKeywordToFolder(folderId, keywordId, optionsFor(operation))
+        if (!canAcceptResult(operation, result.status)) return false
         if (result.ok) {
           const link: FolderKeywordLink = {
             folder_id: folderId,
@@ -622,89 +721,48 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
             )
             return exists
               ? state
-              : { folderKeywordLinks: [...state.folderKeywordLinks, link] }
+              : { serverDataScope: operation ?? null, folderKeywordLinks: [...state.folderKeywordLinks, link] }
           })
-          await db.folderKeywordLinks.put(link)
+          if (!operation) await db.folderKeywordLinks.put(link)
           return true
         }
         return false
       },
 
-      addConversationToFolder: async (conversationId, folderId) => {
+      addConversationToFolder: async (conversationId, folderId, operation) => {
+        if (!canUse(operation)) return false
         const state = get()
-        // Find a keyword associated with this folder, or create one
-        let keyword = state.keywords.find(
-          (k) =>
-            !k.deleted &&
-            state.folderKeywordLinks.some(
-              (l) => l.folder_id === folderId && l.keyword_id === k.id
-            )
-        )
-
+        const folder = state.folders.find((f) => f.id === folderId && !f.deleted)
+        if (!folder) return false
+        let keyword = state.keywords.find((k) => !k.deleted &&
+          state.folderKeywordLinks.some((l) => l.folder_id === folderId && l.keyword_id === k.id))
         let createdKeywordForFolder = false
-
         if (!keyword) {
-          // Create a keyword with the folder name
-          const folder = state.folders.find(f => f.id === folderId)
-          if (!folder) return false
-          keyword = await get().createKeyword(folder.name)
-          if (!keyword) return false
+          keyword = await get().createKeyword(folder.name, operation)
+          if (!canUse(operation) || !keyword) return false
           createdKeywordForFolder = true
-
-          const linked = await get().addKeywordToFolder(folderId, keyword.id)
+          const linked = await get().addKeywordToFolder(folderId, keyword.id, operation)
+          if (!canUse(operation)) return false
           if (!linked) {
+            // Scoped bulk requests can share this keyword creation. Keep it for
+            // recovery rather than deleting a tag another current chunk uses.
+            if (operation) return false
             await apiDeleteKeyword(keyword.id)
-            set((state) => ({
-              keywords: state.keywords.map((k) =>
-                k.id === keyword.id ? { ...k, deleted: true } : k
-              )
-            }))
+            set((current) => ({ keywords: current.keywords.map((k) => k.id === keyword!.id ? { ...k, deleted: true } : k) }))
             await db.keywords.update(keyword.id, { deleted: true })
             return false
           }
         }
-
         const keywordId = keyword.id
-
-        const linkResult = await apiLinkKeywordToConversation(conversationId, keywordId)
-        const success = linkResult.ok
-
-        if (!success && createdKeywordForFolder) {
+        const success = await get().addKeywordToConversation(conversationId, keywordId, operation)
+        if (!canUse(operation)) return false
+        if (!success && createdKeywordForFolder && !operation) {
           await apiUnlinkKeywordFromFolder(folderId, keywordId)
-
-          set((state) => ({
-            folderKeywordLinks: state.folderKeywordLinks.filter(
-              (l) => !(l.folder_id === folderId && l.keyword_id === keywordId)
-            )
-          }))
-
-          await db.folderKeywordLinks
-            .where('[folder_id+keyword_id]')
-            .equals([folderId, keywordId])
-            .delete()
-
+          set((current) => ({ folderKeywordLinks: current.folderKeywordLinks.filter((l) => !(l.folder_id === folderId && l.keyword_id === keywordId)) }))
+          await db.folderKeywordLinks.where('[folder_id+keyword_id]').equals([folderId, keywordId]).delete()
           await apiDeleteKeyword(keywordId)
-          set((state) => ({
-            keywords: state.keywords.map((k) =>
-              k.id === keywordId ? { ...k, deleted: true } : k
-            )
-          }))
+          set((current) => ({ keywords: current.keywords.map((k) => k.id === keywordId ? { ...k, deleted: true } : k) }))
           await db.keywords.update(keywordId, { deleted: true })
-        }
-        if (success) {
-          const link: ConversationKeywordLink = {
-            conversation_id: conversationId,
-            keyword_id: keywordId
-          }
-          set((state) => {
-            const exists = state.conversationKeywordLinks.some(
-              (l) => l.conversation_id === link.conversation_id && l.keyword_id === link.keyword_id
-            )
-            return exists
-              ? state
-              : { conversationKeywordLinks: [...state.conversationKeywordLinks, link] }
-          })
-          await db.conversationKeywordLinks.put(link)
         }
         return success
       },
@@ -816,9 +874,11 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
 
       getConversationsForFolder: (folderId) => {
         const state = get()
-        // Get keyword IDs for this folder
+        if (!state.folders.some(folder => folder.id === folderId && !folder.deleted)) return []
+        const activeKeywordIds = new Set(state.keywords.filter(keyword => !keyword.deleted).map(keyword => keyword.id))
+        // Match the active keyword membership used by the visible folder tree.
         const keywordIds = state.folderKeywordLinks
-          .filter(l => l.folder_id === folderId)
+          .filter(l => l.folder_id === folderId && activeKeywordIds.has(l.keyword_id))
           .map(l => l.keyword_id)
 
         // Get conversation IDs that have these keywords
@@ -830,7 +890,8 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
 
         return Array.from(conversationIds)
       }
-    }),
+      })
+    },
     {
       name: 'tldw-folder-store',
       // Baseline version so future shape changes can migrate instead of discarding
@@ -857,7 +918,7 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
       // the default shallow merge otherwise.
       merge: (persistedState, currentState) => {
         const persisted = (persistedState ?? {}) as Partial<FolderState>
-        const { folderApiAvailable: _legacyFolderApiAvailable, ...rest } =
+        const { folderApiAvailable: _legacyFolderApiAvailable, serverDataScope: _transientServerDataScope, ...rest } =
           persisted
         return {
           ...currentState,

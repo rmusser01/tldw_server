@@ -40,11 +40,11 @@ Add the first follow-up implementation slice for the VZ Linux crash/reboot postu
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Current-code audit: existing VZ runner tests already covered helper unavailable/protocol mismatch preservation, absent status replacement, unhealthy replacement, and helper-generation mismatch replacement. Added missing portable coverage for reachable helper truth with owner/runtime/session metadata mismatch; the new test passed without production changes. Added operator docs for helper crash/manual stop, direct or future launchd-managed restart, host reboot procedure, and host-gated CI exclusions. Verification: python -m pytest tldw_Server_API/tests/sandbox/test_vz_linux_runner.py -q passed (27 passed); git diff --check passed; Bandit on touched test file with baseline test-file B101/B108 skips returned 0 findings; rg verified crash/reboot doc anchors.
 
 Review fix: addressed Qodo type-hint finding by annotating the new metadata-mismatch test fixture parameters and nested store `**kwargs`.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

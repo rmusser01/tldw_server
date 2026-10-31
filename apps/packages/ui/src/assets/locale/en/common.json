@@ -6,6 +6,7 @@
   },
   "dismiss": "Dismiss",
   "confirmTitle": "Please confirm",
+  "temporaryChatDiscardConfirmation": "Discard this Temporary conversation?\n\nCancel keeps it on this device so you can copy messages before continuing. OK discards its messages.",
   "pdf": {
     "passwordTitle": "Enter the PDF password",
     "unlock": "Unlock"
@@ -28,6 +29,19 @@
       "az": "A-Z",
       "provider": "Provider",
       "localFirst": "Local-first"
+    },
+    "saveFailed": "This model is selected for this tab. Your preference could not be saved.",
+    "retrySave": "Retry saving model",
+    "change": "Change model",
+    "choose": "Choose model",
+    "group": {
+      "default": "Default",
+      "local": "Local"
+    },
+    "readiness": {
+      "notChecked": "Not checked",
+      "working": "Working",
+      "unreachable": "Unreachable"
     }
   },
   "save": "Save",
@@ -78,9 +92,14 @@
     }
   },
   "copyToClipboard": "Copy to clipboard",
+  "copyCode": "Copy code",
+  "codeCopied": "Copied",
   "table": {
     "copyCsv": "Copy as CSV",
-    "downloadCsv": "Download CSV"
+    "downloadCsv": "Download CSV",
+    "scrollForMore": "Scroll for more columns →",
+    "label": "Table",
+    "labelWithColumns": "Table: {{columns}}"
   },
   "webSearch": "Searching the web",
   "regenerate": "Regenerate",
@@ -94,10 +113,37 @@
   "delete": "Delete",
   "deleteMessageConfirm": "Delete this message?",
   "deleteFailed": "Delete failed",
+  "deleteMessage": {
+    "failed": "We could not confirm deletion. Reload this conversation to check the saved message before trying again.",
+    "descendants": "This message has replies. Delete those replies first, including any other branches, then try again.",
+    "changed": "The saved message has changed. Reload this conversation and review the latest message before deleting it.",
+    "busy": "A reply is still in progress. Wait for it to finish before deleting a saved message.",
+    "scope": "The server or signed-in account changed. Return to the intended server and account, then reload this conversation.",
+    "unsupported": "This conversation does not support deleting saved messages from this view yet.",
+    "sync": "Your sync setup does not support deleting saved messages from this view yet.",
+    "unavailable": "This saved message is unavailable. Reload the conversation to review its current messages.",
+    "refreshFailed": "The message was deleted, but this view or its saved copy could not be refreshed. Reload the conversation before continuing."
+  },
   "continue": "Continue Response",
   "saveAndSubmit": "Save & Send",
   "editMessage": {
-    "placeholder": "Type a message..."
+    "placeholder": "Type a message...",
+    "label": "Edit message",
+    "failed": "We could not confirm whether your edit was saved. Your edited text is kept. Copy it, then cancel and reload this conversation to check the saved message before saving again.",
+    "changed": "The saved message has changed. Your edited text is kept. Copy it, then cancel and reload this conversation to review the latest version.",
+    "busy": "A reply is still in progress. Your edited text is kept. Wait for it to finish, then save your edit.",
+    "scope": "The server or signed-in account changed. Your edited text is kept. Copy it, then return to the intended server and account and reload this conversation.",
+    "unsupported": "This conversation does not support this edit action yet. Your edited text is kept. Copy it before cancelling.",
+    "payload": "Only non-empty plain-text messages can be saved here. Your edited text is kept. Copy it before cancelling.",
+    "sync": "Your sync setup does not support editing saved messages yet. Your edited text is kept. Copy it before cancelling.",
+    "retired": "The conversation or edited text changed during this save. Your edited text is kept. Review the current message before saving again.",
+    "setup": "Your edited text is kept. Review the conversation setup, then try Save & Send again.",
+    "unavailable": "The saved message is unavailable in this conversation. Your edited text is kept. Copy it, then cancel and reload this conversation to review its current messages.",
+    "access": "This account or connection cannot access the saved message. Your edited text is kept. Copy it, then check your server connection and sign-in and reload this conversation.",
+    "copy": "Copy edit",
+    "copied": "Edit copied",
+    "copying": "Copying edit...",
+    "copyFailed": "Copy failed. Select your edited text and use your browser's Copy command."
   },
   "submit": "Submit",
   "send": "Send",
@@ -126,6 +172,7 @@
   "artifactsCopy": "Copy",
   "artifactsDownload": "Download",
   "artifactsRun": "Run",
+  "artifactsActions": "Artifact actions",
   "copyShort": "Copy",
   "branchShort": "Branch",
   "infoShort": "Info",
@@ -155,6 +202,9 @@
   "complexArguments": "[Complex arguments]",
   "currentChatModelSettings": "Current Chat Model Settings",
   "modelSettings": {
+    "samplingNotSupported": "Not supported by {{provider}}",
+    "samplingThisProvider": "this provider",
+    "samplingSupportUnknown": "Not sent: the server doesn't list whether this model accepts it",
     "label": "Model Settings",
     "description": "Set the model options globally for all chats",
     "form": {
@@ -366,6 +416,11 @@
     "friendlyTimeoutHint": "The server stopped streaming responses. Try again, or open Health & diagnostics to check server status.",
     "friendlyGenericSummary": "Something went wrong while talking to your tldw server.",
     "friendlyGenericHint": "Try again in a moment, or open Health & diagnostics to inspect server health.",
+    "providerUnavailableSummary": "Couldn't reach {{model}}.",
+    "providerUnavailableSummaryGeneric": "Couldn't reach this model's provider.",
+    "providerUnavailableHint": "Your tldw server is fine, but this model's provider didn't respond. Start the provider or switch models.",
+    "gatewayUnavailableHint": "The model's provider, or a proxy in front of your tldw server, didn't respond. Check that both are running, or switch models.",
+    "switchModel": "Switch model",
     "imageArtifactsUnsupportedSummary": "Your tldw server doesn't support image generation yet.",
     "imageArtifactsUnsupportedHint": "Update to a tldw_server2 build with file artifacts enabled, then try again.",
     "imageBackendUnavailableSummary": "Image generation isn't available on your server.",
@@ -447,6 +502,8 @@
     "showRawContent": "Show raw content"
   },
   "commandPalette": {
+    "loading": "Loading commands…",
+    "loadFailed": "Commands could not be loaded. Reconnect, save any edits, then reload the page.",
     "goToChat": "Go to Chat",
     "goToKnowledge": "Go to Knowledge",
     "goToMedia": "Go to Media",
@@ -459,6 +516,8 @@
     "newChat": "New Chat",
     "toggleKnowledgeSearch": "Toggle Search & Context",
     "toggleKnowledgeSearchDesc": "Search your knowledge base and context",
+    "toggleChatWithPage": "Toggle chat with current page",
+    "toggleChatWithPageDesc": "Answer using the page open in this browser tab",
     "toggleWebSearch": "Toggle Web Search",
     "toggleWebDesc": "Search the internet",
     "ingestPage": "Ingest Current Page",
@@ -466,16 +525,20 @@
     "switchModel": "Switch Model",
     "toggleSidebar": "Toggle Sidebar",
     "toggleSidebarDesc": "Show or hide the chat sidebar",
-    "placeholder": "Type a command or search...",
+    "placeholder": "Search commands, settings, and prompts…",
     "noResults": "No results found",
-    "title": "Command Palette",
+    "title": "Search commands",
     "navigate": "navigate",
     "select": "select",
     "toOpen": "to open",
     "categoryActions": "Actions",
     "categoryNavigation": "Navigation",
     "categorySettings": "Settings",
-    "categoryRecent": "Recent"
+    "categoryRecent": "Recent",
+    "searchCommands": "Search commands",
+    "open": "Search commands",
+    "searchHistory": "Find conversations",
+    "searchHistoryDesc": "Focus conversation history search"
   },
   "featureHints": {
     "knowledge": {
@@ -517,12 +580,96 @@
     "serverTab": "Server",
     "foldersTab": "Folders",
     "tabs": {
-      "local": "Local",
+      "local": "On this device",
       "server": "Server",
-      "folders": "Folders"
+      "folders": "Folders",
+      "all": "All",
+      "serverTotal": "Server ({{count}} total)",
+      "foldersChats": "Folders ({count, plural, one {# chat} other {# chats}})"
     },
     "noServerChats": "No server chats yet",
-    "foldersRequireConnection": "Folders require a server connection"
+    "foldersRequireConnection": "Folders require a server connection",
+    "local": {
+      "search": "Search on-device chats…",
+      "help": "Chats stored on this device. Account-bound chats appear for the current account.",
+      "temporaryHelp": "Your Temporary chat stays open. Select a chat to preview its stored messages.",
+      "readError": "Could not load chats on this device.",
+      "noMatches": "No matching chats on this device.",
+      "empty": "No available chats on this device.",
+      "previewAction": "Preview chat: {{title}}",
+      "moreError": "Could not load more chats. Previously loaded chats are still available.",
+      "previewError": "Message previews are unavailable. You can still open a chat.",
+      "openError": "Could not open this chat. Select it again to retry.",
+      "previewTitle": "{{title}} — read-only preview",
+      "closePreview": "Close preview",
+      "previewHelp": "Your Temporary chat stays open. These are stored messages in time order; alternatives and comparison results may be included.",
+      "previewReadError": "Could not read this chat.",
+      "unavailable": "This chat is no longer available in this view.",
+      "storedMessages": "Stored messages",
+      "noMessages": "No stored messages in this chat.",
+      "alternative": "Alternative reply {{index}} of {{count}}",
+      "comparison": "Comparison result",
+      "comparisonPrompt": "Comparison prompt",
+      "image": "Image {{index}} from {{speaker}}",
+      "roles": {
+        "user": "You",
+        "assistant": "Assistant",
+        "system": "System",
+        "tool": "Tool"
+      },
+      "cachedPreviewAction": "Preview cached server chat: {{title}} · {{id}}",
+      "cachedOrigin": "Cached server copy · Read-only",
+      "cachedWorkspace": "Workspace {{id}}",
+      "cachedUnknownScope": "Chat scope unknown",
+      "chatReference": "Chat {{id}}",
+      "cachedPreviewHelp": "These are messages stored on this device. The copy may be incomplete or contain local edits. Your open chat stays unchanged; reconnect and open Server history to continue.",
+      "cachedVerifyError": "Could not verify the account for cached Server copies. Profile-owned chats are still available.",
+      "cachedVerifying": "Verifying the account for cached Server copies. Profile-owned chats are still available.",
+      "retryAccount": "Retry account verification"
+    },
+    "findConversations": "Find conversations",
+    "searchScope": "Search {{source}} history.",
+    "searchFromFolders": "Typing searches Server and On this device history.",
+    "discovery": {
+      "allScope": "Search Server and On this device history.",
+      "serverGroup": "Server results",
+      "deviceGroup": "On this device results",
+      "verifyError": "Could not verify the account for Server history.",
+      "verifying": "Verifying the account for Server history…",
+      "offline": "Server history is offline. Owned cached copies remain available in On this device.",
+      "refreshError": "Could not refresh Server history. Try again; cached copies remain in On this device.",
+      "noServerMatches": "No matching chats on this Server page.",
+      "foreignScope": "Some Server results were excluded because they belong to a different chat scope.",
+      "page": "Page {{page}}"
+    },
+    "folderConversationFallback": "Conversation {{id}}",
+    "folderAccountError": "Unable to verify this account.",
+    "foldersUnavailable": "Folders are unavailable on this server.",
+    "folderLoadError": "Unable to load folders for this account.",
+    "folderReadOnly": "Temporary chat can preview history. Switch to History to organize it.",
+    "folderTitlesLoading": "Loading conversation details…",
+    "folderTitlesPartial": "Some conversation details are unavailable. Folder links remain visible.",
+    "foldersEmpty": "No folders yet. Create a folder to organize your chats.",
+    "folderCreated": "Folder created successfully",
+    "deletedDeviceCopyRetained": "Removed from server history. A cached copy remains on this device because it could not be removed.",
+    "navigation": "Navigation",
+    "state": {
+      "inProgress": "In progress",
+      "resolved": "Resolved",
+      "backlog": "Backlog",
+      "nonViable": "Not viable"
+    },
+    "groups": {
+      "today": "Today",
+      "thisWeek": "This week",
+      "older": "Older"
+    },
+    "movedToTrash": "Moved to Trash",
+    "undoTrash": "Undo",
+    "viewTrash": "View Trash",
+    "permanentlyDeleted": "Chat permanently deleted.",
+    "noSearchMatches": "No chats match “{{query}}”",
+    "clearSearch": "Clear search"
   },
   "knowledgeSidebar": {
     "title": "Knowledge history"
@@ -598,7 +745,9 @@
     "pageHelp": "Page Help",
     "tutorials": "Tutorials",
     "shortcuts": "Shortcuts",
-    "tutorialsHint": "Complete tutorials to learn the interface"
+    "tutorialsHint": "Complete tutorials to learn the interface",
+    "tutorialList": "Tutorial list",
+    "shortcutList": "Shortcut list"
   },
   "shortcuts": {
     "title": "Keyboard Shortcuts",
@@ -606,7 +755,8 @@
     "groups": {
       "general": "General",
       "chat": "Chat",
-      "navigation": "Navigation"
+      "navigation": "Navigation",
+      "messageCards": "Message cards"
     },
     "openCommandPalette": "Open command palette",
     "showKeyboardShortcuts": "Show keyboard shortcuts",
@@ -623,7 +773,19 @@
     "goToPrompts": "Go to Prompts",
     "goToFlashcards": "Go to Flashcards",
     "customizeHint": "Shortcuts can be customized in Settings",
-    "forCommands": "for commands"
+    "forCommands": "for commands",
+    "goToChat": "Go to Chat",
+    "goToWorldBooks": "Go to World Books",
+    "goToDictionaries": "Go to Dictionaries",
+    "goToCharacters": "Go to Characters",
+    "toggleChatWithPage": "Toggle chat with current page",
+    "searchThread": "Search this conversation",
+    "toggleArtifacts": "Toggle artifacts panel (when available)",
+    "toggleCompare": "Toggle compare mode (when enabled)",
+    "toggleModes": "Open mode launcher",
+    "variantSwitch": "Previous / next response variant (focus a reply)",
+    "branchMessage": "Fork from the focused message",
+    "regenerateLast": "Regenerate the last reply (focus a reply)"
   },
   "promptAssist": {
     "trigger": "Improve prompt",
@@ -730,5 +892,21 @@
       "large_rewrite": "The rewrite is extensive and needs review.",
       "unknown": "Prompt safety notice."
     }
+  },
+  "regenerateMessage": {
+    "settings": "Conversation settings could not be verified. No new reply was requested. Reload this saved chat or try again; your original exchange and draft are kept.",
+    "context": "The server refused regeneration because this saved chat uses unsupported context. Review the saved setup or start a compatible chat; your original exchange and draft are kept.",
+    "changed": "The saved message or conversation changed. Your original exchange and draft are kept. Reload the intended chat before regenerating again.",
+    "scope": "The server or signed-in account changed. Your original exchange and draft are kept. Return to the intended server and account and reload this chat.",
+    "unsupported": "This reply or its active setup does not support regeneration yet. Your original exchange and draft are kept. Review conversation and response settings or start a compatible saved chat.",
+    "failed": "We could not confirm the new reply. Your original exchange and draft are kept. Reload this chat and review recovery before regenerating again."
+  },
+  "continueMessage": {
+    "settings": "Conversation settings could not be verified, so the reply was not continued. Reload this saved chat or try again; your original exchange and draft are kept.",
+    "context": "The server could not continue this reply because this saved chat uses unsupported context. Review the saved setup or start a compatible chat; your original exchange and draft are kept.",
+    "changed": "The saved message or conversation changed. Your original exchange and draft are kept. Reload the chat before continuing the reply.",
+    "scope": "The server or signed-in account changed. Your original exchange and draft are kept. Return to the intended server and account and reload this chat.",
+    "unsupported": "This reply can't be continued here. Your original exchange and draft are kept. To keep going, use New Branch on this reply or send a follow-up message.",
+    "failed": "We could not confirm the continued reply. Your original exchange and draft are kept. Reload this chat and check for the saved reply before trying again."
   }
 }

@@ -37,11 +37,11 @@ Add local inference prompt/prefix cache diagnostics for vLLM and llama.cpp witho
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented local cache diagnostics with a separate inference_prefix_cache_intent path for vLLM and llama.cpp. Diagnostics are attached as tldw_local_cache_diagnostics on non-streaming local responses only when cache-related signal exists; strict payload filtering still removes non-OpenAI cache hint keys before sending to local OpenAI-compatible servers.
 
 Verification: focused red run failed on missing local_cache_diagnostics module; focused Stage 7 pack passed 13 tests; expanded pack passed 61 tests; py_compile passed for touched Python files; git diff --check passed; Bandit wrote /tmp/bandit_local_cache_stage7.json with results: [].
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

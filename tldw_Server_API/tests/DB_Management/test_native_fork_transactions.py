@@ -159,7 +159,8 @@ def test_committed_replay_requires_protected_child_binding(native_fork_db: Chara
             "native_creation_operation_id = 'fork-one' WHERE id = ?",
             (child,),
         )
-    assert reserve(db).state == "committed"
+    with pytest.raises(NativeForkStoreError, match="operation_receipt_invalid"):
+        reserve(db)
 
 
 def test_incomplete_committed_receipt_fails_closed(native_fork_db: CharactersRAGDB) -> None:

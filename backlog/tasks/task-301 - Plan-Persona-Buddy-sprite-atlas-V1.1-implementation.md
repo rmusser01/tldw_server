@@ -36,7 +36,7 @@ Create the implementation plan for issue #1611 based on the approved Persona/Bud
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-05-12: Wrote Docs/superpowers/plans/2026-05-12-persona-buddy-sprite-atlas-v1-implementation-plan.md. The plan decomposes implementation into backend atlas validation characterization, WebUI renderer/diagnostic characterization, Persona Visual Packs docs, and final verification/PR prep.
 
 2026-05-12 review: Reviewed the plan against the approved design and current code. It explicitly keeps sprite atlas support under sprite_frames, excludes sprite_sheet renderer activation and manifest version changes, and identifies existing behavior that should be covered by characterization tests rather than unnecessary runtime rewrites.
@@ -44,7 +44,7 @@ Create the implementation plan for issue #1611 based on the approved Persona/Bud
 2026-05-12 review limitation: The writing-plans skill recommends a plan-document-reviewer subagent, but no reviewer agent was spawned because this environment requires explicit user authorization before spawning subagents. Manual plan review was performed instead.
 
 2026-05-12 verification: Plan is documentation/task tracking only. Bandit is not applicable because no Python/runtime code changed in this planning slice. git diff --check will be run before commit.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

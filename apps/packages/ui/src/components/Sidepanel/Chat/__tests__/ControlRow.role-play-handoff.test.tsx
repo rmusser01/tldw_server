@@ -1,5 +1,6 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ControlRow } from "../ControlRow"
 import { browser } from "wxt/browser"
@@ -23,6 +24,8 @@ type MockChildrenProps = {
 
 type MockPopoverProps = MockChildrenProps & {
   content?: React.ReactNode
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
 type MockSwitchProps = {
@@ -37,6 +40,7 @@ type MockInputProps = React.InputHTMLAttributes<HTMLInputElement> & {
 }
 
 const mocks = vi.hoisted(() => ({
+  runtimeId: "review-extension" as string | undefined,
   selectedAssistant: {
     kind: "character",
     id: "char-review",
@@ -61,7 +65,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("wxt/browser", () => ({
   browser: {
     runtime: {
-      id: "review-extension",
+      get id() { return mocks.runtimeId },
       getURL: mocks.runtimeGetURL
     },
     tabs: {}
@@ -104,9 +108,14 @@ vi.mock("antd", () => {
     InputNumber: (props: React.InputHTMLAttributes<HTMLInputElement>) => (
       <input type="number" {...props} />
     ),
-    Popover: ({ children, content }: MockPopoverProps) => (
+    Popover: ({ children, content, open, onOpenChange }: MockPopoverProps) => (
       <>
-        {children}
+        {React.isValidElement(children)
+          ? React.cloneElement(
+              children as React.ReactElement<{ onClick?: () => void }>,
+              { onClick: () => onOpenChange?.(!open) }
+            )
+          : children}
         <div data-testid="mock-popover-content">{content}</div>
       </>
     ),
@@ -132,9 +141,15 @@ vi.mock("antd", () => {
   }
 })
 
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: [] })
-}))
+vi.mock("@tanstack/react-query", async (original) => {
+  const actual = await original<typeof import("@tanstack/react-query")>()
+  const queryClient = new actual.QueryClient()
+  return {
+    ...actual,
+    useQuery: () => ({ data: [] }),
+    useQueryClient: () => queryClient
+  }
+})
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -167,9 +182,32 @@ vi.mock("@/components/Common/PromptSelect", () => ({
   PromptSelect: () => <button type="button">Prompt</button>
 }))
 
-vi.mock("@/components/Common/FeatureHint", () => ({
-  FeatureHint: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
-  useFeatureHintSeen: () => false
+// Keep the real FeatureHint; all instances observe one external setting fixture.
+const hintSettings = vi.hoisted(() => ({
+  seen: {} as Record<string, boolean>,
+  listeners: new Set<() => void>()
+}))
+vi.mock("@/hooks/useSetting", () => ({
+  useSetting: () => {
+    const seen = React.useSyncExternalStore(
+      (listener) => {
+        hintSettings.listeners.add(listener)
+        return () => hintSettings.listeners.delete(listener)
+      },
+      () => hintSettings.seen
+    )
+    return [
+      seen,
+      async (
+        next: Record<string, boolean> |
+          ((previous: Record<string, boolean>) => Record<string, boolean>)
+      ) => {
+        hintSettings.seen =
+          typeof next === "function" ? next(hintSettings.seen) : next
+        hintSettings.listeners.forEach((listener) => listener())
+      }
+    ] as const
+  }
 }))
 
 vi.mock("@/components/Common/McpToolSelector", () => ({
@@ -239,6 +277,9 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
 }))
 
 const defaultProps = () => ({
+  draftReady: true,
+  handoffSourceKey: "owned-source-chat",
+  captureHandoffGuard: () => () => true,
   selectedSystemPrompt: undefined,
   setSelectedSystemPrompt: vi.fn(),
   setSelectedQuickPrompt: vi.fn(),
@@ -258,6 +299,7 @@ const defaultProps = () => ({
 describe("ControlRow role-play handoff behavior", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    hintSettings.seen = {}
     vi.spyOn(window, "open").mockImplementation(() => null)
     delete (browser as unknown as MutableBrowser).tabs.create
   })
@@ -277,7 +319,7 @@ describe("ControlRow role-play handoff behavior", () => {
     const openFullApp = screen.getByTestId("chat-open-full-app")
 
     expect(openFullApp).toHaveAccessibleDescription(
-      "Opens /chat in a new tab with the active role-play route. Use Continue in WebUI to carry a draft or page context."
+      "Opens the character route in the extension full page. Use Copy draft & page references to carry a bounded copy; history and chat settings are not included."
     )
 
     fireEvent.click(openFullApp)
@@ -306,6 +348,19 @@ describe("ControlRow role-play handoff behavior", () => {
 })
 
 import { HistorySelectionContext, historySelectionExpansionPath, parseHistorySelectionHandoff } from "@/hooks/chat/useHistorySelection"
+it("uses the WebUI document handoff with H1 present outside the packaged extension", async () => {
+  mocks.runtimeId = undefined
+  const webui = vi.fn().mockResolvedValue(undefined)
+  const prepareExpansionPath = vi.fn()
+  render(<HistorySelectionContext.Provider value={{ prepareExpansionPath } as unknown as import("@/hooks/chat/useHistorySelection").HistorySelectionController}>
+    <ControlRow {...defaultProps()} onOpenChatInWebUi={webui} />
+  </HistorySelectionContext.Provider>)
+  fireEvent.click(screen.getByTestId("chat-open-full-app"))
+  await waitFor(() => expect(webui).toHaveBeenCalledTimes(1))
+  expect(prepareExpansionPath).not.toHaveBeenCalled()
+  mocks.runtimeId = "review-extension"
+})
+
 it("keeps H1 full-page expansion distinct from the explicit WebUI draft handoff", async () => {
   const reference = { profile_id: "p", client_session_id: "a", owner_key: "owner", conversation_id: "chat" }
   const webui = vi.fn()
@@ -319,4 +374,161 @@ it("keeps H1 full-page expansion distinct from the explicit WebUI draft handoff"
   expect(url.startsWith("chrome-extension://review/options.html#/chat?")).toBe(true)
   expect(parseHistorySelectionHandoff(url)).toEqual({ ...reference, owner_kind: "local" })
   expect(webui).not.toHaveBeenCalled()
+})
+
+// Native UAT372 recorded floating hint paragraphs intercepting the model picker.
+// Native narrow/wide hit testing is still required for the final packaged layout.
+describe("ControlRow first-use guidance", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    hintSettings.seen = {}
+  })
+
+  it("shows one eligible non-tooltip hint before the controls", () => {
+    render(<ControlRow {...defaultProps()} />)
+    expect(
+      screen.getAllByRole("button", { name: "Dismiss" })
+    ).toHaveLength(1)
+    expect(screen.getByRole("status")).toHaveTextContent("Search your knowledge")
+    expect(screen.queryByText("More tools available")).not.toBeInTheDocument()
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument()
+  })
+
+  it("dismisses by keyboard without sending the form and returns focus to the feature", async () => {
+    const user = userEvent.setup()
+    const submit = vi.fn((event: React.FormEvent) => event.preventDefault())
+    render(
+      <form onSubmit={submit}><ControlRow {...defaultProps()} /></form>
+    )
+    screen.getAllByRole("button", { name: "Dismiss" })[0].focus()
+    await user.keyboard("{Enter}")
+    expect(submit).not.toHaveBeenCalled()
+    await waitFor(() => expect(
+      screen.getByRole("button", { name: "Open knowledge search" })
+    ).toHaveFocus())
+    expect(screen.queryByText("Search your knowledge")).not.toBeInTheDocument()
+    expect(screen.getByText("More tools available")).toBeVisible()
+    screen.getByRole("button", { name: "Dismiss" }).focus()
+    await user.keyboard(" ")
+    await waitFor(() => expect(
+      screen.getByRole("button", { name: "More tools" })
+    ).toHaveFocus())
+    expect(screen.queryByRole("button", { name: "Dismiss" })).not.toBeInTheDocument()
+    expect(submit).not.toHaveBeenCalled()
+  })
+
+  it("keeps both dismissals after remount while preserving other seen hints", async () => {
+    const user = userEvent.setup()
+    hintSettings.seen = { "another-feature": true }
+    const first = render(<ControlRow {...defaultProps()} />)
+    await user.click(screen.getAllByRole("button", { name: "Dismiss" })[0])
+    first.unmount()
+    const second = render(<ControlRow {...defaultProps()} />)
+    expect(screen.queryByText("Search your knowledge")).not.toBeInTheDocument()
+    expect(screen.getByText("More tools available")).toBeVisible()
+    await user.click(screen.getByRole("button", { name: "Dismiss" }))
+    second.unmount()
+    render(<ControlRow {...defaultProps()} />)
+    expect(screen.queryByRole("button", { name: "Dismiss" })).not.toBeInTheDocument()
+    expect(hintSettings.seen["another-feature"]).toBe(true)
+  })
+
+  it("defers knowledge guidance until connected without marking it seen", async () => {
+    const user = userEvent.setup()
+    const props = defaultProps()
+    const view = render(<ControlRow {...props} isConnected={false} />)
+    expect(screen.queryByText("Search your knowledge")).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Dismiss" }))
+    expect(screen.queryByRole("button", { name: "Dismiss" })).not.toBeInTheDocument()
+    view.rerender(<ControlRow {...props} isConnected />)
+    expect(screen.getByText("Search your knowledge")).toBeVisible()
+    expect(screen.queryByText("More tools available")).not.toBeInTheDocument()
+  })
+
+  it("preserves More tools Escape and trigger focus while a hint is visible", async () => {
+    render(<ControlRow {...defaultProps()} />)
+    const more = screen.getByRole("button", { name: "More tools" })
+    fireEvent.click(more)
+    expect(more).toHaveAttribute("aria-expanded", "true")
+    fireEvent.keyDown(screen.getByTestId("chat-open-full-app"), { key: "Escape" })
+    expect(more).toHaveAttribute("aria-expanded", "false")
+    await waitFor(() => expect(more).toHaveFocus())
+    expect(screen.getByText("Search your knowledge")).toBeVisible()
+  })
+})
+
+it("does not steal More focus after a retired WebUI open settles", async () => {
+  mocks.runtimeId = undefined
+  let finish!: () => void
+  let current = true
+  const props = { ...defaultProps(), captureHandoffGuard: () => () => current, onOpenChatInWebUi: vi.fn(() => new Promise<void>(resolve => { finish = resolve })) }
+  const view = render(<ControlRow {...props} />)
+  fireEvent.click(screen.getByTestId("chat-open-full-app"))
+  current = false
+  view.rerender(<><ControlRow {...props} handoffSourceKey="new-source" /><button>Other task</button></>)
+  const other = screen.getByRole("button", { name: "Other task" })
+  other.focus()
+  await act(async () => { finish(); await new Promise(resolve => requestAnimationFrame(resolve)) })
+  expect(other).toHaveFocus()
+  mocks.runtimeId = "review-extension"
+})
+
+
+it("does not finish a superseded WebUI opening while the next opening is pending", async () => {
+  mocks.runtimeId = undefined
+  const finishes: Array<() => void> = []
+  const onOpen = vi.fn(() => new Promise<void>(resolve => { finishes.push(resolve) }))
+  render(<><ControlRow {...defaultProps()} onOpenChatInWebUi={onOpen} /><button>Other task</button></>)
+  const more = screen.getByRole("button", { name: "More tools" })
+  fireEvent.click(more)
+  fireEvent.click(screen.getByTestId("chat-open-full-app"))
+  fireEvent.click(screen.getByTestId("chat-open-full-app"))
+  const other = screen.getByRole("button", { name: "Other task" })
+  other.focus()
+  await act(async () => { finishes[0](); await new Promise(resolve => requestAnimationFrame(resolve)) })
+  expect(more).toHaveAttribute("aria-expanded", "true")
+  expect(other).toHaveFocus()
+  await act(async () => { finishes[1](); await new Promise(resolve => requestAnimationFrame(resolve)) })
+  expect(more).toHaveAttribute("aria-expanded", "false")
+  expect(more).toHaveFocus()
+  mocks.runtimeId = "review-extension"
+})
+
+
+it("leaves More and focus alone when another entry point retires the Form opening", async () => {
+  mocks.runtimeId = undefined
+  let finish!: (current: boolean) => void
+  const onOpen = vi.fn(() => new Promise<boolean>(resolve => { finish = resolve }))
+  render(<><ControlRow {...defaultProps()} onOpenChatInWebUi={onOpen} /><button>Other task</button></>)
+  const more = screen.getByRole("button", { name: "More tools" })
+  fireEvent.click(more)
+  fireEvent.click(screen.getByTestId("chat-open-full-app"))
+  const other = screen.getByRole("button", { name: "Other task" })
+  other.focus()
+  await act(async () => { finish(false); await new Promise(resolve => requestAnimationFrame(resolve)) })
+  expect(more).toHaveAttribute("aria-expanded", "true")
+  expect(other).toHaveFocus()
+  mocks.runtimeId = "review-extension"
+})
+
+
+it("finishes WebUI focus before a later task can take focus", async () => {
+  mocks.runtimeId = undefined
+  const frames: FrameRequestCallback[] = []
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frames.push(callback); return frames.length })
+  try {
+    let finish!: () => void
+    const onOpen = vi.fn(() => new Promise<void>(resolve => { finish = resolve }))
+    render(<><ControlRow {...defaultProps()} onOpenChatInWebUi={onOpen} /><button>Other task</button></>)
+    fireEvent.click(screen.getByRole("button", { name: "More tools" }))
+    fireEvent.click(screen.getByTestId("chat-open-full-app"))
+    await act(async () => { finish() })
+    const other = screen.getByRole("button", { name: "Other task" })
+    other.focus()
+    act(() => { frames.forEach(callback => callback(0)) })
+    expect(other).toHaveFocus()
+  } finally {
+    vi.unstubAllGlobals()
+    mocks.runtimeId = "review-extension"
+  }
 })

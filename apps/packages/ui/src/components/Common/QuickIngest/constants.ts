@@ -14,7 +14,8 @@ export const QUICK_INGEST_MAX_FILE_SIZE_LABEL = "50 MB"
 export const DUPLICATE_SKIP_MESSAGE =
   "This item already exists in your library. Use the \u2018Deep\u2019 preset to overwrite."
 
-/** Check if a backend result indicates a duplicate/already-exists skip. */
-export const isDbMessageDuplicate = (data: Record<string, unknown> | null | undefined): boolean =>
-  typeof data?.db_message === "string" &&
-  (data.db_message as string).toLowerCase().includes("already exists")
+/** Classify the backend outcome without treating its quoted title as an outcome. */
+export const isDbMessageDuplicate = (data: Record<string, unknown> | null | undefined): boolean => {
+  if (typeof data?.db_message !== "string") return false
+  return data.db_message.replace(/^Media '[\s\S]*' /i, "").toLowerCase().includes("already exists")
+}

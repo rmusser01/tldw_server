@@ -3,6 +3,7 @@ import { normalizeTldwModels } from "@/services/tldw/model-normalization"
 import { getCanonicalModelKey } from "@/hooks/playground/modelSelectorUtils"
 import {
   buildCharacterChatReadiness,
+  buildCharacterChatSendReadiness,
   buildAvailableChatModelIds,
   buildChatModelUsability,
   findUnavailableChatModel,
@@ -13,6 +14,72 @@ import {
 } from "../chat-model-availability"
 
 describe("chat model availability utilities", () => {
+  it.each([
+    [{}, "ready", null],
+    [{ isSendBlocked: true }, "blocked", "chat-send"],
+    [{ isServerConnected: false, isSendBlocked: true }, "blocked", "server-connection"],
+  ] as const)("reports qualified saved-source send state without live setup: %j", (input, status, missingRequirement) => {
+    expect(buildCharacterChatSendReadiness(input)).toMatchObject({ status, missingRequirement });
+  });
+  it.each([
+    "poe",
+    "minimax",
+    "tabby",
+    "custom-openai-api-3",
+    "custom-openai-api-99",
+    "custom_openai_api_3"
+  ])(
+    "admits an explicitly configured native character model from deployed provider %s",
+    (provider) => {
+      expect(
+        buildCharacterChatReadiness({
+          isServerConnected: true,
+          selectedCharacter: { id: 1, name: "TestBot" },
+          selectedModel: `${provider}:Vendor/Model:Q4`,
+          requireExplicitProvider: true,
+          availableModels: [
+            { model: "tldw:Vendor/Model:Q4", provider, is_configured: true }
+          ]
+        })
+      ).toMatchObject({ status: "ready" })
+    }
+  )
+
+  it("blocks discovery failure with Retry instead of treating retained models as ready", () => {
+    const input = { selectedModel: "openai:gpt-4o-mini", availableModels: [{ model: "gpt-4o-mini", provider: "openai", is_configured: true }], modelsError: true };
+    expect(buildChatModelUsability(input)).toMatchObject({ status: "discovery_failed", canSend: false, recommendedAction: "retry" });
+    const readiness = buildCharacterChatReadiness({ ...input, selectedCharacter: { id: 1 } });
+    expect(readiness).toMatchObject({ status: "blocked", reason: "models-discovery-failed", recommendedAction: "retry" });
+    const copy = getCharacterChatReadinessCopy(readiness, (_key, fallback) => typeof fallback === "string" ? fallback : fallback.defaultValue);
+    expect(copy).toMatchObject({ title: "Could not check chat models", actionLabel: "Try again" });
+    expect(copy.description).toContain("Your character selection and draft are kept");
+  })
+
+  it.each(["tldw:gpt-4o-mini", "auto", "openai:auto"])("requires an explicit concrete native selection for %s", selectedModel => {
+    const readiness = buildCharacterChatReadiness({ selectedCharacter: { id: 1 }, selectedModel, requireExplicitProvider: true, availableModels: [{ model: "gpt-4o-mini", provider: "openai", is_configured: true }] })
+    expect(readiness).toMatchObject({ status: "blocked", missingRequirement: "chat-model", reason: "explicit-model-provider-required", recommendedAction: "open-model-settings" })
+    const copy = getCharacterChatReadinessCopy(readiness, (_key, fallback) => typeof fallback === "string" ? fallback : fallback.defaultValue)
+    expect(copy.title).toBe("Choose a model and provider before starting character chat")
+    expect(getMatchingCharacterChatModelUsabilityCopy({ modelUsability: buildChatModelUsability({ selectedModel: "gpt-4o-mini", availableModels: [{ model: "gpt-4o-mini", provider: "openai" }] }), readiness, readinessTitle: copy.title })).toBe(copy.title)
+  })
+
+  it("checks a genuine explicit provider rather than the first duplicate catalog model", () => {
+    const models = [
+      { model: "gpt-4o-mini", provider: "openai", is_configured: true },
+      { model: "gpt-4o-mini", provider: "custom-openai-api", is_configured: false }
+    ]
+    const input = { selectedCharacter: { id: 1 }, selectedModel: "tldw:gpt-4o-mini", explicitProvider: "custom-openai-api", requireExplicitProvider: true, availableModels: models }
+    expect(buildCharacterChatReadiness(input)).toMatchObject({ reason: "provider-unconfigured" })
+    expect(buildCharacterChatReadiness({ ...input, availableModels: [...models].reverse() })).toMatchObject({ reason: "provider-unconfigured" })
+    expect(buildChatModelUsability({ selectedModel: input.selectedModel, availableModels: models })).toMatchObject({ status: "ready" })
+  })
+
+  it("keeps exact opaque catalog identity in ordinary availability despite a stale provider hint", () => {
+    const availableModels = [{ model: "Model:Q4", provider: "chrome", is_configured: true }]
+    expect(buildChatModelUsability({ selectedModel: "chrome:Model:Q4", explicitProvider: "openai", availableModels })).toMatchObject({ status: "ready", matchedProvider: "chrome" })
+    expect(buildCharacterChatReadiness({ selectedCharacter: { id: 1 }, selectedModel: "chrome:Model:Q4", requireExplicitProvider: true, availableModels })).toMatchObject({ reason: "explicit-model-provider-required" })
+  })
+
   const llamaId = "../../../models/Gemma:Q4.gguf"
   const llamaModels = normalizeTldwModels([{ id: llamaId, provider: "llama", type: "chat", is_configured: true }])
 
@@ -947,7 +1014,8 @@ describe("character chat readiness", () => {
       buildCharacterChatReadiness({
         isServerConnected: true,
         selectedCharacter: null,
-        selectedModel: "gpt-4o-mini"
+        selectedModel: "gpt-4o-mini",
+        availableModels: [{ model: "gpt-4o-mini", provider: "openai", is_configured: true }]
       })
     ).toMatchObject({
       status: "blocked",
@@ -956,7 +1024,7 @@ describe("character chat readiness", () => {
     })
   })
 
-  it("does not reuse character-selection copy as model usability detail", () => {
+  it("uses matching model setup copy before character selection when the model is missing", () => {
     const readiness = buildCharacterChatReadiness({
       isServerConnected: true,
       selectedCharacter: null,
@@ -973,7 +1041,7 @@ describe("character chat readiness", () => {
     })
 
     expect(readiness).toMatchObject({
-      missingRequirement: "selected-character"
+      missingRequirement: "chat-model"
     })
     expect(modelUsability).toMatchObject({
       status: "no_selection",
@@ -985,7 +1053,7 @@ describe("character chat readiness", () => {
         readiness,
         readinessTitle: readinessCopy.title
       })
-    ).toBeNull()
+    ).toBe(readinessCopy.title)
   })
 
   it("blocks character chat when no chat model is available", () => {
@@ -1261,4 +1329,14 @@ describe("character chat readiness", () => {
       actionLabel: "Open model settings"
     })
   })
+})
+
+it("keeps an unavailable offline catalog unknown while strict dispatch rejects the same empty set", () => {
+  expect(findUnavailableChatModel(["openai:gpt-4o-mini"], new Set())).toBeNull()
+  expect(findUnavailableChatModel(["openai:gpt-4o-mini"], new Set(), true)).toBe("openai:gpt-4o-mini")
+})
+
+it("prioritizes prospective model setup before character selection when both are missing", () => {
+  expect(buildCharacterChatReadiness({ isServerConnected: true, selectedCharacter: null, selectedModel: null,
+    requireExplicitProvider: true, availableModels: [] })).toMatchObject({ missingRequirement: "chat-model", recommendedAction: "open-model-settings" })
 })

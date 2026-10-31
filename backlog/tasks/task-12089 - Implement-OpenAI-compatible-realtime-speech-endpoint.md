@@ -43,7 +43,7 @@ Docs/superpowers/plans/2026-07-01-openai-realtime-speech-endpoint-implementation
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 1 complete. Implemented protocol constants, dataclass command/event models, OpenAI GA protocol parser/serializer, capabilities metadata, and provider-free tests. Verification: baseline focused tests passed before implementation (21 passed); Stage 1 tests passed after fixes (43 passed, 3 warnings); spec compliance review passed; code-quality review passed with no Critical or Important findings. Bandit production Realtime package reported errors=0 results=0. Minor hardening candidate: reject stray top-level beta audio fields consistently across event types.
 
 Stage 2 complete. Implemented provider-free realtime pipeline event protocol, internal session orchestrator, manual audio turn lifecycle, response generation/cancellation guards, stale-output suppression, metadata merging, and optional persistence boundary. Verification: focused Stage 2 session+persistence tests passed locally (19 passed, 3 warnings); implementer reported expanded focused slice 72 passed; spec compliance review passed at HEAD 25c6a585; code-quality re-review passed with no Critical or Important findings; Bandit on tldw_Server_API/app/core/Audio/Realtime reported errors=0 results=0. The final persistence fix snapshots RealtimePersistenceConfig before yielding response.done so late session.update cannot misattribute a completed turn.
@@ -110,7 +110,7 @@ Final Qodo follow-up validation: d61c9b8573 received Qodo zero bugs/zero rule vi
 2026-09-10 merge instruction: requester supplied the Change summary and explicitly authorized merging PR 2572; no further approval or rationale is pending. GitHub strict status checks rejected the first merge because dev advanced through PR 2599 (audio.cpp TTS). Rebased cleanly onto dev 6b61b5074c. Feature implementation and review fixes are complete; the requested merge will proceed after GitHub required checks on the updated head.
 
 Final merge freshness update: dev advanced again through PR 2612 to 751563a966 (media original-file cleanup). Rebased cleanly and verified the combined realtime, route, audio.cpp registry, audio-download, and original-storage regression slice: 201 passed, 24 warnings. Bandit on realtime production/manual-helper scope again reported zero findings and errors. Requester merge authorization remains in effect; finishing the required GitHub checks and merge.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

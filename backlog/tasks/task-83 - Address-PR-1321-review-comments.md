@@ -32,7 +32,7 @@ Resolve actionable Qodo and CodeRabbit review comments on PR #1321 for Watchlist
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified two unresolved review threads: Qodo on auto-confirming Modal.confirm in JobsTab.undo-delete.test.tsx, and CodeRabbit on loose setRunsStatusFilter assertion in OutputsTab.relationship-jumps.test.tsx. Both findings were valid in current PR code.
 
 Fix: Modal.confirm mock now records config without invoking onOk; delete tests explicitly await the captured onOk and assert no delete call happened before confirmation. Output run-jump test now captures setRunsStatusFilter call count before the run click and asserts exactly one additional last call with null.
@@ -40,7 +40,7 @@ Fix: Modal.confirm mock now records config without invoking onOk; delete tests e
 Verification: focused review-fix Vitest passed 2 files / 4 tests; watchlists-scale-baseline bench passed 1 file / 4 tests; frontend tsc passed; git diff --check passed. Full Watchlists directory reruns exposed unrelated load-sensitive timeout flakes/perf noise outside the modified review comments; the isolated scale gate passed.
 
 PR: https://github.com/rmusser01/tldw_server/pull/1321
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

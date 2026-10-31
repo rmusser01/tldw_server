@@ -37,7 +37,7 @@ Implementation plan saved at `Docs/superpowers/plans/2026-05-15-first-class-watc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created a Stage 1 implementation plan for first-class Watchlist containers. The plan keeps Stage 1 scoped to container persistence, default migration/backfill, CRUD API, child endpoint scoping, output provenance, frontend selector shell, focused tests, and rollout gates.
 
 Verified plan hygiene with `git diff --check -- Docs/superpowers/plans/2026-05-15-first-class-watchlists-stage1-implementation-plan.md` and a trailing-whitespace awk check; both exited 0 with no output.
@@ -45,7 +45,7 @@ Verified plan hygiene with `git diff --check -- Docs/superpowers/plans/2026-05-1
 Bandit not run because this task changes only documentation and Backlog task records. The plan includes Bandit commands for the later backend implementation scope.
 
 Subagent review was not used because the current instructions only allow subagents when explicitly authorized by the user; I performed a local review against the acceptance criteria instead.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -56,6 +56,7 @@ const toUint8 = (chunk: ArrayBuffer | Uint8Array): Uint8Array<ArrayBuffer> => {
 }
 
 export const useStreamingAudioPlayer = () => {
+  const mountedRef = React.useRef(true)
   const audioRef = React.useRef<HTMLAudioElement | null>(null)
   const mediaSourceRef = React.useRef<MediaSource | null>(null)
   const sourceBufferRef = React.useRef<SourceBuffer | null>(null)
@@ -81,6 +82,8 @@ export const useStreamingAudioPlayer = () => {
       audio.onerror = null
       try {
         audio.pause()
+        audio.src = ""
+        audio.load?.()
       } catch {}
     }
     audioRef.current = null
@@ -153,6 +156,7 @@ export const useStreamingAudioPlayer = () => {
 
   const start = React.useCallback(
     (format: string, preferStream: boolean) => {
+      if (!mountedRef.current) return
       cleanup()
       const normalizedFormat = String(format || "mp3").toLowerCase()
       const mime = formatToMime(normalizedFormat)
@@ -228,6 +232,7 @@ export const useStreamingAudioPlayer = () => {
 
   const append = React.useCallback(
     (chunk: ArrayBuffer | Uint8Array) => {
+      if (!mountedRef.current || !formatRef.current) return
       const data = toUint8(chunk)
       allChunksRef.current.push(data)
       if (modeRef.current === "stream" && !streamFailedRef.current) {
@@ -250,6 +255,7 @@ export const useStreamingAudioPlayer = () => {
   )
 
   const finish = React.useCallback(() => {
+    if (!mountedRef.current || !formatRef.current) return
     if (modeRef.current === "stream" && !streamFailedRef.current) {
       endOfStreamPendingRef.current = true
       flushPending()
@@ -311,7 +317,13 @@ export const useStreamingAudioPlayer = () => {
     cleanup()
   }, [cleanup])
 
-  React.useEffect(() => () => cleanup(), [cleanup])
+  React.useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      cleanup()
+    }
+  }, [cleanup])
 
   return {
     start,

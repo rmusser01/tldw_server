@@ -36,13 +36,13 @@ Implement Task 1 from Docs/superpowers/plans/2026-06-09-explainer-workspace-impl
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 TDD implementation notes: repository RED failed during collection because ExplainerDatabase/ExplainerRepository did not exist; endpoint RED failed during collection because Explainer_DB_Deps/router were not implemented. Added owner-scoped SQLite persistence, selected source/citation companion tables, repository/service validation, per-user dependency, schemas, lightweight router, DB path helper, route registrations, and focused tests.
 
 Spec compliance fix: added tested create/update write paths for node citation snapshots through repository, service, schemas, and API node create/patch payloads.
 
 Code-quality follow-up fix: added nullable PATCH clearing via explicit unset handling, recursive subtree soft-delete with citation cleanup, and lightweight paginated session summaries for list responses. Minor shutdown cleanup wiring for the Explainer DB dependency remains a follow-up because this focused fix did not touch app lifespan wiring.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

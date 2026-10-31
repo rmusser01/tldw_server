@@ -1,3 +1,5 @@
+"""Verify Sync v2 HTTP contracts, including durable personal-context recovery."""
+
 from __future__ import annotations
 
 import base64
@@ -23,6 +25,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_request_user,
 )
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
+from tldw_Server_API.app.core.DB_Management import Sync_DB as sync_db_module
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Personalization.personal_context_repository_models import (
     ProfileStorageLockedError,
@@ -40,6 +43,7 @@ from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_organization import (
     NotesOrganizationDomainAdapter,
 )
+from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_provenance import NotesProvenanceDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
 from tldw_Server_API.app.core.Sync.v2.models import (
@@ -115,6 +119,12 @@ def _clock() -> str:
     return "2026-05-23T18:12:00+00:00"
 
 
+@pytest.fixture(autouse=True)
+def _fixed_sync_storage_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep database expiry checks on the service fixture's fixed clock."""
+    monkeypatch.setattr(sync_db_module, "utcnow_iso", _clock)
+
+
 def _sha256(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
@@ -179,6 +189,7 @@ def _registry() -> SyncAdapterRegistry:
             NotesOrganizationDomainAdapter(domain=domain)
             for domain in NOTES_ORGANIZATION_DOMAINS
         ]
+        + [NotesProvenanceDomainAdapter()]
     )
 
 
@@ -3700,9 +3711,11 @@ def test_personal_context_endpoints_use_real_factory_bootstrap_and_complete_flow
     )
     assert push.status_code == 200, push.text
     assert push.json()["personal_context_exchange"] == exchange
-    assert [item["client_envelope_id"] for item in push.json()["accepted"]] == [
+    accepted_envelopes = push.json()["accepted"]
+    assert [item["client_envelope_id"] for item in accepted_envelopes] == [
         "pc-device:record:1"
     ], push.json()
+    assert accepted_envelopes[0]["apply_status"] == "applied", accepted_envelopes[0]
     recovery_cursor = None
     recovered_body = None
     for _attempt in range(10):

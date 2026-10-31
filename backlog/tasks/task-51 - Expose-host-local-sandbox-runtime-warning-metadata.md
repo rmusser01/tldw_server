@@ -43,7 +43,7 @@ Add additive runtime discovery metadata that explicitly warns clients when a run
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented additive isolation_warnings discovery metadata. RED: focused service/API tests failed because isolation_warnings was absent. GREEN: 14 focused sandbox discovery/API tests passed after adding RuntimeIsolationWarningCode, runtime_isolation_warnings(), service wiring, schema field, and docs. Verification: py_compile on touched Python modules passed; Bandit on touched Python modules produced 0 findings; git diff --check passed. Broader test_feature_discovery_flags.py file was attempted but timed out in existing FastAPI lifecycle/job-worker shutdown while running unrelated lifecycle-heavy tests, so final verification used the focused service/API tests that cover this slice.
 
 PR #1278 review fix pass: Qodo identified that public Sandbox API guides still omit the new isolation_warnings response field; Gemini identified non-portable absolute local Python paths in the implementation plan. Plan: update both public guides and published guide examples/narrative, replace absolute verification commands with portable activated-environment python commands, rerun focused docs/diff checks, commit, push, and resolve review threads.
@@ -53,7 +53,7 @@ PR #1278 review fixes completed: public and published Sandbox API guides now inc
 Additional PR #1278 review pass: CodeRabbit requested test hardening so non-host-local warning assertions cover every discovered runtime and API response shape checks validate every runtime entry rather than only the first. Verified current tests still have those narrower assertions; updating tests only.
 
 Additional CodeRabbit review hardening completed: service discovery warning test now verifies every discovered non-host-local runtime lacks host_local_boundary, and the API shape test verifies required fields plus list-typed isolation_warnings for every runtime entry. Verification: focused sandbox discovery/API pytest passed (14 tests) and git diff --check passed. Bandit was not rerun for this final test/docs-only hardening slice; prior production-code Bandit run for the feature had 0 findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

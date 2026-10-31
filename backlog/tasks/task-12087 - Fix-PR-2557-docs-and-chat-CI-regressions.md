@@ -31,12 +31,12 @@ Address the current PR #2557 CI failures: README release metadata contract wordi
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Verified README release metadata contract with: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Docs/test_release_docs_contract.py -q (11 passed).
 - Verified Chat_NEW persona alias integration coverage with: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Chat_NEW/integration/test_chat_persona_exemplars_integration.py -q (15 passed).
 - Ran targeted repro tests before the full-file checks: README metadata test (1 passed) and four persona alias boundary tests (4 passed).
 - Formatting/security checks: git diff --check passed; pre-commit on touched files passed; Bandit on the touched Python test file passed with B101 skipped for pytest asserts.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

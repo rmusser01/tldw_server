@@ -46,9 +46,9 @@ Write an implementation plan for Scheduled Tasks Phase 2B.2 Capability-aware fro
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created the Phase 2B.2 capability-aware frontend shell implementation plan. The plan keeps the slice frontend-only, adds a pure capability overlay model, Limited availability, metadata-generated result/notification copy, redaction helpers, and tests that prevent Watch/Ingest from being treated as Available before all gates pass. Plan-document-reviewer subagent was not spawned because the available subagent tool requires explicit user permission for delegation; performed a local self-review instead.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

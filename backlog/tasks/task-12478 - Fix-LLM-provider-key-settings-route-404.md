@@ -54,7 +54,6 @@ Implementation plan written: Docs/superpowers/plans/2026-06-01-llm-provider-key-
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented in reviewed slices:
 - Hosted WebUI now has a /settings/provider-keys page shim that lazy-loads ProviderKeysSettings instead of falling through to 404.
@@ -67,7 +66,6 @@ Verification recorded:
 - Bandit is not applicable to the touched implementation/test files because this change is TS/TSX-only frontend routing/test coverage; no Python code was modified.
 - repo-wide git diff --check is currently blocked by unrelated pre-existing whitespace in Docs/Design/Agents.md:155; scoped checks for touched files passed during worker verification.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

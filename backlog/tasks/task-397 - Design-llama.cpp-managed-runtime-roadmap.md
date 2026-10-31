@@ -37,7 +37,7 @@ Create the approved roadmap design spec for expanding the merged llama.cpp WebUI
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Docs/superpowers/specs/2026-05-16-llamacpp-managed-runtime-roadmap-design.md with the approved managed-runtime roadmap: asset inventory, instance profiles, supervisor lifecycle, V1 wrappers, local import/register first, future download requirements, model-family/mmproj support, WebUI workflow, staged delivery, and testing strategy.
 
 Local consistency review completed: checked the spec for the requested compatibility/default-profile, download deferral, mmproj, supervisor, profile, and testing coverage. `git diff --check -- Docs/superpowers/specs/2026-05-16-llamacpp-managed-runtime-roadmap-design.md backlog/tasks/task-397\ -\ Design-llama.cpp-managed-runtime-roadmap.md` passed with no output.
@@ -47,7 +47,7 @@ Bandit not run for this task because the current change is documentation/backlog
 Spec critique pass completed before implementation planning. Added design clarifications for backend-owned persistence vs config.txt, admin-only/deployment-global scope, multi-user provider-wiring constraints, asset identity and symlink allowlist handling, explicit port policy, default-profile migration behavior, per-profile lifecycle locking, shutdown/orphan behavior, reserved mode flags, local folder import semantics, and extra E2E coverage for duplicate ports and V1 wrapper behavior.
 
 Post-rollout closeout: the downstream managed-runtime implementation, asset inventory, model-family/mmproj metadata, capability visibility, profile editor, runtime reconciliation, validation hardening, API compatibility, docs, and smoke coverage have all landed through follow-up tasks. The unrelated completed Sync v2 attachment task that previously reused `TASK-397` was moved to `TASK-490.14`, so `TASK-397` is again the unambiguous llama.cpp managed-runtime roadmap parent.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

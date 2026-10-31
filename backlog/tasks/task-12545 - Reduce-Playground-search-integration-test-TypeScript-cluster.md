@@ -33,14 +33,14 @@ Continue reducing the shared UI package-wide TypeScript compiler baseline by fix
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Captured red evidence from `/tmp/task520-tsc-final.txt`: package `tsc` reported two diagnostics in `src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx` where `unknown[]` args were spread into chat-settings mocks.
 - Root cause was test mock forwarding only. The real chat-settings functions take one params object, while the test forwarded generic unknown rest args to mocks inferred as zero-argument functions.
 - Added `ChatSettingsSyncParams` and `ChatSettingsPatchParams` test-only types, gave the mocks explicit one-parameter async signatures with `unknown` returns, and forwarded mocked service calls by named `params`.
 - Focused verification: `bunx vitest run src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx` passed: 10 tests.
 - Package verification: `bunx tsc --noEmit --pretty false > /tmp/task521-tsc-final.txt 2>&1` still exits nonzero from the known baseline, but diagnostics dropped from 57 in `/tmp/task520-tsc-final.txt` to 55 in `/tmp/task521-tsc-final.txt`; `rg -n 'Playground\.search\.integration\.test\.tsx' /tmp/task521-tsc-final.txt` returns no matches.
 - Bandit skipped: this is a TypeScript test-only WebUI change with no Python touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

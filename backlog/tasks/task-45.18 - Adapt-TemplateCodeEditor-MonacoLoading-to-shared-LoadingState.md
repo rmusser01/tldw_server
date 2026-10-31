@@ -44,7 +44,7 @@ Continue the design-system product-state migration by routing the Watchlists Tem
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED: bunx vitest run src/components/Option/Watchlists/TemplatesTab/__tests__/TemplateCodeEditor.loading-state.test.tsx --reporter=dot failed because the Suspense fallback did not expose data-ds-component="LoadingState".
 
 Implementation: MonacoLoading now directly returns the shared LoadingState primitive in spinner mode, with the existing editor height preserved via a new LoadingState style prop. The TemplateCodeEditor local-loading-state baseline entry was removed.
@@ -62,7 +62,7 @@ Review fix verification: added LoadingState.style.test.tsx. RED run failed becau
 PR #1377 review fix pass: TemplateCodeEditor.loading-state.test.tsx mocked @monaco-editor/react with a synchronous component, making the Suspense fallback assertion dependent on lazy import timing. Reopening to switch the mock to a deterministic suspending component following the ChatComposer lazy variant test pattern.
 
 Review fix verification: TemplateCodeEditor.loading-state.test.tsx now mocks @monaco-editor/react with a PendingMonaco component that throws a never-resolving Promise, matching the ChatComposer lazy/Suspense test pattern so the fallback remains visible during assertion. Verification passed: focused TemplateCodeEditor loading test (1 test), TemplateCodeEditor plus LoadingState focused tests (3 files, 4 tests), product-state guard tests (42 tests), bun run verify:design-system-state (518 baseline exceptions, local-loading-state 2), and git diff --check.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

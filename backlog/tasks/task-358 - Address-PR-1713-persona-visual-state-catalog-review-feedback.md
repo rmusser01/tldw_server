@@ -40,11 +40,11 @@ Resolve the actionable Gemini review comments on PR #1713 for Persona Visual sta
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review feedback verified against PR #1713 threads: broaden state catalog control-character detection and simplify allowed visual state union. Added failing regression for ASCII DEL in label/description/tags, then updated validator. Verification: `python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_core.py -q` passed 41 tests; `python -m bandit -r tldw_Server_API/app/core/Persona/visuals.py -f json -o /tmp/bandit_persona_visuals_1713.json` reported 0 findings.
 
 No known skips or blockers. CI was not rerun locally beyond the focused Persona visual core test file and Bandit because the review feedback only touched the Persona manifest validator path.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

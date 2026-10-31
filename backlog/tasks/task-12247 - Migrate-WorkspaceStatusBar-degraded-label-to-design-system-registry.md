@@ -44,13 +44,13 @@ Replace the hardcoded degraded connection label in WorkspacePlayground Workspace
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Red test first: `bunx vitest run src/components/Option/WorkspacePlayground/__tests__/WorkspaceStatusBar.test.tsx --reporter=dot` failed because the degraded connection indicator still rendered `Degraded` instead of the mocked registry label `Registry Degraded`.
 - The degraded connection tone now reads its label from the design-system state registry; connected and disconnected labels remain unchanged.
 - Removed the `canonical-state-label:src/components/Option/WorkspacePlayground/WorkspaceStatusBar.tsx:Degraded` baseline entry.
 - Tightened the existing connection-state test mock typing to `ConnectionState` and corrected the auth error test fixture from `error_auth` to the valid `auth` error kind.
 - Bandit skipped: touched implementation is frontend TypeScript/test JSON only, with no Python code path.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

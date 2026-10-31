@@ -29,18 +29,14 @@ Implement the approved V5-only mobile sidepanel composer direction: preserve usa
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Implementation plan: Docs/superpowers/plans/2026-07-09-v5-mobile-sidepanel-composer.md
 Verification completed so far:
 - bunx vitest run src/components/Chat/composer/__tests__/ChatComposer.test.tsx --reporter=dot
 - bunx tsc --noEmit --pretty false --project tsconfig.json
 - npx playwright test e2e/smoke/composer-mobile-viewport.spec.ts --reporter=line
 - Bandit skipped: touched TypeScript, Playwright, Backlog, and plan/docs only; no Python execution scope.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

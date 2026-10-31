@@ -37,6 +37,26 @@ export interface CharacterCardV3 {
   data: CharacterV3
 }
 
+/** Accept raw data or the single v3 envelope returned by the server. */
+function toCharacterCard(
+  character: CharacterV3 | CharacterCardV3
+): CharacterCardV3 {
+  if (
+    character.spec === "chara_card_v3" &&
+    character.spec_version === "3.0" &&
+    character.data &&
+    typeof character.data === "object" &&
+    !Array.isArray(character.data)
+  ) {
+    return character as CharacterCardV3
+  }
+  return {
+    spec: "chara_card_v3",
+    spec_version: "3.0",
+    data: character as CharacterV3
+  }
+}
+
 /**
  * Sanitize a filename for safe download
  */
@@ -71,14 +91,10 @@ export function exportCharacterToJSON(
   character: CharacterV3,
   filename?: string
 ): void {
-  const name = character.name || "character"
+  const name = toCharacterCard(character).data.name || "character"
   const safeFilename = filename || `${sanitizeFilename(name)}_character.json`
 
-  const cardData: CharacterCardV3 = {
-    spec: "chara_card_v3",
-    spec_version: "3.0",
-    data: character
-  }
+  const cardData = toCharacterCard(character)
 
   const json = JSON.stringify(cardData, null, 2)
   downloadFile(json, safeFilename, "application/json")
@@ -93,11 +109,7 @@ export function exportCharactersToJSON(
 ): void {
   const safeFilename = filename || `characters_export_${Date.now()}.json`
 
-  const cardData = characters.map((character) => ({
-    spec: "chara_card_v3" as const,
-    spec_version: "3.0" as const,
-    data: character
-  }))
+  const cardData = characters.map(toCharacterCard)
 
   const json = JSON.stringify(cardData, null, 2)
   downloadFile(json, safeFilename, "application/json")
@@ -131,11 +143,7 @@ export async function embedMetadataInPNG(
   }
 
   // Create the character card data
-  const cardData: CharacterCardV3 = {
-    spec: "chara_card_v3",
-    spec_version: "3.0",
-    data: character
-  }
+  const cardData = toCharacterCard(character)
 
   // Encode character data as base64
   const jsonString = JSON.stringify(cardData)
@@ -387,7 +395,7 @@ export async function exportCharacterToPNG(
     allowedAvatarOrigins?: string[]
   }
 ): Promise<void> {
-  const name = character.name || "character"
+  const name = toCharacterCard(character).data.name || "character"
   const filename = options?.filename || `${sanitizeFilename(name)}_character.png`
 
   let imageData: ArrayBuffer | null = null

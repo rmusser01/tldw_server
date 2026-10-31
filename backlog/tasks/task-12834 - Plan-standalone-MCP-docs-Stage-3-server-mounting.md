@@ -34,7 +34,7 @@ Write the Stage 3 implementation plan for standalone MCP docs server mounting: e
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started baseline investigation for Stage 3 server mounting plan. Initial finding: Stage 1/2 added the runtime-neutral `mcp_unified.docs` package plus the built-in `tldw_server` `DocsModule` shim and default config, but no separate top-level standalone MCP server mounting layer is visible under `mcp_unified` yet.
 
 Wrote the Stage 3 implementation plan at `Docs/superpowers/plans/2026-07-01-standalone-mcp-docs-stage3-server-mounting-plan.md`. The plan scopes Stage 3 to a runtime-neutral standalone docs mount/factory, explicit locked_down/local_first/online_capable profile defaults, a small tldw_server docs host adapter boundary, and a built-in server registration guard. It explicitly defers crawler/sync, embeddings/reranking, browser extraction, and Media/RAG bridges.
@@ -42,7 +42,7 @@ Wrote the Stage 3 implementation plan at `Docs/superpowers/plans/2026-07-01-stan
 Review note: the writing-plans workflow recommends a plan-document-reviewer subagent, but the available multi-agent tool rules prohibit spawning unless the user explicitly asks for subagents. I performed a local review instead. Issues found and fixed during review: local_first should be web-capable but policy-bound while locked_down is the downgrade that hides URL ingestion; and the host adapter package needs a parent `adapters/__init__.py` so imports and packaging discovery are explicit.
 
 Verification for this planning slice: placeholder scan found no unfinished markers in the plan; `git diff --check` passed. Bandit is not applicable because this task only changes documentation and Backlog metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -872,7 +872,9 @@ describe("ResultsTab remediation panel", { timeout: 60_000 }, () => {
       })
     await openDetails()
 
-    fireEvent.click(screen.getByRole("button", { name: /explain mistake for question 12/i }))
+    const explainButton = screen.getByLabelText(/explain mistake for question 12/i)
+    expect(explainButton).toHaveRole("button")
+    fireEvent.click(explainButton)
 
     await waitFor(() => {
       expect(assistantRefetchMock).toHaveBeenCalled()
@@ -880,12 +882,11 @@ describe("ResultsTab remediation panel", { timeout: 60_000 }, () => {
       expect(screen.getByText("Conversation changed elsewhere.")).toBeInTheDocument()
       expect(screen.getByText("Quiz #7, question 12")).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole("button", { name: /explain mistake for question 12/i }))
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Retry my message" })).toBeInTheDocument()
-    })
+    fireEvent.click(explainButton)
+    const assistant = within(screen.getByTestId("flashcards-review-study-assistant"))
+    const retryButton = await assistant.findByRole("button", { name: "Retry my message" })
 
-    fireEvent.click(screen.getByRole("button", { name: "Retry my message" }))
+    fireEvent.click(retryButton)
 
     await waitFor(() => {
       expect(mocks.assistantRespond).toHaveBeenNthCalledWith(3, {

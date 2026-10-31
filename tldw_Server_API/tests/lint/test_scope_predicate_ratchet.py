@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import ast
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -48,6 +48,22 @@ def test_no_new_conditional_tenant_predicates() -> None:
         "baseline entries no longer match the tree (line numbers move; "
         "regenerate with --write-baseline):\n  " + "\n  ".join(stale)
     )
+
+
+@pytest.mark.unit
+def test_findings_use_posix_baseline_paths_on_windows(tmp_path, monkeypatch) -> None:
+    source = tmp_path / "pkg" / "query.py"
+    source.parent.mkdir()
+    source.write_text('if user_id:\n    conditions.append("user_id = ?")\n', encoding="utf-8")
+    original_relative_to = Path.relative_to
+
+    def windows_relative_to(path, *other):
+        if path == source:
+            return PureWindowsPath("pkg", "query.py")
+        return original_relative_to(path, *other)
+
+    monkeypatch.setattr(Path, "relative_to", windows_relative_to)
+    assert list(iter_findings(tmp_path)) == ["pkg/query.py:1 if user_id"]
 
 
 @pytest.mark.unit

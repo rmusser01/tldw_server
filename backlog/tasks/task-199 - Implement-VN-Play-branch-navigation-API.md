@@ -52,7 +52,7 @@ Initial sequence:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Preflight completed on rebased branch codex/vn-play-branch-navigation-api at origin/dev 8e52700d0 plus local planning commits. Focused VN Play baseline run: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play -q => 71 passed, 5 warnings in 19.26s.
 
 Task 1 complete after subagent implementation plus review loop. Commits: a8eca8712 Add VN Play branch navigation read model; f2bb5b56d Fix VN Play branch replay warnings; 83de8625f Handle VN Play branch navigation edge cases. Spec review passed after replay cap and ambiguous attribution fixes. Code-quality review passed after limit=0 and restore default-target fixes. Controller verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_branch_navigation.py tldw_Server_API/tests/VN_Play/test_vn_play_state.py -q => 16 passed, 5 warnings; git diff --check => exit 0.
@@ -106,7 +106,7 @@ Task 6 docs and final verification complete. Updated VN Play API docs for branch
 Post-rebase final verification on branch codex/vn-play-branch-navigation-api: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Play -q => 121 passed, 5 warnings in 33.76s. Bandit final scope wrote /tmp/bandit_vn_play_branch_navigation.json with results/errors empty. git diff --check => exit 0. Final review fixes included duplicate branch path hardening and checkpoint restore replay response preservation.
 
 Opened PR #1483 against dev: https://github.com/rmusser01/tldw_server/pull/1483. Initial GitHub check state: pending CI; mergeStateStatus UNSTABLE because checks are still running.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

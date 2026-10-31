@@ -560,10 +560,129 @@ jobs:
             exit 1
           fi
 
+  # Complete shared coverage is advisory and independent of the required gate.
+  # The monolithic run could not finish the growing suite within its 15m budget.
+  shared-ui-coverage:
+    name: shared-ui-coverage (${{ matrix.shard }}/16)
+    needs: [changes]
+    if: >-
+      always() && !cancelled() &&
+      needs.changes.result == 'success' &&
+      needs.changes.outputs.tldw_frontend_changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+      SKIP_WXT_PREPARE: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.2"
+      - name: Install frontend dependencies
+        working-directory: apps
+        run: bun install --frozen-lockfile
+      - name: Run shared UI coverage shard
+        working-directory: apps/packages/ui
+        timeout-minutes: 17
+        run: |
+          timeout --kill-after=30s 15m bun run test:coverage --shard=${{ matrix.shard }}/16 --reporter=default --reporter=blob
+      - name: Upload shared UI coverage blob
+        if: always() && !cancelled()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: shared-ui-coverage-blob-${{ matrix.shard }}
+          path: apps/packages/ui/.vitest-reports/blob-${{ matrix.shard }}-16.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  shared-ui-coverage-report:
+    name: Shared UI coverage summary (report-only)
+    needs: [changes, shared-ui-coverage]
+    if: >-
+      always() && !cancelled() &&
+      needs.changes.result == 'success' &&
+      needs.shared-ui-coverage.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      # Each native blob includes uncovered source; allow room for all sixteen maps.
+      NODE_OPTIONS: --max-old-space-size=8192
+      SKIP_WXT_PREPARE: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.2"
+      - name: Install frontend dependencies
+        working-directory: apps
+        run: bun install --frozen-lockfile
+      - name: Download shared UI coverage blobs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: shared-ui-coverage-blob-*
+          path: apps/packages/ui/.vitest-reports
+          merge-multiple: true
+      - name: Validate coverage shards
+        env:
+          SHARD_COUNT: '16'
+          REPORTS_DIR: apps/packages/ui/.vitest-reports
+        run: |
+          set -euo pipefail
+          for shard in $(seq 1 "$SHARD_COUNT"); do
+            if [[ ! -s "$REPORTS_DIR/blob-${shard}-${SHARD_COUNT}.json" ]]; then
+              echo "::error::Missing coverage report for shard ${shard}/${SHARD_COUNT}" >&2
+              exit 1
+            fi
+          done
+      - name: Merge complete shared UI coverage
+        working-directory: apps/packages/ui
+        timeout-minutes: 17
+        run: timeout --kill-after=30s 15m bunx vitest --merge-reports=.vitest-reports --coverage
+      - name: Upload shared UI coverage summary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: shared-ui-coverage-summary
+          path: apps/packages/ui/coverage/coverage-summary.json
+          if-no-files-found: error
+          retention-days: 7
+
   frontend-required:
+    # A dispatch publishes a diagnostic name, so it can never satisfy the protected check (D2 of the
+    # 2026-10-11 merge-queue redesign: the queue no longer dispatches this gate, so no actor is exempt).
     name: ${{ github.event_name == 'workflow_dispatch' && 'frontend-required-diagnostic' || 'frontend-required' }}
     runs-on: ubuntu-latest
     needs: [changes, admission, frontend-unit-tests, await_license]
+    # Same condition as the changes job, and deliberately no test of its result: GitHub counts
+    # a skipped required job as satisfied, so a change detection that did not succeed has to
+    # reach the first step and fail there (TASK-13462, spec 4.9).
+    # The last arm makes a license wait that was cancelled, failed or negative
+    # reach the refusal step below and go red. Without it this job is skipped,
+    # and GitHub counts a skipped required job as satisfied (TASK-13502).
     if: >-
       always() && !cancelled() &&
       (
@@ -578,10 +697,12 @@ jobs:
             needs.await_license.result == 'skipped' ||
             needs.await_license.outputs.license_passed == 'true'
           )
+        ) ||
+        (
+          github.event_name != 'workflow_run' &&
+          needs.await_license.result != 'skipped' &&
+          needs.await_license.outputs.license_passed != 'true'
         )
-      ) &&
-      (
-        needs.changes.result == 'success'
       )
     timeout-minutes: 120
     env:
@@ -593,6 +714,26 @@ jobs:
       PRIVILEGE_METADATA_VALIDATE_ON_STARTUP: '0'
       SKIP_WXT_PREPARE: '1'
     steps:
+      - name: Require the license audit to have passed
+        if: >-
+          github.event_name != 'workflow_run' &&
+          needs.await_license.result != 'skipped' &&
+          needs.await_license.outputs.license_passed != 'true'
+        run: |
+          echo "::error::License audit did not pass for this PR head, so the gates were not run. Fix the licence policy failure and re-run."
+          exit 1
+
+      - name: Require change detection success
+        shell: bash
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$CHANGES_RESULT" != "success" ]]; then
+            echo "::error::Change detection did not succeed (changes job result: ${CHANGES_RESULT}), so frontend-required cannot know what to test. Failing instead of reporting a skipped check that would count as passed."
+            exit 1
+          fi
+
       - name: Require frontend unit shard success
         shell: bash
         env:
@@ -667,36 +808,36 @@ jobs:
         working-directory: apps/tldw-frontend
         run: bun run typecheck --incremental false
 
-      - name: Run shared UI hook enforcement
+      # Full ESLint rule set on packages/ui (which has no eslint of its own) plus the three
+      # hook rules; pre-existing errors are frozen in eslint-suppressions.packages-ui.json.
+      # This step and the import-cycle ratchet below are TASK-13950.10's; backend-required's
+      # test_license_first_workflow_contracts.py fails if either stops running.
+      # node, not bun: ESLint's parallel lint workers need worker_threads SHARE_ENV (about
+      # 4x faster here), which Bun lacks.
+      - name: Run shared UI lint and hook enforcement
         if: needs.changes.outputs.tldw_frontend_changed == 'true'
         working-directory: apps/tldw-frontend
-        run: bun scripts/check-shared-hooks.mjs
+        run: node scripts/check-shared-hooks.mjs
+
+      - name: Run shared UI import-cycle ratchet
+        if: needs.changes.outputs.tldw_frontend_changed == 'true'
+        working-directory: apps/tldw-frontend
+        run: bun scripts/check-ui-import-cycles.mjs
 
       - name: Run strict shared-boundary typecheck
         if: needs.changes.outputs.tldw_frontend_changed == 'true'
         working-directory: apps/tldw-frontend
         run: bunx tsc --project tsconfig.strict.json
 
-      - name: Frontend coverage summary (report-only)
+      - name: Run all WebUI-owned tests with coverage
         if: needs.changes.outputs.tldw_frontend_changed == 'true'
-        continue-on-error: true
         timeout-minutes: 17
         working-directory: apps/tldw-frontend
         run: |
-          echo "NOTE: report-only; thresholds land after a baseline is observed in CI (audit F4)."
+          echo "WebUI test failures block this gate; coverage percentages remain advisory (audit F4)."
           # Coreutils timeout owns the process group; GitHub's step timeout can leave Vitest workers alive.
           # Shared UI tests run under their package-owned config in the required unit shards.
-          timeout --kill-after=30s 15m bun run test:coverage --exclude '../packages/ui/**'
-
-      - name: Shared UI coverage summary (report-only)
-        if: needs.changes.outputs.tldw_frontend_changed == 'true'
-        continue-on-error: true
-        timeout-minutes: 17
-        working-directory: apps/packages/ui
-        run: |
-          # Use the shared package's aliases/setup and include its source in the report.
-          # Required package-owned unit shards remain the pass/fail gate.
-          timeout --kill-after=30s 15m bun run test:coverage
+          timeout --kill-after=30s 15m bun run test:coverage --maxWorkers=2 --exclude '../packages/ui/**'
 
       - name: Run family guardrails parity tests
         if: needs.changes.outputs.family_guardrails_changed == 'true'
@@ -964,3 +1105,30 @@ jobs:
         if: needs.changes.outputs.admin_ui_changed == 'true'
         working-directory: admin-ui
         run: bun run build
+
+  # Wakes the merge queue when the gate above fails (spec 4.6 of
+  # Docs/superpowers/specs/2026-10-11-merge-queue-approve-held-runs-design.md). A red gate causes
+  # none of the events merge-queue.yml listens for, and GitHub only re-runs a completed run, so
+  # this job cannot retry its own run: it dispatches a queue kick on dev that waits for this run
+  # to complete, then runs the queue. Not required and in no job's `needs`, so it cannot turn the
+  # required check red. Skipped while MERGE_QUEUE is unset or off, for forks, and on dispatches.
+  queue-tick:
+    name: Merge queue tick
+    needs: [frontend-required]
+    if: >-
+      always() && !cancelled() &&
+      needs.frontend-required.result == 'failure' &&
+      (vars.MERGE_QUEUE == 'dry' || vars.MERGE_QUEUE == 'on') &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Wake the merge queue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: gh api -X POST "repos/${REPOSITORY}/actions/workflows/security-required.yml/dispatches" -f ref=dev -f "inputs[queue_kick]=true" -f "inputs[wait_run]=${RUN_ID}"

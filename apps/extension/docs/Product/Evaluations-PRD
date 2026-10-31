@@ -114,7 +114,7 @@ PRD 1 — Evaluations Playground & Settings (Evaluations Module)
       - Display:
           - Tier.
           - Evaluations per minute/day: limits and remaining.
-          - Tokens per day and cost per day/month: limits and remaining.
+          - Tokens per day: limit and remaining. (There is no evaluation cost cap; LLM spend is capped by the general `limits.llm_cost_per_day_usd` / `limits.llm_cost_per_month_usd` quotas.)
           - Reset time (from reset_at or inferred midnight).
   - 5.4 Non‑Goals (v1)
       - No full webhook management UI (beyond possibly showing a configured webhook URL in the playground).

@@ -42,7 +42,7 @@ Move the gated minimal-test audio and audio websocket router factories onto the 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED verification: python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "minimal_optional_router_specs and audio_router" -q failed before implementation with 6 failed, 159 deselected, and 6 warnings, showing the old hand-written factory behavior bypassed shared ImportedRouterSpec semantics.
 
 GREEN verification: focused selector passed 6 passed, 159 deselected, 6 warnings. Full router group contracts passed 165 passed, 30 warnings. Main router contracts passed 6 passed, 5 warnings. OpenAPI contracts passed 69 passed, 24 warnings. Bandit on tldw_Server_API/app/api/v1/router_groups/minimal.py reported 0 results and 0 errors. git diff --check passed.
@@ -50,7 +50,7 @@ GREEN verification: focused selector passed 6 passed, 159 deselected, 6 warnings
 No documentation change required for this internal router-registration cleanup. No blockers or known skips beyond existing test-suite warnings.
 
 PR review follow-up: addressed Gemini comments by sharing the audio import path through a local audio_module_path variable and making the lazy attribute tracking test use an explicit ModuleType subclass. Verified the ModuleType instance __getattr__ behavior separately before changing the test, then kept the clearer subclass form. Post-review validation: focused selector passed 6 passed, 159 deselected, 6 warnings; router group contracts passed 165 passed, 30 warnings; main router contracts passed 6 passed, 5 warnings; OpenAPI contracts passed 69 passed, 24 warnings; Bandit reported 0 results and 0 errors; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

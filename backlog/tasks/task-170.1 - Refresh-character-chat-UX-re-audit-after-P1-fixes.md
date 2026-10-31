@@ -42,13 +42,13 @@ Follow up the completed post-implementation character-chat UX re-audit after the
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Post-P1 Puppeteer refresh initially showed direct `/characters` and explicit character-chat onboarding were fixed, but row `Chat as...` still navigated to Companion Home because full-chat readiness inherited the quick-chat first-model fallback.
 
 Created child task TASK-170.1.1 to fix the row-action gap, then reran the Puppeteer/Chrome walkthrough. Final evidence now shows the row action stays on `/characters` with the selected-character model blocker.
 
 Updated `Docs/Reviews/CHARACTER_CHAT_WEBUI_UX_REAUDIT_2026_05_09.md` and refreshed the screenshot/JSON artifacts under `Docs/Reviews/assets/2026-05-09-character-chat-reaudit/`.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

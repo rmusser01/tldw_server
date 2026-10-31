@@ -191,7 +191,7 @@ entries:
     type: integer
     minimum: 0
     default: null
-    editable_by: [org_admin, platform_admin]
+    editable_by: [platform_admin]
     sensitivity: internal
     ui: number
 
@@ -201,7 +201,7 @@ entries:
     type: integer
     minimum: 0
     default: null
-    editable_by: [org_admin, platform_admin]
+    editable_by: [platform_admin]
     sensitivity: internal
     ui: number
 
@@ -211,7 +211,7 @@ entries:
     type: integer
     minimum: 0
     default: null
-    editable_by: [org_admin, platform_admin]
+    editable_by: [platform_admin]
     sensitivity: internal
     ui: number
 
@@ -221,7 +221,7 @@ entries:
     type: integer
     minimum: 0
     default: null
-    editable_by: [org_admin, platform_admin]
+    editable_by: [platform_admin]
     sensitivity: internal
     ui: number
 
@@ -231,7 +231,7 @@ entries:
     type: integer
     minimum: 0
     default: null
-    editable_by: [org_admin, platform_admin]
+    editable_by: [platform_admin]
     sensitivity: internal
     ui: number
 
@@ -241,7 +241,7 @@ entries:
     type: integer
     minimum: 0
     default: null
-    editable_by: [org_admin, platform_admin]
+    editable_by: [platform_admin]
     sensitivity: internal
     ui: number
 
@@ -251,7 +251,7 @@ entries:
     type: integer
     minimum: 0
     default: null
-    editable_by: [org_admin, platform_admin]
+    editable_by: [platform_admin]
     sensitivity: internal
     ui: number
 
@@ -261,7 +261,147 @@ entries:
     type: integer
     minimum: 0
     default: null
-    editable_by: [org_admin, platform_admin]
+    editable_by: [platform_admin]
+    sensitivity: internal
+    ui: number
+
+  - key: limits.transcription_minutes_per_month
+    label: Transcription Minutes Per Month
+    description: Transcription minutes per calendar month (UTC). Unset means unlimited.
+    type: integer
+    minimum: 0
+    default: null
+    editable_by: [platform_admin]
+    sensitivity: internal
+    ui: number
+
+  - key: limits.llm_tokens_per_month
+    label: LLM Tokens Per Month
+    description: LLM tokens per calendar month (UTC), counted from llm_usage_log. Checked before LLM work; embeddings do not count.
+    type: integer
+    minimum: 0
+    default: null
+    editable_by: [platform_admin]
+    sensitivity: internal
+    ui: number
+
+  - key: limits.llm_cost_per_day_usd
+    label: LLM Cost Per Day (USD)
+    description: LLM spend per UTC day in US dollars, summed from llm_usage_log. Checked before LLM work; embeddings do not count and local providers cost nothing by default.
+    type: number
+    minimum: 0
+    default: null
+    editable_by: [platform_admin]
+    sensitivity: internal
+    ui: number
+
+  - key: limits.llm_cost_per_month_usd
+    label: LLM Cost Per Month (USD)
+    description: LLM spend per calendar month (UTC) in US dollars, summed from llm_usage_log. Checked before LLM work; embeddings do not count and local providers cost nothing by default.
+    type: number
+    minimum: 0
+    default: null
+    editable_by: [platform_admin]
+    sensitivity: internal
+    ui: number
+
+  - key: limits.rag_queries_per_day
+    label: RAG Queries Per Day
+    description: RAG queries per UTC day, including Text2SQL and MCP RAG.
+    type: integer
+    minimum: 0
+    default: null
+    editable_by: [platform_admin]
+    sensitivity: internal
+    ui: number
+
+  - key: limits.media_ingest_mb_per_day
+    label: Media Ingest MB Per Day
+    description: Uploaded media megabytes per UTC day.
+    type: integer
+    minimum: 0
+    default: null
+    editable_by: [platform_admin]
+    sensitivity: internal
+    ui: number
+
+  - key: limits.workflows_runs_per_day
+    label: Workflow Runs Per Day
+    description: Workflow runs per UTC day, API-started and scheduled.
+    type: integer
+    minimum: 0
+    default: null
+    editable_by: [platform_admin]
+    sensitivity: internal
+    ui: number
+
+  - key: limits.evaluation_tokens_per_day
+    label: Evaluation Tokens Per Day
+    description: Evaluation tokens per UTC day.
+    type: integer
+    minimum: 0
+    default: null
+    editable_by: [platform_admin]
+    sensitivity: internal
+    ui: number
+
+  - key: limits.chatbooks_exports_per_day
+    label: Chatbook Exports Per Day
+    description: Chatbook exports per UTC day.
+    type: integer
+    minimum: 0
+    default: null
+    editable_by: [platform_admin]
+    sensitivity: internal
+    ui: number
+
+  - key: limits.chatbooks_imports_per_day
+    label: Chatbook Imports Per Day
+    description: Chatbook imports per UTC day.
+    type: integer
+    minimum: 0
+    default: null
+    editable_by: [platform_admin]
+    sensitivity: internal
+    ui: number
+
+  - key: limits.chatbooks_concurrent_jobs
+    label: Chatbook Concurrent Jobs
+    description: Chatbook export/import jobs running at once.
+    type: integer
+    minimum: 0
+    default: null
+    editable_by: [platform_admin]
+    sensitivity: internal
+    ui: number
+
+  - key: limits.media_concurrent_jobs
+    label: Media Concurrent Ingests
+    description: Media ingest requests (/media/add) running at once. Queued ingest jobs (/media/ingest/jobs) and /media/process-* are not counted.
+    type: integer
+    minimum: 0
+    default: null
+    editable_by: [platform_admin]
+    sensitivity: internal
+    ui: number
+
+  - key: limits.audio_concurrent_streams
+    label: Audio Concurrent Streams
+    description: Audio streaming sessions (transcription, TTS, voice chat, realtime) open at once.
+    type: integer
+    minimum: 0
+    default: null
+    editable_by: [platform_admin]
+    sensitivity: internal
+    ui: number
+
+  - key: limits.audio_concurrent_transcriptions
+    label: Audio Concurrent Transcriptions
+    description: Direct transcription and translation requests running at once.
+    type: integer
+    minimum: 0
+    default: null
+    editable_by: [platform_admin]
     sensitivity: internal
     ui: number
 

@@ -38,9 +38,9 @@ Address PR #1301 review feedback that register_router_specs currently swallows e
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented registry failure handling review fix. RouterSpec and ImportedRouterSpec now carry skip_exceptions metadata defaulting to ImportError and AttributeError. register_router_specs re-raises unexpected resolution failures and only skips configured exception types. Updated contract tests for imported router RuntimeError propagation, core chat-loop crash propagation, and explicit opt-in skip behavior.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

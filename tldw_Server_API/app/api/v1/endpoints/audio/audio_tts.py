@@ -70,6 +70,7 @@ from tldw_Server_API.app.core.TTS.utils import (
     contains_tts_credential_fields,
     parse_bool,
     tts_history_text_length,
+    tts_jobs_queue,
 )
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 
@@ -675,7 +676,7 @@ async def create_speech_job(
 
     job = jm.create_job(
         domain="audio",
-        queue="default",
+        queue=tts_jobs_queue(),
         job_type="tts_longform",
         payload=payload,
         owner_user_id=str(current_user.id),

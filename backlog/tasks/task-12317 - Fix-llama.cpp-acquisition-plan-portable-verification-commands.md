@@ -29,9 +29,9 @@ Address review feedback after PR #1810 merged: remove developer-specific absolut
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified the finding on current origin/dev after PR #1810 merged: the plan contained seven absolute pytest invocations and one absolute Bandit invocation.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -826,8 +826,6 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
   const setRagSearchMode = useStoreMessageOption((s) => s.setRagSearchMode)
   const ragTopK = useStoreMessageOption((s) => s.ragTopK)
   const setRagTopK = useStoreMessageOption((s) => s.setRagTopK)
-  const ragEnableGeneration = useStoreMessageOption((s) => s.ragEnableGeneration)
-  const setRagEnableGeneration = useStoreMessageOption((s) => s.setRagEnableGeneration)
   const ragEnableCitations = useStoreMessageOption((s) => s.ragEnableCitations)
   const setRagEnableCitations = useStoreMessageOption((s) => s.setRagEnableCitations)
   const ragAdvancedOptions = useStoreMessageOption((s) => s.ragAdvancedOptions)
@@ -1959,17 +1957,12 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                     onChange={handleStudioSimilarityThresholdChange}
                   />
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-text-muted">
-                    {t("playground:studio.ragEnableGeneration", "Enable generation")}
-                  </span>
-                  <Switch
-                    size="small"
-                    checked={ragEnableGeneration}
-                    disabled={summaryUsesDirectSourceGeneration}
-                    onChange={(checked) => setRagEnableGeneration(checked)}
-                  />
-                </div>
+                <p className="text-xs text-text-muted">
+                  {t(
+                    "playground:studio.generationSettingsHelp",
+                    "Studio outputs generate an answer using the selected model and generation settings."
+                  )}
+                </p>
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-text-muted">
                     {t("playground:studio.ragEnableCitations", "Enable citations")}

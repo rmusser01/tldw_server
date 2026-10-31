@@ -31,7 +31,7 @@ Docs/superpowers/plans/2026-06-23-flashcards-remaining-ux-remediation-plan.md#ta
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation notes:
 - Added regression coverage for concrete import limit counts and unresolved placeholder leakage in the transfer summary.
 - Added invalid import recovery coverage: rejected import keeps the pasted payload, renders an inline validation alert, and leaves the import button enabled.
@@ -80,7 +80,7 @@ Third review follow-up verification:
 - PASS: cd apps/packages/ui && bunx vitest run src/components/Flashcards/tabs/__tests__/ImportExportTab.import-results.test.tsx src/components/Flashcards/components/__tests__/FlashcardCreateDrawer.deck-reference.test.tsx src/components/Flashcards/tabs/__tests__/ImageOcclusionTransferPanel.test.tsx (3 files passed, 53 tests passed).
 - PASS: git diff --check exited 0.
 - Bandit N/A: frontend-only TypeScript/React and Backlog markdown changes, no Python touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

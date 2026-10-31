@@ -61,7 +61,7 @@ export const ModerationReviewShell: React.FC<ModerationReviewShellProps> = ({
   const reviewComplete =
     !queue.loading &&
     !queue.error &&
-    queue.filters.status === "needs_review" &&
+    queue.loadedFilters.status === "needs_review" &&
     visibleTotal === 0 &&
     queue.items.length === 0
 
@@ -192,6 +192,17 @@ export const ModerationReviewShell: React.FC<ModerationReviewShellProps> = ({
         onRetry={queue.refresh}
       />
 
+      {(queue.selectedItemIds.length > 0 || queue.bulkResult || queue.bulkDeciding) && (
+        <BulkDecisionBar
+          selectedCount={queue.selectedItemIds.length}
+          disabled={queue.loading || Boolean(queue.error)}
+          deciding={queue.bulkDeciding}
+          result={queue.bulkResult}
+          onBulkDecision={queue.bulkDecideSelected}
+          onClearSelection={queue.clearSelection}
+        />
+      )}
+
       {reviewComplete && (
         <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-900 dark:border-green-900/50 dark:bg-green-950/30 dark:text-green-100">
           <div className="font-semibold">Review complete</div>
@@ -232,15 +243,6 @@ export const ModerationReviewShell: React.FC<ModerationReviewShellProps> = ({
               <div className="rounded-lg border border-border bg-surface2 p-4 text-sm text-text-muted">
                 The active filters no longer include this selected item.
               </div>
-            )}
-            {queue.selectedItemIds.length > 0 && (
-              <BulkDecisionBar
-                selectedCount={queue.selectedItemIds.length}
-                deciding={queue.bulkDeciding}
-                result={queue.bulkResult}
-                onBulkDecision={queue.bulkDecideSelected}
-                onClearSelection={queue.clearSelection}
-              />
             )}
             {queue.nextCursor && (
               <button

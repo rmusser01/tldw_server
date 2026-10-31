@@ -62,7 +62,7 @@ Implement the approved Stage 1 llama.cpp managed runtime plan: backend profile p
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 1: added LlamaCppProfile runtime models, profile store exceptions, JSON profile persistence, default profile bootstrap, enabled explicit host/port conflict validation, and API schemas for profile/runtime/lifecycle payloads. Verification: profile-store pytest initially 4 passed; Bandit on Task 1 Python paths reported no findings; git diff --check passed.
 
 Task 1 quality review fixes: malformed dict-shaped profile stores now fail closed without overwrite, wildcard bind host/port conflicts are rejected, and profile-store tests now cover persistence round-trip, update replacement, get miss, delete true/false, corrupt structure, and wildcard conflicts. Verification: profile-store pytest 9 passed; Bandit profile-store review fix output has no findings; git diff --check passed.
@@ -86,7 +86,7 @@ Task 6: final verification completed. Focused backend llama.cpp pytest reported 
 Task 4 review fixes: added profile-scoped use-in-chat, routed V1 start_server and inference through the supervisor default profile when available, made fresh default stop idempotent, and added regression coverage for split-brain and start-by-model to inference behavior. Verification: focused runtime/supervisor pytest 21 passed; broader llama.cpp backend slice 89 passed; py_compile passed; Bandit /tmp/bandit_llamacpp_runtime_api_review_fix.json had no errors/results; git diff --check passed.
 
 Task 5: added llama.cpp profile/runtime TypeScript types, client methods for profile CRUD/lifecycle/instance logs, a compact Admin runtime panel, and runtime-plane loading/actions in LlamacppAdminPage with 404/503 fallback to the legacy single-server controls. Verification: Task 5 Vitest set reported 20 passed. Package-level tsc --noEmit was attempted but remains blocked by existing repo-wide TypeScript test debt outside this slice.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

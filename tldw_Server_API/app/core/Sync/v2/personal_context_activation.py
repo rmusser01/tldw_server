@@ -14,12 +14,14 @@ import json
 from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
+from functools import partial
 from typing import TYPE_CHECKING, Any
 from uuid import NAMESPACE_URL, uuid5
 
 from tldw_profile_core import ProfileManifest, ProfileProposal, ProfileRecord, ProfileScope
 from tldw_profile_core.canonical import canonical_json_bytes
 
+from tldw_Server_API.app.core.exceptions import PersonalContextActivationPendingError
 from tldw_Server_API.app.core.Personalization.personal_context_activation import PersonalContextActivationService
 from tldw_Server_API.app.core.Personalization.personal_context_crypto import EncryptedEnvelope, EnvelopeCipher
 from tldw_Server_API.app.core.Personalization.personal_context_repository_models import (
@@ -159,6 +161,20 @@ def _verify_install(
     )
 
 
+def _require_finished_relay(store: Any, dataset_id: str, profile_id: str) -> None:
+    """Refuse to prepare while the relay has left a staged authority row unfinished.
+
+    Coverage ends relay for its batches, so that row would stay hidden and
+    pending in Sync for good and block every later projection in the dataset.
+    It runs under the profile lease right before preparing, so no relay can
+    stage in between, and refusing leaves no prepared activation to fence the
+    relay: the client's immediate retry lets the relay finish the row first.
+    """
+
+    if store.has_pending_personal_context_authority(dataset_id, profile_id=profile_id):
+        raise PersonalContextActivationPendingError("personal_context_activation_pending")
+
+
 def _receipt(prepared: PreparedPersonalContextActivation) -> PersonalContextActivationReceipt:
     """Expose only bounded canonical installation facts."""
 
@@ -245,7 +261,8 @@ def prepare_activation(
             dataset_id=dataset.dataset_id,
             after_server_cursor=None,
         )
-    prepared = activations.prepare(manifest.profile_id, device_id=device_id)
+    relay_finished = partial(_require_finished_relay, service.store, dataset.dataset_id, manifest.profile_id)
+    prepared = activations.prepare(manifest.profile_id, device_id=device_id, precondition=relay_finished)
     identity = _identity(prepared, dataset, user_id)
     cipher = _cipher(service, dataset)
     with (
@@ -267,7 +284,7 @@ def prepare_activation(
             service.personal_context_relay.relay_profile(
                 user_id=user_id, profile_id=manifest.profile_id, dataset_id=dataset.dataset_id, after_server_cursor=None
             )
-        prepared = activations.prepare(manifest.profile_id, device_id=device_id)
+        prepared = activations.prepare(manifest.profile_id, device_id=device_id, precondition=relay_finished)
         identity = _identity(prepared, dataset, user_id)
     with (
         activations.publications.profile_lease(prepared.profile_id) as lease,

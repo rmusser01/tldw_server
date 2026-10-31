@@ -1,13 +1,20 @@
+"""Persona's stream resolves its caller with the core WebSocket resolver (TASK-13950.7).
+
+The HTTP verifier (``get_auth_principal``) is faked here; the route matrix,
+tests/AuthNZ/test_websocket_route_auth_matrix.py, runs persona against the real AuthNZ store.
+"""
+
 import json
-from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
-from starlette.websockets import WebSocketDisconnect
+from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
-
+from tldw_Server_API.app.core.AuthNZ import websocket_principal
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 
 pytestmark = pytest.mark.unit
 
@@ -16,121 +23,60 @@ fastapi_app = FastAPI()
 fastapi_app.include_router(persona_ep.router, prefix="/api/v1/persona")
 
 
-class _FakeWebSocket:
-    def __init__(self, headers: dict[str, str]):
-        self.headers = headers
-        self.client = SimpleNamespace(host="127.0.0.1", port=54321)
+def _socket(headers: list[tuple[bytes, bytes]]) -> WebSocket:
+    scope = {
+        "type": "websocket",
+        "path": "/api/v1/persona/stream",
+        "headers": headers,
+        "query_string": b"",
+        "client": ("127.0.0.1", 54321),
+    }
+    return WebSocket(scope, receive=AsyncMock(), send=AsyncMock())
+
+
+def _http_verifier(monkeypatch: pytest.MonkeyPatch, principals: dict[str, AuthPrincipal]) -> None:
+    """Stand in for get_auth_principal: the principal for a known bearer credential, else HTTP's 401."""
+
+    async def verify(request):
+        credential = (request.headers.get("authorization") or "").partition(" ")[2]
+        if credential in principals:
+            return principals[credential]
+        raise HTTPException(status_code=401, detail="Could not validate credentials")
+
+    monkeypatch.setattr(websocket_principal, "get_auth_principal", verify)
 
 
 @pytest.mark.asyncio
-async def test_resolve_authenticated_user_id_single_user_bearer_api_key_path(monkeypatch):
-    ws = _FakeWebSocket({"authorization": "Bearer test_api_key"})
+async def test_a_jwt_caller_is_resolved_without_per_tool_key_scopes(monkeypatch: pytest.MonkeyPatch) -> None:
+    _http_verifier(monkeypatch, {"a.b.c": AuthPrincipal(kind="user", user_id=7, token_type="access")})
+    ws = _socket([(b"authorization", b"Bearer a.b.c")])
 
-    monkeypatch.setattr(persona_ep, "get_settings", lambda: SimpleNamespace(AUTH_MODE="single_user"))
-    monkeypatch.setattr(persona_ep, "resolve_client_ip", lambda *_args, **_kwargs: "127.0.0.1")
-
-    async def _verify_jwt_should_not_run(*_args, **_kwargs):
-        raise AssertionError("JWT verification should not run for single-user bearer API key path")
-
-    class _ApiKeyManager:
-        async def validate_api_key(
-            self,
-            api_key: str,
-            ip_address: str | None = None,
-            required_scope: str | None = None,
-            **_kwargs,
-        ):
-            assert api_key == "test_api_key"
-            assert ip_address == "127.0.0.1"
-            assert required_scope in (None, "", "read")
-            return {"user_id": 42}
-
-    async def _fake_get_api_key_manager():
-        return _ApiKeyManager()
-
-    monkeypatch.setattr(persona_ep, "verify_jwt_and_fetch_user", _verify_jwt_should_not_run)
-    monkeypatch.setattr(persona_ep, "get_api_key_manager", _fake_get_api_key_manager)
-
-    user_id, credentials_supplied, auth_ok = await persona_ep._resolve_authenticated_user_id(
-        ws,
-        token=None,
-        api_key=None,
-    )
-
-    assert user_id == "42"
-    assert credentials_supplied is True
-    assert auth_ok is True
+    assert await persona_ep._resolve_authenticated_user_id(ws) == ("7", True, True)
+    assert ws.state.persona_auth_method == "access"
+    assert ws.state.persona_api_key_scopes is None  # only a scoped API key is checked per tool
 
 
 @pytest.mark.asyncio
-async def test_resolve_authenticated_user_id_multi_user_non_jwt_bearer_api_key_path(monkeypatch):
-    ws = _FakeWebSocket({"authorization": "Bearer not-a-jwt-token"})
+async def test_a_service_token_is_not_a_persona_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Persona state is owned by a user; a service principal has none to own it."""
+    _http_verifier(monkeypatch, {"s.v.c": AuthPrincipal(kind="service", user_id=None, token_type="service")})
 
-    monkeypatch.setattr(persona_ep, "get_settings", lambda: SimpleNamespace(AUTH_MODE="multi_user"))
-    monkeypatch.setattr(persona_ep, "resolve_client_ip", lambda *_args, **_kwargs: "127.0.0.1")
-
-    async def _verify_jwt_should_not_run(*_args, **_kwargs):
-        raise AssertionError("JWT verification should not run for non-JWT bearer token path")
-
-    class _ApiKeyManager:
-        async def validate_api_key(
-            self,
-            api_key: str,
-            ip_address: str | None = None,
-            required_scope: str | None = None,
-            **_kwargs,
-        ):
-            assert api_key == "not-a-jwt-token"
-            assert ip_address == "127.0.0.1"
-            assert required_scope in (None, "", "read")
-            return {"user_id": "api-user"}
-
-    async def _fake_get_api_key_manager():
-        return _ApiKeyManager()
-
-    monkeypatch.setattr(persona_ep, "verify_jwt_and_fetch_user", _verify_jwt_should_not_run)
-    monkeypatch.setattr(persona_ep, "get_api_key_manager", _fake_get_api_key_manager)
-
-    user_id, credentials_supplied, auth_ok = await persona_ep._resolve_authenticated_user_id(
-        ws,
-        token=None,
-        api_key=None,
+    assert await persona_ep._resolve_authenticated_user_id(_socket([(b"authorization", b"Bearer s.v.c")])) == (
+        None,
+        True,
+        False,
     )
-
-    assert user_id == "api-user"
-    assert credentials_supplied is True
-    assert auth_ok is True
 
 
 @pytest.mark.asyncio
-async def test_resolve_authenticated_user_id_multi_user_jwt_prefers_jwt_verification(monkeypatch):
-    ws = _FakeWebSocket({"authorization": "Bearer header.payload.signature"})
+async def test_missing_and_refused_credentials_are_told_apart(monkeypatch: pytest.MonkeyPatch) -> None:
+    _http_verifier(monkeypatch, {})
 
-    monkeypatch.setattr(persona_ep, "get_settings", lambda: SimpleNamespace(AUTH_MODE="multi_user"))
-
-    async def _verify_jwt(_request, token: str):
-        assert token == "header.payload.signature"
-        return SimpleNamespace(id="jwt-user")
-
-    class _ApiKeyManager:
-        async def validate_api_key(self, *_args, **_kwargs):
-            raise AssertionError("API key manager should not be used when JWT verification succeeds")
-
-    async def _fake_get_api_key_manager():
-        return _ApiKeyManager()
-
-    monkeypatch.setattr(persona_ep, "verify_jwt_and_fetch_user", _verify_jwt)
-    monkeypatch.setattr(persona_ep, "get_api_key_manager", _fake_get_api_key_manager)
-
-    user_id, credentials_supplied, auth_ok = await persona_ep._resolve_authenticated_user_id(
-        ws,
-        token=None,
-        api_key=None,
-    )
-
-    assert user_id == "jwt-user"
-    assert credentials_supplied is True
-    assert auth_ok is True
+    assert await persona_ep._resolve_authenticated_user_id(_socket([])) == (None, False, False)
+    refused = _socket([(b"authorization", b"Bearer revoked")])
+    assert await persona_ep._resolve_authenticated_user_id(refused) == (None, True, False)
+    # Until the socket closes: no credential to forward, and an empty scope list denies scoped tools.
+    assert (refused.state.persona_auth_method, refused.state.persona_api_key_scopes) == ("", [])
 
 
 @pytest.mark.parametrize("credentials_supplied", [False, True])
@@ -165,32 +111,9 @@ def test_persona_stream_auth_failure_rejects_before_stream_start(monkeypatch, cr
 def test_persona_stream_negotiates_only_safe_auth_marker(
     monkeypatch: pytest.MonkeyPatch, marker: str | None, valid_credential: bool
 ) -> None:
-    """Verify safe bearer-marker negotiation for valid and invalid credentials."""
+    """Echo the bearer marker as offered (a browser compares it exactly), never the credential."""
     monkeypatch.setattr(persona_ep, "is_persona_enabled", lambda: True)
-    monkeypatch.setattr(persona_ep, "get_settings", lambda: SimpleNamespace(AUTH_MODE="single_user"))
-    monkeypatch.setattr(persona_ep, "resolve_client_ip", lambda *_args, **_kwargs: "127.0.0.1")
-
-    async def _verify_jwt_should_not_run(*_args, **_kwargs):
-        raise AssertionError("JWT verification should not run for single-user bearer API key path")
-
-    class _ApiKeyManager:
-        async def validate_api_key(
-            self,
-            api_key: str,
-            ip_address: str | None = None,
-            required_scope: str | None = None,
-            **_kwargs,
-        ):
-            if api_key == "test_api_key":
-                assert required_scope in (None, "", "read")
-                return {"user_id": 99}
-            return None
-
-    async def _fake_get_api_key_manager():
-        return _ApiKeyManager()
-
-    monkeypatch.setattr(persona_ep, "verify_jwt_and_fetch_user", _verify_jwt_should_not_run)
-    monkeypatch.setattr(persona_ep, "get_api_key_manager", _fake_get_api_key_manager)
+    _http_verifier(monkeypatch, {"test_api_key": AuthPrincipal(kind="user", user_id=99, token_type="api_key")})
 
     credential = "test_api_key" if valid_credential else "invalid_api_key"
     headers = {}

@@ -25,9 +25,9 @@ Merge current origin/main into dev so downstream PRs can merge cleanly.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Fetched origin/main and origin/dev, created isolated branch codex/sync-main-into-dev-12134 from origin/dev, and merged origin/main with no conflicts. Local verification before push: git merge-base --is-ancestor origin/main HEAD exited 0; git diff --check origin/dev..HEAD passed; PYTHONPYCACHEPREFIX=/tmp/pycache_sync_main_dev_12134 python3 -m compileall -q apps/mcp-unified/src/mcp_unified passed; Bandit passed for apps/mcp-unified/src/mcp_unified with JSON output at /tmp/bandit_sync_main_dev_12134.json.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

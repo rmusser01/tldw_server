@@ -39,7 +39,7 @@ Address validated current-code review findings in tldw_Server_API/app/core/Gover
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Manual Backlog task created because the Backlog MCP workflow was unavailable and the CLI create/list commands hung in this environment; user approved this temporary exception.
 
 Verification before initial PR creation:
@@ -62,7 +62,7 @@ PR #2456 review follow-up after rebase onto latest origin/dev:
 - Bandit completed on `tldw_Server_API/app/core/Governance` plus `tldw_Server_API/app/core/exceptions.py` with 0 findings; report: `/tmp/bandit_governance_pr2456_rebase.json`.
 
 Known verification note: one repository-global pytest invocation and one single-test invocation were interrupted during the initial fix pass after pytest cleanup/import hooks stalled; the same behaviors were verified using isolated `--confcutdir` unit invocations.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

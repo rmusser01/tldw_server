@@ -339,11 +339,13 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
             )
         return expired_receipt
 
+    # Control recovery deadlines; the database lease clock remains real.
     expired = PersonalContextRelay(
         publications=PersonalContextPublicationRelayStore(personal_db),
         stage_authority=expire_after_stage,
         finalize_authority=finalize,
         cancel_authority=service.cancel_personal_context_authority,
+        clock_ns=lambda: 0,
     ).relay_profile(
         user_id="user-a",
         profile_id=manifest.profile_id,
@@ -375,6 +377,7 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
         stage_authority=stage,
         finalize_authority=finalize,
         cancel_authority=service.cancel_personal_context_authority,
+        clock_ns=lambda: 0,
     )
 
     interrupted_result = relay.relay_profile(
@@ -396,6 +399,7 @@ def test_real_relay_extends_current_sync_heads_across_publication_batches(
         stage_authority=stage,
         finalize_authority=finalize,
         cancel_authority=service.cancel_personal_context_authority,
+        clock_ns=lambda: 0,
     )
     result = relay.relay_profile(
         user_id="user-a",
@@ -555,9 +559,11 @@ def test_corrupt_source_persists_content_free_attention_after_rollback(
             (b"corrupt", manifest.profile_id),
         )
 
+    # Source authentication is independent of the recovery scheduling budget.
     first = PersonalContextRelay(
         publications=PersonalContextPublicationRelayStore(database),
         stage_authority=lambda *_args: pytest.fail("corrupt source reached staging"),
+        clock_ns=lambda: 0,
     ).relay_profile(
         user_id="user-a",
         profile_id=manifest.profile_id,
@@ -567,6 +573,7 @@ def test_corrupt_source_persists_content_free_attention_after_rollback(
     second = PersonalContextRelay(
         publications=PersonalContextPublicationRelayStore(database),
         stage_authority=lambda *_args: pytest.fail("poisoned source reached staging"),
+        clock_ns=lambda: 0,
     ).relay_profile(
         user_id="user-a",
         profile_id=manifest.profile_id,

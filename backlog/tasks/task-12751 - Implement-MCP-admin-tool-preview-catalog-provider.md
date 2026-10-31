@@ -29,7 +29,7 @@ Implement Task 2 from the MCP effective permission explain implementation plan: 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started Task 2 implementation under the approved subagent-driven workflow.
 
 Implemented Task 2 preview catalog wiring. Added AdminToolCatalogEntry and list_admin_tool_catalog without model-facing visibility filtering, wired GatewayPolicyExplainService to prefer admin_tool_catalog_provider and fall back to installed_tool_catalog/list_admin_tool_catalog, and added denied-installed admin catalog preview coverage. Verification so far: focused pytest passed (35 passed), Bandit passed with no issues, git diff --check passed.
@@ -39,7 +39,7 @@ Code-quality review follow-up: added installed_tool_catalog fallback coverage, m
 Verification caveat: requested command for tldw_Server_API/tests/MCP_unified/test_gateway_tool_discovery.py returned pytest exit 4 because that file does not exist in this worktree; no new test file was created because the review follow-up kept the owned-file scope unchanged.
 
 Final review results: latest spec compliance review passed; latest code-quality review found no Critical or Important issues. The only reviewer note was final task bookkeeping, addressed here.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

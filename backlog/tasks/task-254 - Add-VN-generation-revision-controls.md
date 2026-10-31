@@ -56,12 +56,12 @@ Implement Task 7 from Docs/superpowers/plans/2026-05-10-vn-scripted-generation-b
 
 ## Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Implemented scripted VN generation cancel, regenerate, and revision activation service flows.
 - Added active generation revision snapshots to checkpoints/save slots and restore support for both active_revision_id and latest_request_id.
 - Addressed review findings by blocking regeneration after downstream material events, making cancel-without-on_cancel non-advanceable, prevalidating invalid on_cancel branches before mutation, and exposing active generation public output in script state.
 - Verification: `python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_scripted_generation_runtime.py -q --tb=short` -> 19 passed; `python -m pytest tldw_Server_API/tests/VN_Play -q` -> 198 passed; `python -m compileall ...` on touched backend files passed; `python -m bandit -r ... -f json -o /tmp/bandit_vn_task254.json` -> 0 results and 0 errors; `git diff --check` passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

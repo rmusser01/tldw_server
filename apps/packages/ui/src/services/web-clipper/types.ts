@@ -1,3 +1,11 @@
+export interface WebCaptureDescriptor {
+  mode: "server_article"
+  requested_url: string
+  captured_at: string
+  content_sha256: string
+  refresh_of: string | null
+}
+
 export type WebClipperDestination = "note" | "workspace" | "both"
 
 export type WebClipperOutcomeState = "saved" | "saved_with_warnings" | "partially_saved" | "failed"
@@ -49,7 +57,7 @@ export interface WebClipperSaveRequest {
   content?: WebClipperContentPayload
   attachments?: WebClipperAttachmentPayload[]
   enhancements?: WebClipperEnhancementOptions
-  capture_metadata?: Record<string, unknown>
+  capture_metadata?: Record<string, unknown> & { web_capture_v1?: WebCaptureDescriptor }
   source_note_version?: number | null
 }
 

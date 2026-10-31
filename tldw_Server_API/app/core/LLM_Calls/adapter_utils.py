@@ -9,14 +9,14 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCallCredentials,
     is_runtime_issued_provider_call_credentials,
 )
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
-from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_number,
     custom_openai_section_name,
 )
+from tldw_Server_API.app.core.exceptions import ChatConfigurationError
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
+from tldw_Server_API.app.core.LLM_Calls.gateway import resolve_provider_api_key
 from tldw_Server_API.app.core.Utils.Utils import logging
 
 _PROVIDER_SECTION_MAP: dict[str, str] = {
@@ -206,7 +206,22 @@ def get_adapter_or_raise(provider: str):
     return adapter
 
 
-def split_system_message(messages: list[dict[str, Any]]) -> tuple[str | None, list[dict[str, Any]]]:
+def split_system_message(
+    messages: list[dict[str, Any]],
+    *,
+    leading_only: bool = False,
+) -> tuple[str | None, list[dict[str, Any]]]:
+    """Keep legacy extraction or preserve an ordered leading system prefix."""
+    if leading_only:
+        parts: list[str] = []
+        index = 0
+        while index < len(messages) and messages[index].get("role") == "system":
+            text = messages[index].get("content")
+            if not isinstance(text, str):
+                raise TypeError("Leading system messages must contain text.")
+            parts.append(text)
+            index += 1
+        return "\n\n".join(parts) or None, messages[index:]
     system_message = None
     remaining: list[dict[str, Any]] = []
     for msg in messages:
@@ -221,6 +236,7 @@ def split_system_message(messages: list[dict[str, Any]]) -> tuple[str | None, li
 # ---------------------------------------------------------------------------
 # Shared utilities relocated from chat_calls.py (Feb 2026)
 # ---------------------------------------------------------------------------
+
 
 def _safe_cast(value: Any, cast_to: type, default: Any = None) -> Any:
     """Safely casts value to specified type, returning default on failure."""

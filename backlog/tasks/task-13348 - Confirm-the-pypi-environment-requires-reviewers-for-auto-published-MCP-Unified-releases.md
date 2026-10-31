@@ -37,11 +37,11 @@ Source: found while draining the quarantine in TASK-13343.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Checked 2026-09-27 via the GitHub API (gh api repos/rmusser01/tldw_server/environments/pypi): protection_rules = [] (no required reviewers, no wait timer), deployment_branch_policy = null (any branch may deploy), can_admins_bypass = true. testpypi is the same. So the risk this task described is real: publish-pypi (mcp-unified-publish.yml, environment pypi, OIDC id-token: write, pypa/gh-action-pypi-publish) runs unattended on any push to main that bumps the MCP Unified version; the only gate is the workflow's own if: (main + the three version-bearing paths). Remediation is a repository-settings change, not a tree change, and is the owner's call because e4231f6d82 made auto-publish deliberate: either (a) add a required reviewer to the pypi environment (restores a human gate, costs one click per release), or (b) at minimum restrict pypi deployments to the main branch (keeps auto-publish, closes other branches). Recommended: (b) now; (a) if unattended publishing is not intended. Bandit: N/A (no code change).
 
 Correction (Qodo review on #3037): the recommendation above was wrong to call (b) the immediate remediation. A main-only deployment branch policy only stops deployments from other branches; the workflow already restricts the auto-publish path to pushes on main, so automatic releases from main would remain unattended. The only setting that adds a human gate is (a) required reviewers on the pypi environment. Recommendation: add required reviewers unless unattended publishing of MCP Unified version bumps is intended; a main-only branch policy is optional defence-in-depth on top, not a substitute.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

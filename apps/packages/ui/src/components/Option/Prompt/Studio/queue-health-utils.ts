@@ -16,7 +16,7 @@ export type QueueHealthSummary = {
 }
 
 const toSuccessPercent = (successRate?: number): number =>
-  Math.round((successRate ?? 1) * 100)
+  Math.round(successRate ?? 0)
 
 export const summarizeQueueHealth = (
   status: PromptStudioStatus

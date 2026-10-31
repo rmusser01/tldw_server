@@ -30,11 +30,11 @@ Fix actionable inline review feedback on PR #2640 after rebasing on latest dev: 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Addressed all three Gemini inline review comments on PR #2640.
 - Added regression coverage for numeric claims-validation flags, warning sequence copying/flattening, and self-contained accepted review-state validation.
 - Verification: focused review tests red before fix and green after fix; full Workspace artifact/API slice passed with 113 tests; audio adapter/watchlist slice passed with 112 tests; Bandit on touched PR implementation files reported 0 findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -1,10 +1,14 @@
+import { PlaygroundAssistantContext } from "../PlaygroundAssistantContext";
 // @vitest-environment jsdom
 import React from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { PlaygroundCockpitShell } from "../PlaygroundCockpitShell";
+import {
+  PlaygroundCockpitShell,
+  type PlaygroundCockpitMobilePanel,
+} from "../PlaygroundCockpitShell";
 import { PlaygroundCompositionPreview } from "../PlaygroundCompositionPreview";
 import { PlaygroundModelCatalogControls } from "../PlaygroundModelCatalogControls";
 import { PlaygroundRuntimeInspector } from "../PlaygroundRuntimeInspector";
@@ -47,7 +51,267 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: translate }),
 }));
 
+function ControlledMobileShell({
+  initialPanel = null,
+  leftRailVisible = true,
+  rightRailVisible = true,
+  onLeftRailVisibleChange = () => {},
+  onRightRailVisibleChange = () => {},
+}: {
+  initialPanel?: PlaygroundCockpitMobilePanel;
+  leftRailVisible?: boolean;
+  rightRailVisible?: boolean;
+  onLeftRailVisibleChange?: (visible: boolean) => void;
+  onRightRailVisibleChange?: (visible: boolean) => void;
+}) {
+  const [leftVisible, setLeftVisible] = React.useState(leftRailVisible);
+  const [rightVisible, setRightVisible] = React.useState(rightRailVisible);
+  const [panel, setPanel] = React.useState(initialPanel);
+
+  return (
+    <PlaygroundCockpitShell
+      mode="cockpit"
+      leftRailVisible={leftVisible}
+      rightRailVisible={rightVisible}
+      onLeftRailVisibleChange={(visible) => {
+        onLeftRailVisibleChange(visible);
+        setLeftVisible(visible);
+      }}
+      onRightRailVisibleChange={(visible) => {
+        onRightRailVisibleChange(visible);
+        setRightVisible(visible);
+      }}
+      mobilePanel={panel}
+      onMobilePanelChange={setPanel}
+      leftRail={<div>Context tools</div>}
+      rightRail={<div>Runtime tools</div>}
+    >
+      <textarea aria-label="Composer draft" defaultValue="Keep this draft" />
+    </PlaygroundCockpitShell>
+  );
+}
+
 describe("Playground cockpit accessibility", () => {
+  it.each(["cockpit", "focus"] as const)(
+    "keeps one page main when the %s shell is inside its page layout",
+    (mode) => {
+      render(
+        <main aria-label="Chat page">
+          <PlaygroundCockpitShell
+            mode={mode}
+            leftRail={<div>Context tools</div>}
+            rightRail={<div>Runtime tools</div>}
+          >
+            <div>Chat transcript</div>
+          </PlaygroundCockpitShell>
+        </main>,
+      );
+
+      expect(screen.getAllByRole("main")).toHaveLength(1);
+      expect(
+        within(screen.getByRole("main", { name: "Chat page" })).getByText(
+          "Chat transcript",
+        ),
+      ).toBeInTheDocument();
+    },
+  );
+
+  it("offers one pair of native mobile disclosure buttons with labeled panel relations", () => {
+    render(<ControlledMobileShell />);
+    const mobileRails = screen.getByTestId("playground-cockpit-mobile-rails");
+    const rails = within(mobileRails);
+
+    expect(mobileRails.querySelectorAll("button")).toHaveLength(2);
+    expect(rails.queryByRole("tablist")).not.toBeInTheDocument();
+    expect(rails.queryAllByRole("tab")).toHaveLength(0);
+    expect(rails.getAllByRole("region", { hidden: true })).toHaveLength(2);
+    for (const name of ["Context", "Runtime"]) {
+      const button = rails.getByRole("button", { name });
+      const panel = document.getElementById(
+        button.getAttribute("aria-controls") ?? "",
+      );
+      expect(button).toHaveAttribute("type", "button");
+      expect(button).toHaveAttribute("aria-expanded", "false");
+      expect(button).not.toHaveAttribute("aria-selected");
+      expect(panel).toHaveAttribute("aria-labelledby", button.id);
+      expect(panel).not.toBeVisible();
+    }
+  });
+
+  it("honors an explicitly closed mobile panel while both desktop rails stay enabled", () => {
+    render(<ControlledMobileShell />);
+    const mobileRails = screen.getByTestId("playground-cockpit-mobile-rails");
+    const rails = within(mobileRails);
+
+    expect(mobileRails).toHaveAttribute("data-mobile-panel", "none");
+    expect(rails.queryAllByRole("region")).toHaveLength(0);
+    expect(rails.getByRole("button", { name: "Context" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(rails.getByRole("button", { name: "Runtime" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(
+      screen.getByRole("complementary", { name: "Chat cockpit context" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("complementary", { name: "Chat cockpit runtime" }),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    ["Enter", "{Enter}"],
+    ["Space", " "],
+  ])(
+    "opens, switches, and closes mobile panels with %s without changing desktop preferences",
+    async (_name, key) => {
+      const user = userEvent.setup();
+      const onLeftRailVisibleChange = vi.fn();
+      const onRightRailVisibleChange = vi.fn();
+      render(
+        <ControlledMobileShell
+          onLeftRailVisibleChange={onLeftRailVisibleChange}
+          onRightRailVisibleChange={onRightRailVisibleChange}
+        />,
+      );
+      const mobileRails = screen.getByTestId("playground-cockpit-mobile-rails");
+      const rails = within(mobileRails);
+      const context = rails.getByRole("button", { name: "Context" });
+      const runtime = rails.getByRole("button", { name: "Runtime" });
+      const draft = screen.getByRole("textbox", { name: "Composer draft" });
+
+      context.focus();
+      await user.keyboard(key);
+      expect(mobileRails).toHaveAttribute("data-mobile-panel", "context");
+      expect(rails.getByRole("region", { name: "Context" })).toBeVisible();
+      expect(context).toHaveAttribute("aria-expanded", "true");
+      expect(runtime).toHaveAttribute("aria-expanded", "false");
+      expect(context).toHaveFocus();
+
+      runtime.focus();
+      await user.keyboard(key);
+      expect(mobileRails).toHaveAttribute("data-mobile-panel", "runtime");
+      expect(
+        rails.queryByRole("region", { name: "Context" }),
+      ).not.toBeInTheDocument();
+      expect(rails.getByRole("region", { name: "Runtime" })).toBeVisible();
+      expect(context).toHaveAttribute("aria-expanded", "false");
+      expect(runtime).toHaveAttribute("aria-expanded", "true");
+
+      await user.keyboard(key);
+      expect(mobileRails).toHaveAttribute("data-mobile-panel", "none");
+      expect(rails.queryAllByRole("region")).toHaveLength(0);
+      expect(context).toHaveAttribute("aria-expanded", "false");
+      expect(runtime).toHaveAttribute("aria-expanded", "false");
+      expect(runtime).toHaveFocus();
+      expect(onLeftRailVisibleChange).not.toHaveBeenCalled();
+      expect(onRightRailVisibleChange).not.toHaveBeenCalled();
+      expect(draft).toBe(
+        screen.getByRole("textbox", { name: "Composer draft" }),
+      );
+      expect(draft).toHaveValue("Keep this draft");
+    },
+  );
+
+  it("restores a globally collapsed rail on open and keeps it restored on mobile close", async () => {
+    const user = userEvent.setup();
+    const onLeftRailVisibleChange = vi.fn();
+    const onRightRailVisibleChange = vi.fn();
+    render(
+      <ControlledMobileShell
+        leftRailVisible={false}
+        rightRailVisible={false}
+        onLeftRailVisibleChange={onLeftRailVisibleChange}
+        onRightRailVisibleChange={onRightRailVisibleChange}
+      />,
+    );
+    const mobileRails = screen.getByTestId("playground-cockpit-mobile-rails");
+    const rails = within(mobileRails);
+    const context = rails.getByRole("button", { name: "Context" });
+    const runtime = rails.getByRole("button", { name: "Runtime" });
+
+    context.focus();
+    await user.keyboard("{Enter}");
+    expect(rails.getByRole("region", { name: "Context" })).toBeVisible();
+    expect(onLeftRailVisibleChange).toHaveBeenCalledExactlyOnceWith(true);
+
+    await user.keyboard(" ");
+    expect(mobileRails).toHaveAttribute("data-mobile-panel", "none");
+    expect(onLeftRailVisibleChange).toHaveBeenCalledExactlyOnceWith(true);
+    expect(
+      screen.getByRole("complementary", { name: "Chat cockpit context" }),
+    ).toBeInTheDocument();
+
+    runtime.focus();
+    await user.keyboard("{Enter}");
+    expect(rails.getByRole("region", { name: "Runtime" })).toBeVisible();
+    expect(onRightRailVisibleChange).toHaveBeenCalledExactlyOnceWith(true);
+    expect(onLeftRailVisibleChange).toHaveBeenCalledExactlyOnceWith(true);
+  });
+
+  it("falls back to the available mobile rail when the selected rail is globally hidden", () => {
+    const { rerender } = render(
+      <PlaygroundCockpitShell
+        mode="cockpit"
+        leftRailVisible={false}
+        rightRailVisible
+        mobilePanel="context"
+        leftRail={<div>Context tools</div>}
+        rightRail={<div>Runtime tools</div>}
+      >
+        <div>Chat transcript</div>
+      </PlaygroundCockpitShell>,
+    );
+    const mobileRails = screen.getByTestId("playground-cockpit-mobile-rails");
+    const rails = within(mobileRails);
+    expect(mobileRails).toHaveAttribute("data-mobile-panel", "runtime");
+    expect(rails.getByRole("button", { name: "Runtime" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(rails.getByRole("region", { name: "Runtime" })).toBeVisible();
+
+    rerender(
+      <PlaygroundCockpitShell
+        mode="cockpit"
+        leftRailVisible={false}
+        rightRailVisible={false}
+        mobilePanel="context"
+        leftRail={<div>Context tools</div>}
+        rightRail={<div>Runtime tools</div>}
+      >
+        <div>Chat transcript</div>
+      </PlaygroundCockpitShell>,
+    );
+    expect(mobileRails).toHaveAttribute("data-mobile-panel", "none");
+    expect(rails.queryAllByRole("region")).toHaveLength(0);
+  });
+
+  it("toggles the mobile panel with the uncontrolled shell API", async () => {
+    const user = userEvent.setup();
+    render(
+      <PlaygroundCockpitShell
+        mode="cockpit"
+        leftRail={<div>Context tools</div>}
+        rightRail={<div>Runtime tools</div>}
+      >
+        <div>Chat transcript</div>
+      </PlaygroundCockpitShell>,
+    );
+    const mobileRails = screen.getByTestId("playground-cockpit-mobile-rails");
+    const rails = within(mobileRails);
+    const context = rails.getByRole("button", { name: "Context" });
+    expect(mobileRails).toHaveAttribute("data-mobile-panel", "context");
+
+    await user.click(context);
+    expect(mobileRails).toHaveAttribute("data-mobile-panel", "none");
+    await user.click(rails.getByRole("button", { name: "Runtime" }));
+    expect(mobileRails).toHaveAttribute("data-mobile-panel", "runtime");
+    expect(rails.getByRole("region", { name: "Runtime" })).toBeVisible();
+  });
+
   it("labels cockpit landmarks without adding a top layout rail", () => {
     render(
       <PlaygroundCockpitShell
@@ -99,7 +363,7 @@ describe("Playground cockpit accessibility", () => {
     const mobileRails = screen.getByTestId("playground-cockpit-mobile-rails");
     expect(mobileRails).toHaveAttribute("data-mobile-panel", "context");
 
-    const contextPanel = screen.getByRole("tabpanel", { name: "Context" });
+    const contextPanel = screen.getByRole("region", { name: "Context" });
     expect(contextPanel.className).toContain("max-h-[30vh]");
     expect(contextPanel.className).not.toContain("max-h-[42vh]");
 
@@ -131,12 +395,12 @@ describe("Playground cockpit accessibility", () => {
     );
 
     const contextToggle = screen.getByRole("button", {
-      name: "Restore context sidechannel",
+      name: "Show context",
     });
     const runtimeToggle = within(
       screen.getByRole("complementary", { name: "Chat cockpit runtime" }),
     ).getByRole("button", {
-      name: "Collapse runtime sidechannel",
+      name: "Hide runtime",
     });
 
     expect(contextToggle).toHaveAttribute(
@@ -175,13 +439,13 @@ describe("Playground cockpit accessibility", () => {
       name: "Chat cockpit context",
     });
     const contextCollapse = within(contextRail).getByRole("button", {
-      name: "Collapse context sidechannel",
+      name: "Hide context",
     });
     fireEvent.click(contextCollapse);
     expect(onLeftRailVisibleChange).toHaveBeenCalledWith(false);
 
     const runtimeRestore = screen.getByRole("button", {
-      name: "Restore runtime sidechannel",
+      name: "Show runtime",
     });
     expect(runtimeRestore).toHaveAttribute(
       "aria-controls",
@@ -191,7 +455,7 @@ describe("Playground cockpit accessibility", () => {
     expect(onRightRailVisibleChange).toHaveBeenCalledWith(true);
   });
 
-  it("activates cockpit rail and mobile tab controls from the keyboard", async () => {
+  it("activates desktop rail controls and mobile disclosures from the keyboard", async () => {
     const user = userEvent.setup();
     const onLeftRailVisibleChange = vi.fn();
     const onRightRailVisibleChange = vi.fn();
@@ -215,31 +479,34 @@ describe("Playground cockpit accessibility", () => {
 
     const contextToggle = within(
       screen.getByRole("complementary", { name: "Chat cockpit context" }),
-    ).getByRole("button", { name: "Collapse context sidechannel" });
+    ).getByRole("button", { name: "Hide context" });
     contextToggle.focus();
     await user.keyboard("{Enter}");
     expect(onLeftRailVisibleChange).toHaveBeenCalledWith(false);
 
     const runtimeToggle = within(
       screen.getByRole("complementary", { name: "Chat cockpit runtime" }),
-    ).getByRole("button", { name: "Collapse runtime sidechannel" });
+    ).getByRole("button", { name: "Hide runtime" });
     runtimeToggle.focus();
     await user.keyboard("{Enter}");
     expect(onRightRailVisibleChange).toHaveBeenCalledWith(false);
 
-    const runtimeTab = screen.getByRole("tab", { name: "Runtime" });
-    const contextTab = screen.getByRole("tab", { name: "Context" });
-    for (const tab of [contextTab, runtimeTab]) {
+    const mobileRails = within(
+      screen.getByTestId("playground-cockpit-mobile-rails"),
+    );
+    const runtimeButton = mobileRails.getByRole("button", { name: "Runtime" });
+    const contextButton = mobileRails.getByRole("button", { name: "Context" });
+    for (const button of [contextButton, runtimeButton]) {
       const controlledPanel = document.getElementById(
-        tab.getAttribute("aria-controls") ?? "",
+        button.getAttribute("aria-controls") ?? "",
       );
 
       expect(controlledPanel).not.toBeNull();
-      expect(controlledPanel).toHaveAttribute("role", "tabpanel");
-      expect(controlledPanel).toHaveAttribute("aria-labelledby", tab.id);
+      expect(controlledPanel).not.toHaveAttribute("role", "tabpanel");
+      expect(controlledPanel).toHaveAttribute("aria-labelledby", button.id);
     }
 
-    runtimeTab.focus();
+    runtimeButton.focus();
     await user.keyboard("{Enter}");
     expect(onMobilePanelChange).toHaveBeenCalledWith("runtime");
 
@@ -267,7 +534,8 @@ describe("Playground cockpit accessibility", () => {
     expect(status).toHaveAttribute("aria-live", "polite");
     expect(status).toHaveAttribute("aria-atomic", "false");
     expect(status).toHaveTextContent("Streaming");
-    expect(status).toHaveTextContent("anthropic:claude-sonnet-4");
+    expect(status).toHaveTextContent("claude-sonnet-4 (Anthropic)");
+    expect(status).not.toHaveTextContent("anthropic:claude-sonnet-4");
     expect(status).toHaveTextContent("2 messages");
     expect(status).not.toHaveTextContent("Focus");
     expect(status).not.toHaveTextContent("Context active");
@@ -289,10 +557,11 @@ describe("Playground cockpit accessibility", () => {
       />,
     );
 
-    const toggle = screen.getByTestId("model-list-scope-toggle");
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
-    expect(toggle).toHaveTextContent("Search all models");
-    fireEvent.click(toggle);
+    // CC-06: a labelled two-way control that always shows both choices.
+    expect(screen.getByRole("radio", { name: "Ready to use" })).toBeChecked();
+    const allModels = screen.getByRole("radio", { name: "All models" });
+    expect(allModels).not.toBeChecked();
+    fireEvent.click(allModels);
     expect(setModelListScope).toHaveBeenCalledWith("catalog");
 
     const configuredSearch = screen.getByLabelText("Search models");
@@ -310,13 +579,10 @@ describe("Playground cockpit accessibility", () => {
       />,
     );
 
-    expect(screen.getByTestId("model-list-scope-toggle")).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(screen.getByRole("radio", { name: "All models" })).toBeChecked();
     expect(screen.getByLabelText("Search models")).toHaveAttribute(
       "placeholder",
-      "Search all known models",
+      "Search all models",
     );
   });
 
@@ -348,15 +614,14 @@ describe("Playground cockpit accessibility", () => {
     render(
       <>
         <PlaygroundCompositionPreview summary={compositionSummary} />
+        <PlaygroundAssistantContext assistantSummary={assistantSummary} onOpenAssistantSelect={vi.fn()} />
         <PlaygroundRuntimeInspector
           streaming={false}
           selectedProvider="openai"
           selectedModel="gpt-4o-mini"
           messageCount={0}
           threadSearchOpen={false}
-          assistantSummary={assistantSummary}
           onOpenModelSettings={vi.fn()}
-          onOpenAssistantSelect={vi.fn()}
         />
       </>,
     );
@@ -371,15 +636,8 @@ describe("Playground cockpit accessibility", () => {
       within(composition).queryByText("No assistant selected"),
     ).not.toBeInTheDocument();
 
-    const runtimeInspector = screen.getByTestId("playground-runtime-inspector");
-    expect(
-      within(runtimeInspector).getByText("No runtime assistant selected"),
-    ).toBeInTheDocument();
-    expect(
-      within(runtimeInspector).queryByText("No assistant selected"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryAllByText("No assistant selected"),
-    ).toHaveLength(0);
+    const assistant = screen.getByRole("region", { name: "Assistant" });
+    expect(within(assistant).getByText("No assistant selected")).toBeVisible();
+    expect(screen.getByTestId("playground-runtime-inspector")).not.toHaveTextContent("No runtime assistant selected");
   });
 });

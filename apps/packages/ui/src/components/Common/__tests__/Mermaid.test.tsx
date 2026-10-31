@@ -163,4 +163,43 @@ describe("Mermaid", () => {
       theme: "default"
     })
   })
+
+  it("gives identical diagrams independent render IDs and SVG owners", async () => {
+    const { getByTestId, rerender } = render(
+      <>
+        <div data-testid="inline-diagram">
+          <Mermaid code={code} />
+        </div>
+      </>
+    )
+
+    await waitFor(() => expect(renderMock).toHaveBeenCalledTimes(1))
+    await waitFor(() => {
+      expect(
+        getByTestId("inline-diagram").querySelector("svg")?.textContent
+      ).toBe("Rendered diagram")
+    })
+
+    rerender(
+      <>
+        <div data-testid="inline-diagram">
+          <Mermaid code={code} />
+        </div>
+        <div data-testid="artifact-diagram">
+          <Mermaid code={code} />
+        </div>
+      </>
+    )
+
+    await waitFor(() => expect(renderMock).toHaveBeenCalledTimes(2))
+    expect(renderMock.mock.calls[0][0]).not.toBe(renderMock.mock.calls[1][0])
+    await waitFor(() => {
+      expect(
+        getByTestId("inline-diagram").querySelector("svg")?.textContent
+      ).toBe("Rendered diagram")
+      expect(
+        getByTestId("artifact-diagram").querySelector("svg")?.textContent
+      ).toBe("Rendered diagram")
+    })
+  })
 })

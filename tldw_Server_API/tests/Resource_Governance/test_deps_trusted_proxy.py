@@ -67,11 +67,31 @@ async def test_x_forwarded_for_ignored_when_proxy_untrusted(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_derive_entity_key_uses_policy_snapshot_tenant_when_config_omitted():
-    request = _build_request_with_app(headers={"X-TLDW-Tenant": "acme"})
+    request = _build_request_with_app(headers={"X-TLDW-Tenant": "7"})
+    request.state.org_ids = [7]  # set by route auth for a validated principal
 
     ent = derive_entity_key(request)
 
-    assert ent == "tenant:acme"
+    assert ent == "tenant:7"
+
+
+@pytest.mark.asyncio
+async def test_derive_entity_key_ignores_a_tenant_header_without_a_validated_principal():
+    # TASK-13402: rotating an unvalidated header must not mint a bucket per value.
+    request = _build_request_with_app(headers={"X-TLDW-Tenant": "acme"})
+
+    assert derive_entity_key(request) == "ip:127.0.0.1"
+
+
+@pytest.mark.asyncio
+async def test_derive_entity_key_ignores_a_foreign_tenant_header_for_a_principal():
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+
+    request = _build_request_with_app(headers={"X-TLDW-Tenant": "99"})
+    principal = AuthPrincipal(kind="user", user_id=1, org_ids=[7], active_org_id=7)
+    request.state.auth = AuthContext(principal=principal)
+
+    assert derive_entity_key(request) == "tenant:7"
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import closing
 from types import SimpleNamespace
 
 import pytest
@@ -127,11 +128,11 @@ async def test_fetch_active_by_hash_candidates_tolerates_legacy_sqlite_virtual_c
         )
     )
     await pool.initialize()
-    # A legacy api_keys table is pre-existing on-disk state; the guarded pool
-    # refuses DROP, so rebuild it with plain sqlite3 as an older release would.
-    with sqlite3.connect(db_path) as legacy:
-        legacy.execute("DROP TABLE IF EXISTS api_keys")
-        legacy.execute(
+    # A deliberate legacy schema is test setup; managed connections reject
+    # protected table DDL in application code.
+    with closing(sqlite3.connect(db_path)) as conn, conn:
+        conn.execute("DROP TABLE IF EXISTS api_keys")
+        conn.execute(
             """
             CREATE TABLE api_keys (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -154,7 +155,7 @@ async def test_fetch_active_by_hash_candidates_tolerates_legacy_sqlite_virtual_c
             )
             """
         )
-        legacy.execute(
+        conn.execute(
             """
             INSERT INTO api_keys (
                 user_id, key_hash, key_id, key_prefix, name, scope, status, usage_count

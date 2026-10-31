@@ -44,9 +44,9 @@ Source: TASK-13344 triage.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Resolved in the preceding commit with a TEST change only. Both earlier framings were wrong: (1) this was not the test correctly catching a product inconsistency -- registry.supported_domains is the set of adapters HELD, not what the service advertises; (2) promoting notes.task into SYNC_V2_SUPPORTED_DOMAINS was implemented, broke 11 tests that pin notes.task as deliberately dormant (wired but unadvertised), and was reverted. Verified at runtime: registry minus supported equals exactly the dormant task pair, and settings.supported_domains excludes notes.task. The test now expects supported + dormant.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

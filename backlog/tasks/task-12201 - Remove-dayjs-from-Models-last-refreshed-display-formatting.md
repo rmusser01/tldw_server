@@ -54,7 +54,7 @@ Continue issue #1346 by replacing the display-only dayjs usage in apps/packages/
 <!-- DOD:END -->
 
 ## Implementation Notes
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 TDD red check: the focused Models display utility test first failed because modelsDisplayUtils did not exist. Dependency removal was verified separately with an exact package-import scan rather than a filesystem-reading unit-test guard.
 
 Implemented a native Date/getHours/getMinutes helper for the Models last-refreshed HH:mm label and wired Models/index.tsx to use it instead of dayjs.
@@ -64,7 +64,7 @@ Updated the WebUI dependency audit to record the dayjs import count dropping fro
 Verification: bunx vitest run src/components/Option/Models/__tests__/modelsDisplayUtils.test.ts passed with 3 tests; bunx vitest run src/components/Option/Models/__tests__ passed with 2 files and 5 tests; git diff --check passed; exact dayjs package-import scan listed 15 remaining shared UI import lines; bun run lint in apps/tldw-frontend exited 0 with the existing 131 warnings baseline and no touched-file warnings; Bandit skipped because only TypeScript/test/docs/Backlog files changed.
 
 Opened PR #1405 against dev for this Models dayjs cleanup slice: https://github.com/rmusser01/tldw_server/pull/1405
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->

@@ -35,7 +35,7 @@ Add opt-in provider-neutral billing prompt-cache intent handling and adapter-lev
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Provider docs checked on 2026-05-15:
 - OpenAI prompt caching guide: https://platform.openai.com/docs/guides/prompt-caching (automatic prompt caching; prompt_cache_key and prompt_cache_retention request controls; cached_tokens usage proof).
 - Anthropic prompt caching docs: https://platform.claude.com/docs/en/build-with-claude/prompt-caching (cache_control blocks/top-level controls; default 5m TTL, optional 1h TTL; cache_creation/cache_read usage fields).
@@ -59,7 +59,7 @@ Verification:
 
 Known verification note:
 - Full tests/LLM_Adapters/unit was attempted but failed on unrelated CustomOpenAIAdapter2 explicit-base-URL baseline and then hit the repo-level 300s app-fixture timeout.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

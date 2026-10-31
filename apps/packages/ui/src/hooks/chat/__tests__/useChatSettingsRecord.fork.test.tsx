@@ -1,3 +1,5 @@
+import { useStoreMessageOption } from "@/store/option"
+import { settingsTestOwner } from "@/services/__tests__/chat-settings-fixture"
 import { act, renderHook } from "@testing-library/react"
 import { beforeEach, expect, it, vi } from "vitest"
 
@@ -62,11 +64,12 @@ beforeEach(() => {
   mocks.write.mockClear()
   mocks.scopedWrite.mockClear()
   mocks.candidate.mockReset().mockResolvedValue(null)
+  useStoreMessageOption.setState({ historyId: null, serverChatId: null, chatDraftAddress: null, chatDraftRevision: 0 })
 })
 vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: ({ key }: any) => {
     mocks.keys.push(key)
-    return [{ authorNote: "poisoned cache" }]
+    return [{ storageKey: key, settings: { authorNote: "qualified presentation" } }]
   }
 }))
 vi.mock("@/services/chat-settings", () => ({
@@ -75,7 +78,7 @@ vi.mock("@/services/chat-settings", () => ({
   getChatSettingsForKey: mocks.read,
   getChatSettingsStorageKey: (key: string) => key,
   normalizeChatSettingsRecord: (value: any) => value,
-  resolveChatSettingsKey: () => "server:child"
+  resolveChatSettingsKey: ({ serverChatId, historyId }: any) => serverChatId ? "server:owned:verified:child" : historyId ? `local:${historyId}` : "draft:owned:verified:fresh"
 }))
 
 it("held native verification never subscribes/imports server-ID cache, then explicit fork edits use scoped owner", async () => {
@@ -110,6 +113,7 @@ it.each(["ordinary", "fork"])(
       kind: "native",
       owner_key: "owner",
       conversation_id: "child",
+      request_scope: settingsTestOwner.requestScope,
       validate_lease: () => true
     }
     await act(async () => {
@@ -121,7 +125,7 @@ it.each(["ordinary", "fork"])(
     )
     expect(controller.result.current.status).toBe("legacy_review_required")
     expect(settings.result.current.settings).toEqual({
-      authorNote: kind === "fork" ? "verified server" : "poisoned cache"
+      authorNote: kind === "fork" ? "verified server" : "qualified presentation"
     })
     mocks.scopedWrite.mockResolvedValue({ authorNote: "explicit" })
     await act(async () => {
@@ -136,12 +140,14 @@ it.each(["ordinary", "fork"])(
         expect.any(AbortSignal)
       )
     } else {
-      expect(mocks.write).toHaveBeenCalledWith({
+      expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({
         historyId: null,
         serverChatId: "child",
+        requestScope: settingsTestOwner.requestScope,
+        validate_lease: expect.any(Function),
         patch: { authorNote: "explicit" }
-      })
-      expect(mocks.read).toHaveBeenCalledWith("server:child")
+      }))
+      expect(mocks.read).toHaveBeenCalledWith("server:owned:verified:child")
     }
     expect(controller.result.current.status).toBe("legacy_review_required")
   }
@@ -149,7 +155,7 @@ it.each(["ordinary", "fork"])(
 
 it('keeps null display IDs pending for a native owner and permits ordinary settings only after reset', async () => {
   const controller = renderHook(() => useHistorySelection())
-  await act(async () => { await controller.result.current.open({kind: 'native', owner_key: 'owner', conversation_id: 'child', validate_lease: () => true} as any) })
+  await act(async () => { await controller.result.current.open({kind: 'native', owner_key: 'owner', conversation_id: 'child', validate_lease: () => true} as never) })
   mocks.controller = controller.result.current
   const settings = renderHook(() => useChatSettingsRecord({historyId: 'mirror', serverChatId: null}))
   await expect(settings.result.current.updateSettings({authorNote: 'must not copy'})).rejects.toThrow('fork_settings_owner_unavailable')
@@ -163,14 +169,15 @@ it('keeps null display IDs pending for a native owner and permits ordinary setti
   mocks.controller = controller.result.current
   settings.rerender()
   await act(async () => { await settings.result.current.updateSettings({authorNote: 'fresh draft'}) })
-  expect(mocks.write).toHaveBeenCalledWith({historyId: 'mirror', serverChatId: null, patch: {authorNote: 'fresh draft'}})
+  expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({historyId: 'mirror', serverChatId: null, validate_lease: expect.any(Function), patch: {authorNote: 'fresh draft'}}))
 })
 
 it('preserves ordinary settings for temporary history capability rejection', async () => {
   const controller = renderHook(() => useHistorySelection())
   await act(async () => { await controller.result.current.open({kind: 'unavailable', code: 'temporary_history_unavailable'}) })
-  mocks.controller = controller.result.current
+  useStoreMessageOption.setState({ chatDraftAddress: settingsTestOwner.draftAddress })
+  mocks.controller = { ...controller.result.current, draftAccount: { requestScope: settingsTestOwner.requestScope, isCurrent: () => true, retryVerification: () => {} } }
   const settings = renderHook(() => useChatSettingsRecord({historyId: null, serverChatId: null}))
   await act(async () => { await settings.result.current.updateSettings({authorNote: 'temporary settings'}) })
-  expect(mocks.write).toHaveBeenCalledWith({historyId: null, serverChatId: null, patch: {authorNote: 'temporary settings'}})
+  expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({historyId: null, serverChatId: null, requestScope: settingsTestOwner.requestScope, draftAddress: settingsTestOwner.draftAddress, validate_lease: expect.any(Function), patch: {authorNote: 'temporary settings'}}))
 })

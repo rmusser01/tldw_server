@@ -32,7 +32,7 @@ Execute implementation plan Task 2: improve first-time clarity, destination expe
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Started from merged dev 66c8bec4d in isolated worktree .worktrees/notes-post-merge-next. Scope: execute plan Task 2 only, focused Quick Ingest launcher/Add step copy and tests.
 
 - Merged dev already included the first-open Add step purpose/destination copy and the Quick Ingest launcher wording/aria-label baseline.
@@ -46,7 +46,7 @@ Execute implementation plan Task 2: improve first-time clarity, destination expe
 - Bandit: skipped because this slice only changes frontend TS/TSX and Backlog task metadata.
 - PR review follow-up after rebasing on origin/dev: added explicit Quick Ingest review estimate locale entries without a leading approximation marker in the i18next and extension locale bundles, and loosened the duplicate-marker regression to accept every unit emitted by `formatEstimate()`.
 - Review-fix verification: `./node_modules/.bin/vitest run src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx --maxWorkers=1 --no-file-parallelism`, `./node_modules/.bin/vitest run src/components/Layouts/__tests__/QuickIngestButton.resume.test.tsx --maxWorkers=1 --no-file-parallelism`, locale JSON/static no-`~{{time}}` check, and `git diff --check` passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -1,3 +1,4 @@
+import { knowledgeNoteHead, retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 import type { WorkspaceSlice } from './types'
 import type { WorkspaceState } from '../workspace'
 import type { GeneratedArtifact, WorkspaceBanner } from '@/types/workspace'
@@ -154,7 +155,7 @@ export const createStudioSlice: WorkspaceSlice<StudioActions> = (set, get) => ({
   clearCurrentNote: () =>
     set({ currentNote: { ...DEFAULT_WORKSPACE_NOTE } }),
 
-  captureToCurrentNote: ({ title, content, mode = "append" }) =>
+  captureToCurrentNote: ({ title, content, mode = "append", provenance }) =>
     set((state) => {
       const trimmedContent = content.trim()
       if (!trimmedContent) return state
@@ -178,6 +179,7 @@ export const createStudioSlice: WorkspaceSlice<StudioActions> = (set, get) => ({
           ...state.currentNote,
           title: nextTitle,
           content: nextContent,
+          ...(provenance ? { pendingKnowledgeProvenance: provenance } : {}),
           isDirty: true
         }
       }
@@ -188,7 +190,8 @@ export const createStudioSlice: WorkspaceSlice<StudioActions> = (set, get) => ({
       currentNote: {
         id: note.id,
         title: note.title,
-        content: note.content,
+        content: retainKnowledgeNoteProvenance(note.content, note),
+        ...knowledgeNoteHead(note),
         keywords: note.keywords || [],
         version: note.version,
         isDirty: false

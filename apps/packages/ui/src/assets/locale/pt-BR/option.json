@@ -394,7 +394,7 @@
     "storageServerDescription": "Armazenados no seu servidor tldw (recomendado para RAG e workspaces compartilhados).",
     "storageLocalDescription": "Mantidos apenas neste navegador; nenhum dado é gravado no servidor.",
     "storeAfterReview": "Salvar após revisão",
-    "reviewBeforeStorage": "Revisar antes de salvar",
+    "reviewBeforeStorage": "Revisar o conteúdo extraído antes de salvar",
     "reviewBeforeStorageHint": "Processe agora e depois edite os rascunhos localmente antes de enviá-los ao servidor.",
     "reviewEnabled": "Modo de revisão",
     "reviewStorageCap": "Rascunhos locais limitados a {{cap}}.",

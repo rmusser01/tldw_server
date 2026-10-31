@@ -51,7 +51,7 @@ Fix the validated current-code review findings in `tldw_Server_API/app/core/Flas
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Touched files:
 - IMPLEMENTATION_PLAN_flashcards_core_review_fixes_10003.md
 - tldw_Server_API/app/core/Flashcards/apkg_exporter.py
@@ -69,7 +69,13 @@ Verification:
 - `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Flashcards/apkg_exporter.py tldw_Server_API/app/core/Flashcards/apkg_importer.py tldw_Server_API/app/core/Flashcards/study_assistant.py -f json -o /tmp/bandit_flashcards_task_10003.json` -> 0 findings.
 
 Known skips/blockers: full repository pytest was not run because this workspace contains many unrelated in-progress changes; focused Flashcards helper/service and APKG endpoint cap tests were run. The official Backlog CLI was unavailable for mutation because its index references a missing unrelated task file, so this task was created via the approved manual fallback.
-<!-- SECTION:NOTES:END -->
+
+PR #2459 rebase/review follow-up:
+- Rebased branch `codex/flashcards-core-review-fixes-10003` onto latest `origin/dev`.
+- Addressed review findings by adding default APKG total media caps, preflight data-URI decoded-size checks, whitespace-tolerant data URI decoding, valid JSON assistant context compaction, helper docstrings, MCP empty APKG export handling, and markers/return annotations for the new focused tests.
+- Reviewed the raw-SQL comment and kept the APKG collection SQL scoped inside the importer because it parses an uploaded Anki SQLite file rather than accessing application DB state through DB_Management.
+- Verification after review fixes: Flashcards focused suite -> 30 passed; APKG endpoint cap tests -> 2 passed; MCP Flashcards sanitization suite -> 14 passed; py_compile -> passed; Bandit touched Python scope -> 0 findings (`/tmp/bandit_flashcards_pr_2459_rebase.json`).
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -86,13 +92,3 @@ Hardened Flashcards core APKG handling and assistant prompt grounding. APKG impo
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-PR #2459 rebase/review follow-up:
-- Rebased branch `codex/flashcards-core-review-fixes-10003` onto latest `origin/dev`.
-- Addressed review findings by adding default APKG total media caps, preflight data-URI decoded-size checks, whitespace-tolerant data URI decoding, valid JSON assistant context compaction, helper docstrings, MCP empty APKG export handling, and markers/return annotations for the new focused tests.
-- Reviewed the raw-SQL comment and kept the APKG collection SQL scoped inside the importer because it parses an uploaded Anki SQLite file rather than accessing application DB state through DB_Management.
-- Verification after review fixes: Flashcards focused suite -> 30 passed; APKG endpoint cap tests -> 2 passed; MCP Flashcards sanitization suite -> 14 passed; py_compile -> passed; Bandit touched Python scope -> 0 findings (`/tmp/bandit_flashcards_pr_2459_rebase.json`).
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

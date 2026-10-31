@@ -36,6 +36,19 @@ beforeEach(() => { localStorage.clear(); sessionStorage.clear(); mocks.initializ
 afterEach(() => { releases.splice(0).forEach(release => release()) })
 
 describe("Quick Ingest verified authority lifecycle", () => {
+  it("keeps a review account lease through a new ingestion session but retires it on an account boundary", async () => {
+    const { store, authority } = await setup()
+    const review = authority.capture({ sessionBound: false })
+    const ingest = authority.capture()
+    store.getState().createDraftSession()
+    expect(ingest.isCurrent()).toBe(false)
+    expect(review.isCurrent()).toBe(true)
+    expect(authority.capture({ sessionBound: false }).authorityRevision).toBe(review.authorityRevision)
+    change(b); change(a)
+    expect(review.isCurrent()).toBe(false)
+    expect(review.signal.aborted).toBe(true)
+  })
+
   it("masks mounted private state synchronously on logout and rejects a captured completion", async () => {
     const { store, authority } = await setup()
     store.getState().createDraftSession({ results: [{ id: "Bob-private", status: "ok", type: "pdf", mediaId: 7 }] })

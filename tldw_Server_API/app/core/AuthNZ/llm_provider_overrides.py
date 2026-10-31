@@ -31,6 +31,7 @@ from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import (
     canonical_builtin_llm_provider_name,
 )
+from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import allowlist_has_model
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.testing import is_truthy
 
@@ -80,6 +81,13 @@ def _copy_override_map(
     return copy.deepcopy(dict(overrides))
 
 
+def _override_allows_model(provider: str, allowed_models: Any, model: Any) -> bool:
+    """Whether an override allowlist has ``model``; Anthropic dotted and dashed spellings of one ID count as equal."""
+    if provider == "anthropic":
+        return allowlist_has_model(allowed_models, model)
+    return model in allowed_models
+
+
 @dataclass(frozen=True, repr=False)
 class ProviderOverrideCallSnapshot:
     """One redacted provider override snapshot used for policy and fallback."""
@@ -104,7 +112,8 @@ class ProviderOverrideCallSnapshot:
                 "error_code": "provider_disabled",
                 "message": f"Provider '{self.provider}' is disabled by admin override.",
             }
-        if override.allowed_models and model and model not in override.allowed_models:
+        allowed_models = override.allowed_models
+        if allowed_models and model and not _override_allows_model(self.provider, allowed_models, model):
             return {
                 "error_code": "model_not_allowed",
                 "message": f"Model '{model}' is not allowed for provider '{self.provider}'.",
@@ -816,11 +825,17 @@ def apply_llm_provider_overrides_to_listing(
         merged["enabled"] = override.is_enabled if override.is_enabled is not None else merged.get("enabled", True)
 
         models = list(merged.get("models") or [])
+        authoritative = merged.get("model_inventory_source") == "provider"
         config_models = override.config.get("models")
         if isinstance(config_models, list):
-            models = [str(v).strip() for v in config_models if str(v).strip()]
+            configured = [str(v).strip() for v in config_models if str(v).strip()]
+            models = [m for m in models if m in configured] if authoritative else configured
         if override.allowed_models:
-            models = [m for m in models if m in override.allowed_models] if models else list(override.allowed_models)
+            models = (
+                [m for m in models if _override_allows_model(provider_name, override.allowed_models, m)]
+                if authoritative or models
+                else list(override.allowed_models)
+            )
 
         preferred_order = _get_model_priority_from_override(override, "highest_quality")
         if preferred_order:
@@ -837,7 +852,7 @@ def apply_llm_provider_overrides_to_listing(
             for mi in models_info:
                 if not isinstance(mi, dict):
                     continue
-                if mi.get("name") in models:
+                if _override_allows_model(provider_name, models, mi.get("name")):
                     filtered_info.append(mi)
             merged["models_info"] = filtered_info
         if isinstance(merged.get("models_info"), list) and preferred_order:
@@ -856,7 +871,10 @@ def apply_llm_provider_overrides_to_listing(
 
         default_model = override.config.get("default_model")
         if isinstance(default_model, str) and default_model.strip():
-            merged["default_model"] = default_model.strip()
+            if not authoritative or default_model.strip() in models:
+                merged["default_model"] = default_model.strip()
+        if authoritative and merged.get("default_model") not in models:
+            merged["default_model"] = models[0] if models else None
 
         updated_providers.append(merged)
 

@@ -30,15 +30,11 @@ Backfill a bounded Embeddings ADR from TASK-2261 evidence. Scope the accepted de
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Started TASK-2262 in isolated worktree .worktrees/backfill-embeddings-api-adr from origin/dev. Planned scope: create ADR-022 from TASK-2261 evidence, update ADR index, update INV-032 inventory disposition, add Embeddings README backlink, then record docs-only verification and Bandit applicability.
 
 Created ADR-022 and updated ADR index, INV-032 inventory/default disposition, and the Embeddings README backlink. Verification: `git diff --check` passed; scoped file/reference check using `git grep` passed for ADR-022, TASK-2262, INV-032, the ADR path, the completed inventory disposition, and the README backlink; focused Embeddings pytest suite passed with 34 passed and 3 warnings using `source ../../.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Embeddings/test_embeddings_policy.py tldw_Server_API/tests/Embeddings/test_embeddings_fallback.py tldw_Server_API/tests/Embeddings/test_embeddings_endpoint_cache_identity.py tldw_Server_API/tests/Embeddings/test_request_batching.py tldw_Server_API/tests/Embeddings/test_embeddings_jobs_adapter.py tldw_Server_API/tests/Embeddings/test_embeddings_redis_worker.py`. Removed two pytest-generated untracked Watchlists template files before staging. Bandit: skipped because touched files are Markdown documentation and Backlog task metadata only; no Python/code paths were changed. Known blockers/skips: none beyond docs-only Bandit non-applicability.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -15,6 +15,7 @@ from tldw_Server_API.app.api.v1.endpoints.admin.admin_tenant_provisioning import
     TenantProvisionResponse,
     router,
 )
+from tldw_Server_API.app.core.AuthNZ import tenant_provisioning
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 
 
@@ -152,7 +153,6 @@ class TestProvisionEndpointUnit:
         from tldw_Server_API.app.api.v1.endpoints.admin import admin_tenant_provisioning
 
         # 7a0a0df7b6 moved the transaction (and its gateway) into core.
-        from tldw_Server_API.app.core.AuthNZ import tenant_provisioning as tenant_provisioning_core
 
         payload = TenantProvisionRequest(
             username="tenant_user",
@@ -181,7 +181,7 @@ class TestProvisionEndpointUnit:
                 "tldw_Server_API.app.core.AuthNZ.password_service.get_password_service"
             ) as password_service,
             patch.object(
-                tenant_provisioning_core,
+                tenant_provisioning,
                 "VersionedUserWriteGateway",
                 return_value=gateway,
             ) as gateway_type,
@@ -217,7 +217,6 @@ class TestProvisionEndpointUnit:
         from tldw_Server_API.app.api.v1.endpoints.admin import admin_tenant_provisioning
 
         # 7a0a0df7b6 moved the transaction (and its gateway) into core.
-        from tldw_Server_API.app.core.AuthNZ import tenant_provisioning as tenant_provisioning_core
 
         payload = TenantProvisionRequest(
             username="tenant_user",
@@ -256,7 +255,7 @@ class TestProvisionEndpointUnit:
                 "tldw_Server_API.app.core.AuthNZ.password_service.get_password_service"
             ) as password_service,
             patch.object(
-                tenant_provisioning_core,
+                tenant_provisioning,
                 "VersionedUserWriteGateway",
                 return_value=gateway,
             ),

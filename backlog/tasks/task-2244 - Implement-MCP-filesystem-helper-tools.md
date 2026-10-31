@@ -31,9 +31,9 @@ Docs/superpowers/plans/2026-06-04-mcp-filesystem-helper-tools-implementation-pla
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the filesystem helper plan with TDD slices: schemas/validation, fs.stat, fs.glob, fs.grep, profile metadata, docs, and final verification. Added deterministic grep ordering before result limiting, traversal caps, regex pattern guards, dot-segment hidden handling, symlink outside-workspace checks, symlink loop avoidance, skipped counters, and protocol unknown-argument coverage for the new tools.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

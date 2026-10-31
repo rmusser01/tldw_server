@@ -1,31 +1,33 @@
-import React from "react";
-import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
-import { useQueryClient } from "@tanstack/react-query";
-import { useStoreMessageOption } from "~/store/option";
-import { useTranslation } from "react-i18next";
-import { usePageAssist } from "@/context";
-import { useWebUI } from "@/store/webui";
-import { useStorage } from "@plasmohq/storage/hook";
-import { useStoreChatModelSettings } from "@/store/model";
-import { formatFileSize } from "@/utils/format";
-import { useAntdNotification } from "./useAntdNotification";
-import { useChatBaseState } from "@/hooks/chat/useChatBaseState";
-import { useSelectServerChat } from "@/hooks/chat/useSelectServerChat";
-import { useServerChatHistoryId } from "@/hooks/chat/useServerChatHistoryId";
-import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror";
-import { useServerChatLoader } from "@/hooks/chat/useServerChatLoader";
-import { useClearChat } from "@/hooks/chat/useClearChat";
-import { useCompareMode } from "@/hooks/chat/useCompareMode";
-import { useChatActions } from "@/hooks/chat/useChatActions";
-import { useSelectedModel } from "@/hooks/chat/useSelectedModel";
-import { usePromptPersistence } from "@/hooks/chat/usePromptPersistence";
-import { useRagSettings } from "@/hooks/chat/useRagSettings";
-import { useFileUpload } from "@/hooks/chat/useFileUpload";
-import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
-import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state";
-import { useSelectedAssistant } from "@/hooks/useSelectedAssistant";
-import type { AssistantSelection } from "@/types/assistant-selection";
-import type { Character } from "@/types/character";
+import React from 'react';
+import { useHistorySelectionContext } from '@/hooks/chat/useHistorySelection';
+import { useQueryClient } from '@tanstack/react-query';
+import { invalidateServerChatHistory as refreshServerChatHistory } from '@/services/query-client';
+import { useStoreMessageOption } from '~/store/option';
+import { useShallow } from 'zustand/react/shallow';
+import { useTranslation } from 'react-i18next';
+import { usePageAssist } from '@/context';
+import { useWebUI } from '@/store/webui';
+import { useStorage } from '@plasmohq/storage/hook';
+import { useStoreChatModelSettings } from '@/store/model';
+import { formatFileSize } from '@/utils/format';
+import { useAntdNotification } from './useAntdNotification';
+import { useChatBaseState } from '@/hooks/chat/useChatBaseState';
+import { useSelectServerChat } from '@/hooks/chat/useSelectServerChat';
+import { useServerChatHistoryId } from '@/hooks/chat/useServerChatHistoryId';
+import { serverChatMirrorOwnerKey } from '@/db/dexie/server-chat-mirror';
+import { useServerChatLoader } from '@/hooks/chat/useServerChatLoader';
+import { useClearChat } from '@/hooks/chat/useClearChat';
+import { useCompareMode } from '@/hooks/chat/useCompareMode';
+import { useChatActions } from '@/hooks/chat/useChatActions';
+import { useSelectedModel } from '@/hooks/chat/useSelectedModel';
+import { usePromptPersistence } from '@/hooks/chat/usePromptPersistence';
+import { useRagSettings } from '@/hooks/chat/useRagSettings';
+import { useFileUpload } from '@/hooks/chat/useFileUpload';
+import { useChatSettingsRecord } from '@/hooks/chat/useChatSettingsRecord';
+import { resolveEffectiveAssistantState } from '@/hooks/chat/effective-assistant-state';
+import { useSelectedAssistant } from '@/hooks/useSelectedAssistant';
+import type { AssistantSelection } from '@/types/assistant-selection';
+import type { Character } from '@/types/character';
 import {
   assistantSelectionToCharacter,
   characterToAssistantSelection,
@@ -84,8 +86,11 @@ export const useMessageOption = (
 ) => {
   const historySelection = useHistorySelectionContext();
   // Controllers come from Context (for aborting streaming requests)
-  const { controller: abortController, setController: setAbortController } =
-    usePageAssist();
+  const {
+    controller: abortController,
+    setController: setAbortController,
+    getController: getAbortController,
+  } = usePageAssist();
 
   const {
     messages,
@@ -114,6 +119,9 @@ export const useMessageOption = (
     setUseOCR,
   } = useChatBaseState(useStoreMessageOption);
 
+  // Grouped shallow selectors: each group only re-renders this hook's host
+  // when one of its own fields changes (e.g. a streaming messages flush must
+  // not churn the settings/config subscriptions, and vice versa).
   const {
     webSearch,
     setWebSearch,
@@ -121,24 +129,70 @@ export const useMessageOption = (
     setToolChoice,
     isSearchingInternet,
     setIsSearchingInternet,
+    temporaryChat,
+    setTemporaryChat,
+    fileRetrievalEnabled,
+    setFileRetrievalEnabled,
+    actionInfo,
+    setActionInfo,
+    replyTarget,
+    clearReplyTarget,
+  } = useStoreMessageOption(
+    useShallow((state) => ({
+      webSearch: state.webSearch,
+      setWebSearch: state.setWebSearch,
+      toolChoice: state.toolChoice,
+      setToolChoice: state.setToolChoice,
+      isSearchingInternet: state.isSearchingInternet,
+      setIsSearchingInternet: state.setIsSearchingInternet,
+      temporaryChat: state.temporaryChat,
+      setTemporaryChat: state.setTemporaryChat,
+      fileRetrievalEnabled: state.fileRetrievalEnabled,
+      setFileRetrievalEnabled: state.setFileRetrievalEnabled,
+      actionInfo: state.actionInfo,
+      setActionInfo: state.setActionInfo,
+      replyTarget: state.replyTarget,
+      clearReplyTarget: state.clearReplyTarget,
+    })),
+  );
+
+  const {
     queuedMessages: storeQueuedMessages,
     addQueuedMessage: storeAddQueuedMessage,
     setQueuedMessages: storeSetQueuedMessages,
     clearQueuedMessages: storeClearQueuedMessages,
+  } = useStoreMessageOption(
+    useShallow((state) => ({
+      queuedMessages: state.queuedMessages,
+      addQueuedMessage: state.addQueuedMessage,
+      setQueuedMessages: state.setQueuedMessages,
+      clearQueuedMessages: state.clearQueuedMessages,
+    })),
+  );
+
+  const {
     selectedKnowledge,
     setSelectedKnowledge,
-    temporaryChat,
-    setTemporaryChat,
     documentContext,
     setDocumentContext,
     uploadedFiles,
     setUploadedFiles,
     contextFiles,
     setContextFiles,
-    actionInfo,
-    setActionInfo,
-    setFileRetrievalEnabled,
-    fileRetrievalEnabled,
+  } = useStoreMessageOption(
+    useShallow((state) => ({
+      selectedKnowledge: state.selectedKnowledge,
+      setSelectedKnowledge: state.setSelectedKnowledge,
+      documentContext: state.documentContext,
+      setDocumentContext: state.setDocumentContext,
+      uploadedFiles: state.uploadedFiles,
+      setUploadedFiles: state.setUploadedFiles,
+      contextFiles: state.contextFiles,
+      setContextFiles: state.setContextFiles,
+    })),
+  );
+
+  const {
     ragMediaIds,
     setRagMediaIds,
     ragSearchMode,
@@ -155,6 +209,28 @@ export const useMessageOption = (
     setRagAdvancedOptions,
     ragPinnedResults,
     setRagPinnedResults,
+  } = useStoreMessageOption(
+    useShallow((state) => ({
+      ragMediaIds: state.ragMediaIds,
+      setRagMediaIds: state.setRagMediaIds,
+      ragSearchMode: state.ragSearchMode,
+      setRagSearchMode: state.setRagSearchMode,
+      ragTopK: state.ragTopK,
+      setRagTopK: state.setRagTopK,
+      ragEnableGeneration: state.ragEnableGeneration,
+      setRagEnableGeneration: state.setRagEnableGeneration,
+      ragEnableCitations: state.ragEnableCitations,
+      setRagEnableCitations: state.setRagEnableCitations,
+      ragSources: state.ragSources,
+      setRagSources: state.setRagSources,
+      ragAdvancedOptions: state.ragAdvancedOptions,
+      setRagAdvancedOptions: state.setRagAdvancedOptions,
+      ragPinnedResults: state.ragPinnedResults,
+      setRagPinnedResults: state.setRagPinnedResults,
+    })),
+  );
+
+  const {
     serverChatId,
     setServerChatId,
     serverChatTitle,
@@ -185,14 +261,56 @@ export const useMessageOption = (
     setServerChatSource,
     serverChatExternalRef,
     setServerChatExternalRef,
+  } = useStoreMessageOption(
+    useShallow((state) => ({
+      serverChatId: state.serverChatId,
+      setServerChatId: state.setServerChatId,
+      serverChatTitle: state.serverChatTitle,
+      setServerChatTitle: state.setServerChatTitle,
+      serverChatCharacterId: state.serverChatCharacterId,
+      setServerChatCharacterId: state.setServerChatCharacterId,
+      serverChatAssistantKind: state.serverChatAssistantKind,
+      setServerChatAssistantKind: state.setServerChatAssistantKind,
+      serverChatAssistantId: state.serverChatAssistantId,
+      setServerChatAssistantId: state.setServerChatAssistantId,
+      serverChatPersonaMemoryMode: state.serverChatPersonaMemoryMode,
+      setServerChatPersonaMemoryMode: state.setServerChatPersonaMemoryMode,
+      serverChatMetaLoaded: state.serverChatMetaLoaded,
+      setServerChatMetaLoaded: state.setServerChatMetaLoaded,
+      serverChatLoadState: state.serverChatLoadState,
+      setServerChatLoadState: state.setServerChatLoadState,
+      serverChatLoadError: state.serverChatLoadError,
+      setServerChatLoadError: state.setServerChatLoadError,
+      serverChatState: state.serverChatState,
+      setServerChatState: state.setServerChatState,
+      serverChatVersion: state.serverChatVersion,
+      setServerChatVersion: state.setServerChatVersion,
+      serverChatTopic: state.serverChatTopic,
+      setServerChatTopic: state.setServerChatTopic,
+      serverChatClusterId: state.serverChatClusterId,
+      setServerChatClusterId: state.setServerChatClusterId,
+      serverChatSource: state.serverChatSource,
+      setServerChatSource: state.setServerChatSource,
+      serverChatExternalRef: state.serverChatExternalRef,
+      setServerChatExternalRef: state.setServerChatExternalRef,
+    })),
+  );
+
+  const {
     messageSteeringMode,
     setMessageSteeringMode,
     messageSteeringForceNarrate,
     setMessageSteeringForceNarrate,
     clearMessageSteering,
-    replyTarget,
-    clearReplyTarget,
-  } = useStoreMessageOption();
+  } = useStoreMessageOption(
+    useShallow((state) => ({
+      messageSteeringMode: state.messageSteeringMode,
+      setMessageSteeringMode: state.setMessageSteeringMode,
+      messageSteeringForceNarrate: state.messageSteeringForceNarrate,
+      setMessageSteeringForceNarrate: state.setMessageSteeringForceNarrate,
+      clearMessageSteering: state.clearMessageSteering,
+    })),
+  );
 
   const {
     compareMode,
@@ -221,8 +339,14 @@ export const useMessageOption = (
   } = useCompareMode({ historyId, forceEnabled: opts.forceCompareEnabled });
 
   const currentChatModelSettings = useStoreChatModelSettings();
-  const { selectedModel, setSelectedModel, selectedModelIsLoading } =
-    useSelectedModel();
+  const {
+    selectedModel,
+    setSelectedModel,
+    beginSelectedModelSave,
+    retrySelectedModelSave,
+    selectedModelSaveFailed,
+    selectedModelIsLoading
+  } = useSelectedModel()
   const [selectedAssistant, setSelectedAssistant, assistantSelectionMeta] = useSelectedAssistant(null);
   const selectedCharacter = React.useMemo(
     () => assistantSelectionToCharacter<Character>(selectedAssistant),
@@ -269,9 +393,10 @@ export const useMessageOption = (
     [maxContextFileSizeBytes],
   );
   const queryClient = useQueryClient();
-  const invalidateServerChatHistory = React.useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] });
-  }, [queryClient]);
+  const invalidateServerChatHistory = React.useCallback(
+    (isCurrent?: () => boolean) => refreshServerChatHistory(queryClient, isCurrent),
+    [queryClient]
+  );
   const notification = useAntdNotification();
 
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
@@ -330,6 +455,54 @@ export const useMessageOption = (
 
   const assistantDraftSelection =
     selectedAssistant ?? inheritedAssistantSnapshot ?? inheritedAssistantCandidate;
+  const canonicalAssistantId =
+    serverChatAssistantKind === "character"
+      ? serverChatCharacterId
+      : serverChatAssistantKind === "persona"
+        ? serverChatAssistantId
+        : null;
+  const canonicalAssistantKey =
+    serverChatId && canonicalAssistantId != null
+      ? JSON.stringify([
+          serverChatId,
+          serverChatAssistantKind,
+          String(canonicalAssistantId),
+        ])
+      : null;
+  const retainedAssistant = React.useRef<{
+    key: string;
+    selection: AssistantSelection;
+    isCurrent: () => boolean;
+  } | null>(null);
+  // A saved conversation keeps its own card when another tab changes the
+  // shared picker. The captured lease also rejects logout-and-back transitions.
+  if (
+    !canonicalAssistantKey ||
+    !assistantSelectionMeta?.isCurrent?.() ||
+    (retainedAssistant.current &&
+      (retainedAssistant.current.key !== canonicalAssistantKey ||
+        !retainedAssistant.current.isCurrent()))
+  ) {
+    retainedAssistant.current = null;
+  }
+  const isPlaceholderCard = selectedAssistant?.kind === "character" &&
+    selectedAssistant.name.trim().toLowerCase() === "assistant" &&
+    !selectedAssistant.avatar_url && !selectedAssistant.system_prompt &&
+    !selectedAssistant.greeting && !Object.keys(selectedAssistant.extensions ?? {}).length;
+  if (
+    canonicalAssistantKey &&
+    assistantSelectionMeta?.isCurrent?.() &&
+    selectedAssistant?.kind === serverChatAssistantKind &&
+    String(selectedAssistant.id) === String(canonicalAssistantId) &&
+    (!isPlaceholderCard || !retainedAssistant.current)
+  ) {
+    retainedAssistant.current = {
+      key: canonicalAssistantKey,
+      selection: selectedAssistant,
+      isCurrent: assistantSelectionMeta.isCurrent,
+    };
+  }
+  const canonicalAssistant = retainedAssistant.current?.selection ?? null;
   const effectiveAssistantState = React.useMemo(
     () =>
       resolveEffectiveAssistantState({
@@ -337,6 +510,9 @@ export const useMessageOption = (
           assistantKind: serverChatAssistantKind,
           assistantId: serverChatAssistantId,
           characterId: serverChatCharacterId,
+          displayName: canonicalAssistant?.name,
+          avatarUrl: canonicalAssistant?.avatar_url,
+          systemPromptSnapshot: canonicalAssistant?.system_prompt,
         },
         settings: chatSettings ?? null,
         draftSelection: assistantDraftSelection,
@@ -344,6 +520,7 @@ export const useMessageOption = (
     [
       assistantDraftSelection,
       chatSettings,
+      canonicalAssistant,
       serverChatAssistantId,
       serverChatAssistantKind,
       serverChatCharacterId,
@@ -374,7 +551,7 @@ export const useMessageOption = (
     const matchesDraftSelection =
       selectedAssistant?.kind === effectiveAssistantState.kind &&
       selectedAssistant.id === effectiveAssistantState.id;
-    const draftMetadata = matchesDraftSelection ? selectedAssistant : null;
+    const draftMetadata = canonicalAssistant ?? (matchesDraftSelection ? selectedAssistant : null);
 
     return {
       ...draftMetadata,
@@ -390,7 +567,7 @@ export const useMessageOption = (
         draftMetadata?.system_prompt ??
         null,
     };
-  }, [effectiveAssistantState, inheritedAssistant, selectedAssistant]);
+  }, [effectiveAssistantState, inheritedAssistant, selectedAssistant, canonicalAssistant]);
   const selectedAssistantSource =
     inheritedAssistant &&
     effectiveSelectedAssistant?.kind === inheritedAssistant.kind &&
@@ -408,6 +585,7 @@ export const useMessageOption = (
     void ensureServerChatHistoryId(serverChatId, serverChatTitle || undefined, controller.signal, {
       ownerKey: serverChatMirrorOwnerKey({ requestScope: current.owner.request_scope }),
       validateLease: current.owner.validate_lease,
+      scope: current.owner.scope,
     }).catch(error => {
       if (!controller.signal.aborted) console.error("Failed to bind selected server chat mirror", error);
     });
@@ -417,8 +595,6 @@ export const useMessageOption = (
   usePromptPersistence({
     selectedSystemPrompt,
     setSelectedSystemPrompt,
-    selectedQuickPrompt,
-    setSelectedQuickPrompt,
   });
 
   useRagSettings({
@@ -458,6 +634,10 @@ export const useMessageOption = (
     onSubmit: submitChat,
     sendPerModelReply,
     regenerateLastMessage,
+    getRecoveryRetryContext,
+    retryRecoveredHistoryTurn,
+    getSavedQuestionReview,
+    retrySavedQuestion,
     stopStreamingRequest,
     editMessage,
     deleteMessage,
@@ -469,6 +649,7 @@ export const useMessageOption = (
     notification,
     abortController,
     setAbortController,
+    getAbortController,
     messages,
     setMessages,
     history,
@@ -581,6 +762,9 @@ export const useMessageOption = (
     selectedModel,
     selectedModelIsLoading,
     setSelectedModel,
+    beginSelectedModelSave,
+    retrySelectedModelSave,
+    selectedModelSaveFailed,
     chatMode,
     setChatMode,
     isEmbedding,
@@ -588,6 +772,10 @@ export const useMessageOption = (
     speechToTextLanguage,
     setSpeechToTextLanguage,
     regenerateLastMessage,
+    getRecoveryRetryContext,
+    retryRecoveredHistoryTurn,
+    getSavedQuestionReview,
+    retrySavedQuestion,
     webSearch,
     setWebSearch,
     toolChoice,
@@ -700,6 +888,7 @@ export const useMessageOption = (
     selectedCharacter,
     setSelectedCharacter,
     assistantSelectionMeta,
+    effectiveAssistantState,
     selectedAssistant: effectiveSelectedAssistant,
     selectedAssistantSource,
     setSelectedAssistant,

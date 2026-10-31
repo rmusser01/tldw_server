@@ -13,7 +13,7 @@ import os
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -21,6 +21,7 @@ from uuid import uuid4
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Utils.backoff import capped_exponential_delay
 
 from .backends.base import (
     BackendType,
@@ -35,7 +36,6 @@ from .backends.query_utils import (
     prepare_backend_statement,
 )
 from .sqlite_policy import configure_sqlite_connection
-from tldw_Server_API.app.core.Utils.backoff import capped_exponential_delay
 
 _WORKFLOWS_DB_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -251,6 +251,13 @@ CREATE INDEX IF NOT EXISTS idx_workflow_research_wait_lookup ON workflow_researc
 
 def _utcnow_iso() -> str:
     return datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+
+
+def _json_default(value: Any) -> str:
+    """Store a date or datetime as ISO text: PostgreSQL rows carry them where SQLite rows carry text."""
+    if isinstance(value, date):
+        return value.isoformat()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
 def _workflows_idempotency_ttl_hours() -> int:
@@ -543,7 +550,8 @@ class WorkflowsDatabase:
 
         self.db_path = str(db_path or DEFAULT_DB_PATH)
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        # Shared statement caches can return another thread's row (CPython #118172).
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False, cached_statements=0)
         self._conn.row_factory = sqlite3.Row
         self._enable_wal()
         self._create_schema()
@@ -555,7 +563,7 @@ class WorkflowsDatabase:
         self._sqlite_pool: list[sqlite3.Connection] = []
         if pool_size and pool_size > 0:
             for _ in range(max(0, pool_size - 1)):
-                c = sqlite3.connect(self.db_path, check_same_thread=False)
+                c = sqlite3.connect(self.db_path, check_same_thread=False, cached_statements=0)
                 c.row_factory = sqlite3.Row
                 try:
                     configure_sqlite_connection(c)
@@ -1716,7 +1724,7 @@ class WorkflowsDatabase:
         return self._conn
 
     def _release_sqlite(self, conn: sqlite3.Connection) -> None:
-        if getattr(self, "_sqlite_pool", None) and conn is not self._conn:
+        if conn is not self._conn:
             try:
                 self._sqlite_pool.append(conn)
             except _WORKFLOWS_DB_NONCRITICAL_EXCEPTIONS:
@@ -2116,7 +2124,7 @@ class WorkflowsDatabase:
         params = (
             status,
             status_reason,
-            json.dumps(outputs) if outputs is not None else None,
+            json.dumps(outputs, default=_json_default) if outputs is not None else None,
             error,
             started_at,
             ended_at,
@@ -2413,6 +2421,31 @@ class WorkflowsDatabase:
         else:
             conn = self._acquire_sqlite()
             try:
+                # One SQLite/Python transfer avoids concurrent per-row GIL handoffs.
+                packed_sql = (
+                    "SELECT json_group_array(json_object("  # nosec B608 - Internal SQL clauses only; values stay bound.
+                    "'event_id', event_id, 'tenant_id', tenant_id, 'run_id', run_id, "
+                    "'step_run_id', step_run_id, 'event_seq', event_seq, 'event_type', event_type, "
+                    "'payload_json', json(COALESCE(NULLIF(payload_json, ''), '{}')), 'created_at', created_at)), "
+                    "min(payload_json IS NULL OR payload_json = '' OR "
+                    "(typeof(payload_json) = 'text' AND json_valid(payload_json))) FROM (" + sql + ")"
+                )
+                try:
+                    packed, strict_json = conn.cursor().execute(packed_sql, params).fetchone()
+                    if strict_json != 0:
+                        # Aggregate nesting/digit limits must retain per-payload legacy decoding.
+                        with contextlib.suppress(ValueError, RecursionError):
+                            return json.loads(packed)
+                except sqlite3.Error as exc:
+                    # Legacy JSON/BLOBs, optional JSON1 and aggregate size limits retain the original reader.
+                    if getattr(exc, "sqlite_errorcode", None) != sqlite3.SQLITE_TOOBIG and str(exc) not in {
+                        "malformed JSON",
+                        "no such function: json_group_array",
+                        "no such function: json_object",
+                        "no such function: json_valid",
+                        "no such function: json",
+                    }:
+                        raise
                 rows = conn.cursor().execute(sql, params).fetchall()
             finally:
                 self._release_sqlite(conn)
@@ -2484,7 +2517,7 @@ class WorkflowsDatabase:
         params = (
             status,
             _utcnow_iso(),
-            json.dumps(outputs or {}),
+            json.dumps(outputs or {}, default=_json_default),
             error,
             step_run_id,
         )

@@ -31,14 +31,14 @@ Fix the UX Smoke Gate failure on PR #2055 where Stage 4 high-risk route governan
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Guarded route.rationale in the Stage 4 governance helper so missing values produce actionable governance messages.
 - Added explicit rationale values for all active Stage 4 high-risk routes.
 - Added route metadata for /admin/mlx and /settings/image-generation, which were present in the high-risk smoke list but missing from shared route metadata.
 - Focused verification passed: bunx playwright test e2e/smoke/stage4-axe-high-risk-routes.spec.ts --reporter=line --grep "metadata-aligned".
 - Full local Stage 4 using next start could not run without a local production build; a dev-server full run moved past the metadata crash but hit local dev-server restart/network artifacts, so CI remains the authoritative full-gate check.
 - Bandit not applicable: only TypeScript route metadata/smoke-test files and Backlog task metadata were touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

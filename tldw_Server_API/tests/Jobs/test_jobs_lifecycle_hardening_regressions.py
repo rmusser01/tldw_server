@@ -39,6 +39,65 @@ def _clone_manager(manager: JobManager) -> JobManager:
     return JobManager(manager.db_path)
 
 
+def _job_snapshot(manager: JobManager, job_id: int) -> dict[str, Any]:
+    """Capture the full stored row, including completion and lease fields."""
+    conn = manager._connect()
+    try:
+        if manager.backend == "postgres":
+            with manager._pg_cursor(conn) as cur:
+                cur.execute("SELECT * FROM jobs WHERE id=%s", (job_id,))
+                row = cur.fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM jobs WHERE id=?", (job_id,)
+            ).fetchone()
+        assert row is not None
+        return dict(row)
+    finally:
+        conn.close()
+
+
+def _completion_callbacks(
+    manager: JobManager, monkeypatch: pytest.MonkeyPatch
+) -> dict[str, list[Any]]:
+    """Record completion and SLA callbacks after acquisition has finished."""
+    import tldw_Server_API.app.core.Jobs.manager as manager_module
+
+    calls: dict[str, list[Any]] = {
+        "completed": [],
+        "duration": [],
+        "event": [],
+        "sla": [],
+        "gauge": [],
+    }
+    monkeypatch.setattr(
+        manager_module,
+        "increment_completed",
+        lambda labels: calls["completed"].append(labels),
+    )
+    monkeypatch.setattr(
+        manager_module,
+        "observe_duration",
+        lambda *args: calls["duration"].append(args),
+    )
+    monkeypatch.setattr(
+        manager_module,
+        "observe_job_event",
+        lambda event, **_kwargs: calls["event"].append(event),
+    )
+    monkeypatch.setattr(
+        manager_module,
+        "increment_sla_breach",
+        lambda *args: calls["sla"].append(args),
+    )
+    monkeypatch.setattr(
+        manager,
+        "_update_gauges",
+        lambda **kwargs: calls["gauge"].append(kwargs),
+    )
+    return calls
+
+
 def _create_job(
     manager: JobManager,
     *,
@@ -301,10 +360,17 @@ def _is_counter_mutation(sql: Any) -> bool:
 
 
 class _FailCounterCursor:
-    """PostgreSQL cursor adapter that fails before a counter write is sent."""
+    """Fail counter writes, optionally at a specific real SQL statement."""
 
-    def __init__(self, inner: Any) -> None:
+    def __init__(
+        self,
+        inner: Any,
+        fail_statement: str | None = None,
+        flags: dict[str, bool] | None = None,
+    ) -> None:
         self._inner = inner
+        self._fail_statement = fail_statement
+        self._flags = flags
 
     def __enter__(self) -> _FailCounterCursor:
         self._inner.__enter__()
@@ -314,11 +380,20 @@ class _FailCounterCursor:
         return self._inner.__exit__(exc_type, exc, tb)
 
     def execute(self, sql: Any, params: Any = None) -> Any:
-        if _is_counter_mutation(sql):
+        normalized = " ".join(str(sql).upper().split())
+        if self._fail_statement is not None:
+            if normalized.startswith(self._fail_statement):
+                if self._flags is not None:
+                    self._flags["failure"] = True
+                return self._inner.execute("SELECT * FROM missing_jobs_counter_table")
+        elif _is_counter_mutation(sql):
             import psycopg
 
             raise psycopg.OperationalError("forced lifecycle counter write failure")
-        return self._inner.execute(sql, params)
+        result = self._inner.execute(sql, params)
+        if self._flags is not None and normalized.startswith("UPDATE JOB_COUNTERS"):
+            self._flags["update_missed"] = self._inner.rowcount == 0
+        return result
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._inner, name)
@@ -327,9 +402,17 @@ class _FailCounterCursor:
 class _FailCounterConnection:
     """Connection adapter that fails only lifecycle counter mutations."""
 
-    def __init__(self, inner: Any, backend: str) -> None:
+    def __init__(
+        self,
+        inner: Any,
+        backend: str,
+        fail_statement: str | None = None,
+        flags: dict[str, bool] | None = None,
+    ) -> None:
         self._inner = inner
         self._backend = backend
+        self._fail_statement = fail_statement
+        self._flags = flags
 
     def __enter__(self) -> _FailCounterConnection:
         self._inner.__enter__()
@@ -341,13 +424,22 @@ class _FailCounterConnection:
     def cursor(self, *args: Any, **kwargs: Any) -> Any:
         cursor = self._inner.cursor(*args, **kwargs)
         if self._backend == "postgres":
-            return _FailCounterCursor(cursor)
+            return _FailCounterCursor(cursor, self._fail_statement, self._flags)
         return cursor
 
     def execute(self, sql: Any, params: Any = ()) -> Any:
-        if _is_counter_mutation(sql):
+        normalized = " ".join(str(sql).upper().split())
+        if self._fail_statement is not None:
+            if normalized.startswith(self._fail_statement):
+                if self._flags is not None:
+                    self._flags["failure"] = True
+                return self._inner.execute("SELECT * FROM missing_jobs_counter_table")
+        elif _is_counter_mutation(sql):
             raise sqlite3.OperationalError("forced lifecycle counter write failure")
-        return self._inner.execute(sql, params)
+        result = self._inner.execute(sql, params)
+        if self._flags is not None and normalized.startswith("UPDATE JOB_COUNTERS"):
+            self._flags["update_missed"] = result.rowcount == 0
+        return result
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._inner, name)
@@ -692,6 +784,58 @@ def test_terminal_lifecycle_reconciles_a_missing_counter_from_current_jobs(
 
 
 @pytest.mark.parametrize("backend", _BACKENDS)
+def test_completion_missing_counter_reconciliation_failure_rolls_back_everything(
+    backend: str,
+    request: pytest.FixtureRequest,
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A counter reconciliation SQL error rolls back all completion effects."""
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
+    monkeypatch.setenv("JOBS_EVENTS_ENABLED", "true")
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
+    manager = _manager(backend, request, tmp_path, "counter-reconciliation-failure")
+    acquired = _acquire(
+        manager, _create_job(manager, domain="counter-reconciliation-failure")
+    )
+    reader = _clone_manager(manager)
+    before = _job_snapshot(reader, int(acquired["id"]))
+    _delete_counter(manager, acquired)
+    assert _counter_snapshot(reader, acquired) is None
+    calls = _completion_callbacks(manager, monkeypatch)
+    flags = {"update_missed": False, "failure": False}
+    original_connect = manager._connect
+    monkeypatch.setattr(
+        manager,
+        "_connect",
+        lambda: _FailCounterConnection(
+            original_connect(), backend, "INSERT INTO JOB_COUNTERS", flags
+        ),
+    )
+    expected_error = sqlite3.OperationalError
+    if backend == "postgres":
+        import psycopg
+
+        expected_error = psycopg.errors.UndefinedTable
+
+    with pytest.raises(expected_error):
+        manager.complete_job(
+            int(acquired["id"]),
+            result={"must": "roll back"},
+            worker_id=str(acquired["worker_id"]),
+            lease_id=str(acquired["lease_id"]),
+            completion_token=str(acquired["uuid"]),
+            enforce=True,
+        )
+
+    assert flags == {"update_missed": True, "failure": True}
+    assert _job_snapshot(reader, int(acquired["id"])) == before
+    assert _counter_snapshot(reader, acquired) is None
+    assert _event_count(reader, int(acquired["id"]), "job.completed") == 0
+    assert all(not recorded for recorded in calls.values())
+
+
+@pytest.mark.parametrize("backend", _BACKENDS)
 def test_zero_delay_retry_is_ready_and_uses_null_available_at(
     backend: str,
     request: pytest.FixtureRequest,
@@ -862,9 +1006,17 @@ def test_completion_commits_sla_attachment_and_outbox_event_atomically(
 class _FailSlaCursor:
     """PostgreSQL cursor adapter that injects a real statement failure."""
 
-    def __init__(self, inner: Any, flags: dict[str, bool]) -> None:
+    def __init__(
+        self,
+        inner: Any,
+        flags: dict[str, bool],
+        fail_statement: str = "INSERT INTO JOB_ATTACHMENTS",
+        fail_attachment: bool = False,
+    ) -> None:
         self._inner = inner
         self._flags = flags
+        self._fail_statement = fail_statement
+        self._fail_attachment = fail_attachment
 
     def __enter__(self) -> _FailSlaCursor:
         self._inner.__enter__()
@@ -874,9 +1026,10 @@ class _FailSlaCursor:
         return self._inner.__exit__(exc_type, exc, tb)
 
     def execute(self, sql: Any, params: Any = None) -> Any:
-        normalized = str(sql).strip().upper()
-        _record_savepoint_statement(normalized, self._flags)
-        if "INSERT INTO JOB_ATTACHMENTS" in normalized:
+        normalized = " ".join(str(sql).upper().split())
+        if _should_fail_sla_statement(
+            normalized, params, self._flags, self._fail_statement, self._fail_attachment
+        ):
             return self._inner.execute("SELECT * FROM missing_jobs_sla_table")
         return self._inner.execute(sql, params)
 
@@ -893,13 +1046,44 @@ def _record_savepoint_statement(sql: str, flags: dict[str, bool]) -> None:
         flags["release"] = True
 
 
-class _FailSlaConnection:
-    """Connection adapter that fails optional SLA attachment persistence."""
+def _should_fail_sla_statement(
+    sql: str,
+    params: Any,
+    flags: dict[str, bool],
+    fail_statement: str,
+    fail_attachment: bool,
+) -> bool:
+    """Target control prefixes exactly and distinguish SLA from completion events."""
+    _record_savepoint_statement(sql, flags)
+    if fail_attachment and sql.startswith("INSERT INTO JOB_ATTACHMENTS"):
+        flags["attachment_failure"] = True
+        return True
+    if not sql.startswith(fail_statement):
+        return False
+    if fail_statement == "INSERT INTO JOB_EVENTS" and "job.sla_breached" not in (
+        params or ()
+    ):
+        return False
+    flags["failure"] = True
+    return True
 
-    def __init__(self, inner: Any, backend: str, flags: dict[str, bool]) -> None:
+
+class _FailSlaConnection:
+    """Inject real SQL errors in optional SLA writes or savepoint controls."""
+
+    def __init__(
+        self,
+        inner: Any,
+        backend: str,
+        flags: dict[str, bool],
+        fail_statement: str = "INSERT INTO JOB_ATTACHMENTS",
+        fail_attachment: bool = False,
+    ) -> None:
         self._inner = inner
         self._backend = backend
         self._flags = flags
+        self._fail_statement = fail_statement
+        self._fail_attachment = fail_attachment
 
     def __enter__(self) -> _FailSlaConnection:
         self._inner.__enter__()
@@ -911,13 +1095,16 @@ class _FailSlaConnection:
     def cursor(self, *args: Any, **kwargs: Any) -> Any:
         cursor = self._inner.cursor(*args, **kwargs)
         if self._backend == "postgres":
-            return _FailSlaCursor(cursor, self._flags)
+            return _FailSlaCursor(
+                cursor, self._flags, self._fail_statement, self._fail_attachment
+            )
         return cursor
 
     def execute(self, sql: str, params: Any = ()) -> Any:
-        normalized = str(sql).strip().upper()
-        _record_savepoint_statement(normalized, self._flags)
-        if "INSERT INTO JOB_ATTACHMENTS" in normalized:
+        normalized = " ".join(str(sql).upper().split())
+        if _should_fail_sla_statement(
+            normalized, params, self._flags, self._fail_statement, self._fail_attachment
+        ):
             return self._inner.execute("SELECT * FROM missing_jobs_sla_table")
         return self._inner.execute(sql, params)
 
@@ -926,24 +1113,41 @@ class _FailSlaConnection:
 
 
 @pytest.mark.parametrize("backend", _BACKENDS)
+@pytest.mark.parametrize(
+    "fail_statement",
+    (
+        pytest.param("INSERT INTO JOB_ATTACHMENTS", id="attachment"),
+        pytest.param("INSERT INTO JOB_EVENTS", id="sla-outbox"),
+    ),
+)
 def test_optional_sla_write_failure_rolls_back_to_savepoint_without_losing_completion(
     backend: str,
+    fail_statement: str,
     request: pytest.FixtureRequest,
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
+    monkeypatch.setenv("JOBS_EVENTS_ENABLED", "true")
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
     manager = _manager(backend, request, tmp_path, "sla-savepoint")
     _configure_sla(manager, "sla-savepoint")
     acquired = _acquire(manager, _create_job(manager, domain="sla-savepoint"))
     _backdate_started_at(manager, int(acquired["id"]))
+    assert _counter_snapshot(manager, acquired) == (0, 0, 1, 0)
+    calls = _completion_callbacks(manager, monkeypatch)
 
-    flags = {"savepoint": False, "rollback": False, "release": False}
+    flags = {
+        "savepoint": False,
+        "rollback": False,
+        "release": False,
+        "failure": False,
+    }
     original_connect = manager._connect
     monkeypatch.setattr(
         manager,
         "_connect",
-        lambda: _FailSlaConnection(original_connect(), backend, flags),
+        lambda: _FailSlaConnection(original_connect(), backend, flags, fail_statement),
     )
 
     assert manager.complete_job(
@@ -961,7 +1165,116 @@ def test_optional_sla_write_failure_rolls_back_to_savepoint_without_losing_compl
     assert _event_count(reader, int(acquired["id"]), "job.completed") == 1
     assert _event_count(reader, int(acquired["id"]), "job.sla_breached") == 0
     assert _attachment_count(reader, int(acquired["id"])) == 0
-    assert flags == {"savepoint": True, "rollback": True, "release": True}
+    assert _counter_snapshot(reader, acquired) == (0, 0, 0, 0)
+    assert calls["event"] == ["job.completed"]
+    assert calls["sla"] == []
+    assert len(calls["completed"]) == 1
+    assert len(calls["duration"]) == 1
+    assert flags == {
+        "savepoint": True,
+        "rollback": True,
+        "release": True,
+        "failure": True,
+    }
+
+
+@pytest.mark.parametrize("backend", _BACKENDS)
+@pytest.mark.parametrize(
+    ("fail_statement", "fail_attachment", "expected_controls"),
+    (
+        pytest.param(
+            "SAVEPOINT JOB_COMPLETION_SLA",
+            False,
+            {"savepoint": True, "rollback": False, "release": False},
+            id="creation",
+        ),
+        pytest.param(
+            "RELEASE SAVEPOINT JOB_COMPLETION_SLA",
+            False,
+            {"savepoint": True, "rollback": False, "release": True},
+            id="release-on-success",
+        ),
+        pytest.param(
+            "ROLLBACK TO SAVEPOINT JOB_COMPLETION_SLA",
+            True,
+            {"savepoint": True, "rollback": True, "release": False},
+            id="rollback-after-attachment-failure",
+        ),
+        pytest.param(
+            "RELEASE SAVEPOINT JOB_COMPLETION_SLA",
+            True,
+            {"savepoint": True, "rollback": True, "release": True},
+            id="release-after-attachment-failure",
+        ),
+    ),
+)
+def test_completion_sla_savepoint_control_failure_rolls_back_core_completion(
+    backend: str,
+    fail_statement: str,
+    fail_attachment: bool,
+    expected_controls: dict[str, bool],
+    request: pytest.FixtureRequest,
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SLA savepoint control errors roll back mandatory completion effects."""
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
+    monkeypatch.setenv("JOBS_EVENTS_ENABLED", "true")
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
+    manager = _manager(backend, request, tmp_path, "sla-control")
+    _configure_sla(manager, "sla-control")
+    acquired = _acquire(manager, _create_job(manager, domain="sla-control"))
+    _backdate_started_at(manager, int(acquired["id"]))
+    reader = _clone_manager(manager)
+    before = _job_snapshot(reader, int(acquired["id"]))
+    counters_before = _counter_snapshot(reader, acquired)
+    assert counters_before == (0, 0, 1, 0)
+    calls = _completion_callbacks(manager, monkeypatch)
+    original_connect = manager._connect
+    flags = {
+        "savepoint": False,
+        "rollback": False,
+        "release": False,
+        "failure": False,
+        "attachment_failure": False,
+    }
+    monkeypatch.setattr(
+        manager,
+        "_connect",
+        lambda: _FailSlaConnection(
+            original_connect(), backend, flags, fail_statement, fail_attachment
+        ),
+    )
+    expected_error = sqlite3.OperationalError
+    if backend == "postgres":
+        import psycopg
+
+        expected_error = psycopg.errors.UndefinedTable
+        if fail_attachment and fail_statement.startswith("ROLLBACK TO SAVEPOINT"):
+            # The attachment error has already aborted the savepoint transaction.
+            expected_error = psycopg.errors.InFailedSqlTransaction
+
+    with pytest.raises(expected_error):
+        manager.complete_job(
+            int(acquired["id"]),
+            result={"must": "roll back"},
+            worker_id=str(acquired["worker_id"]),
+            lease_id=str(acquired["lease_id"]),
+            completion_token=str(acquired["uuid"]),
+            enforce=True,
+        )
+
+    assert _job_snapshot(reader, int(acquired["id"])) == before
+    assert _counter_snapshot(reader, acquired) == counters_before
+    assert _event_count(reader, int(acquired["id"]), "job.completed") == 0
+    assert _event_count(reader, int(acquired["id"]), "job.sla_breached") == 0
+    assert _attachment_count(reader, int(acquired["id"])) == 0
+    assert flags == {
+        **expected_controls,
+        "failure": True,
+        "attachment_failure": fail_attachment,
+    }
+    assert all(not recorded for recorded in calls.values())
 
 
 def _concurrent_lifecycle_call(
@@ -1025,6 +1338,13 @@ def test_simultaneous_same_operation_finalizers_emit_one_durable_event(
         manager,
         _create_job(manager, domain=f"concurrent-{operation}"),
     )
+    sentinel = None
+    if operation == "complete":
+        sentinel = _acquire(
+            manager,
+            _create_job(manager, domain=f"concurrent-{operation}"),
+        )
+        assert _counter_snapshot(manager, acquired) == (0, 0, 2, 0)
     managers = (manager, _clone_manager(manager))
     barrier = threading.Barrier(2)
 
@@ -1046,6 +1366,9 @@ def test_simultaneous_same_operation_finalizers_emit_one_durable_event(
     assert persisted["status"] == expected_status
     assert results == sorted(expected_results)
     assert _event_count(manager, int(acquired["id"]), event_type) == 1
+    if operation == "complete":
+        assert _counter_snapshot(manager, acquired) == (0, 0, 1, 0)
+        assert manager.get_job(int(sentinel["id"]))["status"] == "processing"
 
 
 @pytest.mark.parametrize("backend", _BACKENDS)

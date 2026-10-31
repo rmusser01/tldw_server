@@ -22,7 +22,7 @@ export interface SmokeHardGateAllowlistRule {
   expiresOn: string
 }
 
-type ConsoleIssue = { type: string; text: string }
+type ConsoleIssue = DiagnosticsData["console"][number]
 type RequestIssue = { url: string; errorText: string }
 
 export interface ClassifiedSmokeIssues {
@@ -463,6 +463,10 @@ export async function seedAuth(
   )
   if (shouldInstallSmokeApiStubs()) {
     await stubCompletedFirstRunSetup(page)
+    await page.route(/\/api\/v1\/moderation\/review\/items(?:\?.*)?$/, async (route) => {
+      if (route.request().method() !== "GET") return route.fallback()
+      await fulfillSmokeJson(route, 200, { items: [], next_cursor: null, total: 0 })
+    })
   }
 }
 
@@ -522,381 +526,7 @@ export const BENIGN_PATTERNS = [
  * Temporary allowlist for non-fatal console/request noise observed in full all-pages smoke.
  * These entries are intentionally narrow and route-scoped where possible.
  */
-export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
-  {
-    id: "m5-chat-history-rate-limit",
-    scope: "console",
-    pattern: /rate_limited\s+\(GET\s+\/api\/v1\/chats\/\?limit=\d+&offset=\d+&ordering=-updated_at\)/i,
-    rationale: "Chat history request bursts can hit server-side 429 in dense all-pages sweeps.",
-    owner: "WebUI",
-    expiresOn: "2026-09-30"
-  },
-  {
-    id: "m5-http-429-resource",
-    scope: "console",
-    pattern: /Failed to load resource: the server responded with a status of 429/i,
-    rationale: "Known rate-limit noise while traversing all routes in parallel; triaged separately.",
-    owner: "Platform",
-    expiresOn: "2026-09-30"
-  },
-  {
-    id: "m5-react-key-prop-spread-warning",
-    scope: "console",
-    pattern: /A props object containing a "key" prop is being spread into JSX/i,
-    rationale: "Known React warning in connectors/settings surfaces; no runtime crash.",
-    owner: "WebUI",
-    expiresOn: "2026-09-30",
-    routes: ["/connectors", "/connectors/browse", "/connectors/jobs", "/connectors/sources", "/settings", "/config", "/profile", "/privileges"]
-  },
-  {
-    id: "m5-react-non-boolean-attribute-warning",
-    scope: "console",
-    pattern: /Received `%s` for a non-boolean attribute `%s`/i,
-    rationale: "Known non-breaking attribute warning in flashcards render path.",
-    owner: "WebUI",
-    expiresOn: "2026-09-30",
-    routes: ["/flashcards"]
-  },
-  {
-    id: "m5-media-max-update-depth-warning",
-    scope: "console",
-    pattern: /Maximum update depth exceeded/i,
-    rationale:
-      "Known media route warning remains scoped to legacy review/media surfaces; Stage 3 critical audited routes are enforced separately.",
-    owner: "WebUI",
-    expiresOn: "2026-09-30",
-    routes: ["/media", "/media/*", "/media-multi"]
-  },
-  {
-    id: "m5-optional-resource-404-noise",
-    scope: "console",
-    pattern: /Failed to load resource: the server responded with a status of 404/i,
-    rationale: "Known optional static/resource fetch misses in selected routes during dev runtime.",
-    owner: "WebUI",
-    expiresOn: "2026-09-30",
-    routes: [
-      "/review",
-      "/media",
-      "/media/*",
-      "/media-multi",
-      "/prompt-studio",
-      "/settings/prompt-studio",
-      "/settings/family-guardrails",
-      "/settings/about",
-      "/settings/speech",
-      "/chatbooks",
-      "/watchlists",
-      "/prompts",
-      "/reading",
-      "/collections",
-      "/admin",
-      "/admin/server",
-      "/notes",
-      "/moderation",
-      "/moderation/rules",
-      "/chunking-playground",
-      "/research-workspace",
-      "/stt",
-      "/speech",
-      "/tts",
-      "/audio",
-      "/404",
-      "/__wayfinding-missing-route__"
-    ]
-  },
-  {
-    id: "m5-drawer-width-deprecation-noise",
-    scope: "console",
-    pattern: /Warning:\s+\[antd:\s*Drawer\]\s+`width` is deprecated\. Please use `size` instead\./i,
-    rationale:
-      "Known Ant Design Drawer deprecation warning in selected routes; no functional regression in smoke path.",
-    owner: "WebUI",
-    expiresOn: "2026-09-30",
-    routes: ["/media-multi", "/kanban", "/review"]
-  },
-  {
-    id: "m5-model-oauth-status-403-noise",
-    scope: "console",
-    pattern: /Failed to load resource: the server responded with a status of 403 \(Forbidden\)/i,
-    rationale:
-      "Model settings probes optional OAuth status endpoint that can return 403 in minimal smoke backend profile.",
-    owner: "Platform",
-    expiresOn: "2026-09-30",
-    routes: ["/settings/model"]
-  },
-  {
-    id: "m5-notes-title-settings-cors-noise",
-    scope: "console",
-    pattern:
-      /Access to fetch at 'http:\/\/127\.0\.0\.1:\d+\/api\/v1\/admin\/notes\/title-settings'.*blocked by CORS policy/i,
-    rationale:
-      "Notes title settings probe may be CORS-blocked in isolated smoke backend mode while page remains recoverable.",
-    owner: "Platform",
-    expiresOn: "2026-09-30",
-    routes: ["/notes"]
-  },
-  {
-    id: "m5-notes-title-settings-net-failed-noise",
-    scope: "console",
-    pattern: /Failed to load resource: net::ERR_FAILED/i,
-    rationale:
-      "Companion browser error after expected CORS rejection for notes title settings probe in smoke mode.",
-    owner: "Platform",
-    expiresOn: "2026-09-30",
-    routes: ["/notes"]
-  },
-  {
-    id: "m5-notes-title-settings-request-failure-noise",
-    scope: "request",
-    pattern: /\/api\/v1\/admin\/notes\/title-settings\s+\(net::ERR_FAILED\)/i,
-    rationale:
-      "Request-failure companion signal for expected notes title settings CORS rejection in isolated smoke mode.",
-    owner: "Platform",
-    expiresOn: "2026-09-30",
-    routes: ["/notes"]
-  },
-  {
-    id: "m5-media-not-found-search-console-noise",
-    scope: "console",
-    pattern:
-      /Media search error:\s+Error:\s+Not Found \(GET \/api\/v1\/media\/\?page=1&results_per_page=20&include_keywords=true\)/i,
-    rationale:
-      "Media pages surface a handled Not Found search message when media endpoints are absent in minimal smoke backend profile.",
-    owner: "WebUI",
-    expiresOn: "2026-09-30",
-    routes: ["/media", "/media/*"]
-  },
-  {
-    id: "m5-quiz-tabs-deprecation-warning",
-    scope: "console",
-    pattern:
-      /Warning:\s+\[antd:\s*Tabs\]\s+`destroyInactiveTabPane` is deprecated/i,
-    rationale:
-      "Known Ant Design deprecation warning in quiz route; tracked separately from functional regressions.",
-    owner: "WebUI",
-    expiresOn: "2026-09-30",
-    routes: ["/quiz"]
-  },
-  {
-    id: "m5-quiz-list-deprecation-warning",
-    scope: "console",
-    pattern:
-      /Warning:\s+\[antd:\s*List\]\s+The `List` component is deprecated/i,
-    rationale:
-      "Known Ant Design List deprecation warning in quiz route; no user-impacting runtime break.",
-    owner: "WebUI",
-    expiresOn: "2026-09-30",
-    routes: ["/quiz"]
-  },
-  {
-    id: "m5-quiz-attempts-422-noise",
-    scope: "console",
-    pattern:
-      /Failed to load resource: the server responded with a status of 422 \(Unprocessable Entity\)/i,
-    rationale:
-      "Quiz attempts list probes may return 422 in minimal smoke backend profile while route UI remains recoverable.",
-    owner: "Platform",
-    expiresOn: "2026-09-30",
-    routes: ["/quiz"]
-  },
-  {
-    id: "m5-prompt-studio-422-noise",
-    scope: "console",
-    pattern:
-      /Failed to load resource: the server responded with a status of 422 \(Unprocessable Entity\)/i,
-    rationale:
-      "Prompt Studio settings probes can return 422 in minimal smoke backend profile.",
-    owner: "Platform",
-    expiresOn: "2026-09-30",
-    routes: ["/prompt-studio"]
-  },
-  {
-    id: "m5-dictionaries-optional-endpoint-500",
-    scope: "console",
-    pattern: /Failed to load resource: the server responded with a status of 500/i,
-    rationale:
-      "Dictionaries route can hit optional backend handlers unavailable in minimal smoke profile.",
-    owner: "Platform",
-    expiresOn: "2026-09-30",
-    routes: ["/dictionaries"]
-  },
-  {
-    id: "m5-collections-antd-message-context-warning",
-    scope: "console",
-    pattern:
-      /Warning:\s+\[antd:\s*message\]\s+Static function can not consume context like dynamic theme/i,
-    rationale:
-      "Known Ant Design message context warning in collections route; no functional regression.",
-    owner: "WebUI",
-    expiresOn: "2026-09-30",
-    routes: ["/collections", "/reading"]
-  },
-  {
-    id: "m5-characters-useform-context-warning",
-    scope: "console",
-    pattern:
-      /Warning:\s+Instance created by `useForm` is not connected to any Form element\.\s+Forget to pass `form` prop\?/i,
-    rationale:
-      "Known Ant Design form instance warning in characters route under minimal smoke backend profile; route remains functional.",
-    owner: "WebUI",
-    expiresOn: "2026-09-30",
-    routes: ["/characters"]
-  },
-  {
-    id: "m5-chat-workspace-startup-backend-refused-console",
-    scope: "console",
-    pattern: /Failed to load resource: net::ERR_CONNECTION_REFUSED/i,
-    rationale:
-      "Chat Workspace route smoke may run without a local API server; focused smoke proof covers the scoped backend chat flow.",
-    owner: "WebUI",
-    expiresOn: "2026-09-30",
-    routes: ["/chat-workspace"]
-  },
-  {
-    id: "m5-chat-workspace-startup-backend-refused-request",
-    scope: "request",
-    pattern:
-      /\/api\/v1\/(?:notifications(?:\/stream)?|persona\/profiles)(?:[/?][^)]*)?\s+\(net::ERR_CONNECTION_REFUSED\)/i,
-    rationale:
-      "Chat Workspace startup probes for notifications/persona data can be unavailable in route-only smoke; scoped backend chat is covered by the focused proof.",
-    owner: "WebUI",
-    expiresOn: "2026-09-30",
-    routes: ["/chat-workspace"]
-  },
-  {
-    id: "m5-model-metadata-rate-limit-log-noise",
-    scope: "console",
-    pattern:
-      /Failed to fetch models from tldw:\s+Error:\s+rate_limited \(GET \/api\/v1\/llm\/models\/metadata\)/i,
-    rationale:
-      "Dense smoke sweeps can rate-limit model metadata probes; treated as environment noise for these routes.",
-    owner: "Platform",
-    expiresOn: "2026-09-30",
-    routes: ["/content-review", "/claims-review", "/research-workspace"]
-  },
-  {
-    id: "m5-model-metadata-abort-noise",
-    scope: "console",
-    pattern:
-      /Failed to fetch models from tldw:\s+AbortError:\s+signal is aborted without reason/i,
-    rationale:
-      "Research Workspace can abort in-flight model metadata fetches during route hydration without user-impacting breakage.",
-    owner: "WebUI",
-    expiresOn: "2026-09-30",
-    routes: ["/research-workspace"]
-  },
-  {
-    id: "m5-chatbooks-evaluations-cors-noise",
-    scope: "console",
-    pattern:
-      /Access to fetch at 'http:\/\/127\.0\.0\.1:\d+\/api\/v1\/evaluations\/\?limit=100'.*blocked by CORS policy/i,
-    rationale:
-      "Chatbooks route issues a best-effort evaluations probe that may be CORS-blocked in isolated smoke backend mode.",
-    owner: "Platform",
-    expiresOn: "2026-09-30",
-    routes: ["/chatbooks"]
-  },
-  {
-    id: "m5-chatbooks-evaluations-net-failed-noise",
-    scope: "console",
-    pattern: /Failed to load resource: net::ERR_FAILED/i,
-    rationale:
-      "Companion browser error emitted after expected CORS rejection for optional evaluations probe in chatbooks.",
-    owner: "Platform",
-    expiresOn: "2026-09-30",
-    routes: ["/chatbooks"]
-  },
-  {
-    id: "m5-chatbooks-evaluations-request-failure-noise",
-    scope: "request",
-    pattern: /\/api\/v1\/evaluations\/\?limit=100\s+\(net::ERR_FAILED\)/i,
-    rationale:
-      "Request-failure companion signal for expected chatbooks evaluations CORS rejection in isolated smoke mode.",
-    owner: "Platform",
-    expiresOn: "2026-09-30",
-    routes: ["/chatbooks"]
-  },
-  {
-    id: "m5-chatbooks-optional-dictionaries-500",
-    scope: "console",
-    pattern: /Failed to load resource: the server responded with a status of 500/i,
-    rationale:
-      "Chatbooks route performs optional dictionaries checks that can return 500 in minimal smoke backend profiles.",
-    owner: "Platform",
-    expiresOn: "2026-09-30",
-    routes: ["/chatbooks"]
-  },
-  {
-    id: "m5-route-boundary-forced-react-overlay-warning",
-    scope: "console",
-    pattern: /The above error occurred in the <ForcedRouteErrorProbe> component/i,
-    rationale: "Expected React error-overlay emission when route boundary fixture intentionally throws.",
-    owner: "WebUI",
-    expiresOn: "2026-09-30",
-    routes: [
-      "/admin/server",
-      "/admin/llamacpp",
-      "/admin/mlx",
-      "/content-review",
-      "/data-tables",
-      "/kanban",
-      "/chunking-playground",
-      "/moderation",
-      "/moderation/rules",
-      "/collections",
-      "/world-books",
-      "/dictionaries",
-      "/characters",
-      "/items",
-      "/document-workspace",
-      "/speech"
-    ]
-  },
-  {
-    id: "m5-route-boundary-forced-error-log",
-    scope: "console",
-    pattern: /\[RouteErrorBoundary:[^\]]+\]\s+Error:\s+Forced route boundary error/i,
-    rationale: "Route boundary fixture emits deterministic forced-error log to confirm recovery branch.",
-    owner: "WebUI",
-    expiresOn: "2026-09-30",
-    routes: [
-      "/admin/server",
-      "/admin/llamacpp",
-      "/admin/mlx",
-      "/content-review",
-      "/data-tables",
-      "/kanban",
-      "/chunking-playground",
-      "/moderation",
-      "/moderation/rules",
-      "/collections",
-      "/world-books",
-      "/dictionaries",
-      "/characters",
-      "/items",
-      "/document-workspace",
-      "/speech"
-    ]
-  },
-  {
-    id: "m5-admin-optional-endpoint-500",
-    scope: "console",
-    pattern: /Failed to load resource: the server responded with a status of 500/i,
-    rationale: "Admin pages hit optional backend endpoints unavailable in minimal smoke profile.",
-    owner: "Platform",
-    expiresOn: "2026-09-30",
-    routes: ["/admin", "/admin/server", "/admin/orgs", "/admin/data-ops", "/admin/watchlists-items", "/admin/watchlists-runs", "/admin/maintenance"]
-  },
-  {
-    id: "m5-llamacpp-unavailable-503",
-    scope: "console",
-    pattern: /Failed to load resource: the server responded with a status of 503/i,
-    rationale: "Expected when llama.cpp backend is not configured in smoke environment.",
-    owner: "Platform",
-    expiresOn: "2026-09-30",
-    routes: ["/admin/llamacpp"]
-  }
-]
+export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = []
 
 const ALLOWLIST_GLOBAL_RATIONALE_PATTERN =
   /\b(all-pages|all routes|cross-route|dense|dev runtime|global|parallel|route boundary|runtime)\b/i
@@ -1000,7 +630,7 @@ export function isBenign(text: string): boolean {
  */
 export function getCriticalIssues(diagnostics: DiagnosticsData): {
   pageErrors: Array<{ message: string; stack: string }>
-  consoleErrors: Array<{ type: string; text: string }>
+  consoleErrors: DiagnosticsData["console"]
   requestFailures: Array<{ url: string; errorText: string }>
 } {
   return {
@@ -1067,7 +697,7 @@ export function classifySmokeIssues(
   }
 
   for (const entry of issues.consoleErrors) {
-    const match = findAllowlistRule("console", entry.text, routePath)
+    const match = findAllowlistRule("console", `${entry.location?.url || ""} ${entry.text}`, routePath)
     if (match) {
       classified.allowlistedConsoleErrors.push({ entry, rule: match })
     } else {

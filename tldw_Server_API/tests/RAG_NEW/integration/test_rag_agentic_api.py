@@ -201,6 +201,56 @@ def client_with_agentic_overrides(monkeypatch, auth_headers):
         fastapi_app.dependency_overrides.clear()
 
 
+def _recording_pipeline(monkeypatch) -> list[dict]:
+    """Replace the unified pipeline with a recorder that returns an empty result."""
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as up
+
+    calls: list[dict] = []
+
+    async def _fake_pipeline(**kwargs):
+        calls.append(kwargs)
+        return up.UnifiedSearchResult(documents=[], query=kwargs.get("query", ""), errors=[])
+
+    monkeypatch.setattr(rag_ep, "unified_rag_pipeline", _fake_pipeline)
+    return calls
+
+
+def test_rag_search_with_generation_refuses_an_over_quota_user(client_with_agentic_overrides, monkeypatch):
+    """A search that generates an answer is refused with the 402 before any retrieval."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    calls = _recording_pipeline(monkeypatch)
+    refuse_llm_work(monkeypatch)
+    resp = client_with_agentic_overrides.post("/api/v1/rag/search", json={"query": "q", "enable_generation": True})
+    assert_llm_quota_402(resp)
+    assert calls == []
+
+
+def test_rag_search_without_generation_is_not_refused_by_the_llm_quota(client_with_agentic_overrides, monkeypatch):
+    """A search with generation off does no LLM work at the boundary, so an over-quota user still searches."""
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work
+
+    calls = _recording_pipeline(monkeypatch)
+    refuse_llm_work(monkeypatch)
+    resp = client_with_agentic_overrides.post("/api/v1/rag/search", json={"query": "q", "enable_generation": False})
+    assert resp.status_code != 402, resp.text
+    assert len(calls) == 1
+
+
+def test_rag_search_profile_without_explicit_generation_is_not_refused_by_the_llm_quota(
+    client_with_agentic_overrides, monkeypatch
+):
+    """The resolved request decides: no shipped profile turns generation on, so a profile alone is not refused."""
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work
+
+    calls = _recording_pipeline(monkeypatch)
+    refuse_llm_work(monkeypatch)
+    resp = client_with_agentic_overrides.post("/api/v1/rag/search", json={"query": "q", "rag_profile": "accuracy"})
+    assert resp.status_code != 402, resp.text
+    assert len(calls) == 1 and calls[0].get("enable_generation") is False
+
+
 def test_rag_agentic_search_smoke_api(client_with_agentic_overrides, monkeypatch):
 
 

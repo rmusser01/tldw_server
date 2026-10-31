@@ -10,7 +10,6 @@ import asyncio
 import contextlib
 import copy
 import json
-import os
 import re
 import sqlite3
 import time
@@ -48,7 +47,12 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError as MediaDatabaseError,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_search_repository import (
+    append_sqlite_media_visibility,
+)
+from tldw_Server_API.app.core.Kanban.vector_search import create_kanban_vector_search
 from tldw_Server_API.app.core.RAG.exceptions import RAGDatabaseError
+from tldw_Server_API.app.core.testing import is_production_like_env
 
 from .hyde import (
     _embedding_model_from_config,
@@ -751,12 +755,7 @@ class BaseRetriever(ABC):
         self.config = config or RetrievalConfig()
         self._db_adapter = db_adapter
         self.db_path = self._validate_path(db_path) if db_path else None
-        # Determine production mode from env var used across the project
-        try:
-            prod_val = str(os.getenv("tldw_production", "false")).strip().lower()
-            self._production_mode = prod_val in {"true", "1", "yes", "on", "y"}
-        except (AttributeError, TypeError, ValueError):
-            self._production_mode = False
+        self._production_mode = is_production_like_env()
         # In production, prefer adapters over any raw SQL fallbacks
         if self._production_mode and self._db_adapter is None:
             logger.warning(
@@ -1388,6 +1387,11 @@ class MediaDBRetriever(BaseRetriever):
             if filter_parts:
                 sql += f" AND ({' OR '.join(filter_parts)})"
 
+        visibility_conditions: list[str] = []
+        append_sqlite_media_visibility(visibility_conditions, params)
+        for condition in visibility_conditions:
+            sql += " AND " + condition
+
         # Add ordering and limit (bm25: lower is better on SQLite)
         sql += " ORDER BY rank ASC LIMIT ?"
         params.append(self.config.max_results)
@@ -1415,6 +1419,9 @@ class MediaDBRetriever(BaseRetriever):
                     "created_at": row.get("ingestion_date"),
                     "transcription_model": row.get("transcription_model"),
                     "source": "media_db",
+                    "source_id": str(row["id"]),
+                    "source_type": "media_db",
+                    "evidence_origin": "local_library",
                 },
                 score=float(score),
             )
@@ -1650,6 +1657,12 @@ class MediaDBRetriever(BaseRetriever):
             sql += " AND m.ingestion_date BETWEEN ? AND ?"
             params.extend([start_date.isoformat(), end_date.isoformat()])
 
+        if backend_type == BackendType.SQLITE:
+            visibility_conditions: list[str] = []
+            append_sqlite_media_visibility(visibility_conditions, params)
+            for condition in visibility_conditions:
+                sql += " AND " + condition
+
         # Order by relevance: SQLite bm25 prefers ASC; Postgres ts_rank prefers DESC
         if backend_type == BackendType.SQLITE:
             sql += " ORDER BY rank ASC LIMIT ?"
@@ -1751,6 +1764,13 @@ class MediaDBRetriever(BaseRetriever):
                             if key not in md and value is not None:
                                 md[key] = value
 
+            # Source identity comes from the owning row, even without descriptive metadata.
+            md.update({
+                "media_id": str(row["media_id"]),
+                "source_id": str(row["media_id"]),
+                "source_type": "media_db",
+                "evidence_origin": "local_library",
+            })
             chunk_uuid = str(row.get("chunk_uuid"))
             content_text = row.get("chunk_text") or ""
 
@@ -1898,6 +1918,11 @@ class MediaDBRetriever(BaseRetriever):
             # Use numeric media ID for Document.id to match callers/tests that
             # expect Media DB identifiers, and keep uuid in metadata if needed.
             doc_id = row.get("id")
+            metadata.update({
+                "source_id": str(doc_id),
+                "source_type": "media_db",
+                "evidence_origin": "local_library",
+            })
             title_text = (row.get("title") or "").strip()
             body_text = (row.get("content") or "").strip()
             if title_text and (not body_text or title_text.lower() not in body_text.lower()):
@@ -2989,8 +3014,7 @@ class NotesDBRetriever(BaseRetriever):
             )
 
         if self.chacha_db is not None and not self.config.tags_filter:
-            docs = self._retrieve_via_chacha(query, notebook_id)
-            return docs
+            return await asyncio.to_thread(self._retrieve_via_chacha, query, notebook_id)
 
         documents = []
 
@@ -3156,7 +3180,7 @@ class NotesDBRetriever(BaseRetriever):
         if self.chacha_db is None:
             return []
         try:
-            results = self.chacha_db.search_notes(query, limit=int(self.config.max_results))
+            results = self.chacha_db.search_notes(query, limit=int(self.config.max_results), match_any=True)
         except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError) as exc:
             logger.error(f"ChaCha notes search failed: {exc}")
             return []
@@ -3264,7 +3288,9 @@ class KanbanDBRetriever(BaseRetriever):
         self.kanban_db = kanban_db
         self.user_id = self._resolve_user_id(user_id)
         if self.kanban_db is None and self.db_path is not None:
-            self.kanban_db = KanbanDB(db_path=str(self.db_path), user_id=self.user_id)
+            self.kanban_db = KanbanDB(
+                db_path=str(self.db_path), user_id=self.user_id, vector_search_factory=create_kanban_vector_search
+            )
             self._owns_db = True
 
     @staticmethod
@@ -3276,7 +3302,9 @@ class KanbanDBRetriever(BaseRetriever):
         if self.kanban_db is None:
             if self.db_path is None:
                 raise MissingDatabasePathError()
-            self.kanban_db = KanbanDB(db_path=str(self.db_path), user_id=self.user_id)
+            self.kanban_db = KanbanDB(
+                db_path=str(self.db_path), user_id=self.user_id, vector_search_factory=create_kanban_vector_search
+            )
             self._owns_db = True
         return self.kanban_db
 
@@ -4474,7 +4502,7 @@ class CharacterCardsRetriever(BaseRetriever):
                 FROM messages m
                 JOIN conversations conv ON m.conversation_id = conv.id
                 LEFT JOIN character_cards cc ON conv.character_id = cc.id
-                WHERE m.deleted = 0 AND m.content LIKE ?
+                WHERE m.deleted = 0 AND conv.deleted = 0 AND m.content LIKE ?
                 ORDER BY m.timestamp DESC
                 LIMIT ?
             """

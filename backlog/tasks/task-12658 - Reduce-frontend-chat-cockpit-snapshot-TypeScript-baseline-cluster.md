@@ -27,7 +27,7 @@ Remove the frontend standalone tsc diagnostic in the chat cockpit real-server sp
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification recorded for this tsc slice:
 - RED: NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false from apps/tldw-frontend reported 7 diagnostics, including the chat-cockpit.real-server.spec.ts session snapshot union diagnostic.
 - GREEN: NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false from apps/tldw-frontend now reports 6 remaining diagnostics, all in unrelated agent-tasks/admin-llamacpp clusters.
@@ -35,14 +35,12 @@ Verification recorded for this tsc slice:
 - No focused runtime test was run because this spec is a real-server Playwright workflow gated by TLDW_E2E_API_KEY/TLDW_API_KEY/SINGLE_USER_API_KEY; compiler coverage is the intended check for this type-only cleanup.
 - git diff --check exits 0.
 - Bandit not applicable: touched file is a TypeScript Playwright spec only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Reduced the frontend standalone tsc baseline by removing the chat cockpit persisted-session snapshot diagnostic. The real-server spec now parses localStorage JSON through a concrete unknown-to-snapshot normalizer that supports both wrapped and legacy plain snapshot shapes.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

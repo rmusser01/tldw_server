@@ -27,9 +27,9 @@ Add the literal test placeholder sentinel to Research Workspace generated artifa
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added the exact 'this is a test' sentinel to the existing shared Research Workspace generated artifact placeholder set. The regression uses data table generation because it directly exercises the shared artifact finalizer used by the file/media-like outputs.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

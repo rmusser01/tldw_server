@@ -86,7 +86,7 @@ Execution notes:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 1 accepted. Commits: 5800111ce, 1f65113f, 7204b7d. Focused Vitest
 passed from apps/packages/ui with 13/13 tests. Spec review approved.
 Code-quality review approved after scoped AntD owner and helper-function
@@ -130,7 +130,7 @@ and no blocked, stale, or baseline-error sections. From repo root: git diff
 PR #1338 review-fix pass started. Actionable comments to address: make duplicate finding IDs stable without positional unsuffixed first occurrence; bound verify-design-system-state file read concurrency; short-circuit JSX-return traversal after a JSX return is found.
 
 PR #1338 review fixes completed: duplicate product-state finding groups now suffix every occurrence so legacy base IDs cannot be inherited by newly inserted earlier duplicates; baseline refreshed with stable duplicate IDs while keeping 523 live exceptions; source reads are bounded and order-preserving; JSX-return traversal short-circuits after finding JSX.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

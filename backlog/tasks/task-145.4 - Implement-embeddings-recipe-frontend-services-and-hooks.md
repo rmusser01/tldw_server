@@ -55,7 +55,7 @@ Implement Task 3 from the embeddings RAG recipe implementation plan: add typed f
 
 ## Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Red verification: `cd apps/packages/ui && bunx vitest run src/components/Option/Evaluations/hooks/__tests__/useRecipes.test.tsx` failed with the expected missing hook exports: `useEmbeddingRecipeCandidates is not a function` and `usePreviewRecipeRecommendationApply is not a function`.
 - Green verification: `cd apps/packages/ui && bunx vitest run src/components/Option/Evaluations/hooks/__tests__/useRecipes.test.tsx` passed with 6 tests.
 - Hygiene verification: `cd apps/packages/ui && bun run verify:openapi` passed; `git diff --check` passed.
@@ -64,7 +64,7 @@ Implement Task 3 from the embeddings RAG recipe implementation plan: add typed f
 - Follow-up red verification: `cd apps/packages/ui && bunx vitest run src/components/Option/Evaluations/hooks/__tests__/useRecipes.test.tsx` failed with candidate `{ ok: false }` not reaching `isError` and apply-preview `{ ok: false }` resolving instead of rejecting.
 - Follow-up green verification: same focused Vitest command passed with 8 tests after wrapping the embeddings candidate query and apply-preview mutation in `ensureOk`.
 - Follow-up hygiene verification: `cd apps/packages/ui && bun run verify:openapi` passed; `git diff --check` passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -33,7 +33,7 @@ Create a detailed implementation plan for the approved #1116 Phase 2 follow-up s
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created implementation plan path: Docs/superpowers/plans/2026-05-03-phase2-followup-stack-implementation-plan.md
 
 Plan decomposes remaining #1116 Phase 2 follow-up work into separate PR-sized tranches: 2.1 lifecycle cleanup, 2.2 sandbox/ACP router conditionals, 2.3 ChaChaNotes persona delegation, and optional 2.4 config follow-up only if needed.
@@ -45,7 +45,7 @@ Verification: git diff --check on Docs/superpowers/plans/2026-05-03-phase2-follo
 Bandit skipped: docs/task-only implementation plan change, no production Python source modified.
 
 Plan review subagent was not dispatched in this session because subagent use requires explicit user authorization; self-review was performed against the approved design and writing-plans checklist.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

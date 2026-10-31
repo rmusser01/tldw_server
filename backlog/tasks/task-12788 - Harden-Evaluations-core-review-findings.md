@@ -42,13 +42,15 @@ Verify and address validated current-code review findings in tldw_Server_API/app
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Starting verified, test-first remediation for Evaluations core review findings. Earlier TASK-2414 output was ignored because that ID resolves to an unrelated Image Generation task in this worktree.
 
 Verification complete. Focused tests: source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Evaluations/test_evaluations_core_hardening.py tldw_Server_API/tests/Evaluations/test_recipe_runs_service.py::test_recipe_service_redacts_sensitive_run_config_in_public_metadata tldw_Server_API/tests/Evaluations/unit/test_user_rate_limiter_minute_exact_and_reset.py -q -> 13 passed. Bandit: source .venv/bin/activate && python -m bandit -r <touched Evaluations core files> -f json -o /tmp/bandit_evaluations_9935.json -> 0 results. Documentation was not updated because the fixes are internal hardening behavior with regression tests.
 
 Clean worktree PR verification on codex/evaluations-core-hardening-9935: focused pytest set passed with 13 passed; Bandit JSON report /tmp/bandit_evaluations_9935_clean_worktree.json reported 0 results; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+
+Rebased PR #2460 branch on latest origin/dev and addressed validated Gemini/Qodo review comments: removed in-memory recipe run secret config storage in favor of BYOK-encrypted durable metadata, preserved candidate_api_keys through rag_answer_quality normalization for worker execution, moved webhook DNS resolution and rate-limit SQLite writes off the async event loop, preserved HTTPS webhook hostnames for TLS verification, fixed mixed IPv4/IPv6 private-network checks, normalized leading-dot domains, required synthetic workflow user scope for owner-filtered operations, and explicitly closed SQLite connections in the rate limiter. Verification: compileall on touched files passed; targeted review regressions passed (5 passed); expanded hardening/recipe/rate-limiter tests passed (32 passed); recipe service + worker suites passed (43 passed); Bandit on touched Evaluations core files reported 0 findings.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -65,9 +67,3 @@ Validated and fixed the Evaluations core review findings. Added regression cover
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Rebased PR #2460 branch on latest origin/dev and addressed validated Gemini/Qodo review comments: removed in-memory recipe run secret config storage in favor of BYOK-encrypted durable metadata, preserved candidate_api_keys through rag_answer_quality normalization for worker execution, moved webhook DNS resolution and rate-limit SQLite writes off the async event loop, preserved HTTPS webhook hostnames for TLS verification, fixed mixed IPv4/IPv6 private-network checks, normalized leading-dot domains, required synthetic workflow user scope for owner-filtered operations, and explicitly closed SQLite connections in the rate limiter. Verification: compileall on touched files passed; targeted review regressions passed (5 passed); expanded hardening/recipe/rate-limiter tests passed (32 passed); recipe service + worker suites passed (43 passed); Bandit on touched Evaluations core files reported 0 findings.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

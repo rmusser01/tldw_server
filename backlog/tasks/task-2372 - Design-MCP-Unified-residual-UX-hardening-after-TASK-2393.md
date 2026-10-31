@@ -43,7 +43,6 @@ Create a residual hardening design for the remaining Unified MCP standalone/embe
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - 2026-06-28: Drafted residual hardening design in Docs/superpowers/specs/2026-06-28-mcp-unified-residual-ux-hardening-design.md.
 - 2026-06-28: Spec review iteration 1 found missing client-doc coverage, explicit-config migration semantics, and publishing-status ambiguity. Patched all three.
@@ -51,7 +50,6 @@ Create a residual hardening design for the remaining Unified MCP standalone/embe
 - 2026-06-28: Spec review iteration 3 approved the design with no blocking contradictions or unsafe ambiguity.
 - 2026-06-30: Finalized after PR #2548 merged. The approved residual design was converted into TASK-12054, implemented in TASK-12055, and verified through TASK-12064/TASK-12065 follow-ups. Full standalone gateway serving remains intentionally out of scope for this design/implementation line.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

@@ -35,7 +35,7 @@ Continue the frontend design-system product-state cleanup by replacing the Commo
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented PromptSelect loading fallback registry lookup via getDesignSystemState('loading').label while keeping the common:loading translation key. Added focused coverage that first failed against the hardcoded Loading fallback and now passes with a mocked registry label.
 
 Removed the PromptSelect canonical-state-label baseline exception. The full design-system verifier also required refreshing current origin/dev baseline IDs for AgentRegistry and ChatbooksPlaygroundPage AntD Alert findings after unrelated baseline drift.
@@ -47,7 +47,7 @@ PR: https://github.com/rmusser01/tldw_server/pull/1574
 PR review follow-up: Gemini suggested optional chaining for the design-system loading label access. Applied getDesignSystemState('loading')?.label, preserving the registry fallback behavior when present while avoiding a throw if the registry is malformed.
 
 Review follow-up verification: PromptSelect focused Vitest passed; product-state guard Vitest passed; bun run verify:design-system-state passed; git diff --check passed; filtered UI tsc output for PromptSelect/baseline/AgentRegistry/Chatbooks returned no matches.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

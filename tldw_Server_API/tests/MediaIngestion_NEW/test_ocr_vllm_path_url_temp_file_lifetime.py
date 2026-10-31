@@ -191,6 +191,8 @@ def test_a_failed_write_does_not_leak_the_temp_file(
     from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR import runtime_support
 
     real_named_temp_file = runtime_support.tempfile.NamedTemporaryFile
+    real_unlink = runtime_support.os.unlink
+    handles: list[Any] = []
 
     class _WriteFails:
         """A NamedTemporaryFile whose write raises, recording the path it created."""
@@ -214,10 +216,18 @@ def test_a_failed_write_does_not_leak_the_temp_file(
 
     def _failing_temp_file(*args: Any, **kwargs: Any) -> _WriteFails:
         handle = real_named_temp_file(*args, **kwargs)
+        handles.append(handle)
         created.append(handle.name)
         return _WriteFails(handle)
 
     monkeypatch.setattr(runtime_support.tempfile, "NamedTemporaryFile", _failing_temp_file)
+
+    def _windows_unlink(path: str, *args: Any, **kwargs: Any) -> None:
+        if handles and str(path) == handles[0].name and not handles[0].closed:
+            raise PermissionError("Windows cannot unlink an open temporary image")
+        real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(runtime_support.os, "unlink", _windows_unlink)
 
     with pytest.raises(OSError):
         module._ocr_via_vllm(_PNG, "prompt", *extra_args)

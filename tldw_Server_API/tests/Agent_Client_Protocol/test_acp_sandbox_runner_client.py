@@ -9,19 +9,18 @@ from uuid import uuid4
 
 import pytest
 
-from tldw_Server_API.app.core.Agent_Client_Protocol.config import ACPSandboxConfig
-from tldw_Server_API.app.core.Agent_Client_Protocol.config import ACPRunnerConfig
-from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import ACPRunnerClient
+from tldw_Server_API.app.core.Agent_Client_Protocol.config import ACPRunnerConfig, ACPSandboxConfig
+from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import ACPRunnerClient, ActivePrompt
 from tldw_Server_API.app.core.Agent_Client_Protocol.sandbox_runner_client import (
     ACPSandboxRunnerManager,
     SandboxSessionHandle,
     _is_self_referential_agent_command,
 )
-from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPMessage
-from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPResponseError
+from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPMessage, ACPResponseError
+from tldw_Server_API.app.core.Agent_Client_Protocol.stream_client import ACPStreamClient
 from tldw_Server_API.app.core.Sandbox.models import RuntimeType
-from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
 from tldw_Server_API.app.core.Sandbox.runners.lima_runner import LimaRunner
+from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
 from tldw_Server_API.app.services.acp_runtime_policy_service import (
     ACPRuntimePolicySnapshot,
 )
@@ -34,6 +33,18 @@ def _standard_runner_config(**overrides: Any) -> ACPRunnerConfig:
     }
     config.update(overrides)
     return ACPRunnerConfig(**config)
+
+
+def _bind_permission_source(manager, session_id):
+    """Admit this policy unit test's real stream source before its request."""
+    async def discard(_data):
+        pass
+    client = ACPStreamClient(send_bytes=discard)
+    manager._sessions[session_id] = SandboxSessionHandle(
+        session_id, 55, "policy-test", "policy-test-run", client, asyncio.current_task(),
+    )
+    manager._active_prompts[session_id] = ActivePrompt(source_client=client, task=asyncio.current_task())
+    return client
 
 
 @pytest.mark.unit
@@ -987,6 +998,7 @@ async def test_sandbox_permission_request_denies_tool_from_runtime_snapshot(monk
         return None
 
     monkeypatch.setattr(manager, "check_permission_governance", _fake_check_permission_governance, raising=False)
+    source = _bind_permission_source(manager, "sandbox-session")
 
     response = await manager._handle_request(
         ACPMessage(
@@ -997,7 +1009,8 @@ async def test_sandbox_permission_request_denies_tool_from_runtime_snapshot(monk
                 "sessionId": "sandbox-session",
                 "tool": {"name": "exec.run", "input": {"command": "whoami"}},
             },
-        )
+        ),
+        source_client=source,
     )
 
     assert response.result == {
@@ -1020,6 +1033,7 @@ async def test_sandbox_permission_request_refreshes_runtime_snapshot_when_policy
         )
     )
     session_id = "sandbox-refresh-policy"
+    source = _bind_permission_source(manager, session_id)
     policy_state = {"allowed_tools": ["web.search"], "fingerprint": "sandbox-allow"}
     call_count = {"build_snapshot": 0}
 
@@ -1101,7 +1115,8 @@ async def test_sandbox_permission_request_refreshes_runtime_snapshot_when_policy
                 "sessionId": session_id,
                 "tool": {"name": "web.search", "input": {"query": "opa"}},
             },
-        )
+        ),
+        source_client=source,
     )
     assert allowed_response.result == {"outcome": {"outcome": "approved"}}
 
@@ -1117,7 +1132,8 @@ async def test_sandbox_permission_request_refreshes_runtime_snapshot_when_policy
                 "sessionId": session_id,
                 "tool": {"name": "web.search", "input": {"query": "opa"}},
             },
-        )
+        ),
+        source_client=source,
     )
     assert denied_response.result == {
         "outcome": {
@@ -1140,6 +1156,7 @@ async def test_low_risk_permission_reuses_cached_runtime_snapshot(monkeypatch) -
         )
     )
     session_id = "sandbox-refresh-cache"
+    source = _bind_permission_source(manager, session_id)
     policy_state = {"allowed_tools": ["web.search"], "fingerprint": "sandbox-cache"}
     call_count = {"build_snapshot": 0}
 
@@ -1220,7 +1237,8 @@ async def test_low_risk_permission_reuses_cached_runtime_snapshot(monkeypatch) -
                 "sessionId": session_id,
                 "tool": {"name": "web.search", "input": {"query": "opa"}},
             },
-        )
+        ),
+        source_client=source,
     )
     assert first.result == {"outcome": {"outcome": "approved"}}
     assert call_count["build_snapshot"] == 1
@@ -1237,7 +1255,8 @@ async def test_low_risk_permission_reuses_cached_runtime_snapshot(monkeypatch) -
                 "sessionId": session_id,
                 "tool": {"name": "web.search", "input": {"query": "opa"}},
             },
-        )
+        ),
+        source_client=source,
     )
     assert second.result == {"outcome": {"outcome": "approved"}}
     assert call_count["build_snapshot"] == 1

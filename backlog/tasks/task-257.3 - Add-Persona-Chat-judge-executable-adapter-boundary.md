@@ -44,7 +44,7 @@ Plan file: Docs/superpowers/plans/2026-05-12-persona-chat-judge-adapter-boundary
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented offline Persona Chat judge execution boundary in tldw_Server_API/app/core/Evaluations/persona_chat_judge_execution.py with injected completion callable, strict JSON parsing, allowlisted evidence references, duplicate execution-key protection, provider/model metadata bounding, and trace-safe failure keys. Added focused tests in tldw_Server_API/tests/Evaluations/test_persona_chat_judge_execution.py and updated the two Persona Chat judge contract docs plus implementation plan.
 
 Verification: python -m pytest tldw_Server_API/tests/Evaluations/test_persona_chat_judge_execution.py tldw_Server_API/tests/Evaluations/test_persona_chat_judge.py tldw_Server_API/tests/Evaluations/test_persona_chat_judge_harness.py tldw_Server_API/tests/Evaluations/test_persona_chat_judge_policy.py tldw_Server_API/tests/Evaluations/unit/test_persona_chat_judge_review_command.py -q passed with 47 passed, 5 warnings. Bandit on touched execution/test files wrote /tmp/bandit_persona_chat_judge_execution.json with zero results. git diff --check passed. Marker scan for unfinished-work labels had no matches.
@@ -54,7 +54,7 @@ PR review follow-up on 2026-05-12: verified three actionable review items on PR 
 PR review fixes implemented: unknown-dimension test now asserts the completion callable is not invoked; evidence references are limited to fields actually present in the prompt envelope plus stable top-level/container fields; case/dimension identifiers are bounded before completion-call metadata and output emission.
 
 PR review verification: python -m pytest tldw_Server_API/tests/Evaluations/test_persona_chat_judge_execution.py tldw_Server_API/tests/Evaluations/test_persona_chat_judge.py tldw_Server_API/tests/Evaluations/test_persona_chat_judge_harness.py tldw_Server_API/tests/Evaluations/test_persona_chat_judge_policy.py tldw_Server_API/tests/Evaluations/unit/test_persona_chat_judge_review_command.py -q passed with 49 passed, 5 warnings. Bandit on touched execution/test files wrote /tmp/bandit_persona_chat_judge_execution_review.json with zero results. git diff --check passed. Marker scan for unfinished-work labels had no matches.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

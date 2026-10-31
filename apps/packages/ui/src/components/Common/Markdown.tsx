@@ -9,6 +9,7 @@ import { Highlight } from "prism-react-renderer"
 import "property-information"
 import React from "react"
 import { CodeBlock } from "./CodeBlock"
+import { CODE_BLOCK_GROUP_CLASS, CodeBlockToolbar } from "./CodeBlockToolbar"
 import { TableBlock } from "./TableBlock"
 import { ManagedMarkdownImage } from "./ManagedMarkdownImage"
 import { MermaidDiagramBlock } from "./MermaidDiagramBlock"
@@ -33,7 +34,20 @@ import {
 const RICH_TEXT_ELEMENT_STYLE_CLASS =
   "[&_em]:[color:var(--rt-italic-color)] [&_em]:[font-family:var(--rt-italic-font)] [&_strong]:[color:var(--rt-bold-color)] [&_strong]:[font-family:var(--rt-bold-font)] [&_blockquote]:[color:var(--rt-quote-text-color)] [&_blockquote]:[font-family:var(--rt-quote-font)] [&_blockquote]:[border-left-color:var(--rt-quote-border-color)] [&_blockquote]:[background-color:var(--rt-quote-bg-color)] [&_blockquote]:border-l-4 [&_blockquote]:rounded-md [&_blockquote]:px-3 [&_blockquote]:py-2"
 
+/**
+ * Inline code reads as code: a monospace pill. `not-prose` opts it out of
+ * Tailwind Typography's `.prose code` styles, which add literal backticks
+ * before and after the text and make it bold.
+ */
+const INLINE_CODE_CLASSES =
+  "not-prose rounded bg-surface2 px-1 py-0.5 font-mono text-[0.9em] font-normal"
+
 const MANAGED_ASSET_MARKER = "flashcard-asset://"
+// Plugin arrays are module-level constants: react-markdown memoizes its
+// unified processor on these identities, so inline arrays rebuilt the
+// processor on every render of every message (TASK-13511).
+const REMARK_PLUGINS = [remarkGfm, remarkMath]
+const REHYPE_PLUGINS = [rehypeKatex]
 const SAFE_URL_PROTOCOL = /^(https?:|mailto:|tel:|blob:)/i
 const DATA_IMAGE_URL_PROTOCOL = /^data:image\//i
 const FENCE_START = /^(\s*)(`{3,}|~{3,})([^\n]*)$/
@@ -157,6 +171,7 @@ export function Markdown({
   allowExternalImages,
   richTextModeOverride,
   headingAnchorIds,
+  enableCodeArtifactActions = true,
   enableMermaidDiagrams = false,
   enableMermaidArtifactActions = false,
   artifactContextId,
@@ -168,6 +183,7 @@ export function Markdown({
   allowExternalImages?: boolean
   richTextModeOverride?: ChatRichTextMode
   headingAnchorIds?: string[]
+  enableCodeArtifactActions?: boolean
   enableMermaidDiagrams?: boolean
   enableMermaidArtifactActions?: boolean
   artifactContextId?: string
@@ -353,8 +369,8 @@ export function Markdown({
       style={richTextStyleVars as React.CSSProperties}
     >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
         urlTransform={transformMarkdownUrl}
         components={{
           pre({ children, ...props }) {
@@ -423,86 +439,102 @@ export function Markdown({
             if (codeBlockVariant === "compact") {
               const highlightLanguage = rawLanguage ? normalizedLanguage : "plaintext"
               return (
-                <div className="not-prose my-2 rounded-lg border border-border bg-surface2/70 px-3 py-2 overflow-x-auto">
-                  <Highlight code={value} language={safeLanguage(highlightLanguage)} theme={resolveTheme(codeTheme || "dracula")}>
-                    {({ className: highlightClassName, style, tokens, getLineProps, getTokenProps }) => (
-                      <pre
-                        className={`${highlightClassName} m-0 text-xs font-mono leading-relaxed`}
-                        style={{
-                          ...style,
-                          backgroundColor: "transparent",
-                          fontFamily: "var(--font-mono)",
-                        }}
-                      >
-                        {tokens.map((line, i) => {
-                          const { key: _lineKey, ...lineProps } = getLineProps({
-                            line,
-                            key: i
-                          })
-                          return (
-                            <div key={i} {...lineProps}>
-                              {line.map((token, key) => {
-                                const { key: _tokenKey, ...tokenProps } =
-                                  getTokenProps({ token, key })
-                                return <span key={key} {...tokenProps} />
-                              })}
-                            </div>
-                          )
-                        })}
-                      </pre>
-                    )}
-                  </Highlight>
+                <div data-code-block className={`not-prose my-2 rounded-lg border border-border bg-surface2/70 ${CODE_BLOCK_GROUP_CLASS}`}>
+                  <CodeBlockToolbar language={highlightLanguage} value={value} />
+                  <div className="overflow-x-auto px-3 py-2">
+                    <Highlight code={value} language={safeLanguage(highlightLanguage)} theme={resolveTheme(codeTheme || "dracula")}>
+                      {({ className: highlightClassName, style, tokens, getLineProps, getTokenProps }) => (
+                        <pre
+                          className={`${highlightClassName} m-0 text-xs font-mono leading-relaxed`}
+                          style={{
+                            ...style,
+                            backgroundColor: "transparent",
+                            fontFamily: "var(--font-mono)",
+                          }}
+                        >
+                          {tokens.map((line, i) => {
+                            const { key: _lineKey, ...lineProps } = getLineProps({
+                              line,
+                              key: i
+                            })
+                            return (
+                              <div key={i} {...lineProps}>
+                                {line.map((token, key) => {
+                                  const { key: _tokenKey, ...tokenProps } =
+                                    getTokenProps({ token, key })
+                                  return <span key={key} {...tokenProps} />
+                                })}
+                              </div>
+                            )
+                          })}
+                        </pre>
+                      )}
+                    </Highlight>
+                  </div>
                 </div>
               )
             }
             if (codeBlockVariant === "github") {
               return (
-                <div className="not-prose my-2 overflow-x-auto rounded-md border border-border/80 bg-surface2/70 px-4 py-3">
-                  <Highlight
-                    code={value}
-                    language={safeLanguage(normalizedLanguage)}
-                    theme={resolveTheme("auto")}
-                  >
-                    {({
-                      className: highlightClassName,
-                      style,
-                      tokens,
-                      getLineProps,
-                      getTokenProps
-                    }) => (
-                      <pre
-                        className={`${highlightClassName} m-0 text-xs font-mono leading-relaxed`}
-                        style={{
-                          ...style,
-                          backgroundColor: "transparent",
-                          fontFamily: "var(--font-mono)"
-                        }}
-                      >
-                        {tokens.map((line, i) => {
-                          const { key: _lineKey, ...lineProps } = getLineProps({
-                            line,
-                            key: i
-                          })
-                          return (
-                            <div key={i} {...lineProps}>
-                              {line.map((token, key) => {
-                                const { key: _tokenKey, ...tokenProps } =
-                                  getTokenProps({ token, key })
-                                return <span key={key} {...tokenProps} />
-                              })}
-                            </div>
-                          )
-                        })}
-                      </pre>
-                    )}
-                  </Highlight>
+                <div data-code-block className={`not-prose my-2 rounded-md border border-border/80 bg-surface2/70 ${CODE_BLOCK_GROUP_CLASS}`}>
+                  <CodeBlockToolbar language={normalizedLanguage} value={value} />
+                  <div className="overflow-x-auto px-4 py-3">
+                    <Highlight
+                      code={value}
+                      language={safeLanguage(normalizedLanguage)}
+                      theme={resolveTheme("auto")}
+                    >
+                      {({
+                        className: highlightClassName,
+                        style,
+                        tokens,
+                        getLineProps,
+                        getTokenProps
+                      }) => (
+                        <pre
+                          className={`${highlightClassName} m-0 text-xs font-mono leading-relaxed`}
+                          style={{
+                            ...style,
+                            backgroundColor: "transparent",
+                            fontFamily: "var(--font-mono)"
+                          }}
+                        >
+                          {tokens.map((line, i) => {
+                            const { key: _lineKey, ...lineProps } = getLineProps({
+                              line,
+                              key: i
+                            })
+                            return (
+                              <div key={i} {...lineProps}>
+                                {line.map((token, key) => {
+                                  const { key: _tokenKey, ...tokenProps } =
+                                    getTokenProps({ token, key })
+                                  return <span key={key} {...tokenProps} />
+                                })}
+                              </div>
+                            )
+                          })}
+                        </pre>
+                      )}
+                    </Highlight>
+                  </div>
                 </div>
               )
             }
-            return <CodeBlock language={match ? match[1] : ""} value={value} blockIndex={blockIndex} />
+            return (
+              <CodeBlock
+                language={match ? match[1] : ""}
+                value={value}
+                blockIndex={blockIndex}
+                enableArtifactAction={enableCodeArtifactActions}
+              />
+            )
           },
           code({ className, children, ...props }) {
-            const mergedClassName = className ? `${className} font-semibold` : "font-semibold"
+            // Inline code (fenced blocks are handled by `pre` above).
+            const mergedClassName = className
+              ? `${className} ${INLINE_CODE_CLASSES}`
+              : INLINE_CODE_CLASSES
             return (
               <code className={mergedClassName} {...props}>
                 {children}
@@ -538,6 +570,7 @@ export function Markdown({
             return <img src={resolvedSrc} alt={alt || ""} loading="lazy" referrerPolicy="no-referrer" className="my-2 max-w-full rounded-md border border-border" />
           },
           table({ children }) {
+            // TableBlock renders the <table> itself (AX-10).
             return <TableBlock>{children}</TableBlock>
           },
           p({ children, className, ...props }) {

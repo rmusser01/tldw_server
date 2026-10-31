@@ -42,9 +42,9 @@ Completed via staged TDD, independent spec and quality reviews, final whole-PR r
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Final base: origin/dev dc25171a8335ba1e0a4924788847eb1fb197b1c8. Final review fix: 9ef8babdb1; whole-PR re-review APPROVED. Backend/AuthNZ/workflow matrix: 119 passed. Explicit changed frontend/shared matrix: 40 files and 560 tests passed. Final UI interaction delta: 2 files and 9 tests passed. Production Chrome extension build passed. Full frontend lint passed with 0 errors and 174 existing warnings. Bandit medium/high passed across all changed Python production modules. git diff --check passed. Standalone frontend typecheck reports only the unrelated unchanged QuickIngestWizardModal.tsx:1813 baseline. Real-Chromium UAT after all fixes: WebUI device/session lifecycle 2 passed; loaded production extension device/session lifecycle 2 passed; same-origin HttpOnly cookie lifecycle 1 passed. Cookie UAT covers bootstrap, unsafe CSRF mutation without API-key headers, production logout, manual fallback, stale/no-cookie idempotency, rotation, and secret-free WebSockets. The dependency-aware changed-only Vitest selector left a stale tool session after unrelated large suites, so it was terminated and replaced by the explicit deterministic 40-file matrix. No functional blockers remain.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

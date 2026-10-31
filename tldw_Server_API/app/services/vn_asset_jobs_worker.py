@@ -11,6 +11,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user_id
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import owns_chacha_checkouts
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
 from tldw_Server_API.app.core.Jobs.manager import JobManager
@@ -41,7 +42,13 @@ def _close_worker_database(db: Any) -> None:
         db.close_connection()
 
 
-async def handle_vn_asset_job(job: dict[str, Any], *, job_manager: JobManager | None = None) -> dict[str, Any]:
+@owns_chacha_checkouts
+async def handle_vn_asset_job(
+    job: dict[str, Any],
+    *,
+    job_manager: JobManager | None = None,
+    worker_config: WorkerConfig | None = None,
+) -> dict[str, Any]:
     if str(job.get("job_type") or "").strip() not in {
         VN_ASSET_ENQUEUE_BATCH_JOB_TYPE,
         VN_ASSET_GENERATE_VARIANT_JOB_TYPE,
@@ -72,6 +79,7 @@ async def handle_vn_asset_job(job: dict[str, Any], *, job_manager: JobManager | 
         worker = VNAssetGenerationWorker(
             repo=repo,
             jobs_manager=job_manager or JobManager(),
+            worker_config=worker_config,
             **worker_dependencies,
         )
         return await worker.handle_job_async(job)
@@ -194,7 +202,7 @@ async def _run_vn_asset_jobs_worker(
     logger.info("VN asset Jobs worker starting: queue={} worker_id={}", cfg.queue, worker_id)
     try:
         await sdk.run(
-            handler=lambda job_row: handle_vn_asset_job(job_row, job_manager=jm),
+            handler=lambda job_row: handle_vn_asset_job(job_row, job_manager=jm, worker_config=cfg),
             cancel_check=lambda job_row: _should_cancel(job_row, job_manager=jm),
         )
     finally:

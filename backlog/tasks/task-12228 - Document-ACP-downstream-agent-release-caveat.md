@@ -35,9 +35,9 @@ Issue #1504 live signoff found the Go runner build/test gate green and the backe
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Docs-only caveat added to CHANGELOG.md and Docs/Development/ACP_Production_Readiness.md after live #1504 validation found runner/backend health green but no real downstream ACP stdio agent/provider credentials available. Verification: git diff --check passed; rg confirmed release caveat text. Bandit skipped because only docs/backlog files changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

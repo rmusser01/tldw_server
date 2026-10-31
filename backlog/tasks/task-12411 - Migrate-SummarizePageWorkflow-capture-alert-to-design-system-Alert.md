@@ -30,11 +30,7 @@ Migrate the SummarizePageWorkflow captured-page success notice from AntD Alert t
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Implemented test-first: the SummarizePageWorkflow regression drives the mocked Chrome page-capture path and failed on the missing canonical Alert marker before replacing the AntD Alert.
 
 Verification recorded for this slice:
@@ -48,7 +44,7 @@ Verification recorded for this slice:
 - Bandit skipped because this slice changes TypeScript UI/test, JSON baseline, and task metadata only; no Python code touched.
 
 PR review follow-up: replaced the SummarizePageWorkflow test's manual setTimeout spy with Vitest fake timers plus vi.waitFor, and changed the content-length assertion to compute the exact localized length from the mocked captured content. Focused regression test remained green after the fix.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -66,8 +62,6 @@ Verification:
 - Bandit skipped because this slice changes TypeScript UI/test, JSON baseline, and task metadata only; no Python code touched.
 
 PR review follow-up addressed the timer and locale-fragility comments in the SummarizePageWorkflow product-state test.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

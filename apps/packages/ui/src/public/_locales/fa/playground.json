@@ -1468,5 +1468,20 @@
   },
   "actor_templateMode_ignore": {
     "message": "نادیده‌گرفتن هنگام فعال بودن الگوها"
+  },
+  "mediaHandoff_conflictLabel": {
+    "message": "تعارض در انتقال رسانه"
+  },
+  "mediaHandoff_conflict": {
+    "message": "در ویرایشگر پیام از قبل یک پیش‌نویس دارید. منبع رسانه را درج کنید، پیش‌نویس خود را جایگزین کنید یا واردسازی را لغو کنید."
+  },
+  "mediaHandoff_insert": {
+    "message": "درج منبع رسانه"
+  },
+  "mediaHandoff_replace": {
+    "message": "جایگزینی پیش‌نویس فعلی"
+  },
+  "mediaHandoff_cancel": {
+    "message": "لغو واردسازی"
   }
 }

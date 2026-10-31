@@ -394,7 +394,7 @@
     "storageServerDescription": "Зберігаються на вашому сервері tldw (рекомендовано для RAG і спільних просторів).",
     "storageLocalDescription": "Зберігаються лише в цьому браузері; дані не надсилаються на сервер.",
     "storeAfterReview": "Зберігати після перевірки",
-    "reviewBeforeStorage": "Перевірити перед збереженням",
+    "reviewBeforeStorage": "Переглянути витягнутий вміст перед збереженням",
     "reviewBeforeStorageHint": "Створювати чернетки та перевіряти їх перед збереженням",
     "reviewEnabled": "Перевірка ввімкнена",
     "reviewStorageCap": "Ліміт збереження перевірки",

@@ -81,6 +81,14 @@ describe("VoicePreviewButton", () => {
     expect(button).toBeDisabled()
   })
 
+  it("blocks preview when the server provider is unavailable", () => {
+    render(<VoicePreviewButton model="kitten" voice="Bella" provider="tldw" disabledReason="Configure a provider in Speech Settings." />)
+    const button = screen.getByRole("button", { name: "Preview voice" })
+    fireEvent.click(button)
+    expect(button).toBeDisabled()
+    expect(mockSynthesizeSpeechDetailed).not.toHaveBeenCalled()
+  })
+
   it("calls detailed synthesis with gateway scope and plays audio on click", async () => {
     const fakeAudioData = new ArrayBuffer(8)
     mockSynthesizeSpeechDetailed.mockResolvedValue({

@@ -59,7 +59,7 @@ jobs:
         )
       )
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.timeout_minutes || 30 }}
     strategy:
       fail-fast: false
       matrix:
@@ -70,6 +70,8 @@ jobs:
             backend: true
           - name: worker
             dockerfile: Dockerfiles/Dockerfile.worker
+            # TASK-13369: allow the completed cold image to finish loading.
+            timeout_minutes: 45
             build_args: ""
             backend: true
           - name: audio-worker
@@ -128,6 +130,9 @@ jobs:
 
   container-build-check:
     name: container-build-check
+    # The last arm makes a license wait that was cancelled, failed or negative
+    # reach the refusal step below and go red. Without it this job is skipped,
+    # and GitHub counts a skipped required job as satisfied (TASK-13502).
     if: >-
       always() && !cancelled() &&
       (
@@ -142,14 +147,55 @@ jobs:
             needs.await_license.result == 'skipped' ||
             needs.await_license.outputs.license_passed == 'true'
           )
+        ) ||
+        (
+          github.event_name != 'workflow_run' &&
+          needs.await_license.result != 'skipped' &&
+          needs.await_license.outputs.license_passed != 'true'
         )
       )
     needs: [build, admission, await_license]
     runs-on: ubuntu-latest
     steps:
+      - name: Require the license audit to have passed
+        if: >-
+          github.event_name != 'workflow_run' &&
+          needs.await_license.result != 'skipped' &&
+          needs.await_license.outputs.license_passed != 'true'
+        run: |
+          echo "::error::License audit did not pass for this PR head, so the gates were not run. Fix the licence policy failure and re-run."
+          exit 1
+
       - name: Check matrix results
         run: |
           if [ "${{ needs.build.result }}" != "success" ]; then
             echo "::error::One or more container builds failed"
             exit 1
           fi
+
+  # Wakes the merge queue when the gate above fails (spec 4.6 of
+  # Docs/superpowers/specs/2026-10-11-merge-queue-approve-held-runs-design.md). A red gate causes
+  # none of the events merge-queue.yml listens for, and GitHub only re-runs a completed run, so
+  # this job cannot retry its own run: it dispatches a queue kick on dev that waits for this run
+  # to complete, then runs the queue. Not required and in no job's `needs`, so it cannot turn the
+  # required check red. Skipped while MERGE_QUEUE is unset or off, for forks, and on dispatches.
+  queue-tick:
+    name: Merge queue tick
+    needs: [container-build-check]
+    if: >-
+      always() && !cancelled() &&
+      needs.container-build-check.result == 'failure' &&
+      (vars.MERGE_QUEUE == 'dry' || vars.MERGE_QUEUE == 'on') &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Wake the merge queue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: gh api -X POST "repos/${REPOSITORY}/actions/workflows/security-required.yml/dispatches" -f ref=dev -f "inputs[queue_kick]=true" -f "inputs[wait_run]=${RUN_ID}"

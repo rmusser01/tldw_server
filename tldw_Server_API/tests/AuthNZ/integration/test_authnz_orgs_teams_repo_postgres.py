@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import (
-    AuthnzOrgsTeamsRepo,
     DEFAULT_BASE_TEAM_NAME,
+    AuthnzOrgsTeamsRepo,
 )
 from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 

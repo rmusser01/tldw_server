@@ -551,6 +551,69 @@ async def test_execute_non_stream_call_normalizes_gemini_usage_for_logging(monke
 
 
 @pytest.mark.asyncio
+async def test_execute_non_stream_call_records_the_service_tier_the_response_reports(monkeypatch):
+    """OpenAI reports service_tier beside usage; the usage record carries it so the tier is costed (TASK-13936)."""
+    logged_usage: dict[str, object] = {}
+
+    async def fake_log_llm_usage(**kwargs):
+        logged_usage.update(kwargs)
+
+    monkeypatch.setattr(chat_service, "log_llm_usage", fake_log_llm_usage)
+    monkeypatch.setattr(chat_service, "get_topic_monitoring_service", lambda: None)
+    usage = {"prompt_tokens": 80, "completion_tokens": 30, "total_tokens": 110}
+    reply = {
+        "choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+        "service_tier": "priority",
+        "usage": usage,
+    }
+
+    async def save_message_fn(*_args, **_kwargs):
+        return None
+
+    request = SimpleNamespace(
+        method="POST",
+        url=SimpleNamespace(path="/api/v1/chat/completions"),
+        headers={},
+        state=SimpleNamespace(user_id=None, api_key_id=None),
+    )
+
+    await execute_non_stream_call(
+        current_loop=asyncio.get_running_loop(),
+        cleaned_args={
+            "api_endpoint": "openai",
+            "api_key": "test-key",
+            "messages_payload": [{"role": "user", "content": "hi"}],
+            "model": "gpt-5-mini",
+            "streaming": False,
+        },
+        selected_provider="openai",
+        provider="openai",
+        model="gpt-5-mini",
+        request_json="{}",
+        request=request,
+        metrics=_CapturingMetrics(),
+        provider_manager=None,
+        templated_llm_payload=[{"role": "user", "content": "hi"}],
+        should_persist=False,
+        final_conversation_id="conv-123",
+        character_card_for_context={"name": "Test"},
+        chat_db=None,
+        save_message_fn=save_message_fn,
+        audit_service=None,
+        audit_context=None,
+        client_id="client",
+        queue_execution_enabled=False,
+        enable_provider_fallback=False,
+        llm_call_func=lambda: reply,
+        refresh_provider_params=lambda *_args, **_kwargs: None,
+        moderation_getter=lambda: _RedactingModeration(),
+    )
+
+    assert logged_usage["usage_metadata"] == {**usage, "service_tier": "priority"}
+    assert "service_tier" not in usage
+
+
+@pytest.mark.asyncio
 async def test_execute_non_stream_call_rejects_invalid_structured_output_before_persist(
     monkeypatch: pytest.MonkeyPatch,
 ):

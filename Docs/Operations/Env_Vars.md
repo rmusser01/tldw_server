@@ -11,6 +11,8 @@ Note: Secrets should be set via environment or `.env`. `config.txt` is supported
 
 ## Core Server
 - `tldw_production`: Enable production guards (`true|false`). Masks API key in logs and enforces DB/secret checks.
+  - The runtime is also production-like when `TLDW_PRODUCTION` is truthy, or when `ENVIRONMENT`, `APP_ENV`, `DEPLOYMENT_ENV`, `FASTAPI_ENV`, `TLDW_ENV` or `ENV` is `prod`, `production` or `live` (any case). Every production guard reads this one detector (`core/testing.runtime_environment()`).
+  - A production-like runtime refuses to start while a test seam is set: `TEST_MODE`, `TESTING`, `TLDW_TEST_MODE`, `TLDW_ALLOW_TEST_FALLBACK_KEYS`, `SINGLE_USER_TEST_API_KEY`, `E2E_TEST_BASE_URL`, `MINIMAL_TEST_APP`, `JWT_SECRET_TEST_KEY`, `ENABLE_ADMIN_E2E_TEST_MODE`, `EVALUATIONS_TEST_DB_PATH`, `JOBS_TEST_NOW_EPOCH` or any `RG_TEST_*`.
 - `ENABLE_OPENAPI`: Show OpenAPI/Swagger UI when `true`. Defaults to hidden in production unless explicitly enabled.
 - `ALLOWED_ORIGINS`: Optional browser-origin allowlist. Comma-separated or JSON array.
   - Local self-hosting already permits common `localhost` and `127.0.0.1` browser origins by default.
@@ -287,8 +289,11 @@ Notes:
 - `CHATBOOKS_IMPORT_DICT_STRICT`: When true, skip dictionaries with fatal validation errors instead of importing with warnings.
 
 ## Audio Jobs
-- `AUDIO_JOBS_WORKER_ENABLED`: Enable the in-process Audio Jobs worker (`true|false`, default follows route policy for `audio-jobs`). When true, the worker starts at app startup and polls the Jobs backend for the `audio` domain pipeline stages.
+- `AUDIO_JOBS_WORKER_ENABLED`: Enable the in-process Audio Jobs worker (`true|false`, default `false`; it also needs the `audio-jobs` route enabled). When true, the worker starts at app startup and polls the Jobs backend for the `audio` domain pipeline stages.
 - `AUDIO_JOBS_OWNER_STRICT`: Enable owner-aware acquisition for fairness across users (`true|false`, default `false`). When enabled, the worker preferentially acquires jobs for owners under their concurrent-job caps.
+- `AUDIO_JOBS_GPU_TRANSCRIBE`: Send the `audio_transcribe` stage to the GPU transcription worker's `transcribe` queue instead of transcribing in the audio jobs worker (`true|false`, default `false`). Set it where the audio jobs worker runs, and only when a GPU worker (`Dockerfiles/Dockerfile.audio_gpu_worker`) reads the same Jobs database.
+- `TTS_JOBS_WORKER_ENABLED`: Run the long-form TTS jobs worker in-process, for `POST /api/v1/audio/speech/jobs` (`true|false`, default follows route policy for `audio`, so it runs wherever the audio routes do). It does not start in sidecar mode (`TLDW_WORKERS_SIDECAR_MODE`), where the `tts` sidecar worker runs instead. An explicit `true` runs it even where the `audio` route is disabled. Set `false` when a standalone worker (`python -m tldw_Server_API.app.core.TTS.tts_jobs_worker`) handles these jobs. A server restart during a synthesis fails that job (`tts_replay_blocked`), so run the `tts` sidecar or a standalone worker where restarts are frequent. For planned restarts, `JOBS_SHUTDOWN_WAIT_FOR_LEASES_SEC` (default `0`) makes shutdown stop new pickups and wait up to that many seconds for running jobs of every kind before it stops the workers; give the container or service a stop timeout at least that long. With large local TTS models on a GPU and several server processes (`UVICORN_WORKERS`), set it to `false` and run one dedicated worker, since each process loads its own model. In-process, a running long-form job takes one of the server process's TTS generation slots (`performance.max_concurrent_generations` in `tts_providers_config.yaml`, default `4`), the same slots `POST /api/v1/audio/speech` uses.
+- `TTS_JOBS_QUEUE`: Jobs queue for long-form TTS jobs (default `tts`). Set the same value for the API server and any standalone TTS worker, and register a custom name in `JOBS_ALLOWED_QUEUES_AUDIO`; `default` and `transcribe` are refused.
 - `REDIS_URL`: Optional Redis URL used by Resource Governor when `RG_BACKEND=redis`.
 
 ## Media Ingest Jobs
@@ -313,19 +318,38 @@ Pytest markers
 - `-m pg_jobs_stress`: Run heavier multi-process concurrency tests for PG (opt-in only).
   - Also set `RUN_PG_JOBS_STRESS=1` to enable these tests during runs.
 
+## Usage Quotas
+
+Usage quotas are per-user budgets, **off by default**: a stock install, single-user or multi-user, applies none. Request rate limits are separate (Resource Governor, below). Design: `Docs/Design/2026-10-02-usage-quota-posture-design.md`.
+
+- `USAGE_QUOTAS_ENABLED`: master switch (`true|1|false|0`). Resolution: this env var > `LIMIT_ENFORCEMENT_ENABLED` (legacy, when set; warns once) > `config.txt` `[Usage-Quotas] enabled` > default `false`. Usage is recorded whether or not it is on.
+- With the switch on, a quota applies only where a platform admin set a value. Values are UserProfiles `limits.*` keys, set per user (`PATCH /api/v1/admin/users/{id}/profile`) or per team/org (`PUT`/`DELETE /api/v1/admin/{orgs|teams}/{id}/profile/overrides/{key}`, body `{"value": n}`; `null` removes). A team or org value is each member's own allowance. The user's own value wins; otherwise the most generous value among their teams that set the key; otherwise the most generous among their orgs. `0` blocks; no value anywhere means unlimited. Changes reach every worker within 60 s.
+- Keys: `limits.audio_daily_minutes`, `limits.transcription_minutes_per_month`, `limits.audio_concurrent_jobs` (queued jobs), `limits.llm_tokens_per_month`, `limits.llm_cost_per_day_usd`, `limits.llm_cost_per_month_usd`, `limits.rag_queries_per_day` (RAG, Text2SQL, MCP), `limits.media_ingest_mb_per_day`, `limits.workflows_runs_per_day` (API-started and scheduled), `limits.evaluations_per_day`, `limits.evaluation_tokens_per_day`, `limits.chatbooks_exports_per_day`, `limits.chatbooks_imports_per_day`, `limits.chatbooks_concurrent_jobs`, `limits.media_concurrent_jobs` (media ingests at once), `limits.audio_concurrent_streams` (audio streams at once), `limits.audio_concurrent_transcriptions` (direct transcriptions at once), `limits.storage_quota_mb` (storage MB; team and org values are each member's allowance, separate from team/org shared storage pools). Days and months are UTC.
+- Upgrading copies each user's existing storage quota into `limits.storage_quota_mb`, except 5120 and the `DEFAULT_STORAGE_QUOTA_MB` configured at upgrade time, which can't be told apart from 'never set'. Those users become unlimited until a value is set. If `DEFAULT_STORAGE_QUOTA_MB` was changed over time, users still on an *older* default carry it over as a real per-user value. `DEFAULT_STORAGE_QUOTA_MB` no longer sets anyone's quota.
+- Not quotas (unchanged): per-file upload size caps, character-chat count caps, per-minute rates.
+- The three concurrency keys hold one lease per running request. With `RG_BACKEND=memory` (the default) a limit holds per worker process; `RG_BACKEND=redis` makes it exact across workers. `RG_ENABLED` does not turn them off (ADR-076).
+- Billing-plan limits additionally need a billing repository (hosted product only); without one, billing checks never run. A wired repository with the switch off logs a warning once, at startup.
+- Operators on `RG_POLICY_STORE=db` whose stored `evals.*` policies carry a `daily_cap` keep that cap until they remove it from the stored policy; evaluation daily caps now come from `limits.evaluations_per_day` / `limits.evaluation_tokens_per_day`.
+- `WORKFLOWS_DISABLE_QUOTAS` and `CHATBOOKS_DISABLE_QUOTAS` (`true|1`): per-module escape hatches that turn off the workflows and chatbooks quota checks respectively, even with the master switch (`USAGE_QUOTAS_ENABLED`) on. `WORKFLOWS_DISABLE_QUOTAS` is read inside `quota_checks.workflows_runs_decision`, so it covers both the `/workflows` endpoint's daily-cap check and the scheduler's direct call for scheduled runs. `CHATBOOKS_DISABLE_QUOTAS` is read by `Chatbooks.quota_manager.QuotaManager`, covering exports/day, imports/day, and concurrent-jobs admission.
+- Deprecated, no longer set any limit:
+  - `AUDIO_TIER_LIMITS_JSON` and `[Audio-Quota] {tier}_*` (`free_daily_minutes`, `standard_concurrent_jobs`, and so on): setting either logs a warning once and changes nothing. Audio limits are `limits.audio_daily_minutes`, `limits.transcription_minutes_per_month` and `limits.audio_concurrent_jobs`. The other `[Audio-Quota]` keys (`failopen_cap_minutes`, `stream_ttl_seconds`, `job_ttl_seconds`) are not tier settings and are still read. The audio tier admin routes (`GET`/`PUT /api/v1/audio/jobs/admin/tiers/{user_id}`) are marked deprecated and no longer affect any limit.
+  - `DEFAULT_STORAGE_QUOTA_MB` (`>= 0`): setting it logs a deprecation warning and sets no one's quota. Only the one-time storage quota migration still reads it, to skip the old default. Use `limits.storage_quota_mb`.
+- Operator guide: `Docs/Operations/Usage_Quotas.md`.
+
 ## Resource Governor (Unified Rate Limiting)
 
-The Resource Governor (RG) is the **primary enforcement path** for all rate limiting. Some deprecated module-local compatibility knobs remain during cutover and will be removed once shadow-mode exit criteria are met (see `Docs/Product/Completed/AuthNZ-Refactor/Resource_Governor_PRD.md`). AuthNZ dependency shims (`check_rate_limit`, `check_auth_rate_limit`) are diagnostics-only and do not enforce fallback 429 behavior.
+The Resource Governor (RG) is the **primary enforcement path** for all rate limiting. Some deprecated module-local compatibility knobs remain during cutover and will be removed once shadow-mode exit criteria are met (see `Docs/Product/Completed/AuthNZ-Refactor/Resource_Governor_PRD.md`). AuthNZ dependency shims (`check_rate_limit`, `check_auth_rate_limit`) apply a **local fallback limit only to requests RG ingress did not govern** (no `request.state.rg_policy_id`). They skip enforcement only when the request already resolved an authenticated single-user principal, or in test mode (`_enforce_auth_deps_ingress_guard` in `auth_deps.py`) — an *anonymous* single-user-mode request (for example `POST /auth/login` before the API key is checked) is not skipped and is floored like any multi-user request. `check_rate_limit` is the general 120/min fallback (`AUTH_DEPS_FALLBACK_RATE_LIMIT`) and honors `RG_ENABLED`: with RG disabled it does not enforce either. `check_auth_rate_limit` is a 30/min auth-endpoint brute-force floor (`AUTH_DEPS_AUTH_FALLBACK_RATE_LIMIT`) and keeps enforcing regardless of `RG_ENABLED` — it is not RG enforcement. See ADR-056 (`Docs/ADR/056-resource-governor-safety-net.md`).
 
 ### Core Settings
-- `RG_ENABLED`: Master toggle for Resource Governor enforcement (`true|1|false|0`). Resolution: env var > `config.txt` `[ResourceGovernor] enabled` > default `false`.
+- `RG_ENABLED`: Master toggle for Resource Governor enforcement (`true|1|false|0`). Resolution: env var > `config.txt` `[ResourceGovernor] enabled` > default `true` (test/pytest runtime defaults `false` unless `RG_ENABLED` is set explicitly). The stock `config.txt` ships `[ResourceGovernor] enabled = true`, so RG is on by default outside tests. Disabling it (env or config.txt) turns off every RG-governed enforcement path — ingress, auth reservations, chat/embeddings token reservations, MCP admission, evaluations concurrency, the workflows daily cap, and the general `check_rate_limit` auth_deps fallback — and the ingress middleware no longer lazily builds a governor; policy files still load so diagnostics endpoints keep reporting state. The switch is read when the server starts: restart it after changing the value. One deliberate exception: `check_auth_rate_limit`'s 30/min auth-endpoint brute-force floor stays on even with RG disabled (see above). See ADR-056 (`Docs/ADR/056-resource-governor-safety-net.md`). Per-user concurrency quotas (`limits.media_concurrent_jobs`, `limits.audio_concurrent_streams`, `limits.audio_concurrent_transcriptions`) are usage quotas and stay on with RG disabled; `USAGE_QUOTAS_ENABLED` governs them (ADR-076).
 - `RG_BACKEND`: Backend type (`memory` | `redis`). Default `memory`. Redis requires `REDIS_URL`.
 - `RG_POLICY_PATH`: Path to YAML policy file. Default `tldw_Server_API/Config_Files/resource_governor_policies.yaml`.
-- `RG_POLICY_STORE`: Policy persistence backend (`yaml` | `db`). Default `yaml`.
+- `RG_POLICY_STORE`: Policy persistence backend (`file` | `db`). Default `file`.
 - `RG_POLICY_RELOAD_ENABLED`: Enable hot-reload of policy changes (`true|false`). Default `true`.
-- `RG_POLICY_RELOAD_INTERVAL_SEC`: Policy reload check interval in seconds. Default `30`.
-- `RG_ROUTE_MAP_AUDIT`: When `true`, log warnings for HTTP routes not covered by the RG route map.
-- `RG_REDIS_FAIL_MODE`: Behavior when Redis is unavailable (`fail_open` | `fail_closed` | `fallback_memory`). Default `fail_open`.
+- `RG_POLICY_RELOAD_INTERVAL_SEC`: Policy reload check interval in seconds. Default `10`.
+- `RG_ROUTE_MAP_AUDIT`: When `true` (the default), the startup audit logs routes not covered by the RG route map.
+- `RG_REDIS_FAIL_MODE`: Behavior when Redis is unavailable (`fail_open` | `fail_closed` | `fallback_memory`). Default `fallback_memory`. Once a Redis command and a PING right after it both fail, RG stops calling Redis for `RG_REDIS_UNREACHABLE_COOLDOWN_SEC` and answers by this fail mode, so the fail mode lasts up to about 15 s after Redis returns (the cooldown after the last failed probe, plus one 5 s timeout); under `fail_closed`, a user refused in that time keeps a `Retry-After` of up to 60 s, so 429s can last about 75 s after Redis recovers (ADR-081).
+- `RG_REDIS_UNREACHABLE_COOLDOWN_SEC`: Seconds the RG Redis backend stops calling a Redis it could not reach before it probes again. Default `10`; `0` turns the cooldown off, so every Redis call waits its own 5 s timeout while Redis does not answer. Below `10`, probes can overlap on a Redis that does not answer. An unset, negative or non-numeric value uses the default. Read when each governor is built (at startup, or on a limiter's first use). RG's Redis client waits at most 5 s to connect and for each reply; `socket_timeout` and `socket_connect_timeout` options in `REDIS_URL` override that (ADR-081).
 
 ### Client Identity
 - `RG_TRUSTED_PROXIES`: Comma-separated trusted-proxy host/CIDR list. This is opt-in: forwarding is used only when the physical peer is a valid IP in this list.
@@ -449,8 +473,9 @@ Config file support (optional):
 - `CHAT_STREAM_CLEANUP_DAEMON_MAX_WORKERS`: Process-local capacity reserved for synchronous cleanup after late or non-cooperative stream work (default `4`). This is not additional request throughput.
 - `CHAT_STREAM_ASYNC_MAX_TASKS`: Process-local cap for asynchronous provider stream tasks (default `256`).
 - `CHAT_STREAM_ASYNC_CLEANUP_MAX_TASKS`: Process-local capacity reserved for asynchronous cleanup tasks (default `32`). This is not additional request throughput.
+- `CHAT_STREAM_SETTLEMENT_MAX_TASKS`: Process-local cap for detached writes that save a partial reply after a stream ended early (default `256`). When it is reached, further partial replies are not saved.
 
-All five values must be integers from `1` through `256`; `0` does not disable a cap, and invalid or out-of-range values fall back to the listed default. They are read at process startup, so changes require a restart. The caps apply independently to each application process and replica.
+All six values must be integers from `1` through `256`; `0` does not disable a cap, and invalid or out-of-range values fall back to the listed default. They are read at process startup, so changes require a restart. The caps apply independently to each application process and replica.
 
 ### Tokenizer (Chat Dictionaries & World Books)
 - `TOKEN_ESTIMATOR_MODE`: `whitespace` (default) or `char_approx`
@@ -680,7 +705,7 @@ Operator notes:
   - `OTEL_SERVICE_NAME`: Logical service name (default `tldw_server`).
   - `OTEL_SERVICE_VERSION`: Service version string (default `1.0.0`).
   - `OTEL_SERVICE_NAMESPACE`: Namespace grouping (default `production`).
-  - `DEPLOYMENT_ENV`: Deployment environment label (default `development`).
+  - `DEPLOYMENT_ENV`: Deployment environment label (default `development`). `prod`, `production` or `live` also turns on the production guards (see `tldw_production`).
 
 - Exporters and enablement
   - `ENABLE_METRICS`: Enable metrics pipeline (`true|false`, default `true`).
@@ -713,7 +738,7 @@ Notes
 | `OTEL_SERVICE_NAME`             | `tldw_server`       | Logical service name |
 | `OTEL_SERVICE_VERSION`          | `1.0.0`             | Freeform version string |
 | `OTEL_SERVICE_NAMESPACE`        | `production`        | Logical namespace/group |
-| `DEPLOYMENT_ENV`                | `development`       | Environment label |
+| `DEPLOYMENT_ENV`                | `development`       | Environment label; `production` also enables production guards |
 | `ENABLE_METRICS`                | `true`              | Enable metrics pipeline |
 | `ENABLE_TRACING`                | `true`              | Enable tracing pipeline |
 | `ENABLE_OTEL_LOGGING`           | `false`             | Enable OTEL logging integration |
@@ -810,9 +835,12 @@ Notes:
   - `CLAIMS_REBUILD_MAX_QUEUE_ALERT`: Queue size threshold for rebuild alerts.
   - `CLAIMS_REBUILD_HEARTBEAT_WARN_SEC`: Heartbeat staleness threshold.
   - `CLAIMS_PROVIDER_COST_MULTIPLIERS`: Cost map for provider metrics.
-  - `CLAIMS_REVIEW_METRICS_SCHEDULER_ENABLED`: Enable nightly review metrics aggregation.
-  - `CLAIMS_REVIEW_METRICS_INTERVAL_SEC`: Review metrics scheduler interval (seconds).
-  - `CLAIMS_REVIEW_METRICS_LOOKBACK_DAYS`: Days of review log to aggregate per run.
+  - `CLAIMS_REVIEW_METRICS_SCHEDULER_ENABLED`: Enable recurring review metrics production (default `false`).
+  - `CLAIMS_REVIEW_METRICS_INTERVAL_SEC`: Interval in seconds (default `86400`, minimum `60`). Invalid/nonpositive values use the default; numeric values outside supported datetime bounds disable this scheduler.
+  - `CLAIMS_REVIEW_METRICS_LOOKBACK_DAYS`: Inclusive UTC days per run (default `2`, capped at `366`). Invalid/nonpositive values use the default.
+  - `CLAIMS_REVIEW_METRICS_JOBS_ENABLED`: Route aggregation through shared Jobs when `CLAIMS_JOBS_ENABLED` is also true (default `false`). Otherwise the one-release compatibility-local route remains active. Routing is captured at startup; restart after changes.
+  - `CLAIMS_JOBS_MAX_RETRIES_REVIEW_METRICS`: Shared Jobs execution retry budget (default `3`, valid range `0..100`). Independent of the producer's three transient-only admission attempts.
+  - The producer uses `CLAIMS_JOBS_QUEUE` (default `default`) and does not require a local worker: `CLAIMS_JOBS_WORKER_ENABLED` only controls local worker startup. Deploy a Claims worker on the same Jobs database and queue before cutover. See [Claims monitoring rollout](https://github.com/rmusser01/tldw_server/blob/dev/Docs/Product/Claims_Module/Claims_Monitoring_Implementation.md#review-metrics-aggregation).
   - Email delivery uses `EMAIL_PROVIDER` (default `mock`) and SMTP settings when enabled.
 
 ## Watchlists Module
@@ -826,3 +854,5 @@ Notes:
 ## Privilege Maps Snapshot Workflow
 - `PRIVILEGE_METADATA_VALIDATE_ON_STARTUP`: Defaults to `1`. Set to `0` when running tests that inject a fake privilege service to bypass catalog validation.
 - Snapshot guard: CI compares the live privilege route registry (collected at runtime) against `tldw_Server_API/tests/fixtures/privilege_route_registry_snapshot.json`. If the snapshot drifts, CI fails with guidance to rerun `python Helper_Scripts/update_privilege_registry_snapshot.py` and commit the refreshed file. Use this script whenever you intentionally add or modify FastAPI routes or privilege dependencies.
+
+- `AUTOMATION_MESSAGE_ENCRYPTION_KEY`: Base64-encoded 32-byte key for the scheduled-automation encrypted message store (`agent_task` raw prompts; per-owner sqlite under `USER_DB_BASE_DIR`). Falls back to `BYOK_ENCRYPTION_KEY` when unset; `BYOK_SECONDARY_ENCRYPTION_KEY` is honored as a secondary for dual-read during key rotation (store-native re-encryption is a tracked follow-up — keep the retired key as secondary until it lands). No key resolvable: agent_task authoring refuses with `message_store_unavailable` (fail closed).

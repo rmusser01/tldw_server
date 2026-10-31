@@ -9,6 +9,8 @@ from fastapi import status
 from unittest.mock import patch, MagicMock
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME
+from tldw_Server_API.app.core import config_llm_providers
+from tldw_Server_API.tests.helpers.provider_keys import api_keys_source
 
 # Fixtures are automatically discovered from conftest.py
 
@@ -97,9 +99,7 @@ class TestChatUnit:
         }
 
         # Remove the provider from mock keys to simulate missing key
-        with patch.dict(
-            "tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "sk-mock-key-12345"}, clear=True
-        ):
+        with patch.object(config_llm_providers, "get_api_keys", lambda: {"openai": "sk-mock-key-12345"}):
             response = unit_test_client.post_with_auth("/api/v1/chat/completions", json_data=request_data)
 
         assert response.status_code >= status.HTTP_400_BAD_REQUEST
@@ -289,7 +289,7 @@ class TestChatErrorHandling:
 
                 with (
                     patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_perform,
-                    patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "test-key"}),
+                    patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
                 ):
                     mock_perform.side_effect = Exception("LLM API Error")
 
@@ -310,21 +310,27 @@ class TestChatErrorHandling:
         finally:
             app.dependency_overrides = original_overrides
 
-    def test_database_error(self, unit_test_client, isolated_db):
-        """Test handling of invalid conversation ID."""
+    def test_database_error(self, unit_test_client, isolated_db, isolated_chat_endpoint_mocks):
+        """Reject an unknown conversation before provider or persistence effects."""
         request_data = {
             "model": "test-model",
             "api_provider": "openai",
             "messages": [{"role": "user", "content": "Hello"}],
             "conversation_id": "invalid-conv-id",
+            "save_to_db": True,
         }
 
-        # The endpoint should handle invalid conversation ID gracefully
+        before = isolated_db.count_conversations_for_user("1", include_deleted=True)
+        writer_before = isolated_db.count_conversations_for_user(isolated_db.client_id, include_deleted=True)
         response = unit_test_client.post_with_auth("/api/v1/chat/completions", json_data=request_data)
 
-        # Should handle the invalid ID gracefully - creates new conversation or returns success
-        # When conversation ID is invalid, the endpoint creates a new conversation
-        assert response.status_code == 200  # Should succeed with new conversation
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert response.json() == {"detail": "Conversation not found"}
+        isolated_chat_endpoint_mocks["perform_chat_api_call"].assert_not_called()
+        isolated_chat_endpoint_mocks["chat_api_call"].assert_not_called()
+        assert isolated_db.get_conversation_by_id("invalid-conv-id") is None
+        assert isolated_db.count_conversations_for_user("1", include_deleted=True) == before
+        assert isolated_db.count_conversations_for_user(isolated_db.client_id, include_deleted=True) == writer_before
 
     def test_invalid_message_format(self, unit_test_client):
         """Test handling of invalid message format."""

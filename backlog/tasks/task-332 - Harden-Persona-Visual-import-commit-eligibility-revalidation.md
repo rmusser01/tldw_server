@@ -45,7 +45,7 @@ Implement GitHub issue #1657 as a focused Persona/Buddy visual-pack hardening sl
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added a stored preview commit-eligibility helper in the Persona API endpoint before import-commit jobs are created.
 - Added shared importer validation that accepts legacy previews with no commit_eligible flag but rejects blocked previews or explicit commit_eligible false results.
 - Added regression coverage proving blocked revalidation fails the job with no additional draft pack created.
@@ -81,7 +81,7 @@ PR #1684 review closeout refresh: rebased codex/persona-visual-commit-guards ont
 Added docstrings to the newly introduced regression tests and local test doubles to address the remaining CodeRabbit docstring coverage warning while leaving existing unrelated tests unchanged.
 
 Post-rebase verification: focused Persona pytest suite passed 66 tests; py_compile passed for changed API/core/tests; git diff --check passed; Ruff E305 passed for importer spacing; Bandit on touched production Python paths reported no findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

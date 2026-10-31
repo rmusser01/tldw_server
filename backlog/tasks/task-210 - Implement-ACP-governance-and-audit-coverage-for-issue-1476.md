@@ -69,13 +69,13 @@ Implement the #1476 governance/RBAC/audit slice in the ACP productionization wor
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added ACP governance/audit documentation that identifies MCP Hub/runtime-policy authority, TokenScopeGuard route coverage, WebSocket write/access checks, audit event inventory, and remaining caveats.
 - Added sanitized ACP audit metadata handling for agent registration/updates/deregistration and session creation without storing cwd, env, command args, prompts, tokens, or MCP server payloads.
 - Added orchestration audit events for dispatch start, task completion signal, reviewer start/decision, finalization, retry, and triage using identifiers, statuses, counts, reason codes, and presence booleans instead of task descriptions, completion summaries, or reviewer feedback text.
 - Verification refreshed on 2026-05-10: focused #1476 gate `62 passed, 5 warnings`; `Agent_Orchestration` suite `148 passed, 5 warnings`; ACP WebSocket suite `33 passed, 5 warnings`; Bandit touched backend scope `0` findings; `git diff --check` clean.
 - GitHub issue #1476 updated with implementation and verification evidence: https://github.com/rmusser01/tldw_server/issues/1476#issuecomment-4414191965
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

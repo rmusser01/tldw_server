@@ -30,7 +30,7 @@ Investigate and reduce local apps/tldw-frontend TypeScript check failures after 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Current local tsc baseline for apps/tldw-frontend was reproduced in /private/tmp/tldw-dev-tsc. Initial current dev surface was 388 primary TypeScript errors; after scoped fixes, node node_modules/typescript/bin/tsc --noEmit --pretty false -p tsconfig.json exits 0 from apps/tldw-frontend.
 
 Focused Playground guard tests pass: bunx vitest run the six Playground guard specs -> 6 files passed, 6 tests passed.
@@ -42,7 +42,7 @@ git diff --check exits 0.
 Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1302. Human requester still needs to add the required human-written Change summary before merge.
 
 Review-fix pass completed for PR #1302. Addressed structured chat version-conflict detection and getChat reuse; scoped chat metadata/scope precedence; command palette query callback consistency; sidepanel edit send flag; prompt ID/content separation; persisted quick-ingest/account-mode validation; navigation shim delimiter and promise handling; test setup shims; and targeted cast/type cleanup. Verification after review fixes: tsc in apps/tldw-frontend exited 0; focused vitest batch with --testTimeout=10000 in apps/packages/ui passed 4 files and 62 tests; git diff --check exited 0. The same focused vitest batch without increased timeout had two FamilyGuardrailsWizard cases exceed the default 5000ms, and those two passed when isolated.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

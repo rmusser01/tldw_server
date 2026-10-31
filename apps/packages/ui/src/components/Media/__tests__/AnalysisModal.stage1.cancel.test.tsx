@@ -15,6 +15,13 @@ const mocks = vi.hoisted(() => ({
   setSelectedModel: vi.fn()
 }))
 
+vi.mock('@/services/tldw/quick-ingest-authority', () => ({
+  useQuickIngestAuthority: () => 'owned-analysis',
+  quickIngestAuthority: { capture: () => ({ authorityRevision: 1,
+    requestScope: { config: { serverUrl: 'http://owned-server', authMode: 'multi-user', expectedUserId: 'alice' } },
+    signal: new AbortController().signal, assertCurrent: () => {} }) }
+}))
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, fallbackOrOptions?: string | { defaultValue?: string }) => {
@@ -217,11 +224,14 @@ describe('AnalysisModal stage 1 cancel plumbing', () => {
   })
 
   it('treats cancellation differently from real generation failures', async () => {
-    mocks.bgStream.mockImplementation(() =>
-      (async function* () {
-        throw new Error('stream failed')
-      })()
-    )
+    mocks.bgStream.mockImplementation(() => ({
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+      next: async () => {
+        throw new Error("stream failed");
+      },
+    }));
     mocks.bgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
       if (request.path === '/api/v1/chat/completions' && request.method === 'POST') {
         throw new Error('fallback failed')
@@ -305,7 +315,8 @@ describe('AnalysisModal stage 1 cancel plumbing', () => {
       expect(onAnalysisGenerated).toHaveBeenCalledWith('Final analysis', expect.any(String))
     })
     await waitFor(() => {
-      expect(onClose).toHaveBeenCalledTimes(1)
+      expect(onClose).not.toHaveBeenCalled()
+      expect(screen.getByDisplayValue('Final analysis')).toBeVisible()
     })
     expect(mocks.bgStream).toHaveBeenCalledTimes(2)
     expect(screen.queryByText('Analysis generation cancelled')).not.toBeInTheDocument()

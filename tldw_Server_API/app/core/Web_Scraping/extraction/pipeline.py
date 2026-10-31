@@ -39,7 +39,10 @@ from tldw_Server_API.app.core.Web_Scraping.extraction.strategies.llm import (
     _extract_llm_entities_with_dependencies,
     schema_rules_to_field_specs,
 )
-from tldw_Server_API.app.core.Web_Scraping.extraction.strategies.trafilatura import extract_with_trafilatura
+from tldw_Server_API.app.core.Web_Scraping.extraction.strategies.trafilatura import (
+    _arxiv_abstract,
+    extract_with_trafilatura,
+)
 from tldw_Server_API.app.core.Web_Scraping.extraction.throttles import (
     cancellable_semaphore,
     get_strategy_semaphore,
@@ -353,6 +356,16 @@ def _extract_article_with_pipeline_with_dependencies(
     if not allow_llm_extraction:
         order = [strategy for strategy in order if strategy != "llm"]
 
+    if (
+        strategy_order is None
+        and handler is None
+        and fallback_extractor is None
+        and all(value is None for value in (schema_rules, llm_settings, regex_settings, cluster_settings))
+        and _arxiv_abstract(html, url) is not None
+    ):
+        order.remove("trafilatura")
+        order.insert(0, "trafilatura")
+
     def finalize(result: dict[str, Any], *, strategy: Optional[str]) -> dict[str, Any]:
         final_result = _copy_result(result)
         summary = final_result.get("summary")
@@ -499,7 +512,6 @@ def _extract_article_with_pipeline_with_dependencies(
         if strategy == "regex":
             with _strategy_throttle(strategy, dependencies):
                 result = _copy_result(extract_regex_entities(html, url, mask_pii=regex_mask_override(regex_settings)))
-            last_result = result
             if result.get("extraction_successful"):
                 regex_result = result
                 if default_regex_enrichment:
@@ -511,6 +523,7 @@ def _extract_article_with_pipeline_with_dependencies(
                 trace.append(_trace_entry(dependencies, strategy, "success", "regex_extracted"))
                 _record_strategy_metrics(dependencies, strategy, "success", dependencies.perf_counter() - start, result)
                 return finalize(result, strategy=strategy)
+            last_result = result
             trace.append(_trace_entry(dependencies, strategy, "failed", "regex_no_matches"))
             _record_strategy_metrics(dependencies, strategy, "failed", dependencies.perf_counter() - start, result)
             continue
@@ -578,8 +591,6 @@ def _extract_article_with_pipeline_with_dependencies(
         trace.append(_trace_entry(dependencies, strategy, "failed", "no_content"))
         _record_strategy_metrics(dependencies, strategy, "failed", dependencies.perf_counter() - start, result)
 
-    if regex_result is not None and regex_result.get("extraction_successful"):
-        return finalize(regex_result, strategy="regex")
     if last_result is None:
         last_result = {
             "title": "N/A",

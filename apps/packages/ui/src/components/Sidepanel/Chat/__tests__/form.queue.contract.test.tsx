@@ -62,14 +62,25 @@ describe("sidepanel queued request contract", () => {
     expect(sidepanelFormSource).not.toContain("QueuedMessagesBanner")
   })
 
-  it("treats busy and disconnected submits as queue actions", () => {
+  it("treats connected busy submits as queue actions", () => {
     expect(sidepanelFormSource).toContain(
-      "const shouldQueueInsteadOfSend = isSending || !isConnectionReady"
+      "const shouldQueueInsteadOfSend = isSending"
     )
-    expect(sidepanelFormSource).toContain('t("common:queue", "Queue")')
-    expect(sidepanelFormSource).toContain(
-      't("playground:composer.queue.primaryAria", "Queue request")'
+  })
+
+  it("keeps Send labelled Send and offers Stop for the whole pending request (XS-10)", () => {
+    // The primary action comes from the shared resolver, which never relabels
+    // Send as "Queue" and shows Stop from the moment a request is pending.
+    expect(sidepanelFormSource).toContain("resolveSidepanelPrimaryAction({")
+    expect(sidepanelFormSource).not.toContain('t("common:queue", "Queue")')
+    expect(sidepanelFormSource).not.toContain(
+      '"playground:composer.queue.primaryAria", "Queue request"'
     )
+    // Stop is gated on the pending request (Pro, Casual and v5 layouts), not
+    // only on token streaming.
+    expect(sidepanelFormSource.match(/primaryAction\.showStop/g)?.length ?? 0).toBe(3)
+    expect(sidepanelFormSource).not.toContain("{streaming && (")
+    expect(sidepanelFormSource).toContain("<SidepanelResponseStatus")
   })
 
   it("disables destructive cancel-and-run for server-backed turns", () => {

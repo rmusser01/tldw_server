@@ -33,7 +33,7 @@ Replace the mirror modalConfirmMock with direct Modal.confirm assertions, add an
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented test-only Modal.confirm hardening. The antd mock now stores the real Modal.confirm call without a mirror helper, getPendingDeleteConfirmation asserts Modal.confirm directly and reads config from Modal.confirm.mock.calls, and a cancel-path regression confirms delete/remove/undo side effects do not run unless onOk is invoked. Verification: focused JobsTab undo-delete Vitest passed 1 file / 4 tests.
 
 Verification: git diff --check passed. Bandit is not applicable because the touched source is a frontend Vitest test plus Backlog task metadata.
@@ -47,7 +47,7 @@ Fresh verification before push: focused JobsTab undo-delete Vitest passed 1 file
 Rebased PR #1326 onto dev after PR #1325 merged. Resolved the overlapping JobsTab test changes into a single Modal.confirm helper using vi.mocked, kept the explicit onCancel production callback, and removed the redundant test-only "confirmation is not accepted" variant from the merged overlap.
 
 Post-rebase verification: rebased PR #1326 onto current dev after PR #1325 merged; focused JobsTab undo-delete Vitest passed 1 file / 4 tests; frontend tsc --noEmit passed; git diff --check against origin/dev..HEAD passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

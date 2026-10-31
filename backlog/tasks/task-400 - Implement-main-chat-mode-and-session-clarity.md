@@ -48,7 +48,7 @@ Slice sequence:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Initial inspection found PR4 should build on existing PlaygroundCockpitShell, PlaygroundStatusStrip, PlaygroundContextRail, and buildCockpitSessionSummary. The app already persists layout mode and rail visibility; the gap is clarity and critical-state visibility rather than new behavior.
 
 Created implementation plan at Docs/superpowers/plans/2026-05-16-chat-cockpit-mode-session-clarity.md. Scope remains main /chat only. Impeccable PRODUCT/DESIGN context is absent in this worktree, so this slice will follow the existing cockpit components, design-system tokens, and roadmap copy rather than inventing a new visual direction.
@@ -62,7 +62,7 @@ Verification recorded:
 - git diff --check: PASS.
 - bun run verify:design-system-state: PASS with existing allowed baseline exceptions.
 - Bandit: skipped because this slice touched no Python files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

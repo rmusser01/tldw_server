@@ -47,13 +47,13 @@ Implementation plan:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented shared custom OpenAI provider numbering helpers and wired custom-openai-api-3 through custom-openai-api-99 into config loading, chat request validation, adapter registry/materialization, payload capability checks, provider metadata, BYOK config overrides, eval/media helper paths, tokenizer routing, and docs/examples.
 
 Verification: initial focused red run failed 8 expected tests for missing numbered providers; after implementation, focused provider/config/schema tests passed 110/110. Secondary targeted tests for media eval key resolution, ms_g_eval validation, tokenizer resolver, and provider key metadata passed 19/19. git diff --check reported no whitespace errors.
 
 Bandit: ran on touched Python implementation files and wrote /tmp/bandit_custom_openai_99.json. It reported three LOW findings on pre-existing lines outside this change: tokenizer_resolver.py:888 B110 try/except/pass, config.py:603 B105 'tiktoken', and config.py:663 B105 None; no findings in the new custom endpoint helper or dynamic adapter/config code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

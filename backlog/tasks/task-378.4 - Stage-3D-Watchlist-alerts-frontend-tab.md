@@ -35,13 +35,13 @@ Add frontend types, service methods, copy, and an Alerts tab for selected Watchl
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Watchlist-scoped content alert frontend types and service methods for rule CRUD plus alert list/detail/update. Added AlertsTab with rule create/edit/enable-delete, inbox filters, evidence display, read/unread/dismiss actions, and explicit content-alert vs health-issue boundary copy. Integrated Alerts into full/progressive/reduced Watchlists navigation, orientation copy, quick action copy, help docs, and mirrored locale keys.
 
 Verification: focused Stage 3D Vitest passed: src/services/__tests__/watchlists-content-alerts.test.ts, src/components/Option/Watchlists/AlertsTab/__tests__/AlertsTab.test.tsx, src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundPage.first-class.test.tsx, src/components/Option/Watchlists/__tests__/watchlists-stage3-copy-contract.test.ts: 4 files, 9 tests passed. Nearby Watchlists regressions passed: experimental IA, orientation guidance, help links, run notifications, static guard: 5 files, 26 tests passed. git diff --check passed. Full frontend tsc still fails on existing repo-wide baseline; filtered tsc output for Watchlists/AlertsTab/services/watchlists/types/watchlists returned no matches after the local copy-contract cast fix. Bandit not applicable to this frontend-only slice; backend Bandit was run for prior Stage 3 backend changes.
 
 Scope note: backend Stage 3B list-alerts API currently exposes status, severity, rule_id, source_id, page, and size. Stage 3D implemented API-backed filters for those fields and client-side search over loaded alerts; API-backed date-window and full text alert search remain future API enhancements rather than frontend-only query parameters.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

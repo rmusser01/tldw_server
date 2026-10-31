@@ -1,6 +1,8 @@
 import json
 import sqlite3
-from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+from threading import Barrier
 
 import pytest
 
@@ -867,3 +869,60 @@ def test_workflow_step_attempt_migration_rebuilds_legacy_contract(tmp_path):
             status="running",
             metadata={"step_type": "prompt"},
         )
+
+
+@pytest.mark.parametrize("pool_size", [0, 4])
+def test_concurrent_run_reads_preserve_requested_identity(tmp_path, monkeypatch, pool_size):
+    monkeypatch.setenv("WORKFLOWS_SQLITE_POOL_SIZE", str(pool_size))
+    db = WorkflowsDatabase(str(tmp_path / "concurrent-reads.db"))
+    readers = 16
+    for index in range(readers):
+        db.create_run(
+            run_id=f"run-{index}",
+            tenant_id="tenant",
+            user_id=f"owner-{index}",
+            inputs={},
+            workflow_id=None,
+            definition_version=1,
+            definition_snapshot={"name": "concurrent-read", "version": 1, "steps": []},
+        )
+    barrier = Barrier(readers, timeout=10)
+
+    def read_identity(index):
+        mismatches = []
+        for _ in range(100):
+            barrier.wait()
+            run = db.get_run(f"run-{index}")
+            if run is None or (run.run_id, run.user_id) != (f"run-{index}", f"owner-{index}"):
+                mismatches.append(None if run is None else (run.run_id, run.user_id))
+        return mismatches
+
+    try:
+        with ThreadPoolExecutor(max_workers=readers) as executor:
+            mismatches = list(executor.map(read_identity, range(readers)))
+        assert not any(mismatches), mismatches
+    finally:
+        db.close()
+
+
+def test_run_and_step_outputs_store_datetimes_as_iso_text(tmp_path):
+    """A notes step on PostgreSQL returns datetimes; on dev storing them raised TypeError and failed the run (TASK-13897)."""
+    db = WorkflowsDatabase(str(tmp_path / "wf.db"))
+    db.create_run(
+        run_id="run",
+        tenant_id="default",
+        user_id="1",
+        inputs={},
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot={"name": "run", "version": 1, "steps": []},
+    )
+    db.create_step_run(step_run_id="run:s:1", tenant_id="default", run_id="run", step_id="s", name="s", step_type="notes")
+    outputs = {"note": {"title": "t", "created_at": datetime(2026, 10, 22, 17, 45, tzinfo=timezone.utc)}}
+
+    db.complete_step_run(step_run_id="run:s:1", outputs=outputs)
+    db.update_run_status("run", status="succeeded", outputs=outputs)
+
+    stored = {"note": {"title": "t", "created_at": "2026-10-22T17:45:00+00:00"}}
+    assert json.loads(db.get_run("run").outputs_json) == stored
+    assert json.loads(db.list_step_runs(run_id="run")[0]["outputs_json"]) == stored

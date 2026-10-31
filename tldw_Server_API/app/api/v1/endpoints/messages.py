@@ -7,14 +7,17 @@ import codecs
 import contextlib
 import json
 import os
+import time
 from collections.abc import AsyncIterator
-from typing import Any
+from functools import partial
+from typing import Any, NoReturn
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request, status
 from loguru import logger
 from starlette.responses import JSONResponse, StreamingResponse
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, check_rate_limit, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.schemas.anthropic_messages import (
     AnthropicCountTokensRequest,
     AnthropicMessagesRequest,
@@ -34,28 +37,39 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCredentialRuntime,
     mark_provider_credential_used,
 )
-from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
-from tldw_Server_API.app.core.Chat.chat_service import (
-    perform_chat_api_call_async,
-    resolve_provider_and_model,
-)
-from tldw_Server_API.app.core.Chat.streaming_utils import (
-    invoke_stream_close_bounded,
-    normalize_provider_stream_error,
-)
-from tldw_Server_API.app.core.config import loaded_config_data
-from tldw_Server_API.app.core.exceptions import raise_detached_error
-from tldw_Server_API.app.core.http_client import create_async_client as async_http_client_factory
-from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
-from tldw_Server_API.app.core.LLM_Calls.anthropic_messages import (
+from tldw_Server_API.app.core.Chat.anthropic_messages import (
     anthropic_messages_to_openai,
     anthropic_tool_choice_to_openai,
     anthropic_tools_to_openai,
     openai_response_to_anthropic,
     openai_stream_to_anthropic,
 )
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    DaemonCapacityError,
+    await_bounded_sync_call,
+    await_owned_worker,
+)
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError, ChatBadRequestError, ChatConfigurationError
+from tldw_Server_API.app.core.Chat.chat_service import (
+    perform_chat_api_call_async,
+    resolve_provider_and_model,
+)
+from tldw_Server_API.app.core.Chat.streaming_utils import (
+    PROVIDER_STREAM_ERROR_MESSAGES,
+    invoke_stream_close_bounded,
+    normalize_provider_stream_error,
+)
+from tldw_Server_API.app.core.config import loaded_config_data
+from tldw_Server_API.app.core.exceptions import ChatModelNotAvailableError, LLMQuotaExceededError, raise_detached_error
+from tldw_Server_API.app.core.http_client import create_async_client as async_http_client_factory
+from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
+from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
+from tldw_Server_API.app.core.LLM_Calls.gateway import _validate_provider_model_selection
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+from tldw_Server_API.app.core.LLM_Calls.usage_accounting import accounted_direct_stream, record_direct_response
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
+from tldw_Server_API.app.core.Usage.llm_quota_gate import check_llm_call_async
 
 router = APIRouter()
 public_router = APIRouter()
@@ -1173,11 +1187,12 @@ def _build_openai_call_params(
     return call_params
 
 
-def _prepare_native_payload(request_data: Any, *, model: str) -> dict[str, Any]:
+def _prepare_native_payload(request_data: Any, *, model: str, provider: str = "") -> dict[str, Any]:
     """Prepare payload for native Messages providers."""
     payload = request_data.model_dump(exclude_none=True)
     payload.pop("api_provider", None)
-    payload["model"] = model
+    # Anthropic accepts only its documented IDs; a saved dotted name (claude-sonnet-4.5) is sent dashed.
+    payload["model"] = canonical_anthropic_model_id(model) if provider == "anthropic" else model
     return payload
 
 
@@ -2010,7 +2025,43 @@ async def _resolve_messages_credentials(
                 },
             )
         )
+    if provider == "anthropic":
+        inventory_request = {
+            "model": model,
+            "api_key": credentials.api_key,
+            "app_config": credentials.app_config or {},
+            "credentials_resolved": True,
+            "base_url": _resolve_messages_base_url(provider, credentials.app_config or {}),
+            "_endpoint_provenance": getattr(credentials, "endpoint_provenance", None),
+        }
+        try:
+            await await_bounded_sync_call(
+                partial(_validate_provider_model_selection, provider, inventory_request),
+                pool=SYNC_ADAPTER_CALL_POOL,
+                exhaustion_message="Provider model discovery capacity is exhausted",
+            )
+        except ChatModelNotAvailableError as unavailable:
+            raise_detached_error(HTTPException(
+                status_code=400, detail={"error_code": unavailable.error_code, "message": str(unavailable)},
+            ))
+        except ChatBadRequestError:
+            raise_detached_error(HTTPException(status_code=400, detail="Invalid model selection."))
+        except ChatAuthenticationError:
+            _raise_messages_inventory_error(502, "provider_authentication_failed")
+        except ChatConfigurationError as inventory_error:
+            _raise_messages_inventory_error(503, inventory_error.error_code)
+        except DaemonCapacityError:
+            _raise_messages_inventory_error(503, "provider_model_inventory_unavailable")
     return credentials
+
+
+def _raise_messages_inventory_error(status_code: int, code: str) -> NoReturn:
+    """The same public code and message chat completions uses for a model-list failure (review M1)."""
+    if code not in PROVIDER_STREAM_ERROR_MESSAGES:
+        code = "provider_configuration_invalid"
+    raise_detached_error(HTTPException(
+        status_code=status_code, detail={"error_code": code, "message": PROVIDER_STREAM_ERROR_MESSAGES[code]},
+    ))
 
 
 async def _handle_messages(
@@ -2023,6 +2074,8 @@ async def _handle_messages(
 ) -> JSONResponse | StreamingResponse:
     """Handle an Anthropic-compatible Messages request."""
     provider, model = _resolve_provider_and_model_for_request(request_data)
+    # Usage quotas (LLM usage accounting spec §4a), before any LLM work. Inline, not a dependency, to name the provider.
+    await enforce_llm_quota(getattr(current_user, "id", None), provider=provider)
     credential_runtime = _new_messages_credential_runtime(current_user, request)
     runtime_owned_by_stream = False
     try:
@@ -2040,7 +2093,7 @@ async def _handle_messages(
         if provider in MESSAGES_NATIVE_PROVIDERS:
             base_url = _resolve_messages_base_url(provider, app_config_override)
             url = _join_messages_endpoint(base_url, "/messages")
-            payload = _prepare_native_payload(request_data, model=model)
+            payload = _prepare_native_payload(request_data, model=model, provider=provider)
             timeout = _resolve_native_timeout(provider, app_config_override)
             headers = _build_native_headers(
                 provider=provider,
@@ -2049,6 +2102,9 @@ async def _handle_messages(
                 anthropic_beta=anthropic_beta,
             )
             stream = _extract_stream_flag(request_data.stream)
+            # No ChatProvider on this path, so it gets the adapters' check at the call (a no-op once admitted).
+            await check_llm_call_async(getattr(credentials, "credential_source", None))
+            started = time.monotonic()
             if stream:
                 stream_iter = await _prepare_native_stream_iterator(
                     url,
@@ -2058,11 +2114,18 @@ async def _handle_messages(
                     provider=provider,
                     operation="messages.stream",
                 )
+                # This path never reaches a ChatProvider, so it records through the provider recorder (ADR-075).
                 response = StreamingResponse(
-                    _touch_on_first_stream_output(
-                        _sanitize_native_messages_stream(stream_iter),
-                        credential_runtime,
-                        credentials,
+                    accounted_direct_stream(
+                        provider,
+                        payload,
+                        _touch_on_first_stream_output(
+                            _sanitize_native_messages_stream(stream_iter),
+                            credential_runtime,
+                            credentials,
+                        ),
+                        started,
+                        credential_source=getattr(credentials, "credential_source", None),
                     ),
                     media_type="text/event-stream",
                 )
@@ -2078,6 +2141,9 @@ async def _handle_messages(
             )
             if not _native_message_payload_is_semantic(data):
                 raise_detached_error(_messages_upstream_http_exception())
+            record_direct_response(
+                provider, payload, data, started, credential_source=getattr(credentials, "credential_source", None)
+            )
             response = JSONResponse(data)
             await await_owned_worker(
                 _mark_messages_credential_used(
@@ -2101,7 +2167,7 @@ async def _handle_messages(
         if stream:
             try:
                 stream_iter = await perform_chat_api_call_async(**call_params)
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, LLMQuotaExceededError):
                 raise
             except Exception:  # noqa: BLE001 - arbitrary adapter failures are untrusted
                 raise_detached_error(_messages_upstream_http_exception())
@@ -2137,7 +2203,7 @@ async def _handle_messages(
             if converted_payload is None:
                 raise ValueError("Invalid converted-provider response")
             converted_response = JSONResponse(converted_payload)
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, LLMQuotaExceededError):
             raise
         except Exception:  # noqa: BLE001 - arbitrary adapter failures are untrusted
             raise_detached_error(_messages_upstream_http_exception())
@@ -2184,7 +2250,7 @@ async def _handle_count_tokens(
 
         base_url = _resolve_messages_base_url(provider, app_config_override)
         url = _join_messages_endpoint(base_url, "/messages/count_tokens")
-        payload = _prepare_native_payload(request_data, model=model)
+        payload = _prepare_native_payload(request_data, model=model, provider=provider)
         timeout = _resolve_native_timeout(provider, app_config_override)
         headers = _build_native_headers(
             provider,

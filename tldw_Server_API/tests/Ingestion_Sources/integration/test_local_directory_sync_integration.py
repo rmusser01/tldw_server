@@ -175,8 +175,8 @@ async def test_local_directory_rescan_applies_create_change_and_delete_for_notes
             note["title"]: note
             for note in notes_db.list_notes(limit=20)
         }
-        assert active_notes["Alpha"]["content"] == "# Alpha\n\nupdated alpha body"
-        assert active_notes["Gamma"]["content"] == "# Gamma\n\nnew gamma body"
+        assert active_notes["Alpha"]["content"] == "# Alpha\n\nupdated alpha body\n"
+        assert active_notes["Gamma"]["content"] == "# Gamma\n\nnew gamma body\n"
 
         deleted_notes = {
             str(note["id"]): note

@@ -31,9 +31,9 @@ Task 10 release-gate slice from the unified onboarding plan. Add or update E2E c
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Closed as fulfilled by replacement verification tasks TASK-499 and TASK-500. TASK-499 added Playwright E2E coverage and recorded focused backend/frontend/E2E/Bandit/diff verification. TASK-500 resolved the broader setup audio release-gate failures and recorded the final full setup/config gate: 324 passed, 4 warnings, Bandit 0 findings, git diff --check clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

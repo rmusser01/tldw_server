@@ -42,9 +42,7 @@ class DefaultFetchClient:
     def fetch(self, request: FetchRequest) -> FetchResponse:
         """Fetch a normalized response for supported Web_Scraping requests."""
         if request.method != "GET":
-            raise BadRequestError(
-                "DefaultFetchClient only supports GET requests in Phase 2"
-            )
+            raise BadRequestError("DefaultFetchClient only supports GET requests in Phase 2")
 
         started = time.monotonic()
         if request.max_response_bytes is not None:

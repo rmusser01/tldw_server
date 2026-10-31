@@ -46,14 +46,14 @@ Move only the covered media and audio router specs onto the shared lazy Imported
 
 ## Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Red check: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "media_audio_router_attr_lookup" -q` failed before implementation because selected media/audio router attributes were resolved during spec construction.
 - Green focused check: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "media_audio_router_attr_lookup" -q` passed with `1 passed`.
 - Green full/adjacent checks: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -q` passed with `46 passed`; `python -m pytest tldw_Server_API/tests/Services/test_main_router_contract.py -q` passed with `6 passed`; `python -m pytest tldw_Server_API/tests/Services/test_openapi_contracts.py -q` passed with `69 passed`.
 - Security and hygiene: `python -m bandit -r tldw_Server_API/app/api/v1/router_groups/content.py -f json -o /tmp/bandit_phase2_2_media_audio_router_conditionals_e.json` reported `0 results` and `0 errors`; `git diff --check` passed.
 - Documentation: no user-facing docs required for this internal router registration refactor.
 - Known skips or blockers: audio router specs still respect `audio_imports_enabled_for_runtime()`, so explicit pytest runs keep the existing no-audio-by-default behavior unless `MINIMAL_TEST_INCLUDE_AUDIO=1` is set.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -50,7 +50,6 @@ Create a follow-on staged remediation design for /knowledge after TASK-528, base
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-06-07: Drafted follow-on Knowledge QA trust remediation design against rebased origin/dev baseline 922f61459c. Review pass tightened canonical trust states with unknown_trust, bounded stages 1-6 citation relevance, export behavior for degraded/unknown answers, and Stage 7 non-blocking scope. Verification so far: git diff --check passed; ASCII scan returned no matches. Awaiting user approval before implementation planning.
 2026-06-07 review pass 2: Found and addressed spec handoff risks before implementation planning: web fallback origin was not first-class, trust-state normalization could diverge across surfaces, Stage 2 citation-jump ownership was ambiguous, live-vs-mocked UAT fixture boundaries needed clarification, and the TASK-528 WXT extension runtime E2E blocker needed explicit release-gate treatment. Verification after patch: git diff --check passed; ASCII scan returned no matches.
@@ -58,10 +57,9 @@ Create a follow-on staged remediation design for /knowledge after TASK-528, base
 2026-06-07: User approved continuing after spec review. Proceeding to implementation planning and child task decomposition from the reviewed design.
 2026-06-07: Created child implementation plan series for TASK-2279.1 through TASK-2279.9 and linked each child task to its plan. Plans cover baseline reconciliation, trust taxonomy, evidence materialization, citation enforcement, extension reliability, scoped search, export/history, live UAT gates, and non-blocking evidence workflow improvements.
 2026-06-07 implementation-plan review: Local review found and fixed two plan handoff issues: Stage 4 now explicitly creates the missing unified-rag request-builder test file, and Stage 1A avoids a trustState/types.ts circular type dependency by placing the public trust-state type in types.ts and the normalizer in trustState.ts.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 2026-06-07 post-rebase hygiene: origin/dev advanced to 1d752415d3 and introduced a separate upstream TASK-2278 for Research Workspace Mermaid work. Renumbered this Knowledge QA follow-on task tree to TASK-2279 and updated child task, spec, and plan references accordingly.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

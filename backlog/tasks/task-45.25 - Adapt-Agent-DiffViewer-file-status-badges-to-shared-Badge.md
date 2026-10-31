@@ -33,7 +33,7 @@ Migrate Agent DiffViewer FileStatusBadge from local span styling to the shared d
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started after verifying PR #1403 merged into dev at 739b1a2b52b71132e4339bf4ac69621488977c36. New isolated worktree: .worktrees/design-system-agent-file-status-badge on branch codex/design-system-agent-file-status-badge. Remaining local-status-badge baseline entries include Agent/DiffViewer, Agent/SessionHistoryPanel, Layouts/ConnectionStatus, PresentationStudioStatusBadge, SyncStatusBadge, and Sidepanel/Chat StatusDot; this slice targets Agent/DiffViewer only.
 
 Red evidence: bunx vitest run src/components/Agent/__tests__/DiffViewer.file-status-badge.test.tsx --reporter=dot failed after dependency bootstrap because NEW was not inside data-ds-component="Badge".
@@ -45,7 +45,7 @@ Verification: bunx vitest run src/components/Agent/__tests__/DiffViewer.file-sta
 TypeScript caveat: bunx tsc --noEmit --pretty false still fails on existing repo-wide frontend baseline errors, but filtering the output for DiffViewer, DiffViewer.file-status-badge, and design-system-product-state-baseline returned no touched-file errors.
 
 Bandit: skipped because this slice only changes TypeScript/TSX, JSON, and Backlog metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

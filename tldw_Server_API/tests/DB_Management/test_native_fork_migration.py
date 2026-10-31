@@ -27,6 +27,7 @@ pytestmark = pytest.mark.integration
 def test_upgrade_reopen_preserves_chat_and_installs_native_storage(
     backend_name: str, request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Upgrade genuine prior native storage through the current registered schema."""
     kwargs = {"db_path": str(tmp_path / "native.sqlite"), "client_id": "alice"}
     if backend_name == "postgres":
         kwargs["backend"] = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
@@ -41,12 +42,16 @@ def test_upgrade_reopen_preserves_chat_and_installs_native_storage(
     for _ in range(2):
         upgraded = CharactersRAGDB(**kwargs)
         assert upgraded.execute_query("SELECT content FROM messages WHERE id = ?", (mid,)).fetchone()["content"] == "keep this turn"
-        expected_version = 77 if backend_name == "postgres" else 73
+        expected_version = (
+            CharactersRAGDB._POSTGRES_SCHEMA_VERSION if backend_name == "postgres"
+            else CharactersRAGDB._CURRENT_SCHEMA_VERSION
+        )
         assert upgraded.execute_query(
             "SELECT version FROM db_schema_version WHERE schema_name = ?", (CharactersRAGDB._SCHEMA_NAME,)
         ).fetchone()["version"] == expected_version
         for table in NATIVE_TABLES:
             assert upgraded.backend.table_exists(table)
+        assert upgraded.execute_query("SELECT role FROM native_chat_asset_references").fetchall() == []
         workspace_columns = (
             {row["column_name"] for row in upgraded.execute_query(
                 "SELECT column_name FROM information_schema.columns WHERE table_name = 'workspaces'"
@@ -206,6 +211,7 @@ def test_colliding_native_lineage_preserves_receipts_or_rolls_back(
                 try:
                     assert dict(upgraded.execute_query("SELECT * FROM native_chat_operations").fetchone()) == receipt
                     assert dict(upgraded.execute_query("SELECT * FROM conversation_history_projections").fetchone()) == projection
+                    assert upgraded.execute_query("SELECT role FROM native_chat_asset_references").fetchall() == []
                     workspace = upgraded.execute_query("SELECT * FROM workspaces WHERE id = ?", ("workspace",)).fetchone()
                     assert workspace["native_chat_admission_closed"]
                     assert workspace["assistant_defaults_explicit_none"]
@@ -216,11 +222,51 @@ def test_colliding_native_lineage_preserves_receipts_or_rolls_back(
                     )) == ("native-fork-v1", "native_fork_v1", "operation", '{"preserved":true}')
                     assert child["assistant_startup_json"] is None
                     assert upgraded.execute_query("SELECT version FROM db_schema_version").fetchone()["version"] == (
-                        77 if backend_name == "postgres" else 73
+                        CharactersRAGDB._POSTGRES_SCHEMA_VERSION if backend_name == "postgres"
+                        else CharactersRAGDB._CURRENT_SCHEMA_VERSION
                     )
                 finally:
                     upgraded.close_connection()
     finally:
         old.close_connection()
+        if backend_name == "postgres":
+            kwargs["backend"].get_pool().close_all()
+
+
+@pytest.mark.parametrize("backend_name", ["sqlite", "postgres"])
+def test_quota_descriptor_upgrade_preserves_existing_intent_and_chat(
+    backend_name: str, request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The registered prior-version upgrade retains intents with unknown legacy identity."""
+    from tldw_Server_API.tests.DB_Management.test_native_chat_asset_io import _reserve
+
+    kwargs: dict[str, Any] = {"db_path": str(tmp_path / "quota-upgrade.sqlite"), "client_id": "1", "owner_user_id": "1"}
+    if backend_name == "postgres":
+        kwargs["backend"] = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
+    with monkeypatch.context() as patch:
+        patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 78)
+        patch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 82)
+        old = CharactersRAGDB(**kwargs)
+        conversation = old.add_conversation({"character_id": 1, "title": "Preserve quota upgrade"})
+        message = old.add_message({"conversation_id": conversation, "sender": "user", "content": "Existing turn"})
+        _reserve(old)
+        intent = dict(old.execute_query("SELECT * FROM native_chat_quota_intents").fetchone())
+        assert "quota_owner_json" not in intent
+        old.close_connection()
+    try:
+        for _ in range(2):
+            upgraded = CharactersRAGDB(**kwargs)
+            try:
+                assert dict(upgraded.execute_query("SELECT * FROM native_chat_quota_intents").fetchone()) == intent | {"quota_owner_json": None}
+                assert upgraded.execute_query("SELECT content FROM messages WHERE id = ?", (message,)).fetchone()["content"] == "Existing turn"
+                assert upgraded.execute_query(
+                    "SELECT version FROM db_schema_version WHERE schema_name = ?", (upgraded._SCHEMA_NAME,)
+                ).fetchone()["version"] == (
+                    CharactersRAGDB._POSTGRES_SCHEMA_VERSION if backend_name == "postgres"
+                    else CharactersRAGDB._CURRENT_SCHEMA_VERSION
+                )
+            finally:
+                upgraded.close_connection()
+    finally:
         if backend_name == "postgres":
             kwargs["backend"].get_pool().close_all()

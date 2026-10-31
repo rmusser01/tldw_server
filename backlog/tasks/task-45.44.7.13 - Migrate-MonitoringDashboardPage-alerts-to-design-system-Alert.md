@@ -45,9 +45,9 @@ Migrate MonitoringDashboardPage admin guard, system, sandbox diagnostics, and st
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added focused MonitoringDashboardPage regression coverage for access denied, not-available, missing system data, host-local sandbox warning, empty sandbox diagnostics, sandbox diagnostics error, empty alert rules, and empty activity feedback. RED evidence: `bunx vitest run src/components/Option/Admin/__tests__/MonitoringDashboardPage.test.tsx --reporter=dot` failed with 8 expected missing `data-ds-component="Alert"` ancestor assertions before production code changed. Migrated MonitoringDashboardPage AntD Alert usage to the design-system Alert primitive while preserving existing copy and alert urgency roles. Removed the seven MonitoringDashboardPage product-state baseline exceptions. GREEN evidence: focused Vitest passed 1 file / 15 tests. Guard evidence: product-state guard Vitest passed 1 file / 54 tests. Full verifier evidence: `bun run verify:design-system-state` passed with baseline exceptions 118. TypeScript evidence: `env NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` passed. Whitespace evidence: `git diff --check` and `git diff --cached --check` passed. Bandit skipped because this slice touched only TypeScript/TSX UI, JSON baseline, and Backlog markdown.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -2,188 +2,55 @@ import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 from tldw_Server_API.app.api.v1.schemas import chat_request_schemas
+from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     LLMProviderOverride,
     set_llm_provider_overrides_cache_for_tests,
 )
-from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
+from tldw_Server_API.app.core.Chat import chat_service
+from tldw_Server_API.app.core.LLM_Calls import gateway
+from tldw_Server_API.tests.helpers.provider_keys import api_keys_source
 
 
-def test_resolver_prefers_module_keys_in_tests(monkeypatch):
-
-
+@pytest.mark.parametrize("prefer_module_keys_in_tests", [True, False])
+def test_resolver_reads_what_production_reads_under_pytest_and_test_mode(monkeypatch, prefer_module_keys_in_tests):
+    """TASK-13950.13: no API_KEYS override from the schema or endpoint module, whatever the test flags."""
     monkeypatch.setenv("PYTEST_CURRENT_TEST", "chat/test")
-    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-
     monkeypatch.setattr(chat_request_schemas, "API_KEYS", {"openai": "module-test-key"}, raising=False)
     monkeypatch.setattr(chat_endpoint, "API_KEYS", {"openai": "module-test-key"}, raising=False)
-    monkeypatch.setattr(chat_request_schemas, "get_api_keys", lambda: {"openai": "env-key"})
+    monkeypatch.setattr(config_llm_providers, "get_api_keys", lambda: {"openai": "env-key"})
 
-    assert chat_request_schemas.API_KEYS.get("openai") == "module-test-key"
-    assert chat_request_schemas.get_api_keys().get("openai") == "env-key"
+    key, debug = gateway.resolve_provider_api_key("openai", prefer_module_keys_in_tests=prefer_module_keys_in_tests)
 
-    resolved_key, debug_info = resolve_provider_api_key("openai")
-
-    assert debug_info["selected_source"] == "module_override"
-    assert resolved_key == "module-test-key", debug_info
-    assert debug_info["test_flags"]["pytest"] is True
+    assert (key, debug["selected_source"]) == ("env-key", "config")
+    assert "module_sources" not in debug and "test_flags" not in debug
 
 
-def test_resolver_test_module_key_skips_provider_override_lookup(monkeypatch):
-    """An exact test-module key must not depend on process-global override state."""
-    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides
-
-    monkeypatch.setenv("PYTEST_CURRENT_TEST", "chat/test")
-    monkeypatch.delenv("TEST_MODE", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setattr(
-        chat_request_schemas,
-        "API_KEYS",
-        {"openai": "module-test-key"},
-        raising=False,
-    )
-    monkeypatch.setattr(
-        chat_endpoint,
-        "API_KEYS",
-        {"openai": "module-test-key"},
-        raising=False,
-    )
-    monkeypatch.setattr(
-        chat_request_schemas,
-        "get_api_keys",
-        lambda: {"openai": "env-key"},
-    )
-    monkeypatch.setattr(
-        llm_provider_overrides,
-        "get_llm_provider_override",
-        lambda _provider: pytest.fail("test module key must skip override lookup"),
-    )
-
-    resolved_key, debug_info = resolve_provider_api_key("openai")
-
-    assert resolved_key == "module-test-key"
-    assert debug_info["selected_source"] == "module_override"
+def test_the_old_paths_are_the_moved_objects():
+    assert chat_service.resolve_provider_api_key is gateway.resolve_provider_api_key
+    # Temporary, until TASK-13950.14 deletes the re-export (its Task 5 removes this assertion).
+    assert chat_request_schemas.get_api_keys is config_llm_providers.get_api_keys
+    assert chat_request_schemas.ALL_SUPPORTED_PROVIDER_NAMES_LIST is config_llm_providers.ALL_SUPPORTED_PROVIDER_NAMES_LIST
+    assert not hasattr(chat_service, "resolve_static_provider_fallback")
 
 
-@pytest.mark.parametrize(
-    ("module_value", "expected_key"),
-    [
-        ("module-test-key", "module-test-key"),
-        ("", None),
-    ],
-)
-def test_static_fallback_preserves_test_module_override_without_dynamic_config_read(
-    monkeypatch,
-    module_value,
-    expected_key,
-):
-    """Legacy test module keys remain authoritative without a config reload."""
-    from tldw_Server_API.app.core.Chat import chat_service
+def test_api_keys_source_layers_test_keys_over_the_real_source(monkeypatch):
+    monkeypatch.setattr(config_llm_providers, "get_api_keys", lambda: {"openai": "env-key", "groq": "groq-key"})
+    monkeypatch.setattr(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key", "anthropic": None}))
 
-    monkeypatch.setenv("PYTEST_CURRENT_TEST", "chat/test")
-    monkeypatch.delenv("TEST_MODE", raising=False)
-    monkeypatch.setattr(
-        chat_request_schemas,
-        "API_KEYS",
-        {"openai": module_value},
-        raising=False,
-    )
-    monkeypatch.setattr(
-        chat_endpoint,
-        "API_KEYS",
-        {"openai": module_value},
-        raising=False,
-    )
-    monkeypatch.setattr(
-        chat_request_schemas,
-        "get_api_keys",
-        lambda: pytest.fail("dynamic API key config must not be read"),
-    )
-    monkeypatch.setattr(
-        chat_service,
-        "resolve_static_server_fallback",
-        lambda _provider: pytest.fail("module override must short-circuit static config"),
-        raising=False,
-    )
-
-    fallback = chat_service.resolve_static_provider_fallback("openai")
-
-    assert fallback.api_key == expected_key
-    assert fallback.credential_fields == {}
-    assert fallback.app_config == {}
-
-
-def test_resolver_ignores_module_keys_outside_tests(monkeypatch):
-
-
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-    monkeypatch.delenv("TEST_MODE", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-
-    monkeypatch.setattr(chat_request_schemas, "API_KEYS", {"openai": "module-test-key"}, raising=False)
-    monkeypatch.setattr(chat_endpoint, "API_KEYS", {"openai": "module-test-key"}, raising=False)
-    monkeypatch.setattr(chat_request_schemas, "get_api_keys", lambda: {"openai": "env-key"})
-
-    set_llm_provider_overrides_cache_for_tests({})
-    try:
-        resolved_key, debug_info = resolve_provider_api_key("openai")
-
-        assert resolved_key == "env-key"
-        assert debug_info["selected_source"] != "module_override"
-    finally:
-        set_llm_provider_overrides_cache_for_tests({})
-
-
-def test_resolver_can_skip_module_preference(monkeypatch):
-
-
-    monkeypatch.setenv("PYTEST_CURRENT_TEST", "chat/test")
-    monkeypatch.delenv("TEST_MODE", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-
-    monkeypatch.setattr(chat_request_schemas, "API_KEYS", {"openai": "module-test-key"}, raising=False)
-    monkeypatch.setattr(chat_endpoint, "API_KEYS", {"openai": "module-test-key"}, raising=False)
-    monkeypatch.setattr(chat_request_schemas, "get_api_keys", lambda: {"openai": "env-key"})
-
-    set_llm_provider_overrides_cache_for_tests({})
-    try:
-        resolved_key, debug_info = resolve_provider_api_key(
-            "openai",
-            prefer_module_keys_in_tests=False,
-        )
-
-        assert resolved_key == "env-key"
-        assert debug_info["selected_source"] != "module_override"
-    finally:
-        set_llm_provider_overrides_cache_for_tests({})
-
-
-def test_resolver_tldw_test_mode_y_prefers_module_keys(monkeypatch):
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-    monkeypatch.setenv("TEST_MODE", "0")
-    monkeypatch.setenv("TLDW_TEST_MODE", "y")
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-
-    monkeypatch.setattr(chat_request_schemas, "API_KEYS", {"openai": "module-test-key"}, raising=False)
-    monkeypatch.setattr(chat_endpoint, "API_KEYS", {"openai": "module-test-key"}, raising=False)
-    monkeypatch.setattr(chat_request_schemas, "get_api_keys", lambda: {"openai": "env-key"})
-
-    resolved_key, debug_info = resolve_provider_api_key("openai")
-
-    assert resolved_key == "module-test-key"
-    assert debug_info["selected_source"] == "module_override"
-    assert debug_info["test_flags"]["test_mode"] is True
+    assert gateway.resolve_provider_api_key("openai")[0] == "test-key"
+    assert gateway.resolve_provider_api_key("groq")[0] == "groq-key"
+    assert gateway.resolve_provider_api_key("anthropic")[0] is None
 
 
 def test_get_api_keys_supports_hyphenated_provider_env_vars(monkeypatch):
-
-
     monkeypatch.setenv("LOCAL_LLM_API_KEY", "local-key")
     monkeypatch.setenv("CUSTOM_OPENAI_API_KEY", "custom-key")
-    monkeypatch.setattr(chat_request_schemas, "load_and_log_configs", lambda: {})
+    monkeypatch.setattr(config_llm_providers, "load_and_log_configs", lambda: {})
 
-    keys = chat_request_schemas.get_api_keys()
+    keys = config_llm_providers.get_api_keys()
 
     assert keys.get("local-llm") == "local-key"
     assert keys.get("custom-openai-api") == "custom-key"
@@ -191,20 +58,18 @@ def test_get_api_keys_supports_hyphenated_provider_env_vars(monkeypatch):
 
 def test_get_api_keys_supports_numbered_custom_openai_env_vars(monkeypatch):
     monkeypatch.setenv("CUSTOM_OPENAI_API_KEY_99", "custom-key-99")
-    monkeypatch.setattr(chat_request_schemas, "load_and_log_configs", lambda: {})
+    monkeypatch.setattr(config_llm_providers, "load_and_log_configs", lambda: {})
 
-    keys = chat_request_schemas.get_api_keys()
+    keys = config_llm_providers.get_api_keys()
 
     assert keys.get("custom-openai-api-99") == "custom-key-99"
 
 
 def test_resolver_prefers_provider_override(monkeypatch):
-
-
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     monkeypatch.delenv("TEST_MODE", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setattr(chat_request_schemas, "get_api_keys", lambda: {"openai": "env-key"})
+    monkeypatch.setattr(config_llm_providers, "get_api_keys", lambda: {"openai": "env-key"})
 
     set_llm_provider_overrides_cache_for_tests(
         {
@@ -216,7 +81,7 @@ def test_resolver_prefers_provider_override(monkeypatch):
     )
 
     try:
-        resolved_key, debug_info = resolve_provider_api_key("openai")
+        resolved_key, debug_info = gateway.resolve_provider_api_key("openai")
         assert resolved_key == "override-key"
         assert debug_info["selected_source"] == "override"
     finally:

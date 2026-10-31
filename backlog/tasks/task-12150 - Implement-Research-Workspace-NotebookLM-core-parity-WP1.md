@@ -28,7 +28,7 @@ documentation:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented from Docs/superpowers/plans/2026-07-04-research-workspace-notebooklm-core-parity-wp1-plan.md in worktree .worktrees/research-workspace-notebooklm-wp1 on branch codex/research-workspace-notebooklm-wp1.
 
 Commits:
@@ -46,7 +46,7 @@ Verification passed: bunx vitest run ../packages/ui/src/components/Option/Resear
 Verification caveat: bun run typecheck failed on pre-existing unrelated errors outside touched WP1 files: AudioStudio/TimelineEditor, ScheduledTasks editor/control-plane, Skills Manager, mcp-hub, voice-cloning, and e2e fixtures. No WP1 touched file was listed.
 
 Bandit: skipped for final touched scope because changes are frontend TS/TSX/test and Backlog markdown only; no Python files were touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

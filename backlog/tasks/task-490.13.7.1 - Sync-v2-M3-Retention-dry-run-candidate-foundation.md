@@ -45,9 +45,9 @@ Implement the first Stage 7 slice: a dry-run-only retention candidate calculator
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the Stage 7 dry-run-only retention candidate foundation. Added red/green coverage for unacknowledged active devices, acknowledged eligible superseded envelopes, restore-window blockers, tombstone hold-window blockers, audit-mode blockers, active blob references, redacted HTTP responses, and no-mutation guarantees. The implementation reports envelope_compaction, tombstone_prune, and blob_gc candidates with stable blocker codes, treats latest tombstones as owning the object retention chain, and never mutates envelopes, materialized state, keys, devices, or blobs.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

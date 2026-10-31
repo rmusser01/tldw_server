@@ -43,7 +43,7 @@ Continue issue #1116 Phase 2.2 by converting the next small set of minimal-test 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started after PR #1305 merge was verified at merge commit 67d13e1bc6621c3cd37e387eeea06dda657b07a5. Worktree: /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/phase2-2-minimal-experience-router-conditionals-ag. Branch: codex/phase2-2-minimal-experience-router-conditionals-ag.
 
 Implemented the minimal experience/support router tranche. Added a red/green focused contract test proving sharing, personalization, and companion defer router attribute lookup until ImportedRouterSpec resolution. Converted only those three eager try/import blocks while preserving prefixes, tags, empty route_key, default_stable=True, and minimal skip context.
@@ -61,7 +61,7 @@ Review follow-up verification: focused selection experience_attr_lookup or raise
 Reopened after explicit user instruction to implement the review suggestion for PR #1307. Scope: sharing, personalization, companion in minimal.py. Plan is to add regression coverage for broad import failure skipping first, verify it fails, then set skip_exceptions=(Exception,) on the three ImportedRouterSpec definitions.
 
 User-directed review implementation completed: sharing, personalization, and companion now explicitly set skip_exceptions=(Exception,) to preserve the prior minimal-test try/except Exception behavior while keeping imports lazy. Added regression coverage proving RuntimeError import failures are skipped during registration for those three specs. Verification: focused selection experience_attr_lookup or experience_runtime_import_failures failed red before the source change and passed after implementation; full test_router_groups_contract.py passed with 77 tests; Bandit on minimal.py reported 0 results and 0 errors; git diff --check was clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

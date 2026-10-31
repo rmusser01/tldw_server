@@ -68,13 +68,13 @@ Implement the #1473 ACP frontend UX workstream in the isolated ACP productioniza
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Current UX contract findings: Agent Tasks already detects missing orchestration routes but only shows a generic unsupported message and duplicates auth/URL handling. ACP Playground and Agent Registry already use the shared ACP connection helpers. Backend #1475 exposes GET /api/v1/agent-orchestration/tasks/{task_id} with enriched runs, session links, history, failure_context, diagnostics, artifacts, and review_decision; Agent Tasks currently does not consume that drill-through contract.
 
 Implemented shared ACP readiness normalization in apps/packages/ui/src/services/acp/readiness.ts, wired Agent Tasks to /api/v1/acp/health with setup-gap guidance, reused shared ACP auth/transport helpers across Agent Tasks and Agent Registry, added task detail drill-through diagnostics from GET /api/v1/agent-orchestration/tasks/{task_id}, and connected setup links to Agent Registry and ACP Playground. Added focused Vitest coverage and targeted Playwright coverage for the setup/run/diagnose path. Bandit is not applicable for this #1473 slice because only frontend TypeScript, E2E, docs, and Backlog files were touched.
 
 GitHub issue #1473 updated with implementation summary and verification evidence: https://github.com/rmusser01/tldw_server/issues/1473#issuecomment-4414319018. Known skip: Bandit not run because this workstream changed frontend TypeScript, E2E, docs, and Backlog files only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

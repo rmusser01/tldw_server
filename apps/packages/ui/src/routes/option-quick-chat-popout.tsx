@@ -1,17 +1,17 @@
+import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import React, { useEffect, useRef, useState } from "react"
 import { Select, Segmented } from "antd"
-import { useQuery } from "@tanstack/react-query"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { useQuickChatStore } from "@/store/quick-chat"
 import { useQuickChat } from "@/hooks/useQuickChat"
-import { fetchChatModels } from "@/services/tldw-server"
 import { QuickChatMessage as QuickChatMessageView } from "@/components/Common/QuickChatHelper/QuickChatMessage"
 import { QuickChatInput } from "@/components/Common/QuickChatHelper/QuickChatInput"
 import { AlertCircle } from "lucide-react"
 import { useChatModelsSelect } from "@/hooks/useChatModelsSelect"
 import { QuickChatGuidesPanel } from "@/components/Common/QuickChatHelper/QuickChatGuidesPanel"
 import { parseQuickChatPopoutState } from "@/components/Common/QuickChatHelper/popout-state"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 
 const QuickChatPopout: React.FC = () => {
   const { t } = useTranslation(["option", "common"])
@@ -36,16 +36,9 @@ const QuickChatPopout: React.FC = () => {
   const {
     data: modelsData,
     isLoading: modelsLoading,
-    isError: modelsError
-  } = useQuery({
-    queryKey: ["quickChatModels"],
-    queryFn: () => fetchChatModels({ returnEmpty: true }),
-    staleTime: 5 * 60 * 1000,
-    gcTime: 5 * 60 * 1000,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    select: (data) => data.filter((model) => model?.model)
-  })
+    isError: modelsError,
+    refetch: retryModels
+  } = useChatModelCatalog()
   const models = modelsData ?? []
   const showModelsError = modelsError && models.length === 0
   const modelsErrorHintId = "quick-chat-models-error-hint"
@@ -92,7 +85,7 @@ const QuickChatPopout: React.FC = () => {
   // Scroll to bottom when messages change
   useEffect(() => {
     if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" })
+      messagesEndRef.current.scrollIntoView({ behavior: smoothScrollBehavior() })
     }
   }, [messages])
 
@@ -188,7 +181,8 @@ const QuickChatPopout: React.FC = () => {
         {showModelsError && (
           <div
             className="mt-2 flex items-center gap-2 text-xs text-warn"
-            id={modelsErrorHintId}>
+            id={modelsErrorHintId}
+            role="alert">
             <AlertCircle className="h-4 w-4" />
             <span>
               {t(
@@ -196,6 +190,9 @@ const QuickChatPopout: React.FC = () => {
                 "Check your server connection, then try again."
               )}
             </span>
+            <button type="button" className="underline min-h-[44px]" onClick={() => { void retryModels() }}>
+              {t("playground:characterChatReadiness.model.retryAction", "Try again")}
+            </button>
           </div>
         )}
         <div className="mt-2">

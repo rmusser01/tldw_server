@@ -41,7 +41,7 @@ async def _activate_admin_after_membership(users_db, user_id: int) -> None:
     """Enable admin login only after canonical membership is verified."""
     try:
         await _ensure_admin_role_membership(user_id)
-        await users_db.update_user(user_id, is_active=True, is_superuser=True)
+        await users_db.update_user(user_id, is_active=True, is_superuser=True, is_verified=True)
     except Exception:
         with contextlib.suppress(Exception):
             await users_db.update_user(user_id, is_active=False, is_superuser=False)

@@ -38,7 +38,7 @@ Docs/superpowers/plans/2026-06-23-logging-module-review-fixes.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Touched files:
 - `Docs/superpowers/plans/2026-06-23-logging-module-review-fixes.md`
 - `backlog/tasks/task-12005 - Harden-Logging-module-review-findings.md`
@@ -62,27 +62,7 @@ Verification:
 - Addressed Qodo review comments: added docstrings and type hints for new helpers/tests, wrapped the traceparent regex, added pytest markers for touched tests, made `_log_sink` resilient to enqueue failures, persisted the file queue/worker across reloads, and expanded dedupe keys with tenant/correlation fields.
 
 Known skips/blockers: full repository pytest was not run; the focused Logging and formatter tests cover the reviewed module scope. Backlog CLI/MCP was unavailable for task creation because the CLI index referenced a missing task file, so this task was created manually with user approval.
-<!-- SECTION:NOTES:END -->
 
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Hardened the Logging module and addressed the latest PR review pass: system-log redaction now treats sensitive structured keys as secrets, internal diagnostics avoid raw exception text, dedupe keys include `event`, UTC formatter coverage uses exact output, sink tests cover structured secret extras, and traceparent tests cover mixed-case normalization. Focused Logging/formatter tests, Ruff, compileall, Bandit, and diff whitespace checks passed.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-## Definition of Done
-<!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
-<!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Reopened to rebase PR #2487 on latest `dev` and address the new CodeRabbit review comments on commit `824bc1d5a748295cf311fbdf99b25b4d65df4cf5`.
 Follow-up PR #2487 pass after rebasing on latest `origin/dev`:
 - Addressed CodeRabbit comments by redacting values for sensitive structured extra keys, omitting raw exception text from internal diagnostics, adding `event` to system-log dedupe keys, asserting exact UTC JSON formatter output, covering structured-secret redaction through the Loguru sink helper, and covering mixed-case traceparent normalization.
@@ -99,3 +79,19 @@ Final review-thread cleanup: added short docstrings to touched private system-lo
 - Verification after docstring cleanup: `source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Logging -f json -o /tmp/bandit_logging_task_12005_rebase_comments_docstrings.json` passed with 0 results and 0 errors.
 - Verification after docstring cleanup: `git diff --check` passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Hardened the Logging module and addressed the latest PR review pass: system-log redaction now treats sensitive structured keys as secrets, internal diagnostics avoid raw exception text, dedupe keys include `event`, UTC formatter coverage uses exact output, sink tests cover structured secret extras, and traceparent tests cover mixed-case normalization. Focused Logging/formatter tests, Ruff, compileall, Bandit, and diff whitespace checks passed.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->

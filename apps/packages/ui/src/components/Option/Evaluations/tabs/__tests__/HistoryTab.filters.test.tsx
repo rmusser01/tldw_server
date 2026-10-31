@@ -5,6 +5,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { HistoryTab } from "../HistoryTab"
 
 const fetchSpy = vi.fn()
+const setSearchParams = vi.fn()
+vi.mock("react-router-dom", () => ({
+  useSearchParams: () => [new URLSearchParams("tab=history&runId=run-old&recipeRunId=recipe-old&scope=keep"), setSearchParams]
+}))
 const fetchHistoryState = {
   mutate: fetchSpy,
   isPending: false,
@@ -166,11 +170,23 @@ describe("HistoryTab filters and rendering", () => {
       target: { value: "user_456" }
     })
 
-    expect(screen.getByText("Unavailable")).toBeInTheDocument()
+    expect(screen.getByText("Error")).toBeInTheDocument()
     expect(screen.getByText("Unable to fetch history")).toBeInTheDocument()
     expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
       "/api/v1/evaluations/history"
     )
     expect(screen.getByTestId("history-user-filter")).toHaveValue("user_456")
   })
+  it("opens the history evaluation's runs and clears unrelated stale run identities", () => {
+    render(<HistoryTab />)
+    fireEvent.click(screen.getByRole("button", { name: "View runs" }))
+    expect(setSearchParams).toHaveBeenCalledOnce()
+    const next = setSearchParams.mock.calls[0][0] as URLSearchParams
+    expect(next.get("tab")).toBe("runs")
+    expect(next.get("evaluationId")).toBe("eval-123")
+    expect(next.has("runId")).toBe(false)
+    expect(next.has("recipeRunId")).toBe(false)
+    expect(next.get("scope")).toBe("keep")
+  })
+
 })

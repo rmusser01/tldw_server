@@ -255,6 +255,7 @@ async def test_paused_definition_skips_with_reason(consumer_env) -> None:
     run = sdb.get_scheduled_task_run_by_slot(
         definition_id=definition.id, run_slot_key=SLOT
     )
+    assert run is not None  # nosec B101
     assert run is not None
     assert run["status"] == "skipped"
     assert run["error"] == "definition_paused"
@@ -418,7 +419,7 @@ async def test_queued_agent_job_is_blocked_before_registered_executor(
 
 
 @pytest.mark.asyncio
-async def test_tool_requesting_config_skips_with_actionable_reason(consumer_env) -> None:
+async def test_tool_requesting_config_terminates_approval_required(consumer_env) -> None:
     user_id = 1014
     definition = _create_definition(
         user_id, input_config={"question": "q", "tools": ["fs_read", "http_fetch"]}
@@ -427,16 +428,294 @@ async def test_tool_requesting_config_skips_with_actionable_reason(consumer_env)
 
     result = await handle_agent_task_job(_job(definition, user_id))
 
-    assert result["status"] == "skipped"
+    # ADR-184 2A: a terminal outcome with a pass-back notification, not a
+    # skip -- the read-only envelope routes here until it exists.
+    assert result["status"] == "approval_required"
     sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
     run = sdb.get_scheduled_task_run_by_slot(
         definition_id=definition.id, run_slot_key=SLOT
     )
-    assert run["error"] == "tools_not_executable_in_phase1"
-    assert "approval-escalation" in (run["result_summary"] or "")
+    assert run is not None  # nosec B101
+    assert run["status"] == "approval_required"
+    assert run["error"] == "tools_require_read_only_envelope"
+    assert "read-only tool envelope" in (run["result_summary"] or "")
+    # ADR-184 2A invariants (review of #3042): a policy boundary is not a
+    # failure -- health must NOT degrade -- and the pass-back notification
+    # must carry the approval kind specifically (a kind-map typo would
+    # otherwise pass silently).
+    sdb_definitions = ScheduledTasksDatabase.for_user(user_id=user_id)
+    pinned = sdb_definitions.get_definition(owner_id=user_id, definition_id=definition.id)
+    assert pinned is not None  # nosec B101
+    assert pinned.health == "ready"
+    notification = _latest_notification(user_id)
+    assert notification is not None  # nosec B101
+    assert str(getattr(notification, "kind", "")) == "automation_run_approval_required"
 
 
 @pytest.mark.asyncio
+@pytest.mark.asyncio
+async def test_approval_required_slot_replays_on_redelivery(consumer_env) -> None:
+    user_id = 1015
+    definition = _create_definition(
+        user_id, input_config={"question": "q", "tools": ["fs_read"]}
+    )
+    first = await handle_agent_task_job(_job(definition, user_id))
+    assert first["status"] == "approval_required"
+
+    second = await handle_agent_task_job(_job(definition, user_id))
+
+    # Terminal replay, not a claim-busy error and not a second outcome.
+    assert second["status"] == "approval_required"
+    assert second["run_id"] == first["run_id"]
+    assert second.get("deduped") is True
+
+
+# ---------------------------------------------------------------------------
+# Read-only envelope routing (ADR-184 task 4)
+# ---------------------------------------------------------------------------
+
+
+def _agent_task_job_env(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    eligible_entries: list[dict[str, Any]] | None = None,
+) -> AsyncMock:
+    """Patch the gate's routing-only derivation where it is imported."""
+    derivation = AsyncMock(
+        return_value=eligible_entries
+        if eligible_entries is not None
+        else [{"name": "media_search", "module": "media"}]
+    )
+    monkeypatch.setattr(agent_task_jobs, "derive_read_only_eligible_tools", derivation)
+    return derivation
+
+
+@pytest.mark.asyncio
+async def test_gate_routes_agent_task_readonly_tools_to_envelope(
+    consumer_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """agent_task + every requested name read-only eligible -> executor dispatch.
+
+    The payload carries ``_envelope_eligible`` (sorted eligible names) as an
+    audit hint; the run executes and succeeds instead of terminating
+    approval_required at the gate.
+    """
+    user_id = 1040
+    definition = _create_definition(
+        user_id,
+        family="agent_task",
+        input_config={
+            "agent_ref": "agent:triage",
+            "message_ref": "redacted:example",
+            "tools": ["media_search"],
+        },
+    )
+    derivation = _agent_task_job_env(monkeypatch)
+    captured: list[dict[str, Any]] = []
+
+    async def spy(d: DefinitionRow, p: dict[str, Any]) -> str:
+        captured.append(p)
+        return "done"
+
+    register_executor("agent_task", spy)
+
+    result = await handle_agent_task_job(
+        _job(definition, user_id),
+        execution_certification_resolver=_certified_execution,
+        execution_stack_ready_resolver=lambda: True,
+    )
+
+    assert result["status"] == "succeeded"
+    derivation.assert_awaited_once_with(user_id)
+    assert [p.get("_envelope_eligible") for p in captured] == [["media_search"]]
+    sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
+    run = sdb.get_scheduled_task_run_by_slot(
+        definition_id=definition.id, run_slot_key=SLOT
+    )
+    assert run is not None  # nosec B101
+    assert run["status"] == "succeeded"
+    assert run["result_summary"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_gate_keeps_approval_required_for_out_of_set_agent_task_tools(
+    consumer_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An agent_task requesting a name outside the eligible set stays terminal."""
+    user_id = 1041
+    definition = _create_definition(
+        user_id,
+        family="agent_task",
+        input_config={
+            "agent_ref": "agent:triage",
+            "message_ref": "redacted:example",
+            "tools": ["media_search", "notes_write"],
+        },
+    )
+    _agent_task_job_env(monkeypatch)
+    executor = AsyncMock(return_value="must not execute")
+    register_executor("agent_task", executor)
+
+    result = await handle_agent_task_job(
+        _job(definition, user_id),
+        execution_certification_resolver=_certified_execution,
+        execution_stack_ready_resolver=lambda: True,
+    )
+
+    assert result["status"] == "approval_required"
+    executor.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_executor_approval_required_prefix_maps_to_terminal(
+    consumer_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The executor's ``approval_required:`` error prefix finishes approval_required.
+
+    Not a failed run: the envelope's classification (out-of-set tool call)
+    travels through the executor-exception path with the documented prefix,
+    records the ADR-184 error code with the note as summary, keeps health
+    ready, and delivers the approval notification kind.
+    """
+    user_id = 1042
+    definition = _create_definition(
+        user_id,
+        family="agent_task",
+        input_config={
+            "agent_ref": "agent:triage",
+            "message_ref": "redacted:example",
+            "tools": ["media_search"],
+        },
+    )
+    _agent_task_job_env(monkeypatch)
+
+    async def envelope_refusal(d: DefinitionRow, p: dict[str, Any]) -> str:
+        raise RuntimeError(
+            "approval_required: attempted non-envelope tool: notes_write"
+        )
+
+    register_executor("agent_task", envelope_refusal)
+
+    result = await handle_agent_task_job(
+        _job(definition, user_id),
+        execution_certification_resolver=_certified_execution,
+        execution_stack_ready_resolver=lambda: True,
+    )
+
+    assert result["status"] == "approval_required"
+    sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
+    run = sdb.get_scheduled_task_run_by_slot(
+        definition_id=definition.id, run_slot_key=SLOT
+    )
+    assert run is not None  # nosec B101
+    assert run["status"] == "approval_required"
+    assert run["error"] == "tools_require_read_only_envelope"
+    assert "notes_write" in (run["result_summary"] or "")
+    pinned = sdb.get_definition(owner_id=user_id, definition_id=definition.id)
+    assert pinned is not None  # nosec B101
+    assert pinned.health == "ready"
+    notification = _latest_notification(user_id)
+    assert notification is not None  # nosec B101
+    assert str(getattr(notification, "kind", "")) == "automation_run_approval_required"
+
+
+@pytest.mark.asyncio
+async def test_mcp_approval_demand_terminates_run_approval_required(
+    consumer_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end (final review F1): an MCP-side approval demand surfaced by
+    the tool-execution chain ends the run ``approval_required`` — never a
+    ``succeeded`` run that swallowed the refusal and kept looping.
+
+    Chain under test: real ``_execute_agent_task`` -> real
+    ``run_read_only_envelope`` with a faked execution seam returning one
+    approval-flagged record -> the documented error prefix -> this
+    consumer's terminal approval outcome.
+    """
+    import tldw_Server_API.app.core.Chat.tool_auto_exec as tae
+    import tldw_Server_API.app.core.Scheduled_Tasks.automation_executors as em
+
+    user_id = 1043
+    definition = _create_definition(
+        user_id,
+        family="agent_task",
+        input_config={"message_ref": "redacted:example", "tools": ["media_search"]},
+    )
+    _agent_task_job_env(monkeypatch)
+
+    class _FakeStore:
+        def resolve_message(self, owner_id: int, message_ref: str) -> str | None:
+            return "RAW_AGENT_PROMPT"
+
+    monkeypatch.setattr(
+        em.AutomationMessageStore,
+        "for_user",
+        classmethod(lambda cls, user_id: _FakeStore()),
+    )
+
+    async def _fake_derive(owner_id: int):
+        return [{"name": "media_search", "module": "media"}]
+
+    monkeypatch.setattr(em, "derive_read_only_eligible_tools", _fake_derive)
+
+    llm_calls: list[dict[str, Any]] = []
+
+    async def _fake_llm(**kwargs):
+        llm_calls.append(kwargs)
+        return {"choices": [{"message": {"content": "", "tool_calls": [
+            {"id": "c1", "type": "function",
+             "function": {"name": "media_search", "arguments": "{}"}}]}}]}
+
+    monkeypatch.setattr(em, "_envelope_llm_call", _fake_llm)
+
+    async def _approval_demand(**kwargs):
+        record = tae.ToolExecutionRecord(
+            tool_call_id="c1",
+            tool_name="media_search",
+            ok=False,
+            content='{"ok": false, "error": "approval required"}',
+            result=None,
+            approval_required=True,
+        )
+        return tae.ToolExecutionBatchResult(
+            requested_calls=1,
+            processed_calls=1,
+            execution_attempts=1,
+            executed_calls=0,
+            truncated=False,
+            results=[record],
+        )
+
+    monkeypatch.setattr(em, "_envelope_execute_calls", _approval_demand)
+
+    em.register_automation_executors()
+
+    result = await handle_agent_task_job(
+        _job(definition, user_id),
+        execution_certification_resolver=_certified_execution,
+        execution_stack_ready_resolver=lambda: True,
+    )
+
+    assert result["status"] == "approval_required"
+    sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
+    run = sdb.get_scheduled_task_run_by_slot(
+        definition_id=definition.id, run_slot_key=SLOT
+    )
+    assert run is not None  # nosec B101
+    assert run["status"] == "approval_required"
+    summary = run["result_summary"] or ""
+    assert "media_search" in summary
+    assert "approval" in summary
+    pinned = sdb.get_definition(owner_id=user_id, definition_id=definition.id)
+    assert pinned is not None  # nosec B101
+    assert pinned.health == "ready"  # approval is health-neutral
+    # The flagged record was never fed back to the model: one round only.
+    assert len(llm_calls) == 1
+    notification = _latest_notification(user_id)
+    assert notification is not None  # nosec B101
+    assert str(getattr(notification, "kind", "")) == "automation_run_approval_required"
+
+
 async def test_no_executor_fails_honestly(consumer_env) -> None:
     user_id = 1015
     definition = _create_definition(user_id)
@@ -451,6 +730,7 @@ async def test_no_executor_fails_honestly(consumer_env) -> None:
     run = sdb.get_scheduled_task_run_by_slot(
         definition_id=definition.id, run_slot_key=SLOT
     )
+    assert run is not None  # nosec B101
     assert run["error"] == "family_not_wired_for_execution:recurring_question"
 
 
@@ -479,6 +759,7 @@ async def test_execution_deadline_records_timed_out(consumer_env) -> None:
     run = sdb.get_scheduled_task_run_by_slot(
         definition_id=definition.id, run_slot_key=SLOT
     )
+    assert run is not None  # nosec B101
     assert run["status"] == "timed_out"
     notification = _latest_notification(user_id)
     assert notification is not None
@@ -507,6 +788,7 @@ async def test_executor_exception_records_failed(consumer_env) -> None:
     run = sdb.get_scheduled_task_run_by_slot(
         definition_id=definition.id, run_slot_key=SLOT
     )
+    assert run is not None  # nosec B101
     assert "RuntimeError" in (run["error"] or "")
 
 
@@ -538,6 +820,7 @@ async def test_failed_run_degrades_health_and_audits(consumer_env) -> None:
 
     sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
     updated = sdb.get_definition(owner_id=user_id, definition_id=definition.id)
+    assert updated is not None  # nosec B101
     assert updated.health == "degraded"
     audits, _total = sdb.list_audit_events(
         owner_id=user_id, definition_id=definition.id
@@ -634,6 +917,7 @@ async def test_reclaimed_jobs_lease_requires_explicit_stopped_claim_reconciliati
         owner_user_id=str(user_id),
     )
     original = manager.acquire_next_job(domain="scheduled_tasks", queue="default", worker_id="first", lease_seconds=60)
+    assert original is not None  # nosec B101
     sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
     run = sdb.create_scheduled_task_run(
         definition_id=definition.id,
@@ -660,6 +944,7 @@ async def test_reclaimed_jobs_lease_requires_explicit_stopped_claim_reconciliati
     replacement = manager.acquire_next_job(
         domain="scheduled_tasks", queue="default", worker_id="second", lease_seconds=60
     )
+    assert replacement is not None  # nosec B101
     with pytest.raises(ValueError, match="stale Jobs lease"):
         await handle_agent_task_job(original, scheduled_db=sdb, jobs_manager=manager)
     with pytest.raises(agent_task_jobs.ScheduledTaskClaimBusy):
@@ -746,6 +1031,7 @@ async def test_replaced_lease_cannot_overlap_cancellation_resistant_executor(con
         owner_user_id=str(user_id),
     )
     original = manager.acquire_next_job(domain="scheduled_tasks", queue="default", worker_id="old", lease_seconds=60)
+    assert original is not None  # nosec B101
     started, cancelling, stopped = asyncio.Event(), asyncio.Event(), asyncio.Event()
     calls = []
 
@@ -768,6 +1054,7 @@ async def test_replaced_lease_cannot_overlap_cancellation_resistant_executor(con
     await asyncio.wait_for(cancelling.wait(), timeout=2)
     assert manager.release_job(int(original["id"]), worker_id="old", lease_id=original["lease_id"])
     replacement = manager.acquire_next_job(domain="scheduled_tasks", queue="default", worker_id="new", lease_seconds=60)
+    assert replacement is not None  # nosec B101
     try:
         with pytest.raises(RuntimeError, match="claim.*active|reconciliation"):
             await handle_agent_task_job(replacement, jobs_manager=manager)
@@ -839,10 +1126,15 @@ async def test_repeated_handler_cancellation_retains_live_executor_claim(consume
     with pytest.raises(asyncio.CancelledError):
         await first
     try:
-        assert not executor_tasks[0].done()
+        first_task = executor_tasks[0]
+        assert first_task is not None  # nosec B101
+        assert not first_task.done()
         with pytest.raises(agent_task_jobs.ScheduledTaskClaimBusy):
             await handle_agent_task_job(_job(definition, user_id))
         assert len(executor_tasks) == 1
     finally:
         stop_executor.set()
-        await asyncio.gather(*executor_tasks, return_exceptions=True)
+        await asyncio.gather(
+            *[task for task in executor_tasks if task is not None],
+            return_exceptions=True,
+        )

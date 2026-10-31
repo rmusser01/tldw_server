@@ -43,13 +43,13 @@ Create a focused design-first slice for the next VZ Linux recovery gap: helper c
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Writing focused recovery posture spec for helper crash, launchd restart, and host reboot; keeping scope docs/design-only and preserving existing generation-aware reuse plus dry-run-first repair invariants.
 
 Added proposed design spec Docs/superpowers/specs/2026-05-09-vz-linux-helper-crash-host-reboot-recovery-posture-design.md linking issue #1459 and mapping acceptance criteria.
 
 Verification: git diff --check passed. rg/sed verified the spec links issue #1459 and contains helper crash, launchd restart, host reboot, and acceptance mapping sections. Bandit was not run because this slice changed documentation/task metadata only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

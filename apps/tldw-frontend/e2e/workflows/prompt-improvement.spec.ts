@@ -362,6 +362,13 @@ function expectIsolatedRequest(
   }
 }
 
+// The compact Improve-prompt trigger is a 44px touch target on narrow screens
+// and a 32px toolbar icon from Tailwind's `sm` breakpoint up (CC-07).
+const expectedCompactTriggerSize = async (trigger: Locator): Promise<number> =>
+  (await trigger.page().evaluate(() => window.matchMedia("(min-width: 640px)").matches))
+    ? 32
+    : 44
+
 test.describe("WebUI prompt improvement parity", () => {
   for (const viewport of [
     { label: "desktop", width: 1280, height: 800 },
@@ -381,8 +388,9 @@ test.describe("WebUI prompt improvement parity", () => {
       await expect(trigger).toHaveCount(1)
       await expect(send).toBeVisible()
       const triggerBox = await trigger.boundingBox()
-      expect(triggerBox?.width).toBe(44)
-      expect(triggerBox?.height).toBe(44)
+      const triggerSize = await expectedCompactTriggerSize(trigger)
+      expect(triggerBox?.width).toBe(triggerSize)
+      expect(triggerBox?.height).toBe(triggerSize)
       expect(
         await cluster.evaluate((element) => {
           const improve = element.querySelector('[aria-label="Improve prompt"]')

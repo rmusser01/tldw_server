@@ -47,7 +47,6 @@ Implement Task 4 from the Backlog.md Python compatibility clone implementation p
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Red test captured: `source .venv/bin/activate && python -m pytest tools/backlog-py/tests/test_task_parser.py -v` failed with `ModuleNotFoundError: No module named 'backlog_py.markdown'`.
 - Implemented a conservative parser that splits frontmatter only at a starting `---`, preserves raw source/frontmatter/body, detects owned section markers, parses checklist items while retaining raw lines, and raises `TaskMarkdownParseError` for unterminated owned sections.
@@ -56,7 +55,6 @@ Implement Task 4 from the Backlog.md Python compatibility clone implementation p
 - Bandit passed: `source .venv/bin/activate && python -m bandit -r tools/backlog-py/src -f json -o /tmp/bandit_backlog_py_task4.json`; output JSON has zero severity findings in totals.
 - Whitespace check passed: `git diff --check`.
 - Known skip: Task 4 plan Step 6 remains unchecked because the controller explicitly instructed not to commit.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Controller verification 2026-05-10:
 - Reproduced package-directory parser fixture failure from tools/backlog-py: repo-root-relative fixture path caused FileNotFoundError in 3 parser tests.
@@ -80,7 +78,7 @@ Controller test hardening 2026-05-10:
 Review closeout 2026-05-10:
 - Spec-compliance review approved with no missing Task 4 requirements or extra scope.
 - Code-quality review approved with no blockers. Deferred non-blocking parser hardening: decide how unknown uppercase marker sections should be represented before mutation support, and define duplicate section handling before editing sections.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

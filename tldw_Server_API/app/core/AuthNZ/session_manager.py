@@ -2074,23 +2074,32 @@ class SessionManager:
 
 # Global instance
 _session_manager: Optional[SessionManager] = None
+# Serializes first-time init; recreated by reset_session_manager() so it never
+# stays bound to a previous event loop.
+_session_manager_lock = asyncio.Lock()
 
 
 async def get_session_manager() -> SessionManager:
     """Get session manager singleton instance"""
     global _session_manager
-    if not _session_manager:
-        _session_manager = SessionManager()
-        await _session_manager.initialize()
+    if _session_manager:
+        return _session_manager
+    async with _session_manager_lock:
+        if not _session_manager:
+            manager = SessionManager()
+            await manager.initialize()
+            # Publish only after initialize() succeeds; a failure leaves nothing behind.
+            _session_manager = manager
     return _session_manager
 
 
 async def reset_session_manager():
     """Reset session manager (for testing)"""
-    global _session_manager
+    global _session_manager, _session_manager_lock
     if _session_manager:
         await _session_manager.shutdown()
     _session_manager = None
+    _session_manager_lock = asyncio.Lock()
 
 
 #

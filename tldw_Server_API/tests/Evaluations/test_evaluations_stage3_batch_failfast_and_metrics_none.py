@@ -264,9 +264,9 @@ def test_batch_parallel_strict_fail_fast_cancels_remaining(monkeypatch):
             endpoint: str,
             is_batch: bool,
             tokens_requested: int,
-            estimated_cost: float,
+            evaluations_requested: int = 1,
         ):
-            _ = (endpoint, is_batch, tokens_requested, estimated_cost)
+            _ = (endpoint, is_batch, tokens_requested, evaluations_requested)
             return True, {"retry_after": 0}
 
     started_items: list[int] = []
@@ -377,9 +377,9 @@ def test_batch_parallel_sanitizes_item_failure(monkeypatch):
             endpoint: str,
             is_batch: bool,
             tokens_requested: int,
-            estimated_cost: float,
+            evaluations_requested: int = 1,
         ):
-            _ = (endpoint, is_batch, tokens_requested, estimated_cost)
+            _ = (endpoint, is_batch, tokens_requested, evaluations_requested)
             return True, {"retry_after": 0}
 
     class _Service:
@@ -457,7 +457,7 @@ async def test_execute_evaluation_handles_metrics_none(tmp_path, monkeypatch):
     runner = EvaluationRunner(str(tmp_path / "evals_stage3.db"), max_concurrent_evals=2, eval_timeout=10)
 
     monkeypatch.setattr(runner.db, "update_run_status", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(runner.db, "update_run_progress", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runner.db, "update_run_progress", lambda *_args, **_kwargs: True)
 
     captured_results: dict[str, object] = {}
 

@@ -1,7 +1,10 @@
+from types import SimpleNamespace
+
 import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import messages as messages_endpoint
 from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime as runtime_module
+from tldw_Server_API.app.core.Chat import chat_service
 
 
 def _build_openai_response(text: str) -> dict:
@@ -40,25 +43,6 @@ class _FakeResponse:
 
     def json(self):
         return self._json_data
-
-
-class _FakeClient:
-    def __init__(self, json_data: dict, capture: dict | None = None):
-        self._json_data = json_data
-        self._capture = capture
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-    def post(self, url, headers=None, json=None):
-        if self._capture is not None:
-            self._capture["url"] = url
-            self._capture["headers"] = headers
-            self._capture["json"] = json
-        return _FakeResponse(self._json_data)
 
 
 class _AsyncFakeClient:
@@ -132,6 +116,58 @@ def test_messages_endpoint_streaming(client_user_only, monkeypatch):
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("model", ["openai/gpt-4", "llama.cpp/test-model"])
+@pytest.mark.parametrize("stream", [False, True])
+def test_messages_refuses_an_over_quota_user_before_any_provider_call(client_user_only, monkeypatch, model, stream):
+    """An over-quota user gets the 402 on the adapter path and the native path, streaming or not."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    calls: list[str] = []
+
+    async def _adapter_call(**kwargs):
+        calls.append("adapter")
+        return _build_openai_response("unused")
+
+    async def _native_post(url, headers, payload, **_kwargs):
+        calls.append("native")
+        return _build_native_response()
+
+    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _adapter_call)
+    monkeypatch.setattr(messages_endpoint, "_native_post_json", _native_post)
+    refuse_llm_work(monkeypatch)
+    payload = {"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 10, "stream": stream}
+    response = client_user_only.post("/api/v1/messages", json=payload)
+    assert_llm_quota_402(response)
+    assert calls == []
+
+
+@pytest.mark.integration
+def test_messages_admits_an_over_quota_user_whose_provider_runs_on_their_own_key(client_user_only, monkeypatch):
+    """Over the limit, a request whose provider runs on the user's own key still reaches the provider (TASK-13955)."""
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    calls: list[str] = []
+
+    async def _adapter_call(**kwargs):
+        calls.append("adapter")
+        return _build_openai_response("hello")
+
+    async def _own_key(_uid, provider):
+        return provider == "openai"
+
+    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _adapter_call)
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
+    refuse_llm_work(monkeypatch)
+    payload = {"model": "openai/gpt-4", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 10}
+    response = client_user_only.post("/api/v1/messages", json=payload)
+    assert response.status_code == 200, response.text
+    assert calls == ["adapter"]
+
+
+@pytest.mark.integration
 def test_messages_count_tokens_unsupported_provider(client_user_only, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     payload = {
@@ -199,11 +235,11 @@ def test_messages_llamacpp_base_url_normalized_completions(client_user_only, mon
 @pytest.mark.integration
 def test_messages_count_tokens_anthropic(client_user_only, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setattr(
-        messages_endpoint,
-        "http_client_factory",
-        lambda *a, **k: _FakeClient({"input_tokens": 3}),
-    )
+    monkeypatch.setattr(chat_service, "discover_provider_models", lambda *args, **kwargs: SimpleNamespace(
+        status="ready", models=("claude-3-sonnet-20240229",),
+    ))
+    # count_tokens posts through async_http_client_factory; the sync
+    # http_client_factory alias is not on this path.
     monkeypatch.setattr(
         messages_endpoint,
         "async_http_client_factory",

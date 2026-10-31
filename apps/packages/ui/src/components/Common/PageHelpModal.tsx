@@ -7,6 +7,8 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
+import i18n from "i18next"
+import tutorialsEn from "@/assets/locale/en/tutorials.json"
 import { useLocation } from "react-router-dom"
 import {
   X,
@@ -18,13 +20,23 @@ import {
   Command,
   Lock
 } from "lucide-react"
-import { defaultShortcuts, formatShortcut } from "@/hooks/keyboard/useShortcutConfig"
+import { useShortcutConfig, formatShortcut } from "@/hooks/keyboard/useShortcutConfig"
 import { isMac } from "@/hooks/keyboard/useKeyboardShortcuts"
+import { useStartTutorial } from "@/hooks/useStartTutorial"
+import { FEATURE_FLAGS, useFeatureFlag } from "@/hooks/useFeatureFlags"
 import { useHelpModal, useTutorialStore } from "@/store/tutorials"
 import {
   getTutorialsForRoute,
   type TutorialDefinition
 } from "@/tutorials"
+
+// Register the English fallback only when this demand-loaded help surface arrives.
+const registerTutorialTranslations = () => {
+  i18n.addResourceBundle("en", "tutorials", tutorialsEn, true, false)
+  i18n.off("initialized", registerTutorialTranslations)
+}
+if (i18n.isInitialized) registerTutorialTranslations()
+else i18n.on("initialized", registerTutorialTranslations)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -137,13 +149,11 @@ const TutorialList: React.FC<TutorialListProps> = ({
             <button
               onClick={() => onStart(tutorial.id)}
               disabled={isLocked}
-              className="shrink-0 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50"
-              style={{
-                backgroundColor:
-                  isLocked || isCompleted ? undefined : "var(--color-primary)",
-                color: isLocked || isCompleted ? "var(--color-text)" : "white"
-              }}
-            >
+              className={`min-h-[44px] shrink-0 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50 ${
+                isLocked || isCompleted
+                  ? "text-text hover:bg-surface2 transition-colors"
+                  : "bg-primary text-primary-foreground hover:bg-primaryStrong hover:text-primary-strong-foreground transition-none"
+              }`}>
               {isLocked ? (
                 <>
                   <Lock className="size-3.5" />
@@ -203,18 +213,37 @@ const ShortcutsList: React.FC<ShortcutsListProps> = ({ groups }) => {
 // Main Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function PageHelpModal() {
-  const { isOpen, close } = useHelpModal()
-  const startTutorial = useTutorialStore((state) => state.startTutorial)
-  const completedTutorials = useTutorialStore((state) => state.completedTutorials)
+export type PageHelpModalProps = {
+  initialTab?: TabKey
+  scope?: "full" | "sidepanel"
+  modeNavigationEnabled?: boolean
+  sidebarToggleEnabled?: boolean
+  quickChatEnabled?: boolean
+  onStartTutorial?: (tutorialId: string) => boolean
+}
 
-  const openRef = useRef(false)
+export function PageHelpModal({
+  initialTab,
+  scope = "full",
+  modeNavigationEnabled = true,
+  sidebarToggleEnabled = true,
+  quickChatEnabled = true,
+  onStartTutorial
+}: PageHelpModalProps = {}) {
+  const { isOpen, close } = useHelpModal()
+  const startTutorial = useStartTutorial()
+  const completedTutorials = useTutorialStore(
+    (state) => state.completedTutorials
+  )
+
   const modalRef = useRef<HTMLDivElement | null>(null)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
-  const previouslyFocusedElementRef = useRef<HTMLElement | null>(null)
 
   const { t } = useTranslation(["common", "tutorials"])
   const location = useLocation()
+  const { shortcuts } = useShortcutConfig()
+  // Compare stays hidden until it is verified (owner decision D4).
+  const [compareEnabled] = useFeatureFlag(FEATURE_FLAGS.COMPARE_MODE)
 
   // Get tutorials for current route
   const availableTutorials = useMemo(
@@ -227,65 +256,17 @@ export function PageHelpModal() {
   )
 
   // Determine default tab based on available tutorials
-  const defaultTab: TabKey = availableTutorials.length > 0 ? "tutorials" : "shortcuts"
-  const [activeTab, setActiveTab] = useState<TabKey>(defaultTab)
+  const defaultTab: TabKey =
+    availableTutorials.length > 0 ? "tutorials" : "shortcuts"
+  const [activeTab, setActiveTab] = useState<TabKey>(initialTab ?? defaultTab)
 
-  // Reset tab when route changes
   useEffect(() => {
-    setActiveTab(availableTutorials.length > 0 ? "tutorials" : "shortcuts")
-  }, [location.pathname, availableTutorials.length])
+    setActiveTab(initialTab ?? defaultTab)
+  }, [initialTab, defaultTab, location.pathname])
 
-  // Track open state in ref for keyboard handler
   useEffect(() => {
-    openRef.current = isOpen
+    if (isOpen) closeButtonRef.current?.focus()
   }, [isOpen])
-
-  // Focus management
-  useEffect(() => {
-    if (isOpen) {
-      previouslyFocusedElementRef.current =
-        document.activeElement instanceof HTMLElement ? document.activeElement : null
-
-      if (closeButtonRef.current) {
-        closeButtonRef.current.focus()
-      }
-      return
-    }
-
-    if (!isOpen && previouslyFocusedElementRef.current) {
-      const element = previouslyFocusedElementRef.current
-      previouslyFocusedElementRef.current = null
-
-      if (document.contains(element)) {
-        element.focus()
-      }
-    }
-  }, [isOpen])
-
-  // Handle Escape key to close
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && openRef.current) {
-        close()
-      }
-    }
-
-    document.addEventListener("keydown", handleKeyDown)
-    return () => document.removeEventListener("keydown", handleKeyDown)
-  }, [close])
-
-  // Listen for custom event to open modal
-  useEffect(() => {
-    if (typeof window === "undefined") return
-    const handleOpen = () => useTutorialStore.getState().openHelpModal()
-    window.addEventListener("tldw:open-help-modal", handleOpen)
-    // Also listen for the old shortcuts modal event for backwards compatibility
-    window.addEventListener("tldw:open-shortcuts-modal", handleOpen)
-    return () => {
-      window.removeEventListener("tldw:open-help-modal", handleOpen)
-      window.removeEventListener("tldw:open-shortcuts-modal", handleOpen)
-    }
-  }, [])
 
   const modKey = isMac ? "⌘" : "Ctrl"
 
@@ -296,17 +277,31 @@ export function PageHelpModal() {
         title: t("common:shortcuts.groups.general", "General"),
         shortcuts: [
           {
-            label: t("common:shortcuts.openCommandPalette", "Open command palette"),
+            label: t(
+              "common:shortcuts.openCommandPalette",
+              "Open command palette"
+            ),
             keys: `${modKey} + K`
           },
           {
-            label: t("common:shortcuts.showHelp", "Show help & tutorials"),
+            label: t(
+              "common:shortcuts.showKeyboardShortcuts",
+              "Show keyboard shortcuts"
+            ),
             keys: "?"
           },
           {
             label: t("common:shortcuts.focusTextarea", "Focus message input"),
-            keys: formatShortcut(defaultShortcuts.focusTextarea)
-          }
+            keys: formatShortcut(shortcuts.focusTextarea)
+          },
+          ...(sidebarToggleEnabled
+            ? [
+                {
+                  label: t("common:shortcuts.toggleSidebar", "Toggle sidebar"),
+                  keys: formatShortcut(shortcuts.toggleSidebar)
+                }
+              ]
+            : [])
         ]
       },
       {
@@ -314,61 +309,170 @@ export function PageHelpModal() {
         shortcuts: [
           {
             label: t("common:shortcuts.newChat", "Start new chat"),
-            keys: formatShortcut(defaultShortcuts.newChat)
+            keys: formatShortcut(shortcuts.newChat)
           },
-          {
-            label: t("common:shortcuts.toggleChatMode", "Toggle chat with current page"),
-            keys: formatShortcut(defaultShortcuts.toggleChatMode)
-          },
-          {
-            label: t("common:shortcuts.toggleWebSearch", "Toggle web search"),
-            keys: formatShortcut(defaultShortcuts.toggleWebSearch)
-          },
-          {
-            label: t("common:shortcuts.toggleQuickChat", "Toggle Quick Chat Helper"),
-            keys: formatShortcut(defaultShortcuts.toggleQuickChatHelper)
-          }
+          ...(scope === "sidepanel"
+            ? [
+                {
+                  label: t(
+                    "common:shortcuts.toggleChatWithPage",
+                    "Toggle chat with current page"
+                  ),
+                  keys: formatShortcut(shortcuts.toggleChatMode)
+                },
+                {
+                  label: t(
+                    "common:shortcuts.toggleWebSearch",
+                    "Toggle web search"
+                  ),
+                  keys: formatShortcut(shortcuts.toggleWebSearch)
+                }
+              ]
+            : [
+                ...(quickChatEnabled
+                  ? [
+                      {
+                        label: t(
+                          "common:shortcuts.toggleQuickChat",
+                          "Toggle Quick Chat Helper"
+                        ),
+                        keys: formatShortcut(shortcuts.toggleQuickChatHelper)
+                      }
+                    ]
+                  : []),
+                {
+                  label: t(
+                    "common:shortcuts.searchThread",
+                    "Search this conversation"
+                  ),
+                  keys: `${modKey} + F`
+                },
+                {
+                  label: t(
+                    "common:shortcuts.toggleArtifacts",
+                    "Toggle artifacts panel (when available)"
+                  ),
+                  keys: "Alt + Shift + A"
+                },
+                ...(compareEnabled
+                  ? [
+                      {
+                        label: t(
+                          "common:shortcuts.toggleCompare",
+                          "Toggle compare mode (when enabled)"
+                        ),
+                        keys: "Alt + Shift + C"
+                      }
+                    ]
+                  : []),
+                {
+                  label: t(
+                    "common:shortcuts.toggleModes",
+                    "Open mode launcher"
+                  ),
+                  keys: "Alt + Shift + M"
+                }
+              ])
         ]
       },
       {
-        title: t("common:shortcuts.groups.navigation", "Navigation"),
+        title: t("common:shortcuts.groups.messageCards", "Message cards"),
         shortcuts: [
           {
-            label: t("common:shortcuts.toggleSidebar", "Toggle sidebar"),
-            keys: formatShortcut(defaultShortcuts.toggleSidebar)
+            label: t(
+              "common:shortcuts.variantSwitch",
+              "Previous / next response variant (focus a reply)"
+            ),
+            keys: "Alt + Shift + ← / →"
           },
           {
-            label: t("common:shortcuts.goToPlayground", "Go to Playground"),
-            keys: formatShortcut(defaultShortcuts.modePlayground)
+            label: t(
+              "common:shortcuts.branchMessage",
+              "Fork from the focused message"
+            ),
+            keys: "Alt + Shift + B"
           },
           {
-            label: t("common:shortcuts.goToSources", "Go to Sources"),
-            keys: formatShortcut(defaultShortcuts.modeSources)
-          },
-          {
-            label: t("common:shortcuts.goToMedia", "Go to Media"),
-            keys: formatShortcut(defaultShortcuts.modeMedia)
-          },
-          {
-            label: t("common:shortcuts.goToKnowledge", "Go to Knowledge"),
-            keys: formatShortcut(defaultShortcuts.modeKnowledge)
-          },
-          {
-            label: t("common:shortcuts.goToNotes", "Go to Notes"),
-            keys: formatShortcut(defaultShortcuts.modeNotes)
-          },
-          {
-            label: t("common:shortcuts.goToPrompts", "Go to Prompts"),
-            keys: formatShortcut(defaultShortcuts.modePrompts)
-          },
-          {
-            label: t("common:shortcuts.goToFlashcards", "Go to Flashcards"),
-            keys: formatShortcut(defaultShortcuts.modeFlashcards)
+            label: t(
+              "common:shortcuts.regenerateLast",
+              "Regenerate the last reply (focus a reply)"
+            ),
+            keys: "Alt + Shift + R"
           }
         ]
-      }
+      },
+      ...(scope === "full" && modeNavigationEnabled
+        ? [
+            {
+              title: t("common:shortcuts.groups.navigation", "Navigation"),
+              shortcuts: [
+                {
+                  label: t("common:shortcuts.goToChat", "Go to Chat"),
+                  keys: formatShortcut(shortcuts.modePlayground)
+                },
+                {
+                  label: t("common:shortcuts.goToSources", "Go to Sources"),
+                  keys: formatShortcut(shortcuts.modeSources)
+                },
+                {
+                  label: t("common:shortcuts.goToMedia", "Go to Media"),
+                  keys: formatShortcut(shortcuts.modeMedia)
+                },
+                {
+                  label: t("common:shortcuts.goToKnowledge", "Go to Knowledge"),
+                  keys: formatShortcut(shortcuts.modeKnowledge)
+                },
+                {
+                  label: t("common:shortcuts.goToNotes", "Go to Notes"),
+                  keys: formatShortcut(shortcuts.modeNotes)
+                },
+                {
+                  label: t("common:shortcuts.goToPrompts", "Go to Prompts"),
+                  keys: formatShortcut(shortcuts.modePrompts)
+                },
+                {
+                  label: t(
+                    "common:shortcuts.goToFlashcards",
+                    "Go to Flashcards"
+                  ),
+                  keys: formatShortcut(shortcuts.modeFlashcards)
+                },
+                {
+                  label: t(
+                    "common:shortcuts.goToWorldBooks",
+                    "Go to World Books"
+                  ),
+                  keys: formatShortcut(shortcuts.modeWorldBooks)
+                },
+                {
+                  label: t(
+                    "common:shortcuts.goToDictionaries",
+                    "Go to Dictionaries"
+                  ),
+                  keys: formatShortcut(shortcuts.modeDictionaries)
+                },
+                {
+                  label: t(
+                    "common:shortcuts.goToCharacters",
+                    "Go to Characters"
+                  ),
+                  keys: formatShortcut(shortcuts.modeCharacters)
+                }
+              ]
+            }
+          ]
+        : [])
     ],
-    [modKey, t]
+    [
+      modKey,
+      t,
+      shortcuts,
+      scope,
+      modeNavigationEnabled,
+      sidebarToggleEnabled,
+      quickChatEnabled,
+      compareEnabled
+    ]
   )
 
   const handleClose = useCallback(() => {
@@ -377,10 +481,12 @@ export function PageHelpModal() {
 
   const handleStartTutorial = useCallback(
     (tutorialId: string) => {
-      close()
-      startTutorial(tutorialId)
+      const accepted = onStartTutorial
+        ? onStartTutorial(tutorialId)
+        : startTutorial(tutorialId)
+      if (accepted) close()
     },
-    [close, startTutorial]
+    [close, startTutorial, onStartTutorial]
   )
 
   const handleKeyDownInModal = useCallback(
@@ -411,7 +517,8 @@ export function PageHelpModal() {
       let nextIndex = currentIndex
 
       if (event.shiftKey) {
-        nextIndex = currentIndex <= 0 ? focusableElements.length - 1 : currentIndex - 1
+        nextIndex =
+          currentIndex <= 0 ? focusableElements.length - 1 : currentIndex - 1
       } else {
         nextIndex =
           currentIndex === -1 || currentIndex === focusableElements.length - 1
@@ -446,16 +553,14 @@ export function PageHelpModal() {
         role="dialog"
         aria-modal="true"
         aria-labelledby="help-modal-title"
-        onKeyDown={handleKeyDownInModal}
-      >
+        onKeyDown={handleKeyDownInModal}>
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div className="flex items-center gap-2">
             <GraduationCap className="size-5 text-text-subtle" />
             <h2
               id="help-modal-title"
-              className="text-base font-semibold text-text"
-            >
+              className="text-base font-semibold text-text">
               {t("common:help.pageHelp", "Page Help")}
             </h2>
           </div>
@@ -463,8 +568,7 @@ export function PageHelpModal() {
             ref={closeButtonRef}
             onClick={handleClose}
             className="rounded-lg p-2 min-w-[44px] min-h-[44px] flex items-center justify-center text-text-subtle hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-            aria-label={t("common:close", "Close")}
-          >
+            aria-label={t("common:close", "Close")}>
             <X className="size-5" />
           </button>
         </div>
@@ -477,18 +581,16 @@ export function PageHelpModal() {
               activeTab === "tutorials"
                 ? "border-b-2 border-primary text-primary"
                 : "text-text-muted hover:text-text"
-            }`}
-          >
+            }`}>
             <GraduationCap className="size-4" />
             {t("common:help.tutorials", "Tutorials")}
             {tutorialCount > 0 && (
               <span
                 className={`ml-1 flex size-5 items-center justify-center rounded-full text-xs font-medium ${
                   activeTab === "tutorials"
-                    ? "bg-primary text-white"
+                    ? "bg-primary text-primary-foreground"
                     : "bg-surface2 text-text-muted"
-                }`}
-              >
+                }`}>
                 {tutorialCount}
               </span>
             )}
@@ -499,15 +601,23 @@ export function PageHelpModal() {
               activeTab === "shortcuts"
                 ? "border-b-2 border-primary text-primary"
                 : "text-text-muted hover:text-text"
-            }`}
-          >
+            }`}>
             <Keyboard className="size-4" />
             {t("common:help.shortcuts", "Shortcuts")}
           </button>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-4">
+        {/* Content: a focusable, labelled region so keyboard users can
+            scroll a list that has no focusable items of its own (AX-18). */}
+        <div
+          role="region"
+          aria-label={
+            activeTab === "tutorials"
+              ? t("common:help.tutorialList", "Tutorial list")
+              : t("common:help.shortcutList", "Shortcut list")
+          }
+          tabIndex={0}
+          className="flex-1 overflow-y-auto p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus">
           {activeTab === "tutorials" ? (
             <TutorialList
               tutorials={availableTutorials}

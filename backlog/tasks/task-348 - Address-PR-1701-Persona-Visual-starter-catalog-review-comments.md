@@ -31,7 +31,7 @@ Verify and address actionable review comments on PR #1701 for the bundled Person
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Qodo findings were valid: the new pytest fixture lacked a return type and list/detail responses could echo invalid fixture enum strings into FastAPI response validation. Added the fixture return type and starter fixture validation for renderer type, manifest renderer consistency, and response-safe asset roles before list/detail/copy responses are built.
 
 CodeRabbit's DB update return guard finding was valid. `copy_starter_pack_to_persona` now raises `starter_copy_failed` inside the cleanup block when either the manifest update or draft status transition returns no pack.
@@ -39,7 +39,7 @@ CodeRabbit's DB update return guard finding was valid. `copy_starter_pack_to_per
 Gemini's in-place manifest mutation concern is already mitigated by `remap_visual_manifest_assets`, which deep-copies internally; the call site now also passes a deep copy to keep the fixture boundary explicit.
 
 Verification completed: `python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_starter_catalog.py tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q --tb=short --disable-warnings` -> 57 passed; `python -m py_compile ...` touched Persona Visual files -> passed; Bandit touched Python scope -> 0 findings in `/tmp/bandit_persona_visual_starter_catalog_review.json`; `git diff --check` -> passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

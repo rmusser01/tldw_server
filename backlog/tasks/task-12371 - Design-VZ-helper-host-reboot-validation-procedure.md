@@ -40,7 +40,7 @@ Design the next VZ Linux operator recovery slice after the merged launchd drill:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created the host reboot validation design spec at Docs/superpowers/specs/2026-05-19-vz-helper-host-reboot-validation-design.md. Risk review patched the design before planning: evidence must use a durable non-/tmp private directory, post-reboot smoke must target the restored helper socket instead of starting a second helper, launchd mode must use explicit ownership, and stale pre-reboot pid files must not be trusted after reboot.
 
 Created the execution-ready implementation plan at Docs/superpowers/plans/2026-05-19-vz-helper-host-reboot-validation.md. The plan scopes the future implementation to host-reboot-drill pre/post evidence, PingState helper details, portable helperctl tests, restored-helper smoke targeting, docs, Bandit, and optional prepared-host validation.
@@ -64,7 +64,7 @@ Task 5 verification:
 - `git diff --check` passed.
 
 Prepared-host reboot validation was not run in Task 5 because it is disruptive and requires an operator reboot. Scheduled/nightly CI is expected to skip host reboot validation. A manual prepared-host drill is blocking only when explicitly invoked; blocking failures include missing, unsafe, or volatile evidence directories; pre/post metadata mismatch; helper ping/protocol failure; and post-smoke failure when `--run-smoke` is requested.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

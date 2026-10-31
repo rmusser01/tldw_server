@@ -35,20 +35,14 @@ The Discord-to-Jobs verification slice can fail Embeddings admin endpoint tests 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Updated the shared Embeddings admin fixtures to override registered route auth dependency callables and to use the active deterministic single-user key in headers.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Fixed Embeddings admin auth fixture instability by overriding the actual get_request_user and get_auth_principal callables registered on Embeddings/vector-store routes, and by deriving Authorization/X-API-KEY headers from get_settings().SINGLE_USER_API_KEY. Verification: focused priority bump tests passed (2 passed); focused touched-scope command passed (44 passed); Discord-to-Jobs slice passed (3247 passed, 156 skipped); git diff --check passed; Bandit on touched tests reported no findings.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

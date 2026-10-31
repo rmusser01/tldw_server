@@ -37,7 +37,7 @@ Verify and address validated findings from the current-code review of `tldw_Serv
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Backlog MCP tools were unavailable and the Backlog CLI failed on stale internal task filename references. The user approved manual task creation as the fallback. Verification result before edits: the summarization arbitrary file-read finding is not active through `analyze()` because the file-reading helper is shadowed by a later `extract_text_from_input()` definition, and the remaining file-reading metadata helper has no callers.
 
 RED verification: focused regression tests failed before implementation for raw upstream 400-body logging, missing bounded stream bridge API, stale MLX session restore after an older failed load, and missing Hugging Face GGUF filename validation.
@@ -51,7 +51,10 @@ GREEN verification: focused four-test regression run passed with 4 passed and 18
 `tldw_Server_API/tests/LLM_Adapters/unit/test_adapter_stream_error_normalization.py`.
 
 Bandit verification on touched production files exited 0 with zero findings. `git diff --check` on touched files exited 0.
-<!-- SECTION:NOTES:END -->
+
+Reopened after fresh PR review comments on 2026-06-24. Validated four actionable items: log sync iterator close failures instead of swallowing them, remove default-executor dependency from `wrap_sync_stream`, split GGUF filename tests into focused scenarios, and avoid reporting superseded MLX loads as successful applied loads.
+Addressed fresh PR review comments after rebasing onto latest `origin/dev`. RED focused tests failed before production changes for default-executor stream delivery, swallowed close errors, and superseded MLX success metrics. Implemented async-queue stream delivery with `asyncio.run_coroutine_threadsafe`, debug logging for iterator close failures, superseded MLX load metric status, and split GGUF filename validation tests. GREEN verification: focused review-comment tests passed with 7 passed and 27 warnings; broader targeted suite passed with 68 passed and 149 warnings. Bandit on touched LLM_Calls production files exited 0 with zero findings. `git diff --check` exited 0.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -68,10 +71,3 @@ Rebased the PR branch onto latest `origin/dev` and addressed the validated PR re
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Reopened after fresh PR review comments on 2026-06-24. Validated four actionable items: log sync iterator close failures instead of swallowing them, remove default-executor dependency from `wrap_sync_stream`, split GGUF filename tests into focused scenarios, and avoid reporting superseded MLX loads as successful applied loads.
-Addressed fresh PR review comments after rebasing onto latest `origin/dev`. RED focused tests failed before production changes for default-executor stream delivery, swallowed close errors, and superseded MLX success metrics. Implemented async-queue stream delivery with `asyncio.run_coroutine_threadsafe`, debug logging for iterator close failures, superseded MLX load metric status, and split GGUF filename validation tests. GREEN verification: focused review-comment tests passed with 7 passed and 27 warnings; broader targeted suite passed with 68 passed and 149 warnings. Bandit on touched LLM_Calls production files exited 0 with zero findings. `git diff --check` exited 0.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

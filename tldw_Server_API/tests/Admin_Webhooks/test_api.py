@@ -923,6 +923,90 @@ def test_list_uses_server_total_without_synthesizing_etag(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("delivery_history", [False, True], ids=["registrations", "deliveries"])
+@pytest.mark.parametrize(
+    ("limit", "offset", "total", "count", "next_offset"),
+    [
+        (2, 0, 0, 0, None),
+        (2, 0, 3, 2, 2),
+        (2, 2, 3, 1, None),
+        (2, 4, 3, 0, None),
+        (100, 900, 1_200, 100, 1_000),
+        (100, 1_000, 1_200, 100, None),
+        (100, 950, 1_200, 100, None),
+    ],
+    ids=["empty", "more", "partial-last", "past-end", "next-at-cap", "at-cap", "next-past-cap"],
+)
+def test_webhook_lists_expose_bounded_canonical_pagination(
+    monkeypatch: pytest.MonkeyPatch,
+    delivery_history: bool,
+    limit: int,
+    offset: int,
+    total: int,
+    count: int,
+    next_offset: int | None,
+) -> None:
+    if delivery_history:
+        client, service, _, _ = _delivery_client(monkeypatch)
+        item = SimpleNamespace(
+            delivery=_delivery(),
+            event_type="webhook.test",
+            completed_after_config_change=False,
+            attempts=(_attempt(),),
+        )
+        method = "list_delivery_history"
+        path = "/api/v1/admin/webhooks/41/deliveries"
+        args = (41,)
+    else:
+        client, service, _, _ = _client(monkeypatch)
+        item = _registration()
+        method = "list_page"
+        path = "/api/v1/admin/webhooks"
+        args = ()
+    page = SimpleNamespace(items=(item,) * count, total=total, limit=limit, offset=offset)
+    fetch = AsyncMock(return_value=page)
+    monkeypatch.setattr(service, method, fetch)
+
+    response = client.get(path, params={"limit": limit, "offset": offset})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["items"]) == count
+    assert (payload["total"], payload["limit"], payload["offset"]) == (total, limit, offset)
+    assert payload["pagination"] == {
+        "mode": "offset",
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": next_offset is not None,
+        "next_offset": next_offset,
+    }
+    assert (payload["has_more"], payload["next_offset"]) == (next_offset is not None, next_offset)
+    fetch.assert_awaited_once_with(*args, limit=limit, offset=offset)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("delivery_history", [False, True], ids=["registrations", "deliveries"])
+@pytest.mark.parametrize("params", [{"limit": 0}, {"limit": 101}, {"offset": -1}, {"offset": 1_001}])
+def test_webhook_lists_reject_out_of_bounds_pages_before_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+    delivery_history: bool,
+    params: dict[str, int],
+) -> None:
+    if delivery_history:
+        client, service, _, _ = _delivery_client(monkeypatch)
+        path = "/api/v1/admin/webhooks/41/deliveries"
+    else:
+        client, service, _, _ = _client(monkeypatch)
+        path = "/api/v1/admin/webhooks"
+
+    response = client.get(path, params=params)
+
+    assert response.status_code == 422
+    assert service.calls == []
+
+
+@pytest.mark.unit
 def test_read_audit_failure_does_not_change_successful_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -20,7 +20,7 @@ No repository edits, agents, applications, runtime tests, database actions, buil
 
 ### P2-1 — Summary history fence: resolved
 
-- `IMPLEMENTATION_PLAN_chatbook_h2_native_fork.md:72–85` now carries the admitted post-input `history_revision` in `FrozenHistoryBehaviorPlan` and `expected_history_revision` in `NativeChildSummaryUpdate`, alongside the settings revision.
+- `Docs/Plans/IMPLEMENTATION_PLAN_chatbook_h2_native_fork.md:72–85` now carries the admitted post-input `history_revision` in `FrozenHistoryBehaviorPlan` and `expected_history_revision` in `NativeChildSummaryUpdate`, alongside the settings revision.
 - Task 3.2 at `:299` and `:312` captures the post-append version in the same admission transaction and compares both versions under the child lock. The tests hold composition while an actual edit/delete/append changes history without changing settings.
 - Design `Docs/Design/2026-09-18-chatbook-h2-native-fork-design.md:129` explicitly discards the stale update and prohibits installing it under a freshly reread fence.
 

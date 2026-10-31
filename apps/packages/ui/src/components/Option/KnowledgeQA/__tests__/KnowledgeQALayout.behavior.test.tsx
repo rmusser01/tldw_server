@@ -1,5 +1,7 @@
+import "./dialogTestSetup"
 import React from "react"
-import { act, fireEvent, render, screen, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { KnowledgeQALayout } from "../layout/KnowledgeQALayout"
 import {
@@ -191,14 +193,18 @@ vi.mock("../composer/KnowledgeComposer", () => ({
 
 vi.mock("../empty/KnowledgeReadyState", () => ({
   KnowledgeReadyState: ({
+    children,
     recoveryState,
     hasSources,
     webFallbackEnabled,
   }: {
+    children?: React.ReactNode
     recoveryState?: { kind: string }
     hasSources: boolean
     webFallbackEnabled: boolean
   }) => (
+    <>
+    {children}
     <div data-testid="knowledge-ready-state">
       {recoveryState
         ? `knowledge-ready-recovery:${recoveryState.kind}`
@@ -208,6 +214,7 @@ vi.mock("../empty/KnowledgeReadyState", () => ({
           ? "Ready with web fallback only"
           : "No sources selected"}
     </div>
+    </>
   ),
 }))
 
@@ -222,10 +229,16 @@ vi.mock("../panels/AnswerWorkspace", () => ({
 vi.mock("../panels/NoResultsRecovery", () => ({
   NoResultsRecovery: ({
     onShowNearestMatches,
+    onChangeIncludedSources,
+    onSearchMoreResults
   }: {
+    onChangeIncludedSources: () => void
+    onSearchMoreResults: () => void
     onShowNearestMatches: () => void
   }) => (
     <div data-testid="knowledge-no-results-recovery">
+      <button onClick={onChangeIncludedSources}>Change included sources</button>
+      <button onClick={onSearchMoreResults}>Search more results</button>
       <button type="button" onClick={onShowNearestMatches}>
         Show nearest matches
       </button>
@@ -253,6 +266,49 @@ vi.mock("../evidence/EvidenceRail", () => ({
 }))
 
 describe("KnowledgeQALayout evidence-rail transitions", () => {
+  it("opens source selection separately from retrieval depth", async () => {
+    state.hasSearched = true
+    state.results = []
+    renderLayout()
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Change included sources" })
+    )
+    expect(
+      screen.getByRole("dialog", { name: "Source scope and profiles" })
+    ).toBeVisible()
+    expect(state.updateSetting).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Search more results" }))
+    expect(state.updateSetting).toHaveBeenCalledWith(
+      "top_k",
+      expect.any(Number)
+    )
+    expect(
+      state.updateSetting.mock.calls.every(([key]) => key === "top_k")
+    ).toBe(true)
+  })
+
+  it("keeps focus inside scope and returns to its trigger after Escape", async () => {
+    const user = userEvent.setup()
+    render(<KnowledgeQALayout onExportClick={vi.fn()} />)
+    const trigger = screen.getByRole("button", { name: "Open compact sources" })
+    await user.click(trigger)
+    const dialog = screen.getByRole("dialog", { name: "Source scope and profiles" })
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
+    for (let i = 0; i < 14; i++) {
+      await user.tab({ shift: i >= 6 })
+      expect(dialog.contains(document.activeElement)).toBe(true)
+    }
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(trigger).toHaveFocus())
+    expect(screen.queryByRole("dialog")).toBeNull()
+  })
+  it("puts asking before optional orientation", () => {
+    render(<KnowledgeQALayout onExportClick={vi.fn()} />)
+    const composer = screen.getByTestId("knowledge-composer")
+    const guidance = screen.getByTestId("knowledge-ready-state")
+    expect(composer.compareDocumentPosition(guidance) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   const renderLayoutElement = () => (
     <KnowledgeQALayout
       onExportClick={vi.fn()}

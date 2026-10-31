@@ -29,9 +29,9 @@ Write an implementation plan for the approved Chat Macros and /wrapup design, co
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan written at Docs/superpowers/plans/2026-07-03-chat-macros-implementation-plan.md. It breaks Chat Macros v1 into TDD-sized stages covering parser/models, ChaChaNotes storage, file-backed macro registry, API/router, slash invocation, executor/ACP fallback metadata, Jobs worker, frontend settings/status UI, and final verification. Plan review loop ran three iterations with subagents; issues found in each pass were addressed in the plan. Because the third pass hit the configured review-loop limit, no fourth reviewer approval was requested; this caveat is recorded here.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

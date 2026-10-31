@@ -40,9 +40,9 @@ Implement Task 2 of the VN platform API implementation plan. Scope: migrate and 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented canonical VN asset route tests, durable idempotency records for VN asset work/file mutators, preview/content validation hardening, cleanup blocker reporting, docs updates, and tiktoken fallback hardening for offline test environments. Verification: VN_Assets 232 passed, VN_Platform 8 passed, git diff --check passed, Bandit touched production files results 0 at /tmp/bandit_vn_assets_task2.json.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

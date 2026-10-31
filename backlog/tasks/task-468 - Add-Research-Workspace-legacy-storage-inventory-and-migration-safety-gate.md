@@ -31,16 +31,12 @@ Implement slice A of the Research Workspace migration roadmap: create a non-dest
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 - Added a non-mutating Research Workspace legacy storage inventory module that classifies known localStorage keys, split workspace snapshot/chat keys, IndexedDB offload stores, UI-only preferences, metadata, derived runtime surfaces, and obsolete flags.
 - Added a fail-closed deletion eligibility evaluator. Content-bearing or unsupported surfaces block deletion unless covered by a migration manifest; unknown workspace-prefixed localStorage keys and unknown stores in the workspace IndexedDB database also block deletion. UI-only/local diagnostic keys are retained and do not block content migration.
 - Documented the storage inventory and deletion rules in Docs/Design/Research_Workspace_Legacy_Storage_Inventory.md. This slice does not delete local data, add server migration endpoints, or restore /workspace-playground aliases/redirects.
 - Verification: `cd apps/packages/ui && bunx vitest run src/store/__tests__/research-workspace-legacy-storage-inventory.test.ts` passed 7 tests. `git diff --check` on tracked docs/task paths and `git diff --no-index --check /dev/null ...` for the two new TypeScript files produced no whitespace diagnostics. Bandit skipped because this slice changed frontend TypeScript/tests and documentation only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

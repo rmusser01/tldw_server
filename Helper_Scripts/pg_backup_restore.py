@@ -22,9 +22,12 @@ Notes:
 from __future__ import annotations
 
 import argparse
+import math
 import os
-import sys
+import time
+import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Optional
 
 from loguru import logger
@@ -94,6 +97,71 @@ def _restore(args) -> int:
     return 0
 
 
+def _restore_bundle(args) -> int:
+    """Recover an explicitly acknowledged database bundle with no application pool."""
+    from tldw_Server_API.app.core.DB_Management import DB_Backups
+    from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+    from tldw_Server_API.app.core.exceptions import BundleError, UnsupportedBackupBackendError
+    from tldw_Server_API.app.services import admin_bundle_service as bundles
+    from tldw_Server_API.app.services import admin_data_ops_service as data_ops
+
+    if not args.confirm_offline or args.no_drop or not math.isfinite(args.timeout) or not 0 < args.timeout <= 600:
+        logger.error("Database recovery requires stopped clients, clean restore and a timeout in (0, 600] seconds")
+        return 2
+    try:
+        config = data_ops._postgresql_database_config()
+    except UnsupportedBackupBackendError:
+        logger.error("Database recovery requires one explicit co-located AuthNZ/content/Jobs PostgreSQL target")
+        return 2
+    if args.confirm_database != config.pg_database:
+        logger.error("The confirmed database name must exactly match the configured target")
+        return 2
+    deadline = time.monotonic() + args.timeout
+    backend = SimpleNamespace(backend_type=BackendType.POSTGRESQL, config=config)
+    try:
+        DB_Backups.assert_postgres_database_offline(config, timeout_seconds=deadline - time.monotonic())
+        manifest = bundles._read_manifest_from_zip(args.bundle_file)
+        if not isinstance(manifest, dict):
+            raise ValueError("invalid_bundle_manifest")
+        base = data_ops._backup_base_dir()
+        os.makedirs(base, exist_ok=True)
+        with bundles._validated_postgresql_archive(
+            args.bundle_file, manifest, None, staging_parent=base, deadline=deadline
+        ) as dump_file:
+            backup_backend = SimpleNamespace(
+                backend_type=BackendType.POSTGRESQL, config=data_ops._postgresql_backup_config()
+            )
+            safety = DB_Backups.create_postgres_backup(
+                backup_backend,
+                backup_dir=os.path.join(base, "postgresql"),
+                label="postgresql-safety",
+                timeout_seconds=deadline - time.monotonic(),
+            )
+            if not safety or not os.path.isfile(safety):
+                raise RuntimeError("safety_snapshot_failed")
+            DB_Backups.assert_postgres_database_offline(config, timeout_seconds=deadline - time.monotonic())
+            status = DB_Backups.restore_postgres_backup(
+                backend, dump_file=dump_file, drop_first=True, timeout_seconds=deadline - time.monotonic()
+            )
+            if status != "ok":
+                raise RuntimeError("database_restore_failed")
+        if time.monotonic() >= deadline:
+            raise RuntimeError("database_recovery_deadline_exceeded")
+        print(
+            "Database restored. Keep clients stopped; verify data, review queued/leased Jobs and explicitly decide resume/cancel before cold restart and normal sign-in."
+        )
+        print(f"Safety snapshot: {safety}")
+        return 0
+    except DB_Backups.PostgresToolTimeout as exc:
+        logger.error("{}", str(exc))
+        return 1
+    except (BundleError, OSError, RuntimeError, ValueError, zipfile.BadZipFile) as exc:
+        logger.bind(error_type=type(exc).__name__).error(
+            "PostgreSQL database recovery failed; keep clients stopped and inspect the target before retrying"
+        )
+        return 1
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="PostgreSQL content DB backup/restore helper")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -107,6 +175,24 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_restore.add_argument("--dump-file", required=True, help="Path to .dump file created by pg_dump -F c")
     p_restore.add_argument("--no-drop", action="store_true", help="Do not drop objects before restore (omit -c)")
     p_restore.set_defaults(func=_restore)
+
+    p_bundle = sub.add_parser("restore-bundle", help="Offline whole-database recovery, including all users and Jobs")
+    p_bundle.add_argument("--bundle-file", required=True, help="Trusted explicit PostgreSQL database bundle ZIP")
+    p_bundle.add_argument("--confirm-database", required=True, help="Exact configured target database name")
+    p_bundle.add_argument(
+        "--confirm-offline",
+        action="store_true",
+        help="Acknowledge all API/Jobs/Scheduler clients are stopped and prevented from reconnecting",
+    )
+    p_bundle.add_argument(
+        "--timeout", type=float, default=600, help="Whole operation deadline in seconds (maximum 600)"
+    )
+    p_bundle.add_argument(
+        "--no-drop",
+        action="store_true",
+        help="Unsupported for database bundles; supplied only to report an explicit refusal",
+    )
+    p_bundle.set_defaults(func=_restore_bundle)
 
     args = parser.parse_args(argv)
     return args.func(args)

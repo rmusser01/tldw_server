@@ -36,7 +36,7 @@ Execute the character-chat model readiness work package: define a shared readine
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented shared character-chat readiness helper in apps/packages/ui/src/utils/chat-model-availability.ts and reused existing model normalization/catalog helpers for model availability checks.
 
 Added in-context quick-chat no-model blocker in CharacterDialogs/useCharacterQuickChat, preserved selected character context, and linked directly to /settings/model instead of redirecting away from the selected-character task.
@@ -54,7 +54,7 @@ Verification: git diff --check passed.
 Typecheck: ../../tldw-frontend/node_modules/.bin/tsc --noEmit -p tsconfig.json currently fails on existing broad UI type debt; new helper-specific TFunction diagnostics were fixed. Remaining filtered diagnostics are pre-existing in large files such as PlaygroundChat, CharacterDialogs parse-error rendering, and older Manager mock tuple typing.
 
 Bandit: not applicable because this package only changes frontend TypeScript/React code and docs/backlog records.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

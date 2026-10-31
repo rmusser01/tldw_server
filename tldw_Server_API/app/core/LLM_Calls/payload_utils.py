@@ -5,7 +5,6 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 from urllib.parse import quote, urlsplit
 
-
 _HTTP_HEADER_NAME_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 _SERVER_MANAGED_EXTRA_HEADERS = frozenset(
     {
@@ -142,7 +141,7 @@ def resolve_runtime_embedding_base_url(
     from tldw_Server_API.app.core.AuthNZ.byok_config import (
         is_runtime_base_url_override,
     )
-    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+    from tldw_Server_API.app.core.exceptions import ChatConfigurationError
 
     base_url = request.get("base_url")
     provenance = request.get("_runtime_base_url_override")
@@ -185,6 +184,9 @@ def resolve_runtime_embedding_base_url(
             message="Invalid runtime embedding endpoint configuration.",
         )
     return cleaned.rstrip("/")
+
+
+EMBEDDING_REDIRECT_STATUS_CODES = frozenset({301, 302, 303, 307, 308})
 
 
 def _summarize_message_content(content: Any) -> tuple[int, bool]:
@@ -397,6 +399,7 @@ def merge_extra_headers(headers: dict[str, str], request: Mapping[str, Any]) -> 
 
 
 __all__ = [
+    "EMBEDDING_REDIRECT_STATUS_CODES",
     "_sanitize_payload_for_logging",
     "encode_google_model_path",
     "encode_huggingface_model_path",

@@ -40,7 +40,6 @@ Docs/superpowers/plans/2026-06-03-codex-acp-workspace-live-certification-plan.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented in TDD slices: workspace-live-e2e manifest contract, backend workspace live runner contract, strict optional artifact expectation regression, and documentation updates. Main-checkout MCP-created TASK-509 was not used for this branch because the worktree already had task-509 collisions; TASK-2227 is the canonical branch-local task.
 
@@ -49,7 +48,6 @@ Verification:
 - PASS: `python -m bandit -q Helper_Scripts/Testing-related/acp_certification_smoke.py` -> exit 0.
 - LIVE SKIP/REFUSAL: `python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile workspace-live-e2e --run` -> exit 2, missing `TLDW_E2E_SERVER_URL`, `TLDW_E2E_API_KEY`, `ACP_AGENT_PROFILE`, `ACP_E2E_WORKSPACE_ID`. No live certification claim made.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

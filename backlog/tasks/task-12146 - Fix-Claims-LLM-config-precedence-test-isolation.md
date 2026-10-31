@@ -36,20 +36,14 @@ The broad mid-slice pytest run fails `test_claims_llm_config_prefers_claims_spec
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Updated the Claims config precedence test to read the current config module settings object at runtime instead of retaining a stale imported settings binding after reloads.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Fixed the order-dependent Claims LLM config precedence test by resolving settings through the config module on each snapshot, mutation, and restore. Verification: focused touched-scope command passed (44 passed); Chat_NEW through Claims slice passed (1362 passed, 15 skipped, 15 xfailed, 2 xpassed); Discord-to-Jobs slice passed (3247 passed, 156 skipped); git diff --check passed; Bandit on touched tests reported no findings.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

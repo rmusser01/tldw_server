@@ -18,7 +18,10 @@ from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
 from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_models import SnapshotRequest
 from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(not hasattr(os, "O_NOFOLLOW"), reason="secure snapshots require POSIX confinement"),
+]
 
 
 def test_public_snapshot_errors_share_central_exception_identity():

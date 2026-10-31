@@ -116,6 +116,7 @@ class StubPromptsModule(BaseModule):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("allow_knowledge_source_tools")
 async def test_knowledge_get_for_additional_sources():
     await reset_module_registry()
     registry = get_module_registry()

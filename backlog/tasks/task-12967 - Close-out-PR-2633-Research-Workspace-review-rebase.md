@@ -47,9 +47,9 @@ Historical closeout only. The executed implementation plan is Docs/superpowers/p
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Historical closeout created during TASK-12966 after verifying PR #2633 merged at 8601d41f807be65cfb7f8a3878c2606dbb1cb1ca and all 20 review threads were resolved. The original colliding Workspace TASK-12949 record is removed by the reconciliation change. Verification found two unrelated pre-existing TASK-12949 records for PR #2714 CI and Parakeet ONNX work; they are outside this Workspace/UAT tracker cleanup.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

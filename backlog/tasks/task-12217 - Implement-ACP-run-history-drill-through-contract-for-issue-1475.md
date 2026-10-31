@@ -69,14 +69,14 @@ Implement the #1475 run-history and session drill-through slice in the ACP produ
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added red/green tests for `GET /api/v1/agent-orchestration/tasks/{task_id}` run history enrichment covering a successful linked ACP session and a failed linked ACP session with normalized diagnostics.
 - Added an additive run-entry contract with `session` drill-through links/availability, `history` event/audit/artifact/diagnostic/tool-call/stop-reason metadata, prompt/result previews, `failure_context`, and reviewer decision summaries where durable review rows can be matched.
 - Reused existing ACP session store messages, session diagnostic normalization, and in-memory audit lookup; no new persistence table was added for this slice.
 - Documented the frontend-facing contract in `Docs/Development/Agent_Client_Protocol.md` and updated the #1475 readiness row in `Docs/Development/ACP_Production_Readiness.md`.
 - Verification refreshed on 2026-05-10: red run failed on missing `session`; targeted green run `2 passed, 5 warnings`; focused ACP/session/orchestration set `46 passed, 5 warnings`; full `Agent_Orchestration` suite `150 passed, 5 warnings`; Bandit touched backend scope `0` findings; `git diff --check` clean.
 - GitHub issue #1475 updated with implementation and verification evidence: https://github.com/rmusser01/tldw_server/issues/1475#issuecomment-4414212170
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

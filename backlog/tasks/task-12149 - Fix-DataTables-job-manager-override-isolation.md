@@ -35,20 +35,14 @@ The DB-to-Jobs slice stops at `test_generate_job_create_error_marks_failed` with
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Replaced stale direct get_job_manager override keys with data_tables_endpoint.get_job_manager throughout the DataTables API tests.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Fixed the DataTables job-manager override isolation issue by using the current endpoint module dependency key for overrides and cleanup. Verification: focused touched-scope command passed (44 passed); DataTables directory passed (62 passed); Discord-to-Jobs slice passed (3247 passed, 156 skipped); git diff --check passed; Bandit on touched tests reported no findings.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

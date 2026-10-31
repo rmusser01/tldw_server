@@ -49,7 +49,7 @@ Source: TASK-13344 AC3.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 DONE in 31795b4d50 for four of the five; the fifth is deliberately left red. tests/Sync goes 18 failures to 14 (re-measured across the whole directory).
 
 Every one was test drift -- the product was right in all four cases.
@@ -107,7 +107,7 @@ relaxing the assertion would silence a real product inconsistency. TASK-13350 ow
 Verification: the three touched files run 95 passed / 1 failed (that one being TASK-13350).
 Whole directory re-run with -n 4 --dist loadfile: 14 failed / 2976 passed, down from 18,
 and the four that disappeared are exactly these.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

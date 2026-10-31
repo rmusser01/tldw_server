@@ -33,7 +33,7 @@ Implement the first PR slice from the Watchlists digest/audio implementation pla
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Commits:
 - ab2f60201 feat: align watchlists audio contracts
 - 5b249de37 feat: support variable watchlist cadence presets
@@ -46,7 +46,7 @@ Verification:
 - git diff --check
 
 Bandit: skipped; touched runtime code is TypeScript frontend only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

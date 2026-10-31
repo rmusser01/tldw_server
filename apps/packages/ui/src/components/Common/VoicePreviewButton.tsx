@@ -12,6 +12,7 @@ type VoicePreviewButtonProps = {
   backend?: string
   allowFallback?: boolean
   className?: string
+  disabledReason?: string | null
 }
 
 type PreviewState = "idle" | "loading" | "playing"
@@ -23,6 +24,7 @@ export function VoicePreviewButton({
   backend,
   allowFallback,
   className,
+  disabledReason,
 }: VoicePreviewButtonProps) {
   const [state, setState] = useState<PreviewState>("idle")
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -47,6 +49,10 @@ export function VoicePreviewButton({
     if (state === "playing") {
       cleanup()
       setState("idle")
+      return
+    }
+
+    if (disabledReason || !voice || provider === "browser" || state === "loading") {
       return
     }
 
@@ -78,9 +84,11 @@ export function VoicePreviewButton({
       cleanup()
       setState("idle")
     }
-  }, [state, model, voice, backend, allowFallback, cleanup])
+  }, [state, model, voice, provider, backend, allowFallback, disabledReason, cleanup])
 
-  const disabled = !voice || provider === "browser"
+  const disabled =
+    state !== "playing" &&
+    (state === "loading" || !voice || provider === "browser" || Boolean(disabledReason))
 
   const icon =
     state === "loading" ? (
@@ -94,7 +102,7 @@ export function VoicePreviewButton({
   const label = state === "playing" ? "Stop" : "Preview"
 
   return (
-    <Tooltip title="Preview voice">
+    <Tooltip title={disabledReason || "Preview voice"}>
       <Button
         size="small"
         type="text"

@@ -1,4 +1,5 @@
 import React from "react"
+import { MemoryRouter } from "react-router-dom"
 import { act, render } from "@testing-library/react"
 import { expect, it, vi } from "vitest"
 import { EventOnlyHosts } from "../EventHosts"
@@ -12,7 +13,7 @@ vi.mock("../PageHelpModal", () => {
 })
 
 it("does not load closed help when the settings event hosts mount", async () => {
-  await act(async () => { render(<EventOnlyHosts />) })
+  await act(async () => { render(<MemoryRouter><EventOnlyHosts /></MemoryRouter>) })
   await act(async () => { await vi.dynamicImportSettled() })
   expect(mocks.loadHelp).not.toHaveBeenCalled()
 })

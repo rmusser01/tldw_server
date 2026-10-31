@@ -33,11 +33,14 @@ Verify and remediate Local_LLM review findings around llama.cpp acquisition SSRF
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified the current Local_LLM code still contains the reviewed issues: acquisition payload validation does not re-run DNS checks and the httpx fetch follows redirects automatically; Llamafile start can auto-download the latest executable without required integrity verification; legacy LlamaCpp/Llamafile/Ollama PID stop paths can target unmanaged processes; legacy LlamaCpp/Llamafile lifecycle state lacks explicit locks; HuggingFace accepts arbitrary local model directories and caches variants without a bound; download failures can log raw URLs; HTTP status fallback regex is double-escaped. Plan: add failing focused regressions, consolidate llama.cpp argument formatting into a shared helper used by both supervisor runner and legacy handler, harden download/provenance behavior, remove unmanaged PID stops, add lifecycle locks, tighten HuggingFace path/cache behavior, and verify with focused pytest plus Bandit.
 
 Implemented shared llama.cpp server argument formatting, hardened acquisition redirect/final-target validation through the central HTTP client, required opt-in plus SHA-256 for llamafile executable auto-downloads, serialized legacy LlamaCpp/Llamafile lifecycle mutation, rejected unmanaged PID/port stops, tightened HuggingFace local path and loaded-model cache behavior, and redacted sensitive URLs/status parsing.
-<!-- SECTION:NOTES:END -->
+
+Reopened for PR follow-up: rebase `codex/local-llm-hardening-2420` on latest `dev`, inspect PR comments/checks, address validated issues, re-run focused verification, and update PR branch.
+PR follow-up completed: rebased `codex/local-llm-hardening-2420` onto latest `origin/dev`, removed the unrelated Claims_Extraction design/task commit from the PR branch, and addressed the Qodo review findings. `_HttpxDownloadStream.__aenter__()` now offloads config loading and per-hop URL/DNS validation with `asyncio.to_thread`; `OllamaHandler.stop_server()` now terminates the handler-owned `asyncio.subprocess.Process` directly for managed PID/port stops instead of routing through the optional psutil PID helper.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -58,10 +61,3 @@ PR follow-up verification after rebase: `python -m py_compile tldw_Server_API/ap
 - [x] #8 Bandit runs on touched Python files.
 - [x] #9 Backlog task records verification and final summary.
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Reopened for PR follow-up: rebase `codex/local-llm-hardening-2420` on latest `dev`, inspect PR comments/checks, address validated issues, re-run focused verification, and update PR branch.
-PR follow-up completed: rebased `codex/local-llm-hardening-2420` onto latest `origin/dev`, removed the unrelated Claims_Extraction design/task commit from the PR branch, and addressed the Qodo review findings. `_HttpxDownloadStream.__aenter__()` now offloads config loading and per-hop URL/DNS validation with `asyncio.to_thread`; `OllamaHandler.stop_server()` now terminates the handler-owned `asyncio.subprocess.Process` directly for managed PID/port stops instead of routing through the optional psutil PID helper.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

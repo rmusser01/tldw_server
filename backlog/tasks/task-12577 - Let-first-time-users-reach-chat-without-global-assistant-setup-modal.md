@@ -36,9 +36,9 @@ Docs/superpowers/plans/2026-05-28-chat-first-run-gate-bypass.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the focused /chat first-run gate bypass. Added a route-level app-shell regression proving /chat sets FirstRunGate bypass=true while preserving the /persona setup target, and added inline chat nudge coverage proving assistant setup remains available inside PlaygroundComposerNotices when no profile exists. Fixed the first-run notice test fixture to stub the same global localStorage used by the component. Updated the rebaseline review/evidence to mark first-time-unseeded.png as pre-TASK-536 evidence and record that the current proof is focused unit coverage because the backend attempt on 127.0.0.1:18031 exited during startup before a replacement screenshot could be captured. Verification: focused Vitest passed 2 files / 17 tests; evidence JSON parse passed; git diff --check passed. Bandit skipped because no Python files were touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

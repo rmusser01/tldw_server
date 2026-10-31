@@ -41,7 +41,7 @@ Resolve still-valid review feedback on PR #1608 for the Persona Buddy renderer c
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified the live PR #1608 review threads before editing. Addressed the still-valid findings: validation-only renderer capabilities are now rejected when activation validation is requested; unsupported renderer IDs in manifest errors are bounded and newline/tab/backslash escaped; legacy `asset_ids` are trimmed before frame lookup; asset map presence no longer allocates `Object.keys`; the Buddy renderer registry uses own-property lookup for untrusted renderer strings; the shared render-error type moved to a neutral PersonaBuddy module; capability payload `renderer_type` is string-based for forward compatibility; local absolute worktree paths were redacted from the touched task notes.
 
 Verification:
@@ -50,7 +50,7 @@ Verification:
 - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Persona/visuals.py -f json -o /tmp/bandit_pr1608_review_visuals.json` -> 0 results, 0 errors.
 - `git diff --check` -> passed.
 - Package-wide `bunx tsc -p tsconfig.json --noEmit --pretty false` still has unrelated baseline errors; after the local typed-map fix, filtered Persona/Buddy/persona-visuals TypeScript output had no matches.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

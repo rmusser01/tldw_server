@@ -53,7 +53,7 @@ Found by the comprehensive core-module review; independently verified by the orc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Duplicate of TASK-13307 (filed twice during the 2026-09-22 review). Work and status are tracked there.
 
 
@@ -68,7 +68,7 @@ Verification: the new file 12 passed; existing OCR tests (test_ocr_backend_dots.
 
 Notes from the other branch (merged 2026-09-27):
 Closed 2026-09-27, re-verified on dev. AC #4 stays unchecked on purpose: declined with the counterexample recorded above.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

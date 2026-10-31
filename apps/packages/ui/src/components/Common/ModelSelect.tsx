@@ -1,14 +1,36 @@
-import { useQuery } from "@tanstack/react-query"
-import { Avatar, Dropdown, Input, Select, Tooltip, type MenuProps } from "antd"
+import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
+import {
+  Avatar,
+  Dropdown,
+  Input,
+  Select,
+  Tooltip,
+  type InputRef,
+  type MenuProps
+} from "antd"
 import { LucideBrain, Star } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { useStorage } from "@plasmohq/storage/hook"
-import { fetchChatModels } from "@/services/tldw-server"
-import { useMessage } from "@/hooks/useMessage"
+import { useSelectedModel } from "@/hooks/chat/useSelectedModel"
+import { SelectedModelSaveFeedback } from "./SelectedModelSaveFeedback"
 import { getProviderDisplayName } from "@/utils/provider-registry"
 import { ProviderIcons } from "./ProviderIcon"
 import { IconButton } from "./IconButton"
+import { useStoreChatModelSettings } from "@/store/model"
+import {
+  getCanonicalModelKey,
+  getModelId,
+  getModelProvider,
+  resolveModelSelectorSelection
+} from "@/hooks/playground/modelSelectorUtils"
+import { useChatModelReadinessState } from "@/hooks/chat/useChatModelReadinessState"
+import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider"
+import {
+  formatChatModelLabel,
+  formatChatProviderName,
+  getChatModelLabelParts
+} from "@/utils/chat-model-label"
 
 export type Props = {
   iconClassName?: string
@@ -50,7 +72,8 @@ const ModelSelectBase = (
   ref: React.ForwardedRef<ModelSelectHandle>
 ) => {
   const { t } = useTranslation("common")
-  const { setSelectedModel, selectedModel } = useMessage()
+  const { setSelectedModel, selectedModel, selectedModelSaveFailed, retrySelectedModelSave } = useSelectedModel()
+  const apiProvider = useStoreChatModelSettings(state => state.apiProvider)
   const selectedModelValue =
     typeof selectedModel === "string" ? selectedModel : null
   const [menuDensity] = useStorage("menuDensity", "comfortable")
@@ -65,20 +88,36 @@ const ModelSelectBase = (
   const [searchQuery, setSearchQuery] = React.useState("")
   const [dropdownOpen, setDropdownOpen] = React.useState(false)
   const triggerRef = React.useRef<HTMLButtonElement | null>(null)
+  const searchInputRef = React.useRef<InputRef | null>(null)
   React.useImperativeHandle(
     ref,
     () => ({
+      // Opens the picker and puts keyboard focus in its search box (XS-02).
+      // The menu renders in a portal, so focus must land inside it: leaving it
+      // on the trigger strands keyboard users outside the list.
       openAndFocus: () => {
         setDropdownOpen(true)
-        window.requestAnimationFrame(() => triggerRef.current?.focus())
+        let framesLeft = 10
+        const focusSearch = () => {
+          const input = searchInputRef.current
+          if (input) {
+            input.focus({ preventScroll: true })
+            return
+          }
+          framesLeft -= 1
+          if (framesLeft > 0) window.requestAnimationFrame(focusSearch)
+        }
+        window.requestAnimationFrame(focusSearch)
       }
     }),
     []
   )
-  const { data, isLoading } = useQuery<ChatModel[]>({
-    queryKey: ["getAllModelsForSelect"],
-    queryFn: () => fetchChatModels({ returnEmpty: true })
-  })
+  const { data, isLoading, isError, refetch } = useChatModelCatalog()
+
+  const selectedSelection = React.useMemo(
+    () => resolveModelSelectorSelection(data, selectedModelValue, apiProvider),
+    [data, selectedModelValue, apiProvider]
+  )
 
   const favoriteSet = React.useMemo(
     () => new Set((favoriteModels || []).map((value) => String(value))),
@@ -131,12 +170,9 @@ const ModelSelectBase = (
       return normalized.toLowerCase()
     }
 
+    // Local providers keep their own group, named "Local · Ollama" (XS-02).
     const toGroupKey = (providerRaw: string) =>
-      providerRaw === "chrome"
-        ? "default"
-        : LOCAL_PROVIDERS.has(providerRaw)
-          ? "custom"
-          : providerRaw
+      providerRaw === "chrome" ? "default" : providerRaw
 
     const byDisplayLabel = (a: ChatModel, b: ChatModel) => {
       const aProvider = getProviderDisplayName(toProviderKey(a.provider))
@@ -148,8 +184,9 @@ const ModelSelectBase = (
 
     const buildItem = (model: ChatModel): MenuItem => {
       const providerRaw = toProviderKey(model.provider)
-      const providerLabel = getProviderDisplayName(providerRaw)
-      const modelLabel = model.nickname || model.model
+      const providerLabel =
+        formatChatProviderName(providerRaw) || getProviderDisplayName(providerRaw)
+      const modelLabel = getChatModelLabelParts({ model }).modelName || model.model
       const caps = Array.isArray(model.details?.capabilities)
         ? model.details.capabilities
         : []
@@ -162,7 +199,7 @@ const ModelSelectBase = (
         : t("modelSelect.favoriteAdd", "Add to favorites")
 
       return {
-        key: model.model,
+        key: getCanonicalModelKey(model),
         label: (
           <div className="w-56 gap-2 text-sm inline-flex items-start leading-5">
             <div>
@@ -176,8 +213,12 @@ const ModelSelectBase = (
               )}
             </div>
             <div className="flex flex-col min-w-0 flex-1">
-              <span className="truncate">
-                {providerLabel} - {modelLabel}
+              {/* Model first; the provider is secondary and truncates first (XS-02). */}
+              <span className="flex min-w-0 items-baseline gap-1.5">
+                <span className="min-w-0 truncate font-medium">{modelLabel}</span>
+                <span className="min-w-0 max-w-[45%] shrink-[2] truncate text-xs text-text-muted">
+                  {providerLabel}
+                </span>
               </span>
               {(hasVision || hasTools || hasFast) && (
                 <div className="mt-0.5 flex flex-wrap gap-1 text-[10px]">
@@ -223,11 +264,7 @@ const ModelSelectBase = (
           </div>
         ),
         onClick: () => {
-          if (selectedModelValue === model.model) {
-            setSelectedModel(null)
-          } else {
-            setSelectedModel(model.model)
-          }
+          void setSelectedModel(getCanonicalModelKey(model)).catch(() => undefined)
         }
       }
     }
@@ -290,12 +327,14 @@ const ModelSelectBase = (
 
     const items: MenuItem[] = []
     for (const [groupKey, children] of groupEntries) {
+      const providerText =
+        formatChatProviderName(groupKey) || getProviderDisplayName(groupKey)
       const labelText =
         groupKey === "default"
           ? t("modelSelect.group.default", "Default")
-          : groupKey === "custom"
-            ? t("modelSelect.group.custom", "Custom")
-            : getProviderDisplayName(groupKey)
+          : LOCAL_PROVIDERS.has(groupKey)
+            ? `${t("modelSelect.group.local", "Local")} · ${providerText}`
+            : providerText
       const iconKey = groupKey === "default" ? "chrome" : groupKey
       items.push({
         type: "group",
@@ -313,27 +352,73 @@ const ModelSelectBase = (
   }, [
     favoriteSet,
     filteredData,
-    selectedModelValue,
     setSelectedModel,
     sortMode,
     t,
     toggleFavorite
   ])
 
-  // Get display name for selected model
+  // The selected model's name and "model (Provider)" label (XS-02). The chip
+  // truncates with CSS so the model name is never cut to a fixed length.
   const selectedModelDisplay = React.useMemo(() => {
     if (!selectedModelValue || !data) return null
-    const model = data.find(m => m.model === selectedModelValue)
-    if (!model) return selectedModelValue.split('/').pop() || selectedModelValue
-    // Use nickname if available, otherwise extract short name from model ID
-    const shortName = model.nickname || model.model.split('/').pop() || model.model
-    // Truncate if too long
-    return shortName.length > 20 ? shortName.substring(0, 18) + '…' : shortName
-  }, [selectedModelValue, data])
+    const model = selectedSelection.model
+    const modelName = model
+      ? getChatModelLabelParts({ model }).modelName
+      : getChatModelLabelParts({ modelId: selectedModelValue }).modelName
+    return modelName.split("/").pop() || modelName
+  }, [selectedModelValue, data, selectedSelection.model])
+  const selectedModelLabel = React.useMemo(() => {
+    if (!selectedModelValue) return null
+    return formatChatModelLabel({
+      model: selectedSelection.model,
+      modelId: selectedSelection.model ? undefined : selectedModelValue,
+      provider: selectedSelection.provider
+    })
+  }, [selectedModelValue, selectedSelection.model, selectedSelection.provider])
+  // The selected model's own status, as on the full chat page (XS-02, CC-01).
+  const selectedModelReadiness = useChatModelReadinessState({
+    model: selectedSelection.model as Record<string, unknown> | null,
+    provider: selectedSelection.model
+      ? getModelProvider(selectedSelection.model)
+      : selectedSelection.provider,
+    modelId: selectedSelection.model
+      ? getModelId(selectedSelection.model)
+      : selectedModelValue
+        ? parseProviderQualifiedModelSelection(selectedModelValue).modelId
+        : null
+  })
+  const selectedModelReadinessLabel =
+    selectedModelReadiness === "unreachable"
+      ? t("modelSelect.readiness.unreachable", "Unreachable")
+      : selectedModelReadiness === "working"
+        ? t("modelSelect.readiness.working", "Working")
+        : selectedModelReadiness === "not_checked"
+          ? t("modelSelect.readiness.notChecked", "Not checked")
+          : null
+  const selectedModelSummary = selectedModelLabel
+    ? [selectedModelLabel, selectedModelReadinessLabel].filter(Boolean).join(". ")
+    : null
+
+  const saveFeedback = <SelectedModelSaveFeedback failed={selectedModelSaveFailed} onRetry={retrySelectedModelSave} />
+
+  if (isError) {
+    return (
+      <>{saveFeedback}<IconButton
+        ariaLabel={`${t("playground:composer.modelsDiscoveryFailed", "Could not check chat models")}. ${t("playground:characterChatReadiness.model.retryAction", "Try again")}`}
+        onClick={() => { void refetch() }}
+        dataTestId="chat-model-retry"
+        className="h-11 min-w-11 px-2 text-text-muted"
+      >
+        <LucideBrain className={iconClassName} />
+        <span className="ml-1 text-xs">{t("playground:characterChatReadiness.model.retryAction", "Try again")}</span>
+      </IconButton></>
+    )
+  }
 
   if (isLoading && !data) {
     return (
-      <Tooltip title={t("modelSelect.loading", "Loading models...")}>
+      <>{saveFeedback}<Tooltip title={t("modelSelect.loading", "Loading models...")}>
         <IconButton
           ariaLabel={t("selectAModel") as string}
           disabled
@@ -345,12 +430,13 @@ const ModelSelectBase = (
             {t("modelSelect.loading", "Loading models...")}
           </span>
         </IconButton>
-      </Tooltip>
+      </Tooltip></>
     )
   }
 
   return (
     <>
+      {saveFeedback}
       {data && data.length > 0 && (
         <Dropdown
           open={dropdownOpen}
@@ -363,13 +449,14 @@ const ModelSelectBase = (
           menu={{
             items: menuItems,
             className: `no-scrollbar ${menuDensity === 'compact' ? 'menu-density-compact' : 'menu-density-comfortable'}`,
-            selectedKeys: selectedModelValue ? [selectedModelValue] : [],
+            selectedKeys: selectedSelection.model ? [getCanonicalModelKey(selectedSelection.model)] : [],
             selectable: true
           }}
           popupRender={(menu) => (
             <div className="w-72">
               <div className="flex items-center gap-2 px-2 py-2 border-b border-border">
                 <Input
+                  ref={searchInputRef}
                   size="small"
                   placeholder={t("modelSelect.searchPlaceholder", "Search models")}
                   value={searchQuery}
@@ -377,7 +464,17 @@ const ModelSelectBase = (
                   className="flex-1"
                   autoFocus
                   onChange={(event) => setSearchQuery(event.target.value)}
-                  onKeyDown={(event) => event.stopPropagation()}
+                  onKeyDown={(event) => {
+                    event.stopPropagation()
+                    // Escape leaves the picker and returns to the chip, so a
+                    // keyboard user is never stranded in the portal (XS-02).
+                    if (event.key === "Escape") {
+                      event.preventDefault()
+                      setDropdownOpen(false)
+                      setSearchQuery("")
+                      triggerRef.current?.focus()
+                    }
+                  }}
                 />
                 <Select
                   size="small"
@@ -409,20 +506,46 @@ const ModelSelectBase = (
           trigger={["click"]}>
           <Tooltip
             title={
-              selectedModelValue
-                ? `${t("modelSelect.tooltip", "Changes model for next message")}: ${selectedModelValue}`
+              selectedModelSummary
+                ? `${t("modelSelect.tooltip", "Changes model for next message")}: ${selectedModelSummary}`
                 : t("modelSelect.tooltip", "Changes model for next message")
             }>
             <IconButton
               ref={triggerRef}
-              ariaLabel={t("selectAModel") as string}
+              ariaLabel={
+                selectedModelSummary
+                  ? `${t("modelSelect.label", "Model")}: ${selectedModelSummary}. ${t("modelSelect.change", "Change model")}`
+                  : showSelectedName
+                    ? t("modelSelect.choose", "Choose model")
+                    : (t("selectAModel") as string)
+              }
               hasPopup="menu"
               dataTestId="chat-model-select"
-              className="px-2 text-text-muted">
-              <LucideBrain className={iconClassName} />
+              className="min-w-0 max-w-full px-2 text-text-muted">
+              <LucideBrain className={`${iconClassName} shrink-0`} />
               {showSelectedName && selectedModelDisplay ? (
-                <span className="ml-1.5 max-w-[120px] truncate text-xs font-medium text-text">
-                  {selectedModelDisplay}
+                <>
+                  <span className="ml-1.5 min-w-0 max-w-[200px] truncate text-xs font-medium text-text">
+                    {selectedModelDisplay}
+                  </span>
+                  {selectedModelReadiness ? (
+                    <span
+                      aria-hidden="true"
+                      data-testid="chat-model-readiness"
+                      data-model-readiness={selectedModelReadiness}
+                      className={`ml-1.5 inline-block size-1.5 shrink-0 rounded-full ${
+                        selectedModelReadiness === "unreachable"
+                          ? "bg-warn"
+                          : selectedModelReadiness === "working"
+                            ? "bg-success"
+                            : "bg-text-muted"
+                      }`}
+                    />
+                  ) : null}
+                </>
+              ) : showSelectedName ? (
+                <span className="ml-1.5 text-xs font-medium text-text">
+                  {t("modelSelect.choose", "Choose model")}
                 </span>
               ) : (
                 <span className="ml-1 hidden sm:inline text-xs">

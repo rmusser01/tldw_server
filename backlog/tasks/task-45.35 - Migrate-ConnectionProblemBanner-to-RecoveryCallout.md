@@ -41,11 +41,11 @@ Migrate the remaining ConnectionProblemBanner local-recovery-banner debt to the 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented ConnectionProblemBanner through RecoveryCallout with state=unavailable, preserving badge/title composition, description text, examples, primary action, secondary action, retry action, disabled retry state, and className forwarding. StatePanel primaryAction is now optional to match ActionGroup runtime semantics and allow canonical recovery surfaces that only have secondary actions.
 
 Removed the ConnectionProblemBanner local-recovery-banner baseline exception. The design-system verifier now reports 511 allowed legacy exceptions and no local-recovery-banner bucket.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

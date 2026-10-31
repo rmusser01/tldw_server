@@ -6,7 +6,7 @@ const fixture = vi.hoisted(() => ({
   beforeRead: null as null | ((key: string) => Promise<void>)
 }))
 vi.mock("wxt/browser", () => ({ browser: {
-  runtime: {}, storage: { local: { get: async () => ({}) }, onChanged: { addListener: () => undefined } }
+  runtime: {}, storage: { local: { get: async () => ({}) }, onChanged: { addListener: () => undefined, removeListener: () => undefined } }
 } }))
 vi.mock("@/utils/safe-storage", () => ({ createSafeStorage: (options?: { area?: string }) => ({
   get: async <T,>(key: string): Promise<T | null> => {
@@ -208,11 +208,16 @@ describe("connection readiness through actual apiSend and canonical refresh", ()
   })
 
   it("does not add refresh or replay to an ordinary direct mutation", async () => {
-    const fetchSpy = vi.fn(async () => response(401))
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).endsWith("/auth/refresh")
+        ? response(200, { access_token: jwt("Alice", 1), refresh_token: "rotated" })
+        : response(401)
+    )
     vi.stubGlobal("fetch", fetchSpy)
     expect(await apiSend({ path: "/api/v1/prompts/", method: "POST", body: { name: "private draft" } }, {
       readiness: { config: config(), isCurrent: () => true }
     })).toMatchObject({ status: 401 })
     expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(fixture.values.tldwRefreshRotation).toBeUndefined()
   })
 })

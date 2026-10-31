@@ -1,3 +1,7 @@
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import { assertAuthConnectionAttempt, normalizeAuthServerUrl, type AuthConnectionAttempt } from "./auth-connection-target"
+import type { PathOrUrl } from "./openapi-guard"
+import type { TldwConfig } from "./TldwApiClient"
 import { tldwClient } from "./TldwApiClient"
 import { bgRequest } from "@/services/background-proxy"
 import { emitSplashAfterLoginSuccess } from "@/services/splash-events"
@@ -5,7 +9,7 @@ import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 import { clearSourceReviewHandoffs } from "@/services/tldw/source-review-handoff"
 import { clearFlashcardsGenerateHandoffs } from "@/services/tldw/flashcards-generate-handoff"
-import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import { createServicePromptScopeChangedError, isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import { clearStandaloneHtmlSessionRecords } from "@/services/tldw/standalone-html-session-records"
 import { deriveScopedUserId, deriveTokenOrgId } from "@/utils/media-navigation-scope"
 
@@ -65,25 +69,41 @@ export class TldwAuthService {
     return isHostedTldwDeployment()
   }
 
-  private async ensureHostedOrgId(): Promise<void> {
+  private async ensureHostedOrgId(
+    expected?: AuthConnectionAttempt,
+    assertCurrent?: (config: Partial<TldwConfig> | null) => void,
+    assertCommitted?: (config: Partial<TldwConfig> | null) => void
+  ): Promise<void> {
+    const checkCurrent = async () => {
+      if (assertCurrent) assertCurrent(await this.readLoginConfig(expected))
+    }
+    const saveOrg = async (orgId: number) => {
+      if (assertCurrent) await tldwClient.updateConfig({ orgId }, assertCurrent, assertCommitted)
+      else await tldwClient.updateConfig({ orgId })
+    }
+    await checkCurrent()
     try {
       const orgs = await bgRequest<OrgListResponse>({
         path: "/api/v1/orgs",
         method: "GET"
       })
+      await checkCurrent()
       const existingId = orgs?.items?.[0]?.id
       if (existingId) {
-        await tldwClient.updateConfig({ orgId: existingId })
+        await saveOrg(existingId)
         return
       }
-    } catch {
+    } catch (error) {
+      if (isRequestConfigScopeChangedError(error)) throw error
       // Continue to the hosted profile fallback below.
     }
 
+    await checkCurrent()
     try {
       const profile = await tldwClient.getCurrentUserProfile({
         includeRaw: true
       })
+      await checkCurrent()
       const activeOrgId = Number(
         profile?.active_org_id ??
         profile?.org_id ??
@@ -91,104 +111,144 @@ export class TldwAuthService {
         0
       )
       if (Number.isFinite(activeOrgId) && activeOrgId > 0) {
-        await tldwClient.updateConfig({ orgId: activeOrgId })
+        await saveOrg(activeOrgId)
       }
-    } catch {
+    } catch (error) {
+      if (isRequestConfigScopeChangedError(error)) throw error
       // best-effort only
     }
   }
 
-  /**
-   * Login for multi-user mode
-   */
-  async login(credentials: LoginCredentials): Promise<TokenResponse> {
-    const hostedMode = this.isHostedMode()
-    const config = await tldwClient.getConfig()
-    if (!config && !hostedMode) {
-      throw new Error('tldw server not configured')
+  /** Bind Settings sign-in to its visible target across service and storage awaits. */
+  private async withConnectionAttempt<T>(
+    expected: AuthConnectionAttempt | undefined,
+    run: (
+      assertCurrent?: (config: Partial<TldwConfig> | null) => void,
+      assertCommitted?: (config: Partial<TldwConfig> | null) => void
+    ) => Promise<T>
+  ): Promise<T> {
+    if (!expected) return run()
+    const target = { ...expected.target }
+    let invalidated = false
+    const unwatch = watchChatAccountChanges(changed => { if (changed) invalidated = true })
+    const assertCurrent = (config: Partial<TldwConfig> | null) => {
+      if (invalidated) throw createServicePromptScopeChangedError()
+      assertAuthConnectionAttempt({ ...expected, target }, config)
     }
+    try {
+      return await run(assertCurrent, config => {
+        // The write itself can change account authority. Its own event is valid;
+        // the view lifetime and the actual committed target must still match.
+        assertAuthConnectionAttempt({ target, signal: expected.signal }, config)
+      })
+    } finally {
+      unwatch()
+    }
+  }
 
-    const formData = new URLSearchParams()
-    formData.append('username', credentials.username)
-    formData.append('password', credentials.password)
+  private async readLoginConfig(expected?: AuthConnectionAttempt): Promise<TldwConfig | null> {
+    // getConfig can return a cached target. Settings authorizes committed storage.
+    if (!expected) return tldwClient.getConfig()
+    try {
+      await tldwClient.initialize()
+      return await tldwClient.getConfig()
+    } catch {
+      throw createServicePromptScopeChangedError()
+    }
+  }
 
-    const response = await bgRequest<any>({
-      path: hostedMode ? '/api/auth/login' : '/api/v1/auth/login',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: formData.toString(),
-      noAuth: true
+  private authPath(path: `/api/v1/auth/${string}`, hostedMode: boolean, expected?: AuthConnectionAttempt): PathOrUrl {
+    if (hostedMode) return path.replace("/api/v1/auth/", "/api/auth/") as PathOrUrl
+    return expected ? (normalizeAuthServerUrl(expected.target.serverUrl) + path) as PathOrUrl : path
+  }
+
+  /** Login for multi-user mode. */
+  async login(credentials: LoginCredentials, expected?: AuthConnectionAttempt): Promise<TokenResponse> {
+    return this.withConnectionAttempt(expected, async (assertCurrent, assertCommitted) => {
+      const hostedMode = this.isHostedMode()
+      const config = await this.readLoginConfig(expected)
+      assertCurrent?.(config)
+      if (!config && !hostedMode) throw new Error("tldw server not configured")
+      const formData = new URLSearchParams({ username: credentials.username, password: credentials.password })
+      const tokens = await bgRequest<TokenResponse, PathOrUrl>({
+        path: this.authPath("/api/v1/auth/login", hostedMode, expected),
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: formData.toString(),
+        noAuth: true
+      })
+      assertCurrent?.(config)
+      assertCurrent?.(await this.readLoginConfig(expected))
+      await this.publishLogin(tokens, hostedMode, assertCurrent, assertCommitted, expected)
+      return tokens
     })
-    const tokens = response as TokenResponse
+  }
 
-    await tldwClient.updateConfig({
-      authMode: 'multi-user',
+  /** Request a magic link sign-in email. */
+  async requestMagicLink(email: string, expected?: AuthConnectionAttempt): Promise<void> {
+    return this.withConnectionAttempt(expected, async assertCurrent => {
+      const hostedMode = this.isHostedMode()
+      const config = await this.readLoginConfig(expected)
+      assertCurrent?.(config)
+      if (!config && !hostedMode) throw new Error("tldw server not configured")
+      await bgRequest({
+        path: this.authPath("/api/v1/auth/magic-link/request", hostedMode, expected),
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: { email },
+        noAuth: true
+      })
+      assertCurrent?.(config)
+      assertCurrent?.(await this.readLoginConfig(expected))
+    })
+  }
+
+  /** Verify a magic link token and sign in. */
+  async verifyMagicLink(token: string, expected?: AuthConnectionAttempt): Promise<TokenResponse> {
+    return this.withConnectionAttempt(expected, async (assertCurrent, assertCommitted) => {
+      const hostedMode = this.isHostedMode()
+      const config = await this.readLoginConfig(expected)
+      assertCurrent?.(config)
+      if (!config && !hostedMode) throw new Error("tldw server not configured")
+      const tokens = await bgRequest<TokenResponse, PathOrUrl>({
+        path: this.authPath("/api/v1/auth/magic-link/verify", hostedMode, expected),
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: { token },
+        noAuth: true
+      })
+      assertCurrent?.(config)
+      assertCurrent?.(await this.readLoginConfig(expected))
+      await this.publishLogin(tokens, hostedMode, assertCurrent, assertCommitted, expected)
+      return tokens
+    })
+  }
+
+  private async publishLogin(
+    tokens: TokenResponse,
+    hostedMode: boolean,
+    assertCurrent?: (config: Partial<TldwConfig> | null) => void,
+    assertCommitted?: (config: Partial<TldwConfig> | null) => void,
+    expected?: AuthConnectionAttempt
+  ): Promise<void> {
+    const update: Partial<TldwConfig> = {
+      authMode: "multi-user",
       accessToken: hostedMode ? undefined : tokens.access_token,
       refreshToken: hostedMode ? undefined : tokens.refresh_token,
       ...(hostedMode ? {} : { orgId: deriveTokenOrgId(tokens.access_token) })
-    })
-
-    if (hostedMode) await this.ensureHostedOrgId()
-
-    if (!hostedMode && tokens.expires_in) {
-      this.setupTokenRefresh(tokens.expires_in)
     }
-
+    if (assertCurrent) await tldwClient.updateConfig(update, assertCurrent, assertCommitted)
+    else await tldwClient.updateConfig(update)
+    if (hostedMode) {
+      // The login write is now authoritative. Start the metadata phase from it,
+      // keeping lifecycle cancellation while observing subsequent account changes.
+      const committedAttempt = expected ? { target: { ...expected.target }, signal: expected.signal } : undefined
+      await this.withConnectionAttempt(committedAttempt, (current, committed) =>
+        this.ensureHostedOrgId(committedAttempt, current, committed))
+    }
+    if (expected) assertAuthConnectionAttempt({ target: expected.target, signal: expected.signal }, expected.target)
+    if (!hostedMode && tokens.expires_in) this.setupTokenRefresh(tokens.expires_in)
     emitSplashAfterLoginSuccess()
-    return tokens
-  }
-
-  /**
-   * Request a magic link sign-in email
-   */
-  async requestMagicLink(email: string): Promise<void> {
-    const hostedMode = this.isHostedMode()
-    const config = await tldwClient.getConfig()
-    if (!config && !hostedMode) {
-      throw new Error('tldw server not configured')
-    }
-    await bgRequest<any>({
-      path: hostedMode ? '/api/auth/magic-link/request' : '/api/v1/auth/magic-link/request',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: { email },
-      noAuth: true
-    })
-  }
-
-  /**
-   * Verify a magic link token and sign in
-   */
-  async verifyMagicLink(token: string): Promise<TokenResponse> {
-    const hostedMode = this.isHostedMode()
-    const config = await tldwClient.getConfig()
-    if (!config && !hostedMode) {
-      throw new Error('tldw server not configured')
-    }
-
-    const tokens = await bgRequest<TokenResponse>({
-      path: hostedMode ? '/api/auth/magic-link/verify' : '/api/v1/auth/magic-link/verify',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: { token },
-      noAuth: true
-    })
-
-    await tldwClient.updateConfig({
-      authMode: 'multi-user',
-      accessToken: hostedMode ? undefined : tokens.access_token,
-      refreshToken: hostedMode ? undefined : tokens.refresh_token,
-      ...(hostedMode ? {} : { orgId: deriveTokenOrgId(tokens.access_token) })
-    })
-
-    if (hostedMode) await this.ensureHostedOrgId()
-
-    if (!hostedMode && tokens.expires_in) {
-      this.setupTokenRefresh(tokens.expires_in)
-    }
-
-    emitSplashAfterLoginSuccess()
-    return tokens
   }
 
   /**
@@ -280,6 +340,8 @@ export class TldwAuthService {
       tokens = await bgRequest<TokenResponse>({
         path: '/api/v1/auth/refresh',
         method: 'POST',
+        // A background worker cannot send this request back to its own listener.
+        preferDirect: typeof window === "undefined",
         headers: { 'Content-Type': 'application/json' },
         body: { refresh_token: config.refreshToken },
         servicePromptConfig: {

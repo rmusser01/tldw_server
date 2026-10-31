@@ -1,3 +1,8 @@
+import { servicePromptAuthorityKey } from "@/services/tldw/domains/service-prompts";
+import {
+  createNotesGraphAuthorityScope,
+  useNotesGraphAuthorityScope,
+} from "@/components/Notes/hooks/useNotesGraphAuthorityScope";
 /**
  * KnowledgeQAProvider - Context provider for Knowledge QA state management
  */
@@ -13,6 +18,11 @@ import React, {
   useState,
   type ReactNode,
 } from "react"
+import { useTranslation } from "react-i18next"
+import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
+import { removeLocalCopyOfServerChat } from "@/components/Sidepanel/Chat/tab-conversation-actions"
+import { useInRouterContext, useLocation } from "react-router-dom"
+import { parseKnowledgeScope } from "@/utils/knowledge-scope-handoff"
 import { useStorage } from "@plasmohq/storage/hook"
 import type {
   KnowledgeQAState,
@@ -49,8 +59,10 @@ import { createKnowledgeQaClient } from "./knowledgeQaClient"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { KNOWLEDGE_QA_KEYWORD } from "./constants"
 import { trackKnowledgeQaSearchMetric } from "@/utils/knowledge-qa-search-metrics"
+import { createStreamingUpdateScheduler } from "@/utils/streaming-update-scheduler"
 import { getKnowledgeQaHistoryStorageKey, getKnowledgeQaStorageScopeKey, persistKnowledgeQaHistory } from "./historyStorage"
 import { useKnowledgeQAAuthority } from "./hooks/useKnowledgeQAAuthority"
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import {
   getKnowledgeQaSearchErrorLogCode,
   mapKnowledgeQaSearchErrorMessage,
@@ -116,6 +128,7 @@ const KNOWLEDGE_QA_SETTINGS_OVERRIDES: Partial<RagSettings> = {
 // Initial state
 const initialState: KnowledgeQAState = {
   query: "",
+  resultQuery: null,
   isSearching: false,
   hasSearched: false,
   results: [],
@@ -159,6 +172,7 @@ const isLocalThreadId = (id: string | null | undefined) =>
   Boolean(id && id.startsWith(LOCAL_THREAD_PREFIX))
 
 type ResultsPayload = {
+  query: string | null
   completedGenerationEnabled?: boolean | null
   results: RagResult[]
   answer: string | null
@@ -265,6 +279,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
       return {
         ...state,
         results: action.payload.results,
+        resultQuery: action.payload.query,
         completedGenerationEnabled: action.payload.completedGenerationEnabled ?? null,
         answer: action.payload.answer,
         citations: action.payload.citations,
@@ -283,6 +298,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
       return {
         ...state,
         results: action.payload.results,
+        resultQuery: action.payload.query,
         answer: action.payload.answer,
         citations: action.payload.citations,
         answerTrustState: action.payload.answerTrustState,
@@ -325,7 +341,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
         answerTrustReasonCodes: action.payload ? [] : state.answerTrustReasonCodes,
         answerEvidenceOrigin: action.payload ? null : state.answerEvidenceOrigin,
         extensionFailureState: action.payload ? "search_failed" : null,
-        hasSearched: true,
+        hasSearched: action.payload !== null || state.hasSearched,
         isSearching: false,
         queryStage: action.payload ? "error" : "idle",
       }
@@ -344,6 +360,7 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
     case "CLEAR_RESULTS":
       return {
         ...state,
+        resultQuery: null,
         results: [],
         completedGenerationEnabled: null,
         answer: null,
@@ -389,6 +406,13 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
             : {
                 ...presetSettings,
                 ...KNOWLEDGE_QA_SETTINGS_OVERRIDES,
+                sources: state.settings.sources,
+                include_media_ids: state.settings.include_media_ids,
+                include_note_ids: state.settings.include_note_ids,
+                collection_id: state.settings.collection_id,
+                keyword_filter: state.settings.keyword_filter,
+                generation_provider: state.settings.generation_provider,
+                generation_model: state.settings.generation_model,
                 enable_web_fallback: state.settings.enable_web_fallback,
               },
       }
@@ -741,25 +765,30 @@ function deriveThreadHydrationState(messages: KnowledgeQAMessage[]): {
     ragContext?.trust_evidence_origin === "unknown_origin"
       ? ragContext.trust_evidence_origin
       : null
-  const normalizedTrust =
-    storedTrustState != null
-      ? {
-          state: storedTrustState,
-          reasonCodes: storedReasonCodes,
-          evidenceOrigin: storedEvidenceOrigin ?? "unknown_origin",
-        }
-      : normalizeKnowledgeAnswerTrust({
-          answer,
-          results,
-          citations,
-          hasRequiredMetadata: false,
-        })
+  const normalizedTrust = normalizeKnowledgeAnswerTrust({
+    answer,
+    results,
+    citations,
+    backendTrust:
+      storedTrustState != null
+        ? {
+            state: storedTrustState,
+            reasonCodes: storedReasonCodes,
+            evidenceOrigin: storedEvidenceOrigin ?? "unknown_origin",
+          }
+        : null,
+    hasRequiredMetadata: false,
+  })
   const queryFromContext =
     typeof ragContext?.search_query === "string" &&
     ragContext.search_query.trim().length > 0
       ? ragContext.search_query
       : null
-  const query = latestUserMessage?.content || queryFromContext
+  const answeredUserMessage = messages
+    .slice(0, messages.indexOf(latestAssistantMessage))
+    .reverse()
+    .find((message) => message.role === "user")
+  const query = queryFromContext || answeredUserMessage?.content || null
 
   return {
     query,
@@ -1421,6 +1450,7 @@ function buildScopeSnapshot(
     preset,
     sources: [...settings.sources],
     webFallback: Boolean(settings.enable_web_fallback),
+    keywordFilter: settings.keyword_filter,
     collectionId:
       typeof settings.collection_id === "number" &&
       Number.isInteger(settings.collection_id) &&
@@ -1468,6 +1498,10 @@ function createRestorableSettingsSnapshot(settings: RagSettings): Partial<RagSet
       typeof settings.enable_citations === "boolean" ? settings.enable_citations : undefined,
     enable_generation:
       typeof settings.enable_generation === "boolean" ? settings.enable_generation : undefined,
+    generation_provider:
+      typeof settings.generation_provider === "string" ? settings.generation_provider : null,
+    generation_model:
+      typeof settings.generation_model === "string" ? settings.generation_model : null,
     enable_web_fallback:
       typeof settings.enable_web_fallback === "boolean" ? settings.enable_web_fallback : undefined,
     web_fallback_threshold:
@@ -1537,6 +1571,12 @@ function normalizeRestorableSettingsSnapshot(
   }
   if (typeof candidate.enable_generation === "boolean") {
     normalized.enable_generation = candidate.enable_generation
+  }
+  if (candidate.generation_provider === null || typeof candidate.generation_provider === "string") {
+    normalized.generation_provider = typeof candidate.generation_provider === "string" ? candidate.generation_provider : null
+  }
+  if (candidate.generation_model === null || typeof candidate.generation_model === "string") {
+    normalized.generation_model = typeof candidate.generation_model === "string" ? candidate.generation_model : null
   }
   if (typeof candidate.enable_web_fallback === "boolean") {
     normalized.enable_web_fallback = candidate.enable_web_fallback
@@ -1667,22 +1707,110 @@ function mergeStringFilters(
 // Provider component
 export function KnowledgeQAProvider({ children }: { children: ReactNode }) {
   const authority = useKnowledgeQAAuthority()
-  return <OwnedKnowledgeQAProvider key={authority.key} authority={authority}>{children}</OwnedKnowledgeQAProvider>
+  const inRouter = useInRouterContext()
+  const handoffOwner = useRef<{ routeKey: string; scopeKey: string } | null>(
+    null,
+  )
+  return inRouter ? (
+    <RoutedKnowledgeQAProvider
+      authority={authority}
+      handoffOwner={handoffOwner}
+    >
+      {children}
+    </RoutedKnowledgeQAProvider>
+  ) : (
+    <OwnedKnowledgeQAProvider key={authority.key} authority={authority}>
+      {children}
+    </OwnedKnowledgeQAProvider>
+  )
 }
 
-function OwnedKnowledgeQAProvider({ children, authority }: {
+function RoutedKnowledgeQAProvider({
+  authority,
+  handoffOwner,
+  children,
+}: {
+  authority: ReturnType<typeof useKnowledgeQAAuthority>
+  handoffOwner: React.MutableRefObject<{
+    routeKey: string
+    scopeKey: string
+  } | null>
+  children: ReactNode
+}) {
+  const location = useLocation()
+  const scopeKey = authority.snapshot?.scopeKey
+  const ownerChanged =
+    handoffOwner.current?.routeKey === location.key &&
+    scopeKey &&
+    handoffOwner.current.scopeKey !== scopeKey
+  useEffect(() => {
+    if (scopeKey && parseKnowledgeScope(location.search) && !ownerChanged) {
+      handoffOwner.current = { routeKey: location.key, scopeKey }
+    }
+  }, [location.key, location.search, ownerChanged, scopeKey, handoffOwner])
+  return (
+    <OwnedKnowledgeQAProvider
+      key={authority.key}
+      authority={authority}
+      scopeSearch={ownerChanged ? "?media_ids=" : location.search}
+      scopeArrivalKey={location.key}
+    >
+      {children}
+    </OwnedKnowledgeQAProvider>
+  )
+}
+
+function OwnedKnowledgeQAProvider({
+  children,
+  authority,
+  scopeSearch = "",
+  scopeArrivalKey = "",
+}: {
   children: ReactNode
   authority: ReturnType<typeof useKnowledgeQAAuthority>
+  scopeSearch?: string
+  scopeArrivalKey?: string
 }) {
+  const { t } = useTranslation("common")
   const [state, rawDispatch] = useReducer(reducer, initialState)
   const mounted = useRef(true)
   const isCurrent = useCallback(() => mounted.current && authority.isCurrent(), [authority])
+  const canStartPrivateOperation = useCallback(
+    () => Boolean(authority.snapshot) && isCurrent(),
+    [authority.snapshot, isCurrent]
+  )
   const tldwClient = useMemo(() => createKnowledgeQaClient(authority.snapshot, isCurrent), [authority.snapshot, isCurrent])
-  const dispatch = useCallback((action: Action) => {
-    if (isCurrent()) rawDispatch(action)
-  }, [isCurrent])
+  const queryIntentRevisionRef = useRef(0)
+  const dispatch = useCallback(
+    (action: Action) => {
+      if (!isCurrent()) return
+      if (action.type === "SET_QUERY") queryIntentRevisionRef.current += 1
+      rawDispatch(action)
+    },
+    [isCurrent]
+  )
+
   const historyStorageKey = authority.snapshot
     ? getKnowledgeQaHistoryStorageKey(authority.snapshot.requestScope) : null
+  const verifiedNotesAuthorityScope = useNotesGraphAuthorityScope({
+    config: authority.snapshot?.requestScope.config ?? null,
+    loading: !authority.snapshot,
+  });
+  const expectedNotesAuthorityScope =
+    authority.snapshot?.requestScope.userId != null
+      ? createNotesGraphAuthorityScope(
+          authority.snapshot.requestScope.config.serverUrl,
+          authority.snapshot.requestScope.userId,
+        )
+      : verifiedNotesAuthorityScope;
+  const notesAuthorityScope =
+    verifiedNotesAuthorityScope === expectedNotesAuthorityScope
+      ? verifiedNotesAuthorityScope
+      : null;
+  const notesAuthorityId =
+    notesAuthorityScope && authority.snapshot
+      ? servicePromptAuthorityKey(authority.snapshot.requestScope)
+      : null;
   const storageScopeKey = authority.snapshot
     ? getKnowledgeQaStorageScopeKey(authority.snapshot.requestScope) : null
   useEffect(() => {
@@ -1690,13 +1818,19 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
     return () => { mounted.current = false }
   }, [])
   const [historyHydrated, setHistoryHydrated] = useState(false)
-  const [storedPreset] = useStorage<RagPresetName>("ragSearchPreset", "balanced")
-  const [storedSettings] = useStorage<RagSettings>(
+  const [storedPreset, , presetStorage] = useStorage<RagPresetName>("ragSearchPreset", "balanced")
+  const [storedSettings, , settingsStorage] = useStorage<RagSettings>(
     "ragSearchSettingsV2",
     DEFAULT_RAG_SETTINGS
   )
   const [streamingFeatureFlag] = useStorage<boolean>("ff_knowledgeQaStreaming", true)
   const hydratedDefaultsRef = useRef<string | null>(null)
+  const [defaultsHydrated, setDefaultsHydrated] = useState(false)
+  const [scopeHandoffApplied, setScopeHandoffApplied] = useState<string | null>(null)
+  const scopeHandoffPending =
+    parseKnowledgeScope(scopeSearch) !== null &&
+    scopeHandoffApplied !== `${scopeArrivalKey}:${scopeSearch}`
+  const invalidScopeHandoffRef = useRef(false)
   const activeSearchAbortRef = useRef<AbortController | null>(null)
   const activeSearchRequestIdRef = useRef(0)
   const activeThreadHydrationRequestIdRef = useRef(0)
@@ -1715,6 +1849,12 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
   const defaultCharacterPromiseRef = useRef<Promise<number | null> | null>(null)
 
   useEffect(() => {
+    if (
+      presetStorage?.isLoading ||
+      settingsStorage?.isLoading ||
+      scopeHandoffApplied !== null
+    )
+      return
     if (state.currentThreadId || state.messages.length > 0) {
       hydratedDefaultsRef.current = null
       return
@@ -1741,6 +1881,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
       return
     }
     hydratedDefaultsRef.current = serialized
+    setDefaultsHydrated(true)
 
     dispatch({
       type: "HYDRATE_DEFAULTS",
@@ -1749,7 +1890,75 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
         settings: normalizedSettings,
       },
     })
-  }, [dispatch, state.currentThreadId, state.messages.length, storedPreset, storedSettings])
+  }, [
+    dispatch,
+    presetStorage?.isLoading,
+    settingsStorage?.isLoading,
+    scopeHandoffApplied,
+    state.currentThreadId,
+    state.messages.length,
+    storedPreset,
+    storedSettings,
+  ])
+
+  useEffect(() => {
+    const scope = parseKnowledgeScope(scopeSearch)
+    if (
+      !scope ||
+      !defaultsHydrated ||
+      presetStorage?.isLoading ||
+      settingsStorage?.isLoading ||
+      !canStartPrivateOperation()
+    )
+      return
+    const arrival = `${scopeArrivalKey}:${scopeSearch}`
+    if (scopeHandoffApplied === arrival) return
+    setScopeHandoffApplied(arrival)
+    invalidScopeHandoffRef.current = scope.invalid
+    activeSearchAbortRef.current?.abort("clear")
+    activeSearchAbortRef.current = null
+    activeSearchRequestIdRef.current += 1
+    activeThreadHydrationRequestIdRef.current += 1
+    dispatch({ type: "CLEAR_RESULTS" })
+    dispatch({ type: "SET_THREAD_ID", payload: null })
+    dispatch({ type: "SET_LOCAL_ONLY_THREAD", payload: false })
+    dispatch({ type: "SET_MESSAGES", payload: [] })
+    dispatch({ type: "SET_QUERY", payload: "" })
+    dispatch({
+      type: "SET_SETTINGS",
+      payload: {
+        ...state.settings,
+        sources: scope.invalid
+          ? []
+          : [
+              ...(scope.mediaIds.length ? ["media_db" as const] : []),
+              ...(scope.noteIds.length ? ["notes" as const] : [])
+            ],
+        include_media_ids: scope.mediaIds,
+        include_note_ids: scope.noteIds,
+        collection_id: null,
+        keyword_filter: "",
+        corpus: "",
+        index_namespace: "",
+      },
+    })
+    if (scope.invalid)
+      dispatch({
+        type: "SET_ERROR",
+        payload:
+          "This source selection is empty or invalid. Choose specific sources before asking.",
+      })
+  }, [
+    canStartPrivateOperation,
+    defaultsHydrated,
+    dispatch,
+    presetStorage?.isLoading,
+    scopeArrivalKey,
+    scopeHandoffApplied,
+    scopeSearch,
+    settingsStorage?.isLoading,
+    state.settings,
+  ])
 
   const resolveDefaultCharacterId = useCallback(async (): Promise<number | null> => {
     if (defaultCharacterIdRef.current != null) {
@@ -1764,7 +1973,10 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
         await tldwClient.initialize()
         const searchResults = await tldwClient
           .searchCharacters(DEFAULT_CHARACTER_NAME, { limit: 5 })
-          .catch(() => [])
+          .catch((error) => {
+            if (isRequestConfigScopeChangedError(error)) throw error
+            return []
+          })
         const match =
           searchResults.find(
             (c: any) =>
@@ -1776,7 +1988,10 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
           return match.id
         }
 
-        const listResults = await tldwClient.listCharacters({ limit: 10 }).catch(() => [])
+        const listResults = await tldwClient.listCharacters({ limit: 10 }).catch((error) => {
+          if (isRequestConfigScopeChangedError(error)) throw error
+          return []
+        })
         const fallback =
           listResults.find(
             (c: any) =>
@@ -1788,6 +2003,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
           return fallback.id
         }
       } catch (error) {
+        if (isRequestConfigScopeChangedError(error)) throw error
         console.warn("Failed to resolve default character:", error)
       }
       return null
@@ -1834,6 +2050,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
           }),
         })
       } catch (error) {
+        if (isRequestConfigScopeChangedError(error)) throw error
         console.warn("Failed to tag Knowledge QA conversation:", error)
       }
     },
@@ -1853,7 +2070,8 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
   )
 
   const createNewThread = useCallback(
-    async (title?: string, options?: CreateThreadOptions): Promise<string> => {
+    async (title?: string, options?: CreateThreadOptions): Promise<string | null> => {
+      if (!canStartPrivateOperation() || scopeHandoffPending) return null
       const shouldActivate = options?.shouldActivate ?? (() => true)
       const cleanupRemoteIfSkipped = options?.cleanupRemoteIfSkipped ?? false
       try {
@@ -1908,6 +2126,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
               await tagConversationKeyword(String(threadId), currentVersion)
             }
           } catch (error) {
+            if (isRequestConfigScopeChangedError(error)) throw error
             console.warn("Failed to fetch conversation version for tagging:", error)
           }
         }
@@ -1934,7 +2153,8 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
 
         return threadId
       } catch (error) {
-        if (isCurrent()) console.error("Failed to create thread:", error)
+        if (!isCurrent() || isRequestConfigScopeChangedError(error)) return null
+        console.error("Failed to create thread:", error)
         // Return a local ID as fallback
         const localId = `${LOCAL_THREAD_PREFIX}${crypto.randomUUID()}`
         if (!shouldActivate()) {
@@ -1950,7 +2170,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
         return localId
       }
     },
-    [dispatch, isCurrent, resolveDefaultCharacterId, tagConversationKeyword, tldwClient]
+    [canStartPrivateOperation, dispatch, isCurrent, resolveDefaultCharacterId, scopeHandoffPending, tagConversationKeyword, tldwClient]
   )
 
   const notifyPersistenceFailure = useCallback(() => {
@@ -2005,6 +2225,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
           timestamp: response?.created_at ? String(response.created_at) : undefined,
         }
       } catch (error) {
+        if (isRequestConfigScopeChangedError(error)) throw error
         if (!isCurrent()) return null
         console.warn("Failed to persist chat message:", error)
         notifyPersistenceFailure()
@@ -2044,6 +2265,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
         const result = await response.json()
         return result?.success ?? false
       } catch (error) {
+        if (isRequestConfigScopeChangedError(error)) throw error
         // Metadata-only failure path: answers/sources remain usable even if context persistence fails.
         if (isCurrent()) console.error("Failed to persist RAG context:", error)
         return false
@@ -2053,6 +2275,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
   )
 
   const retrySync = useCallback(async (): Promise<boolean> => {
+    if (!canStartPrivateOperation()) return false
     try {
       const messagesToSync = state.messages.filter(
         (candidate) =>
@@ -2068,9 +2291,10 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
       if (!targetThreadId || isLocalThreadId(targetThreadId)) {
         const firstQuestion =
           messagesToSync.find((candidate) => candidate.role === "user")?.content ||
-          state.query ||
+          state.resultQuery || state.query ||
           "Knowledge QA"
         targetThreadId = await createNewThread(firstQuestion)
+        if (!targetThreadId) return false
       }
 
       if (!targetThreadId || isLocalThreadId(targetThreadId)) {
@@ -2164,13 +2388,16 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
       })
       return true
     } catch (error) {
+      if (!isCurrent() || isRequestConfigScopeChangedError(error)) return false
       console.warn("Failed to retry Knowledge QA sync:", error)
       dispatch({ type: "MARK_SYNC_FAILED" })
       return false
     }
   }, [
+    canStartPrivateOperation,
     createNewThread,
     dispatch,
+    isCurrent,
     message,
     persistChatMessage,
     persistRagContext,
@@ -2179,6 +2406,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
     state.currentThreadId,
     state.messages,
     state.query,
+    state.resultQuery,
     state.results,
     state.settings.strip_min_relevance,
   ])
@@ -2231,6 +2459,22 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
       addToHistory: boolean,
       settingsOverrides?: Partial<RagSettings>
     ) => {
+      if (!canStartPrivateOperation()) return
+      if (scopeHandoffPending) {
+        dispatch({
+          type: "SET_ERROR",
+          payload: "Preparing this source selection. Please ask again once it is ready.",
+        })
+        return
+      }
+      if (invalidScopeHandoffRef.current) {
+        dispatch({
+          type: "SET_ERROR",
+          payload:
+            "This source selection is empty or invalid. Choose specific sources before asking.",
+        })
+        return
+      }
       const trimmedQuery = question.trim()
       if (!trimmedQuery) return
       const queryWasTruncated = trimmedQuery.length > RAG_QUERY_MAX_LENGTH
@@ -2282,52 +2526,56 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
         })
 
       let threadId = state.currentThreadId
-      if (!threadId) {
-        threadId = await createNewThread(trimmedQuery, {
-          shouldActivate: () => !isStaleSearchRequest(),
-          cleanupRemoteIfSkipped: true,
-        })
+      try {
+        if (!threadId) {
+          threadId = await createNewThread(trimmedQuery, {
+            shouldActivate: () => !isStaleSearchRequest(),
+            cleanupRemoteIfSkipped: true,
+          })
+          if (isStaleSearchRequest()) {
+            return
+          }
+          if (!threadId) {
+            dispatch({ type: "CANCEL_SEARCH" })
+            return
+          }
+        }
+        let threadSyncFailed = Boolean(threadId && isLocalThreadId(threadId))
+        const markThreadSyncFailed = () => {
+          threadSyncFailed = true
+          dispatch({ type: "SET_LOCAL_ONLY_THREAD", payload: true })
+          dispatch({
+            type: "SET_EXTENSION_FAILURE_STATE",
+            payload: "search_succeeded_sync_failed",
+          })
+        }
+        const isThreadSyncFailed = () =>
+          threadSyncFailed || Boolean(threadId && isLocalThreadId(threadId))
+
+        const userTimestamp = new Date().toISOString()
+        const persistedUser = threadId
+          ? await persistChatMessage(threadId, "user", trimmedQuery, null)
+          : null
         if (isStaleSearchRequest()) {
           return
         }
-      }
-      let threadSyncFailed = Boolean(threadId && isLocalThreadId(threadId))
-      const markThreadSyncFailed = () => {
-        threadSyncFailed = true
-        dispatch({ type: "SET_LOCAL_ONLY_THREAD", payload: true })
-        dispatch({
-          type: "SET_EXTENSION_FAILURE_STATE",
-          payload: "search_succeeded_sync_failed",
-        })
-      }
-      const isThreadSyncFailed = () =>
-        threadSyncFailed || Boolean(threadId && isLocalThreadId(threadId))
-
-      const userTimestamp = new Date().toISOString()
-      const persistedUser = threadId
-        ? await persistChatMessage(threadId, "user", trimmedQuery, null)
-        : null
-      if (isStaleSearchRequest()) {
-        return
-      }
-      if (threadId && !isLocalThreadId(threadId) && !persistedUser) {
-        markThreadSyncFailed()
-      }
-      const userMessageId = persistedUser?.id || crypto.randomUUID()
-
-      if (threadId) {
-        const userMessage: KnowledgeQAMessage = {
-          id: userMessageId,
-          conversationId: threadId,
-          role: "user",
-          content: trimmedQuery,
-          timestamp: persistedUser?.timestamp || userTimestamp,
+        if (threadId && !isLocalThreadId(threadId) && !persistedUser) {
+          markThreadSyncFailed()
         }
-        dispatch({ type: "ADD_MESSAGE", payload: userMessage })
-      }
+        const userMessageId = persistedUser?.id || crypto.randomUUID()
 
-      try {
-        const { options } = buildRagSearchRequest({
+        if (threadId) {
+          const userMessage: KnowledgeQAMessage = {
+            id: userMessageId,
+            conversationId: threadId,
+            role: "user",
+            content: trimmedQuery,
+            timestamp: persistedUser?.timestamp || userTimestamp,
+          }
+          dispatch({ type: "ADD_MESSAGE", payload: userMessage })
+        }
+
+        const { options, timeoutMs } = buildRagSearchRequest({
           ...effectiveSettings,
           query: trimmedQuery,
           enable_web_fallback: effectiveSettings.enable_web_fallback,
@@ -2387,6 +2635,48 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
           let terminalEvent: RagTerminalEvent | null = null
           let streamWhyPayload: unknown = null
           let streamSourceStatusPayload: unknown = null
+          // Streaming deltas are throttled (TASK-13511): citation parsing and
+          // trust normalization each scan the whole accumulated answer, so
+          // running them per token made long answers degrade quadratically.
+          // The scheduler flushes at most every 80ms with the latest state,
+          // mirroring the chat streaming cadence.
+          let streamEnded = false
+          const emitPartialAnswer = () => {
+            const partialAnswer = normalizeAnswerText(streamAnswer)
+            const partialCitations = partialAnswer
+              ? parseCitations(partialAnswer, streamResults)
+              : []
+            const partialTrust = normalizeKnowledgeAnswerTrust({
+              answer: partialAnswer,
+              results: streamResults,
+              citations: partialCitations,
+              hasRequiredMetadata: true,
+              syncFailed: isThreadSyncFailed(),
+              weakEvidence: hasWeakEvidence(
+                streamResults,
+                effectiveSettings.strip_min_relevance
+              ),
+            })
+            dispatch({
+              type: "SET_PARTIAL_RESULTS",
+              payload: {
+                query: trimmedQuery,
+                results: streamResults,
+                answer: partialAnswer,
+                citations: partialCitations,
+                answerTrustState: partialTrust.state,
+                answerTrustReasonCodes: partialTrust.reasonCodes,
+                answerEvidenceOrigin:
+                  partialTrust.evidenceOrigin === "unknown_origin"
+                    ? null
+                    : partialTrust.evidenceOrigin,
+              },
+            })
+          }
+          const streamingUpdateScheduler = createStreamingUpdateScheduler<null>({
+            shouldFlush: () => !streamEnded && !isStaleSearchRequest(),
+            apply: () => emitPartialAnswer(),
+          })
 
           try {
             for await (const event of (tldwClient as {
@@ -2396,9 +2686,11 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
               ) => AsyncGenerator<any, void, unknown>
             }).ragSearchStream(trimmedQuery, {
               ...options,
+              timeoutMs,
               signal: abortController.signal,
             })) {
               if (isStaleSearchRequest()) {
+                streamingUpdateScheduler.cancel()
                 return
               }
               if (terminalEvent) {
@@ -2440,35 +2732,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
                   type: "SET_SEARCH_DETAILS",
                   payload: resolvedSearchDetails,
                 })
-                const partialAnswer = normalizeAnswerText(streamAnswer)
-                const partialCitations = partialAnswer
-                  ? parseCitations(partialAnswer, streamResults)
-                  : []
-                const partialTrust = normalizeKnowledgeAnswerTrust({
-                  answer: partialAnswer,
-                  results: streamResults,
-                  citations: partialCitations,
-                  hasRequiredMetadata: true,
-                  syncFailed: isThreadSyncFailed(),
-                  weakEvidence: hasWeakEvidence(
-                    streamResults,
-                    effectiveSettings.strip_min_relevance
-                  ),
-                })
-                dispatch({
-                  type: "SET_PARTIAL_RESULTS",
-                  payload: {
-                    results: streamResults,
-                    answer: partialAnswer,
-                    citations: partialCitations,
-                    answerTrustState: partialTrust.state,
-                    answerTrustReasonCodes: partialTrust.reasonCodes,
-                    answerEvidenceOrigin:
-                      partialTrust.evidenceOrigin === "unknown_origin"
-                        ? null
-                        : partialTrust.evidenceOrigin,
-                  },
-                })
+                emitPartialAnswer()
                 continue
               }
 
@@ -2479,38 +2743,16 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
                 if (!deltaText) continue
                 observedStreamOutput = true
                 streamAnswer += deltaText
-                const partialAnswer = normalizeAnswerText(streamAnswer)
-                const partialCitations = partialAnswer
-                  ? parseCitations(partialAnswer, streamResults)
-                  : []
-                const partialTrust = normalizeKnowledgeAnswerTrust({
-                  answer: partialAnswer,
-                  results: streamResults,
-                  citations: partialCitations,
-                  hasRequiredMetadata: true,
-                  syncFailed: isThreadSyncFailed(),
-                  weakEvidence: hasWeakEvidence(
-                    streamResults,
-                    effectiveSettings.strip_min_relevance
-                  ),
-                })
-                dispatch({
-                  type: "SET_PARTIAL_RESULTS",
-                  payload: {
-                    results: streamResults,
-                    answer: partialAnswer,
-                    citations: partialCitations,
-                    answerTrustState: partialTrust.state,
-                    answerTrustReasonCodes: partialTrust.reasonCodes,
-                    answerEvidenceOrigin:
-                      partialTrust.evidenceOrigin === "unknown_origin"
-                        ? null
-                        : partialTrust.evidenceOrigin,
-                  },
-                })
+                streamingUpdateScheduler.schedule(null)
                 continue
               }
             }
+
+            // Land the final buffered partial state before terminal handling
+            // so no streamed content is lost, then stop any trailing flush
+            // from racing the terminal/error dispatches.
+            streamingUpdateScheduler.flushNow()
+            streamEnded = true
 
             if (!terminalEvent) {
               throw new RagTerminalStreamError(
@@ -2534,6 +2776,8 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
               effectiveSettings
             )
           } catch (streamError) {
+            streamEnded = true
+            streamingUpdateScheduler.cancel()
             const streamMessage =
               streamError instanceof Error
                 ? streamError.message
@@ -2563,6 +2807,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
           dispatch({ type: "SET_QUERY_STAGE", payload: "ranking" })
           const response = await tldwClient.ragSearch(trimmedQuery, {
             ...options,
+            timeoutMs,
             signal: abortController.signal,
           })
           if (isStaleSearchRequest()) {
@@ -2632,6 +2877,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
         dispatch({
           type: "SET_RESULTS",
           payload: {
+            query: trimmedQuery,
             results,
             answer,
             citations,
@@ -2752,6 +2998,10 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
         if (isStaleSearchRequest()) {
           return
         }
+        if (isRequestConfigScopeChangedError(error)) {
+          dispatch({ type: "CANCEL_SEARCH" })
+          return
+        }
         if (isAbortError) {
           const abortReason = abortController.signal.reason
           if (abortReason === "clear" || abortReason === "superseded") {
@@ -2798,6 +3048,8 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
       }
     },
     [
+      canStartPrivateOperation,
+      scopeHandoffPending,
       dispatch,
       beginThreadHydrationRequest,
       state.settings,
@@ -2829,26 +3081,31 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
     })
   }, [message, state.isSearching])
 
-  const search = useCallback(async () => {
-    const queryLength = state.query.trim().length
+  const search = useCallback(async (queryOverride?: string) => {
+    // SearchBar keeps the raw query in local state and syncs the reducer on a
+    // 250ms debounce; on submit it passes its current text explicitly so the
+    // request never waits on (or races) that sync (WP-08).
+    const queryText =
+      typeof queryOverride === "string" ? queryOverride : state.query
+    const queryLength = queryText.trim().length
     if (queryLength > 0) {
       void trackKnowledgeQaSearchMetric({
         type: "search_submit",
         query_length: queryLength,
       })
     }
-    await runKnowledgeQuery(state.query, true)
+    await runKnowledgeQuery(queryText, true)
   }, [state.query, runKnowledgeQuery])
 
   const rerunWithTokenLimit = useCallback(
     async (tokenLimit: number) => {
       const normalized = Math.max(64, Math.min(4000, Math.round(tokenLimit)))
-      await runKnowledgeQuery(state.query, false, {
+      await runKnowledgeQuery(state.resultQuery ?? state.query, false, {
         max_generation_tokens: normalized,
         enable_generation: true,
       })
     },
-    [runKnowledgeQuery, state.query]
+    [runKnowledgeQuery, state.query, state.resultQuery]
   )
 
   const clearResults = useCallback(() => {
@@ -2879,7 +3136,8 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
     state.results.length,
   ])
 
-  const startNewTopic = useCallback(async (): Promise<string> => {
+  const startNewTopic = useCallback(async (): Promise<string | null> => {
+    if (!canStartPrivateOperation()) return null
     clearResults()
     dispatch({ type: "SET_QUERY", payload: "" })
     const newTopicRequestId = beginThreadHydrationRequest()
@@ -2888,7 +3146,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
         activeThreadHydrationRequestIdRef.current === newTopicRequestId,
       cleanupRemoteIfSkipped: true,
     })
-  }, [beginThreadHydrationRequest, clearResults, createNewThread, dispatch])
+  }, [beginThreadHydrationRequest, canStartPrivateOperation, clearResults, createNewThread, dispatch])
 
   const selectThread = useCallback(async (threadId: string): Promise<ThreadHydrationResult> => {
     const threadHydrationRequestId = beginThreadHydrationRequest()
@@ -2947,6 +3205,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
         dispatch({
           type: "SET_RESULTS",
           payload: {
+            query: hydration.query,
             completedGenerationEnabled: hydration.settingsSnapshot?.enable_generation ?? null,
             results: hydration.results,
             answer: hydration.answer,
@@ -3064,6 +3323,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
           dispatch({
             type: "SET_RESULTS",
             payload: {
+              query: hydration.query,
               completedGenerationEnabled: hydration.settingsSnapshot?.enable_generation ?? null,
               results: hydration.results,
               answer: hydration.answer,
@@ -3109,6 +3369,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
 
   const branchFromTurn = useCallback(
     async (messageId: string) => {
+      if (!canStartPrivateOperation()) return
       const branchRequestId = beginThreadHydrationRequest()
       const isStaleBranchRequest = () =>
         !isCurrent() ||
@@ -3155,7 +3416,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
         shouldActivate: () => !isStaleBranchRequest(),
         cleanupRemoteIfSkipped: true,
       })
-      if (isStaleBranchRequest()) {
+      if (!branchThreadId || isStaleBranchRequest()) {
         return
       }
 
@@ -3163,12 +3424,18 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
       let parentMessageId: string | null = null
 
       for (const sourceMessage of branchSeedMessages) {
-        const persisted = await persistChatMessage(
-          branchThreadId,
-          sourceMessage.role,
-          sourceMessage.content,
-          parentMessageId
-        )
+        let persisted: Awaited<ReturnType<typeof persistChatMessage>>
+        try {
+          persisted = await persistChatMessage(
+            branchThreadId,
+            sourceMessage.role,
+            sourceMessage.content,
+            parentMessageId
+          )
+        } catch (error) {
+          if (!isCurrent() || isRequestConfigScopeChangedError(error)) return
+          throw error
+        }
         if (isStaleBranchRequest()) {
           await cleanupStaleBranchThread(branchThreadId)
           return
@@ -3189,7 +3456,12 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
           sourceMessage.ragContext &&
           persisted?.id
         ) {
-          await persistRagContext(persisted.id, sourceMessage.ragContext)
+          try {
+            await persistRagContext(persisted.id, sourceMessage.ragContext)
+          } catch (error) {
+            if (!isCurrent() || isRequestConfigScopeChangedError(error)) return
+            throw error
+          }
           if (isStaleBranchRequest()) {
             await cleanupStaleBranchThread(branchThreadId)
             return
@@ -3219,6 +3491,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
         dispatch({
           type: "SET_RESULTS",
           payload: {
+            query: hydration.query,
             completedGenerationEnabled: hydration.settingsSnapshot?.enable_generation ?? null,
             results: hydration.results,
             answer: hydration.answer,
@@ -3244,6 +3517,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
     },
     [
       beginThreadHydrationRequest,
+      canStartPrivateOperation,
       createNewThread,
       dispatch,
       isCurrent,
@@ -3267,9 +3541,22 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
     dispatch({ type: "SET_PRESET", payload: preset })
   }, [dispatch])
 
-  const updateSetting = useCallback(<K extends keyof RagSettings>(key: K, value: RagSettings[K]) => {
-    dispatch({ type: "UPDATE_SETTING", payload: { key, value } })
-  }, [dispatch])
+  const updateSetting = useCallback(
+    <K extends keyof RagSettings>(key: K, value: RagSettings[K]) => {
+      if (
+        (key === "sources" ||
+          key === "include_media_ids" ||
+          key === "include_note_ids") &&
+        Array.isArray(value) &&
+        value.length > 0
+      ) {
+        invalidScopeHandoffRef.current = false
+        dispatch({ type: "SET_ERROR", payload: null })
+      }
+      dispatch({ type: "UPDATE_SETTING", payload: { key, value } })
+    },
+    [dispatch],
+  )
 
   const resetSettings = useCallback(() => {
     dispatch({ type: "SET_SETTINGS", payload: { ...DEFAULT_RAG_SETTINGS, ...KNOWLEDGE_QA_SETTINGS_OVERRIDES } })
@@ -3441,20 +3728,56 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
     dispatch({ type: "TOGGLE_HISTORY_PIN", payload: id })
   }, [dispatch, markHistoryMutation])
 
+  const deleteHistoryViewRevision = activeThreadHydrationRequestIdRef.current
   const deleteHistoryItem = useCallback(
     async (id: string) => {
       const item = state.searchHistory.find((h) => h.id === id)
       const conversationId = item?.conversationId
 
+      const queryRevision = queryIntentRevisionRef.current
+      const completeDeletion = () => {
+        if (!isCurrent()) return
+        const deletedActiveThread =
+          deleteHistoryViewRevision ===
+            activeThreadHydrationRequestIdRef.current &&
+          Boolean(state.currentThreadId) &&
+          (conversationId === state.currentThreadId ||
+            id === state.currentThreadId)
+        if (deletedActiveThread) {
+          clearResults()
+          if (queryRevision === queryIntentRevisionRef.current) {
+            dispatch({ type: "SET_QUERY", payload: "" })
+          }
+        }
+        markHistoryMutation()
+        dispatch({ type: "REMOVE_HISTORY_ITEM", payload: id })
+      }
       const toastKey = `knowledge-qa-delete-${id}`
       const attemptServerDelete = async () => {
         try {
           await tldwClient.deleteChat(conversationId as string)
+          if (!isCurrent() || !authority.snapshot) return false
+          const removed = await removeLocalCopyOfServerChat(
+            conversationId as string,
+            serverChatMirrorOwnerKey(authority.snapshot),
+            {
+              scope: { type: "global" },
+              signal: authority.snapshot.scopeSignal,
+              validate_lease: isCurrent
+            }
+          )
+          if (!isCurrent()) return false
+          completeDeletion()
           message.open({
             key: toastKey,
-            type: "success",
-            content: "Deleted from server history.",
-            duration: 2.5,
+            type: removed ? "success" : "warning",
+            content: removed
+              ? "Deleted from server history."
+              : t(
+                  "chatSidebar.deletedDeviceCopyRetained",
+                  "Removed from server history. A cached copy remains on this device because it could not be removed."
+                ),
+            duration: 2.5
           })
           return true
         } catch (error) {
@@ -3471,13 +3794,12 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
                   className="text-primary underline"
                   onClick={() => {
                     attemptServerDelete().catch(() => undefined)
-                  }}
-                >
+                  }}>
                   Retry
                 </button>
               </span>
             ),
-            className: "max-w-sm",
+            className: "max-w-sm"
           })
           return false
         }
@@ -3489,34 +3811,27 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
           return
         }
       } else {
+        completeDeletion()
         message.open({
           key: toastKey,
           type: "success",
           content: "Removed from local history.",
-          duration: 2,
+          duration: 2
         })
       }
-
-      const deletedActiveThread =
-        Boolean(state.currentThreadId) &&
-        (conversationId === state.currentThreadId || id === state.currentThreadId)
-      if (deletedActiveThread) {
-        clearResults()
-        dispatch({ type: "SET_QUERY", payload: "" })
-      }
-
-      markHistoryMutation()
-      dispatch({ type: "REMOVE_HISTORY_ITEM", payload: id })
     },
     [
+      authority.snapshot,
       clearResults,
+      deleteHistoryViewRevision,
       dispatch,
       isCurrent,
       markHistoryMutation,
       message,
       state.currentThreadId,
       state.searchHistory,
-      tldwClient,
+      t,
+      tldwClient
     ]
   )
 
@@ -3557,11 +3872,32 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
     sourceHealthRequestIdRef.current = requestId
     dispatch({ type: "SET_SOURCE_HEALTH_LOADING" })
     try {
-      const payload = await tldwClient.ragSourceHealth()
+      const [payload, counts] = await Promise.all([
+        tldwClient.ragSourceHealth(),
+        Promise.allSettled([
+          tldwClient.listMedia({
+            page: 1,
+            results_per_page: 1,
+            include_keywords: false
+          }),
+          tldwClient.listNotes({ limit: 1, offset: 0 })
+        ])
+      ])
+      const [media, notes] = counts
       if (sourceHealthRequestIdRef.current !== requestId) return
       dispatch({
         type: "SET_SOURCE_HEALTH",
-        payload: normalizeKnowledgeSourceHealth(payload),
+        payload: {
+          ...normalizeKnowledgeSourceHealth(payload, {
+            media_db: media.status === "fulfilled" ? media.value : undefined,
+            notes: notes.status === "fulfilled" ? notes.value : undefined
+          }),
+          personalContentError: counts.some(
+            (count) => count.status === "rejected"
+          )
+            ? "Personal item counts could not be loaded. Check Media or Notes and refresh readiness."
+            : null
+        }
       })
     } catch {
       if (sourceHealthRequestIdRef.current !== requestId) return
@@ -3572,6 +3908,23 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
       })
     }
   }, [dispatch, tldwClient])
+
+  useEffect(() => {
+    if (!authority.snapshot) return
+    const complete = (event: Event) => {
+      const detail = (event as CustomEvent<{ isCurrent?: () => boolean }>)
+        .detail
+      if (
+        !isCurrent() ||
+        (typeof detail?.isCurrent === "function" && !detail.isCurrent())
+      )
+        return
+      void refreshSourceHealth()
+    }
+    window.addEventListener("tldw:quick-ingest-complete", complete)
+    return () =>
+      window.removeEventListener("tldw:quick-ingest-complete", complete)
+  }, [authority.snapshot, isCurrent, refreshSourceHealth])
 
   // Initialize client and load safe pre-query source health once when ready.
   useEffect(() => {
@@ -3711,6 +4064,8 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
       client: tldwClient,
       isAuthorityCurrent: isCurrent,
       storageScopeKey,
+      notesAuthorityScope,
+      notesAuthorityId,
       historyHydrated,
       setQuery,
       search,
@@ -3751,6 +4106,8 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
       isCurrent,
       historyHydrated,
       storageScopeKey,
+      notesAuthorityScope,
+      notesAuthorityId,
       setQuery,
       search,
       cancelSearch,
@@ -3783,8 +4140,8 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
       persistRagContext,
       scrollToSource,
       scrollToCitation,
-    ]
-  )
+    ],
+  );
 
   return (
     <KnowledgeQAContext.Provider value={contextValue}>

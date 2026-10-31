@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import copy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from time import monotonic_ns
 from typing import Any, Literal
 
@@ -155,6 +155,30 @@ class SyncV2Store:
                     envelopes,
                     connection=connection,
                 )
+            yield guarded
+
+    @contextmanager
+    def projection_fence(
+        self,
+        dataset_id: str,
+        domains: Sequence[SyncDomain],
+    ) -> Iterator[SyncV2Store]:
+        """Hold the dataset projection fence for a caller that commits its own projection.
+
+        ``materialization_guard`` takes the same lock for envelopes that already
+        exist. This is for a server-origin write whose envelope is built only
+        after its product row commits: one Sync transaction, opened before that
+        write, in which no other envelope can be accepted or projected for the
+        dataset.
+        """
+
+        if self._connection is not None:
+            yield self
+            return
+        keys = [(dataset_id, domain, "*") for domain in domains]
+        with self.db.materialization_transaction(keys) as connection:
+            guarded = copy(self)
+            guarded._connection = connection
             yield guarded
 
     @contextmanager
@@ -450,6 +474,7 @@ class SyncV2Store:
         return self.db.list_datasets_for_user(
             user_id,
             include_archived=include_archived,
+            connection=self._connection,
         )
 
     def list_devices_for_user(
@@ -965,6 +990,14 @@ class SyncV2Store:
         )
 
     def insert_envelope(self, envelope: SyncEnvelopeCreate) -> SyncEnvelope:
+        from .notes_provenance import expand_provenance_tombstone
+        if envelope.domain == "notes.note" and envelope.operation == "tombstone":
+            existing = self.get_existing_envelope_for_idempotency(envelope)
+            if existing is not None:
+                return existing
+        plan = expand_provenance_tombstone(envelope, store=self)
+        if plan is not None:
+            return self.insert_envelopes_atomic(plan)[0]
         return self.db.insert_envelope(envelope, connection=self._connection)
 
     def insert_claimed_conflict_resolution_envelope(
@@ -979,8 +1012,26 @@ class SyncV2Store:
     ) -> SyncEnvelope:
         if self._connection is None:
             raise SyncStoreError("Sync conflict resolution requires a dataset guard")
+        from .notes_provenance import expand_provenance_tombstone
+
+        plan = None
+        if envelope.domain == "notes.note" and envelope.operation == "tombstone":
+            existing = self.get_existing_envelope_for_idempotency(envelope)
+            if existing is not None:
+                envelope = replace(
+                    envelope,
+                    mutation_group_id=existing.mutation_group_id,
+                    mutation_step=existing.mutation_step,
+                    mutation_step_count=existing.mutation_step_count,
+                    mutation_plan_hash=existing.mutation_plan_hash,
+                )
+            else:
+                plan = expand_provenance_tombstone(envelope, store=self)
+                if plan is not None:
+                    envelope = plan[0]
         return self.db.insert_claimed_conflict_resolution_envelope(
             envelope,
+            mutation_group=plan,
             conflict_id=conflict_id,
             dataset_id=dataset_id,
             resolved_by_device_id=resolved_by_device_id,
@@ -1021,12 +1072,14 @@ class SyncV2Store:
         trusted_notes_organization_bootstrap_id: str | None = None,
         trusted_notes_task_bootstrap_id: str | None = None,
         trusted_notes_task_coordinator: bool = False,
+        trusted_notes_provenance_bootstrap: Callable[[SyncEnvelopeCreate], bool] | None = None,
     ) -> list[SyncEnvelope]:
         """Insert one complete validated group or return its exact stored replay."""
 
         return self.db.insert_envelopes_atomic(
             envelopes,
             trusted_notes_organization_bootstrap_id=trusted_notes_organization_bootstrap_id,
+            trusted_notes_provenance_bootstrap=trusted_notes_provenance_bootstrap,
             trusted_notes_task_bootstrap_id=trusted_notes_task_bootstrap_id,
             trusted_notes_task_coordinator=trusted_notes_task_coordinator,
         )
@@ -1048,7 +1101,15 @@ class SyncV2Store:
         self,
         envelope: SyncEnvelopeCreate,
     ) -> SyncEnvelope | None:
-        return self.db.get_existing_envelope_for_idempotency(envelope)
+        if envelope.domain == "notes.note" and envelope.operation == "tombstone" and envelope.mutation_group_id is None:
+            from .mutation_group_validation import validate_stored_mutation_group
+            from .notes_provenance import singleton_delete_group_id
+            group_id = singleton_delete_group_id(envelope)
+            group = self.list_mutation_group(envelope.dataset_id, group_id)
+            if group:
+                validate_stored_mutation_group(group, dataset_id=envelope.dataset_id, mutation_group_id=group_id)
+                envelope = replace(envelope, mutation_group_id=group_id, mutation_step=0, mutation_step_count=len(group), mutation_plan_hash=group[0].mutation_plan_hash)
+        return self.db.get_existing_envelope_for_idempotency(envelope, connection=self._connection)
 
     def list_envelopes_after(
         self,
@@ -1492,6 +1553,30 @@ class SyncV2Store:
             apply_status=apply_status,
             apply_error_code=apply_error_code,
             apply_error_message=apply_error_message,
+            connection=self._connection,
+        )
+
+    def has_pending_personal_context_authority(
+        self,
+        dataset_id: str,
+        *,
+        profile_id: str,
+    ) -> bool:
+        """Return whether the relay left a staged authority row of the profile unfinished.
+
+        Args:
+            dataset_id: Sync dataset bound to the profile.
+            profile_id: Canonical profile whose relayed authority rows count.
+
+        Returns:
+            True when an accepted home-authority envelope for the profile is
+            still ``pending``. Reads through this store's guarded transaction
+            when it holds one.
+        """
+
+        return self.db.has_pending_personal_context_authority(
+            dataset_id,
+            profile_id=profile_id,
             connection=self._connection,
         )
 

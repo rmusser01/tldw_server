@@ -478,6 +478,7 @@ export function FilterPanel({
           {t('review:mediaPage.sortBy', { defaultValue: 'Sort by' })}
         </div>
         <Select
+          aria-label={t('review:mediaPage.sortBy', { defaultValue: 'Sort by' })}
           value={sortBy}
           onChange={(value) => onSortByChange?.(value as MediaSortBy)}
           options={sortOptions}

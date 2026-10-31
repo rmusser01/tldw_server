@@ -67,8 +67,9 @@ from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
+from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
-from tldw_Server_API.app.core.exceptions import EgressPolicyError, RetryExhaustedError
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, LLMQuotaExceededError, RetryExhaustedError
 from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env
 from tldw_Server_API.app.core.Setup import setup_manager
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_ROLES
@@ -610,6 +611,8 @@ def _fva_claims_analyze_call(
     try:
         response = perform_chat_api_call(**call_kwargs)
         return coerce_llm_response_text(response)
+    except LLMQuotaExceededError:
+        raise  # the user's limit: not an empty reply for the verifier to score without the LLM
     except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(f"FVA analyze function failed: {exc}")
         return ""
@@ -631,7 +634,7 @@ def _enqueue_claim_rebuild_if_needed(*, media_id: int, db_path: str, owner_user_
                 logger.debug("Claims rebuild Jobs enqueue failed; falling back to legacy queue: {}", exc)
     try:
         svc = get_claims_rebuild_service()
-        svc.submit(media_id=int(media_id), db_path=str(db_path))
+        svc.submit(media_id=int(media_id), db_path=str(db_path), owner_user_id=owner_user_id)
     except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug("Claims rebuild enqueue failed: {}", exc)
 
@@ -2842,6 +2845,7 @@ async def review_claim(
             expected_version=int(payload.get("review_version")),
             action_ip=action_ip,
             action_user_agent=action_user_agent,
+            actor_user_id=principal.user_id if principal.user_id is not None else int(current_user.id),
         )
         if updated is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Claim not found")
@@ -2991,6 +2995,7 @@ def bulk_review_claims(
                 expected_version=int(claim_row.get("review_version") or 1),
                 action_ip=action_ip,
                 action_user_agent=action_user_agent,
+                actor_user_id=principal.user_id if principal.user_id is not None else int(current_user.id),
             )
             if isinstance(updated, dict) and updated.get("conflict"):
                 conflicts.append(int(cid))
@@ -3211,6 +3216,11 @@ def aggregate_claims_review_extractor_metrics_daily(
     report_date: str | None = None,
     lookback_days: int | None = None,
 ) -> int:
+    """Resolve legacy date arguments and delegate to explicit window aggregation."""
+    from tldw_Server_API.app.core.Claims_Extraction.claims_review_metrics import (
+        aggregate_claims_review_metrics_window,
+    )
+
     if db.backend_type == BackendType.POSTGRESQL and not target_user_id:
         logger.debug("Claims review metrics aggregation skipped: missing target_user_id for Postgres")
         return 0
@@ -3224,138 +3234,19 @@ def aggregate_claims_review_extractor_metrics_daily(
             )
         except _CLAIMS_NONCRITICAL_EXCEPTIONS:
             lookback_val = 2
-        lookback_val = max(1, lookback_val)
-        today = datetime.utcnow().date()
+        lookback_val = max(1, min(366, lookback_val))
+        today = datetime.now(timezone.utc).date()
         start_date = today - timedelta(days=lookback_val - 1)
         end_date = today
     else:
         end_date = start_date
 
-    if start_date is None:
-        return 0
-
-    start_dt = datetime.combine(start_date, datetime.min.time())
-    end_dt = datetime.combine(end_date + timedelta(days=1), datetime.min.time())
-
-    if db.backend_type == BackendType.POSTGRESQL:
-        placeholder = "%s"
-        start_param = start_dt
-        end_param = end_dt
-        claims_table = "claims"
-        media_table = "media"
-    else:
-        placeholder = "?"
-        start_param = start_dt.strftime("%Y-%m-%d %H:%M:%S")
-        end_param = end_dt.strftime("%Y-%m-%d %H:%M:%S")
-        claims_table = "Claims"
-        media_table = "Media"
-
-    owner_filter_sql = ""
-    params: list[Any] = [start_param, end_param]
-    if db.backend_type == BackendType.POSTGRESQL and target_user_id:
-        owner_filter_sql = (
-            f" AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = {placeholder}"
-        )
-        params.append(str(target_user_id))
-
-    date_expr = "DATE(l.created_at)"
-    metrics_sql = (
-        "SELECT "
-        + date_expr
-        + " AS day, "
-        "COALESCE(c.extractor, 'unknown') AS extractor, "
-        "COALESCE(c.extractor_version, '') AS extractor_version, "
-        "COUNT(*) AS total_reviewed, "
-        "SUM(CASE WHEN lower(l.new_status) = 'approved' THEN 1 ELSE 0 END) AS approved_count, "
-        "SUM(CASE WHEN lower(l.new_status) = 'rejected' THEN 1 ELSE 0 END) AS rejected_count, "
-        "SUM(CASE WHEN lower(l.new_status) = 'flagged' THEN 1 ELSE 0 END) AS flagged_count, "
-        "SUM(CASE WHEN lower(l.new_status) = 'reassigned' THEN 1 ELSE 0 END) AS reassigned_count, "
-        "SUM(CASE WHEN l.old_text IS NOT NULL AND l.new_text IS NOT NULL AND l.old_text <> l.new_text "
-        "THEN 1 ELSE 0 END) AS edited_count "
-        "FROM claims_review_log l "
-        f"LEFT JOIN {claims_table} c ON c.id = l.claim_id "
-        f"LEFT JOIN {media_table} m ON m.id = c.media_id "
-        f"WHERE l.created_at >= {placeholder} AND l.created_at < {placeholder}"
-        + owner_filter_sql
-        + " GROUP BY day, extractor, extractor_version ORDER BY day ASC"
+    return aggregate_claims_review_metrics_window(
+        db=db,
+        owner_user_id=user_id_value,
+        start_date=start_date,
+        end_date=end_date,
     )
-
-    reason_sql = (
-        "SELECT "
-        + date_expr
-        + " AS day, "
-        "COALESCE(c.extractor, 'unknown') AS extractor, "
-        "COALESCE(c.extractor_version, '') AS extractor_version, "
-        "l.reason_code, COUNT(*) AS count "
-        "FROM claims_review_log l "
-        f"LEFT JOIN {claims_table} c ON c.id = l.claim_id "
-        f"LEFT JOIN {media_table} m ON m.id = c.media_id "
-        f"WHERE l.created_at >= {placeholder} AND l.created_at < {placeholder}"
-        + owner_filter_sql
-        + " GROUP BY day, extractor, extractor_version, l.reason_code"
-    )
-
-    metrics_rows = db.execute_query(metrics_sql, tuple(params)).fetchall()
-    if not metrics_rows:
-        return 0
-
-    reason_rows = db.execute_query(reason_sql, tuple(params)).fetchall()
-    reason_counts: dict[tuple[str, str, str], dict[str, int]] = {}
-    for row in reason_rows:
-        try:
-            day_val = row[0]
-            extractor_val = row[1]
-            version_val = row[2]
-            reason_val = row[3]
-            count_val = row[4]
-        except _CLAIMS_NONCRITICAL_EXCEPTIONS:
-            continue
-        if reason_val is None:
-            continue
-        reason_key = str(reason_val).strip()
-        if not reason_key:
-            continue
-        day_str = day_val.isoformat() if hasattr(day_val, "isoformat") else str(day_val)
-        extractor_key = str(extractor_val or "unknown")
-        version_key = str(version_val or "")
-        key = (day_str, extractor_key, version_key)
-        counts_for_key = reason_counts.setdefault(key, {})
-        counts_for_key[reason_key] = counts_for_key.get(reason_key, 0) + int(count_val or 0)
-
-    written = 0
-    for row in metrics_rows:
-        try:
-            day_val = row[0]
-            extractor_val = row[1]
-            version_val = row[2]
-            total_reviewed = row[3]
-            approved_count = row[4]
-            rejected_count = row[5]
-            flagged_count = row[6]
-            reassigned_count = row[7]
-            edited_count = row[8]
-        except _CLAIMS_NONCRITICAL_EXCEPTIONS:
-            continue
-        day_str = day_val.isoformat() if hasattr(day_val, "isoformat") else str(day_val)
-        extractor_key = str(extractor_val or "unknown")
-        version_key = str(version_val or "")
-        reason_payload = reason_counts.get((day_str, extractor_key, version_key))
-        db.upsert_claims_review_extractor_metrics_daily(
-            user_id=user_id_value,
-            report_date=day_str,
-            extractor=extractor_key,
-            extractor_version=version_key,
-            total_reviewed=int(total_reviewed or 0),
-            approved_count=int(approved_count or 0),
-            rejected_count=int(rejected_count or 0),
-            flagged_count=int(flagged_count or 0),
-            reassigned_count=int(reassigned_count or 0),
-            edited_count=int(edited_count or 0),
-            reason_code_counts_json=json.dumps(reason_payload) if reason_payload else None,
-        )
-        written += 1
-
-    return written
 
 
 def list_claims_review_metrics(
@@ -4710,7 +4601,7 @@ def rebuild_claims(
     else:
         db_path = db.db_path_str
     svc = rebuild_service or get_claims_rebuild_service()
-    svc.submit(media_id=media_id, db_path=db_path)
+    svc.submit(media_id=media_id, db_path=db_path, owner_user_id=owner_user_id)
     return {"status": "accepted", "media_id": media_id}
 
 
@@ -4760,7 +4651,7 @@ def rebuild_all_media(
 
         svc = rebuild_service or get_claims_rebuild_service()
         for mid in mids:
-            svc.submit(media_id=mid, db_path=db_path)
+            svc.submit(media_id=mid, db_path=db_path, owner_user_id=owner_user_id)
         return {
             "status": "accepted",
             "enqueued": len(mids),
@@ -4800,9 +4691,9 @@ async def verify_claims_with_fva(
     sources: list[str] | None = None,
     top_k: int = 10,
     fva_config: dict[str, Any] | None = None,
-    user_id: str | None = None,
-    current_user: User | None = None,
-    db: MediaDatabase | None = None,
+    user_id: int | None = None,
+    current_user: User,
+    db: MediaDatabase,
 ) -> dict[str, Any]:
     """
     Verify claims using the FVA (Falsification-Verification Alignment) pipeline.
@@ -4820,13 +4711,39 @@ async def verify_claims_with_fva(
         sources: Data sources to search (defaults to media_db)
         top_k: Number of documents to retrieve
         fva_config: FVA pipeline configuration options
-        user_id: User ID for scoped retrieval
+        user_id: The user to verify for; honoured only for a platform admin, as in
+            rebuild_claims. Anyone else's is ignored and the request runs for current_user.
         current_user: Current authenticated user
-        db: MediaDatabase instance
+        db: The authenticated user's MediaDatabase
 
     Returns:
         FVA verification results with status changes and timing
     """
+    owner_user_id = int(current_user.id)
+    if user_id is None or int(user_id) == owner_user_id or not _legacy_user_has_platform_admin_claims(current_user):
+        return await _verify_claims_with_fva_for(
+            owner_user_id, db, claims=claims, query=query, sources=sources, top_k=top_k, fva_config=fva_config
+        )
+    # An admin verifying for another user: that user's media DB and content scope. The media visibility
+    # filter, the quota decision and the usage rows all read the scope (TASK-13881).
+    # ponytail: the user's personal media only; give the scope their team and org ids if admins need shared media.
+    with scoped_context(user_id=int(user_id), is_admin=False), _claims_user_override_db(int(user_id)) as (owner_db, _):
+        return await _verify_claims_with_fva_for(
+            int(user_id), owner_db, claims=claims, query=query, sources=sources, top_k=top_k, fva_config=fva_config
+        )
+
+
+async def _verify_claims_with_fva_for(
+    owner_user_id: int,
+    db: MediaDatabase,
+    *,
+    claims: list[dict[str, Any]],
+    query: str,
+    sources: list[str] | None,
+    top_k: int,
+    fva_config: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Run the FVA pipeline on ``db`` and ``owner_user_id``'s vector store, for that user."""
     import time
     from uuid import uuid4
 
@@ -4864,22 +4781,13 @@ async def verify_claims_with_fva(
 
     # Set up budget if specified
     budget: ClaimsJobBudget | None = None
-    job_context: ClaimsJobContext | None = None
     max_budget_usd = config_dict.get("max_budget_usd")
     if max_budget_usd is not None:
         budget = ClaimsJobBudget(max_cost_usd=float(max_budget_usd))
-        job_context = ClaimsJobContext(
-            job_id=str(uuid4()),
-            user_id=user_id or (current_user.username if current_user else None),
-        )
+    job_context = ClaimsJobContext(user_id=owner_user_id)  # the claims_verify usage rows, by id
 
-    # Resolve user_id for retrieval
-    resolved_user_id = user_id
-    if resolved_user_id is None and current_user is not None:
-        resolved_user_id = str(current_user.username) if hasattr(current_user, "username") else None
-
-    # Build retriever
-    retriever = MultiDatabaseRetriever(media_db=db)
+    # The user_id picks the vector store (collection user_{id}_media_embeddings).
+    retriever = MultiDatabaseRetriever({}, user_id=str(owner_user_id), media_db=db)
 
     # Build data sources
     data_sources: list[DataSource] = []
@@ -4891,10 +4799,7 @@ async def verify_claims_with_fva(
         data_sources = [DataSource.MEDIA_DB]
 
     # Retrieve base documents
-    retrieval_config = RetrievalConfig(
-        top_k=top_k,
-        search_mode="hybrid",
-    )
+    retrieval_config = RetrievalConfig(max_results=top_k)  # FTS and vector, merged: the hybrid search
     base_documents = await retriever.retrieve(
         query=query,
         sources=data_sources,
@@ -4939,7 +4844,7 @@ async def verify_claims_with_fva(
         claims=claim_objects,
         query=query,
         documents=base_documents,
-        user_id=resolved_user_id,
+        user_id=str(owner_user_id),
         budget=budget,
         job_context=job_context,
     )

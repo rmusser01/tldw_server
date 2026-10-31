@@ -1,9 +1,24 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render as renderUI,
+  screen,
+  waitFor,
+  within
+} from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import React from "react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import axe from "axe-core"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { ResearchWorkspace } from "../index"
+
+// Match the router context provided by both deployed shells.
+const render: typeof renderUI = (ui, options) =>
+  renderUI(ui, {
+    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>,
+    ...options
+  })
 
 const {
   mockGetMediaDetails,
@@ -22,7 +37,8 @@ const {
   mockRunResearchWorkspaceMigration,
   mockChatPaneProps,
   mockStatusBarProps,
-  mockBgRequest
+  mockBgRequest,
+  mockReadResearchWebCaptures
 } = vi.hoisted(() => ({
   mockGetMediaDetails: vi.fn(),
   mockUpsertWorkspace: vi.fn(),
@@ -49,7 +65,8 @@ const {
     }
     workspaceContextStatus?: unknown
   }>,
-  mockBgRequest: vi.fn()
+  mockBgRequest: vi.fn(),
+  mockReadResearchWebCaptures: vi.fn()
 }))
 
 const { mockScheduleWorkspaceUndoAction, mockUndoWorkspaceAction } = vi.hoisted(
@@ -68,6 +85,8 @@ const testState = {
   workspaceName: "New Research",
   workspaceTag: "workspace:test",
   initializeWorkspace: vi.fn(),
+  restoreServerWorkspace: vi.fn(),
+  workspaceSnapshots: {},
   createNewWorkspace: vi.fn(),
   addSources: vi.fn(),
   setSelectedSourceIds: vi.fn(),
@@ -125,9 +144,12 @@ vi.mock("@/hooks/useMediaQuery", () => ({
   useMobile: () => testState.isMobile
 }))
 
-vi.mock("@/store/workspace", () => ({
-  useWorkspaceStore: (selector: (state: typeof testState) => unknown) =>
-    selector(testState),
+vi.mock("@/store/workspace", async original => ({
+  ...await original<typeof import("@/store/workspace")>(),
+  useWorkspaceStore: Object.assign(
+    (selector: (state: typeof testState) => unknown) => selector(testState),
+    { getState: () => testState }
+  ),
   createWorkspaceStorage: () => ({
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -158,12 +180,35 @@ vi.mock("@/services/background-proxy", () => ({
 }))
 
 vi.mock("@/store/workspace-migration", () => ({
-  runResearchWorkspaceMigration: mockRunResearchWorkspaceMigration
+  runResearchWorkspaceMigration: mockRunResearchWorkspaceMigration,
+  RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFIX: "tldw:research-workspace:migration:tombstone"
 }))
 
-vi.mock("@/utils/research-workspace-prefill", () => ({
-  consumeResearchWorkspacePrefill: vi.fn().mockResolvedValue(null),
-  buildKnowledgeQaSeedNote: vi.fn().mockReturnValue("")
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async (_ids: unknown, options: { signal: AbortSignal }) => ({
+    scopeKey: "workspace-alice",
+    requestScope: { config: { serverUrl: "https://workspace.test", authMode: "multi-user" }, userId: "alice" },
+    scopeSignal: options.signal,
+    scopeInvalidatedSignal: options.signal,
+    release: vi.fn()
+  })
+}))
+
+// Stage 3 has no captured-article checkpoints; retain the real owner and restore logic.
+vi.mock("@/utils/research-workspace-prefill", async original => ({
+  ...await original<typeof import("@/utils/research-workspace-prefill")>(),
+  readResearchWebCaptures: mockReadResearchWebCaptures
+}))
+
+vi.mock("@/utils/use-research-workspace-prefill", () => ({
+  useResearchWorkspacePrefill: () => ({
+    attached: 0,
+    pending: 0,
+    failed: 0,
+    importing: false,
+    error: null,
+    retry: vi.fn(),
+  }),
 }))
 
 vi.mock("../undo-manager", () => ({
@@ -373,6 +418,76 @@ const createDeferred = <T,>() => {
 }
 
 describe("ResearchWorkspace stage 3 global navigation", () => {
+  const migrationReceipt = () => {
+    testState.workspaceId = ""
+    localStorage.setItem("tldw:research-workspace:migration:tombstone:workspace-original", JSON.stringify({
+      legacyWorkspaceId: "workspace-original", serverWorkspaceId: "workspace-original",
+      migrationId: "migration-original", contentRetained: false, deletedAt: "2026-10-03T00:00:00Z",
+      serverScopeKey: "workspace-alice"
+    }))
+  }
+
+  it("restores migrated server identity and sources before creating a workspace on reload", async () => {
+    migrationReceipt()
+    mockBgRequest.mockImplementation(async ({ path }: { path: string }) => path.endsWith("/context") ? {
+      workspace_id: "workspace-original",
+      workspace: { id: "workspace-original", name: "Saved Research", created_at: "2026-10-01T00:00:00Z", version: 1 },
+      sources: { items: [{ id: "source-original", workspace_id: "workspace-original", media_id: 7, title: "Larch", source_type: "text", selected: true, added_at: "2026-10-01T00:00:00Z" }] },
+      partial_errors: []
+    } : path.includes("/api/v1/notes/search/") ? { notes: [] } : [])
+    render(<ResearchWorkspace />)
+    await waitFor(() => expect(testState.restoreServerWorkspace).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: "workspace-original", workspaceName: "Saved Research",
+      sources: [expect.objectContaining({ id: "source-original", mediaId: 7 })], selectedSourceIds: ["source-original"]
+    })))
+    expect(mockReadResearchWebCaptures).toHaveBeenCalledWith(
+      expect.stringContaining(":auth:multi-user:org:none:user:alice"), "workspace-original"
+    )
+    expect(mockBgRequest).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/notes/search/?tokens=workspace%3Aworkspace-original&limit=100&include_keywords=true",
+      servicePromptConfig: {
+        serverUrl: "https://workspace.test", authMode: "multi-user", expectedUserId: "alice"
+      },
+      headers: { "X-TLDW-Expected-User-ID": "alice" }
+    }))
+    expect(testState.initializeWorkspace).not.toHaveBeenCalled()
+  })
+
+  it("shows recovery after a migrated server read fails without creating a replacement", async () => {
+    migrationReceipt()
+    mockBgRequest.mockRejectedValue(new Error("Workspace unavailable"))
+    render(<ResearchWorkspace />)
+    expect(await screen.findByRole("alert")).toHaveTextContent("Unable to restore your Research Workspace")
+    expect(testState.initializeWorkspace).not.toHaveBeenCalled()
+    expect(testState.restoreServerWorkspace).not.toHaveBeenCalled()
+  })
+
+  it("starts a separate workspace only on explicit recovery action and retains the saved receipt", async () => {
+    migrationReceipt()
+    const key = "tldw:research-workspace:migration:tombstone:workspace-original"
+    const savedReceipt = localStorage.getItem(key)
+    mockBgRequest.mockRejectedValue(new Error("Temporary outage"))
+    render(<ResearchWorkspace />)
+    await screen.findByRole("alert")
+    expect(testState.createNewWorkspace).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Start new workspace" }))
+    expect(testState.createNewWorkspace).toHaveBeenCalledOnce()
+    expect(localStorage.getItem(key)).toBe(savedReceipt)
+  })
+
+  it("initializes normally when an unbound receipt is absent from the current account's server list", async () => {
+    migrationReceipt()
+    const key = "tldw:research-workspace:migration:tombstone:workspace-original"
+    const receipt = JSON.parse(localStorage.getItem(key)!)
+    delete receipt.serverScopeKey
+    localStorage.setItem(key, JSON.stringify(receipt))
+    mockBgRequest.mockResolvedValue({ items: [] })
+    render(<ResearchWorkspace />)
+    await waitFor(() => expect(testState.initializeWorkspace).toHaveBeenCalledOnce())
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    expect(testState.restoreServerWorkspace).not.toHaveBeenCalled()
+  })
+
   const originalMatchMedia = window.matchMedia
 
   beforeAll(() => {
@@ -400,6 +515,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mockReadResearchWebCaptures.mockReset().mockResolvedValue([])
     ensureLocalStorage()
     delete (window as Window & {
       __tldwResearchWorkspaceFreshInitialization?: Set<string>

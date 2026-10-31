@@ -1,5 +1,6 @@
-from io import BytesIO
 import zipfile
+from io import BytesIO
+
 import pytest
 
 
@@ -92,7 +93,7 @@ def test_process_emails_sanitizes_processor_failure(client_user_only, monkeypatc
 
 def test_process_emails_rechunk_failure_log_is_sanitized(client_user_only, monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints.media import process_emails as process_emails_mod
-    import tldw_Server_API.app.core.Chunking as chunking_mod
+    from tldw_Server_API.app.core import Chunking
 
     logger_stub = _LoggerStub()
 
@@ -108,7 +109,7 @@ def test_process_emails_rechunk_failure_log_is_sanitized(client_user_only, monke
 
     monkeypatch.setattr(process_emails_mod, "logger", logger_stub)
     monkeypatch.setattr(process_emails_mod.email_lib, "process_email_task", stub_process_email_task)
-    monkeypatch.setattr(chunking_mod, "improved_chunking_process", fail_improved_chunking_process)
+    monkeypatch.setattr(Chunking, "improved_chunking_process", fail_improved_chunking_process)
 
     content = (
         b"From: Alice <alice@example.com>\r\n"
@@ -365,6 +366,7 @@ def test_process_emails_endpoint_mbox_guardrail_too_many_messages(client_user_on
     import mailbox as _mailbox
     import tempfile as _tempfile
     from email.message import EmailMessage
+
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Email import Email_Processing_Lib as email_lib
 
     # Monkeypatch guardrail limits to keep the test lightweight
@@ -424,6 +426,7 @@ def test_process_emails_endpoint_mbox_guardrail_oversized_bytes(client_user_only
     import mailbox as _mailbox
     import tempfile as _tempfile
     from email.message import EmailMessage
+
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Email import Email_Processing_Lib as email_lib
 
     archive_cfg = email_lib.DEFAULT_MEDIA_TYPE_CONFIG.get('archive', {})
@@ -486,7 +489,7 @@ def _build_zip_with_emls(n: int, payload_size: int = 32) -> bytes:
             eml = (
                 b"From: A <a@example.com>\r\n"
                 b"To: B <b@example.com>\r\n"
-                + f"Subject: Z{i}\r\n".encode("utf-8")
+                + f"Subject: Z{i}\r\n".encode()
                 + b"MIME-Version: 1.0\r\n"
                 + b"Content-Type: text/plain; charset=utf-8\r\n\r\n"
                 + body
@@ -593,6 +596,7 @@ def test_process_emails_endpoint_mbox_large_container(client_user_only):
     import mailbox as _mailbox
     import tempfile as _tempfile
     from email.message import EmailMessage
+
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Email import Email_Processing_Lib as email_lib
 
     archive_cfg = email_lib.DEFAULT_MEDIA_TYPE_CONFIG.get('archive', {})
@@ -709,9 +713,9 @@ def test_process_emails_endpoint_pst_recipients_and_date_strict(client_user_only
     assert item.get('date'), f"No date found in metadata: {item}"
 
 
-def test_process_emails_endpoint_pst_feature_flag_behavior(client_user_only):
-
-
+def test_process_emails_endpoint_pst_feature_flag_behavior(client_user_only, monkeypatch):
+    import sys
+    monkeypatch.setitem(sys.modules, "pypff", None)
     # Without pypff installed, uploading a small .pst with accept_pst=true should return informative error and grouping keyword
     placeholder = b"!pst placeholder!"  # not a real PST
     files = {

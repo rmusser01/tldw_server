@@ -37,11 +37,11 @@ Extend admin LLM usage reporting after cache-aware usage rows are populated. Rep
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 8 scope located: admin LLM usage reporting is implemented in tldw_Server_API/app/services/admin_usage_service.py, exposed through tldw_Server_API/app/api/v1/endpoints/admin/admin_usage.py, and typed by tldw_Server_API/app/api/v1/schemas/admin_schemas.py. The implementation should use llm_usage_log cache-aware columns and avoid raw_usage_metadata_json.
 
 Implemented admin usage log, summary, and CSV cache-aware reporting in admin_usage_service.py and admin_schemas.py. Added endpoint coverage for provider cache aggregates, local diagnostic counts, legacy table fallback, and raw metadata redaction.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

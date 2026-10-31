@@ -6,6 +6,7 @@
  * still expose the setup/recovery surfaces without layout overflow.
  */
 import { type Page } from "@playwright/test"
+import { ChatPage } from "../../utils/page-objects/ChatPage"
 import {
   assertNoCriticalErrors,
   expect,
@@ -31,6 +32,7 @@ const VIEWPORTS: ViewportTarget[] = [
 ]
 
 async function openRolePlaySetup(page: Page): Promise<void> {
+  await new ChatPage(page).openConversationControls()
   const directSetupButtons = page.getByTestId("composer-role-play-setup")
   const directSetupCount = await directSetupButtons.count()
   let openedDirectly = false
@@ -44,10 +46,8 @@ async function openRolePlaySetup(page: Page): Promise<void> {
   }
 
   if (!openedDirectly) {
-    await page.getByRole("button", { name: "More options" }).first().click()
-    await page
-      .getByRole("button", { name: "Role-play setup", exact: true })
-      .click()
+    await page.getByRole("button", { name: "More options", exact: true }).click()
+    await page.getByRole("button", { name: "Role-play setup", exact: true }).filter({ visible: true }).first().click()
   }
 
   const dialog = page.getByRole("dialog", { name: "Role-play setup" })
@@ -80,14 +80,16 @@ async function expectCharacterSessionsReachable(page: Page): Promise<void> {
     return
   }
 
-  const showPanels = page.getByTestId("playground-chat-layout-mode-trigger")
-  if (await showPanels.isVisible().catch(() => false)) {
-    await showPanels.click()
-  }
-
-  const contextTab = page.getByRole("tab", { name: "Context" })
-  if (await contextTab.isVisible().catch(() => false)) {
-    await contextTab.click()
+  // Rail visibility is independent of focus mode and defaults to collapsed.
+  const restoreContext = page.getByRole("button", {
+    name: "Show context", exact: true,
+  })
+  if (await restoreContext.isVisible()) {
+    await restoreContext.click()
+  } else {
+    await page.getByRole("button", {
+      name: "Context", exact: true,
+    }).click()
   }
 
   await expect(sessions).toBeVisible({ timeout: 30_000 })
@@ -111,6 +113,15 @@ test.describe("Character Chat Phase 6 signoff", () => {
       })
       await waitForConnection(page)
 
+      // Mobile starts in focus mode. The same toggle enters focus on desktop,
+      // so only activate it when its current pressed state means exit focus.
+      const layoutToggle = page.getByTestId("playground-chat-layout-mode-trigger")
+      await expect(layoutToggle).toBeVisible()
+      if ((await layoutToggle.getAttribute("aria-pressed")) === "true") {
+        await layoutToggle.click()
+      }
+      await expect(layoutToggle).toHaveAttribute("aria-pressed", "false")
+
       await expect(
         page.getByTestId("playground-active-chat-mode"),
       ).toContainText("Character Chat", { timeout: 30_000 })
@@ -118,7 +129,7 @@ test.describe("Character Chat Phase 6 signoff", () => {
       await expect(
         page.getByTestId("character-chat-readiness-panel"),
       ).toBeVisible({ timeout: 30_000 })
-      await expect(page.getByPlaceholder(/type a message/i)).toBeVisible({
+      await expect(page.getByTestId("chat-input")).toBeVisible({
         timeout: 30_000,
       })
       await expectNoHorizontalOverflow(page, `${viewport.label} character chat`)

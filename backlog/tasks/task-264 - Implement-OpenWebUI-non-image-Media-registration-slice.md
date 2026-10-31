@@ -40,9 +40,9 @@ Follow Stage 4 of the implementation plan with TDD: inspect existing Media DB ad
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification: service/media registration focus passed with 15 tests; combined OpenWebUI hydration/import + MediaFiles + SQLite MediaDB suite passed with 108 tests; git diff --check passed; Bandit on touched backend code wrote /tmp/bandit_openwebui_media_registration.json with 0 results and 0 errors.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

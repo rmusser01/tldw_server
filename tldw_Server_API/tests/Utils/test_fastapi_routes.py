@@ -138,3 +138,17 @@ def test_plain_test_doubles_pass_through() -> None:
     (route,) = list(iter_served_routes([fake]))
 
     assert (route.path, route.methods, route.route) == ("/x", {"GET"}, fake)
+
+
+def test_router_routes_version_changes_on_include() -> None:
+    """policy_resolver rebuilds its index on this private FastAPI counter (read per request)."""
+    app = FastAPI()
+    before = app.router._routes_version
+    extra = APIRouter()
+
+    @extra.get("/x")
+    def x() -> None:
+        return None
+
+    app.include_router(extra)
+    assert isinstance(app.router._routes_version, int) and app.router._routes_version != before

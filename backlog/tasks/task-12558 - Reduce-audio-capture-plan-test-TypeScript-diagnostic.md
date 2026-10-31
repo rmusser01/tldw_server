@@ -33,14 +33,14 @@ Continue reducing the shared UI package-wide TypeScript compiler baseline by fix
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Captured red evidence from `/tmp/task526-tsc-final.txt`: package `tsc` reported one diagnostic in `src/audio/__tests__/resolve-audio-capture-plan.test.ts` where the shared `requestedSource` fixture inferred `sourceKind` as `string`.
 - Root cause was test fixture literal widening only. The resolver expects `AudioCaptureRequestedSource`, and the fixture value already uses a valid `AudioSourceKind`.
 - Imported `AudioCaptureRequestedSource` from `@/audio` and annotated the `requestedSource` fixture, preserving the object used by assertions.
 - Focused verification: `bunx vitest run src/audio/__tests__/resolve-audio-capture-plan.test.ts` passed: 1 test.
 - Package verification: `bunx tsc --noEmit --pretty false > /tmp/task527-tsc-final.txt 2>&1` still exits nonzero from the known baseline, but diagnostics dropped from 42 in `/tmp/task526-tsc-final.txt` to 41 in `/tmp/task527-tsc-final.txt`; searching for `resolve-audio-capture-plan.test.ts` returns no matches.
 - Bandit skipped: this is a TypeScript test-only WebUI change with no Python touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -34,9 +34,9 @@ Implement Task 3 from the llama.cpp model-family/mmproj profile wiring plan: exp
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Task 3 managed profile metadata for /api/v1/llm/models/metadata. Added a public metadata builder backed by the existing llama.cpp profile capability resolver, appended supervisor-managed profile entries through the existing llm_manager path, preserved existing catalog filters, kept stale asset failures as bounded capability warnings, and documented disabled profiles as visible with is_configured=false. PR review fixes offloaded managed profile metadata collection from the async endpoint, bounded Local_LLM scan failures, added scan-truncation warnings, and expanded output_modality test coverage.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

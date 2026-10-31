@@ -9,7 +9,6 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole
-from tldw_Server_API.app.main import app as _app
 
 router = APIRouter()
 
@@ -34,12 +33,9 @@ def _safe_int(value: Any, default: int = 0) -> int:
 
 def _get_app():
     """Return the current app instance, accommodating reloads in tests."""
-    try:
-        from tldw_Server_API.app import main as _main
+    from tldw_Server_API.app.main import app
 
-        return getattr(_main, "app", _app)
-    except ImportError:
-        return _app
+    return app
 
 
 def _get_or_init_governor() -> Any | None:
@@ -60,7 +56,10 @@ def _get_or_init_governor() -> Any | None:
             loader = getattr(app.state, "rg_policy_loader", None)
             if loader is not None:
                 gov = MemoryResourceGovernor(policy_loader=loader)
-                app.state.rg_governor = gov
+                from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag
+
+                if bool(_rg_enabled_flag(True)):
+                    app.state.rg_governor = gov  # diagnostics only when disabled
         except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS:
             # Keep behavior consistent with previous code path: best-effort only.
             logger.debug("Resource governor lazy-init skipped")

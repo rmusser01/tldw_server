@@ -1,9 +1,11 @@
 import asyncio
 import base64
 import json
+import shutil
 import time
 import wave
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -287,10 +289,10 @@ def test_silero_turn_detector_triggers_after_silence(monkeypatch):
     assert detector.available
 
     # First chunk marks speech
-    assert detector.observe(b"\x00" * 160) is False
+    assert detector.observe(b"\x00" * (512 * 4)) is False
     # Wait beyond turn_stop_secs to simulate silence
     time.sleep(0.06)
-    assert detector.observe(b"\x00" * 160) is True
+    assert detector.observe(b"\x00" * (512 * 4)) is True
 
 
 def test_silero_turn_detector_honors_min_utterance(monkeypatch):
@@ -327,11 +329,11 @@ def test_silero_turn_detector_honors_min_utterance(monkeypatch):
     )
     assert detector.available
 
-    assert detector.observe(b"\x00" * 160) is False  # speech observed
+    assert detector.observe(b"\x00" * (512 * 4)) is False  # speech observed
     time.sleep(0.06)  # silence shorter than min_utterance guard
-    assert detector.observe(b"\x00" * 160) is False
+    assert detector.observe(b"\x00" * (512 * 4)) is False
     time.sleep(0.5)  # now above min_utterance
-    assert detector.observe(b"\x00" * 160) is True
+    assert detector.observe(b"\x00" * (512 * 4)) is True
 
 
 def test_silero_turn_detector_fails_open_on_torchscript_error(monkeypatch):
@@ -368,16 +370,16 @@ def test_silero_turn_detector_fails_open_on_torchscript_error(monkeypatch):
     )
     assert detector.available
 
-    assert detector.observe(b"\x00" * 8) is False
+    assert detector.observe(np.zeros(512, dtype=np.float32).tobytes()) is False
     assert detector.available is False
-    assert "too short" in (detector.unavailable_reason or "")
+    assert detector.unavailable_reason == "vad_runtime_error"
 
 
-def test_silero_turn_detector_real_vad_end_to_end():
+def test_silero_turn_detector_real_vad_end_to_end(monkeypatch, tmp_path):
 
 
     """
-    Exercise SileroTurnDetector with real Silero VAD (no stubs) on a sample WAV plus trailing silence.
+    Exercise real Silero VAD on tracked speech plus trailing silence.
 
     Skips when Silero VAD is not available locally.
     """
@@ -392,9 +394,15 @@ def test_silero_turn_detector_real_vad_end_to_end():
         pytest.skip("Silero VAD unavailable")
 
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified import SileroTurnDetector
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import convert_to_wav
 
-    # Use the shipped sample audio and append silence to trigger EOS
-    wav_path = Path("tldw_Server_API/tests/Media_Ingestion_Modification/test_media/sample.wav")
+    # Convert the tracked speech fixture in pytest's private directory.
+    video_path = tmp_path / "speech.mp4"
+    shutil.copyfile(
+        Path("tldw_Server_API/tests/Media_Ingestion_Modification/test_media/sample.mp4"),
+        video_path,
+    )
+    wav_path = convert_to_wav(str(video_path), offset=1, end_time=7, base_dir=tmp_path)
     with wave.open(str(wav_path), "rb") as wf:
         data = wf.readframes(wf.getnframes())
         sr = wf.getframerate()
@@ -414,9 +422,12 @@ def test_silero_turn_detector_real_vad_end_to_end():
     if not detector.available:
         pytest.skip(f"Silero VAD not initialized: {detector.unavailable_reason}")
 
+    now = [1000.0]
+    monkeypatch.setattr(time, "time", lambda: now[0])
     frame_size = int(0.1 * sr)
     triggered = False
     for i in range(0, len(audio), frame_size):
+        now[0] = 1000.0 + (i // frame_size) * 0.1
         chunk = audio[i : i + frame_size].astype(np.float32).tobytes()
         if detector.observe(chunk):
             triggered = True
@@ -553,3 +564,314 @@ async def test_ws_streaming_pauses_emit_single_final(monkeypatch):
     assert len(finals) == 1, f"Expected single final, saw {ws.sent}"
     assert finals[0].get("text") == "pause-final"
     assert elapsed < 3.0, f"Streaming with pause should complete quickly, took {elapsed}s"
+
+
+class _RecordingVADIterator:
+    def __init__(self, **kwargs):
+        if kwargs["sampling_rate"] not in (8000, 16000):
+            raise ValueError("unsupported Silero sample rate")
+        self.windows = []
+        self.reset_calls = 0
+
+    def __call__(self, audio_in, **_kwargs):
+        self.windows.append(np.asarray(audio_in).copy())
+        return {"start": 0} if len(self.windows) == 1 else {}
+
+    def reset_states(self):
+        self.reset_calls += 1
+
+
+@pytest.fixture
+def silero_detector_factory(monkeypatch):
+    """Exercise the real detector with a deterministic, optional-Torch-safe provider."""
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.VAD_Lib as vlib
+
+    monkeypatch.setattr(unified, "load_comprehensive_config", lambda: None)
+    monkeypatch.setattr(unified, "_get_torch_module", lambda: None)
+
+    def make(
+        iterator_cls=_RecordingVADIterator, *, sample_rate=16000,
+        turn_stop_secs=0.1, min_utterance_secs=0.0,
+    ):
+        monkeypatch.setattr(
+            vlib,
+            "_lazy_import_silero_vad",
+            lambda: (object(), [None, None, None, iterator_cls, None]),
+        )
+        return unified.SileroTurnDetector(
+            sample_rate=sample_rate,
+            enabled=True,
+            vad_threshold=0.5,
+            min_silence_ms=200,
+            turn_stop_secs=turn_stop_secs,
+            min_utterance_secs=min_utterance_secs,
+        )
+
+    return make
+
+
+@pytest.mark.parametrize("sample_rate,window", [(8000, 256), (16000, 512)])
+def test_silero_buffers_short_frames_and_preserves_ordered_tail(
+    silero_detector_factory, sample_rate, window
+):
+    """Packet boundaries must not change the model windows, even without Torch."""
+    detector = silero_detector_factory(sample_rate=sample_rate)
+    audio = np.arange(window * 3, dtype=np.float32)
+    assert detector.observe(audio[: window // 2].tobytes()) is False
+    assert detector._iterator.windows == []
+    detector.observe(audio[window // 2 : window * 2 + 17].tobytes())
+    assert [len(chunk) for chunk in detector._iterator.windows] == [window, window]
+    detector.observe(audio[window * 2 + 17 :].tobytes())
+    np.testing.assert_array_equal(np.concatenate(detector._iterator.windows), audio)
+    assert detector.available
+
+
+def test_silero_consumes_all_windows_after_early_speech(silero_detector_factory):
+    """A speech event must not short-circuit later stateful model calls."""
+    detector = silero_detector_factory()
+    audio = np.arange(512 * 3, dtype=np.float32)
+    assert detector.observe(audio.tobytes()) is False
+    assert [len(chunk) for chunk in detector._iterator.windows] == [512, 512, 512]
+    np.testing.assert_array_equal(np.concatenate(detector._iterator.windows), audio)
+
+
+def test_silero_turn_reset_discards_only_vad_tail(silero_detector_factory, monkeypatch):
+    """The next turn must not inherit the preceding detector's incomplete window."""
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
+
+    now = [1000.0]
+    monkeypatch.setattr(unified.time, "time", lambda: now[0])
+    detector = silero_detector_factory()
+    assert detector.observe(np.zeros(512, dtype=np.float32).tobytes()) is False
+    now[0] = 1000.2
+    assert detector.observe(np.zeros(512 + 256, dtype=np.float32).tobytes()) is True
+    assert detector._iterator.reset_calls == 1
+    assert detector.observe(np.zeros(256, dtype=np.float32).tobytes()) is False
+    assert len(detector._iterator.windows) == 2
+
+
+@pytest.mark.parametrize("stage", ["initialization", "observe", "reset"])
+def test_silero_typed_script_error_recovers_without_private_diagnostics(
+    silero_detector_factory, monkeypatch, stage
+):
+    """The lazy Torch exception class belongs only to the detector's recovery boundary."""
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
+
+    class _ScriptError(Exception):
+        pass
+
+    class _FailingIterator(_RecordingVADIterator):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            if stage == "initialization":
+                raise _ScriptError("private-vad-sentinel /private/model/traceback")
+
+        def __call__(self, audio_in, **kwargs):
+            if stage == "observe":
+                raise _ScriptError("private-vad-sentinel /private/model/traceback")
+            return super().__call__(audio_in, **kwargs)
+
+        def reset_states(self):
+            super().reset_states()
+            if stage == "reset":
+                raise _ScriptError("private-vad-sentinel /private/model/traceback")
+
+    fake_torch = SimpleNamespace(jit=SimpleNamespace(Error=_ScriptError), from_numpy=lambda x: x)
+    monkeypatch.setattr(unified, "_get_torch_module", lambda: fake_torch)
+    warnings = []
+    monkeypatch.setattr(unified.logger, "warning", lambda message, *args: warnings.append(message.format(*args)))
+    now = [1000.0]
+    monkeypatch.setattr(unified.time, "time", lambda: now[0])
+    detector = silero_detector_factory(_FailingIterator)
+    if stage != "initialization":
+        assert detector.available
+        if stage == "reset":
+            assert detector.observe(np.zeros(512, dtype=np.float32).tobytes()) is False
+            now[0] = 1000.2
+        assert detector.observe(np.zeros(513, dtype=np.float32).tobytes()) is False
+    assert detector.available is False
+    assert detector._vad_audio_remainder.size == 0
+    assert detector.unavailable_reason == (
+        "vad_initialization_error" if stage == "initialization" else "vad_runtime_error"
+    )
+    assert warnings
+    assert "private-vad-sentinel" not in str(warnings + [detector.unavailable_reason])
+    assert "/private/model/traceback" not in str(warnings + [detector.unavailable_reason])
+    assert _ScriptError not in unified._AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS
+
+
+@pytest.mark.parametrize("error_class", [None, "not an exception class", KeyboardInterrupt, RuntimeError])
+def test_silero_rejects_invalid_torch_error_class(
+    silero_detector_factory, monkeypatch, error_class
+):
+    """Optional/malformed Torch APIs must not expand recovery to unrelated exceptions."""
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
+
+    class _UnrelatedError(Exception):
+        pass
+
+    class _UnexpectedIterator(_RecordingVADIterator):
+        def __call__(self, *_args, **_kwargs):
+            raise _UnrelatedError("unrelated failure")
+
+    fake_torch = SimpleNamespace(jit=SimpleNamespace(Error=error_class), from_numpy=lambda x: x)
+    monkeypatch.setattr(unified, "_get_torch_module", lambda: fake_torch)
+    detector = silero_detector_factory(_UnexpectedIterator)
+    with pytest.raises(_UnrelatedError, match="unrelated failure"):
+        detector.observe(np.zeros(512, dtype=np.float32).tobytes())
+    assert detector.available
+
+
+def test_silero_preserves_unsupported_rate_rejection(silero_detector_factory):
+    detector = silero_detector_factory(sample_rate=44100)
+    assert detector.available is False
+    assert detector.observe(np.zeros(4096, dtype=np.float32).tobytes()) is False
+
+
+@pytest.mark.asyncio
+async def test_typed_vad_failure_preserves_original_asr_frames_and_manual_commit(
+    silero_detector_factory, monkeypatch
+):
+    """Only VAD's state is retired; all original PCM reaches ASR and stays manually committable."""
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
+
+    class _ScriptError(Exception):
+        pass
+
+    class _FailingIterator(_RecordingVADIterator):
+        def __call__(self, *_args, **_kwargs):
+            raise _ScriptError("private-vad-sentinel /private/model/traceback")
+
+    fake_torch = SimpleNamespace(jit=SimpleNamespace(Error=_ScriptError), from_numpy=lambda x: x)
+    monkeypatch.setattr(unified, "_get_torch_module", lambda: fake_torch)
+    detector = silero_detector_factory(_FailingIterator)
+    monkeypatch.setattr(unified, "SileroTurnDetector", lambda **_kwargs: detector)
+    received = []
+
+    class _StubTranscriber:
+        def __init__(self, _config):
+            pass
+
+        def initialize(self):
+            pass
+
+        async def process_audio_chunk(self, audio_bytes):
+            received.append(audio_bytes)
+            return {"type": "partial", "text": "asr_after_vad_error", "is_final": False}
+
+        def get_full_transcript(self):
+            return "asr_after_vad_error"
+
+        def reset(self):
+            pass
+
+        def cleanup(self):
+            pass
+
+    monkeypatch.setattr(unified, "UnifiedStreamingTranscriber", _StubTranscriber)
+    pcm_frames = [np.arange(513, dtype="<i2"), np.arange(7, dtype="<i2")]
+    ws = _DummyWebSocket([
+        json.dumps({"type": "config", "model": "parakeet", "sample_rate": 16000, "enable_vad": True}),
+        *[json.dumps({"type": "audio", "data": base64.b64encode(pcm.tobytes()).decode("ascii")}) for pcm in pcm_frames],
+        json.dumps({"type": "commit"}),
+        json.dumps({"type": "stop"}),
+    ])
+    await unified.handle_unified_websocket(ws, unified.UnifiedStreamingConfig())
+    assert received == [(pcm.astype(np.float32) / 32768.0).tobytes() for pcm in pcm_frames]
+    full_transcripts = [frame for frame in ws.sent if frame.get("type") == "full_transcript"]
+    assert full_transcripts[0]["text"] == "asr_after_vad_error"
+    assert full_transcripts[0]["auto_commit"] is False
+    assert full_transcripts[0]["vad_status"] == "fail_open"
+    assert "private-vad-sentinel" not in str(ws.sent)
+    assert "/private/model/traceback" not in str(ws.sent)
+
+
+@pytest.mark.parametrize(
+    "native_state,result,expected",
+    [
+        (True, None, True),
+        (False, {"end": 512}, False),
+        (False, {"start": 0}, False),
+        (False, {"speech_probs": [0.9]}, False),
+    ],
+    ids=["ongoing-none", "native-end", "inactive-start", "inactive-probability"],
+)
+def test_silero_boolean_iterator_state_controls_speech(
+    silero_detector_factory, native_state, result, expected
+):
+    """Native state is authoritative even when event-only output is contradictory."""
+    detector = silero_detector_factory()
+    detector._iterator.triggered = native_state
+    assert detector._saw_speech(result) is expected
+
+
+@pytest.mark.parametrize(
+    "result,expected",
+    [
+        ({"start": 0}, True),
+        ({"speech_probs": [0.9]}, True),
+        ({"speech_timestamps": [{"start": 0, "end": 512}]}, True),
+        ({"end": 512}, False),
+    ],
+    ids=["start-zero", "probability", "timestamps", "end-only"],
+)
+def test_silero_legacy_event_fallback_preserves_supported_shapes(
+    silero_detector_factory, result, expected
+):
+    """Adapters without a boolean state retain the supported legacy output contract."""
+    detector = silero_detector_factory()
+    detector._iterator.triggered = "legacy-state"
+    assert detector._saw_speech(result) is expected
+
+
+def test_silero_active_speech_state_consumes_windows_then_commits_once(
+    silero_detector_factory, monkeypatch
+):
+    """Ongoing event-free speech stays open until the native end and silence guards."""
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
+
+    class _StatefulIterator(_RecordingVADIterator):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.triggered = False
+            self.speaking = True
+
+        def __call__(self, audio_in, **kwargs):
+            super().__call__(audio_in, **kwargs)
+            was_active = self.triggered
+            self.triggered = self.speaking
+            if self.triggered and not was_active:
+                return {"start": 0}
+            if was_active and not self.triggered:
+                return {"end": len(self.windows) * 512}
+            return None
+
+        def reset_states(self):
+            super().reset_states()
+            self.triggered = False
+
+    now = [1000.0]
+    monkeypatch.setattr(unified.time, "time", lambda: now[0])
+    detector = silero_detector_factory(
+        _StatefulIterator, turn_stop_secs=0.2, min_utterance_secs=0.2
+    )
+    audio = np.arange(512 * 9, dtype=np.float32)
+    for packet, elapsed in enumerate((0.0, 0.3, 0.6)):
+        now[0] = 1000.0 + elapsed
+        assert detector.observe(audio[packet * 1536 : (packet + 1) * 1536].tobytes()) is False
+    assert len(detector._iterator.windows) == 9
+    np.testing.assert_array_equal(np.concatenate(detector._iterator.windows), audio)
+    assert detector._iterator.reset_calls == 0
+
+    detector._iterator.speaking = False
+    now[0] = 1000.7
+    silence = np.zeros(512 * 3, dtype=np.float32).tobytes()
+    assert detector.observe(silence) is False
+    now[0] = 1000.85
+    assert detector.observe(silence) is True
+    assert detector.last_trigger_at == 1000.85
+    assert detector._iterator.reset_calls == 1
+    now[0] = 1001.1
+    assert detector.observe(silence) is False
+    assert detector._iterator.reset_calls == 1

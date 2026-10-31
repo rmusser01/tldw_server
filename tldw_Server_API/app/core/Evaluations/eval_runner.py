@@ -14,6 +14,7 @@ import os
 import statistics
 import time
 from contextlib import suppress
+from copy import deepcopy
 from datetime import datetime
 from typing import Any, Callable, Optional
 
@@ -50,12 +51,14 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     resolve_provider_model,
     split_system_message,
 )
+from tldw_Server_API.app.core.Evaluations.recipes.dataset_snapshot import build_dataset_content_hash
 from tldw_Server_API.app.core.Evaluations.run_state import (
     can_transition_run_status,
     normalize_run_status,
 )
 from tldw_Server_API.app.core.Evaluations.scoring import normalize_geval_metric
 from tldw_Server_API.app.core.Evaluations.webhook_security import webhook_validator
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import SummaryProviderError
 from tldw_Server_API.app.core.RAG.rag_custom_metrics import get_custom_metrics
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
 from tldw_Server_API.app.core.RAG.rag_service.vector_stores import (
@@ -295,6 +298,18 @@ class EvaluationRunner:
             # Get samples
             samples = await self._get_samples(evaluation, eval_config)
             total_samples = len(samples)
+            uses_override = bool(eval_config.get("dataset_override"))
+            dataset_id = None if uses_override else evaluation.get("dataset_id")
+            provenance = {
+                "evaluation_id": eval_id,
+                "evaluation_type": eval_type,
+                "evaluation_content_hash": build_dataset_content_hash({
+                    "eval_type": eval_type, "eval_spec": eval_spec,
+                }),
+                "dataset_id": dataset_id,
+                "dataset_source": "override" if uses_override else "dataset" if dataset_id else "inline",
+                "dataset_content_hash": build_dataset_content_hash(samples),
+            }
 
             # Initialize progress
             progress = {
@@ -322,15 +337,23 @@ class EvaluationRunner:
                 self.db.update_run_progress(run_id, progress)
 
                 # Execute rag_pipeline evaluation end-to-end
-                results, usage = await self._execute_rag_pipeline_run(
-                    run_id=run_id,
-                    samples=samples,
-                    eval_spec=eval_spec,
-                    eval_config=eval_config,
-                    run_user_id=evaluation.get("created_by"),
-                )
+                # This branch bypasses per-example processing; retain its former service deadline.
+                try:
+                    results, usage = await asyncio.wait_for(
+                        self._execute_rag_pipeline_run(
+                            run_id=run_id,
+                            samples=samples,
+                            eval_spec=eval_spec,
+                            eval_config=eval_config,
+                            run_user_id=evaluation.get("created_by"),
+                        ),
+                        timeout=30.0,
+                    )
+                except asyncio.TimeoutError as exc:
+                    raise TimeoutError("RAG pipeline timed out after 30s") from exc
 
                 # Store results and webhook
+                results["provenance"] = provenance
                 self.db.store_run_results(run_id, results, usage)
                 webhook_url = eval_config.get("webhook_url")
                 if webhook_url:
@@ -397,7 +420,31 @@ class EvaluationRunner:
 
                     sample_results.append(result)
 
-                self.db.update_run_progress(run_id, progress)
+                # A later cancellation must preserve completed batches and their inputs.
+                metrics = self._normalize_metrics(eval_spec.get("metrics"), default=[])
+                checkpoint_saved = self.db.update_run_progress(
+                    run_id, progress,
+                    results={
+                        "aggregate": self._calculate_aggregate_results(
+                            sample_results, metrics, eval_spec.get("threshold", 0.7)
+                        ),
+                        "by_metric": self._calculate_metric_stats(sample_results, metrics),
+                        "sample_results": sample_results,
+                        "failed_samples": [r for r in sample_results if r.get("error")],
+                        "provenance": provenance,
+                    },
+                    usage=self._calculate_usage(sample_results),
+                )
+                if not checkpoint_saved:
+                    raise asyncio.CancelledError("Run retired before batch checkpoint")
+
+                provider_error = next(
+                    (row["error"] for row in batch_results if row.get("provider_error")), None
+                )
+                if provider_error:
+                    raise RuntimeError(
+                        f"{provider_error}. Check the provider settings and availability before starting a new run."
+                    )
 
             # Calculate aggregate results (include failed samples)
             eval_metrics = self._normalize_metrics(eval_spec.get("metrics"), default=[])
@@ -416,7 +463,8 @@ class EvaluationRunner:
                 "aggregate": aggregate,
                 "by_metric": self._calculate_metric_stats(sample_results, eval_metrics),
                 "sample_results": sample_results,
-                "failed_samples": [r for r in sample_results if r.get("error")]
+                "failed_samples": [r for r in sample_results if r.get("error")],
+                "provenance": provenance,
             }
 
             # Store results
@@ -1303,6 +1351,7 @@ class EvaluationRunner:
         timeout_seconds: Optional[float] = None,
     ) -> list[dict[str, Any]]:
         """Process a batch of samples with proper concurrency control"""
+        sample_snapshots = deepcopy(batch)
         run_timeout = timeout_seconds if timeout_seconds is not None else self.eval_timeout
         try:
             run_timeout = float(run_timeout)
@@ -1361,18 +1410,23 @@ class EvaluationRunner:
         # Handle any unexpected exceptions from gather
         processed_results = []
         for i, result in enumerate(results):
+            provider_error = result.code if isinstance(result, SummaryProviderError) else None
             if isinstance(result, Exception):
-                processed_results.append({
+                result = {
                     "sample_id": sample_ids[i] if i < len(sample_ids) else f"sample_{start_index + i:06d}",
                     "error": str(result)
-                })
-            else:
-                if isinstance(result, dict):
-                    # Preserve original dataset sample id when available
-                    ds_id = batch[i].get("id") or batch[i].get("sample_id")
-                    if ds_id and "dataset_sample_id" not in result:
-                        result["dataset_sample_id"] = ds_id
-                processed_results.append(result)
+                }
+                if provider_error:
+                    result["provider_error"] = provider_error
+            if isinstance(result, dict):
+                sample = sample_snapshots[i]
+                # Retain what was evaluated even if the evaluator mutates its sample.
+                result["input"] = sample.get("input")
+                result["expected"] = sample.get("expected")
+                ds_id = sample.get("id") or sample.get("sample_id")
+                if ds_id and "dataset_sample_id" not in result:
+                    result["dataset_sample_id"] = ds_id
+            processed_results.append(result)
 
         return processed_results
 
@@ -1572,7 +1626,17 @@ class EvaluationRunner:
                 "scores": scores,
                 "passed": passed,
                 "avg_score": avg_score,
-                "format_compliance": result.get("format_compliance", True)
+                "format_compliance": result.get("format_compliance", True),
+                "grader": {
+                    "provider": api_name, "model": model_override,
+                    "model_source": "override" if model_override else "provider_default",
+                    "temperature": 0.1,
+                },
+                "metric_results": {
+                    name: {key: data[key] for key in ("score", "raw_score", "rationale", "rubric") if key in data}
+                    for name, data in result.get("metrics", {}).items()
+                    if isinstance(data, dict)
+                },
             }
 
         except _EVAL_RUNNER_NONCRITICAL_EXCEPTIONS as e:
@@ -1600,9 +1664,12 @@ class EvaluationRunner:
                 expected = expected_field
             expected = expected if expected is not None else ""
 
-            # Normalize strings
-            output = str(output).strip().lower()
-            expected = str(expected).strip().lower()
+            # Preserve the historical whitespace normalization in both modes.
+            output = str(output).strip()
+            expected = str(expected).strip()
+            if not eval_spec.get("case_sensitive", False):
+                output = output.lower()
+                expected = expected.lower()
 
             passed = output == expected
             score = 1.0 if passed else 0.0
@@ -1639,10 +1706,13 @@ class EvaluationRunner:
             if isinstance(expected_items, str) or not isinstance(expected_items, list):
                 expected_items = [expected_items]
 
-            # Check each expected item
+            case_sensitive = eval_spec.get("case_sensitive", False)
+            if not case_sensitive:
+                output = output.lower()
             found_count = 0
             for item in expected_items:
-                if str(item).lower() in output.lower():
+                expected = str(item) if case_sensitive else str(item).lower()
+                if expected in output:
                     found_count += 1
 
             score = found_count / len(expected_items) if expected_items else 0
@@ -2159,13 +2229,13 @@ class EvaluationRunner:
         thresholds = eval_spec.get("thresholds")
         if isinstance(thresholds, dict):
             if global_threshold is None:
-                for key in ("pass", "overall", "default", "threshold"):
+                for key in ("pass", "overall", "default", "threshold", "min_score"):
                     if key in thresholds:
                         global_threshold = self._coerce_threshold_value(thresholds.get(key))
                         if global_threshold is not None:
                             break
             for key, value in thresholds.items():
-                if key in {"pass", "overall", "default", "threshold", "excellent"}:
+                if key in {"pass", "overall", "default", "threshold", "excellent", "min_score"}:
                     continue
                 metric_threshold = self._coerce_threshold_value(value)
                 if metric_threshold is not None:
@@ -2378,10 +2448,14 @@ class EvaluationRunner:
                     resp.raise_for_status()
                 except _EVAL_RUNNER_NONCRITICAL_EXCEPTIONS:
                     raise
-            logger.info(f"Webhook sent to {webhook_url} for run {run_id}")
+            logger.info(f"Webhook sent for run {run_id}")
 
-        except _EVAL_RUNNER_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Failed to send webhook to {webhook_url}: {e}")
+        except _EVAL_RUNNER_NONCRITICAL_EXCEPTIONS:
+            logger.error(f"Webhook delivery failed for run {run_id}")
+            try:
+                self.db.record_webhook_failure(run_id, eval_id)
+            except Exception:  # noqa: BLE001 - Any notification bookkeeping failure must preserve the grade.
+                logger.error(f"Could not persist webhook warning for run {run_id}")
 
     def cancel_run(self, run_id: str) -> bool:
         """Cancel a running evaluation"""

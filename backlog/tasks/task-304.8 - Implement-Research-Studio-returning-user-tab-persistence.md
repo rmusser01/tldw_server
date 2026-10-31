@@ -40,7 +40,7 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented guarded mobile-tab persistence with the versioned key tldw:research-studio:last-mobile-tab:v1. Reads accept only sources/chat/studio and storage failures return null; writes are no-ops on storage errors.
 
 WorkspacePlayground now initializes from URL tab first, then stored mobile tab, then Chat. Mobile tab changes write the stored tab only when the initial URL did not include a valid tab state.
@@ -50,7 +50,7 @@ Focused Vitest: bunx vitest run src/components/Option/WorkspacePlayground/__test
 CDP smoke: mobile /research-studio with stored studio opened Studio; /research-studio?tab=chat overrode stored studio; no-URL Studio click wrote studio; URL-tab Studio click preserved existing stored sources.
 
 Bandit skipped because touched implementation is frontend TypeScript/TSX only; documentation update not relevant for this UI persistence slice.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

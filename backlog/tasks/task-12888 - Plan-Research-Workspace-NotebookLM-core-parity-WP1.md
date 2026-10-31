@@ -28,19 +28,17 @@ Write a narrow implementation plan for the approved Research Workspace NotebookL
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan file: Docs/superpowers/plans/2026-07-04-research-workspace-notebooklm-core-parity-wp1-plan.md
 Spec source: Docs/superpowers/specs/2026-07-04-research-workspace-notebooklm-pro-ultra-review-design.md
 Plan review: third/final review approved. Prior issues around Add Source copy/test mismatch, ChatPane selectedSystemPrompt misuse, and StudioPane primary-output test expectations were resolved.
 Verification: git diff --check passed for plan/task files; non-ASCII scan found no matches. Bandit skipped because this task changed only planning documentation and Backlog metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Created a narrow WP1 implementation plan for Research Workspace NotebookLM-core parity. The plan covers Add Source expectation copy, ChatPane style/length presets via per-turn message instructions, Studio output grouping, and existing extension handoff routing. Scope explicitly defers Drive sync, video/infographic generation, Ultra agent workflows, new ingestion backends, new dependencies, and new sidepanel routes.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

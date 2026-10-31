@@ -34,11 +34,11 @@ Preserve running design notes from the working directory and GitHub Desktop stas
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Recovered saved Sublime Text note buffers in addition to the Desktop stash and current disk. Reconciled 32 note filenames; 27 differ from origin/dev, including seven new files. Every nonblank line from each source and remote is retained in source order; only trailing whitespace/extra end-of-file blank lines normalized. Existing RAG_Links.md receives the # RAG Links.md additions. Complete raw versions and editor undo records are preserved under /Users/macbook-dev/Documents/tldw-notes-rescue-20260905-090102. Original main checkout, old dev history, and Desktop stash remain intact. Verification: preservation assertions passed; diff whitespace check passed; Bandit scans documentation scope (no Python source changes). Application test suite not applicable to note recovery. Remote push verification pending; live editor-only text beyond saved session snapshots cannot yet be confirmed.
 
 Recovery commit ac1ded68080655dcaf32b34927095964c4d69aac was pushed and verified with git ls-remote on origin/codex/notes-rescue-20260905. PR #2885 targets dev. GitHub rejected direct dev push (required pull request, required status checks, frontend license policy check). Merge remains pending CI and requester-owned Change summary per repository policy. Original checkout still uses stale dev to avoid replacing open editor files; requester was asked to confirm all open notes are saved before local checkout reconciliation.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

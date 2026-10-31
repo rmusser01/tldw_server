@@ -43,7 +43,7 @@ PR #1288 review-fix pass: add extractor regression coverage for nested block nam
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented focused C# CodeGraph slice. Verified tree-sitter-c-sharp 0.23.5 exposes tree_sitter_c_sharp.language and installed tree-sitter-c-sharp>=0.23,<0.24 into the shared venv for local tests.
 
 Added optional dependency probing, parser loader mapping, csharp foundation metadata, CodeGraphIndexer registration, CSharpTreeSitterExtractor, extractor/indexer/registry/loader/MCP search tests, and implementation plan Docs/superpowers/plans/2026-05-05-native-codegraph-csharp-extractor-implementation-plan.md.
@@ -53,7 +53,7 @@ Verification: focused RED tests failed for unsupported csharp or missing extract
 Reopened for PR #1288 review comments from Gemini and Qodo: nested namespace qualification, generic method invocations, namespace-scoped using extraction, and monkeypatch typing.
 
 PR #1288 review-fix verification: focused review tests passed for block namespaces/usings/generic calls and C# dependency-missing indexer path; full CodeGraph plus MCP focused suite passed with 118 passed and 5 warnings; Ruff passed on touched CodeGraph/MCP/test scope; Bandit JSON at /tmp/bandit_codegraph_csharp_review_fixes.json reported errors 0 and results 0; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

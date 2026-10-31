@@ -7,7 +7,7 @@ to ensure compatibility with the application.
 
 import threading
 from abc import ABC, abstractmethod
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
@@ -38,6 +38,10 @@ class ConstraintViolationError(DatabaseError):
 
 class UniqueConstraintError(ConstraintViolationError):
     """A uniqueness conflict, without driver diagnostics or identifying payload."""
+
+
+class SavedViewNameUniqueConstraintError(UniqueConstraintError):
+    """A saved-view owner/workspace/name conflict without driver payload."""
 
 
 class TransientContentionError(DatabaseError):
@@ -142,6 +146,20 @@ class DatabaseConfig:
     echo: bool = False
     isolation_level: Optional[str] = None
     connect_timeout: int = 10
+
+    def postgres_connection_string(self) -> str:
+        """Return the conninfo used by both PostgreSQL connection paths."""
+        if self.connection_string:
+            return str(self.connection_string)
+        return (
+            f"host={self.pg_host or 'localhost'} "
+            f"port={self.pg_port or 5432} "
+            f"dbname={self.pg_database or 'tldw'} "
+            f"user={self.pg_user or 'tldw_user'} "
+            f"password={self.pg_password or ''} "
+            f"sslmode={self.pg_sslmode or 'prefer'} "
+            f"connect_timeout={self.connect_timeout or 10}"
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Convert config to dictionary."""
@@ -279,7 +297,7 @@ class QueryResult:
     rows: list[dict[str, Any]]
     rowcount: int
     lastrowid: Optional[int] = None
-    description: Optional[list[tuple]] = None
+    description: Optional[Sequence[Sequence[Any]]] = None
     execution_time: Optional[float] = None
 
     def __len__(self) -> int:
@@ -455,7 +473,7 @@ class DatabaseBackend(ABC):
     def execute(
         self,
         query: str,
-        params: Optional[Union[tuple, dict]] = None,
+        params: Optional[Union[tuple, list, dict]] = None,
         connection: Optional[Any] = None,
         *,
         log_errors: bool = True,
@@ -478,7 +496,7 @@ class DatabaseBackend(ABC):
     def execute_many(
         self,
         query: str,
-        params_list: list[Union[tuple, dict]],
+        params_list: Sequence[Union[tuple, list, dict]],
         connection: Optional[Any] = None
     ) -> QueryResult:
         """

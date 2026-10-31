@@ -20,6 +20,7 @@ import {
 import { CalendarClock, Plus } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useTldwApiClient } from "@/hooks/useTldwApiClient"
+import { dedupeTags } from "@/utils/tag-identity"
 import type {
   ReadingDigestSchedule,
   ReadingDigestSuggestionStatus,
@@ -59,16 +60,8 @@ const STATUS_LABELS: Record<ReadingDigestSuggestionStatus, string> = {
   archived: "Archived"
 }
 
-const normalizeTags = (value: string[] | undefined): string[] => {
-  if (!Array.isArray(value)) return []
-  return Array.from(
-    new Set(
-      value
-        .map((tag) => String(tag || "").trim().toLowerCase())
-        .filter(Boolean)
-    )
-  )
-}
+const normalizeTags = (value: string[] | undefined): string[] =>
+  Array.isArray(value) ? dedupeTags(value) : []
 
 const buildSuggestionsConfig = (
   values: DigestScheduleFormValues

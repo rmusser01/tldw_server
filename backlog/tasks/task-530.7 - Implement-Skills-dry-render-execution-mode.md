@@ -40,14 +40,14 @@ Docs/Plans/IMPLEMENTATION_PLAN_skills_dry_render_TASK_530_7.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan: Docs/Plans/IMPLEMENTATION_PLAN_skills_dry_render_TASK_530_7.md
 
 Implementation notes:
 - Added backend dry_run contract and executor short-circuit for render-only Skills execution.
 - Added frontend Render prompt only action beside Run test in the Skills preview modal.
 - Kept import review, delete/versioning, permission metadata panels, and bulk actions out of scope.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

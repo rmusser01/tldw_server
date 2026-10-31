@@ -42,13 +42,13 @@ Address the live-browser regressions found in the 2026-05-09 character-chat UX r
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause: direct `/characters` and explicit `/?intent=character-chat&returnTo=...` routes were intercepted by the outer Next `_app` `FirstRunGate` before the package-level route-aware onboarding code could render. The row-level Chat as path already blocked null selected model state, but it treated an unresolved model catalog as acceptable when a stale selected model value existed, allowing navigation to generic home before readiness was confirmed.
 
 RED verification: `bunx vitest run __tests__/app/app-layout.test.tsx --testTimeout=30000` failed the two new character-chat app gate tests because `data-bypass` remained false. RED verification: `bunx vitest run src/components/PersonaGarden/__tests__/FirstRunGate.test.tsx src/components/Option/Characters/__tests__/Manager.first-use.test.tsx --testTimeout=30000` failed the new FirstRunGate bypass test and stale-selected-model row chat test.
 
 GREEN verification: focused FirstRunGate, app layout, and Characters stale-model/row-chat Vitest checks passed. `../../tldw-frontend/node_modules/.bin/tsc --noEmit -p tsconfig.json --pretty false` passed from `apps/packages/ui`. Puppeteer/Chrome smoke `node /private/tmp/character-p1-smoke.mjs` passed and saved evidence under `Docs/Reviews/assets/2026-05-09-character-chat-p1-smoke`. `git diff --check` passed. Direct `apps/tldw-frontend` typecheck still fails on pre-existing app-wide baseline errors outside this patch; recorded as a known skip/blocker, not a regression from TASK-173. Bandit skipped because touched runtime code is TypeScript/React and no Python files changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

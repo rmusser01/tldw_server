@@ -33,13 +33,13 @@ Execute implementation plan Task 5: strengthen URL/text/file input validation, d
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Canonical completed record: `backlog/completed/task-394.5 - Harden-Quick-Ingest-URL-and-file-input-validation.md`. This `backlog/tasks/` file is a tracker mirror retained for PR visibility and should not be treated as a separate closeout record.
 
 Latest origin/dev already contains the Task 5 Quick Ingest validation behavior. Verified normalized URL dedupe, mixed valid/invalid paste summary copy, supported file-type alignment, unsupported-file rejection, and the truthful 50 MB buffered-client upload limit.
 
 Verification: `bun run test src/components/Common/QuickIngest/__tests__/AddContentStep.url-detection.test.ts src/components/Common/QuickIngest/__tests__/QuickIngestWizardModal.integration.test.tsx src/services/__tests__/quick-ingest-batch.test.ts --maxWorkers=1 --no-file-parallelism` passed 72 tests after `bun install` under `apps/` repaired copied worktree package links. Verification: `npx playwright test e2e/workflows/media-ingest.spec.ts --grep "quick ingest configure options stay reachable" --project=chromium --reporter=line` passed 1 test in 55.3s. Bandit is not applicable because this closeout branch only updates Backlog task metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

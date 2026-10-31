@@ -69,21 +69,27 @@ async def test_slow_retrieval_emits_keepalive_and_preserves_result(monkeypatch, 
     async def retrieve(**kwargs):
         started.set()
         await release.wait()
+        # A heartbeat can arrive after release while retrieval finishes.
+        await asyncio.sleep(0.05)
         return UnifiedSearchResult(query=kwargs["query"], documents=[], metadata={})
 
     stream = stream_rag_events(
         resolved_request=request, retrieval_plan=_retrieval_plan(), standard_pipeline=retrieve,
         extra_context={"generate_streaming_response": _fake_generate_streaming_response},
     )
-    first = asyncio.create_task(stream.__anext__())
+    first = asyncio.ensure_future(stream.__anext__())
     await started.wait()
     try:
         assert await asyncio.wait_for(asyncio.shield(first), 0.2) == {"type": "heartbeat"}
         assert await asyncio.wait_for(stream.__anext__(), 0.2) == {"type": "heartbeat"}
         release.set()
         events = [event async for event in stream]
-        assert [event["type"] for event in events] == ["contexts", "reasoning", "delta", "complete"]
-        assert events[-2]["text"] == "answer text"
+        assert [event["type"] for event in events if event["type"] != "heartbeat"] == [
+            "contexts", "reasoning", "delta", "complete",
+        ]
+        delta_event = events[-2]
+        assert delta_event["type"] == "delta"
+        assert delta_event.get("text") == "answer text"
     finally:
         release.set()
         await first
@@ -142,12 +148,17 @@ async def test_stream_preserves_source_failures_with_only_public_fields(with_pro
         resolved_request=request, retrieval_plan=_retrieval_plan(), standard_pipeline=retrieve,
     )]
     context = next(event for event in events if event["type"] == "contexts")
-    assert context["source_status"] == {
+    assert context["type"] == "contexts"
+    source_status = context.get("source_status")
+    assert isinstance(source_status, dict)
+    assert source_status == {
         "media_db": statuses["media_db"],
         "characters": {"status": "error", "count": 0, "reason": "retrieval_failed"},
         "chats": statuses["chats"],
     }
-    assert len(context["contexts"]) == int(retained)
+    contexts = context.get("contexts")
+    assert isinstance(contexts, list)
+    assert len(contexts) == int(retained)
     assert "private" not in str(events)
 
 
@@ -169,7 +180,10 @@ async def test_stream_omits_invalid_source_status_entries(invalid):
         resolved_request=request, retrieval_plan=_retrieval_plan(), standard_pipeline=retrieve,
     )]
     context = next(event for event in events if event["type"] == "contexts")
-    assert context["source_status"] == {"notes": {"status": "empty", "count": 0}}
+    assert context["type"] == "contexts"
+    source_status = context.get("source_status")
+    assert isinstance(source_status, dict)
+    assert source_status == {"notes": {"status": "empty", "count": 0}}
 
 
 @pytest.mark.asyncio
@@ -184,16 +198,35 @@ async def test_stream_preserves_safe_security_filter_outcome(retained, excluded,
         return UnifiedSearchResult(
             documents=[allowed] if retained else [],
             query=kwargs["query"],
-            metadata={"security_filter": {
-                "excluded_count": excluded, "retained_count": retained,
-                "excluded_ids": ["secret-id"], "excluded_text": "secret-text",
-            }},
+            metadata={
+                "security_filter": {
+                    "excluded_count": excluded,
+                    "retained_count": retained,
+                    "excluded_ids": ["secret-id"],
+                    "excluded_text": "secret-text",
+                },
+                "source_status": {
+                    "notes": {
+                        "status": "empty",
+                        "count": 0,
+                        "reason": "security_filtered" if excluded else "no_matching_entries",
+                        "excluded_ids": ["secret-id"],
+                        "excluded_text": "secret-text",
+                        "path": "/private/database",
+                        "exception": "private credential",
+                    },
+                    "media_db": {"status": "searched" if retained else "empty", "count": retained},
+                },
+            },
         )
 
     calls = []
 
     async def generate(context, **kwargs):
         calls.append(kwargs)
+        assert "secret" not in str(context)
+        if retained:
+            assert "Public release notice" in str(context)
         return await _fake_generate_streaming_response(context, **kwargs)
 
     events = [event async for event in stream_rag_events(
@@ -202,7 +235,17 @@ async def test_stream_preserves_safe_security_filter_outcome(retained, excluded,
         extra_context={"generate_streaming_response": generate},
     )]
     context = next(event for event in events if event["type"] == "contexts")
-    assert context["security_filter"] == {"excluded_count": excluded, "retained_count": retained}
+    assert context["type"] == "contexts"
+    source_status = context.get("source_status")
+    assert isinstance(source_status, dict)
+    assert context.get("security_filter") == {"excluded_count": excluded, "retained_count": retained}
+    assert source_status["notes"] == {
+        "status": "empty",
+        "count": 0,
+        "reason": "security_filtered" if excluded else "no_matching_entries",
+    }
+    assert source_status["media_db"] == {"status": "searched" if retained else "empty", "count": retained}
+    assert "private" not in str(events)
     assert "secret-id" not in str(events)
     assert "secret-text" not in str(events)
     assert bool(calls) is not (excluded > 0 and retained == 0)
@@ -236,7 +279,9 @@ async def test_stream_preserves_clarification_without_dispatching_provider(with_
         )
     ]
     assert [event["type"] for event in events] == ["clarification", "delta", "complete"]
-    assert events[1]["text"] == "Which document do you mean?"
+    delta_event = events[1]
+    assert delta_event["type"] == "delta"
+    assert delta_event.get("text") == "Which document do you mean?"
     # The public stream contract conservatively marks any emitted text as
     # dispatched, preventing retries after a visible clarification response.
     assert events[-1]["allow_non_stream_fallback"] is False
@@ -304,7 +349,11 @@ async def test_stream_provider_prompt_matches_numbered_source_contract(monkeypat
     events = [event async for event in stream_rag_events(
         resolved_request=request, retrieval_plan=_retrieval_plan(), standard_pipeline=retrieve,
     )]
-    assert len(events[0]["contexts"]) == 1
+    contexts_event = events[0]
+    assert contexts_event["type"] == "contexts"
+    contexts = contexts_event.get("contexts")
+    assert isinstance(contexts, list)
+    assert len(contexts) == 1
     assert "Operator instruction: answer briefly." in prompts[0]
     if enable_citations:
         assert "Additional source outside visible limit" not in prompts[0]
@@ -517,7 +566,7 @@ async def test_streaming_generator_cancellation_closes_raw_iterator(
     )
 
     assert await stream.__anext__() == "answer"  # nosec B101
-    pending = asyncio.create_task(stream.__anext__())
+    pending = asyncio.ensure_future(stream.__anext__())
     await raw.waiting.wait()
     pending.cancel()
 
@@ -792,14 +841,22 @@ async def test_stream_rag_events_wraps_standard_stream_result_in_order():
         "delta",
         "complete",
     ]
-    assert events[0]["contexts"][0]["id"] == "doc-1"  # nosec B101
-    assert events[1]["plan"] == [  # nosec B101
+    contexts_event = events[0]
+    assert contexts_event["type"] == "contexts"
+    contexts = contexts_event.get("contexts")
+    assert isinstance(contexts, list)
+    assert contexts[0]["id"] == "doc-1"  # nosec B101
+    reasoning_event = events[1]
+    assert reasoning_event["type"] == "reasoning"
+    assert reasoning_event.get("plan") == [  # nosec B101
         "Gather top-k contexts",
         "Rerank using strategy=flashrank",
         "Ground claims from sources",
         "Synthesize final answer",
     ]
-    assert events[2]["text"] == "answer text"  # nosec B101
+    delta_event = events[2]
+    assert delta_event["type"] == "delta"
+    assert delta_event.get("text") == "answer text"  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -939,7 +996,9 @@ async def test_streaming_generation_marks_partial_output_and_propagates_failure(
         "delta",
         "error",
     ]
-    assert events[2]["text"] == "partial answer"  # nosec B101
+    delta_event = events[2]
+    assert delta_event["type"] == "delta"
+    assert delta_event.get("text") == "partial answer"  # nosec B101
     assert events[3]["code"] == "provider_authentication_failed"  # nosec B101
     assert events[3]["status_code"] == 502  # nosec B101
     assert events[3]["schema_version"] == 1  # nosec B101
@@ -1057,8 +1116,14 @@ async def test_stream_rag_events_continues_with_empty_contexts_when_agentic_pref
         "delta",
         "complete",
     ]
-    assert events[0]["contexts"] == []  # nosec B101
-    assert events[-2]["text"] == "answer text"  # nosec B101
+    contexts_event = events[0]
+    assert contexts_event["type"] == "contexts"
+    contexts = contexts_event.get("contexts")
+    assert isinstance(contexts, list)
+    assert contexts == []  # nosec B101
+    delta_event = events[-2]
+    assert delta_event["type"] == "delta"
+    assert delta_event.get("text") == "answer text"  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -1104,7 +1169,11 @@ async def test_stream_rag_events_skips_standard_prefetch_for_agentic_strategy():
         "delta",
         "complete",
     ]
-    assert events[1]["contexts"][0]["id"] == "agentic-doc"  # nosec B101
+    contexts_event = events[1]
+    assert contexts_event["type"] == "contexts"
+    contexts = contexts_event.get("contexts")
+    assert isinstance(contexts, list)
+    assert contexts[0]["id"] == "agentic-doc"  # nosec B101
 
 
 def test_generation_config_logs_config_load_failures(monkeypatch: pytest.MonkeyPatch) -> None:

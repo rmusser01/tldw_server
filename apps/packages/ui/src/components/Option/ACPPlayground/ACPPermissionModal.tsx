@@ -8,6 +8,7 @@ import {
   AlertTriangle,
   Clock,
   Wrench,
+  Square,
 } from "lucide-react"
 import { UI_CONFIG } from "@/services/acp/constants"
 import type { ACPPendingPermission, ACPPermissionTier } from "@/services/acp/types"
@@ -16,12 +17,14 @@ interface ACPPermissionModalProps {
   pendingPermissions: ACPPendingPermission[]
   approvePermission: (requestId: string, batchApproveTier?: ACPPermissionTier) => void
   denyPermission: (requestId: string) => void
+  stopOperation: () => void
 }
 
 export const ACPPermissionModal: React.FC<ACPPermissionModalProps> = ({
   pendingPermissions,
   approvePermission,
   denyPermission,
+  stopOperation,
 }) => {
   const { t } = useTranslation(["playground", "common"])
 
@@ -290,6 +293,14 @@ export const ACPPermissionModal: React.FC<ACPPermissionModalProps> = ({
             className="flex-1"
           >
             {t("playground:acp.deny", "Deny")}
+          </Button>
+          <Button
+            danger
+            icon={<Square className="h-4 w-4" />}
+            onClick={stopOperation}
+            className="flex-1"
+          >
+            {t("playground:acp.stop", "Stop")}
           </Button>
           <Button
             type="primary"

@@ -34,9 +34,9 @@ Complete #1116 Phase 2.2 content router cleanup by deferring the remaining rag_u
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red test: pytest test_router_groups_contract.py -k rag_unified_router_attr_lookup failed because rag_unified fake module had router attr access during iter_content_router_specs. Green verification: focused RAG laziness test passed; full router group contract passed; main router contract passed; OpenAPI contracts passed; Bandit content.py results=0 errors=0; git diff --check clean. Documentation update not needed for this internal router import refactor.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -9,6 +9,8 @@ tests cover transforming such exceptions into SSE error frames.
 from typing import Any, Dict, List, Type
 import pytest
 
+pytestmark = pytest.mark.usefixtures("no_live_network", "loopback_custom_openai_endpoints")
+
 
 class _FakeResponse:
     def __init__(self):

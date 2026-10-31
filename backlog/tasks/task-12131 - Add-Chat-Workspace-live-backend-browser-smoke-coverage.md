@@ -43,7 +43,7 @@ Docs/superpowers/plans/2026-06-30-chat-workspace-live-backend-smoke-plan.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented #2035 focused Chat Workspace browser smoke coverage.
 
 Touched files:
@@ -57,7 +57,7 @@ Implementation notes:
 - Backend fixture covers health/config/model/chat/RAG endpoints, captures request bodies, returns selected-source generated RAG answer, delays streaming so Stop generation is visible, and returns deterministic streaming failure for recovery assertions.
 - Assertions verify workspace scope in chat creation, structured include_media_ids for ready staged media, fallback context injection for staged source without valid media id, stop button during active streaming, and draft/staged context preservation after failure.
 - Stage 5 release gate now requires /chat-workspace to reference the focused proof spec and narrowly allowlists no-backend startup probes for notifications/persona on route-only smoke.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

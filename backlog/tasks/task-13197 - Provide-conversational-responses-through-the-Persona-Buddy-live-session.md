@@ -53,8 +53,6 @@ Ordinary persisted Persona Live turns now return provider-backed replies through
 Real DeepSeek response, Stop/retry and explicit tool-review acceptance passed on the rebased implementation. Human speech acceptance remains separately tracked.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

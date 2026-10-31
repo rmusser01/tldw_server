@@ -48,7 +48,7 @@ Implementation stages:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented stable hook metadata fields warningReasonCode and wakeWarningReasonCode for existing Persona Live voice/wake warning paths.
 
 Mapped reason-coded live voice and wake states in Buddy diagnostics so no-trigger/no-transcript/no-config cases do not read as broken when manual controls remain available.
@@ -68,7 +68,7 @@ PR review fixes: removed stale live_voice_source_pending from the plan snippet b
 Review-fix verification: ./node_modules/.bin/vitest run src/hooks/__tests__/usePersonaLiveVoiceController.test.tsx src/components/PersonaGarden/__tests__/personaBuddyDiagnostics.test.ts src/components/PersonaGarden/__tests__/LiveSessionPanel.test.tsx --maxWorkers=1 passed: 3 files, 75 tests.
 
 Review-fix verification: git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

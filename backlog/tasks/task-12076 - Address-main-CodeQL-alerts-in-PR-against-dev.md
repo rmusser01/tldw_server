@@ -31,11 +31,7 @@ Docs/superpowers/plans/2026-06-30-main-codeql-alerts-dev-pr-plan.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Alert classes addressed from refs/heads/main against origin/dev:
 - Frontend clear-text secret storage: durable config/history storage no longer persists API keys or bearer/access/refresh tokens; test-only E2E seed values are scoped with CodeQL suppressions.
 - Backend path injection: storage/download/import/export/temp paths now use existing safe_join/root validation or narrow CodeQL annotations after validated roots.
@@ -55,7 +51,7 @@ Verification recorded:
 - Bandit touched Python scope written to /tmp/bandit_main_codeql.json; raw scan has 0 high/medium findings, remaining low findings are baseline B101 asserts plus existing B311/B404/B603 in touched legacy files. Actionable profile excluding those baseline IDs written to /tmp/bandit_main_codeql_filtered.json with 0 results.
 
 Follow-up requested: rebase PR #2564 on latest dev and address unresolved PR review threads/comments from Gemini, Cubic, Qodo, and CI checks.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

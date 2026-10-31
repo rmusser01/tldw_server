@@ -53,7 +53,7 @@ Fix PR #2258 CI failures in workflow test shards: media ingest polling should fa
 
 ## Additional CI Failure Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 CI run 27886920141 direct failures addressed:
 - Job 82523799578, product-workflows-storage: test_media_ingest_local_text_chunking crashed with KeyError: status while polling a non-validated run payload.
 - Job 82523800213, product-workflows-api: test_reject_allows_admin_override reused the engine run path for permission setup and the second helper call observed succeeded instead of waiting_approval.
@@ -81,27 +81,7 @@ Post-merge verification after merging origin/dev:
 - Bandit including MCP server and touched workflow tests wrote /tmp/bandit_ci2258_post_merge.json; MCP server had no findings, remaining findings are existing low-severity pytest assert/test-token patterns in workflow tests.
 
 gap-verified-5 follow-up: full local shard reproduction without --maxfail surfaced 26 failures: one Slides Hypothesis too_slow health check and a Telegram 404 cluster. Root cause for Telegram was Notes Graph integration fixture reloading tldw_Server_API.app.main with MINIMAL_TEST_APP=0 and leaving the shared module in full-app route-gated state; fixture now restores the default minimal test profile after yield. Slides ordering property test now uses a smaller unique-order range to avoid slow-input health checks under loaded shards. Verification: Notes Graph then Telegram admin ordered reproduction passed 6 tests; Slides ordering passed; full gap-verified-5 shard passed 689 tests with 1 skipped; compileall/diff check passed; Bandit on touched tests wrote /tmp/bandit_ci2258_gap5_tests.json and exited 0.
-<!-- SECTION:NOTES:END -->
 
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Stabilized both direct PR #2258 workflow shard failures. Media ingest polling now validates run-status responses and reports useful diagnostics. Approval permission tests now create waiting approval state directly in the workflow test database, avoiding a scheduler race while preserving approve/reject authorization coverage. Local shard verification passed for both affected CI shards.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-## Definition of Done
-<!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
-<!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Additional failures surfaced in run 27892030109/27892030110 before pushing local fixes: macOS/Ubuntu/Windows core-utils-tooling failed test_endpoint_auth_dependency_symbols_come_from_auth_deps because research_discovery.py imported User/get_request_user from core.AuthNZ; Ubuntu e2e-smoke failed test_deep_research_run_creation_persists_chat_handoff with ChaChaNotes migration V36->V37 expected 37, got 38; Build and Validate Distributions failed test_mcp_unified_standalone_distribution_metadata_matches_extras because standalone MCP package metadata did not expose the wheel-installed smoke transport dependencies. Fixes: moved research_discovery auth imports to API_Deps.auth_deps, added httpx/websockets to the MCP standalone metadata contract and gateway package payload assertions, and added a process-local SQLite schema initialization lock keyed by ChaChaNotes DB path to prevent concurrent in-process schema migrations from interleaving. Added a unit regression for path-shared schema locks. Local verification: MCP package metadata tests passed; auth import boundary test passed; schema lock unit test passed; deep research E2E handoff test passed with E2E_INPROCESS/single-user env; compileall and git diff --check passed; Bandit wrote /tmp/bandit_ci2258_mcp_research_chacha.json with zero findings in changed production files.
 
 Later completed macOS, Ubuntu, and Windows db-privileges shards in the same still-running CI run failed test_readme_no_longer_mentions_media_db_v2_in_source because README.md still used the legacy Media_DB_v2 filename in the database architecture note and Mermaid node. Fix: replaced those README references with generic per-user media content DB wording. Local verification: README guard test passed and rg found no Media_DB_v2 occurrences in README.md.
@@ -133,3 +113,19 @@ The same CI run later surfaced Ubuntu py3.13 product-workflows-engine job 827974
 The same CI run also cancelled Windows py3.12 product-workflows-step-adapters job 82797416512 after collecting 117 tests and making steady progress through test_new_step_adapters.py until the job was killed near the end, with no assertion failure and no JUnit artifact. Local full-file reproduction passed all 117 tests but took 192.31s; the durations report showed nearly every test paying about 0.94s in TestClient teardown because the function-scoped fixture used a context-managed TestClient and therefore ran the full app lifespan shutdown for every adapter case. The fixture now keeps per-test client and workflow DB isolation but uses the established non-context TestClient pattern plus explicit close, avoiding repeated app lifespan teardown in this broad integration sweep. Verification: the full test_new_step_adapters.py file exited 0 three times after the fixture change; the captured verification run completed with exit_code=0 in 24.58s; compileall on the three touched tests passed; git diff --check passed; Bandit on the touched tests with B101/B108 skipped wrote /tmp/bandit_ci2258_second_pass_tests.json and exited 0.
 After all other checks finished, the same CI run cancelled Ubuntu py3.13 product-notes-persona job 82797419601. It collected 1065 tests and was still making steady progress at 47% when the 35-minute job budget killed pytest. No test assertion failed and no JUnit artifact was uploaded. The root cause was timeout budget exhaustion: setup-python/deps took 21 minutes before pytest started, leaving about 13 minutes for a large shard that had passed on Ubuntu py3.12 in 16 minutes and Windows py3.12 in 31 minutes. The Linux py3.13 full-suite shard job timeout is now 50 minutes so transient slow dependency setup does not cancel otherwise-progressing shards.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Stabilized both direct PR #2258 workflow shard failures. Media ingest polling now validates run-status responses and reports useful diagnostics. Approval permission tests now create waiting approval state directly in the workflow test database, avoiding a scheduler race while preserving approve/reject authorization coverage. Local shard verification passed for both affected CI shards.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->

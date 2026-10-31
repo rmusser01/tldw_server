@@ -37,7 +37,7 @@ Continue the Ingestion/Library/media product-state migration by replacing the re
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added focused design-system Alert regression tests for the CreateTableWizard source-selection tip, SaveTablePanel missing-table warning, and TableDetailModal load-error state. The initial focused Vitest run failed as expected because the existing AntD Alert markup did not expose data-ds-component="Alert".
 - Replaced the three remaining DataTables AntD Alert product-state callouts with the shared design-system Alert primitive while preserving existing titles, body copy, and state severity.
 - Removed the three matching DataTables baseline exceptions; baseline count moved from 82 to 79 and the touched paths now have zero baseline entries.
@@ -46,7 +46,7 @@ Continue the Ingestion/Library/media product-state migration by replacing the re
 
 - PR review follow-up: extracted the repeated DataTables design-system Alert ancestor assertion into src/test-utils/designSystemAlert.ts with sync and async helpers, then updated the three new DataTables alert tests to import the shared helper without changing assertion semantics.
 - Review-fix verification: focused DataTables Alert tests passed 3/3; node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit --pretty false exited 0; git diff --check exited 0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

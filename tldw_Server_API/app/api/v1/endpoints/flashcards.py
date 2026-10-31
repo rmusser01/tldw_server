@@ -13,10 +13,11 @@ from fastapi.responses import Response, StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, check_rate_limit, get_auth_principal, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, check_rate_limit, get_auth_principal, get_request_user, require_expected_user_if_present
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_owner, get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.API_Deps.study_assistant_deps import get_study_assistant_guidance
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import require_llm_quota
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
 from tldw_Server_API.app.api.v1.schemas.flashcards import (
@@ -819,7 +820,7 @@ def list_decks(
         raise map_db_error_to_http(exc, default_detail="Failed to list decks") from exc
 
 
-@router.patch("/decks/{deck_id}", response_model=Deck)
+@router.patch("/decks/{deck_id}", response_model=Deck, dependencies=[Depends(require_expected_user_if_present)])
 def update_deck(
     deck_id: int,
     payload: DeckUpdate,
@@ -2459,7 +2460,11 @@ def get_flashcard_assistant(
         raise map_db_error_to_http(exc, default_detail="Failed to fetch study assistant context") from exc
 
 
-@router.post("/{card_uuid}/assistant/respond", response_model=StudyAssistantRespondResponse)
+@router.post(
+    "/{card_uuid}/assistant/respond",
+    response_model=StudyAssistantRespondResponse,
+    dependencies=[Depends(require_llm_quota)],
+)
 async def respond_flashcard_assistant(
     card_uuid: str,
     payload: StudyAssistantRespondRequest,
@@ -2598,6 +2603,8 @@ async def generate_flashcards(
         error = result.get("error") if isinstance(result, dict) else None
         raw_flashcards = result.get("flashcards") if isinstance(result, dict) else []
         if error:
+            if error == "duplicate_flashcards":
+                raise HTTPException(status_code=422, detail=error)
             if is_test_mode() and _should_return_test_mode_flashcards(error):
                 raw_flashcards = _build_test_mode_flashcards(payload)
             else:

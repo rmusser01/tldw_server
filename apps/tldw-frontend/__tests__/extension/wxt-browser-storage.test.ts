@@ -76,7 +76,7 @@ describe("wxt-browser storage shim", () => {
 
     // Force the write to throw (simulate quota exceeded / serialization error).
     const setItemSpy = vi
-      .spyOn(Storage.prototype, "setItem")
+      .spyOn(Object.getPrototypeOf(window.localStorage), "setItem")
       .mockImplementation(() => {
         throw new Error("QuotaExceededError")
       })
@@ -97,9 +97,9 @@ describe("wxt-browser storage shim", () => {
     // First key serializes/writes fine; the second throws mid-set. The earlier
     // (committed) key must still emit onChanged, the failed key must not, and
     // the overall promise must reject.
-    const realSetItem = Storage.prototype.setItem
+    const realSetItem = Object.getPrototypeOf(window.localStorage).setItem
     const setItemSpy = vi
-      .spyOn(Storage.prototype, "setItem")
+      .spyOn(Object.getPrototypeOf(window.localStorage), "setItem")
       .mockImplementation(function (
         this: globalThis.Storage,
         key: string,
@@ -141,5 +141,13 @@ describe("wxt-browser storage shim", () => {
     expect(changes.flag.newValue).toBe(true)
 
     storage.onChanged.removeListener(listener)
+  })
+})
+
+it.each(["local", "sync", "session"] as const)("omits absent %s keys while preserving stored null and falsy values", async area => {
+  await storage[area].set({ present: null, zero: 0, disabled: false, empty: "" })
+  expect({ missing: await storage[area].get("missing"),
+    mixed: await storage[area].get(["missing", "present", "zero", "disabled", "empty"]) }).toEqual({
+    missing: {}, mixed: { present: null, zero: 0, disabled: false, empty: "" }
   })
 })

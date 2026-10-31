@@ -43,7 +43,7 @@ Source: synthesis F27
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 APPLIED - decision recorded, migration done, impact being measured.
 
 DECISION (recorded in the module docstring at core/Evaluations/scoring.py): the affine mapping of the declared range wins. On a 1-5 Likert scale the minimum observable score is 1, not 0, so 1 must map to 0.0. raw/5.0 mapped 1 to 0.2, putting a 20% FLOOR under every metric - a judge rating every context "1 = completely irrelevant" reported 0.2, which also shifted the observed-range clamp in _calculate_overall_score and every threshold built on it. Both formulas agree at 5, which is why the divergence was invisible on happy-path fixtures.
@@ -74,7 +74,7 @@ Suite: tests/Evaluations with RUN_EVALUATIONS=1 -n 8: before 19 failed/863 passe
 Endpoint-level test for evaluations_unified was not added: the existing test_geval_endpoint itself fails locally with credential_store_unavailable, so the endpoint is covered through the unit-tested shared helper instead.
 Bandit -ll on touched files: one pre-existing B608 at evaluation_manager.py:853 (untouched code).
 Out of scope follow-up: core/RAG/rag_service/analytics_system.py:959,968 divide user feedback stars by 5 (1 -> 0.2) into stored analytics history; different module, changing it would break trend continuity, so it needs its own decision.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

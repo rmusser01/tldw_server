@@ -54,9 +54,9 @@ Create a reviewed design spec for making MCP server/tool availability from chat 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created `Docs/superpowers/specs/2026-05-06-mcp-chat-personal-tool-filter-design.md` with the approved personal MCP tool availability filter design. Verification: reviewed the written spec and ran `git diff --check` scoped to the new spec and task path; no whitespace errors reported. Bandit skipped because this task only adds documentation/Backlog tracking and touches no executable code. Spec-review subagent was not dispatched because current tool policy requires explicit user authorization for subagent delegation; user review remains the next gate before implementation planning.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

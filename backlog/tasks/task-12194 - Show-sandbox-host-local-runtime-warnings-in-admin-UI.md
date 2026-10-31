@@ -42,11 +42,11 @@ Review fix: verify Qodo's 403 diagnostics finding, add a focused failing test th
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented a read-only Sandbox Runtime Isolation card in MonitoringDashboardPage backed by tldwClient.getSandboxRuntimeDiagnostics(). The card summarizes readiness counts, lists runtime rows, and emits an explicit host-local warning when diagnostics reports seatbelt/worktree or other host-local warning runtimes. Added focused Vitest coverage with mocked seatbelt/worktree diagnostics. Verification: first focused Vitest run failed on the missing card as expected; after implementation the focused Vitest file passed; git diff --check passed; bun run verify:openapi passed after leaving the sandbox admin endpoint out of ClientPath because the current OSS OpenAPI verifier does not publish that admin route and AllowedPath remains intentionally wide. Bandit skipped because only frontend TypeScript, docs, and backlog files changed.
 
 PR #1336 review fix: verified Qodo's sandbox diagnostics 403 finding. The root cause was that the sandbox diagnostics card stored only a string error and always rendered the fixed "Sandbox diagnostics unavailable" title. Added a RED Vitest case for a 403 diagnostics response, then changed the card to preserve a small error state with title, sanitized description, and severity. 403 now renders "Sandbox diagnostics access denied"; non-forbidden failures keep the unavailable path. Verification: focused Vitest file passed 8/8, git diff --check passed, and bun run verify:openapi passed with the existing reviewed exceptions.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

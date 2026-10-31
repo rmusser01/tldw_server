@@ -43,7 +43,7 @@ Migrate the smaller Evaluations component AntD Alert product-state findings to t
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Before count from `bun run verify:design-system-state` on `origin/dev`:
   Evaluations 14 baseline exceptions.
 - Slice scope is smaller Evaluations components first; larger RAG recipe config
@@ -51,7 +51,7 @@ Migrate the smaller Evaluations component AntD Alert product-state findings to t
 - PR: https://github.com/rmusser01/tldw_server/pull/2135.
 - Review follow-up kept the wizard hint text size on the Alert title content and
   restored message-only prominence for the embeddings media-search error alert.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

@@ -111,8 +111,10 @@ async def _ensure_pg_extras(db_pool: object) -> None:
             ensure_generated_files_table_pg,
             ensure_llm_provider_overrides_pg,
             ensure_notification_permissions_pg,
+            ensure_org_stt_settings_pg,
             ensure_privilege_snapshots_table_pg,
             ensure_sharing_tables_pg,
+            ensure_storage_quota_overrides_backfill_pg,
             ensure_tool_catalogs_tables_pg,
             ensure_usage_tables_pg,
             ensure_user_timestamp_timezones_pg,
@@ -130,6 +132,12 @@ async def _ensure_pg_extras(db_pool: object) -> None:
                 ensure_authnz_core_tables_pg,
                 "AUTHNZ_CORE_SCHEMA_NOT_READY",
             ),
+            (
+                "org STT settings",
+                ensure_org_stt_settings_pg,
+                "AUTHNZ_PG_STT_SCHEMA_NOT_READY",
+            ),
+            ("storage quota overrides backfill", ensure_storage_quota_overrides_backfill_pg, None),
             (
                 "canonical admin webhook tables",
                 ensure_admin_webhook_canonical_tables_pg,

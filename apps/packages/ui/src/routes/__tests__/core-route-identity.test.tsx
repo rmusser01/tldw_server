@@ -178,8 +178,8 @@ describe("core route identity guardrails", () => {
 
   it("provides unique route-intent headings for home/setup/onboarding-test", async () => {
     const firstRender = render(<OptionIndex />)
-    expect(screen.getByRole("heading", { name: "First-time setup" })).toBeInTheDocument()
-    expect(screen.getByTestId("unified-setup-shell")).toBeInTheDocument()
+    expect(await screen.findByRole("heading", { name: "First-time setup" })).toBeInTheDocument()
+    expect(await screen.findByTestId("unified-setup-shell")).toBeInTheDocument()
     expect(optionLayoutMock).toHaveBeenLastCalledWith(
       expect.objectContaining({
         hideHeader: true,
@@ -199,7 +199,7 @@ describe("core route identity guardrails", () => {
     expect(
       screen.getByRole("heading", {
         level: 2,
-        name: "Setup operator recovery"
+        name: "Setup complete"
       })
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Return home" })).toBeInTheDocument()
@@ -231,7 +231,7 @@ describe("core route identity guardrails", () => {
 
     render(<OptionIndex />)
 
-    expect(screen.getByTestId("unified-setup-shell")).toBeInTheDocument()
+    expect(await screen.findByTestId("unified-setup-shell")).toBeInTheDocument()
     expect(screen.queryByTestId("companion-home-shell")).not.toBeInTheDocument()
     expect(markFirstRunCompleteMock).not.toHaveBeenCalled()
   })
@@ -269,10 +269,10 @@ describe("core route identity guardrails", () => {
     expect(beginOnboardingMock).not.toHaveBeenCalled()
   })
 
-  it("renders setup in the focused shell while backend setup is required", () => {
+  it("renders setup in the focused shell while backend setup is required", async () => {
     render(<OptionIndex />)
 
-    expect(screen.getByTestId("unified-setup-shell")).toBeInTheDocument()
+    expect(await screen.findByTestId("unified-setup-shell")).toBeInTheDocument()
     expect(optionLayoutMock).toHaveBeenLastCalledWith(
       expect.objectContaining({
         hideHeader: true,
@@ -281,13 +281,13 @@ describe("core route identity guardrails", () => {
     )
   })
 
-  it("returns from setup recovery to home after unified setup completion", () => {
+  it("returns from setup recovery to home after unified setup completion", async () => {
     render(<OptionSetup />)
 
     // While setup is required the route opens on the setup entry choice;
     // the WebUI lane mounts the unified setup wizard.
     fireEvent.click(screen.getByRole("button", { name: "Set up in WebUI" }))
-    fireEvent.click(screen.getByTestId("complete-unified-setup"))
+    fireEvent.click(await screen.findByTestId("complete-unified-setup"))
 
     expect(navigateMock).toHaveBeenCalledWith("/")
   })
@@ -303,7 +303,7 @@ describe("core route identity guardrails", () => {
 
     render(<OptionIndex />)
 
-    expect(screen.getByRole("heading", { name: "First-time setup" })).toBeInTheDocument()
+    expect(await screen.findByRole("heading", { name: "First-time setup" })).toBeInTheDocument()
     expect(
       screen.queryByTestId("character-chat-onboarding-lane")
     ).not.toBeInTheDocument()
@@ -319,6 +319,6 @@ describe("core route identity guardrails", () => {
     expect(
       screen.queryByRole("button", { name: "Start character chat" })
     ).not.toBeInTheDocument()
-    expect(screen.getByTestId("unified-setup-shell")).toBeInTheDocument()
+    expect(await screen.findByTestId("unified-setup-shell")).toBeInTheDocument()
   })
 })

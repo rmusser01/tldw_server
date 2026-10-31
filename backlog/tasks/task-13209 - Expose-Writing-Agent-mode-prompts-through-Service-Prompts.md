@@ -35,7 +35,7 @@ Approved bounded slice: make Quick, Planning, and Brainstorm Writing Playground 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline: 90 registry/API and 91 frontend checks passed. RED: component 11 failures/1 pass, snapshot compatibility 4 failures/79 passes, Settings 3 expected failures, backend registry 2 expected failures. Implemented 3 literal mode definitions, shared Settings labels, explicit packaged fallback allowlist, optional scoped manuscript reads, and retained history scope lease. Additional regression reproduced unverified failed-load text leaking into later request history; now excluded. Backend registry/API: 93 passed. Broad frontend, WebUI shim, lint/typecheck and independent read-only review in progress. Bandit on touched Python runtime and Ruff on touched Python runtime/tests pass.
 
 Independent review found and verified two issues: first-load errors without a retained lease could remain visible across account changes; scoped manuscript GETs were rejected by the existing transport allowlist. Both addressed test-first. Unbound config/auth cleanup regressions: 2 RED then 17 component tests GREEN. Scoped transport regressions: 6 RED then 70 real-transport/guard tests GREEN. HTTP expected-user regressions: 3 RED, 6 compatible cases passed; now adding the existing expected-user dependency only to those three GET endpoints. Follow-up review approved with no actionable findings. Broader scope suite: 286 passed. Shared Settings/save-reset regression and other affected suites passed, with final totals pending. WebUI Settings 87 passed and component rerun underway. Bandit on both Python runtime files reports zero findings. Five Ruff findings in preexisting manuscript endpoint/test code were verified against HEAD; other touched Python files pass. Frontend ESLint has no errors; 10 existing any warnings in tldw-server.ts. Full shared TypeScript check reports 158 existing diagnostics outside changed runtime code; corrected a preexisting over-broad fixture Record annotation. Locale generator run, retaining only this slice’s seven generated keys to avoid unrelated prior locale drift.
@@ -57,7 +57,7 @@ Approved contract refresh complete. Canonical exporter succeeded with PYTHONPATH
 User approved rebase and force-with-lease update. Rebased four commits onto origin/dev c5b777e9ba7f2ef755185fdb0d350fa1c0d2ce2e without conflicts. git range-diff reports all four patches unchanged. Current rebased implementation/fixes: 0ff1a07b37, d3e2e31f46, 6396c88d2f, 20ab6669ff. Fresh affected backend/shared UI/WebUI tests, Bandit and OpenAPI drift verification running before publication.
 
 Post-rebase verification complete: 132 backend tests, 443 shared UI tests across 12 files, and 25 WebUI-harness checks passed. Bandit on both touched runtime Python files reports no findings; OpenAPI drift check passes on latest dev; scoped ESLint has no code findings (existing pages-path configuration warning only). Temporary dependency symlinks removed. Remote dev remains c5b777e9ba7f2ef755185fdb0d350fa1c0d2ce2e and remote PR head remains 01036a690ca5b60881c0d8394dda9bcaa9e668db; publishing with an explicit expected-head lease.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

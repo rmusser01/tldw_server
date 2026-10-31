@@ -1,19 +1,21 @@
 from __future__ import annotations
 
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
 
 from tldw_Server_API.app.core.config import settings
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.backends import factory as factory_mod
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     BackendType,
     DatabaseConfig,
     DatabaseError,
 )
-
+from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 
 pytestmark = pytest.mark.unit
 
@@ -31,9 +33,11 @@ def _select_one(db: CharactersRAGDB) -> object:
     return row
 
 
-def test_chacha_schema_initialization_lock_is_shared_for_same_sqlite_path(tmp_path: Path) -> None:
-    db_path = str(tmp_path / "schema-lock.db")
-    other_path = str(tmp_path / "other-schema-lock.db")
+def test_chacha_schema_initialization_lock_is_shared_for_same_sqlite_path() -> None:
+    # Fixed keys cover separate and colliding stripes without random tmp-path collisions.
+    db_path = "schema-lock.db"
+    other_path = "other-schema-lock.db"
+    colliding_path = "collision-schema-lock-145.db"
 
     first = CharactersRAGDB._sqlite_schema_init_lock_for_path(db_path)
     second = CharactersRAGDB._sqlite_schema_init_lock_for_path(db_path)
@@ -41,6 +45,7 @@ def test_chacha_schema_initialization_lock_is_shared_for_same_sqlite_path(tmp_pa
 
     assert first is second  # nosec B101
     assert first is not other  # nosec B101
+    assert first is CharactersRAGDB._sqlite_schema_init_lock_for_path(colliding_path)
 
 
 def test_chacha_close_all_connections_keeps_shared_pool_usable_for_canonical_backend(tmp_path: Path) -> None:
@@ -75,6 +80,50 @@ def test_chacha_same_thread_compatibility_gate_for_shared_or_isolated_sqlite_bac
     assert primary.backend is not secondary.backend  # nosec B101
     assert not factory_mod.is_factory_managed_backend(primary.backend)  # nosec B101
     assert not factory_mod.is_factory_managed_backend(secondary.backend)  # nosec B101
+
+
+def test_chacha_owned_file_first_write_survives_peer_schema_change(tmp_path: Path) -> None:
+    """A cold bootstrap checkout must not reach the first write after peer DDL."""
+    path = tmp_path / "cold-bootstrap.db"
+    db = CharactersRAGDB(path, client_id="device-first")
+    try:
+        with closing(sqlite3.connect(path, isolation_level=None)) as peer:
+            peer.execute("CREATE TABLE caller_marker(id INTEGER PRIMARY KEY)")
+        character = db.add_character_card({"name": "First user character"})
+        assert db.get_character_card_by_id(character)["name"] == "First user character"
+    finally:
+        db.close_all_connections()
+
+
+def test_chacha_memory_bootstrap_keeps_storage_for_first_write() -> None:
+    """Retiring a file bootstrap must never discard an in-memory schema."""
+    db = CharactersRAGDB(":memory:", client_id="memory-owner")
+    try:
+        character = db.add_character_card({"name": "Memory character"})
+        assert db.get_character_card_by_id(character)["name"] == "Memory character"
+    finally:
+        db.close_all_connections()
+
+
+@pytest.mark.parametrize("factory_shared", [False, True], ids=["direct-injected", "factory-shared"])
+def test_chacha_injected_sqlite_constructor_keeps_caller_checkout(tmp_path: Path, factory_shared: bool) -> None:
+    """Construction keeps the injected checkout usable for caller-controlled work."""
+    path = tmp_path / "injected-caller.db"
+    config = DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=str(path))
+    backend = factory_mod.DatabaseBackendFactory.create_backend(config) if factory_shared else SQLiteBackend(config)
+    raw = backend.get_pool().get_connection()
+    db = CharactersRAGDB(path, client_id="injected-owner", backend=backend)
+    try:
+        assert db.get_connection() is raw
+        raw.execute("BEGIN IMMEDIATE")
+        raw.execute("UPDATE character_cards SET description = ? WHERE id = 1", ("Pending caller edit",))
+        assert raw.in_transaction
+        assert db.get_character_card_by_id(1)["description"] == "Pending caller edit"
+        raw.rollback()
+        assert db.get_character_card_by_id(1)["description"] == "A general-purpose assistant."
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()
 
 
 def test_collections_close_does_not_break_direct_chacha_wrapper_for_same_sqlite_file(

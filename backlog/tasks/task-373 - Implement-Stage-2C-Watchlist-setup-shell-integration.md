@@ -37,11 +37,11 @@ Integrate the Stage 2 setup wizard into the Watchlists shell create flow. Scope:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 2C started after Stage 2B commit eece4a843. Scope is shell create-flow integration only: replace create-mode metadata modal with WatchlistSetupWizard, keep edit modal behavior, attach watchlist_id to source/job payloads, update store selection, and route to destination tab.
 
 Stage 2C TDD result: red shell tests failed as expected because the create button still opened the old metadata modal and the wizard preset buttons were absent. Implemented shell integration by opening WatchlistSetupWizard from the stable watchlists-create-container control, leaving edit on the existing metadata modal, adapting createWatchlist/createWatchlistSource/bulkCreateSources/createWatchlistJob, attaching watchlist_id to source/job payloads, adding/selecting the created Watchlist, and routing to the wizard destination tab. Added wizard submit error feedback for service failures. Green verification: ./node_modules/.bin/vitest run src/components/Option/Watchlists/__tests__/WatchlistsPlaygroundPage.first-class.test.tsx src/components/Option/Watchlists/__tests__/watchlists-selected-scope-contract.test.ts --maxWorkers=1 --no-file-parallelism --reporter=verbose -> 2 files passed, 11 tests passed. Wizard/model/copy regression also passed: 3 files, 12 tests. git diff --check passed. Bandit not applicable because this task touched only frontend TypeScript/TSX and Backlog task files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

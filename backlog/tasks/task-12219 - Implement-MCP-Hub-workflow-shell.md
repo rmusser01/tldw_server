@@ -47,7 +47,7 @@ Implement Stage 1 of the approved MCP Hub workflow-first design: replace the fla
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 In isolated branch codex/mcp-hub-workflow-shell, completed the unit/component red-green loop for Stage 1 workflow shell. Red run failed on missing workflow config and old tab/default behavior. Green run: bunx vitest run ../packages/ui/src/components/Option/MCPHub/__tests__/McpHubWorkflowConfig.test.ts ../packages/ui/src/components/Option/MCPHub/__tests__/McpHubPage.test.tsx ../packages/ui/src/components/Option/MCPHub/__tests__/McpHubPage.ftux.test.tsx passed 18 tests across 3 files; jsdom emitted existing CSS parse warnings.
 
 Added final hardening after review: MCP Hub tutorial now targets persistent workflow buttons for non-default sections, and route-state resolution preserves a valid workflow deep link when view is invalid.
@@ -55,7 +55,7 @@ Added final hardening after review: MCP Hub tutorial now targets persistent work
 Verification: focused Vitest suite passed 29 tests across MCP Hub config/page/FTUX/route/tutorial coverage; touched-file ESLint exited 0 with the existing Next pages-directory warning; git diff --check passed; Playwright MCP Hub spec passed 3 page/navigation/query tests and skipped 5 backend-dependent API checks via server availability guard. Full bunx tsc --noEmit --pretty false remains blocked by unrelated existing errors in EmbeddingsModelSelectionConfig.tsx, persona-visuals.ts, and lib/api/vnPlay.ts. Bandit skipped because touched implementation files are frontend TypeScript/JSON and Backlog metadata only.
 
 After touching the MCP Hub tutorial locale text, mechanically regenerated apps/packages/ui/src/public/_locales/en/tutorials.json from the nested source locale so the extension locale mirror test passes.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -365,6 +365,20 @@ vi.mock("@/store/workspace", () => {
   return { useWorkspaceStore }
 })
 
+// Launcher ownership is qualified separately with the real router/store/library.
+vi.mock("@/hooks/useStartTutorial", async () => {
+  const { useTutorialStore } = await import("@/store/tutorials")
+  return {
+    useStartTutorial: () => {
+      const start = useTutorialStore((state) => state.startTutorial)
+      return (id: string) => {
+        start(id)
+        return true
+      }
+    }
+  }
+})
+
 vi.mock("@/store/tutorials", () => ({
   useTutorialStore: (
     selector: (state: { startTutorial: typeof mockStartTutorial }) => unknown

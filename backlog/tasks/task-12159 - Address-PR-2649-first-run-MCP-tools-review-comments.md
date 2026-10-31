@@ -29,13 +29,9 @@ Rebase PR #2649 onto latest dev and address Qodo/CodeRabbit review comments for 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Rebased codex/first-run-mcp-tools onto origin/dev and force-pushed the updated branch. Fixed valid Qodo/CodeRabbit issues: rate limits, docstrings, actor attribution, custom validation exceptions, sanitized logging, fail-closed baseline allowlist, stored catalog-version hashing, test markers, MCP Hub validation error feedback, stale drill-target handling, router-aware onboarding links, targeted Playwright fallback, sandbox diagnostics helper extraction, and duplicated task markers. Did not cache get_setup_mcp_tools_service because it wraps the existing per-request MCP Hub factory and dynamic registry snapshots; caching risks stale config/test overrides. Resolved the review threads and replied inline with the caching rationale.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

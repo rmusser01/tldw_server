@@ -32,7 +32,7 @@ Fetch/rebase dev and regenerate conflicted API fingerprint; verify targeted runt
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Rebased onto dev dc0b7455f2, resolving the single generated fingerprint conflict by rerunning canonical export/type generation. Published rebased head 54802df88b with exact previous-head force-with-lease and marked PR ready for review. Fresh targeted backend matrix: 253 passed, one opt-in live skip, six warnings. Awaiting dodo identity and approval for direct renumbering of six snapshot task files with IDs reused by dev; no merge until requested review and checks clear.
 
 Fresh rebased shared Admin/runtime UI run: 64 tests passed across four files. Fresh canonical OpenAPI drift check passed. Current user authorized ready review/merge, not production enablement; human summary preserved verbatim in PR. Background follow-up must keep unchanged states quiet and must not merge before requested reviewer identity/review and required checks are clear.
@@ -52,7 +52,7 @@ Independent final review found one additional staged-filename ownership gap. A c
 Final review P2 re-review confirmed resolved. Rebased all 25 commits onto latest dev 69c96ef715 (PR2887); only generated fingerprint conflicts, both resolved by canonical export/type generation. Rebased review fix commit 152d8ea8af. Fresh post-rebase 13-file matrix: 339 passed, one opt-in live skip, ten warnings; generated TypeScript check passed. Await exact-head CI and any follow-up review before merge; user human Change summary preserved verbatim.
 
 Requester explicitly approved direct renumbering of the two new Buddy collisions after latest-dev rebase: snapshot review/merge record 13183→13190 and snapshot design record 13184→13191. Buddy records retain 13183/13184 unchanged. Rebased onto dev86eb9e517c; preserved both independent entries in the only lessons-document conflict. No snapshot runtime/UI code changed during this rebase. Fresh matrix339 passed/one opt-in live skip/ten warnings; canonical fingerprint matches. Await final-head CI after publishing.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

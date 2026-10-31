@@ -30,7 +30,7 @@ Fix the remaining UX Smoke Gate failure on PR #2055 where the all-pages hard-gat
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Root cause: the all-pages hard-gate metadata test aborted before route execution because m5-model-metadata-rate-limit-log-noise and m5-model-metadata-abort-noise had expiresOn set to 2026-03-31.
 - Both entries remain intentionally narrow: the rate-limit rule is scoped to /content-review, /claims-review, and /research-workspace; the abort rule is scoped to /research-workspace only.
 - Renewed only those two expiresOn values to 2026-09-30, matching the current review horizon used by the rest of SMOKE_HARD_GATE_ALLOWLIST.
@@ -38,7 +38,7 @@ Fix the remaining UX Smoke Gate failure on PR #2055 where the all-pages hard-gat
 - GREEN verification passed with 1 passed after renewal.
 - git diff --check passed.
 - Bandit not applicable: only TypeScript smoke-test metadata and Backlog task metadata were touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

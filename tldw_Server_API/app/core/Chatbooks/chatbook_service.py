@@ -27,6 +27,7 @@ import os
 import shutil
 import tempfile
 import zipfile
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from collections.abc import Callable
@@ -39,6 +40,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.config import ACTUAL_PROJECT_ROOT, load_comprehensive_config, settings as core_settings
 from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.core.Usage.quota_resolver import user_quota
 from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
     validate_chat_settings_storage,
 )
@@ -127,7 +129,7 @@ from .openwebui_hydration import (
     resolve_openwebui_file_path,
     validate_openwebui_data_root,
 )
-from .quota_manager import QuotaManager, UNLIMITED_QUOTA
+from .quota_manager import QuotaManager
 
 _CHATBOOK_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ArchiveError,
@@ -206,6 +208,15 @@ try:
     from ..Embeddings.ChromaDB_Library import ChromaDBManager  # type: ignore
 except _CHATBOOK_NONCRITICAL_EXCEPTIONS:  # pragma: no cover
     ChromaDBManager = None  # type: ignore
+
+
+@dataclass(frozen=True)
+class ChatbookJobLimits:
+    """A user's chatbook job allowances (spec 2 §4); None means unlimited."""
+
+    exports_per_day: float | None = None
+    imports_per_day: float | None = None
+    concurrent_jobs: float | None = None
 
 
 class ChatbookService:
@@ -2099,8 +2110,9 @@ class ChatbookService:
         if selection_mode == "allowlist" and sum(len(ids or []) for ids in content_selections.values()) == 0:
             return False, "Export allowlist contains no exportable items.", None
 
+        job_limits = await self._resolve_job_limits()
         if not async_mode:
-            self._check_chatbook_job_admission_with_lock("export")
+            self._check_chatbook_job_admission_with_lock("export", job_limits)
 
         if async_mode:
             # Create job and run asynchronously
@@ -2113,7 +2125,7 @@ class ChatbookService:
             )
 
             # Store job in database after atomically reserving Chatbooks quota.
-            self._save_export_job_with_quota(job)
+            self._save_export_job_with_quota(job, job_limits)
 
             # Enqueue into core Jobs and start worker if needed
             job_created = None
@@ -2983,8 +2995,9 @@ class ChatbookService:
         if safe_source_filename in {"", ".", ".."}:
             safe_source_filename = ""
 
+        job_limits = await self._resolve_job_limits()
         if not async_mode:
-            self._check_chatbook_job_admission_with_lock("import")
+            self._check_chatbook_job_admission_with_lock("import", job_limits)
 
         if async_mode:
             # Create job and run asynchronously
@@ -3005,7 +3018,7 @@ class ChatbookService:
             )
 
             # Store job in database after atomically reserving Chatbooks quota.
-            self._save_import_job_with_quota(job)
+            self._save_import_job_with_quota(job, job_limits)
 
             # Start async task through core Jobs.
             job_created = None
@@ -6353,10 +6366,19 @@ class ChatbookService:
                 if not char:
                     continue
 
+                char = self._convert_datetimes(char)
+                image = char.get("image")
+                if image is not None:
+                    if not isinstance(image, (bytes, bytearray, memoryview)):
+                        raise ExportError("Unsupported character image representation")
+                    char["image"] = base64.b64encode(bytes(image)).decode("ascii")
+                    char["image_encoding"] = "base64"
+                serialized = json.dumps(char, indent=2, ensure_ascii=False)
+
                 # Write character file
                 char_file = chars_dir / f"character_{char_id}.json"
                 with open(char_file, 'w', encoding='utf-8') as f:
-                    json.dump(char, f, indent=2, ensure_ascii=False)
+                    f.write(serialized)
 
                 # Add to content
                 content.characters[char_id] = char
@@ -6370,7 +6392,7 @@ class ChatbookService:
                 ))
 
             except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
-                logger.error(f"Error collecting character {char_id}: {e}")
+                raise ExportError(f"Error collecting character {char_id}: {e}") from e
 
     def _collect_world_books(
         self,
@@ -7545,6 +7567,11 @@ class ChatbookService:
                 with open(char_file, encoding='utf-8') as f:
                     char_data = json.load(f)
 
+                if "image_encoding" in char_data:
+                    if char_data.pop("image_encoding") != "base64" or not isinstance(char_data.get("image"), str):
+                        raise ValidationError("Unsupported character image encoding")
+                    char_data["image"] = base64.b64decode(char_data["image"], validate=True)
+
                 # Check for existing character
                 char_name = char_data.get('name', 'Unnamed')
                 if prefix_imported:
@@ -7936,56 +7963,63 @@ class ChatbookService:
             ("chatbooks_quota", str(self.user_id)),
         )
 
-    def _check_chatbook_job_admission(self, operation_type: str) -> None:
+    async def _resolve_job_limits(self) -> ChatbookJobLimits:
+        """This user's chatbook allowances from their limits.* values."""
+        return ChatbookJobLimits(
+            exports_per_day=await user_quota(self.user_id_int, "limits.chatbooks_exports_per_day"),
+            imports_per_day=await user_quota(self.user_id_int, "limits.chatbooks_imports_per_day"),
+            concurrent_jobs=await user_quota(self.user_id_int, "limits.chatbooks_concurrent_jobs"),
+        )
+
+    def _check_chatbook_job_admission(self, operation_type: str, limits: ChatbookJobLimits) -> None:
         quota_manager = QuotaManager(self.user_id, self.user_tier, db=self.db)
         if quota_manager._quotas_disabled:
             return
 
         if operation_type == "export":
-            operation_limit = quota_manager.quotas["max_exports_per_day"]
-            limit_message = f"Daily export limit ({operation_limit}) reached. Try again tomorrow."
+            operation_limit = limits.exports_per_day
             quota_type = "daily_export"
         else:
-            operation_limit = quota_manager.quotas["max_imports_per_day"]
-            limit_message = f"Daily import limit ({operation_limit}) reached. Try again tomorrow."
+            operation_limit = limits.imports_per_day
             quota_type = "daily_import"
 
-        if operation_limit != UNLIMITED_QUOTA:
+        if operation_limit is not None:
             operations_today = self._count_operations_today_for_quota(operation_type)
             if operations_today >= operation_limit:
+                verb = "export" if operation_type == "export" else "import"
                 raise QuotaExceededError(
-                    limit_message,
+                    f"Daily {verb} limit ({int(operation_limit)}) reached. Try again tomorrow.",
                     quota_type=quota_type,
                     limit=operation_limit,
                     current=operations_today,
                 )
 
-        concurrent_limit = quota_manager.quotas["max_concurrent_jobs"]
-        if concurrent_limit != UNLIMITED_QUOTA:
+        concurrent_limit = limits.concurrent_jobs
+        if concurrent_limit is not None:
             active_jobs = self._count_active_jobs_for_quota()
             if active_jobs >= concurrent_limit:
                 raise QuotaExceededError(
-                    f"Maximum concurrent jobs ({concurrent_limit}) reached. Wait for current jobs to complete.",
+                    f"Maximum concurrent jobs ({int(concurrent_limit)}) reached. Wait for current jobs to complete.",
                     quota_type="concurrent_jobs",
                     limit=concurrent_limit,
                     current=active_jobs,
                 )
 
-    def _check_chatbook_job_admission_with_lock(self, operation_type: str) -> None:
+    def _check_chatbook_job_admission_with_lock(self, operation_type: str, limits: ChatbookJobLimits) -> None:
         with self.db.transaction():
             self._acquire_chatbook_quota_admission_lock()
-            self._check_chatbook_job_admission(operation_type)
+            self._check_chatbook_job_admission(operation_type, limits)
 
-    def _save_export_job_with_quota(self, job: ExportJob) -> None:
+    def _save_export_job_with_quota(self, job: ExportJob, limits: ChatbookJobLimits) -> None:
         with self.db.transaction():
             self._acquire_chatbook_quota_admission_lock()
-            self._check_chatbook_job_admission("export")
+            self._check_chatbook_job_admission("export", limits)
             self._save_export_job(job, commit=False)
 
-    def _save_import_job_with_quota(self, job: ImportJob) -> None:
+    def _save_import_job_with_quota(self, job: ImportJob, limits: ChatbookJobLimits) -> None:
         with self.db.transaction():
             self._acquire_chatbook_quota_admission_lock()
-            self._check_chatbook_job_admission("import")
+            self._check_chatbook_job_admission("import", limits)
             self._save_import_job(job, commit=False)
 
     def _save_export_job(self, job: ExportJob, *, commit: bool = True):

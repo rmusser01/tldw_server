@@ -1,4 +1,11 @@
 {
+  "mediaHandoff": {
+    "conflictLabel": "Konflikt ved medieoverførsel",
+    "conflict": "Der er allerede en kladde i beskedfeltet. Indsæt mediekilden, erstat din kladde, eller annuller importen.",
+    "insert": "Indsæt mediekilde",
+    "replace": "Erstat den aktuelle kladde",
+    "cancel": "Annuller import"
+  },
   "formError": {
     "noModel": "Vælg venligst en model",
     "noEmbeddingModel": "Vælg venligst en embedding model under indstillinger > RAG side"

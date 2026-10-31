@@ -43,7 +43,7 @@ Continue issue #1346 dependency cleanup by removing the remaining dayjs usage fr
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented in isolated worktree branch codex/webui-datatables-native-date-cell-1346. EditableCell now formats date cells via a local native Date helper and renders date edits with an accessible native input[type=date]. The test suite first failed against the old behavior: invalid values rendered as Invalid Date and edit mode exposed Ant Design DatePicker rather than the native input contract. After implementation, the focused tests pass. The audit now records shared UI dayjs package imports dropping from 7 to 6 and keeps the remaining Media, ReadingList, Items, and Kanban DatePicker/Dayjs surfaces deferred.
 
 Verification: `bunx vitest run src/components/Option/DataTables/__tests__/EditableCell.date.test.tsx --maxWorkers=1` failed before implementation on invalid date rendering and missing native date input; after implementation it passed with 4 tests.
@@ -59,7 +59,7 @@ Opened PR #1424 against dev: https://github.com/rmusser01/tldw_server/pull/1424
 PR #1424 review follow-up: addressed Gemini/Qodo date-cell findings by removing the change-time finish call, relying on blur/Enter for date edit commits, handling numeric timestamps including 0, and validating date-prefix strings before truncation. Added regression coverage for numeric timestamps, epoch zero, malformed date-prefix values, and change-then-blur single-commit behavior.
 
 Review-fix verification: `bunx vitest run src/components/Option/DataTables/__tests__/EditableCell.date.test.tsx --maxWorkers=1` now passes with 7 tests. `git diff --check` exits 0. Exact shared UI dayjs package-import scan remains 6 expected lines. `bun run lint` from apps/tldw-frontend exits 0 with the existing 131-warning baseline. Filtered shared UI TypeScript diagnostics for `EditableCell|DataTables` returned no matches.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

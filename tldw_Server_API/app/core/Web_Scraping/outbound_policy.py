@@ -15,11 +15,10 @@ from urllib.parse import urlsplit
 
 from loguru import logger
 
+from tldw_Server_API.app.core.config import web_outbound_policy_mode
 from tldw_Server_API.app.core.Metrics import increment_counter
 from tldw_Server_API.app.core.Security import egress as egress_policy
 from tldw_Server_API.app.core.Web_Scraping.filters import RobotsFilter
-from tldw_Server_API.app.core.config import web_outbound_policy_mode
-
 
 _Mode = Literal["compat", "strict"]
 
@@ -46,9 +45,7 @@ def get_web_outbound_policy_mode(config: dict[str, Any] | None = None) -> _Mode:
     raw_mode = os.getenv("WEB_OUTBOUND_POLICY_MODE")
     if raw_mode is None:
         if config is not None:
-            raw_mode = str(
-                ((config.get("web_scraper", {}) or {}).get("web_outbound_policy_mode", "compat"))
-            )
+            raw_mode = str((config.get("web_scraper", {}) or {}).get("web_outbound_policy_mode", "compat"))
         else:
             raw_mode = web_outbound_policy_mode()
 
@@ -170,9 +167,10 @@ async def decide_web_outbound_policy(
     stage: str,
     config: dict[str, Any] | None = None,
     robots_filter: RobotsFilter | None = None,
+    credential_free: bool = False,
 ) -> WebOutboundPolicyDecision:
     """Evaluate egress plus optional robots policy for async scrape callers."""
-    mode = get_web_outbound_policy_mode(config)
+    mode = "strict" if credential_free else get_web_outbound_policy_mode(config)
     raw = evaluate_url_policy(url)
     if not getattr(raw, "allowed", False):
         return _decision(
@@ -186,7 +184,9 @@ async def decide_web_outbound_policy(
     if not respect_robots:
         return _decision(True, mode=mode, reason="robots_skipped", stage=stage, source=source)
 
-    robots_filter = robots_filter or RobotsFilter(user_agent=user_agent or "*")
+    robots_filter = robots_filter or RobotsFilter(
+        user_agent=user_agent or "*", **({"credential_free": True} if credential_free else {})
+    )
     try:
         robots_result = await robots_filter.check(
             url,

@@ -600,7 +600,7 @@
     "reviewStorageCapWarning_one": "{{count}} 個檔案超過本機草稿上限（{{cap}}）。請在提交音訊/影片前附加來源。",
     "reviewStorageCapWarning_other": "{{count}} 個檔案超過本機草稿上限（{{cap}}）。請在提交音訊/影片前附加來源。",
     "storeAfterReview": "審核後儲存",
-    "reviewBeforeStorage": "儲存前審核",
+    "reviewBeforeStorage": "儲存前檢閱擷取的內容",
     "reviewBeforeStorageHint": "先處理，然後在提交到伺服器前於本機編輯草稿。",
     "reviewEnabled": "審核模式",
     "reviewStorageCap": "本機草稿上限為 {{cap}}。",

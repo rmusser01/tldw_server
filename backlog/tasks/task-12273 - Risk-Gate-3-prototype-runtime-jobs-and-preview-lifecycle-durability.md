@@ -71,7 +71,7 @@ Stage 5: Verification and PR closeout
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-05-15: Created isolated worktree `.worktrees/prototype-risk-gate-3-runtime-durability` on branch codex/prototype-risk-gate-3-runtime-durability from origin/dev 2184b2168 after PR #1719 / Risk Gate 2 was verified merged and issue #1454 was closed.
 
 2026-05-15: Baseline verification before implementation: `./.venv/bin/python -m pytest tldw_Server_API/tests/PrototypeWorkspaces -q` passed with 90 passed, 5 warnings in 7.20s from the new worktree.
@@ -89,7 +89,7 @@ Opened PR #1729: https://github.com/rmusser01/tldw_server/pull/1729
 2026-05-15: Addressed PR #1729 review feedback: moved prototype job exceptions to app/core/exceptions.py, made worker programming/runtime-state failures terminal with stable failure codes, persisted failure_code through WorkerSDK.error_code, generated deterministic snapshot ids for Jobs-backed snapshot saves, propagated top-level preview runtime profile versions, made session preview retry reuse tolerant of archived workspaces, prevented metadata from overriding authoritative snapshot ids, removed new raw-SQL assertions from prototype tests, and cleaned machine-specific paths from the task log.
 
 2026-05-15: Review-fix verification: `./.venv/bin/python -m pytest tldw_Server_API/tests/PrototypeWorkspaces tldw_Server_API/tests/Jobs/test_worker_sdk.py -q` -> 110 passed, 5 warnings; `./.venv/bin/python -m pytest tldw_Server_API/tests/Jobs/test_worker_sdk.py -q` -> 7 passed, 5 warnings after WorkerSDK jitter hardening; Bandit touched-scope run to `/tmp/bandit_prototype_risk_gate_3_review_fixes.json` -> 0 findings; `git diff --check` -> clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

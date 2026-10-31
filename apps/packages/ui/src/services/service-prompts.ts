@@ -1,4 +1,5 @@
 import { createSafeStorage } from "@/utils/safe-storage"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { tldwAuth } from "@/services/tldw/TldwAuth"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -621,12 +622,7 @@ const createServicePromptScopeLease = (
     active = false
     parentSignal?.removeEventListener("abort", abortRequest)
     if (bound) legacyLocalStorage.unwatch(storageWatch)
-    if (typeof window !== "undefined") {
-      window.removeEventListener(
-        "tldw:auth-credentials-changed",
-        invalidateScope
-      )
-    }
+    releaseAccount()
   }
   const abortRequest = () => {
     if (!controller.signal.aborted) controller.abort()
@@ -636,16 +632,13 @@ const createServicePromptScopeLease = (
     abortRequest()
   }
 
+  const releaseAccount = watchChatAccountChanges((invalidated) => {
+    if (invalidated) invalidateScope()
+  })
   if (parentSignal?.aborted) {
     abortRequest()
   } else {
     parentSignal?.addEventListener("abort", abortRequest, { once: true })
-    if (typeof window !== "undefined") {
-      window.addEventListener(
-        "tldw:auth-credentials-changed",
-        invalidateScope
-      )
-    }
   }
 
   return Object.freeze({

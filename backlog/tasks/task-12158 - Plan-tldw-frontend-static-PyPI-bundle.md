@@ -33,9 +33,9 @@ Create the PRD and ADR for bundling a clean static tldw-frontend export inside t
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created the PRD and ADR for the tldw-frontend-only static PyPI bundle planning slice. Updated the ADR index so ADR-029 is discoverable. No runtime implementation files were changed; admin-ui remains explicitly out of scope for this first slice. Verification: git diff --check passed for the PRD, ADR, and ADR index. Bandit skipped because this is docs/task-only planning work.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

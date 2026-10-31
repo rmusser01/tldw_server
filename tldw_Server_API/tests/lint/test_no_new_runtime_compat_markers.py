@@ -4,7 +4,12 @@ import ast
 from pathlib import Path
 
 
-EXPECTED_COMPAT_KEYS = {
+EXPECTED_COMPAT_KEYS: set[str] = set()
+
+# Compat paths whose sunset dates passed and were removed (TASK-13444).
+# They must not be resurrected in COMPAT_PATHS or referenced by any
+# log_runtime_deprecation() call site under app/.
+EXPIRED_COMPAT_KEYS = {
     "auth_db_execute_compat",
     "llm_chat_legacy_session",
     "web_scraping_legacy_fallback",
@@ -93,6 +98,13 @@ def scan_for_new_compat_markers() -> list[str]:
         offenders.append(
             "Expected runtime compatibility keys were removed from COMPAT_PATHS: "
             + ", ".join(missing_keys)
+        )
+
+    resurrected_keys = sorted(EXPIRED_COMPAT_KEYS & registry_keys)
+    if resurrected_keys:
+        offenders.append(
+            "Expired runtime compatibility keys were re-added to COMPAT_PATHS: "
+            + ", ".join(resurrected_keys)
         )
 
     for py_file in app_root.rglob("*.py"):

@@ -37,7 +37,7 @@ Implement issue #1434 using the reviewed design spec and implementation plan. Pe
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 1 complete: added VNPlayRepository.record_story_choice_selection(), refactored append_event through transaction-local _insert_event(), and added repository coverage for happy path plus replay/scene-version rollback guards. Verification rerun by controller: python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_db.py -q passed with 7 passed, 5 warnings; Bandit wrote /tmp/bandit_vn_play_story_choice_task1_controller_after_fix.json with no reported findings; git diff --check HEAD^ HEAD was clean. Commits: 986092c3a and bc139107e.
 
 Task 2 complete after review fix: wired Story choice validation into submit_turn, added mode/input errors, kept custom_action non-branching, passed selected choice metadata to the adapter context, and moved decisive visible-choice/window revalidation into VNPlayRepository.record_story_choice_selection. Controller verification: python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_db.py tldw_Server_API/tests/VN_Play/test_vn_play_turns.py tldw_Server_API/tests/VN_Play/test_vn_play_state.py -q passed with 34 passed, 5 warnings; Bandit wrote /tmp/bandit_vn_play_story_choice_task2_controller_after_atomic_fix.json with no reported findings; git diff --check HEAD^ HEAD was clean. Commits: 59c54877f and e6ce9cf47.
@@ -47,7 +47,7 @@ Task 3 complete: rewrote retry_last_turn to create a new retry turn request from
 Task 4 complete: added API-level coverage for Story choice branch state in turn responses, invalid_choice_id on unknown Story choices, retry_last_turn_not_failed after completed Story turns, and branch_path list shape from GET /branches. Updated Docs/API-related/VN_PLAY_API.md with Story choice validation, non-branching Story custom_action, choice_selected payload, branch_path list shape, stable Story errors, and failure-only retry semantics. Endpoint code did not need changes because generic VNPlayTurnError already maps to HTTP 400 and conflict/model failures remain separately mapped. Verification: python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_api.py -q passed with 23 passed, 5 warnings; git diff --check was clean. Commit: cdda06011.
 
 Task 5 closeout verification complete: python -m pytest tldw_Server_API/tests/VN_Play/test_vn_play_db.py tldw_Server_API/tests/VN_Play/test_vn_play_state.py tldw_Server_API/tests/VN_Play/test_vn_play_turns.py tldw_Server_API/tests/VN_Play/test_vn_play_api.py -q passed with 59 passed, 5 warnings; Bandit wrote /tmp/bandit_vn_play_story_branch.json with zero findings across VNPlay_DB.py, service.py, constants.py, and vn_play.py; git diff --check was clean. Known skips/blockers: none.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

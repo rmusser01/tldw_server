@@ -39,13 +39,13 @@ Resolve actionable review feedback on PR #1635 for the Sync v2 server substrate 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review-fix implementation pass: added SQL-side accepted/status/excluded-device pull filtering, timezone-aware UTC timestamps, direct conflict lookup with ownership validation, SQL restore-manifest aggregation, cached Sync v2 service wiring, bounded push batches, safer SyncStoreError mapping/log context, canonical legacy media payload hashing, workspace source-ref token matching, recursive nested-list redaction, and Backlog cleanup for reviewer-noted task files.
 
 Verification so far: python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_media_compat.py tldw_Server_API/tests/Sync/test_sync_v2_domain_adapters.py tldw_Server_API/tests/Sync/test_sync_v2_security.py tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py tldw_Server_API/tests/Sync/test_sync_v2_store.py tldw_Server_API/tests/Sync/test_sync_v2_service.py -q -> 142 passed; python -m pytest tldw_Server_API/tests/Sync tldw_Server_API/tests/e2e/test_chatbook_sync_v2_restore.py -q -> 145 passed; Bandit wrote /tmp/bandit_sync_v2_pr1635_review.json with empty errors/results; git diff --check clean.
 
 Live PR thread refresh before staging found 21 open review threads: 5 Gemini, 5 Qodo, and 11 CodeRabbit. All mapped to the patch set or task-file cleanup. gh pr checks before this push still showed older Full Suite / UX Smoke / Onboarding E2E failures alongside passing required gates and passing CodeRabbit; previous log review indicated timeout/install or broad-suite boundary behavior rather than a Sync v2-specific failing assertion. The branch push should trigger a fresh check run.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

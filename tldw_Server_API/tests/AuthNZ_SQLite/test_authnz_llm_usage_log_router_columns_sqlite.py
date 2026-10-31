@@ -43,3 +43,4 @@ async def test_llm_usage_log_has_router_analytics_columns_sqlite(tmp_path, monke
     indexes = {row["name"] for row in await pool.fetchall("PRAGMA index_list(llm_usage_log)")}
     assert "idx_llm_usage_log_remote_ip_ts" in indexes
     assert "idx_llm_usage_log_token_name_ts" in indexes
+    assert "idx_llm_usage_log_user_ts" in indexes

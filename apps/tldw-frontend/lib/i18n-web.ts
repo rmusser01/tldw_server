@@ -45,6 +45,7 @@ const NAMESPACES = [
   "audiobook",
   "watchlists",
   "workflows",
+  "tutorials",
 ] as const
 
 type Namespace = (typeof NAMESPACES)[number]
@@ -87,7 +88,7 @@ const normalizeLanguage = (lng: string): string => {
 }
 
 // Pre-bundled English resources
-const englishResources: Record<Namespace, object> = {
+const englishResources: Record<Exclude<Namespace, "tutorials">, object> = {
   common: commonEn,
   sidepanel: sidepanelEn,
   settings: settingsEn,
@@ -173,6 +174,9 @@ export const ensureLanguageLoaded = async (lng: string): Promise<void> => {
       import(`@tldw/ui/assets/locale/${normalized}/workflows.json`).catch(
         () => null
       ),
+      import(`@tldw/ui/assets/locale/${normalized}/tutorials.json`).catch(
+        () => null
+      ),
     ])
 
     const namespaces: Namespace[] = [
@@ -182,6 +186,7 @@ export const ensureLanguageLoaded = async (lng: string): Promise<void> => {
       "playground",
       "knowledge",
       "workflows",
+      "tutorials",
     ]
     modules.forEach((mod, idx) => {
       if (mod) {

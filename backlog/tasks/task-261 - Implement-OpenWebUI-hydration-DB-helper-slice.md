@@ -38,11 +38,11 @@ Stage 1 local execution after the implementer subagent hit the account usage lim
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-05-11: Implementer subagent hit account usage limit; completed Stage 1 locally using TDD. Red run failed with missing hydration helper functions, then green run passed after implementing the DB helpers.
 
 Verification: pytest hydration DB helpers 9 passed; pytest existing OpenWebUI DB import adapter 9 passed; git diff --check clean; Bandit on OpenWebUI_DB.py wrote /tmp/bandit_openwebui_hydration_db_helpers.json with zero findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

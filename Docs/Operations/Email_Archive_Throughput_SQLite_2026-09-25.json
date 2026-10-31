@@ -1,0 +1,44 @@
+{
+  "backend": "sqlite",
+  "full_app": true,
+  "auth_mode": "multi_user",
+  "test_mode": false,
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "cpu_count": 18,
+  "python": "3.11.13",
+  "runs": [
+    {
+      "batch": 0,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 2.016686875023879,
+      "messages_per_second": 49.586279971607354
+    },
+    {
+      "batch": 1,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 1.8289294579299167,
+      "messages_per_second": 54.67679443098124
+    },
+    {
+      "batch": 2,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 1.7624018330825493,
+      "messages_per_second": 56.74074897272085
+    }
+  ],
+  "messages": 300,
+  "attachment_ratio": 0,
+  "rerun_messages": 100,
+  "idempotent": true,
+  "cross_user_search_count": 0,
+  "cross_user_detail_status": 404,
+  "outbound_attempts": 0,
+  "model_attempts": 0,
+  "aggregate_messages_per_second": 53.494833846452224,
+  "target_messages_per_second": 50,
+  "root": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-sqlite-yy4esixq",
+  "all_batches_meet_target": false
+}

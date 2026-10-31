@@ -50,14 +50,14 @@ Implement the WebUI consumer for the backend-owned scripted VN generation API fr
 <!-- DOD:END -->
 
 ## Notes
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Started from GitHub issue #1578 after PR #1571 merged and issue #1535 was closed.
 - Implemented the VN scripted generation WebUI inspector in the feature worktree. Verification: focused VN frontend tests pass with 31 tests; frontend lint exits 0 with existing repo-wide warnings only; git diff --check passes; ASCII scan over touched files found no non-ASCII characters. TypeScript check was run and now has no touched-file errors; it still fails on existing baseline errors in packages/ui EmbeddingsModelSelectionConfig.tsx and persona-visuals.ts. Bandit skipped because this slice only touches TypeScript/React frontend files and Backlog metadata.
 - Documentation surface reviewed: no separate docs update required for this WebUI-only consumer slice because it implements the API documented in Docs/API/VN.md without changing the backend contract.
 - Opened PR #1584 against dev for this WebUI inspector slice: https://github.com/rmusser01/tldw_server/pull/1584
 - Addressed PR #1584 review comments: added the dedicated session generation inspector route link and route wrapper, consolidated session/generation loading, added generation pagination, rendered timestamps and mapped error-state guidance, gated debug controls for non-admin JWT users, cleared debug state on session changes, removed the duplicate post-action refresh, and added in-flight guards for generation actions. Verification after fixes: focused VN frontend tests pass with 37 tests; lint exits 0 with existing repo-wide warnings only; TypeScript still fails only on existing packages/ui baseline errors; git diff --check passes; touched files are ASCII-only.
 - Follow-up PR review sweep found a remaining conditional refresh edge after the duplicate-refresh fix: generation actions returning a `session` payload updated scene state but skipped collection refresh. Added a failing regression test, then refreshed session collections exactly once in the `response.session` branch of `handleTurn`. Verification after the fix: focused VN frontend tests pass with 38 tests; lint exits 0 with existing repo-wide warnings only; TypeScript still fails only on existing packages/ui baseline errors; git diff --check passes.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->

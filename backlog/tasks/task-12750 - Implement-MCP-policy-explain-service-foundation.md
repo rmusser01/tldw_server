@@ -28,13 +28,13 @@ Implement Task 1 from the MCP effective permission explain implementation plan: 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the Task 1 service foundation in mcp_unified/gateway/policy_explain.py with typed request/response models, GatewayPolicyExplainService, GatewayPolicyExplainError, subject redaction helpers, effective decision handling, strict audit append behavior, and bounded preview pagination.
 
 Focused tests in tldw_Server_API/tests/MCP_unified/test_standalone_policy_explain_service.py cover allow/ask/deny explanations, redaction/sanitization states, audit writes, audit fail-closed behavior, resolver failure auditing, degraded previews, validation error redaction, and preview pagination.
 
 Subagent review results: latest spec compliance review passed with no gaps; latest code-quality review found no Critical or Important issues. Minor follow-up candidates were cursor length hardening, async catalog_provider edge coverage, and richer install metadata in the later catalog task.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -45,8 +45,6 @@ Task 1 added the standalone MCP policy explain service foundation and focused re
 - git diff --check -> exit 0
 
 Known non-blocking follow-ups: cap oversized cursor tokens, add explicit audit_store=None and async catalog_provider tests, and preserve installation metadata in the Task 2 catalog provider.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

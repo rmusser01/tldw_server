@@ -921,8 +921,7 @@ def process_videos(
     Processes multiple videos or local file paths, transcribes, summarizes,
     and optionally stores in the DB (if store_in_db=True).
 
-    This function was adapted from your old `process_videos_with_error_handling()`
-    but with Gradio references removed.
+    This function was adapted from `process_videos_with_error_handling()`.
 
     :param inputs: A list of either URLs or local file paths.
     :param start_time: Start time for partial transcription (e.g. "1:30" or "90").

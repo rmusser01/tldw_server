@@ -37,11 +37,11 @@ Completed session schema repair, seven array-binding method repairs, regressions
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Array audit found three additional affected methods: ManagedSecretRefsRepo.list_refs_by_ids and organization/user scoped total counts. Seven affected methods now preserve a single array parameter through DatabasePool. Regression red: 16 failed, 14 passed; focused green including override readiness: 49 passed. Real PostgreSQL first run verified profile overrides and scoped counts; corrected missing metadata argument in the new managed-secret test and rerun is active. Independent review found no array production defect. Sessions migration work continues.
 
 Final combined auth/profile suite: 86 passed, 78 warnings in 227.54s, including real PostgreSQL production-schema and array cases. Session worker: 24 focused unit tests and 4 PostgreSQL integration tests passed. SQLite compatibility: 8 passed. Existing PostgreSQL session tests now seed through UsersDB and isolated_test_environment; production write guards remain enabled. Independent review found no remaining defects. New test files pass Black and Ruff; session production scope passes Ruff. Array scope has one unchanged SIM118 finding, confirmed against base. Bandit for all eight touched auth/profile production files: zero findings. Broader migrations: 52 passed, 1 existing failure in test_sqlite_upgrade_preserves_custom_users_schema_objects_and_foreign_keys. Single-test rerun on exact base 751563a966 fails identically with seven extra users columns, starting with uuid; this is unrelated to migration98. Full backend suite was not run.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

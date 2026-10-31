@@ -48,7 +48,7 @@ Stages:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created implementation plan for GitHub issue #1592 after verifying PR #1590 was merged and issue #1587 closed. Worktree: .worktrees/vn-play-branch-timeline-1592. Baseline frontend VN tests could not run before dependency setup because vitest is not installed in the fresh worktree; install/link dependencies before implementation verification.
 
 Implemented typed frontend VN Play branch navigation and branch restore helpers, BranchTimelinePanel, and VNPlayWorkspace wiring against backend-owned branch navigation APIs. The workspace now keeps branch semantics server-authoritative, refreshes branch navigation with session collections, and handles guarded branch restore with idempotency keys plus recoverable stale/in-progress states.
@@ -70,7 +70,7 @@ Review verification:
 - `bun run test:run __tests__/vn-play/vnPlayApi.test.ts __tests__/vn-play/BranchTimelinePanel.test.tsx __tests__/vn-play/VNPlayWorkspace.test.tsx __tests__/vn-play/SceneStage.test.tsx __tests__/vn-play/vnPlayRuntime.test.ts` passed: 5 files, 56 tests.
 - `bun run lint -- components/vn-play/BranchTimelinePanel.tsx components/vn-play/VNPlayWorkspace.tsx __tests__/vn-play/BranchTimelinePanel.test.tsx __tests__/vn-play/VNPlayWorkspace.test.tsx __tests__/vn-play/vnPlayApi.test.ts` exited 0 with existing repo-wide warnings only.
 - `git diff --check` exited 0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

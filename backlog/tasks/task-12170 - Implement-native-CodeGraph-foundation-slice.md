@@ -45,7 +45,7 @@ Execution rule: no production CodeGraph code starts until this plan is explicitl
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created implementation plan at Docs/superpowers/plans/2026-05-03-native-codegraph-foundation-implementation-plan.md. Plan keeps Stage 1 narrow to foundation/status/file-inventory indexing and prevents overclaiming graph tools before extractors land.
 
 Plan includes TDD red/green steps, exact files, focused pytest commands, Bandit command, git diff --check, dependency-matrix gate before pyproject optional extra, and commit checkpoints.
@@ -69,7 +69,7 @@ Verification: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/
 Verification: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/CodeGraph tldw_Server_API/app/core/DB_Management/codegraph tldw_Server_API/app/core/MCP_unified/modules/implementations/codegraph_module.py -f json -o /tmp/bandit_codegraph_1244_second_pass.json -> 0 results.
 
 Verification: git diff --check -> clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

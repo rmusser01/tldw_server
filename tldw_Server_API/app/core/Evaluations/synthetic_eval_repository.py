@@ -7,7 +7,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from tldw_Server_API.app.api.v1.schemas.synthetic_eval_schemas import (
+from tldw_Server_API.app.core.DB_Management.Evaluations_DB import EvaluationsDatabase
+from tldw_Server_API.app.core.Evaluations.synthetic_eval_schemas import (
     SyntheticEvalDraftSampleCreate,
     SyntheticEvalPromotionCreate,
     SyntheticEvalProvenance,
@@ -15,7 +16,6 @@ from tldw_Server_API.app.api.v1.schemas.synthetic_eval_schemas import (
     SyntheticEvalReviewActionType,
     SyntheticEvalReviewState,
 )
-from tldw_Server_API.app.core.DB_Management.Evaluations_DB import EvaluationsDatabase
 
 
 def _utcnow_iso() -> str:

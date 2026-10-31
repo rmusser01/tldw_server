@@ -1,4 +1,4 @@
-"""Tests for the ChaChaNotes PostgreSQL v77 companion migration."""
+"""Verify bounded PostgreSQL companion dispatch and current-registry upgrades."""
 
 import re
 from contextlib import nullcontext
@@ -7,14 +7,15 @@ from types import SimpleNamespace
 import pytest
 from psycopg import sql as pg_sql
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     BackendType,
     DatabaseConfig,
+)
+from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.unit
 
@@ -23,7 +24,7 @@ pytestmark = pytest.mark.unit
 def test_postgres_companion_upgrade_finishes_fast_path_and_installs_rls(
     monkeypatch: pytest.MonkeyPatch, tmp_path, source_version: int,
 ) -> None:
-    """Exercise dispatch with a recorded SQL boundary, including old companion73."""
+    """Exercise only v77 dispatch at the recorded SQL boundary, including old v73."""
     from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap
 
     conn = object()
@@ -40,6 +41,7 @@ def test_postgres_companion_upgrade_finishes_fast_path_and_installs_rls(
         ),
     )
     db = CharactersRAGDB(tmp_path / "dispatch.sqlite", "dispatch-owner")
+    monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 77)
     original_backend = db.backend
     monkeypatch.setattr(db, "_backend", backend)
     monkeypatch.setattr(schema_bootstrap, "postgres_schema_migration", lambda *_args: nullcontext(conn))
@@ -101,7 +103,7 @@ def test_postgres_v77_migrates_prior_dev_and_enforces_companion_constraints(
     monkeypatch: pytest.MonkeyPatch,
     source_version: int,
 ) -> None:
-    """The live PostgreSQL migration preserves dev and adds companion constraints."""
+    """Drained prior catalogs reach the current registry with companion data intact."""
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     db: CharactersRAGDB | None = None
     try:
@@ -146,10 +148,11 @@ def test_postgres_v77_migrates_prior_dev_and_enforces_companion_constraints(
                         ("legacy-review", legacy_pack["id"], "b" * 64), connection=conn,
                     )
 
+        db.close_connection()
         for _ in range(2):
             db._initialize_schema_postgres()
             with backend.transaction() as conn:
-                assert db._get_schema_version_postgres(conn) == 77
+                assert db._get_schema_version_postgres(conn) == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
                 for table in ("persona_buddy_preferences", "persona_visual_pack_reviews"):
                     flags = backend.execute(
                         "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = %s::regclass",

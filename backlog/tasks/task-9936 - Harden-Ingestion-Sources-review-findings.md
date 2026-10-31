@@ -36,7 +36,7 @@ Fix the current Ingestion_Sources module issues found during review: archive pat
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Backlog MCP resources were unavailable and the official Backlog CLI hung on search, list, and create. The human requester approved a direct task-file fallback before repository edits. Work is isolated in `.worktrees/ingestion-sources-review-hardening` on branch `codex/ingestion-sources-review-hardening`.
 
 RED verification before implementation: focused Ingestion Sources pytest command collected 31 tests, with 11 expected failures covering archive suffix collision, archive limit enforcement, oversized local files, git timeout wrapping, missing indexes, job fence mismatch handling, and string boolean rejection.
@@ -62,7 +62,7 @@ Review-response verification:
 - `python -m py_compile` on touched Ingestion Sources implementation files -> exit 0.
 - `python -m bandit -r tldw_Server_API/app/core/Ingestion_Sources -f json -o /tmp/bandit_ingestion_sources_review.json` -> exit 0; JSON summary had 0 issues.
 - `git diff --check` -> exit 0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -1,0 +1,21 @@
+{
+  "entry": "CDP content-script message; native menu not qualified",
+  "draft": {
+    "clipId": "f2637dd7-096c-41d0-a3f7-7e9ba1b8b65c",
+    "requestedType": "article",
+    "clipType": "article",
+    "pageUrl": "http://127.0.0.1:19135/article",
+    "pageTitle": "Vega native capture fixture",
+    "visibleBody": "# Vega greenhouse capture\n\nThis synthetic article is used only for the Knowledge extension usability check.\n\nThe Vega native capture inspection is scheduled for 24 November 2026. The irrigation budget is 75 litres per plot per week.\n\nCapture this source, save the note, then ask about the inspection date.",
+    "fullExtract": "Vega greenhouse capture\n\nThis synthetic article is used only for the Knowledge extension usability check.\n\nThe Vega native capture inspection is scheduled for 24 November 2026. The irrigation budget is 75 litres per plot per week.\n\nCapture this source, save the note, then ask about the inspection date.",
+    "captureMetadata": {
+      "clipType": "article",
+      "actualType": "article",
+      "fallbackPath": [
+        "article"
+      ]
+    },
+    "capturedAt": "2026-10-07T16:11:03.618Z"
+  },
+  "tabId": 1295055511
+}

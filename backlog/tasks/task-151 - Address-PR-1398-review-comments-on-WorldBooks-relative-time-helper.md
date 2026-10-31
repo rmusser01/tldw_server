@@ -48,7 +48,7 @@ Address the actionable Gemini/Qodo review feedback on PR #1398 by preventing sin
 <!-- DOD:END -->
 
 ## Implementation Notes
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 TDD red check: focused WorldBooks utility test failed before the production fix with pluralized singular labels including 1 minutes ago, 1 hours ago, 1 days ago, and 1 years ago.
 
 Implemented review fix in worldBookListUtils by keeping dayjs-compatible raw millisecond thresholds for singular boundary ranges and routing counted units through a singular/plural helper.
@@ -56,4 +56,4 @@ Implemented review fix in worldBookListUtils by keeping dayjs-compatible raw mil
 Tightened the no-dayjs test guard to match dayjs import statements instead of any incidental substring.
 
 Verification: bunx vitest run src/components/Option/WorldBooks/__tests__/worldBookListUtils.test.ts passed with 19 tests; bun run test:worldbooks passed with 62 files, 208 passed, 6 skipped; git diff --check passed; bun run lint in apps/tldw-frontend exited 0 with the existing 131 warnings baseline and no touched-file warnings; Bandit skipped because this review fix only touches TypeScript/test/Backlog files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

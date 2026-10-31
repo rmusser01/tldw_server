@@ -1,0 +1,231 @@
+{
+  "acceptance_certificate": false,
+  "backend": "postgresql",
+  "source_revision": "ae46f643ab",
+  "phase": "cold_subject_filter_count",
+  "full_report_produced": false,
+  "sqlstate": "53100",
+  "loaded_messages_progress": 1000000,
+  "elapsed_seconds_at_last_load_progress": 254.45,
+  "full_setup_duration_recorded": false,
+  "log": "/tmp/email_million_postgres_current_final_13376.log",
+  "log_sha256": "ef01480d34203bd1db619dfd8162dfd79d096ab27ceb54d4360022cce9e956b7",
+  "root": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-postgres-7owg6sxn",
+  "diagnosis": {
+    "report_version": 1,
+    "source_revision": "ae46f643ab",
+    "diagnostic_root": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-postgres-jiks6v09",
+    "postgres_resources": {
+      "role": "email_probe_e30ff7699e",
+      "auth_db": "email_auth_e30ff7699e",
+      "content_db": "email_content_e30ff7699e"
+    },
+    "owner_id": 42,
+    "is_admin": false,
+    "query_class": "subject_filter",
+    "trace": [],
+    "settings": {
+      "work_mem": "64MB",
+      "parallel_workers": "2",
+      "plan_cache_mode": "auto",
+      "row_security": "on"
+    },
+    "catalog": [
+      {
+        "relname": "email_attachments",
+        "estimated_rows": 200000,
+        "relpages": 2667,
+        "relallvisible": 2667,
+        "has_analyze": true,
+        "has_autoanalyze": true,
+        "has_autovacuum": true,
+        "n_live_tup": 200000,
+        "n_dead_tup": 0
+      },
+      {
+        "relname": "email_message_labels",
+        "estimated_rows": 2290910,
+        "relpages": 10137,
+        "relallvisible": 10137,
+        "has_analyze": true,
+        "has_autoanalyze": true,
+        "has_autovacuum": true,
+        "n_live_tup": 2290910,
+        "n_dead_tup": 0
+      },
+      {
+        "relname": "email_message_participants",
+        "estimated_rows": 2000000,
+        "relpages": 10811,
+        "relallvisible": 10811,
+        "has_analyze": true,
+        "has_autoanalyze": true,
+        "has_autovacuum": true,
+        "n_live_tup": 2000000,
+        "n_dead_tup": 0
+      },
+      {
+        "relname": "email_messages",
+        "estimated_rows": 999997,
+        "relpages": 90906,
+        "relallvisible": 90906,
+        "has_analyze": true,
+        "has_autoanalyze": true,
+        "has_autovacuum": true,
+        "n_live_tup": 999997,
+        "n_dead_tup": 0
+      },
+      {
+        "relname": "media",
+        "estimated_rows": 999999,
+        "relpages": 90909,
+        "relallvisible": 90909,
+        "has_analyze": true,
+        "has_autoanalyze": true,
+        "has_autovacuum": true,
+        "n_live_tup": 999999,
+        "n_dead_tup": 0
+      }
+    ],
+    "statistics_names": [
+      "email_media_visibility_stats",
+      "email_text_condition_stats"
+    ],
+    "index_names": [
+      "email_messages_media_id_key",
+      "email_messages_pkey",
+      "idx_email_message_count_cover",
+      "idx_email_messages_identity_cover",
+      "idx_email_messages_source_id",
+      "idx_email_messages_tenant_date",
+      "idx_email_messages_tenant_date_id",
+      "idx_email_messages_tenant_has_attachments_date",
+      "idx_email_messages_tenant_message_id",
+      "idx_email_messages_tenant_source_message",
+      "idx_email_text_trigram"
+    ],
+    "failure": {
+      "phase": "cold_subject_search",
+      "kind": "count",
+      "exception_type": "DiskFull",
+      "sqlstate": "53100",
+      "duration_seconds": 0.14350866700988263
+    },
+    "search": {
+      "success": false,
+      "exception_type": "DiskFull"
+    },
+    "failure_plan": {
+      "Node Type": "Aggregate",
+      "Plan Rows": 1,
+      "Plan Width": 8,
+      "Total Cost": 273651.19,
+      "Parallel Aware": false,
+      "Plans": [
+        {
+          "Node Type": "Result",
+          "Plan Rows": 1,
+          "Plan Width": 32,
+          "Total Cost": 0.01,
+          "Parallel Aware": false
+        },
+        {
+          "Node Type": "Result",
+          "Plan Rows": 1,
+          "Plan Width": 32,
+          "Total Cost": 0.01,
+          "Parallel Aware": false
+        },
+        {
+          "Node Type": "Result",
+          "Plan Rows": 1,
+          "Plan Width": 32,
+          "Total Cost": 0.01,
+          "Parallel Aware": false
+        },
+        {
+          "Node Type": "Result",
+          "Plan Rows": 1,
+          "Plan Width": 32,
+          "Total Cost": 0.01,
+          "Parallel Aware": false
+        },
+        {
+          "Node Type": "Result",
+          "Plan Rows": 1,
+          "Plan Width": 32,
+          "Total Cost": 0.01,
+          "Parallel Aware": false
+        },
+        {
+          "Node Type": "Gather",
+          "Plan Rows": 2,
+          "Plan Width": 8,
+          "Total Cost": 273651.11,
+          "Workers Planned": 2,
+          "Parallel Aware": false,
+          "Plans": [
+            {
+              "Node Type": "Aggregate",
+              "Plan Rows": 1,
+              "Plan Width": 8,
+              "Total Cost": 272650.91,
+              "Parallel Aware": false,
+              "Plans": [
+                {
+                  "Node Type": "Hash Join",
+                  "Join Type": "Inner",
+                  "Plan Rows": 8988,
+                  "Plan Width": 0,
+                  "Total Cost": 272628.43,
+                  "Parallel Aware": true,
+                  "Plans": [
+                    {
+                      "Node Type": "Bitmap Heap Scan",
+                      "Relation Name": "email_messages",
+                      "Plan Rows": 71549,
+                      "Plan Width": 4,
+                      "Total Cost": 94419.07,
+                      "Parallel Aware": true,
+                      "Plans": [
+                        {
+                          "Node Type": "Bitmap Index Scan",
+                          "Index Name": "idx_email_text_trigram",
+                          "Plan Rows": 171717,
+                          "Plan Width": 0,
+                          "Total Cost": 1183.15,
+                          "Parallel Aware": false
+                        }
+                      ]
+                    },
+                    {
+                      "Node Type": "Hash",
+                      "Plan Rows": 52344,
+                      "Plan Width": 8,
+                      "Total Cost": 177367.25,
+                      "Parallel Aware": true,
+                      "Plans": [
+                        {
+                          "Node Type": "Seq Scan",
+                          "Relation Name": "media",
+                          "Plan Rows": 52344,
+                          "Plan Width": 8,
+                          "Total Cost": 177367.25,
+                          "Parallel Aware": true
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "guards": {
+      "outbound_attempts": 0,
+      "model_attempts": 0
+    }
+  }
+}

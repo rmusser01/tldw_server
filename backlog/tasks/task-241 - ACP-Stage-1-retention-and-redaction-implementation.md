@@ -41,7 +41,7 @@ Implement the first execution stage for ACP issue closure: enforce ACP retention
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Worktree created for implementation: .worktrees/acp-retention-redaction-stage1 on branch codex/acp-retention-redaction-stage1 from origin/dev. Main checkout is dirty and will not be edited for implementation.
 
 Implemented in isolated worktree .worktrees/acp-retention-redaction-stage1 on branch codex/acp-retention-redaction-stage1.
@@ -65,7 +65,7 @@ PR #1548 second review-fix pass: addressing Qodo and CodeRabbit comments on mana
 PR #1548 second review fixes completed: added managed transaction scopes for ACP retention purge deletes, normalized audit retention to non-negative values at config/singleton/service boundaries, pruned audit hot cache during purge, filtered endpoint in-memory audit events by retention, broadened redaction for relative and forward-slash paths, redacted plain string transcript event payloads, and sanitized task notes to remove workstation-specific paths.
 
 Verification: review-specific regression tests passed with 6 passed and 5 warnings; affected ACP endpoint/session suites passed with 52 passed and 5 warnings; broader ACP Stage 1 suite passed with 121 passed and 5 warnings; git diff --check passed; Bandit wrote a developer-local JSON report with 0 high, 8 medium, 1 low pre-existing ACP DB baseline findings and no new changed-line findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

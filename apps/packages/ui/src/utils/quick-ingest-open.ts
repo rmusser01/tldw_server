@@ -1,3 +1,5 @@
+import { createUrlQueueItems, isValidQueueUrl } from "@/components/Common/QuickIngest/queue-items"
+import type { WizardQueueItem } from "@/components/Common/QuickIngest/types"
 import {
   DEFAULT_PRESETS,
   FIRST_SOURCE_PREFERRED_PRESET,
@@ -28,6 +30,7 @@ export const isFirstSourceQuickIngestKind = (
 export type QuickIngestOpenDetail =
   | {
       source: "manual"
+      url?: string
       action?: "normal"
     }
   | {
@@ -67,6 +70,7 @@ export type QuickIngestPendingOpenRequest = {
 
 export type QuickIngestSessionSeed = {
   openDetail: QuickIngestOpenDetail
+  queueItems?: WizardQueueItem[]
   firstSourceAddMode?: FirstSourceQuickIngestKind | null
   selectedPreset?: Exclude<IngestPreset, "custom">
   customBasePreset?: Exclude<IngestPreset, "custom">
@@ -274,6 +278,10 @@ export const createQuickIngestSessionSeedFromOpenDetail = (
 
   if (isQuickIngestPlaylistPreflightDetail(detail)) {
     return { openDetail: detail, firstSourceAddMode: null }
+  }
+
+  if (typeof detail?.url === "string" && isValidQueueUrl(detail.url)) {
+    return { openDetail: { ...detail, url: detail.url.trim() }, queueItems: createUrlQueueItems(detail.url) }
   }
 
   return null

@@ -39,7 +39,7 @@ Implement Phase 7 from the Character Chat first-class PRD and implementation pla
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Execution started with superpowers:subagent-driven-development and superpowers:test-driven-development. Controller ran baseline before production edits: bunx vitest run ../packages/ui/src/utils/__tests__/chat-model-availability.test.ts ../packages/ui/src/components/Option/Playground/__tests__/CharacterChatReadinessPanel.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundStatusStrip.first-slice.test.tsx --reporter=verbose passed with 3 files / 39 tests. Two Task 1 workers were shut down after no edits/progress reports; controller implemented Task 1 locally under TDD. Red test: focused utility test failed with 11 failures because buildChatModelUsability was not a function. Green tests: focused utility test passed with 33 tests; baseline trio passed with 3 files / 50 tests. Task 1 added the pure model usability contract/helper and unit coverage only; UI wiring remains pending.
 
 Task 1 final: addressed spec-review gaps for provider aliases, colon-bearing local model IDs, and provider-qualified duplicate matching. Verification: focused utility suite passed with 41/41 tests; baseline trio passed with 3 files / 58 tests; git diff --check clean. Review gates: Task 1 spec review approved and code-quality review approved for HEAD ebda82474. Task 1 remains UI-unwired by design; Task 2 will map Character Chat readiness to the usability contract.
@@ -69,7 +69,7 @@ Task 7 real-backend verification: added `apps/tldw-frontend/e2e/workflows/journe
 Task 8 final verification: focused unit/component suite passed with 7 files / 94 tests. `bunx tsc --noEmit --pretty false` still fails on inherited baseline TypeScript debt in Media read-along, Evaluations embeddings recipe config, Workspace StudioPane, keyboard shortcut config, persona live control, and tier-4 admin llamacpp E2E fixtures; a touched-scope E2E response narrowing issue was fixed and no TypeScript errors remain in touched files. Real-backend Playwright verification was rerun against the real FastAPI backend at `http://127.0.0.1:8000`; backend health returned `status: ok`, and the Phase 7 journey suite passed with 1 passed / 2 skipped. The active no-provider/send-gating scenario used a real backend-created character and real model metadata, and the provider-failure/successful-send scenarios skipped for the same environment reasons as Task 7. Bandit skipped because no Python files were touched by this frontend/docs slice.
 
 Rebase closeout: rebased `codex/character-chat-post-phase6-prd` onto current `origin/dev` at `027bfeb52`. Fresh focused suite passed with 7 files / 94 tests. Fresh `bunx tsc --noEmit --pretty false` still fails only outside the Phase 7 touched scope; current dev adds inherited Watchlists RunDetailDrawer TypeScript errors alongside the previously recorded baseline files. Real-backend Playwright was rerun after starting the backend outside the sandbox so it could bind `127.0.0.1:8000`; backend health returned `status: ok`, and the Phase 7 journey suite passed with 1 passed / 2 skipped.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

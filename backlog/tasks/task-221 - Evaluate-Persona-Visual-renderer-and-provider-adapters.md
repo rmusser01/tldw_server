@@ -55,7 +55,7 @@ Research GitHub issue #1497 for the Persona/Buddy visual-pack system. Produce a 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added `Docs/Design/2026-05-10-persona-visual-renderer-provider-adapter-evaluation.md` with a repo-grounded renderer/provider evaluation for #1497.
 - Recommended keeping `sprite_frames` as the only V1 activatable renderer while adding a renderer capability contract before non-sprite manifests.
 - Identified Live2D as the best expressive 2D persona candidate, gated by licensing, official SDK packaging, archive validation, dependency, and fallback requirements.
@@ -63,7 +63,7 @@ Research GitHub issue #1497 for the Persona/Buddy visual-pack system. Produce a 
 - Corrected stale PRD wording so the personal visual library remains reference-backed with no display snapshots.
 - Verification: `git diff --check` passed.
 - Bandit: skipped because this is a docs/backlog-only research change with no touched Python code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

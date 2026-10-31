@@ -32,9 +32,9 @@ Follow up on PR #1245 review feedback for the Phase 2.2 chat router conditional 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red check: python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k 'fake_router_module_does_not_mutate or crashing_chat_import or logs_spec_name' -q failed on the expected fake-module mutation, unhandled chat_loop RuntimeError, and missing RouterSpec name support. Green checks: focused review selection passed with 3 passed; full router contract passed with 41 passed; main router plus OpenAPI contracts passed with 75 passed. Security and hygiene: Bandit touched source scope reported 0 results and 0 errors in /tmp/bandit_pr1245_review_fixes.json; git diff --check passed; newly-added line-length scan found no added lines over 100 characters.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

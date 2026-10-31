@@ -208,8 +208,17 @@ def test_search_by_safe_metadata_ungrouped_query_preserves_standard_constraints_
         def fetchall(self):
             return self._rows
 
-    def _execute_query(query, params):
+    # Keyword filters resolve to ids first (KeywordsRepository.match_identities).
+    keyword_rows = [
+        {"id": 11, "uuid": "kw-11", "keyword": "Review", "deleted": False, "version": 1},
+        {"id": 12, "uuid": "kw-12", "keyword": "Biology", "deleted": False, "version": 1},
+        {"id": 13, "uuid": "kw-13", "keyword": "private", "deleted": False, "version": 1},
+    ]
+
+    def _execute_query(query, params=()):
         normalized = " ".join(query.split())
+        if "FROM Keywords" in normalized:
+            return _Cursor(keyword_rows)
         queries.append((normalized, params))
         if "COUNT(*) AS total_count" in normalized:
             return _Cursor([{"total_count": 1}])
@@ -257,7 +266,7 @@ def test_search_by_safe_metadata_ungrouped_query_preserves_standard_constraints_
     assert "LOWER(COALESCE(m.title, '')) LIKE ?" in count_sql
     assert "LOWER(COALESCE(dv.safe_metadata, '')) LIKE ?" in count_sql
     assert "LOWER(m.type) IN (?)" in count_sql
-    assert "COUNT(DISTINCT k_mh.id)" in count_sql
+    assert "EXISTS (SELECT 1 FROM MediaKeywords mk WHERE mk.media_id = m.id AND mk.keyword_id IN (?))" in count_sql
     assert "NOT EXISTS" in count_sql
     assert "dv.created_at >= ?" in count_sql
     assert "dv.created_at <= ?" in count_sql
@@ -266,10 +275,9 @@ def test_search_by_safe_metadata_ungrouped_query_preserves_standard_constraints_
         "%biology%",
         "%biology%",
         "pdf",
-        "review",
-        "biology",
-        2,
-        "private",
+        11,
+        12,
+        13,
         "2026-01-01T00:00:00.000Z",
         "2026-01-31T23:59:59.999Z",
     )

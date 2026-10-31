@@ -391,3 +391,32 @@ async def test_configured_native_voice_mapping_is_sent_upstream():
     adapter = AudioCppTTSAdapter(config)
     await adapter.generate(TTSRequest(text="hello", voice="alba", format=AudioFormat.WAV))
     assert client.payloads[-1]["voice"] == "alba"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("opt_in", [True, False])
+async def test_owned_client_gets_the_private_network_opt_in_from_provider_config(monkeypatch, opt_in):
+    from tldw_Server_API.app.core.TTS.adapters import audio_cpp_adapter as module
+
+    built: list[dict[str, object]] = []
+
+    class Client(_FakeAudioCppClient):
+        def __init__(self, **kwargs):
+            super().__init__()
+            built.append(kwargs)
+
+    config = _provider_config(client=_FakeAudioCppClient())
+    config["client"] = None
+    config["base_url"] = "http://192.168.1.50:8080"
+    extra = config["extra_params"]
+    assert isinstance(extra, dict)
+    config["extra_params"] = {**extra, "allow_remote_base_url": True, "allow_private_network": opt_in}
+    monkeypatch.setattr(module, "AudioCppClient", Client)
+    adapter = AudioCppTTSAdapter(config)
+    await adapter.ensure_initialized()
+    await adapter.close()
+
+    [kwargs] = built
+    assert kwargs["base_url"] == "http://192.168.1.50:8080"
+    assert kwargs["allow_remote_base_url"] is True
+    assert kwargs["allow_private_network"] is opt_in

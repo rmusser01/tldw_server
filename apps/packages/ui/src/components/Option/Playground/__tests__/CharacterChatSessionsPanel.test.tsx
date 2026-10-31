@@ -6,6 +6,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ServerChatHistoryItem } from "@/hooks/useServerChatHistory";
 import { CharacterChatSessionsPanel } from "../CharacterChatSessionsPanel";
 
+const ownerMock = vi.hoisted(() => ({
+  ownerKey: "account-A",
+  requestScope: {
+    userId: "A",
+    config: { serverUrl: "https://chat.test", authMode: "multi-user" },
+  },
+  isCurrent: () => true,
+}));
+vi.mock("@/hooks/useChatDraftOwner", () => ({
+  useChatDraftOwner: () => ownerMock,
+}));
+vi.mock("@/hooks/useConnectionState", () => ({
+  useConnectionState: () => ({ isConnected: true }),
+}));
+vi.mock("@/store/connection", () => ({
+  useConnectionStore: { getState: () => ({ state: { isConnected: true } }) },
+}));
 const historyHookMock = vi.hoisted(() => vi.fn());
 const selectServerChatMock = vi.hoisted(() => vi.fn());
 const formatRelativeTimeMock = vi.hoisted(() =>
@@ -82,15 +99,15 @@ describe("CharacterChatSessionsPanel", () => {
   it("fetches character-scoped recent sessions and prioritizes the active character", () => {
     const currentCharacterChat = makeChat("chat-current", {
       title: "Mira Act I",
-      character_id: "mira",
+      character_id: "7",
     });
     const nextMiraChat = makeChat("chat-next", {
       title: "Mira Act II",
-      character_id: "mira",
+      character_id: "7",
     });
     const otherCharacterChat = makeChat("chat-other", {
       title: "Rook Side Quest",
-      character_id: "rook",
+      character_id: "9",
     });
     historyHookMock.mockReturnValue({
       data: [otherCharacterChat, nextMiraChat, currentCharacterChat],
@@ -103,7 +120,7 @@ describe("CharacterChatSessionsPanel", () => {
 
     render(
       <CharacterChatSessionsPanel
-        activeCharacterId="mira"
+        activeCharacterId="7"
         activeCharacterName="Mira"
         activeServerChatId="chat-current"
       />,
@@ -114,6 +131,7 @@ describe("CharacterChatSessionsPanel", () => {
       expect.objectContaining({
         enabled: true,
         filterMode: "character",
+        characterId: 7,
         limit: 5,
         mode: "overview",
         page: 1,
@@ -133,6 +151,11 @@ describe("CharacterChatSessionsPanel", () => {
       within(currentCharacterList).queryByText("Rook Side Quest"),
     ).not.toBeInTheDocument();
 
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Recent chats with other characters",
+      }),
+    );
     const otherCharactersList = screen.getByRole("list", {
       name: "Other character sessions",
     });
@@ -152,13 +175,13 @@ describe("CharacterChatSessionsPanel", () => {
       title: "Mira Assistant Identity",
       character_id: null,
       assistant_kind: "character",
-      assistant_id: "mira",
+      assistant_id: "7",
     });
     const personaBackedChat = makeChat("chat-persona", {
       title: "Garden Helper",
       character_id: null,
       assistant_kind: "persona",
-      assistant_id: "mira",
+      assistant_id: "7",
     });
     historyHookMock.mockReturnValue({
       data: [personaBackedChat, assistantBackedChat],
@@ -171,7 +194,7 @@ describe("CharacterChatSessionsPanel", () => {
 
     render(
       <CharacterChatSessionsPanel
-        activeCharacterId="mira"
+        activeCharacterId="7"
         activeCharacterName="Mira"
         activeServerChatId={null}
       />,
@@ -187,17 +210,23 @@ describe("CharacterChatSessionsPanel", () => {
       within(currentCharacterList).queryByText("Garden Helper"),
     ).not.toBeInTheDocument();
 
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Recent chats with other characters",
+      }),
+    );
+    expect(screen.queryByText("Garden Helper")).not.toBeInTheDocument();
     expect(
-      within(
-        screen.getByRole("list", { name: "Other character sessions" }),
-    ).getByText("Garden Helper"),
+      screen.getByText(
+        "Some sessions in this page could not be verified for this character. Retry to refresh.",
+      ),
     ).toBeInTheDocument();
   });
 
   it("offers a primary resume-last action and shows character session metadata", () => {
     const lastCharacterChat = makeChat("chat-last", {
       title: "Campfire opening",
-      character_id: "mira",
+      character_id: "7",
       character_name: "Mira",
       topic_label: "Act I",
       message_count: 6,
@@ -214,7 +243,7 @@ describe("CharacterChatSessionsPanel", () => {
 
     render(
       <CharacterChatSessionsPanel
-        activeCharacterId="mira"
+        activeCharacterId="7"
         activeCharacterName="Mira"
         activeServerChatId={null}
       />,
@@ -244,7 +273,7 @@ describe("CharacterChatSessionsPanel", () => {
     });
     const { rerender } = render(
       <CharacterChatSessionsPanel
-        activeCharacterId="mira"
+        activeCharacterId="7"
         activeCharacterName="Mira"
         activeServerChatId={null}
       />,
@@ -266,13 +295,13 @@ describe("CharacterChatSessionsPanel", () => {
     });
     rerender(
       <CharacterChatSessionsPanel
-        activeCharacterId="mira"
+        activeCharacterId="7"
         activeCharacterName="Mira"
         activeServerChatId={null}
       />,
     );
     expect(
-      screen.getByText("No character conversations yet."),
+      screen.getByText("No conversations with this character yet."),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
@@ -290,7 +319,7 @@ describe("CharacterChatSessionsPanel", () => {
     });
     rerender(
       <CharacterChatSessionsPanel
-        activeCharacterId="mira"
+        activeCharacterId="7"
         activeCharacterName="Mira"
         activeServerChatId={null}
       />,
@@ -306,7 +335,7 @@ describe("CharacterChatSessionsPanel", () => {
   it("announces stale and hard-failure session states", () => {
     const staleChat = makeChat("chat-stale", {
       title: "Stale Mira",
-      character_id: "mira",
+      character_id: "7",
     });
     historyHookMock.mockReturnValueOnce({
       data: [staleChat],
@@ -318,7 +347,7 @@ describe("CharacterChatSessionsPanel", () => {
     });
     const { rerender } = render(
       <CharacterChatSessionsPanel
-        activeCharacterId="mira"
+        activeCharacterId="7"
         activeCharacterName="Mira"
         activeServerChatId={null}
       />,
@@ -338,7 +367,7 @@ describe("CharacterChatSessionsPanel", () => {
     });
     rerender(
       <CharacterChatSessionsPanel
-        activeCharacterId="mira"
+        activeCharacterId="7"
         activeCharacterName="Mira"
         activeServerChatId={null}
       />,
@@ -352,7 +381,7 @@ describe("CharacterChatSessionsPanel", () => {
   it("normalizes timestamps before rendering relative session age", () => {
     const chatWithPaddedTimestamp = makeChat("chat-padded", {
       title: "Padded Timestamp",
-      character_id: "mira",
+      character_id: "7",
       updated_at: "  2026-05-20T00:10:00.000Z  ",
     });
     historyHookMock.mockReturnValue({
@@ -366,7 +395,7 @@ describe("CharacterChatSessionsPanel", () => {
 
     render(
       <CharacterChatSessionsPanel
-        activeCharacterId="mira"
+        activeCharacterId="7"
         activeCharacterName="Mira"
         activeServerChatId={null}
       />,
@@ -394,7 +423,7 @@ describe("CharacterChatSessionsPanel", () => {
 
     render(
       <CharacterChatSessionsPanel
-        activeCharacterId="mira"
+        activeCharacterId="7"
         activeCharacterName="Mira"
         activeServerChatId={null}
       />,
@@ -404,7 +433,7 @@ describe("CharacterChatSessionsPanel", () => {
       screen.getByText("Character sessions could not be loaded."),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText("No character conversations yet."),
+      screen.queryByText("No conversations with this character yet."),
     ).not.toBeInTheDocument();
   });
 });

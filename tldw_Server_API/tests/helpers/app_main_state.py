@@ -5,6 +5,7 @@ import importlib
 import sys
 from collections.abc import Iterator
 from types import ModuleType
+from weakref import WeakSet
 
 APP_PACKAGE_NAME = "tldw_Server_API.app"
 APP_MAIN_MODULE_NAME = "tldw_Server_API.app.main"
@@ -69,17 +70,15 @@ def import_app_main() -> ModuleType:
     return current
 
 
-# Modules produced by reload_app_main(), as opposed to an ordinary first import.
-# Modules are never freed while in sys.modules, and a stale id only makes a later
-# first import look like a reload (the old, merely slow, behaviour).
-_RELOADED_IDS: set[int] = set()
+# Track live reload modules without retaining them or confusing reused IDs.
+_RELOADED_MODULES: WeakSet[ModuleType] = WeakSet()
 
 
 def reload_app_main() -> ModuleType:
     clear_app_main()
     importlib.invalidate_caches()
     imported = importlib.import_module(APP_MAIN_MODULE_NAME)
-    _RELOADED_IDS.add(id(imported))
+    _RELOADED_MODULES.add(imported)
     return set_app_main(imported)
 
 
@@ -119,5 +118,5 @@ def app_main_isolated() -> Iterator[None]:
         # to split from. Unloading it made every later test re-import app.main,
         # leaking a whole FastAPI app per test until shards crawled into the CI
         # timeout. Only undo a module that reload_app_main() produced.
-        if current is not snapshot and (snapshot is not None or id(current) in _RELOADED_IDS):
+        if current is not snapshot and (snapshot is not None or current in _RELOADED_MODULES):
             restore_app_main(snapshot)

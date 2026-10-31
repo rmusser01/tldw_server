@@ -41,7 +41,7 @@ Implement issue #1732 by adding nine server-owned Persona Visual starter catalog
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created after PR #1725 merged and issue #1695 closed. Issue #1732 tracks this next Persona/Buddy visual catalog slice under epic #1510.
 
 Supersession note from TASK-419: this task recorded the earlier nine-scaffold
@@ -65,7 +65,7 @@ Clarified fixture descriptions, tags, tests, docs, and task language so the PR r
 Wording-correction verification: focused starter catalog/API pytest passed with 23 tests; git diff --check passed; Bandit JSON report for touched Persona starter backend modules reported zero findings.
 
 PR #1734 review fixes: wrapped the long fixture/test lines identified by Qodo and changed multi-custom-state scaffold generation so each custom state gets a distinct deterministic variant asset key. Added a regression test for action-guide and elaborate-persona custom-state asset separation.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

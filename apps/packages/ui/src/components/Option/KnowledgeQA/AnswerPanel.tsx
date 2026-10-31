@@ -12,6 +12,7 @@ import { cn } from "@/libs/utils"
 import { getFeedbackSessionId, submitExplicitFeedback } from "@/services/feedback"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { useNavigate } from "react-router-dom"
+import { useHomeMilestoneScope } from "@/hooks/useHomeMilestoneScope"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import {
@@ -178,6 +179,8 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     answer,
     answerTrustState = "unknown_trust",
     answerTrustReasonCodes = [],
+    answerEvidenceOrigin = null,
+    isAuthorityCurrent,
     citations,
     isSearching,
     error,
@@ -188,6 +191,8 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     completedGenerationEnabled = null,
     search,
     query = "",
+    resultQuery,
+    lastSearchScope,
     currentThreadId = null,
     messages = [],
     setSettingsPanelOpen,
@@ -198,6 +203,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     sourceHealth,
     expertMode = false,
   } = useKnowledgeQA()
+  const answeredQuery = resultQuery === undefined ? query : resultQuery ?? ""
   const [isExpanded, setIsExpanded] = useState(false)
   const [answerFeedback, setAnswerFeedback] = useState<"up" | "down" | null>(null)
   const [answerFeedbackSubmitting, setAnswerFeedbackSubmitting] = useState(false)
@@ -217,6 +223,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
   const activeAnswerSessionKeyRef = useRef("")
   const messageApi = useAntdMessage()
   const navigate = useNavigate()
+  const ownerScope = useHomeMilestoneScope()
 
   // Get cited indices for highlighting
   const citedIndices = useMemo(() => citations.map((c) => c.index), [citations])
@@ -436,7 +443,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
       await submitExplicitFeedback({
         conversation_id: currentThreadId || undefined,
         message_id: latestAssistantMessageId || undefined,
-        query: query?.trim() || undefined,
+        query: answeredQuery.trim() || undefined,
         feedback_type: "helpful",
         helpful: thumb === "up",
         feedback_id: searchDetails?.feedbackId || undefined,
@@ -512,20 +519,40 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
   }
 
   const handleOpenInWorkspace = async () => {
-    if (workspaceHandoffPending) return
+    if (workspaceHandoffPending || !ownerScope || !isAuthorityCurrent()) return
 
     const requestSessionKey = answerSessionKey
     setWorkspaceHandoffPending(true)
     try {
       const payload = buildKnowledgeQaWorkspacePrefill({
         threadId: currentThreadId,
-        query,
+        query: answeredQuery,
         answer: normalizedAnswer,
         citations: citations.map((citation) => citation.index),
         results,
+        answerTrustState,
+        answerEvidenceOrigin,
+        answerTrustReasonCodes,
+        scope: lastSearchScope ? {
+          sources: lastSearchScope.sources, include_media_ids: lastSearchScope.includeMediaIds,
+          include_note_ids: lastSearchScope.includeNoteIds, collection_id: lastSearchScope.collectionId,
+          keyword_filter: lastSearchScope.keywordFilter, enable_web_fallback: lastSearchScope.webFallback,
+        } : settings
+          ? {
+              sources: settings.sources,
+              include_media_ids: settings.include_media_ids,
+              include_note_ids: settings.include_note_ids,
+              collection_id: settings.collection_id,
+              keyword_filter: settings.keyword_filter,
+              enable_web_fallback: settings.enable_web_fallback,
+            }
+          : undefined,
       })
-      await queueResearchWorkspacePrefill(payload)
-      if (activeAnswerSessionKeyRef.current !== requestSessionKey) {
+      await queueResearchWorkspacePrefill(payload, ownerScope)
+      if (
+        !isAuthorityCurrent() ||
+        activeAnswerSessionKeyRef.current !== requestSessionKey
+      ) {
         return
       }
       void trackKnowledgeQaSearchMetric({
@@ -533,18 +560,23 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
         source_count: results.length,
       })
       navigate("/research-workspace")
-    } catch (error) {
-      if (activeAnswerSessionKeyRef.current !== requestSessionKey) {
+    } catch {
+      if (
+        !isAuthorityCurrent() ||
+        activeAnswerSessionKeyRef.current !== requestSessionKey
+      ) {
         return
       }
-      console.error("Failed to open workspace with Knowledge QA context:", error)
       messageApi.open({
         type: "error",
         content: "Unable to open Workspace right now.",
         duration: 3,
       })
     } finally {
-      if (activeAnswerSessionKeyRef.current === requestSessionKey) {
+      if (
+        isAuthorityCurrent() &&
+        activeAnswerSessionKeyRef.current === requestSessionKey
+      ) {
         setWorkspaceHandoffPending(false)
       }
     }
@@ -878,14 +910,18 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
               onClick={() => {
                 void handleOpenInWorkspace()
               }}
-              disabled={workspaceHandoffPending}
+              disabled={workspaceHandoffPending || !ownerScope}
               className={cn(
                 "rounded-md border px-2 py-1 text-xs transition-colors",
                 "border-border bg-surface text-text-subtle hover:bg-hover hover:text-text",
                 workspaceHandoffPending && "opacity-60 cursor-not-allowed"
               )}
             >
-              {workspaceHandoffPending ? "Opening..." : "Continue in editor"}
+              {workspaceHandoffPending
+                ? "Opening..."
+                : t("knowledge:continueInResearchWorkspace", {
+                    defaultValue: "Continue in Research Workspace",
+                  })}
             </button>
           </div>
         </div>

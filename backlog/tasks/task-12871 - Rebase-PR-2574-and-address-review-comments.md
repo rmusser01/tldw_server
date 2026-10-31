@@ -34,22 +34,14 @@ Rebase PR 2574 onto the latest dev branch, resolve conflicts, inspect open PR re
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Rebased branch onto origin/dev and resolved conflicts in notification_service.py and MCP local importer sync behavior. Added review-fix tests for local sync item failures, missing local source paths, decoded file URIs, and SQLite migration unique index detection. Verification so far: focused regression tests passed; full MCP docs suite passed with 267 passed/4 warnings; Bandit touched-scope report had zero findings; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Rebased PR 2574 onto origin/dev, resolved rebase conflicts, addressed actionable review threads, and added regression coverage for local sync read/decode failures, missing/non-scannable local source tombstone safety, file URI decoding, and SQLite index introspection. Verification: focused regressions passed, full MCP docs suite passed with 268 passed/4 warnings, touched-scope Bandit reported zero findings, and git diff --check passed. The DocsError/DB_Management comments were handled with standalone MCP package boundary rationale rather than code relocation.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -1,4 +1,11 @@
 /** H1 wire values. Owners construct snapshots and admissions; views only select them. */
+/** Original excluded row; editor leases and callbacks stay private. */
+export type HistoryEditTargetV1 = {
+  readonly version: 1
+  readonly message_id: string
+  readonly message_revision: string
+}
+
 export type HistoryCursorV1 =
   | { readonly kind: "after_message"; readonly message_id: string }
   | { readonly kind: "before_message"; readonly message_id: string }
@@ -89,8 +96,20 @@ export type HistoryResolutionV1 =
   | { readonly status: "ready"; readonly selection: HistorySelectionV1; readonly rows: readonly HistoryNodeV1[] }
   | HistoryResolutionFailureV1
 
+export type NativeCompletionCapabilityV1 = {
+  readonly policy: "selected_history_v1"
+  readonly supported: boolean
+  readonly storage_context_digest: string
+}
+
 export type HistorySelectionCaptureV1 = {
+  readonly native_completion_v1?: NativeCompletionCapabilityV1
   readonly status: "captured"
+  readonly acknowledged_capability?: "tldw_history_existing_input_v1" | "tldw_history_server_existing_input_v1"
+  readonly validated_admission?: {
+    readonly admission: HistoryAdmissionReferenceV1
+    readonly input_revision: string
+  }
   readonly snapshot: HistorySelectionSnapshotV1
   readonly rows: readonly HistoryNodeV1[]
   readonly selected_content: readonly HistorySelectedContentV1[]
@@ -99,6 +118,7 @@ export type HistorySelectionCaptureV1 = {
   readonly storage_context_digest: string
 }
 export type HistoryCaptureResultV1 = HistorySelectionCaptureV1 | (HistoryResolutionFailureV1 & {
+  readonly acknowledged_capability?: "tldw_history_existing_input_v1" | "tldw_history_server_existing_input_v1"
   readonly snapshot: HistorySelectionSnapshotV1
   readonly view: HistoryViewSelectionV1
 })
@@ -107,6 +127,8 @@ export type HistoryCaptureResultV1 = HistorySelectionCaptureV1 | (HistoryResolut
 export type HistoryCaptureRequestV1 = {
   readonly view: Omit<HistoryViewSelectionV1, "owner_key"> & { readonly owner_key?: string | null }
   readonly purpose: "send" | "fork"
+  readonly required_capability?: "tldw_history_existing_input_v1" | "tldw_history_server_existing_input_v1"
+  readonly accepted_input_admission?: HistoryAdmissionReferenceV1
 }
 
 export type PreparedHistoryContextV1 = {

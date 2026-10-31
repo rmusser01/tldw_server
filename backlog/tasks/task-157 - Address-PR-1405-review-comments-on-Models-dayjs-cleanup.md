@@ -47,7 +47,7 @@ Address actionable review feedback on PR #1405 by making the Models last-refresh
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the review fixes by replacing Intl.DateTimeFormat with deterministic Date#getHours/getMinutes string padding and by removing the filesystem-reading dayjs source guard from the Vitest unit test.
 
 Dependency regression coverage for this review fix is handled by an explicit exact import scan over apps/packages/ui/src/components/Option/Models, which returned no output and exit 1 as expected for no dayjs imports.
@@ -55,7 +55,7 @@ Dependency regression coverage for this review fix is handled by an explicit exa
 Verification: bunx vitest run src/components/Option/Models/__tests__ passed with 2 files and 4 tests; git diff --check passed; bun run lint in apps/tldw-frontend exited 0 with the existing 131 warnings baseline; Bandit skipped because only TypeScript/test/docs/Backlog files changed.
 
 PR #1405 review closeout: pushed commit 8231f31a1, updated the PR body to remove stale Intl/source-guard wording, observed both Qodo threads resolved/outdated after the pushed diff, replied to and resolved the remaining Gemini formatter thread at https://github.com/rmusser01/tldw_server/pull/1405#discussion_r3212532157.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

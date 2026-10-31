@@ -35,7 +35,7 @@ Validate and, if needed, patch PR #1582 so the redesigned /chat cockpit preserve
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Patched degraded readiness layout so degraded non-chat subsystems show a warning while /chat still receives a full-height application viewport.
 
 Kept legacy composer controls immediately below the textarea and before transient notices so model, MCP, Search & Context, prompt, character, attachments, tools, send, and advanced controls remain reachable in cockpit/focus layouts.
@@ -47,7 +47,7 @@ Real-server correction pass: added apps/tldw-frontend/e2e/workflows/chat-cockpit
 Real server evidence collected 2026-05-12: /api/v1/health returned HTTP 206 with JSON status degraded; degraded check was chacha_notes while database and metrics were healthy. /api/v1/llm/providers returned HTTP 200 with total_configured 26, configured_count 20, default_provider openai. /api/v1/llm/models/metadata returned HTTP 200 with total 852.
 
 Real-server Playwright verification passed after formatting: TLDW_E2E_SERVER_URL=http://127.0.0.1:8000 TLDW_E2E_API_KEY=THIS-IS-A-SECURE-KEY-123-FAKE-KEY TLDW_SERVER_URL=http://127.0.0.1:8000 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 TLDW_WEB_URL=http://localhost:18014 TLDW_WEB_CMD='bun run dev -- -H 127.0.0.1 -p 18014' bunx playwright test e2e/workflows/chat-cockpit.real-server.spec.ts --project=chromium --reporter=line. Result: 2 passed in 10.4s. Desktop covered degraded warning pass-through, cockpit controls, Search & Context, MCP unavailable disabled state, advanced controls, model/prompt/character selectors, tools menu, Current Chat Model Settings, Scene Director, focus mode hide/restore. Mobile covered default focus composer, opening cockpit rails, Context/Runtime summaries, model/character sidepanel actions, and returning to focus.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

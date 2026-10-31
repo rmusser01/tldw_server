@@ -33,7 +33,7 @@ Migrate Agent SessionHistoryPanel local StatusBadge from bespoke span styling to
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red evidence: bunx vitest run src/components/Agent/__tests__/SessionHistoryPanel.status-badge.test.tsx --reporter=dot failed because Idle was not rendered inside data-ds-component="Badge".
 
 Implementation: SessionHistoryPanel StatusBadge now maps AgentStatus values to canonical design-system state keys, selects shared Badge variants through getBadgeVariantForDesignSystemSeverity, preserves the translated visible labels and lucide status icons, marks icons aria-hidden, and removes the SessionHistoryPanel local-status-badge baseline exception. Running maps to retrying so it keeps an info/primary visual treatment while still using the canonical state registry.
@@ -41,7 +41,7 @@ Implementation: SessionHistoryPanel StatusBadge now maps AgentStatus values to c
 Verification: bunx vitest run src/components/Agent/__tests__/SessionHistoryPanel.status-badge.test.tsx --reporter=dot passed 1/1; bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot passed 46/46; bun run verify:design-system-state passed with baseline exceptions 510 and local-status-badge 4; git diff --check passed; touched-file TypeScript filter over bunx tsc --noEmit --pretty false returned no matches.
 
 Bandit: skipped because this slice only changes TypeScript/TSX, JSON, and Backlog metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

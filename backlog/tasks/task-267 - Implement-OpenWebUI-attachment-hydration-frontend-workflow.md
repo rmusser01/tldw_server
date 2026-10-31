@@ -36,11 +36,11 @@ Implement Stage 7 of the OpenWebUI attachment hydration plan: add frontend API c
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Stage 7 frontend workflow: added OpenWebUI hydration client methods and import-tab hydration controls for data root, conversation ids, optional source user, preview, opt-in supported-file processing, job creation, job refresh, summary counts, and warnings.
 
 Verification: bun run test src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-import.test.tsx from apps/packages/ui passed, 13 tests. bun run verify:openapi passed with reviewed baseline exception paths. git diff --check passed. Package-wide bunx tsc -p tsconfig.json --noEmit still fails on existing unrelated baseline TypeScript errors; no reported error referenced the new Chatbooks hydration files. Bandit not applicable for this frontend-only slice. User docs are owned by Stage 8.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

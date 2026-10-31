@@ -25,18 +25,16 @@ Current-head PR #2692 UI Package Characters Harness failed because two slow rout
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause: two route-focused onboarding tests still had explicit 10s timeout caps. CI showed both completed too slowly under the full harness load, while adjacent route-focus tests already use 30s. Aligned only those two timeout values to 30s.
 
 Verification: exact failing route-focused tests passed locally; full bun run test:characters-harness -- --maxWorkers=1 --no-file-parallelism passed. Bandit not applicable because this change only adjusts TypeScript test timeout metadata and Backlog metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Aligned the two failing route-focused character onboarding tests with the existing 30s harness timeout pattern. Verified the exact failing test names and the full characters harness locally.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

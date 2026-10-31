@@ -11,7 +11,6 @@ import wave
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, Literal
 
-from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
 from tldw_Server_API.app.core.Audio.Realtime.constants import REALTIME_MAX_OUTPUT_CHUNK_BYTES
 from tldw_Server_API.app.core.Audio.Realtime.models import RealtimeSessionConfig
 from tldw_Server_API.app.core.Audio.Realtime.pipeline import (
@@ -25,6 +24,7 @@ from tldw_Server_API.app.core.Audio.Realtime.pipeline import (
     RealtimePipelineTurnDone,
 )
 from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
+from tldw_Server_API.app.core.TTS.speech_schemas import OpenAISpeechRequest
 
 PipelineStage = Literal["stt", "llm", "tts"]
 

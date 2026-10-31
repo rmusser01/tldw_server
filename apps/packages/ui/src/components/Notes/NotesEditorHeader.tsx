@@ -47,6 +47,8 @@ interface NotesEditorHeaderProps {
   isDirty?: boolean
   saveIndicator?: SaveIndicatorState
   lastSavedAt?: string | null
+  /** Version, last save and server shown in the status pill's tooltip. */
+  saveStatusDetail?: string | null
   onOpenLinkedConversation: () => void
   onOpenSourceLink: (sourceId: string, sourceLabel: string) => void
   onApplyTemplate?: (templateId: string) => void
@@ -89,6 +91,7 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
   isDirty,
   saveIndicator = 'idle',
   lastSavedAt,
+  saveStatusDetail = null,
   onOpenLinkedConversation,
   onOpenSourceLink,
   onApplyTemplate,
@@ -125,12 +128,8 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
           defaultValue: 'Conversation ID'
         })}: ${backlinkConversationId}`
       : null
-  const displayedSaveState =
-    saveIndicator === 'saving' || saveIndicator === 'error'
-      ? saveIndicator
-      : isDirty
-        ? 'dirty'
-        : saveIndicator
+  // The editor's save state machine already folds in unsaved edits (NS-06).
+  const displayedSaveState = saveIndicator
 
   const overflowMenuItems: MenuProps['items'] = useMemo(() => {
     const items: MenuProps['items'] = []
@@ -441,6 +440,7 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
             state={displayedSaveState}
             lastSavedAt={lastSavedAt}
             onRetry={onSave}
+            detail={saveStatusDetail}
           />
         </div>
         {backlinkConversationId && (
@@ -503,7 +503,7 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
           }
         >
           <Button
-            type="primary"
+            type={isDirty ? 'primary' : 'default'}
             size={toolbarButtonSize}
             onClick={onSave}
             loading={isSaving}
@@ -538,9 +538,6 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
               disabled={!canSave || isSaving}
               icon={(<FilePlusIcon className="w-4 h-4" />)}
               className={touchTargetClass}
-              aria-label={t('option:notesSearch.toolbarSaveAndNewTooltip', {
-                defaultValue: 'Save and start another note'
-              })}
               data-testid="notes-save-and-new-button"
             >
               {t('option:notesSearch.saveAndNewAction', { defaultValue: 'Save & new' })}
@@ -636,7 +633,6 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
             }
           >
             <Button
-              type="primary"
               size={toolbarButtonSize}
               onClick={onCreateStudyPack}
               disabled={!canCreateStudyPack}

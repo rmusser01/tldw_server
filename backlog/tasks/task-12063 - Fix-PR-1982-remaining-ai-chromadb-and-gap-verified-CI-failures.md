@@ -25,7 +25,7 @@ Investigate and address the remaining failed PR #1982 CI checks on commit d48094
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Investigated failed PR #1982 check runs for commit d480942a408081248b24a12ee724ddac6f8e0714. Downloaded direct logs for ai-chromadb on Ubuntu 3.12/3.13, macOS 3.12, and Windows 3.12 plus gap-verified-3 on Ubuntu 3.12/3.13.
 
 Root causes:
@@ -49,14 +49,12 @@ Verification:
 Known skips/blockers:
 - Local verification is on the project Python 3.11 venv; the failing CI matrix used Python 3.12/3.13. The failed contracts reproduce locally on 3.11 and now pass locally.
 - Existing unrelated untracked watchlist template files remain unstaged.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Reconciled the remaining PR #1982 ai-chromadb and gap-verified-3 failures by restoring missing-model validation to model_required and making Chroma dimension mismatch recovery non-destructive except for confirmed-empty collections. Verified with the focused red set and both CI-style shard path sets locally.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

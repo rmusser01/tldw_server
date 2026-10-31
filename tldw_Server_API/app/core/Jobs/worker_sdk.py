@@ -18,6 +18,7 @@ from typing import Any, Callable
 from loguru import logger
 
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
+from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
 
 from .manager import JobManager
 from .operations.contracts import (
@@ -28,6 +29,7 @@ from .operations.contracts import (
     PreparedDispositionOrigin,
     PreparedDispositionResult,
     PreparedJobDisposition,
+    normalize_acquire_job_types,
 )
 
 try:
@@ -716,7 +718,8 @@ class WorkerSDK:
             try:
                 error_class: type[BaseException] | None = None
                 try:
-                    disposition = await handler(copy.deepcopy(acquired_job), context)
+                    with llm_call_root(acquired_job.get("owner_user_id")):
+                        disposition = await handler(copy.deepcopy(acquired_job), context)
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:  # noqa: BLE001 - handler isolation boundary
@@ -798,6 +801,7 @@ class WorkerSDK:
         acquire_guard: Callable[[dict[str, Any]], Awaitable[bool]] | None = None,
         owner_user_id: str | None = None,
         job_type: str | None = None,
+        job_types: tuple[str, ...] | None = None,
         on_completed: CompletionCallback | None = None,
         on_completion_rejected: CompletionCallback | None = None,
         on_failed: FailureCallback | None = None,
@@ -806,8 +810,11 @@ class WorkerSDK:
 
         handler should accept a job dict and return a result dict (or None) to finalize.
         Completion callbacks run after the durable completion attempt and receive
-        the acquired job plus the normalized result.
+        the acquired job plus the normalized result. An optional `job_types`
+        tuple restricts selection within the same serial claim loop.
         """
+        job_types = normalize_acquire_job_types(job_type, job_types)
+        type_filter = {"job_types": job_types} if job_types is not None else {}
         backoff = max(1, int(self.cfg.backoff_base_seconds))
         backoff_max = max(backoff, int(self.cfg.backoff_max_seconds))
         enforce = self.jm.should_enforce_leases()
@@ -820,6 +827,7 @@ class WorkerSDK:
                     worker_id=self.cfg.worker_id,
                     owner_user_id=owner_user_id,
                     job_type=job_type,
+                    **type_filter,
                 )
             except _WORKER_SDK_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"Acquire error: {e}")
@@ -952,7 +960,8 @@ class WorkerSDK:
                 renew_task = asyncio.create_task(self._auto_renew(job, progress_cb=progress_cb))
                 # Handle job
                 try:
-                    result = await handler(job)
+                    with llm_call_root(job.get("owner_user_id")):
+                        result = await handler(job)
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
@@ -1027,6 +1036,7 @@ class WorkerSDK:
                         or is_truthy(os.getenv("JOBS_REQUIRE_COMPLETION_TOKEN"))
                         else None
                     ),
+                    expected_uuid=str(job.get("uuid") or ""),
                     enforce=enforce,
                 )
                 if not ok:

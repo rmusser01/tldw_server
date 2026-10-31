@@ -34,7 +34,7 @@ Write the approved design spec for the Persona/Buddy sprite atlas V1.1 slice. Sc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-05-12: Wrote Docs/superpowers/specs/2026-05-12-persona-buddy-sprite-atlas-v1-design.md for issue #1611. Scope keeps sprite atlas support under renderer_type: sprite_frames with asset_role: sprite_sheet and frames[].region rectangles. No sprite_sheet renderer, manifest version bump, Live2D, VN/CYOA, image generation, or marketplace behavior is included.
 
 2026-05-12 review: Self-reviewed the spec against the merged PR #1608 renderer capability contract and the user-approved scope decision. The spec preserves the existing renderer registry, fail-soft Buddy fallback, explicit activation, and backend validation boundaries. Subagent review was not run because this turn did not include explicit authorization to spawn a reviewer agent.
@@ -42,7 +42,7 @@ Write the approved design spec for the Persona/Buddy sprite atlas V1.1 slice. Sc
 2026-05-12 verification: Documentation-only design slice; Bandit is not applicable because no Python/runtime code changed. Ran targeted text review for scope terms and will run git diff --check before commit.
 
 2026-05-12 follow-up design review: Tightened the spec before implementation planning. Clarified that V1.1 is not a manifest version, atlas previews should use preview_frame because preview_asset_id is ambiguous when many frames share one atlas asset, missing dimensions can remain permissive for finite positive regions, and registry renderability should stay coarse so SpriteFrameRenderer can mount and emit unsupported_region diagnostics.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

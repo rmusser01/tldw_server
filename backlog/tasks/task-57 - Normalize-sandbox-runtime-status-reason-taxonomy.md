@@ -36,7 +36,7 @@ PR #1284 review follow-up: verify current PR head and taxonomy ordering, add onl
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Focused RED check failed before implementation because vz_linux_policy_failed and vz_macos_policy_failed normalized to runtime_unavailable.
 
 Verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/sandbox/test_run_status_reason_codes.py tldw_Server_API/tests/sandbox/test_runtime_inventory_contract.py -q passed with 24 tests.
@@ -54,7 +54,7 @@ Verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python 
 Verification: git diff --check passed after the review follow-up edit.
 
 Bandit: skipped for this follow-up because it only adds pytest assertions in a sandbox test file and makes no production-code changes; the PR's production taxonomy file already had zero Bandit findings in the prior verification.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

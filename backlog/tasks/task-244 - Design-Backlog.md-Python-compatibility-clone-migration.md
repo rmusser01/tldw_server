@@ -43,13 +43,13 @@ Create a design artifact reviewing a full Python compatibility clone of upstream
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Wrote design spec at Docs/superpowers/specs/2026-05-10-backlog-md-python-compatibility-clone-design.md. Initial spec review subagent approved it with no blocking issues. Advisory recommendations were to resolve open questions during early planning, start the implementation plan with upstream command/MCP inventory, and define agent-critical CLI/MCP operations in the first milestone checklist.
 
 Verification for initial spec: rg marker scan over the design spec and TASK-244 passed. git diff --check over the design spec and TASK-244 passed. Bandit was skipped because this task changed only Markdown design/backlog files and no Python code.
 
 User reviewed the committed spec and asked for a critique-first pass before continuing. Reopened TASK-244 to harden the design based on current upstream docs and local review findings. Addressed planning risks around upstream config/default drift, BACKLOG_CWD and --cwd MCP behavior, --no-git initialization, modified-file search, datetime/date-only compatibility, onStatusChange callbacks, browser UI/service-mode complexity, pinned oracle fixture snapshots, and measurable agent-critical CLI/MCP parity.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

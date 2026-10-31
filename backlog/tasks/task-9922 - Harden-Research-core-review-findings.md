@@ -36,9 +36,9 @@ Plan file: Docs/superpowers/plans/2026-06-23-research-core-review-hardening-plan
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification pass confirmed all six review findings were present in current code before fixes. Implemented owner-scoped service reads/actions, checkpoint replay guards, per-user Jobs worker path resolution, unique immutable artifact storage files with latest aliases, cooperative cancellation checks, and collection budget enforcement. Added focused regression coverage in tldw_Server_API/tests/Research/test_research_core_hardening.py. PR review follow-up: async Research job handlers now offload artifact writes through asyncio.to_thread to avoid blocking the event loop. Verification: hardening pytest 10 passed; compatibility pytest slice 10 passed; py_compile passed; git diff --check passed; Bandit JSON reported errors=0 and results=0. Known skip/workaround: default pytest cleanup with the unraisableexception plugin hung during earlier red runs, so focused verification used -p no:unraisableexception.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -97,6 +97,20 @@ describe("plasmo storage cross-instance change propagation (H10)", () => {
     vi.restoreAllMocks()
   })
 
+  it("B08 functional render-only updates use the latest value without persisting", async () => {
+    const { result } = renderHook(() => useStorage<number>("render-only-counter", 0))
+    await waitFor(() => expect(result.current[2].isLoading).toBe(false))
+    act(() => {
+      result.current[2].setRenderValue(previous => (previous ?? 0) + 1)
+      result.current[2].setRenderValue(previous => (previous ?? 0) + 1)
+    })
+    expect(result.current[0]).toBe(2)
+    expect(await new Storage().get("render-only-counter")).toBeUndefined()
+    await act(async () => { await result.current[1](previous => (previous ?? 0) + 1) })
+    expect(result.current[0]).toBe(3)
+    expect(await new Storage().get("render-only-counter")).toBe(3)
+  })
+
   it("functional setValue uses the freshest value, not a stale closure", async () => {
     const { result } = renderHook(() => useStorage<number>("counter", 0))
 

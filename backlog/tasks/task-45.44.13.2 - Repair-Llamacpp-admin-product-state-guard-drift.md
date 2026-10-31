@@ -35,11 +35,11 @@ Current dev has unbaselined Llamacpp admin AntD Alert product-state findings. Mi
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Migrated the small Llamacpp admin Alert drift from AntD Alert to the design-system Alert primitive across AdminPage, InventoryPanel, LaunchPanel, and ReadinessPanel. Removed stale LlamacppAdminPage baseline entries. Verification: focused Llamacpp admin Vitest files passed; product-state guard test passed; verify:design-system-state passed; git diff --check passed. Full UI tsc remains blocked by pre-existing repo-wide unrelated TypeScript errors outside touched files. Bandit skipped because this task only touches frontend TypeScript/JSON/backlog files.
 
 PR #1738 review fixes: marked non-urgent llama.cpp admin notices as role=status with aria-live=polite while leaving error alerts assertive. Verification: focused Llamacpp admin Vitest files passed; product-state guard test passed; verify:design-system-state passed; git diff --check passed. Full UI tsc remains blocked by pre-existing unrelated errors outside touched paths. Bandit not applicable for frontend TypeScript/backlog-only changes.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

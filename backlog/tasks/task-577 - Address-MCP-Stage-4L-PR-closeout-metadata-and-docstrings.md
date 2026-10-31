@@ -28,11 +28,11 @@ Address remaining PR #2195 closeout comments after code review fixes: complete P
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified current PR state after commit 733392167e. Remaining items are closeout/metadata: CodeRabbit PR description checklist, repo-wide docstring warning, and stale unresolved review threads whose findings are already fixed in current code.
 
 Added concise docstrings to touched public FastAPI route handlers and storage protocol methods. Prepared a complete PR body with validation, UX/Watchlists applicability, risk, rollback, and docstring coverage context. Review-thread resolution will reference the fixed current code after push.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

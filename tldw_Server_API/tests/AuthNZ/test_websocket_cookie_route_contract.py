@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import ast
+import importlib
+import re
 from pathlib import Path
+from unittest.mock import AsyncMock, Mock
 
 import pytest
+from fastapi import WebSocket
 
 pytestmark = pytest.mark.unit
 
@@ -24,8 +28,10 @@ FIRST_PARTY_WEBSOCKET_AUTH_FILES = (
     "tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py",
     "tldw_Server_API/app/core/Audio/streaming_service.py",
     # Realtime speech routes (9d6104995e) authenticate via the shared audio
-    # handshake in streaming_service, which owns the cookie resolver.
+    # adapter in streaming_service, which sits on the core resolver.
     "tldw_Server_API/app/core/Audio/Realtime/auth.py",
+    # The core WebSocket resolver (TASK-13950.7) owns it for migrated routes.
+    "tldw_Server_API/app/core/AuthNZ/websocket_principal.py",
 )
 
 EXPECTED_WEBSOCKET_HANDLERS = {
@@ -85,7 +91,80 @@ def test_first_party_websocket_auth_files_use_shared_cookie_resolver():
         source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
         if relative_path.endswith("endpoints/meetings.py"):
             assert "get_meetings_db_for_websocket" in source, relative_path
-        elif relative_path.endswith("Audio/Realtime/auth.py"):
+        elif relative_path.endswith(("Audio/Realtime/auth.py", "endpoints/audio/audio_streaming.py")):
             assert "_audio_ws_authenticate" in source, relative_path
+            assert "resolve_single_user_cookie_websocket" not in source, relative_path
+        elif relative_path.endswith(("endpoints/voice_assistant.py", "Audio/streaming_service.py")):
+            # First-message-frame routes: the core resolver reads the cookie before accept, then the frame.
+            assert re.search(r"\bresolve_ws_principal_first_frame\b", source), relative_path
+            assert "resolve_single_user_cookie_websocket" not in source, relative_path
+        elif relative_path.endswith(("endpoints/workflows.py", "endpoints/sandbox.py")):
+            # A whole word, so the deprecated query shim's longer name cannot satisfy it.
+            assert re.search(r"\bresolve_ws_principal\b", source), relative_path
+            assert "resolve_single_user_cookie_websocket" not in source, relative_path  # the resolver owns it
+        elif relative_path.endswith(("endpoints/agent_client_protocol.py", "endpoints/watchlists.py", "endpoints/persona.py")):
+            # resolve_ws_principal behind the deprecated query shim (pinned in
+            # tests/lint/test_auth_token_parsing_ratchet.py; TASK-13950.61 removes it).
+            assert re.search(r"\bresolve_ws_principal_or_deprecated_query\b", source), relative_path
+            assert "resolve_single_user_cookie_websocket" not in source, relative_path
+        elif relative_path.endswith(("endpoints/acp_multiplex.py", "prompt_studio/prompt_studio_websocket.py")):
+            # ACP's _authenticate_ws: resolve_ws_principal behind the deprecated credential shim.
+            assert "_authenticate_ws" in source, relative_path
         else:
             assert "resolve_single_user_cookie_websocket" in source, relative_path
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("module_name", "handler_name", "path"),
+    [
+        ("audio.audio_realtime", "websocket_realtime", "/api/v1/audio/realtime"),
+        ("realtime_compat", "websocket_realtime_compat", "/v1/realtime"),
+    ],
+)
+@pytest.mark.parametrize("untrusted_cookie", [False, True], ids=["missing-credentials", "untrusted-cookie-origin"])
+async def test_realtime_routes_enforce_shared_websocket_auth(
+    monkeypatch: pytest.MonkeyPatch,
+    module_name: str,
+    handler_name: str,
+    path: str,
+    untrusted_cookie: bool,
+) -> None:
+    from tldw_Server_API.app.core.Audio.Realtime import handler
+    from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
+    from tldw_Server_API.app.core.AuthNZ import websocket_session_auth
+
+    module = importlib.import_module(f"tldw_Server_API.app.api.v1.endpoints.{module_name}")
+    settings = auth_settings.get_settings()
+    monkeypatch.setattr(settings, "AUTH_MODE", "single_user")
+    monkeypatch.setattr(websocket_session_auth, "trusted_webui_origins", lambda: {"http://localhost:3000"})
+    pipeline_factory = Mock(side_effect=AssertionError("Unauthenticated realtime pipeline started"))
+    monkeypatch.setattr(module, "DEFAULT_REALTIME_PIPELINE_FACTORY", pipeline_factory)
+    headers = []
+    if untrusted_cookie:
+        headers = [
+            (b"cookie", f"{settings.SINGLE_USER_SESSION_COOKIE_NAME}=untrusted-session".encode()),
+            (b"origin", b"https://untrusted.example"),
+        ]
+    send = AsyncMock()
+    receive = AsyncMock(side_effect=AssertionError("Realtime auth consumed protocol data"))
+    websocket = WebSocket(
+        scope={
+            "type": "websocket",
+            "path": path,
+            "headers": headers,
+            "query_string": b"",
+            "client": ("127.0.0.1", 12345),
+        },
+        receive=receive,
+        send=send,
+    )
+
+    assert module.handle_realtime_websocket is handler.handle_realtime_websocket
+    await getattr(module, handler_name)(websocket)
+
+    send.assert_awaited_once_with(
+        {"type": "websocket.close", "code": 4403 if untrusted_cookie else 4401, "reason": ""},
+    )
+    receive.assert_not_awaited()
+    pipeline_factory.assert_not_called()

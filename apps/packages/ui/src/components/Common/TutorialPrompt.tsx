@@ -1,9 +1,10 @@
+import { useStartTutorial } from "@/hooks/useStartTutorial"
 /**
  * TutorialPrompt Component
  * Shows a toast notification on first visit to pages with tutorials
  */
 
-import React, { useEffect, useRef } from "react"
+import React, { useEffect, useLayoutEffect, useRef } from "react"
 import { useLocation } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { notification, Button, Space } from "antd"
@@ -31,22 +32,41 @@ const NOTIFICATION_KEY = "tutorial-prompt-global"
 export const TutorialPrompt: React.FC = () => {
   const { t } = useTranslation(["tutorials", "common"])
   const location = useLocation()
+  const route = JSON.stringify([
+    location.key,
+    location.pathname,
+    location.search,
+    location.hash
+  ])
   const [api, contextHolder] = notification.useNotification()
-  const timeoutRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null)
+  const timeoutRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(
+    null
+  )
   const notificationKeyRef = useRef<string | null>(null)
   const shownRef = useRef<Set<string>>(new Set())
   const lastPromptShownAtRef = useRef(0)
   const activePromptPageRef = useRef<string | null>(null)
   const suppressCloseMarkRef = useRef(false)
 
-  const hasSeenPromptForPage = useTutorialStore((state) => state.hasSeenPromptForPage)
+  const hasSeenPromptForPage = useTutorialStore(
+    (state) => state.hasSeenPromptForPage
+  )
   const markPromptSeen = useTutorialStore((state) => state.markPromptSeen)
-  const startTutorial = useTutorialStore((state) => state.startTutorial)
+  const startTutorial = useStartTutorial()
+  const launcherRef = useRef(startTutorial)
+  useLayoutEffect(() => {
+    launcherRef.current = startTutorial
+  }, [startTutorial])
   const isHelpModalOpen = useTutorialStore((state) => state.isHelpModalOpen)
   const activeTutorialId = useTutorialStore((state) => state.activeTutorialId)
-  const completedTutorials = useTutorialStore((state) => state.completedTutorials)
+  const completedTutorials = useTutorialStore(
+    (state) => state.completedTutorials
+  )
 
   useEffect(() => {
+    // Keep the prompt's original source; unrelated renders must not cancel its delay.
+    const launchTutorial = launcherRef.current
+    let active = true
     const pageKey = location.pathname
     const tutorialLookupOptions = {
       completedTutorialIds: completedTutorials
@@ -97,20 +117,27 @@ export const TutorialPrompt: React.FC = () => {
       return
     }
 
-    // Mark as shown for this session immediately
-    shownRef.current.add(pageKey)
-
+    // The page counts as prompted once the prompt appears. A same-page address
+    // change before then (opening a note writes /notes?note=<id>, XP-05)
+    // cancels the pending prompt, and this lets it be scheduled again.
     const now = Date.now()
     const elapsedSinceLastPrompt = now - lastPromptShownAtRef.current
-    const cooldownRemaining = Math.max(PROMPT_COOLDOWN_MS - elapsedSinceLastPrompt, 0)
+    const cooldownRemaining = Math.max(
+      PROMPT_COOLDOWN_MS - elapsedSinceLastPrompt,
+      0
+    )
     const delayMs = Math.max(PROMPT_DELAY_MS, cooldownRemaining)
 
     // Show notification after a delay
     timeoutRef.current = globalThis.setTimeout(() => {
+      if (!active) return
+      shownRef.current.add(pageKey)
       lastPromptShownAtRef.current = Date.now()
       activePromptPageRef.current = pageKey
 
       const handleDismiss = () => {
+        if (!active) return
+        active = false
         if (notificationKeyRef.current) {
           api.destroy(notificationKeyRef.current)
           notificationKeyRef.current = null
@@ -120,12 +147,13 @@ export const TutorialPrompt: React.FC = () => {
       }
 
       const handleStartTour = () => {
+        if (!active || !launchTutorial(primaryTutorial.id)) return
+        active = false
         if (notificationKeyRef.current) {
           api.destroy(notificationKeyRef.current)
           notificationKeyRef.current = null
         }
         markPromptSeen(pageKey)
-        startTutorial(primaryTutorial.id)
         activePromptPageRef.current = null
       }
 
@@ -141,7 +169,10 @@ export const TutorialPrompt: React.FC = () => {
           <span className="text-text-muted">
             {t("tutorials:prompt.description", {
               defaultValue: "Take a quick tour to learn the key features.",
-              tutorialName: t(primaryTutorial.labelKey, primaryTutorial.labelFallback)
+              tutorialName: t(
+                primaryTutorial.labelKey,
+                primaryTutorial.labelFallback
+              )
             })}
           </span>
         ),
@@ -164,6 +195,8 @@ export const TutorialPrompt: React.FC = () => {
         placement: "bottomRight",
         className: "tutorial-prompt-notification",
         onClose: () => {
+          if (!active) return
+          active = false
           notificationKeyRef.current = null
           if (suppressCloseMarkRef.current) {
             suppressCloseMarkRef.current = false
@@ -179,6 +212,7 @@ export const TutorialPrompt: React.FC = () => {
     }, delayMs)
 
     return () => {
+      active = false
       if (timeoutRef.current) {
         window.clearTimeout(timeoutRef.current)
         timeoutRef.current = null
@@ -191,6 +225,7 @@ export const TutorialPrompt: React.FC = () => {
       }
     }
   }, [
+    route,
     location.pathname,
     activeTutorialId,
     api,
@@ -198,8 +233,7 @@ export const TutorialPrompt: React.FC = () => {
     completedTutorials,
     t,
     hasSeenPromptForPage,
-    markPromptSeen,
-    startTutorial
+    markPromptSeen
   ])
 
   return contextHolder

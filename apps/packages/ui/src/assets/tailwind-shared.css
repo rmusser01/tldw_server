@@ -76,17 +76,19 @@
   --color-surface-2: 240 237 231;
   --color-elevated: 251 250 247;
   --color-primary: 47 111 237;
+  --color-primary-foreground: 0 0 0;
   --color-primary-strong: 36 86 199;
+  --color-primary-strong-foreground: 255 255 255;
   --color-accent: 31 181 159;
-  --color-success: 34 160 123;
-  --color-warn: 217 119 6;
-  --color-danger: 224 88 109;
+  --color-success: 4 120 87;
+  --color-warn: 168 82 7;
+  --color-danger: 190 45 74;
   --color-muted: 102 112 133;
   --color-border: 226 221 211;
   --color-border-strong: 207 200 186;
   --color-text: 31 35 40;
   --color-text-muted: 91 100 114;
-  --color-text-subtle: 110 120 135;
+  --color-text-subtle: 95 104 119;
   --color-focus: 13 134 119;
   --state-ready: var(--color-success);
   --state-unavailable: var(--color-danger);
@@ -142,7 +144,9 @@
   --color-surface-2: 29 33 40;
   --color-elevated: 35 40 50;
   --color-primary: 92 141 255;
+  --color-primary-foreground: 0 0 0;
   --color-primary-strong: 62 106 224;
+  --color-primary-strong-foreground: 255 255 255;
   --color-accent: 79 209 176;
   --color-success: 59 214 150;
   --color-warn: 247 185 85;
@@ -416,7 +420,7 @@ body {
 .ant-table-column-sorter,
 .ant-tag,
 .ant-drawer-title,
-.ant-typography:not(.ant-typography-danger):not(.ant-typography-success):not(.ant-typography-warning),
+.ant-typography:not(.ant-typography-danger):not(.ant-typography-success):not(.ant-typography-warning):not(.ant-typography-secondary),
 .ant-form-item-label > label,
 .ant-checkbox-wrapper,
 .ant-radio-wrapper,
@@ -553,7 +557,8 @@ body {
 .ant-select-focused .ant-select-selector,
 .ant-picker-focused {
   border-color: rgb(var(--color-primary)) !important;
-  box-shadow: 0 0 0 2px rgb(var(--color-focus) / 0.4) !important;
+  /* Opaque so the halo itself reaches 3:1 against the surface (AX-08). */
+  box-shadow: 0 0 0 2px rgb(var(--color-focus)) !important;
 }
 
 .ant-form-item-has-error .ant-form-item-explain,
@@ -760,13 +765,20 @@ body {
   border-radius: 8px;
 }
 
+/* A checked switch's label sits on the primary track; antd writes it white,
+   which fails contrast on light primaries such as the dark theme's (AX-07). */
+.ant-switch.ant-switch-checked .ant-switch-inner .ant-switch-inner-checked {
+  color: rgb(var(--color-primary-foreground));
+}
+
 .focus-ring.ant-switch:focus-visible {
-  box-shadow: 0 0 0 3px rgb(var(--color-focus) / 0.35);
+  /* A surface gap keeps the ring distinct from a checked switch's fill. */
+  box-shadow: 0 0 0 2px rgb(var(--color-surface)), 0 0 0 4px rgb(var(--color-focus));
 }
 
 .focus-ring.ant-select-focused .ant-select-selector,
 .focus-ring .ant-select-selector:focus-visible {
-  box-shadow: 0 0 0 3px rgb(var(--color-focus) / 0.35) !important;
+  box-shadow: 0 0 0 2px rgb(var(--color-focus)) !important;
   border-color: rgb(var(--color-focus)) !important;
   border-radius: 8px !important;
 }
@@ -1317,5 +1329,53 @@ body {
     box-shadow:
       0 0 0 1px rgba(var(--color-warn), 0.14),
       0 12px 28px -18px rgba(var(--color-warn), 0.36);
+  }
+}
+
+/* ===== Accessibility: forced colours (AX-15, #3124) =====
+   Windows High Contrast and other forced-colour modes replace fills, so a
+   selected toggle that differs only by background looks like its neighbours.
+   Outline the selected state in a system colour that survives. */
+@media (forced-colors: active) {
+  [aria-pressed="true"],
+  [role="radio"][aria-checked="true"],
+  [role="tab"][aria-selected="true"],
+  .ant-pagination-item-active,
+  .ant-segmented-item-selected {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+}
+
+/* ===== Accessibility: link focus (AX-08, #3124) =====
+   antd's global reset sets `a { outline: none }` and `a:focus { outline: 0 }`
+   (scoped by its hashed class), so links without focus classes of their own
+   showed nothing on keyboard focus. Links that already style their focus
+   (Tailwind focus: / focus-visible: utilities) are left alone. */
+a[href]:focus-visible:not([class*="focus:"]):not([class*="focus-visible:"]) {
+  outline: 2px solid rgb(var(--color-focus));
+  outline-offset: 2px;
+}
+
+/* ===== Accessibility: reduced motion (AX-19, #3124) =====
+   Honour the OS "reduce motion" setting everywhere: stop looping and
+   decorative animations (shake, pulse, bounce, spinners), make transitions
+   effectively instant and turn off CSS smooth scrolling. This overrides the
+   app's own animation setting too, including "subtle". A behaviour passed
+   from script still wins over CSS, so scripted scrolls must use
+   smoothScrollBehavior() from utils/reduced-motion; the files that do not
+   yet are listed in utils/__tests__/smooth-scroll.guard.test.ts. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-base: 0ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

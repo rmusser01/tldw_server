@@ -81,6 +81,7 @@ class LegacyImportErrorCode(str, Enum):
 
     SOURCE_INVALID = "admin_webhook_legacy_source_invalid"
     SOURCE_CHANGED = "admin_webhook_legacy_source_changed"
+    HOST_UNSUPPORTED = "admin_webhook_legacy_host_unsupported"
     PATH_UNSAFE = "admin_webhook_legacy_path_unsafe"
     REPORT_INVALID = "admin_webhook_legacy_report_invalid"
     APPROVAL_MISMATCH = "admin_webhook_legacy_approval_mismatch"
@@ -101,6 +102,21 @@ class LegacyImportError(TransactionPassthroughError):
     def __init__(self, code: LegacyImportErrorCode | str) -> None:
         self.code = LegacyImportErrorCode(code)
         super().__init__(self.code.value)
+
+
+def posix_private_artifacts_supported() -> bool:
+    """Return whether this host supports the private artifact ownership contract."""
+    return (
+        os.name == "posix"
+        and callable(getattr(os, "geteuid", None))
+        and callable(getattr(os, "fchmod", None))
+    )
+
+
+def require_posix_private_artifacts() -> None:
+    """Reject unsupported hosts before accessing private migration artifacts."""
+    if not posix_private_artifacts_supported():
+        raise LegacyImportError(LegacyImportErrorCode.HOST_UNSUPPORTED)
 
 
 class LegacyRejectionReason(str, Enum):
@@ -260,6 +276,8 @@ class _FileEvidence:
     group_id: int
     mode: int
     identity: str
+    # Ephemeral cleanup evidence; persisted artifact identities retain their format.
+    change_time_ns: int | None = None
 
 
 class _RecordIssue(Exception):
@@ -392,6 +410,7 @@ def _path_exists(path: Path) -> bool:
 
 
 def _normalize_output_path(path: Path) -> Path:
+    require_posix_private_artifacts()
     expanded = Path(os.path.abspath(os.path.expanduser(str(path))))
     if _path_exists(expanded):
         metadata = os.lstat(expanded)
@@ -416,6 +435,7 @@ def _is_within(path: Path, root: Path) -> bool:
 
 
 def _fsync_directory(path: Path) -> None:
+    require_posix_private_artifacts()
     descriptor = os.open(path, os.O_RDONLY)
     try:
         try:
@@ -428,6 +448,7 @@ def _fsync_directory(path: Path) -> None:
 
 
 def _publish_private_report(path: Path, payload: bytes) -> None:
+    require_posix_private_artifacts()
     if _path_exists(path):
         metadata = os.lstat(path)
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.geteuid():
@@ -470,6 +491,7 @@ def _publish_private_report(path: Path, payload: bytes) -> None:
 
 
 def _read_private_file(path: Path, *, maximum_bytes: int = 70_000_000) -> bytes:
+    require_posix_private_artifacts()
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(path, flags)
@@ -509,6 +531,7 @@ def _file_evidence(path: Path, *, expected_payload: bytes | None = None) -> _Fil
         group_id=metadata.st_gid,
         mode=stat.S_IMODE(metadata.st_mode),
         identity=f"{metadata.st_dev}:{metadata.st_ino}",
+        change_time_ns=metadata.st_ctime_ns,
     )
 
 
@@ -521,6 +544,7 @@ def _publish_exclusive_artifact(
     staging_path: Path,
     payload: bytes,
 ) -> _FileEvidence:
+    require_posix_private_artifacts()
     if _path_exists(final_path) or _path_exists(staging_path):
         raise LegacyImportError(LegacyImportErrorCode.PATH_UNSAFE)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
@@ -564,6 +588,7 @@ def _publish_or_resume_artifact(
     staging_path: Path,
     payload: bytes,
 ) -> _FileEvidence:
+    require_posix_private_artifacts()
     if _path_exists(final_path):
         final_evidence = _file_evidence(final_path, expected_payload=payload)
         if _path_exists(staging_path):
@@ -614,6 +639,7 @@ def _strict_json_object(payload: bytes, *, maximum_bytes: int) -> dict[str, obje
 
 
 def _publish_exclusive_output(path: Path, payload: bytes) -> _FileEvidence:
+    require_posix_private_artifacts()
     if _path_exists(path):
         raise LegacyImportError(LegacyImportErrorCode.PATH_UNSAFE)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
@@ -668,6 +694,7 @@ def _remove_published_output_if_same(
         or metadata.st_gid != evidence.group_id
         or stat.S_IMODE(metadata.st_mode) != evidence.mode
         or f"{metadata.st_dev}:{metadata.st_ino}" != evidence.identity
+        or metadata.st_ctime_ns != evidence.change_time_ns
     ):
         return
     # dev:inode alone cannot prove the file is still ours: Linux filesystems reuse a
@@ -1389,6 +1416,7 @@ class LegacyImportService:
         """Publish a deterministic mode-0600 redacted dry-run report."""
         if not isinstance(request, LegacyImportRequest):
             raise TypeError("LegacyImportRequest is required")
+        require_posix_private_artifacts()
         snapshot = await self._snapshot()
         paths = self._normalize_paths(
             request,
@@ -2224,6 +2252,7 @@ class LegacyImportService:
             or now.tzinfo is None
         ):
             raise LegacyImportError(LegacyImportErrorCode.PRECONDITION_FAILED)
+        require_posix_private_artifacts()
         state = await self._repository.get_migration_state()
         self._require_extractable_rollback_state(state=state, now=now)
         if not confirmed or state.import_operation_id is None:
@@ -2394,6 +2423,7 @@ class LegacyImportService:
         request_id: str,
     ) -> str:
         """Retire the one-time key and encrypted active backup after expiry."""
+        require_posix_private_artifacts()
         state = await self._repository.get_migration_state()
         if state.rollback_retirement_phase == "not_applicable":
             return LegacyImportErrorCode.ROLLBACK_ARTIFACTS_NOT_APPLICABLE.value
@@ -2768,6 +2798,7 @@ class LegacyImportService:
         """Apply one literal approved report through the durable import stages."""
         if not isinstance(request, LegacyImportRequest):
             raise TypeError("LegacyImportRequest is required")
+        require_posix_private_artifacts()
         if (
             self._settings.mode is not AdminWebhookMode.MIGRATE
             or self._settings.route_selection is not WebhookRouteSelection.CANONICAL

@@ -73,7 +73,7 @@ export const WritingPlaygroundShell: FC<WritingPlaygroundShellProps> = ({
           placement="left"
           open={libraryOpen}
           onClose={onLibraryClose}
-          width={LIBRARY_DRAWER_WIDTH_PX}
+          size={LIBRARY_DRAWER_WIDTH_PX}
           styles={{ body: { padding: 0 } }}>
           {libraryContent}
         </Drawer>
@@ -101,7 +101,7 @@ export const WritingPlaygroundShell: FC<WritingPlaygroundShellProps> = ({
           placement="right"
           open={inspectorOpen}
           onClose={onInspectorClose}
-          width={INSPECTOR_DRAWER_WIDTH_PX}
+          size={INSPECTOR_DRAWER_WIDTH_PX}
           styles={{ body: { padding: 0 } }}>
           {inspectorContent}
         </Drawer>

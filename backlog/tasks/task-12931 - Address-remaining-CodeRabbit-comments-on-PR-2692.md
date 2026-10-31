@@ -25,16 +25,14 @@ Address current unresolved CodeRabbit comments on PR #2692: dedupe sidebar short
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented minimal CodeRabbit follow-ups: normalizeSidebarShortcutSelection now drops duplicate persisted shortcut IDs before mapping actions; ChatSidebar tools-first coverage includes duplicate saved IDs; mobile cockpit panel height cap is named MAX_MOBILE_PANEL_HEIGHT_PX; TTS provider preview required fields now use a provider keyed field table while preserving the same messages and short-circuit behavior. Verification: bunx vitest run src/components/Common/ChatSidebar/__tests__/ChatSidebar.tools-first.test.tsx --maxWorkers=1 --no-file-parallelism passed (8 tests); bunx vitest run src/components/Option/Settings/__tests__/TTSModeSettings.test.tsx --maxWorkers=1 --no-file-parallelism passed (15 tests); apps/tldw-frontend bun run typecheck passed; git diff --check passed. Bandit not applicable because touched implementation is TypeScript/Playwright plus Backlog metadata only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Addressed the remaining CodeRabbit comments on PR #2692 with a focused TypeScript-only patch and recorded the focused verification. No Python files were touched, so Bandit was not applicable.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -4,12 +4,14 @@ import asyncio
 import gc
 import threading
 import weakref
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.Claims_Extraction.analyze_types import ClaimsAnalyzeCallable
+from tldw_Server_API.app.core.Context_Integrity import prompt_loader as prompt_loader_mod
 from tldw_Server_API.app.core.Context_Integrity.models import ContextIntegrityBootState
 from tldw_Server_API.app.core.Context_Integrity.resolver import (
     ContextIntegrityResolver,
@@ -18,7 +20,6 @@ from tldw_Server_API.app.core.Context_Integrity.resolver import (
 )
 from tldw_Server_API.app.core.RAG.rag_service import generation as generation_mod
 from tldw_Server_API.app.core.RAG.rag_service.generation import PromptTemplates
-from tldw_Server_API.app.core.Utils import prompt_loader as prompt_loader_mod
 
 pytestmark = pytest.mark.unit
 
@@ -109,12 +110,10 @@ async def test_prompt_load_uses_resolver_captured_before_concurrent_transition(
     release_read = threading.Event()
     original_read = prompt_loader_mod._read_regular_file_bytes_no_follow
 
-    # The loader passes max_bytes= (53f0a747d2); a narrower stub signature raised
-    # TypeError before read_started was ever set.
-    def barrier_read(path: Any, **kwargs: Any) -> bytes:
+    def barrier_read(path: Any, *, max_bytes: int | None = None) -> bytes:
         read_started.set()
         assert release_read.wait(timeout=1.0)  # nosec B101
-        return original_read(path, **kwargs)
+        return original_read(path, max_bytes=max_bytes)
 
     monkeypatch.setattr(
         prompt_loader_mod,
@@ -448,3 +447,73 @@ async def test_claims_stream_wrapper_closes_only_its_own_base_stream(
         "a": ["base_stream_close"],
         "b": ["base_stream_close"],
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("keyword_arguments", [True, False], ids=["canonical-keywords", "full-positional"])
+async def test_streaming_claims_callback_accepts_native_analyze_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    keyword_arguments: bool,
+) -> None:
+    captured_callbacks: list[ClaimsAnalyzeCallable] = []
+    lifecycle: list[str] = []
+
+    class _StubGenerator:
+        async def generate_stream(self, _context: object, _query: str, **_kwargs: object) -> AsyncGenerator[str, None]:
+            try:
+                yield "answer"
+            finally:
+                lifecycle.append("base_stream_close")
+
+    class _ClaimsEngine:
+        def __init__(self, analyze_fn: ClaimsAnalyzeCallable) -> None:
+            captured_callbacks.append(analyze_fn)
+
+    monkeypatch.setattr(generation_mod, "create_generator", lambda _config: _StubGenerator())
+    monkeypatch.setattr(generation_mod, "ClaimsEngine", _ClaimsEngine)
+    context = SimpleNamespace(
+        config={"generation": {"provider": "openai", "model": "gpt-4o-mini"}},
+        query="claims callback contract",
+        metadata={},
+        documents=[],
+    )
+    result = await generation_mod.generate_streaming_response(context, enable_claims=True)
+    stream: AsyncGenerator[str, None] = result.stream_generator
+    try:
+        assert await stream.__anext__() == "answer"
+        assert len(captured_callbacks) == 1
+        analyze = captured_callbacks[0]
+        if keyword_arguments:
+            response = analyze(
+                api_endpoint=None,
+                input_data="answer",
+                prompt=None,
+                api_key=None,
+                system_message=None,
+                temp=None,
+                streaming=False,
+                recursive_summarization=False,
+                chunked_summarization=False,
+                chunk_options=None,
+                model_override=None,
+                response_format=None,
+            )
+        else:
+            response = analyze(
+                None,
+                "answer",
+                None,
+                None,
+                None,
+                None,
+                False,
+                False,
+                False,
+                None,
+                None,
+                None,
+            )
+        assert response == '{"claims": []}'
+    finally:
+        await stream.aclose()
+    assert lifecycle == ["base_stream_close"]

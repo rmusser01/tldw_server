@@ -40,9 +40,9 @@ Align public and operator-facing sandbox documentation after the merged runtime 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Docs-only reconciliation completed. Updated Sandbox API quick guide with admin runtime diagnostics, macOS diagnostics, image-store cleanup, VZ reconciliation repair, and status_reason_code guidance. Updated Sandbox README source-of-truth pointers, macOS operator notes cross-runtime diagnostics guidance, and inventory current-gap wording for host-local warnings. Verification: listed referenced docs successfully; verified documented admin endpoint route strings exist in sandbox.py; verified status_reason_code schema/taxonomy references exist; git diff --check passed. Bandit skipped because no production code changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

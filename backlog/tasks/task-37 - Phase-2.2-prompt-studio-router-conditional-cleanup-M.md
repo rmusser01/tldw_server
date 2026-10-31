@@ -27,11 +27,11 @@ Continue #1116 Phase 2.2 by deferring the remaining Prompt Studio content router
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red/green focused test: python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "prompt_studio_router_attr_lookup" -q failed before implementation on eager router attr lookup, then passed after converting Prompt Studio specs to lazy imported specs.
 
 Verification: router group contract 54 passed; main router contract 6 passed; OpenAPI contracts 69 passed; Bandit source scan content.py returned 0 results/0 errors; git diff --check clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

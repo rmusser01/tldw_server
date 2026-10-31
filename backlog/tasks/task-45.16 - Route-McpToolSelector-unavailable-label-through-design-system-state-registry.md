@@ -36,11 +36,11 @@ Fix the current design-system product-state guard regression on dev by replacing
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red check: bun run verify:design-system-state failed on origin/dev with blocked canonical-state-label finding for src/components/Common/McpToolSelector.tsx (Unavailable). Implementation imports getDesignSystemState and uses getDesignSystemState("unavailable").label as the statusUnavailable translation fallback, preserving the translation key and existing rendered label.
 
 Verification: bun run verify:design-system-state passed with 520 baseline exceptions and no blocked findings. bunx vitest run src/components/Common/__tests__/McpToolSelector.test.tsx src/design-system/__tests__/product-state-guard.test.ts --maxWorkers=1 --reporter=dot passed with 2 files and 42 tests. git diff --check passed. Bandit skipped because touched code is frontend TypeScript and a Backlog task file, not Python.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

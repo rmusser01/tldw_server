@@ -41,7 +41,7 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Updated current Quick Chat/tutorial coverage docs, Published mirrors, extension route inventory, QA checklist, and shared WebUI/extension parity helper to use /research-studio as canonical while preserving workspace-playground internal compatibility names.
 
 Search classification: remaining Workspace Playground/Workspace Studio hits are internal compatibility names, legacy alias route files/tests, tutorial id workspace-playground-basics, deterministic test filenames/helpers, or historical review/plan artifacts. Current release docs and inventories touched by this slice now use /research-studio.
@@ -53,7 +53,7 @@ CDP smoke: /research-studio rendered; /workspace-playground?shared=alias-test ca
 Known caveat: manual CDP smoke saw repeated 401s from backend-dependent requests because the running single-user backend rejected the seeded demo key. /api/v1/health itself returned degraded and route rendering/alias/mobile tab checks were still observable.
 
 Bandit not run: this slice changes frontend tests/helpers and documentation/task records only; no backend Python files touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

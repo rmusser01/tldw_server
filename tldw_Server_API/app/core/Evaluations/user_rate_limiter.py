@@ -4,11 +4,14 @@ Per-user rate limiting for Evaluations module.
 **Phase 2 Deprecation Notice**:
 - When ``RG_ENABLED=true``, evaluations/minute and evaluations/tokens daily
   caps are enforced by the ResourceGovernor via ``_maybe_enforce_with_rg_evaluations``.
-- Cost caps (``max_cost_per_day``, ``max_cost_per_month``) remain **legacy-only**
-  and are enforced regardless of RG status.
-- When RG is disabled or unavailable, minute/daily eval/token checks are
-  skipped (fail-open with deprecation warning). Only cost caps are enforced.
-- CUSTOM tier bypasses RG; only cost caps are enforced with a deprecation warning.
+- Evaluation cost caps were removed; LLM spend is capped by the general
+  ``limits.llm_cost_per_day_usd`` / ``limits.llm_cost_per_month_usd`` quotas,
+  which apply only with ``USAGE_QUOTAS_ENABLED`` on (see Docs/Operations/Usage_Quotas.md).
+- When RG is disabled or unavailable, the per-minute checks are skipped
+  (fail-open with deprecation warning). The per-user daily evaluations/tokens
+  quotas (``limits.evaluations_per_day``, ``limits.evaluation_tokens_per_day``)
+  are still enforced locally by ``_reserve_request_usage``.
+- CUSTOM tier bypasses RG with a deprecation warning.
 - This shim will be removed in a future release.
 """
 
@@ -35,6 +38,8 @@ from tldw_Server_API.app.core.Evaluations.config_manager import (
 )
 from tldw_Server_API.app.core.Evaluations.identity import canonical_evaluations_user_scope
 from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.Usage.quota_checks import as_quota_user_id
+from tldw_Server_API.app.core.Usage.quota_resolver import user_quota
 
 # Narrowed exception tuple for BLE001 fixes
 _USER_RATE_LIMIT_NONCRITICAL_EXCEPTIONS = (
@@ -121,8 +126,6 @@ class RateLimitConfig:
     evaluations_per_day: int
     total_tokens_per_day: int
     burst_size: int
-    max_cost_per_day: float
-    max_cost_per_month: float
 
     @classmethod
     def for_tier(cls, tier: UserTier) -> "RateLimitConfig":
@@ -138,8 +141,6 @@ class RateLimitConfig:
                 evaluations_per_day=tier_config.evaluations_per_day,
                 total_tokens_per_day=tier_config.total_tokens_per_day,
                 burst_size=tier_config.burst_size,
-                max_cost_per_day=tier_config.max_cost_per_day,
-                max_cost_per_month=tier_config.max_cost_per_month
             )
 
         # Fallback to hardcoded defaults if external config not available
@@ -151,8 +152,6 @@ class RateLimitConfig:
                 evaluations_per_day=100,
                 total_tokens_per_day=100_000,
                 burst_size=5,
-                max_cost_per_day=1.0,
-                max_cost_per_month=10.0
             ),
             UserTier.BASIC: cls(
                 tier=UserTier.BASIC,
@@ -161,8 +160,6 @@ class RateLimitConfig:
                 evaluations_per_day=1000,
                 total_tokens_per_day=1_000_000,
                 burst_size=10,
-                max_cost_per_day=10.0,
-                max_cost_per_month=100.0
             ),
             UserTier.PREMIUM: cls(
                 tier=UserTier.PREMIUM,
@@ -171,8 +168,6 @@ class RateLimitConfig:
                 evaluations_per_day=10000,
                 total_tokens_per_day=10_000_000,
                 burst_size=25,
-                max_cost_per_day=100.0,
-                max_cost_per_month=1000.0
             ),
             UserTier.ENTERPRISE: cls(
                 tier=UserTier.ENTERPRISE,
@@ -181,8 +176,6 @@ class RateLimitConfig:
                 evaluations_per_day=100000,
                 total_tokens_per_day=100_000_000,
                 burst_size=100,
-                max_cost_per_day=1000.0,
-                max_cost_per_month=10000.0
             ),
             UserTier.CUSTOM: cls(
                 tier=UserTier.CUSTOM,
@@ -191,8 +184,6 @@ class RateLimitConfig:
                 evaluations_per_day=100,
                 total_tokens_per_day=100_000,
                 burst_size=5,
-                max_cost_per_day=1.0,
-                max_cost_per_month=10.0
             )
         }
 
@@ -341,7 +332,7 @@ class UserRateLimiter:
         endpoint: str,
         is_batch: bool = False,
         tokens_requested: int = 0,
-        estimated_cost: float = 0.0
+        evaluations_requested: int = 1,
     ) -> tuple[bool, dict[str, Any]]:
         """
         Check if user can make request based on their tier limits.
@@ -351,7 +342,8 @@ class UserRateLimiter:
             endpoint: API endpoint being accessed
             is_batch: Whether this is a batch evaluation
             tokens_requested: Estimated tokens for request
-            estimated_cost: Estimated cost for request
+            evaluations_requested: How many evaluation units this call represents
+                against the daily evaluations cap (e.g. item count for a batch)
 
         Returns:
             Tuple of (is_allowed, metadata)
@@ -360,6 +352,12 @@ class UserRateLimiter:
         """
         config = await self._get_user_config(user_id)
 
+        quota_uid = as_quota_user_id(user_id)
+        daily_caps = {
+            "max_evaluations_per_day": await user_quota(quota_uid, "limits.evaluations_per_day"),
+            "max_tokens_per_day": await user_quota(quota_uid, "limits.evaluation_tokens_per_day"),
+        }
+
         if _rg_evaluations_enabled() and config.tier != UserTier.CUSTOM:
             policy_id = _policy_id_for_config(config, is_batch=is_batch)
             rg_decision = await _maybe_enforce_with_rg_evaluations(
@@ -367,7 +365,6 @@ class UserRateLimiter:
                 endpoint=endpoint,
                 is_batch=is_batch,
                 tokens_requested=tokens_requested,
-                estimated_cost=estimated_cost,
                 policy_id=policy_id,
             )
             if rg_decision is not None:
@@ -380,14 +377,14 @@ class UserRateLimiter:
                         "rate_limit_source": "resource_governor",
                     }
 
-                # Enforce cost caps locally (RG does not handle cost limits)
-                # and reserve the estimated request usage atomically.
+                # Enforce the daily caps locally and reserve the estimated
+                # request usage atomically.
                 usage_ok, usage_meta = await self._reserve_request_usage(
                     user_id,
                     endpoint,
                     tokens_requested,
-                    estimated_cost,
-                    config,
+                    **daily_caps,
+                    evaluations_requested=evaluations_requested,
                 )
                 if not usage_ok:
                     return False, usage_meta
@@ -401,13 +398,13 @@ class UserRateLimiter:
 
             _log_rg_evals_fallback("rg_decision_unavailable")
             _emit_evals_legacy_deprecation("rg_decision_unavailable")
-            # Fail-open for eval/token caps; still enforce cost.
+            # Fail-open for RG's eval/token caps; still enforce the local daily caps.
             usage_ok, usage_meta = await self._reserve_request_usage(
                 user_id,
                 endpoint,
                 tokens_requested,
-                estimated_cost,
-                config,
+                **daily_caps,
+                evaluations_requested=evaluations_requested,
             )
             if not usage_ok:
                 return False, usage_meta
@@ -417,20 +414,20 @@ class UserRateLimiter:
                 **usage_meta,
             }
 
-        # RG disabled or CUSTOM tier → skip minute/daily checks (Phase 2),
-        # enforce cost caps only.
+        # RG disabled or CUSTOM tier → skip the minute checks (Phase 2);
+        # the local daily caps are still enforced.
         _emit_evals_legacy_deprecation("rg_disabled_or_custom_tier")
         usage_ok, usage_meta = await self._reserve_request_usage(
             user_id,
             endpoint,
             tokens_requested,
-            estimated_cost,
-            config,
+            **daily_caps,
+            evaluations_requested=evaluations_requested,
         )
         if not usage_ok:
             return False, usage_meta
         return True, {
-            "rate_limit_source": "legacy_cost_only",
+            "rate_limit_source": "legacy_local",
             "tier": config.tier.value,
             **usage_meta,
         }
@@ -450,7 +447,7 @@ class UserRateLimiter:
             cursor.execute("""
                 SELECT tier, evaluations_per_minute, batch_evaluations_per_minute,
                        evaluations_per_day, total_tokens_per_day, burst_size,
-                       max_cost_per_day, max_cost_per_month, expires_at
+                       expires_at
                 FROM user_rate_limits
                 WHERE user_id = ?
             """, (user_id,))
@@ -460,9 +457,9 @@ class UserRateLimiter:
             if row:
                 # Check if custom limits have expired (tolerate naive or aware timestamps)
                 expired = False
-                if row[8]:
+                if row[6]:
                     try:
-                        _exp_raw = row[8]
+                        _exp_raw = row[6]
                         exp_dt = datetime.fromisoformat(_exp_raw)
                         if exp_dt.tzinfo is None:
                             # Compare naive timestamps in UTC
@@ -492,8 +489,6 @@ class UserRateLimiter:
                         evaluations_per_day=row[3],
                         total_tokens_per_day=row[4],
                         burst_size=row[5],
-                        max_cost_per_day=row[6],
-                        max_cost_per_month=row[7]
                     )
             else:
                 # Create default configuration for new user.
@@ -508,22 +503,19 @@ class UserRateLimiter:
                 cursor.execute("""
                     INSERT INTO user_rate_limits (
                         user_id, tier, evaluations_per_minute, batch_evaluations_per_minute,
-                        evaluations_per_day, total_tokens_per_day, burst_size,
-                        max_cost_per_day, max_cost_per_month
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        evaluations_per_day, total_tokens_per_day, burst_size
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(user_id) DO NOTHING
                 """, (
                     user_id, config.tier.value, config.evaluations_per_minute,
                     config.batch_evaluations_per_minute, config.evaluations_per_day,
                     config.total_tokens_per_day, config.burst_size,
-                    config.max_cost_per_day, config.max_cost_per_month
                 ))
                 conn.commit()
 
                 cursor.execute("""
                     SELECT tier, evaluations_per_minute, batch_evaluations_per_minute,
-                           evaluations_per_day, total_tokens_per_day, burst_size,
-                           max_cost_per_day, max_cost_per_month
+                           evaluations_per_day, total_tokens_per_day, burst_size
                     FROM user_rate_limits
                     WHERE user_id = ?
                 """, (user_id,))
@@ -536,8 +528,6 @@ class UserRateLimiter:
                         evaluations_per_day=persisted[3],
                         total_tokens_per_day=persisted[4],
                         burst_size=persisted[5],
-                        max_cost_per_day=persisted[6],
-                        max_cost_per_month=persisted[7],
                     )
             return config
 
@@ -635,66 +625,25 @@ class UserRateLimiter:
         except _USER_RATE_LIMIT_NONCRITICAL_EXCEPTIONS as exc:  # pragma: no cover - defensive
             logger.debug(f"Evaluations: legacy daily_usage backfill skipped: {exc}")
 
-    async def _check_cost_limits(
-        self,
-        user_id: str,
-        estimated_cost: float,
-        config: RateLimitConfig,
-    ) -> tuple[bool, dict[str, Any]]:
-        """Check daily cost limits only (RG handles evaluations/tokens)."""
-        try:
-            cost = float(estimated_cost or 0.0)
-        except _USER_RATE_LIMIT_NONCRITICAL_EXCEPTIONS:
-            cost = 0.0
-        if cost <= 0:
-            return True, {}
-
-        today = datetime.now(timezone.utc).date()
-        day_str = str(today)
-        row = await self._run_db(
-            lambda conn: conn.execute(
-                "SELECT total_cost FROM daily_usage WHERE user_id = ? AND date = ?",
-                (user_id, day_str),
-            ).fetchone()
-        )
-        total_cost = float(row[0] or 0.0) if row else 0.0
-
-        if total_cost + cost > float(config.max_cost_per_day):
-            reset_at = datetime.combine(
-                today + timedelta(days=1),
-                datetime.min.time(),
-                tzinfo=timezone.utc,
-            )
-            retry_after = max(1, int((reset_at - datetime.now(timezone.utc)).total_seconds()))
-            return False, {
-                "error": "Daily cost limit exceeded",
-                "limit": config.max_cost_per_day,
-                "used": total_cost,
-                "requested": cost,
-                "retry_after": retry_after,
-                "resets_at": reset_at.isoformat(),
-            }
-
-        return True, {
-            "cost_remaining": float(config.max_cost_per_day) - total_cost - cost,
-        }
-
     async def _reserve_request_usage(
         self,
         user_id: str,
         endpoint: str,
         tokens_used: int,
-        cost: float,
-        config: RateLimitConfig,
+        *,
+        max_evaluations_per_day: float | None = None,
+        max_tokens_per_day: float | None = None,
+        evaluations_requested: int = 1,
     ) -> tuple[bool, dict[str, Any]]:
-        """Atomically enforce cost caps and record estimated request usage."""
+        """Atomically enforce the daily caps and record estimated request usage."""
         allowed, metadata, now, normalized_tokens = await asyncio.to_thread(
             self._reserve_request_usage_sync,
             user_id,
             endpoint,
             tokens_used,
-            cost,
-            config,
+            max_evaluations_per_day,
+            max_tokens_per_day,
+            evaluations_requested,
         )
         if not allowed:
             return False, metadata
@@ -712,17 +661,13 @@ class UserRateLimiter:
         user_id: str,
         endpoint: str,
         tokens_used: int,
-        cost: float,
-        config: RateLimitConfig,
+        max_evaluations_per_day: float | None = None,
+        max_tokens_per_day: float | None = None,
+        evaluations_requested: int = 1,
     ) -> tuple[bool, dict[str, Any], datetime, int]:
         now = datetime.now(timezone.utc)
         today = now.date()
-        try:
-            normalized_cost = float(cost or 0.0)
-        except _USER_RATE_LIMIT_NONCRITICAL_EXCEPTIONS:
-            normalized_cost = 0.0
         normalized_tokens = max(0, int(tokens_used or 0))
-        cost_remaining: Optional[float] = None
 
         # Already dispatched to a worker thread by _reserve_request_usage();
         # keep it synchronous and only take the connection policy from _connect().
@@ -730,32 +675,30 @@ class UserRateLimiter:
         try:
             conn.execute("BEGIN IMMEDIATE")
             try:
-                if normalized_cost > 0:
+                if max_evaluations_per_day is not None or max_tokens_per_day is not None:
                     cursor = conn.cursor()
                     cursor.execute(
-                        "SELECT total_cost FROM daily_usage WHERE user_id = ? AND date = ?",
+                        "SELECT total_evaluations, total_tokens FROM daily_usage WHERE user_id = ? AND date = ?",
                         (user_id, str(today)),
                     )
                     row = cursor.fetchone()
-                    total_cost = float(row[0] or 0.0) if row else 0.0
-                    daily_limit = float(config.max_cost_per_day)
-                    if total_cost + normalized_cost > daily_limit:
+                    used_evaluations = int(row[0] or 0) if row else 0
+                    used_tokens = int(row[1] or 0) if row else 0
+                    breach = None
+                    if max_evaluations_per_day is not None and used_evaluations + evaluations_requested > max_evaluations_per_day:
+                        breach = ("Daily evaluation limit exceeded", max_evaluations_per_day, used_evaluations)
+                    elif max_tokens_per_day is not None and used_tokens + normalized_tokens > max_tokens_per_day:
+                        breach = ("Daily evaluation token limit exceeded", max_tokens_per_day, used_tokens)
+                    if breach is not None:
                         conn.rollback()
-                        reset_at = datetime.combine(
-                            today + timedelta(days=1),
-                            datetime.min.time(),
-                            tzinfo=timezone.utc,
-                        )
-                        retry_after = max(1, int((reset_at - datetime.now(timezone.utc)).total_seconds()))
+                        reset_at = datetime.combine(today + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
                         return False, {
-                            "error": "Daily cost limit exceeded",
-                            "limit": config.max_cost_per_day,
-                            "used": total_cost,
-                            "requested": normalized_cost,
-                            "retry_after": retry_after,
+                            "error": breach[0],
+                            "limit": breach[1],
+                            "used": breach[2],
+                            "retry_after": max(1, int((reset_at - datetime.now(timezone.utc)).total_seconds())),
                             "resets_at": reset_at.isoformat(),
                         }, now, normalized_tokens
-                    cost_remaining = daily_limit - total_cost - normalized_cost
 
                 self._write_request_usage(
                     conn,
@@ -764,7 +707,7 @@ class UserRateLimiter:
                     now=now,
                     today=today,
                     tokens_used=normalized_tokens,
-                    cost=normalized_cost,
+                    evaluations_delta=evaluations_requested,
                 )
                 conn.commit()
             except _USER_RATE_LIMIT_NONCRITICAL_EXCEPTIONS:
@@ -773,24 +716,23 @@ class UserRateLimiter:
         finally:
             conn.close()
 
-        if cost_remaining is None:
-            return True, {}, now, normalized_tokens
-        return True, {"cost_remaining": cost_remaining}, now, normalized_tokens
+        return True, {}, now, normalized_tokens
 
     async def _record_request(
         self,
         user_id: str,
         endpoint: str,
         tokens_used: int,
-        cost: float
+        *,
+        reserved_tokens: int = 0,
     ):
-        """Record a request for tracking."""
+        """Record a request's actual usage, replacing any tokens already reserved."""
         now, normalized_tokens = await asyncio.to_thread(
             self._record_request_sync,
             user_id,
             endpoint,
             tokens_used,
-            cost,
+            reserved_tokens,
         )
         await self._shadow_write_daily_usage(
             user_id=user_id,
@@ -804,12 +746,16 @@ class UserRateLimiter:
         user_id: str,
         endpoint: str,
         tokens_used: int,
-        cost: float,
+        reserved_tokens: int = 0,
     ) -> tuple[datetime, int]:
         now = datetime.now(timezone.utc)
         today = now.date()
         normalized_tokens = max(0, int(tokens_used or 0))
-        normalized_cost = float(cost or 0.0)
+        # This call site already reserved an estimate via check_rate_limit()'s
+        # _reserve_request_usage(), which wrote +1 evaluation and the estimate's
+        # tokens. Replace the estimate with the actual token count (may be
+        # negative) and record 0 more evaluations so one request counts once.
+        token_delta = normalized_tokens - max(0, int(reserved_tokens or 0))
 
         # Already dispatched to a worker thread by _record_request(); keep it
         # synchronous and only take the connection policy from _connect().
@@ -821,8 +767,8 @@ class UserRateLimiter:
                 endpoint=endpoint,
                 now=now,
                 today=today,
-                tokens_used=normalized_tokens,
-                cost=normalized_cost,
+                tokens_used=token_delta,
+                evaluations_delta=0,
             )
             conn.commit()
         finally:
@@ -838,23 +784,27 @@ class UserRateLimiter:
         now: datetime,
         today: Any,
         tokens_used: int,
-        cost: float,
+        evaluations_delta: int = 1,
     ) -> None:
+        """Record one request's usage; `tokens_used`/`evaluations_delta` are deltas, not totals.
+
+        `tokens_used` may be negative (e.g. an actual-usage correction replacing an
+        estimate); the day's `total_tokens` is clamped so it never drops below 0.
+        """
         # Record in tracking table
         conn.execute(
-            "INSERT INTO rate_limit_tracking (user_id, endpoint, timestamp, tokens_used, cost) VALUES (?, ?, ?, ?, ?)",
-            (user_id, endpoint, now.isoformat(), tokens_used, cost)
+            "INSERT INTO rate_limit_tracking (user_id, endpoint, timestamp, tokens_used) VALUES (?, ?, ?, ?)",
+            (user_id, endpoint, now.isoformat(), tokens_used)
         )
 
         # Update daily usage
         conn.execute("""
-            INSERT INTO daily_usage (user_id, date, total_evaluations, total_tokens, total_cost)
-            VALUES (?, ?, 1, ?, ?)
+            INSERT INTO daily_usage (user_id, date, total_evaluations, total_tokens)
+            VALUES (?, ?, ?, MAX(0, ?))
             ON CONFLICT(user_id, date) DO UPDATE SET
-                total_evaluations = total_evaluations + 1,
-                total_tokens = total_tokens + ?,
-                total_cost = total_cost + ?
-        """, (user_id, str(today), tokens_used, cost, tokens_used, cost))
+                total_evaluations = total_evaluations + ?,
+                total_tokens = MAX(0, total_tokens + ?)
+        """, (user_id, str(today), evaluations_delta, tokens_used, evaluations_delta, tokens_used))
 
     async def _shadow_write_daily_usage(
         self,
@@ -916,7 +866,6 @@ class UserRateLimiter:
                 "X-RateLimit-Daily-Limit": str(config.evaluations_per_day),
                 "X-RateLimit-Daily-Remaining": str(daily_metadata.get("evaluations_remaining", 0)),
                 "X-RateLimit-Tokens-Remaining": str(daily_metadata.get("tokens_remaining", 0)),
-                "X-RateLimit-Cost-Remaining": f"{daily_metadata.get('cost_remaining', 0):.2f}"
             },
             "tier": config.tier.value,
             "limits": {
@@ -955,6 +904,9 @@ class UserRateLimiter:
                 for key, value in custom_limits.items():
                     if hasattr(config, key):
                         setattr(config, key, value)
+                    else:
+                        # e.g. the removed max_cost_per_day / max_cost_per_month
+                        logger.warning(f"Ignoring unknown custom limit {key!r} for user {user_id}")
 
             def _apply(conn: sqlite3.Connection) -> None:
                 cursor = conn.cursor()
@@ -962,13 +914,11 @@ class UserRateLimiter:
                     UPDATE user_rate_limits
                     SET tier = ?, evaluations_per_minute = ?, batch_evaluations_per_minute = ?,
                         evaluations_per_day = ?, total_tokens_per_day = ?, burst_size = ?,
-                        max_cost_per_day = ?, max_cost_per_month = ?,
                         expires_at = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE user_id = ?
                 """, (
                     new_tier.value, config.evaluations_per_minute, config.batch_evaluations_per_minute,
                     config.evaluations_per_day, config.total_tokens_per_day, config.burst_size,
-                    config.max_cost_per_day, config.max_cost_per_month,
                     expires_at, user_id
                 ))
 
@@ -978,13 +928,12 @@ class UserRateLimiter:
                         INSERT INTO user_rate_limits (
                             user_id, tier, evaluations_per_minute, batch_evaluations_per_minute,
                             evaluations_per_day, total_tokens_per_day, burst_size,
-                            max_cost_per_day, max_cost_per_month, expires_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            expires_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         user_id, new_tier.value, config.evaluations_per_minute,
                         config.batch_evaluations_per_minute, config.evaluations_per_day,
                         config.total_tokens_per_day, config.burst_size,
-                        config.max_cost_per_day, config.max_cost_per_month,
                         expires_at
                     ))
 
@@ -1022,7 +971,7 @@ class UserRateLimiter:
 
             # Get today's usage
             cursor.execute("""
-                SELECT total_evaluations, total_tokens, total_cost
+                SELECT total_evaluations, total_tokens
                 FROM daily_usage
                 WHERE user_id = ? AND date = ?
             """, (user_id, str(today)))
@@ -1030,22 +979,22 @@ class UserRateLimiter:
             row = cursor.fetchone()
 
             if row:
-                total_evaluations, total_tokens, total_cost = row
+                total_evaluations, total_tokens = row
             else:
-                total_evaluations = total_tokens = total_cost = 0
+                total_evaluations = total_tokens = 0
 
-            # Get monthly cost
-            month_start = today.replace(day=1)
-            cursor.execute("""
-                SELECT SUM(total_cost)
-                FROM daily_usage
-                WHERE user_id = ? AND date >= ?
-            """, (user_id, str(month_start)))
+            return total_evaluations, total_tokens
 
-            monthly_cost = cursor.fetchone()[0] or 0.0
-            return total_evaluations, total_tokens, total_cost, monthly_cost
+        total_evaluations, total_tokens = await self._run_db(_summary)
 
-        total_evaluations, total_tokens, total_cost, monthly_cost = await self._run_db(_summary)
+        quota_uid = as_quota_user_id(user_id)
+        if quota_uid is None:
+            evals_cap = tokens_cap = None
+        else:
+            evals_cap = await user_quota(quota_uid, "limits.evaluations_per_day")
+            tokens_cap = await user_quota(quota_uid, "limits.evaluation_tokens_per_day")
+        evals_cap = None if evals_cap is None else int(evals_cap)
+        tokens_cap = None if tokens_cap is None else int(tokens_cap)
 
         return {
             "user_id": user_id,
@@ -1057,39 +1006,43 @@ class UserRateLimiter:
                     "burst_size": config.burst_size
                 },
                 "daily": {
-                    "evaluations": config.evaluations_per_day,
-                    "tokens": config.total_tokens_per_day,
-                    "cost": config.max_cost_per_day
-                },
-                "monthly": {
-                    "cost": config.max_cost_per_month
+                    "evaluations": evals_cap,
+                    "tokens": tokens_cap
                 }
             },
             "usage": {
                 "today": {
                     "evaluations": total_evaluations,
-                    "tokens": total_tokens,
-                    "cost": total_cost
-                },
-                "month": {
-                    "cost": monthly_cost
+                    "tokens": total_tokens
                 }
             },
             "remaining": {
-                "daily_evaluations": config.evaluations_per_day - total_evaluations,
-                "daily_tokens": config.total_tokens_per_day - total_tokens,
-                "daily_cost": config.max_cost_per_day - total_cost,
-                "monthly_cost": config.max_cost_per_month - monthly_cost
+                "daily_evaluations": None if evals_cap is None else max(0, evals_cap - total_evaluations),
+                "daily_tokens": None if tokens_cap is None else max(0, tokens_cap - total_tokens)
             }
         }
 
-    async def record_actual_usage(self, user_id: str, endpoint: str, tokens_used: int, cost: float = 0.0) -> None:
+    async def record_actual_usage(
+        self,
+        user_id: str,
+        endpoint: str,
+        tokens_used: int,
+        *,
+        reserved_tokens: int = 0,
+    ) -> None:
         """Record actual usage after a request completes (if provider returns usage).
 
-        Safe no-op on failure.
+        `reserved_tokens` is the estimate already reserved by `check_rate_limit()`
+        for this same request; it is subtracted so the day's token total reflects
+        the actual usage once, not estimate-plus-actual. Safe no-op on failure.
         """
         try:
-            await self._record_request(user_id, endpoint, max(0, int(tokens_used or 0)), float(cost or 0.0))
+            await self._record_request(
+                user_id,
+                endpoint,
+                max(0, int(tokens_used or 0)),
+                reserved_tokens=max(0, int(reserved_tokens or 0)),
+            )
         except _USER_RATE_LIMIT_NONCRITICAL_EXCEPTIONS:
             # Non-fatal; logging here could be noisy for hot paths
             pass
@@ -1281,7 +1234,6 @@ async def _maybe_enforce_with_rg_evaluations(
     endpoint: str,
     is_batch: bool,
     tokens_requested: int,
-    estimated_cost: float,
     policy_id: str,
 ) -> Optional[dict[str, object]]:
     """
@@ -1304,9 +1256,6 @@ async def _maybe_enforce_with_rg_evaluations(
             tu = 0
         if tu > 0:
             categories["tokens"] = {"units": tu}
-        # Cost/day caps remain legacy-only (and unified eval endpoints currently
-        # pass estimated_cost=0.0). RG-first enforcement covers evaluations/tokens;
-        # keep estimated_cost in tags for observability only.
 
         decision, handle = await gov.reserve(
             RGRequest(
@@ -1318,7 +1267,6 @@ async def _maybe_enforce_with_rg_evaluations(
                     "endpoint": endpoint,
                     "is_batch": str(bool(is_batch)).lower(),
                     "tokens_est": str(int(tu)),
-                    "cost_est": str(float(estimated_cost or 0.0)),
                 },
             ),
             op_id=op_id,

@@ -35,7 +35,7 @@ Implement the approved bounded PDF slice: independent media.pdf.summarization se
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Approved in this conversation. Fresh worktree codex/pdf-summary-service-prompt from dev a5aa0c8e67. Baseline registry plus document Service Prompt tests: 64 passed, 2 warnings. Read-only searches found no existing PDF Service Prompt task/worktree. MCP search did not return; using official CLI fallback. Local worktree task-ID scan tops out at 13160.
 
 Implemented the approved independent PDF literal-system entry with shared Settings metadata and golden defaults. HTTP tests exposed an existing multipart bug: api_name was discarded, preventing analysis. Added only parsing/forwarding of that existing field; credentials remain server-only. RED: 7 backend contract failures and 1 shared Settings failure before implementation. GREEN: PDF/registry/API 89 passed; broader PDF/document, chunking, input-contract, usage-event and permission regressions 95 passed (8 warnings); Settings/service/domain 195 passed. Ruff lint/format and touched-file ESLint passed; ESLint emitted only the shared-file Next pages-directory notice. Extension tsc --noEmit -p tsconfig.compile.json passed (not a full shared-UI typecheck). Bandit scanned the three changed production Python files: zero findings and errors, report /tmp/bandit_pdf_summary_service_prompt.json. Independent review found no Critical, Important or Minor issues. git diff --check passed. Full repository suites, full shared-UI typecheck and live provider/browser E2E were not run. No dependency changes; temporary dependency symlinks removed before commit. Local implementation complete; PR creation/integration awaits the user choice.
@@ -51,7 +51,7 @@ Broader media/form/provider/permissions regressions also passed: 72 passed, 8 wa
 Human clarified the implementation rationale: this continues the existing series of PRs incrementally making each prompt user editable. This establishes ownership of the incremental existing-system approach; no further rationale request is needed. Proceed with routine OpenAPI fingerprint/type regeneration under the existing instruction to address all PR issues. Qodo marked both bugs resolved; architecture thread resolved following core-default extraction, evidence-based reply and independent review. License status briefly failed during reevaluation, then passed without changes.
 
 Official OpenAPI exporter regenerated fingerprint c7c4460fe75e00483544cf5a0bc5aba6a57dff0aa3cb164fbd322c20704622a4, exactly matching CI. Frontend types generated successfully using installed openapi-typescript 7.13.0. Fresh exporter --check passed. Removing only PDF api_name/api_provider schema properties in memory reproduces previous ffad0273dc45 fingerprint, proving no unrelated contract drift. Full schema/types remain gitignored per repo tooling; only fingerprint is tracked. Temporary dependency symlink removed. Implementation and review fixes complete; required CI and final merge monitored by pr-2880-review-and-merge. Human what/why rationale recorded and accepted from the existing incremental prompt-editability workstream explanation.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

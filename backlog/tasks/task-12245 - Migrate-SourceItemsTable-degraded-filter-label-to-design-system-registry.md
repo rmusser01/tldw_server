@@ -44,12 +44,12 @@ Replace the hardcoded degraded filter label in SourceItemsTable with the design-
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Red test first: `bunx vitest run src/components/Option/Sources/__tests__/SourceItemsTable.design-system.test.tsx --reporter=dot` failed because the filter button was still named `Degraded` instead of the mocked registry label.
 - The component now reads the degraded label from the design-system state registry while leaving filter values, callbacks, and table rendering unchanged.
 - Removed the `canonical-state-label:src/components/Option/Sources/SourceItemsTable.tsx:Degraded` baseline entry.
 - Bandit skipped: touched implementation is frontend TypeScript/test JSON only, with no Python code path.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

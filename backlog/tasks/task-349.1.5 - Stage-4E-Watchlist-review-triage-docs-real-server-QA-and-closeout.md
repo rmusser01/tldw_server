@@ -43,7 +43,7 @@ Close Stage 4 by documenting the item triage API/UI contract, running focused ba
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started after Stage 4D commit 2cc6494fb. Scope: API docs, focused Stage 4 backend/frontend verification, Bandit for backend touches, and real-server CDP smoke in desktop plus extension-sized viewports. Browser evidence must use the real FastAPI/WebUI stack without API mocks.
 
 Implemented Stage 4E closeout updates: docs, selected Watchlist Updates copy, help anchor, locale parity, copy-contract tests, accessibility labels, and real-server QA evidence.
@@ -53,7 +53,7 @@ Verification: backend focused Watchlists tests 16 passed; frontend focused suite
 Real-server CDP smoke used real FastAPI 127.0.0.1:18001 and real Next WebUI localhost:18002 with no API mocking. Verified seeded Watchlist id 4, alert match, saved view, reviewed state, briefing queue state, persisted API state, desktop screenshot, and 420x760 constrained screenshot in /private/tmp/tldw-watchlists-stage4e.
 
 Known observation: repeated reload/resize cycles can trigger Watchlists rate_limit responses in the dev console; the loaded queue remained usable. Logged as a follow-up resilience issue, not a Stage 4E blocker.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

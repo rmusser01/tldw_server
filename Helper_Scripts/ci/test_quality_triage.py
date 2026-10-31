@@ -3,7 +3,7 @@
 
 The suite (~4k test files) cannot be hand-audited. This scanner parses every
 test module's AST and flags the anti-patterns documented in
-``audits/2026-07-04-test-suite-audit-round2.md`` (RA1-RA3, RA7):
+``Docs/Audit/2026-07-04-test-suite-audit-round2.md`` (RA1-RA3, RA7):
 
 * ``mock_density``     — an integration-marked file where a single test
                          function stacks >= 4 mock/patch/monkeypatch calls

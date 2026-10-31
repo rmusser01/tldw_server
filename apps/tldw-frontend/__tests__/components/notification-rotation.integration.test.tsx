@@ -117,6 +117,57 @@ describe("notification rotation through actual storage and WebUI transport", () 
     window.dispatchEvent(new StorageEvent("storage", { key: REFRESH_ROTATION_KEY, newValue }))
   }
 
+  it.each(["device", "session"] as const)("retires the real manual %s Logout stream without a synthetic config event", async (persistence) => {
+    const { tldwClient } = await import("@/services/tldw/TldwApiClient")
+    const { TldwAuthService } = await import("@/services/tldw/TldwAuth")
+    let tail = Promise.resolve()
+    const locks = { request: (_name: string, operation: () => unknown) => {
+      const next = tail.then(operation)
+      tail = next.then(() => undefined, () => undefined)
+      return next
+    } }
+    vi.stubGlobal("navigator", new Proxy(window.navigator, {
+      get: (target, key) => key === "locks" ? locks : Reflect.get(target, key, target)
+    }))
+    await tldwClient.initialize()
+    await tldwClient.saveManualSingleUserCredential({
+      serverUrl: "https://api.example.test", apiKey: "synthetic-notification-key", persistence
+    })
+    requests = []
+    let streamClosed = false
+    const transport = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      if (!String(url).includes("/stream")) return transport(url, init)
+      requests.push({ url: String(url), init })
+      return new Response(new ReadableStream({
+        start(controller) {
+          init?.signal?.addEventListener("abort", () => {
+            streamClosed = true
+            controller.close()
+          }, { once: true })
+        }
+      }), { headers: { "Content-Type": "text/event-stream" } })
+    })
+    const view = mount()
+    await expectState("active:3")
+    const stream = requests.find(({ url }) => url.includes("/stream"))!
+    expect(stream.init?.signal?.aborted).toBe(false)
+    vi.useFakeTimers()
+    try {
+      await act(async () => new TldwAuthService().logout())
+      await act(async () => vi.advanceTimersByTimeAsync(0))
+      expect(stream.init?.signal?.aborted).toBe(true)
+      expect(streamClosed).toBe(true)
+      expect(screen.getByTestId("lifecycle")).toHaveTextContent("auth-required:0")
+      const count = requests.length
+      await act(async () => vi.advanceTimersByTimeAsync(30_000))
+      expect(requests).toHaveLength(count)
+    } finally {
+      view.unmount()
+      vi.useRealTimers()
+    }
+  })
+
   it("uses matching stored rotation for unread, list, and stream headers", async () => {
     await rotate("same-tab")
     mount()

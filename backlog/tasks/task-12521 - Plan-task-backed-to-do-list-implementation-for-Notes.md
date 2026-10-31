@@ -34,9 +34,9 @@ Use superpowers:writing-plans to create a staged implementation plan with TDD st
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Docs/superpowers/plans/2026-06-05-notes-task-backed-todo-lists-implementation-plan.md using the writing-plans workflow. Reviewed the approved PRD/spec and relevant Notes, ChaChaNotes, MCP Unified, and WebUI files. Ran two plan review passes; the final pass returned APPROVED. Added Task 0 to require implementation Backlog tracking before any code edits. Verified markdown whitespace with git diff --check for the plan and Backlog task. Bandit is not applicable because this task only changes planning documentation and Backlog metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -34,7 +34,7 @@ Continue reducing the shared UI package-wide TypeScript compiler baseline by fix
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Captured red evidence from `/tmp/task511-tsc-final.txt`: package `tsc` reported three diagnostics in `src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx` around spreading `unknown[]` into chat-settings mocks and a `mockImplementation` callback whose parameter did not match the inferred zero-argument mock signature.
 - Root cause was test mock typing only. The chat-settings test state inferred zero-argument mocks from `vi.fn(async () => null)`, while the real service accepts a single params object.
 - Added `ChatSettingsSyncParams` and `ChatSettingsPatchParams` test-only types, gave the mocks explicit one-parameter async signatures with loose `unknown` returns, and forwarded mocked service calls by named `params` rather than spreading `unknown[]`.
@@ -42,7 +42,7 @@ Continue reducing the shared UI package-wide TypeScript compiler baseline by fix
 - Focused verification attempted with `bunx vitest run src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx`. Initial run failed because the mock lacked `useDesktop`; after adding it, the suite reached current runtime assertions but still failed 13/17 with stale test expectations, including `setSelectedQuickPrompt is not a function` from the mocked `useMessageOption` path and missing persisted attachment surfaces. This is recorded as a focused-suite blocker outside the compiler-only slice.
 - Package verification: `bunx tsc --noEmit --pretty false > /tmp/task512-tsc-final.txt 2>&1` still exits nonzero from the known baseline, but diagnostics dropped from 76 in `/tmp/task511-tsc-final.txt` to 73 in `/tmp/task512-tsc-final.txt`; `rg -n 'Playground\.research-context\.integration\.test\.tsx' /tmp/task512-tsc-final.txt` returns no matches.
 - Bandit skipped: this is a TypeScript test-only WebUI change with no Python touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

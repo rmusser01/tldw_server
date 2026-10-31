@@ -47,7 +47,7 @@ Docs/superpowers/plans/2026-05-27-flashcards-extension-native-generated-drafts-i
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan: Docs/superpowers/plans/2026-05-27-flashcards-extension-native-generated-drafts-implementation-plan.md.
 
 Touched scope: sidepanel Flashcards route/tests, extension/WebUI flashcards docs, master UX fix list, and the implementation plan.
@@ -61,7 +61,7 @@ Verification:
 - PASS: git diff --check.
 - PARTIAL: NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false still reports only the unrelated CharacterListContent design-system density baseline.
 - Bandit not applicable: no Python files touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

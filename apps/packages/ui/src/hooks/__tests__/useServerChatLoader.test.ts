@@ -347,6 +347,13 @@ const createServerMessage = (
 })
 
 describe("fetchAllServerChatMessages", () => {
+  it("refuses a complete-history claim when full duplicate pages exhaust the page ceiling", async () => {
+    const page = [{ id: "same", role: "user", content: "Pinned", created_at: "2026-10-08T00:00:00Z" }] as Awaited<ReturnType<typeof fetchAllServerChatMessages>>
+    const fetchPage = vi.fn().mockResolvedValue(page)
+    await expect(fetchAllServerChatMessages(fetchPage, { limit: 1, maxPages: 2 })).rejects.toThrow("pagination limit")
+    expect(fetchPage).toHaveBeenCalledTimes(2)
+  })
+
   it("fetches all pages so later-page greeting messages are included", async () => {
     const greeting = createServerMessage({
       id: "msg-2",

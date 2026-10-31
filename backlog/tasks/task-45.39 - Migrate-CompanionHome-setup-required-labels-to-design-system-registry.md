@@ -37,7 +37,7 @@ Continue the shared product-state design-system migration by routing CompanionHo
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED: bunx vitest run src/components/Option/CompanionHome/__tests__/CompanionHomePage.test.tsx --reporter=dot first reached the intended failing assertion after dependencies were installed: the setup card state did not render the distinct design-system registry label and still used local hardcoded copy.
 
 Implementation: CompanionHomePage now resolves setup_required through getDesignSystemState with DESIGN_SYSTEM_STATES fallback and uses that label for the setup-required card states. The focused test partially mocks the design-system registry to prove visible card labels come from the registry without asserting implementation call details. Removed the three CompanionHome setup-required canonical-state-label baseline entries.
@@ -47,7 +47,7 @@ Verification: focused CompanionHome test passed 8/8; product-state guard test pa
 PR #1637 review fix: SETUP_REQUIRED_LABEL now uses optional chaining for both getDesignSystemState("setup_required") and DESIGN_SYSTEM_STATES.setup_required, with a final runtime fallback. The fallback avoids reintroducing the guarded canonical state-label literal in app source, so the product-state verifier remains the enforcement point.
 
 PR #1637 review verification refresh: CompanionHome focused test passed 8/8; product-state guard test passed 52/52; bun run verify:design-system-state passed with the existing 500 allowed legacy exceptions; git diff --check passed; touched-file TypeScript filtering returned no diagnostics. GitHub review sweep showed Qodo no issues and CodeRabbit skipped auto-review on this non-default base. One Gemini thread remained to resolve after pushing the review-fix commit. Optional Full Suite jobs were cancelled in broad Admin/Audio matrix steps while required gates were passing.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -47,7 +47,7 @@ Review and address all actionable GitHub review comments on PR #1393 for persona
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented review fixes: export cancel endpoint; import-preview cancel and delete endpoints; PersonaVisualService FastAPI dependency helper; chunked persona visual asset upload cap enforcement; generation idempotency digest including prompt/backend/target state; ZIP directory member tolerance while preserving unsafe member checks; generation worker DB/persistence offload; portability worker runner and optional startup registration; authored trigger ID replacement on candidate patch merge.
 
 Verification passed before PR replies: focused pytest for persona visual jobs, portability, service, API, and startup worker tests reported 45 passed; py_compile passed for touched production files; Bandit reported zero findings on touched production files and touched tests with B101 skipped; git diff --check passed.
@@ -55,7 +55,7 @@ Verification passed before PR replies: focused pytest for persona visual jobs, p
 PR #1393 inline review threads were replied to and resolved on GitHub after pushing commit efee5af22. The archive-ingestion-pipeline comment was answered with the technical disposition that persona visual pack archives follow the PR #1135-style portability import-preview boundary rather than media ingestion, while retaining bounded scoped staging and archive validation.
 
 GitHub checks restarted after the push and were still pending at closeout; local focused verification and Bandit were clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -679,10 +679,13 @@ export class FlashcardsPage extends BasePage {
   }
 
   async selectReviewDeckByName(deckName: string): Promise<void> {
-    await this.reviewDeckSelect.click({ force: true });
+    const selectedDeck = this.reviewDeckSelect.getByText(deckName, { exact: true });
+    if (await selectedDeck.isVisible()) return;
+    await this.reviewDeckSelect.click();
     const deckOption = this.getActiveSelectOption(deckName);
     await expect(deckOption).toBeVisible({ timeout: 10_000 });
     await deckOption.click();
+    await expect(selectedDeck).toBeVisible({ timeout: 10_000 });
   }
 
   async selectManageWorkspaceById(workspaceId: string): Promise<void> {

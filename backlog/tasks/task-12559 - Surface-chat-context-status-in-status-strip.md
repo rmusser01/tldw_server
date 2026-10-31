@@ -30,13 +30,13 @@ Address /chat UX rebaseline F5 by showing active Web search/context source state
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Starting focused /chat F5 status-feedback slice. Planned touched scope: PlaygroundStatusStrip and status-strip/cockpit tests only unless existing wiring requires a parent prop adjustment.
 
 Implemented compact active-context source chips in PlaygroundStatusStrip using the existing contextSummary prop. Chips render only while hasContext is true, show up to four summaries, and add a +N more overflow label to keep the strip compact.
 
 Verification: RED focused run failed as expected because Chat status lacked Web search/source text. GREEN focused run passed 74 tests across PlaygroundStatusStrip.first-slice, Playground.cockpit-controls, and Playground.cockpit-shell. TypeScript compiler gate still fails only on known baseline CharacterListContent.design-system.test.tsx GalleryCardDensity error. git diff --check passed. Bandit not run because touched code is TS/TSX UI only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -31,9 +31,9 @@ Task 8 frontend slice from the unified onboarding plan. Add provider, ingest def
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Closed as fulfilled by replacement implementation task TASK-497. TASK-497 implemented the progressive wizard steps, provider save/default behavior, backend-gated first-chat completion, and first-source milestone, with focused frontend/backend/OpenAPI/Bandit/diff verification recorded there.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
