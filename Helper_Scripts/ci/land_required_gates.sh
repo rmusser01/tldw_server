@@ -1,5 +1,5 @@
 #!/bin/sh
-# Drive a pull request's six required gates to green, then merge it.
+# Drive a pull request's seven required gates to green, then merge it.
 #
 # Workaround for TASK-13355: required gates are cancelled before they report, so a PR
 # stays BLOCKED indefinitely unless someone re-runs them in the right window. See
@@ -27,7 +27,9 @@ PR="${2:?usage: land_required_gates.sh <branch> <pr-number> [--no-merge]}"
 NO_MERGE="${3:-}"
 
 REPO="${LAND_GATES_REPO:-rmusser01/tldw_server}"
-GATES="backend-required security-required coverage-required frontend-required e2e-required container-build-check"
+# frontend-e2e-tiers.yml reports `E2E Critical (Tier 1 + Journeys)`. Its run conclusion also
+# covers the advisory ux-regression job, so a failure there stops this script too.
+GATES="backend-required security-required coverage-required frontend-required e2e-required container-build-check frontend-e2e-tiers.yml"
 AUDIT="Frontend License Gate Audit"
 PACE="${LAND_GATES_PACE:-40}"
 
@@ -70,7 +72,7 @@ done
 
 [ "$audit_passed" = true ] || { echo "Timed out waiting for the current-head audit" >&2; exit 1; }
 
-printf '=== PR #%s: ensuring the six gates run ===\n' "$PR"
+printf '=== PR #%s: ensuring the seven gates run ===\n' "$PR"
 for wf in $GATES; do
   set -- $(latest_run "$wf" || true)
   id="${1:-}"
@@ -94,7 +96,7 @@ for wf in $GATES; do
   esac
 done
 
-printf '=== PR #%s: waiting for the six gates ===\n' "$PR"
+printf '=== PR #%s: waiting for the seven gates ===\n' "$PR"
 gates_passed=false
 i=0
 while [ "$i" -lt 150 ]; do
@@ -115,16 +117,16 @@ while [ "$i" -lt 150 ]; do
     printf 'PR #%s GATE PROBLEM:%s\n' "$PR" "$bad"
     exit 1
   fi
-  if [ "$ok" -eq 6 ]; then
+  if [ "$ok" -eq 7 ]; then
     gates_passed=true
-    printf 'PR #%s: all six gates green\n' "$PR"
+    printf 'PR #%s: all seven gates green\n' "$PR"
     break
   fi
   i=$((i + 1))
   sleep 30
 done
 
-[ "$gates_passed" = true ] || { echo "Timed out waiting for six current-head gates" >&2; exit 1; }
+[ "$gates_passed" = true ] || { echo "Timed out waiting for seven current-head gates" >&2; exit 1; }
 
 CURRENT_HEAD="$(gh pr view --repo "$REPO" "$PR" --json headRefOid --template '{{.headRefOid}}')"
 [ "$CURRENT_HEAD" = "$HEAD_SHA" ] || { echo "PR head changed during validation" >&2; exit 1; }

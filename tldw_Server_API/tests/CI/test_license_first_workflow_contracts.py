@@ -72,6 +72,7 @@ QUEUE_TICK_GATES = {
     "container-build-check.yml": "container-build-check",
     "coverage-required.yml": "coverage-required",
     "e2e-required.yml": "e2e-required",
+    "frontend-e2e-tiers.yml": "critical",
     "frontend-required.yml": "frontend-required",
     "security-required.yml": "security-required",
 }
@@ -135,7 +136,7 @@ ORIGINAL_JOB_NAMES = {
     "coverage-required.yml": ("changes", "coverage-required", "queue-tick"),
     "e2e-required.yml": ("changes", "e2e-required", "queue-tick"),
     "e2e-smoke.yml": ("e2e-smoke",),
-    "frontend-e2e-tiers.yml": ("changes", "critical", "features", "admin", "ux-regression"),
+    "frontend-e2e-tiers.yml": ("changes", "critical", "features", "admin", "ux-regression", "queue-tick"),
     "frontend-required.yml": (
         "changes", "frontend-unit-tests", "shared-ui-coverage",
         "shared-ui-coverage-report", "frontend-required", "queue-tick",
@@ -188,6 +189,7 @@ ORIGINAL_DEPENDENCIES = {
     ("frontend-e2e-tiers.yml", "critical"): ("changes",),
     ("frontend-e2e-tiers.yml", "features"): ("changes",),
     ("frontend-e2e-tiers.yml", "admin"): ("changes",),
+    ("frontend-e2e-tiers.yml", "queue-tick"): ("critical",),
     ("frontend-required.yml", "frontend-unit-tests"): ("changes",),
     ("frontend-required.yml", "shared-ui-coverage"): ("changes",),
     ("frontend-required.yml", "shared-ui-coverage-report"): ("changes", "shared-ui-coverage"),
@@ -207,13 +209,14 @@ ALWAYS_ROLLUPS = {
     ("ci.yml", "full-suite-macos-312-summary"),
     ("ci.yml", "full-suite-windows-312-summary"),
 }
-# The six required gate jobs. Each turns a license wait that was cancelled, failed or negative
+# The seven required gate jobs. Each turns a license wait that was cancelled, failed or negative
 # red rather than being skipped, which GitHub would count as satisfied (TASK-13502).
 LICENSE_RED_GATES = {
     ("backend-required.yml", "backend-required"),
     ("container-build-check.yml", "container-build-check"),
     ("coverage-required.yml", "coverage-required"),
     ("e2e-required.yml", "e2e-required"),
+    ("frontend-e2e-tiers.yml", "critical"),
     ("frontend-required.yml", "frontend-required"),
     ("security-required.yml", "security-required"),
 }
@@ -435,7 +438,12 @@ def _assert_fails_when_change_detection_did_not_succeed(name: str, job: dict[str
     assert re.search(r"(?m)^\s*exit 1\s*$", guard["run"]), name
     # No later step may run after the guard failed.
     for step in job["steps"]:
-        assert "always()" not in str(step.get("if", "")) or "needs.changes.outputs." in str(step["if"]), name
+        condition = str(step.get("if", ""))
+        assert (
+            "always()" not in condition
+            or "needs.changes.outputs." in condition
+            or _normalized(condition) == "always()&&needs.changes.result=='success'"
+        ), name
         assert "failure()" not in str(step.get("if", "")), name
 
 
@@ -627,7 +635,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
             "(github.event_name == 'pull_request' || "
             "github.event_name == 'workflow_run') || "
             "(github.event_name == 'workflow_dispatch' && "
-            "contains(fromJSON('[\"critical\",\"all-tiers\"]'), github.event.inputs.tier))"
+            "(github.event.inputs.tier == 'critical' || github.event.inputs.tier == 'all-tiers'))"
         ),
         "features": (
             "github.event_name == 'workflow_dispatch' && "
@@ -646,7 +654,8 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
             "github.event.inputs.tier == 'all-tiers')"
         ),
     }
-    # Replaces the old pull_request `paths:` filter; dispatch and a failed classifier run.
+    # Replaces the old pull_request `paths:` filter. A dispatch always runs; a `changes` that did
+    # not succeed runs the tier too, and `critical`'s guard step then turns it red.
     frontend_relevance = (
         "github.event_name == 'workflow_dispatch' || "
         "needs.changes.result != 'success' || "
@@ -708,10 +717,6 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 if (name, job_name) in LICENSE_RED_GATES and name != "container-build-check.yml":
                     _assert_fails_when_change_detection_did_not_succeed(name, job)
                 expected_condition = admission_clause
-                if extra_condition:
-                    expected_condition += f" && ({extra_condition})"
-                if name == "frontend-e2e-tiers.yml" and job_name in {"critical", "features", "admin"}:
-                    expected_condition += f" && ({frontend_relevance})"
                 if (name, job_name) in LICENSE_RED_GATES:
                     # A required gate must report a license wait that did not pass as failure,
                     # even when the changes job was not admitted (TASK-13502).
@@ -735,6 +740,10 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                         "needs.await_license.outputs.license_passed != 'true'"
                     )
                     assert re.search(r"(?m)^\s*exit 1\s*$", refusal["run"])
+                if extra_condition:
+                    expected_condition += f" && ({extra_condition})"
+                if name == "frontend-e2e-tiers.yml" and job_name in {"critical", "features", "admin"}:
+                    expected_condition += f" && ({frontend_relevance})"
                 if name == "security-required.yml" and job_name in ("changes", "security-required"):
                     # A queue kick runs no gate job (spec 4.6 of the 2026-10-11 merge-queue redesign);
                     # every other event takes the condition unchanged.
@@ -886,7 +895,7 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
         assert 'git fetch --no-tags --depth=1 origin "$BASE_SHA"' in admitted_script
         assert 'git fetch --no-tags --depth=1 origin "$HEAD_SHA"' in admitted_script
         assert (
-            'git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$CHANGED_FILES_PATH"'
+            'git diff --name-only --no-renames "$BASE_SHA" "$HEAD_SHA" > "$CHANGED_FILES_PATH"'
             in admitted_script
         )
         assert 'mapfile -t CHANGED_FILES < "$CHANGED_FILES_PATH"' in admitted_script
@@ -904,7 +913,7 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
         'HEAD_SHA="${{ needs.admission.outputs.head_sha || '
         'github.event.pull_request.head.sha || github.sha }}"'
     ) in backend_text
-    assert 'git diff --name-only "$BASE_SHA" "$HEAD_SHA"' in backend_text
+    assert 'git diff --name-only --no-renames "$BASE_SHA" "$HEAD_SHA"' in backend_text
     assert "< <(git diff" not in backend_text
     backend_mypy_script = next(
         step["run"]
@@ -1012,7 +1021,7 @@ def test_shared_change_detector_fails_closed_on_diff_errors() -> None:
 
     assert "< <(git diff" not in script
     assert (
-        'git diff --name-only "$BASE_SHA" "${{ github.sha }}" > "$CHANGED_FILES_PATH"'
+        'git diff --name-only --no-renames "$BASE_SHA" "${{ github.sha }}" > "$CHANGED_FILES_PATH"'
         in script
     )
     assert 'mapfile -t CHANGED_FILES < "$CHANGED_FILES_PATH"' in script
@@ -1744,7 +1753,8 @@ def test_frontend_critical_keeps_first_attempt_evidence_within_job_deadline() ->
     assert "--reporter=list,json" in run["run"]
     assert run["env"]["PLAYWRIGHT_JSON_OUTPUT_NAME"].endswith("/results.json")
     upload = next(step for step in steps if step.get("name") == "Upload test artifacts")
-    assert upload["if"] == "always()"
+    # Uploads after any failure once the guards passed; never after a guard refused the run.
+    assert upload["if"] == "always() && needs.changes.result == 'success'"
     assert "test-results/" in upload["with"]["path"]
     assert ".tmp/frontend-e2e/" in upload["with"]["path"]
     assert upload["with"]["include-hidden-files"] is True

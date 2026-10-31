@@ -111,7 +111,7 @@ jobs:
           fi
           git cat-file -e "${BASE_SHA}^{commit}"
           git cat-file -e "${HEAD_SHA}^{commit}"
-          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$CHANGED_FILES_PATH"
+          git diff --name-only --no-renames "$BASE_SHA" "$HEAD_SHA" > "$CHANGED_FILES_PATH"
           mapfile -t CHANGED_FILES < "$CHANGED_FILES_PATH"
           python -m Helper_Scripts.ci.emit_ci_gate_flags "${CHANGED_FILES[@]}"
 
@@ -304,14 +304,14 @@ jobs:
       github.ref == 'refs/heads/dev' &&
       (vars.MERGE_QUEUE == 'dry' || vars.MERGE_QUEUE == 'on')
     runs-on: ubuntu-latest
-    # Same budget as merge-queue.yml's job: a kick may wait 3 minutes for its run, then re-run up to six gates.
+    # Same budget as merge-queue.yml's job: a kick may wait 3 minutes for its run, then re-run up to seven gates.
     timeout-minutes: 15
     permissions:
       # write: rebase the front PR's branch, comment and disarm, approve/re-run/cancel/delete runs.
       contents: write
       pull-requests: write
       actions: write
-      # read: the six required check runs and the license commit status on the front PR's head.
+      # read: the seven required check runs and the license commit status on the front PR's head.
       checks: read
       statuses: read
     steps:

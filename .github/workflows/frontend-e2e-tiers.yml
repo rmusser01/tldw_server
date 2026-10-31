@@ -117,14 +117,19 @@ jobs:
           fi
           git cat-file -e "${BASE_SHA}^{commit}"
           git cat-file -e "${HEAD_SHA}^{commit}"
-          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$CHANGED_FILES_PATH"
+          git diff --name-only --no-renames "$BASE_SHA" "$HEAD_SHA" > "$CHANGED_FILES_PATH"
           mapfile -t CHANGED_FILES < "$CHANGED_FILES_PATH"
           python -m Helper_Scripts.ci.emit_ci_gate_flags "${CHANGED_FILES[@]}"
 
   # ── Tier 1 + Journeys (critical path — every PR with relevant changes) ─
-  # The last clause of each tier's `if:` is the path scope. A manual dispatch
-  # has no PR diff and always counts as relevant; so does a failed `changes`
-  # job, so an unknown change set runs the tier instead of skipping it.
+  # A required check on dev. The last clause of each tier's `if:` is the path
+  # scope: an irrelevant PR skips the tier, which GitHub counts as passing. A
+  # manual dispatch has no PR diff and always counts as relevant; so does a
+  # failed or skipped `changes` job, so `critical` then runs and its first two
+  # steps turn it red, as the other required gates do (TASK-13462, TASK-13502):
+  # a license wait that did not pass, or change detection that did not succeed,
+  # fails the check instead of skipping it. Its `if:` sticks to `==`/`||` so the
+  # merge-queue gate tests can evaluate it.
   critical:
     name: E2E Critical (Tier 1 + Journeys)
     needs: [changes, admission, await_license]
@@ -144,13 +149,19 @@ jobs:
             needs.await_license.result == 'skipped' ||
             needs.await_license.outputs.license_passed == 'true'
           )
+        ) ||
+        (
+          github.event_name != 'workflow_run' &&
+          needs.await_license.result != 'skipped' &&
+          needs.await_license.outputs.license_passed != 'true'
         )
       ) &&
       (
         (github.event_name == 'pull_request' ||
          github.event_name == 'workflow_run') ||
         (github.event_name == 'workflow_dispatch' &&
-         contains(fromJSON('["critical","all-tiers"]'), github.event.inputs.tier))
+         (github.event.inputs.tier == 'critical' ||
+          github.event.inputs.tier == 'all-tiers'))
       ) &&
       (
         github.event_name == 'workflow_dispatch' ||
@@ -200,6 +211,26 @@ jobs:
       OPENAI_API_KEY: sk-ci-controlled-downstream-key
       OPENAI_API_BASE_URL: http://127.0.0.1:8101/v1
     steps:
+      - name: Require the license audit to have passed
+        if: >-
+          github.event_name != 'workflow_run' &&
+          needs.await_license.result != 'skipped' &&
+          needs.await_license.outputs.license_passed != 'true'
+        run: |
+          echo "::error::License audit did not pass for this PR head, so the gates were not run. Fix the licence policy failure and re-run."
+          exit 1
+
+      # Stays directly after the license refusal: the only later step with a
+      # status function also requires a successful `changes`, so none runs
+      # once either has failed.
+      - name: Require change detection to have succeeded
+        if: needs.changes.result != 'success'
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+        run: |
+          echo "::error::Change detection (the 'changes' job) ended as '${CHANGES_RESULT}', not 'success', so this gate cannot tell what the head changed and ran nothing. Re-run the workflow."
+          exit 1
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
@@ -304,7 +335,7 @@ jobs:
         run: bun run e2e:critical --reporter=list,json --retries=0 --trace=retain-on-failure
 
       - name: Upload test artifacts
-        if: always()
+        if: always() && needs.changes.result == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: e2e-critical-results
@@ -740,3 +771,26 @@ jobs:
           name: e2e-ux-regression-results
           path: apps/tldw-frontend/test-results/
           retention-days: 7
+
+  # Wakes the merge queue after a failed E2E Critical, as in the other required
+  # gate workflows (TASK-13462, ADR-063). Inert while MERGE_QUEUE is unset.
+  queue-tick:
+    name: Merge queue tick
+    needs: [critical]
+    if: >-
+      always() && !cancelled() &&
+      needs.critical.result == 'failure' &&
+      (vars.MERGE_QUEUE == 'dry' || vars.MERGE_QUEUE == 'on') &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Wake the merge queue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: gh api -X POST "repos/${REPOSITORY}/actions/workflows/security-required.yml/dispatches" -f ref=dev -f "inputs[queue_kick]=true" -f "inputs[wait_run]=${RUN_ID}"
