@@ -76,7 +76,7 @@ RERUN_REFUSALS = ("HTTP 409", "HTTP 422")
 RERUN_REFUSAL_403_TEXT = "month ago"
 # How long a kick waits for the run that sent it to complete before deciding. The kick's job
 # timeout is 15 minutes (as merge-queue.yml's); the wait plus one front's worst case (an UNKNOWN
-# settle, a rebase's polls, re-runs of up to six gates) must fit.
+# settle, a rebase's polls, re-runs of up to seven gates) must fit.
 # ponytail: a run still live after this is a GitHub fault; the kick decides anyway and the next event recovers.
 WAIT_RUN_TRIES = 30
 WAIT_RUN_DELAY_S = 6.0
@@ -119,6 +119,7 @@ CONTEXTS = (
     Context("frontend-required", "frontend-required.yml"),
     Context("e2e-required", "e2e-required.yml"),
     Context("container-build-check", "container-build-check.yml"),
+    Context("E2E Critical (Tier 1 + Journeys)", "frontend-e2e-tiers.yml"),
     Context("frontend-license-policy/trusted/dev", "frontend-license-gate.yml", kind="status"),
 )
 ALL_CONTEXTS = tuple(c.name for c in CONTEXTS)
@@ -686,7 +687,7 @@ def required_run_stand_ins(runs: list[dict], checks: tuple[CheckRun, ...]) -> tu
 
 
 def read_contexts(gh: GhApi, sha: str) -> tuple[CheckRun, ...]:
-    """Read all seven required contexts' runs on a commit (spec 4.1).
+    """Read all eight required contexts' runs on a commit (spec 4.1).
 
     Workflow runs are read before check runs: a run seen as completed already has its check
     runs, so "completed without reporting its check" is never an artefact of the read order.
@@ -932,7 +933,7 @@ def wake(gh: GhApi, wait_run: int | None = None) -> None:
     """Start a queue kick: `security-required.yml` on dev with `queue_kick=true` (spec 4.6, D3).
 
     Its gate jobs skip and only its `queue-kick` job runs, which waits for `wait_run` (if given)
-    and then runs the queue. Up to six gate runs can each send one. GitHub keeps one kick running
+    and then runs the queue. Up to seven gate runs can each send one. GitHub keeps one kick running
     and one pending, and a newer pending kick replaces an older one, losing its `wait_run`. That
     costs nothing: a gate run completes seconds after its tick sends the kick, so it is done by
     the time any later kick runs, and every kick decides from fresh state.
@@ -1133,7 +1134,7 @@ def _wake_if_moved(gh: GhApi, pr: PrState, sleep: Callable[[float], None]) -> bo
 
 
 def _approve_gates(gh: GhApi, sha: str, log: Callable[[str], None], sleep: Callable[[float], None]) -> set[str]:
-    """Approve the six held gate runs on a fresh head, waiting (bounded) for them to appear."""
+    """Approve the seven held gate runs on a fresh head, waiting (bounded) for them to appear."""
     approved: set[str] = set()
     for attempt in range(HELD_RUN_POLLS):
         if attempt:
@@ -1146,7 +1147,7 @@ def _approve_gates(gh: GhApi, sha: str, log: Callable[[str], None], sleep: Calla
 
 def _rebase(gh: GhApi, pr: PrState, log: Callable[[str], None], sleep: Callable[[float], None],
             now: Callable[[], datetime]) -> bool:
-    """Rebase the front PR onto dev with its head pinned, then get its seven contexts going (spec section 6).
+    """Rebase the front PR onto dev with its head pinned, then get its eight contexts going (spec section 6).
 
     Returns:
         True if the PR was evicted, False otherwise.
@@ -1257,7 +1258,7 @@ def _rebase(gh: GhApi, pr: PrState, log: Callable[[str], None], sleep: Callable[
 def cleanup_approval_runs(gh: GhApi, pr: PrState, log: Callable[[str], None]) -> None:
     """Delete the non-gate runs GitHub holds on the front head because the queue's token caused them (D1).
 
-    A queue rebase makes GitHub hold a run for every pull_request workflow; only the six gates are
+    A queue rebase makes GitHub hold a run for every pull_request workflow; only the seven gates are
     approved. Deleting the others removes the "Approve and run" button that would start `ci.yml`'s
     200+ jobs on a click. A gate's held run is never deleted here. Best-effort end to end.
     """
@@ -1653,7 +1654,7 @@ def settle_unknown(gh: GhApi, pr: PrState, sleep: Callable[[float], None]) -> Pr
 def _still_front(gh: GhApi, pr: PrState, left: set[int]) -> bool:
     """Whether the PR is still armed, on the same head, and first in line.
 
-    A decision is taken on a snapshot, and reading seven contexts takes a dozen calls. In that
+    A decision is taken on a snapshot, and reading eight contexts takes a dozen calls. In that
     time another queue run may have evicted the PR, or its author may have disarmed it or
     pushed. Acting on the stale snapshot would start checks on a PR that has left the line.
 

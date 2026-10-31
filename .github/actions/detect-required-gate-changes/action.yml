@@ -55,7 +55,7 @@ runs:
 
         CHANGED_FILES_PATH="${RUNNER_TEMP}/required-gate-changed-files.txt"
         if [[ -n "${BASE_SHA:-}" ]]; then
-          git diff --name-only "$BASE_SHA" "${{ github.sha }}" > "$CHANGED_FILES_PATH"
+          git diff --name-only --no-renames "$BASE_SHA" "${{ github.sha }}" > "$CHANGED_FILES_PATH"
         else
           git ls-files > "$CHANGED_FILES_PATH"
         fi

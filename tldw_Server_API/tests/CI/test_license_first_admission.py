@@ -11,6 +11,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from Helper_Scripts.ci.path_classifier import classify_paths
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT_PATH = REPO_ROOT / "Helper_Scripts/ci/license_first_admission.py"
 ROUTES_PATH = REPO_ROOT / ".github/license-first-paths.json"
@@ -32,7 +34,6 @@ WORKFLOW_PATH = ".github/workflows/frontend-license-gate.yml"
 
 FILTERED_WORKFLOWS = {
     "actionlint.yml",
-    "frontend-e2e-tiers.yml",
     "jobs-suite.yml",
     "mcp-unified-rc.yml",
     "notes-remediation-targeted.yml",
@@ -435,38 +436,42 @@ def load_workflow_trigger(filename: str) -> dict:
     return workflow["on"]["pull_request"]
 
 
-@pytest.mark.parametrize("route_source", ["pull_request", "license_admission"])
 @pytest.mark.parametrize(
-    ("filename", "expected"),
+    ("filename", "relevant"),
     [
-        ("apps/extension/tests/e2e/notes.spec.ts", "true"),
-        (".github/workflows/frontend-e2e-tiers.yml", "true"),
-        ("apps/extension-docs/notes.md", "false"),
-        (".github/workflows/frontend-e2e-tiers-copy.yml", "false"),
+        # Every root of the pull_request `paths:` filter this workflow used to have.
+        ("apps/packages/ui/src/components/Notes/NotesListPanel.tsx", True),
+        ("apps/tldw-frontend/pages/chat/index.tsx", True),
+        ("apps/extension/tests/e2e/notes.spec.ts", True),
+        ("tldw_Server_API/app/main.py", True),
+        (".github/workflows/frontend-e2e-tiers.yml", True),
+        ("apps/extension-docs/notes.md", False),
+        ("Docs/Guides/README.md", False),
+        ("backlog/tasks/task-1 - Example.md", False),
     ],
 )
-def test_frontend_e2e_trigger_and_admission_route_notes_chat_paths(
-    route_source: str,
+def test_frontend_e2e_admits_every_change_and_scopes_its_tiers_by_classifier(
     filename: str,
-    expected: str,
+    relevant: bool,
 ) -> None:
+    """The workflow has no path filter so its required check always reports.
+
+    Both entry routes start it for any change; the `changes` job's
+    backend_changed || e2e_changed then decides whether the browser tiers run.
+    """
     workflow_file = "frontend-e2e-tiers.yml"
-    if route_source == "pull_request":
-        routes = {
-            workflow_file: {
-                "mode": "paths",
-                "patterns": load_workflow_trigger(workflow_file)["paths"],
-            }
-        }
-    else:
-        routes = json.loads(ROUTES_PATH.read_text(encoding="utf-8"))
+    assert "paths" not in load_workflow_trigger(workflow_file)
+    routes = json.loads(ROUTES_PATH.read_text(encoding="utf-8"))
+    assert workflow_file not in routes
     inputs = valid_inputs(
         workflow_file=workflow_file,
         routes=routes,
         file_pages=[[{"filename": filename, "status": "modified"}]],
     )
 
-    assert admission.admit(**inputs)["should_run"] == expected  # nosec B101 - pytest asserts the literal routing outcome
+    assert admission.admit(**inputs)["should_run"] == "true"  # nosec B101 - pytest asserts the literal routing outcome
+    flags = classify_paths([filename])
+    assert (flags["backend_changed"] or flags["e2e_changed"]) is relevant  # nosec B101 - pytest asserts the literal scope
 
 
 def test_route_manifest_exactly_copies_current_pull_request_filters() -> None:
