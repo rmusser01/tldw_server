@@ -448,27 +448,27 @@ Links inside other task files, left as they are (backlog-py cannot rewrite notes
 
 - `backlog/completed/task-12052 - Address-PR-2534-review-comments-and-rebase.md` -> `task-12050 - Rebase-PR-2534-MCP-Unified-UX-remediation-on-dev.md`
 - `backlog/completed/task-12052 - Address-PR-2534-review-comments-and-rebase.md` -> `task-12051 - Fix-PR-2534-backend-required-safe-config-unit-tests.md`
-- `backlog/tasks/task-12160 - Plan-Web-Scraping-refactor-Phase-2-runtime-and-policy-boundary-implementation.md` -> `task-12159 - Design-Web-Scraping-refactor-Phase-2-runtime-and-policy-boundary.md`
-- `backlog/tasks/task-12161 - Implement-Web-Scraping-refactor-Phase-2-runtime-and-policy-boundary.md` -> `task-12160 - Plan-Web-Scraping-refactor-Phase-2-runtime-and-policy-boundary-implementation.md`
+- `backlog/tasks/task-15078 - Plan-Web-Scraping-refactor-Phase-2-runtime-and-policy-boundary-implementation.md` -> `task-12159 - Design-Web-Scraping-refactor-Phase-2-runtime-and-policy-boundary.md`
+- `backlog/tasks/task-15080 - Implement-Web-Scraping-refactor-Phase-2-runtime-and-policy-boundary.md` -> `task-12160 - Plan-Web-Scraping-refactor-Phase-2-runtime-and-policy-boundary-implementation.md`
 - `backlog/tasks/task-13100 - Remediate-global-plaintext-web-scraping-cookie-exposure-for-research-discovery.md` -> `task-12969 - Remediate-global-plaintext-web-scraping-cookie-exposure.md`
 - `backlog/tasks/task-13101 - Add-cooperative-cancellation-and-partial-result-finalization-for-research-Jobs.md` -> `task-12970 - Add-cooperative-cancellation-and-partial-result-finalization-to-Jobs.md`
 - `backlog/completed/task-12971 - Address-PR-2740-review-findings-and-rebase-Skills-extension-parity.md` -> `task-12970 - Certify-Skills-browser-extension-parity-and-fix-shell-specific-regressions.md`
 - `backlog/tasks/task-12993 - Implement-Claims-Jobs-Stage-2A-analytics-exports.md` -> `task-12989 - Design-Claims-Jobs-Stage-2A-analytics-exports.md`
 - `backlog/tasks/task-12993 - Implement-Claims-Jobs-Stage-2A-analytics-exports.md` -> `task-12990 - Plan-Claims-Jobs-Stage-2A-analytics-exports-implementation.md`
-- `backlog/tasks/task-13231 - Review-and-rebase-PR-2613-audio-fail-fast-regression-coverage.md` -> `task-13001 - Refresh-audit-oversized-audio-download-regression-PR.md`
+- `backlog/tasks/task-15152 - Review-and-rebase-PR-2613-audio-fail-fast-regression-coverage.md` -> `task-13001 - Refresh-audit-oversized-audio-download-regression-PR.md`
 - `backlog/tasks/task-13011 - Implement-Moderation-shared-models-extraction.md` -> `task-13010 - Design-Moderation-shared-models-extraction.md`
 - `backlog/tasks/task-13208 - Make-Study-Assistant-guidance-customizable-through-Service-Prompts.md` -> `task-13199 - Make-Study-Assistant-guidance-customizable-through-Service-Prompts.md`
-- `backlog/tasks/task-13215 - Fix-Jobs-completion-missing-row-concurrent-insert-atomicity.md` -> `task-13216 - Migrate-acquired-job-completion-callers-to-UUID-preconditions.md`
-- `backlog/tasks/task-13215 - Fix-Jobs-completion-missing-row-concurrent-insert-atomicity.md` -> `task-13217 - Assess-historical-Jobs-completion-bookkeeping-drift.md`
-- `backlog/tasks/task-2247 - Confirm-Security-module-decisions-for-ADR-backfill.md` -> `task-2248 - Backfill-Security-request-edge-middleware-ADR.md`
-- `backlog/completed/task-2387 - Address-MCP-smoke-harness-final-review-findings.md` -> `task-2387 - Design-MCP-smoke-client-transport-harness.md`
+- `backlog/tasks/task-15149 - Fix-Jobs-completion-missing-row-concurrent-insert-atomicity.md` -> `task-13216 - Migrate-acquired-job-completion-callers-to-UUID-preconditions.md`
+- `backlog/tasks/task-15149 - Fix-Jobs-completion-missing-row-concurrent-insert-atomicity.md` -> `task-13217 - Assess-historical-Jobs-completion-bookkeeping-drift.md`
+- `backlog/tasks/task-15024 - Confirm-Security-module-decisions-for-ADR-backfill.md` -> `task-2248 - Backfill-Security-request-edge-middleware-ADR.md`
+- `backlog/completed/task-15253 - Address-MCP-smoke-harness-final-review-findings.md` -> `task-2387 - Design-MCP-smoke-client-transport-harness.md`
 - `backlog/completed/task-2392 - Address-PR-2411-smoke-harness-review-comments.md` -> `task-2387 - Design-MCP-smoke-client-transport-harness.md`
-- `backlog/completed/task-418 - Address-PR-1814-review-comments.md` -> `task-400 - Inventory-bulk-conference-collection-contract-for-implementation.md`
+- `backlog/completed/task-15229 - Address-PR-1814-review-comments.md` -> `task-400 - Inventory-bulk-conference-collection-contract-for-implementation.md`
 - `backlog/tasks/task-420 - Address-PR-1820-review-comments.md` -> `task-405 - Implement-folder-to-notes-Sources-UI-exposure.md`
 - `backlog/tasks/task-420 - Address-PR-1820-review-comments.md` -> `task-406 - Add-Sources-server-path-picker.md`
-- `backlog/tasks/task-469 - Address-PR-2018-Research-Workspace-source-Jobs-review-feedback.md` -> `task-469 - Address-Research-Workspace-source-Jobs-review-feedback.md`
-- `backlog/completed/task-469 - Address-Research-Workspace-source-Jobs-review-feedback.md` -> `task-469 - Enqueue-Research-Workspace-source-ingestion-Jobs.md`
-- `backlog/tasks/task-469 - Address-PR-2018-Research-Workspace-source-Jobs-review-feedback.md` -> `task-469 - Enqueue-Research-Workspace-source-ingestion-Jobs.md`
+- `backlog/tasks/task-15007 - Address-PR-2018-Research-Workspace-source-Jobs-review-feedback.md` -> `task-469 - Address-Research-Workspace-source-Jobs-review-feedback.md`
+- `backlog/completed/task-15233 - Address-Research-Workspace-source-Jobs-review-feedback.md` -> `task-469 - Enqueue-Research-Workspace-source-ingestion-Jobs.md`
+- `backlog/tasks/task-15007 - Address-PR-2018-Research-Workspace-source-Jobs-review-feedback.md` -> `task-469 - Enqueue-Research-Workspace-source-ingestion-Jobs.md`
 
 Renumbered files that cite their own old file name, left as they are:
 
