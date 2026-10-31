@@ -896,3 +896,44 @@ it("refuses mixed null and legacy linear local graphs", async () => {
   expect(screen.queryByTestId("opened-sources")).not.toBeInTheDocument();
   expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)).toEqual(session);
 });
+
+
+it.each(["blank-image", "empty-documents", "both"])(
+  "opens an exact mirror written by the real local saver with %s placeholders", async kind => {
+    const { historyId } = await prepareOwnedMirror();
+    const { saveMessage } = await import("@/db/dexie/helpers");
+    mirror.messages.delete("local-user");
+    await saveMessage({
+      id: "local-user", history_id: historyId, name: "You", role: "user", content: "Saved question",
+      images: kind === "empty-documents" ? [] : [""],
+      documents: kind === "blank-image" ? undefined : [],
+      parent_message_id: null, serverMessageId: "server-user", createdAt: 17,
+    });
+    const raw = structuredClone([...mirror.messages]);
+    const session = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET);
+    await mount("/research-workspace?source_workspace_id=" + TARGET);
+    await screen.findByTestId("opened-sources");
+    expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)).toEqual(session);
+    expect([...mirror.messages]).toEqual(raw);
+  });
+
+it.each(["image", "documents", "malformed-image"])(
+  "retains a real %s attachment absent from the canonical transcript", async kind => {
+    const { historyId } = await prepareOwnedMirror();
+    const { saveMessage } = await import("@/db/dexie/helpers");
+    mirror.messages.delete("local-user");
+    await saveMessage({
+      id: "local-user", history_id: historyId, name: "You", role: "user", content: "Saved question",
+      images: kind === "image" ? ["data:image/png;base64,aGVsbG8="] : [""],
+      documents: kind === "documents" ? [{ type: "file", filename: "keep.txt" }] : [],
+      parent_message_id: null, serverMessageId: "server-user", createdAt: 17,
+    });
+    if (kind === "malformed-image") mirror.messages.get("local-user")!.images = [null];
+    const raw = structuredClone([...mirror.messages]);
+    const session = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET);
+    await mount("/research-workspace?source_workspace_id=" + TARGET);
+    await screen.findByRole("alert");
+    expect(screen.queryByTestId("opened-sources")).not.toBeInTheDocument();
+    expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)).toEqual(session);
+    expect([...mirror.messages]).toEqual(raw);
+  });

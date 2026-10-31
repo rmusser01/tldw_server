@@ -125,6 +125,14 @@ const cachedMessagesMatchCanonical = (cached: Message[], canonical: Message[], r
       const display = ["id", "name", "createdAt", "modelId", "modelName", "modelImage", "reasoning_time_taken"];
       const fields = Object.keys(message).filter(key => !display.includes(key) && message[key as keyof Message] !== undefined);
       const payload = (row: Message, local: boolean) => Object.fromEntries(fields.map(key => {
+        // Text-only local saves retain an empty image marker and document list.
+        if (key === "images") {
+          if (row.images !== undefined && (!Array.isArray(row.images) || row.images.some(image => typeof image !== "string")))
+            throw new Error("Unverified local image context");
+          return [key, row.images?.filter(image => image !== "")];
+        }
+        if (key === "documents" && Array.isArray(row.documents) && row.documents.length === 0)
+          return [key, undefined];
         if (key === "sources" && (message.sources?.length || saved.sources?.length)) {
           const provenance = local ? projectWorkspaceRagSources(row.sources)
             : readWorkspaceRagSourceProvenance(saved.metadataExtra?.[WORKSPACE_RAG_SOURCES_KEY]);
