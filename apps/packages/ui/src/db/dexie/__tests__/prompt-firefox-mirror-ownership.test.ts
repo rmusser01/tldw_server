@@ -9,7 +9,23 @@ vi.mock("../schema", () => ({ db: { prompts: {
   update: async (id: string, fields: any) => { Object.assign(state.dexie.get(id), fields); return 1 },
   delete: async (id: string) => state.dexie.delete(id),
   bulkDelete: async (ids: string[]) => ids.forEach(id => state.dexie.delete(id)),
-  filter: (predicate: (row: any) => boolean) => ({ toArray: async () => [...state.dexie.values()].filter(predicate), reverse: () => ({ sortBy: async () => [...state.dexie.values()].filter(predicate) }) })
+  filter: (predicate: (row: any) => boolean) => ({ toArray: async () => [...state.dexie.values()].filter(predicate), reverse: () => ({ sortBy: async () => [...state.dexie.values()].filter(predicate) }) }),
+  // WP-25: the trash queries read the numeric-deletedAt index range instead
+  // of scanning the whole table; mirror the range semantics here.
+  where: (key: string) => {
+    const trashQuery = (test: (row: any) => boolean) => ({
+      filter: (next: (row: any) => boolean) => trashQuery(row => test(row) && next(row)),
+      toArray: async () => [...state.dexie.values()].filter(test),
+      reverse: () => ({ sortBy: async () => [...state.dexie.values()].filter(test) })
+    })
+    return {
+      above: (value: unknown) => trashQuery(row => row[key] > value),
+      between: (lower: unknown, upper: unknown, includeLower = true, includeUpper = false) =>
+        trashQuery(row =>
+          (includeLower ? row[key] >= lower : row[key] > lower) &&
+          (includeUpper ? row[key] <= upper : row[key] < upper))
+    }
+  }
 } } }))
 vi.mock("../..", () => ({
   getPromptByIdFB: async (id: string) => state.firefox.get(id),

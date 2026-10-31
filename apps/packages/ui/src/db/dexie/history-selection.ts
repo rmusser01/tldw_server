@@ -3,6 +3,7 @@ import type { RoleplayResumeRecovery } from "@/services/tldw/roleplay-resume"
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
 import { db } from "./schema"
+import { indexMessageSearchTokens } from "./search-tokens"
 import type {
   HistoryInfo,
   Message,
@@ -235,7 +236,7 @@ export const withLocalMessageMutation = async <T,>(
 ): Promise<T> =>
   db.transaction(
     "rw",
-    [db.messages, db.chatHistories, db.userSettings],
+    [db.messages, db.chatHistories, db.userSettings, db.searchTokens],
     async () => {
       assertLease(capturedOwner)
       assertLease(options)
@@ -265,7 +266,8 @@ const tables = () => [
   db.sessionFiles,
   db.compareStates,
   db.historySelections,
-  db.historyProjections
+  db.historyProjections,
+  db.searchTokens
 ]
 const assertLease = (opts?: HistoryOperationOptions) => {
   if (opts?.signal?.aborted || opts?.validate_lease?.() === false)
@@ -970,6 +972,7 @@ export const appendLocalSelectedUser = (
     )
       fail("stale_selection")
     await db.messages.add({ ...message, history_admission: admission })
+    await indexMessageSearchTokens(message)
     return admission
   })
 }
@@ -1085,6 +1088,7 @@ export const settleLocalAcceptedAssistant = (
     }
     const result = { ...message, history_settlement: settlement }
     await db.messages.add(result)
+    await indexMessageSearchTokens(result)
     return result
   })
 }
@@ -1141,6 +1145,7 @@ export const settleLocalSelectedExistingInput = (
       }
     }
     await db.messages.add(result)
+    await indexMessageSearchTokens(result)
     return result
   })
 }

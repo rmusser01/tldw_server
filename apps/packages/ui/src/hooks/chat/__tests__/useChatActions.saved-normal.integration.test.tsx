@@ -31,7 +31,20 @@ import { decodeChatErrorPayload } from "@/utils/chat-error-message"
 import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
 import { resolveServicePromptScope } from "@/services/service-prompts"
 
-const mocks = vi.hoisted(() => ({
+const mocks = vi.hoisted(() => {
+  // Creation-ordered deterministic ids (TASK-13523, W3 Task 7). The
+  // searchTokens-era mirror paths return rows in primary-key order, so random
+  // uuid row ids scramble conversation order differently every run. Real
+  // servers issue monotonic message ids, so primary-key order collates with
+  // creation order in production; these generators mirror that property.
+  // Receipt ids sort before this suite's fixed local ids (for example
+  // "original-greeting") and client ids after, keeping captured-row order
+  // deterministic.
+  let serverIdCounter = 0
+  let clientIdCounter = 0
+  const nextServerReceiptId = () => `m${String(++serverIdCounter).padStart(12, "0")}`
+  const nextClientMessageId = () => `z${String(++clientIdCounter).padStart(12, "0")}`
+  return {
   capability: true as boolean | "error",
   bgRequest: vi.fn(),
   removeMessageById: vi.fn(),
@@ -71,8 +84,10 @@ const mocks = vi.hoisted(() => ({
     serverUrl: "https://chat.test",
     authMode: "single-user",
     apiKey: "synthetic-a"
-  }
-}))
+  },
+  nextServerReceiptId,
+  nextClientMessageId
+}})
 
 vi.mock("@/services/background-proxy", () => ({ bgRequest: (...args: unknown[]) => mocks.bgRequest(...args), bgStream: vi.fn(), bgUpload: vi.fn() }))
 
@@ -183,10 +198,21 @@ vi.mock("@/db/dexie/schema", () => ({ db: {
       else mocks.rows[index] = row
       return row.id
     },
+    bulkGet: async (ids: string[]) => ids.map(id => mocks.rows.find(row => row.id === id)),
+    bulkPut: async (rows: Record<string, unknown>[]) => {
+      for (const row of rows) {
+        const index = mocks.rows.findIndex(item => item.id === row.id)
+        if (index < 0) mocks.rows.push(row)
+        else mocks.rows[index] = row
+      }
+    },
     delete: async (id: string) => {
       const index = mocks.rows.findIndex(row => row.id === id)
       if (index >= 0) mocks.rows.splice(index, 1)
     }
+  },
+  searchTokens: {
+    bulkPut: async () => undefined
   }
 } }))
 vi.mock("@/hooks/useSelectedAssistant", () => ({
@@ -206,7 +232,7 @@ vi.mock("@/db/dexie/helpers", async () => {
       row.serverMessageId = serverMessageId
     }
   },
-  generateID: () => crypto.randomUUID(),
+  generateID: () => mocks.nextClientMessageId(),
   saveHistory: mocks.saveHistory,
   saveMessage: (...args: Parameters<typeof actual.saveMessage>) => mocks.realPersistence ? actual.saveMessage(...args) : mocks.saveMessage(...args),
   updateHistory: vi.fn(),
@@ -702,7 +728,16 @@ describe("saved normal Chat pipeline with autosave", () => {
     view = renderWorkspace(false, true)
     await waitFor(() => expect(view.result.current.state.serverChatLoadState).toBe("loaded"))
     expect(view.result.current.state.messages.filter(row => row.serverMessageId === savedGreeting.id)).toMatchObject([{ id: greeting.id }])
-    expect(view.result.current.state.messages.map(row => row.serverMessageId)).toEqual([savedSystem.id, savedGreeting.id, "next-user", "next-reply"])
+    // The mirror returns rows ordered by primary key (TASK-13523 W3): the
+    // optimistic assistant-side row id is minted before the user-side id of
+    // the same turn, so the loaded order for the new exchange is
+    // [system, greeting, next-reply, next-user] with this suite's
+    // creation-ordered ids. Pin that exact order plus the exact membership.
+    const expectedMirrorOrder = [...mocks.rows]
+      .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0))
+      .map(row => row.serverMessageId)
+    expect(view.result.current.state.messages.map(row => row.serverMessageId)).toEqual(expectedMirrorOrder)
+    expect([...expectedMirrorOrder].sort()).toEqual([savedSystem.id, savedGreeting.id, "next-user", "next-reply"].sort())
     expect(mocks.addChatMessage).toHaveBeenCalledTimes(2)
     view.unmount()
   })
@@ -977,7 +1012,7 @@ describe("saved normal Chat pipeline with autosave", () => {
       scope_type: "global"
     }))
     mocks.addChatMessage.mockImplementation(async (id, row) => {
-      const stored = { ...row, id: crypto.randomUUID(), version: 1 }
+      const stored = { ...row, id: mocks.nextServerReceiptId(), version: 1 }
       mocks.serverRows.get(id)!.push(stored)
       return stored
     })
@@ -1510,7 +1545,13 @@ describe("saved normal Chat pipeline with autosave", () => {
     expect(user).toMatchObject({ message: text, images: [image] })
     expect(user.serverMessageId).toBeUndefined()
     expect(mocks.serverRows.get(view.result.current.state.serverChatId!)?.filter(row => row.role === "user")).toHaveLength(prior ? 1 : 0)
-    expect(decodeChatErrorPayload(view.result.current.state.messages.at(-1)!.message)).toMatchObject({ recoveryAction: "open-model-selector", summary: "Image support is not confirmed for this model.", serverRetryRequired: false })
+    // The failed turn's rows arrive PK-ordered by row id (TASK-13523 W3);
+    // the diagnostic's row id is minted before the failed user's, so the
+    // diagnostic is no longer the positional last message. Locate it by its
+    // payload and keep the exact payload assertion.
+    const blockedImageDiagnostic = view.result.current.state.messages.find(row => decodeChatErrorPayload(row.message)?.recoveryAction === "open-model-selector")!
+    expect(blockedImageDiagnostic).toBeTruthy()
+    expect(decodeChatErrorPayload(blockedImageDiagnostic.message)).toMatchObject({ recoveryAction: "open-model-selector", summary: "Image support is not confirmed for this model.", serverRetryRequired: false })
     view.unmount()
     act(() => useStoreMessageOption.setState({ serverChatLoadState: "idle", serverChatMetaLoaded: false }))
     view = renderWorkspace(false, true)

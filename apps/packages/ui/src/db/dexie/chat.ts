@@ -29,7 +29,8 @@ import {
 } from "./types"
 import Dexie, { type ObservabilitySet, type UpdateSpec } from "dexie"
 import { db } from './schema';
-import { getAllModelNicknames } from "./nickname";
+import { getAllModelNicknames, invalidateModelNicknameCache } from "./nickname";
+import { indexMessageSearchTokens, indexMessagesSearchTokens, searchTokenHistoryIds } from "./search-tokens";
 const PAGE_SIZE = 30;
 
 export { isOnDeviceHistory, isReadableOnDeviceHistory, isOwnedCachedServerHistory, type OnDeviceHistoryScope, type OnDeviceHistoryReadOptions, type VisibleServerChats } from "./history-selection";
@@ -53,17 +54,6 @@ function searchQueryInContent(content: string, query: string): boolean {
   const wordBoundaryPattern = new RegExp(`\\b${normalizedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
 
   return wordBoundaryPattern.test(normalizedContent);
-}
-
-function fastForward(lastRow: any, idProp: string, otherCriterion?: (item: any) => boolean) {
-  let fastForwardComplete = false;
-  return (item: any) => {
-    if (fastForwardComplete) return otherCriterion ? otherCriterion(item) : true;
-    if (item[idProp] === lastRow[idProp]) {
-      fastForwardComplete = true;
-    }
-    return false;
-  };
 }
 
 
@@ -188,21 +178,41 @@ export class PageAssistDatabase {
       .anyOfIgnoreCase(normalizedQuery.split(' '))
       .toArray();
 
-    const messageMatches = await db.messages
-      .filter(message => searchQueryInContent(message.content, normalizedQuery))
-      .toArray();
+    // Content search (WP-23): the searchTokens index narrows to candidate
+    // histories, then only candidate message rows are streamed through the
+    // exact word-boundary check. The messages table is never materialized.
+    const candidateHistoryIds = await searchTokenHistoryIds(normalizedQuery);
+    const contentMatchedIds = new Set<string>();
+    if (candidateHistoryIds === null) {
+      // Punctuation-only query: no word tokens to prefilter with. Keep the
+      // exact semantics via a streaming pass that never materializes the
+      // table (rare path).
+      await db.messages.each(message => {
+        if (searchQueryInContent(message.content, normalizedQuery)) {
+          contentMatchedIds.add(message.history_id);
+        }
+      });
+    } else if (candidateHistoryIds.size > 0) {
+      await db.messages
+        .where('history_id')
+        .anyOf([...candidateHistoryIds])
+        .filter(message => searchQueryInContent(message.content, normalizedQuery))
+        .each(message => contentMatchedIds.add(message.history_id));
+    }
 
-    const historyIdsFromMessages = [...new Set(messageMatches.map(msg => msg.history_id))];
-
-    const historiesFromMessages = await db.chatHistories
+    const historiesFromMessages = contentMatchedIds.size === 0 ? [] : await db.chatHistories
       .where('id')
-      .anyOf(historyIdsFromMessages)
+      .anyOf([...contentMatchedIds])
       .toArray();
 
-    const allMatches = [...titleMatches, ...historiesFromMessages];
-    const uniqueHistories = allMatches.filter((history, index, self) =>
-      index === self.findIndex(h => h.id === history.id)
-    );
+    // Set dedupe: title matches win over content matches for the same id.
+    const seenIds = new Set<string>();
+    const uniqueHistories: ChatHistory = [];
+    for (const history of [...titleMatches, ...historiesFromMessages]) {
+      if (seenIds.has(history.id)) continue;
+      seenIds.add(history.id);
+      uniqueHistories.push(history);
+    }
 
     return uniqueHistories.sort((a, b) => b.createdAt - a.createdAt);
   }
@@ -245,26 +255,35 @@ export class PageAssistDatabase {
       .sortBy('createdAt');
   }
 
-  async getHistoryMetadata(historyId: string): Promise<{
+  /**
+   * The newest message of a history via the `[history_id+createdAt]` compound
+   * index (WP-26): two cursor seeks instead of materializing the history's
+   * messages. The newest row is the index maximum; a tie on `createdAt`
+   * resolves to the FIRST row in primary-key order, exactly matching the
+   * previous reduce() over the PK-ordered `history_id` scan.
+   */
+  private async newestMessageByHistoryId(historyId: string): Promise<Message | undefined> {
+    const newest = await db.messages
+      .where('[history_id+createdAt]')
+      .between([historyId, -Infinity], [historyId, Infinity])
+      .last();
+    if (!newest) return undefined;
+    const firstOfTie = await db.messages
+      .where('[history_id+createdAt]')
+      .equals([historyId, newest.createdAt])
+      .first();
+    return firstOfTie ?? newest;
+  }
+
+  private async historyMetadataEntry(historyId: string): Promise<{
     messageCount: number;
     lastMessage?: { content: string; role: string; createdAt: number };
   }> {
-    const messages = await db.messages
-      .where('history_id')
-      .equals(historyId)
-      .toArray();
-
-    const messageCount = messages.length;
-
-    if (messageCount === 0) {
-      return { messageCount };
-    }
-
-    // Find the most recent message
-    const lastMessage = messages.reduce((latest, msg) =>
-      msg.createdAt > latest.createdAt ? msg : latest
-    , messages[0]);
-
+    // Index-only count: no message values are materialized for the count.
+    const messageCount = await db.messages.where('history_id').equals(historyId).count();
+    if (messageCount === 0) return { messageCount };
+    const lastMessage = await this.newestMessageByHistoryId(historyId);
+    if (!lastMessage) return { messageCount };
     return {
       messageCount,
       lastMessage: {
@@ -273,6 +292,13 @@ export class PageAssistDatabase {
         createdAt: lastMessage.createdAt
       }
     };
+  }
+
+  async getHistoryMetadata(historyId: string): Promise<{
+    messageCount: number;
+    lastMessage?: { content: string; role: string; createdAt: number };
+  }> {
+    return this.historyMetadataEntry(historyId);
   }
 
   async getHistoriesWithMetadata(historyIds: string[], scope?: OnDeviceHistoryScope, options?: OnDeviceHistoryReadOptions): Promise<Map<string, {
@@ -288,43 +314,17 @@ export class PageAssistDatabase {
       return metadata;
     });
     const result = new Map();
+    if (historyIds.length === 0) return result;
 
-    // Batch fetch all messages for the given history IDs
-    const allMessages = await db.messages
-      .where('history_id')
-      .anyOf(historyIds)
-      .toArray();
-
-    // Group messages by history_id
-    const messagesByHistory = new Map<string, typeof allMessages>();
-    for (const msg of allMessages) {
-      const existing = messagesByHistory.get(msg.history_id) || [];
-      existing.push(msg);
-      messagesByHistory.set(msg.history_id, existing);
-    }
-
-    // Compute metadata for each history
-    for (const historyId of historyIds) {
-      const messages = messagesByHistory.get(historyId) || [];
-      const messageCount = messages.length;
-
-      if (messageCount === 0) {
-        result.set(historyId, { messageCount });
-      } else {
-        const lastMessage = messages.reduce((latest, msg) =>
-          msg.createdAt > latest.createdAt ? msg : latest
-        , messages[0]);
-
-        result.set(historyId, {
-          messageCount,
-          lastMessage: {
-            content: lastMessage.content,
-            role: lastMessage.role,
-            createdAt: lastMessage.createdAt
-          }
-        });
+    // Per-history index counts plus O(log n) newest-message lookups (WP-26):
+    // opening the sidebar on hundreds of histories never loads the messages
+    // table — only index entries and at most one message row per history.
+    // One read transaction batches the per-history queries.
+    await db.transaction('r', db.messages, async () => {
+      for (const historyId of historyIds) {
+        result.set(historyId, await this.historyMetadataEntry(historyId));
       }
-    }
+    });
 
     return result;
   }
@@ -343,6 +343,14 @@ export class PageAssistDatabase {
 
   async addMessage(message: Message) {
     await db.messages.add(stripHistoryAuthority(message));
+    // Keep the content-search token index fresh. Best-effort: the message is
+    // already committed, so an index failure degrades only that message's
+    // searchability rather than failing the save.
+    try {
+      await indexMessageSearchTokens(message);
+    } catch (error) {
+      console.warn("[search-tokens] failed to index a saved message:", error);
+    }
   }
 
   async updateMessage(
@@ -357,6 +365,10 @@ export class PageAssistDatabase {
       if (row.history_id !== history_id)
         throw new Error("message_owner_mismatch");
       await db.messages.update(message_id, { content });
+      // Re-index in the same transaction: stale tokens from the old content
+      // are harmless (exact verification rejects them), the new content must
+      // be findable.
+      await indexMessageSearchTokens({ history_id, content });
     });
   }
 
@@ -431,6 +443,8 @@ export class PageAssistDatabase {
   async clear() {
     await db.delete();
     await db.open();
+    // db.delete() wipes every table, including nicknames.
+    invalidateModelNicknameCache();
   }
 
   async deleteChatHistory(id: string) {
@@ -454,6 +468,8 @@ export class PageAssistDatabase {
   async clearDB() {
     await db.delete();
     await db.open();
+    // db.delete() wipes every table, including nicknames.
+    invalidateModelNicknameCache();
   }
 
   async deleteMessage(history_id: string) {
@@ -466,7 +482,7 @@ export class PageAssistDatabase {
   }> {
     const offset = (page - 1) * PAGE_SIZE;
     const query = searchQuery?.trim();
-    if (scope) return db.transaction("r", [db.userSettings, db.chatHistories, db.messages], async () => {
+    if (scope) return db.transaction("r", [db.userSettings, db.chatHistories, db.messages, db.searchTokens], async () => {
       await assertOnDeviceReader(scope);
       const candidates = query ? await this.fullTextSearchChatHistories(query) : await this.getChatHistories();
       const eligible = candidates.filter(history => isReadableOnDeviceHistory(history, scope, options, query));
@@ -532,15 +548,34 @@ export class PageAssistDatabase {
     });
   }
 
-  async getChatHistoriesPaginatedOptimized(lastEntry?: any, searchQuery?: string): Promise<{
+  /**
+   * Keyset pagination over the `[createdAt+id]` compound index (WP-27): each
+   * page is an exact range scan strictly below the previous page's last row,
+   * so pages never duplicate or skip — including on createdAt ties — without
+   * an offset scan or a stateful fast-forward predicate.
+   */
+  async getChatHistoriesPaginatedOptimized(lastEntry?: Pick<HistoryInfo, 'createdAt' | 'id'>, searchQuery?: string): Promise<{
     histories: ChatHistory;
     hasMore: boolean;
   }> {
     if (searchQuery) {
+      // Search results are computed and sorted in memory; continue after the
+      // previous page's last row by id. A cursor that no longer matches any
+      // result (row deleted between pages) ends the walk cleanly instead of
+      // re-serving page 1.
       const allResults = await this.fullTextSearchChatHistories(searchQuery);
+      if (!lastEntry) {
+        return {
+          histories: allResults.slice(0, PAGE_SIZE),
+          hasMore: allResults.length > PAGE_SIZE
+        };
+      }
+      const cursor = allResults.findIndex(row => row.id === lastEntry.id);
+      if (cursor === -1) return { histories: [], hasMore: false };
+      const histories = allResults.slice(cursor + 1, cursor + 1 + PAGE_SIZE);
       return {
-        histories: allResults.slice(0, PAGE_SIZE),
-        hasMore: allResults.length > PAGE_SIZE
+        histories,
+        hasMore: cursor + 1 + PAGE_SIZE < allResults.length
       };
     }
 
@@ -550,39 +585,68 @@ export class PageAssistDatabase {
         .reverse()
         .limit(PAGE_SIZE)
         .toArray();
-
       return {
         histories,
         hasMore: histories.length === PAGE_SIZE
-      };
-    } else {
-      const histories = await db.chatHistories
-        .where('createdAt')
-        .belowOrEqual(lastEntry.createdAt)
-        .filter(fastForward(lastEntry, "id"))
-        .limit(PAGE_SIZE)
-        .reverse()
-        .toArray();
-
-      return {
-        histories,
-        hasMore: histories.length === PAGE_SIZE
+          ? await this.hasMoreHistoriesBefore(histories[histories.length - 1])
+          : false
       };
     }
+
+    const histories = await db.chatHistories
+      .where('[createdAt+id]')
+      .below([lastEntry.createdAt, lastEntry.id])
+      .reverse()
+      .limit(PAGE_SIZE)
+      .toArray();
+    return {
+      histories,
+      hasMore: histories.length === PAGE_SIZE
+        ? await this.hasMoreHistoriesBefore(histories[histories.length - 1])
+        : false
+    };
+  }
+
+  /** One-row probe below the page cursor: exact hasMore without an offset or full count. */
+  private async hasMoreHistoriesBefore(lastRow: HistoryInfo | undefined): Promise<boolean> {
+    if (!lastRow) return false;
+    const next = await db.chatHistories
+      .where('[createdAt+id]')
+      .below([lastRow.createdAt, lastRow.id])
+      .limit(1)
+      .first();
+    return !!next;
   }
 
   // Prompts Methods
   /** Read shared, unlinked legacy data without probing authenticated ownership. */
   async getSharedLocalPrompts(deleted = false): Promise<Prompts> {
+    // Only trashed prompts (numeric deletedAt, always a positive Date.now()
+    // timestamp) have entries in the `deletedAt` index — IndexedDB never
+    // indexes null/undefined — so only the deleted side can be an index
+    // range. The non-deleted side keeps its JS filter: rows with
+    // deletedAt:null or with the field absent (pre-v9 legacy rows) have no
+    // index entries to query.
+    if (!deleted) {
+      return await db.prompts
+        .filter(p => p.ownerId == null && isPromptOwnedBy(p, null) && !p.deletedAt)
+        .reverse()
+        .sortBy('createdAt');
+    }
     return await db.prompts
-      .filter(p => p.ownerId == null && isPromptOwnedBy(p, null) && !!p.deletedAt === deleted)
+      .where('deletedAt')
+      .above(0)
+      .filter(p => p.ownerId == null && isPromptOwnedBy(p, null))
       .reverse()
-      .sortBy(deleted ? 'deletedAt' : 'createdAt');
+      .sortBy('deletedAt');
   }
 
   async getAllPrompts(expectedOwnerId?: string | null): Promise<Prompts> {
     const ownerId = await resolvePromptOwnerId(expectedOwnerId);
-    // Only return non-deleted prompts
+    // Only return non-deleted prompts. Non-deleted rows are exactly the ones
+    // WITHOUT an index entry (see getSharedLocalPrompts), so the JS filter
+    // over the table is unavoidable here — but its cost is proportional to
+    // the returned set.
     return await db.prompts
       .filter(p => !p.deletedAt && isPromptOwnedBy(p, ownerId))
       .reverse()
@@ -591,9 +655,12 @@ export class PageAssistDatabase {
 
   async getDeletedPrompts(expectedOwnerId?: string | null): Promise<Prompts> {
     const ownerId = await resolvePromptOwnerId(expectedOwnerId);
-    // Return soft-deleted prompts (trash)
+    // Return soft-deleted prompts (trash): the numeric-deletedAt range of
+    // the index is exactly the trashed set.
     return await db.prompts
-      .filter(p => !!p.deletedAt && isPromptOwnedBy(p, ownerId))
+      .where('deletedAt')
+      .above(0)
+      .filter(p => isPromptOwnedBy(p, ownerId))
       .reverse()
       .sortBy('deletedAt');
   }
@@ -604,7 +671,7 @@ export class PageAssistDatabase {
   }
 
   async countStoredPromptsForMigration(): Promise<number> {
-    return (await db.prompts.toArray()).length;
+    return db.prompts.count();
   }
 
   async addPrompt(prompt: Prompt, expectedOwnerId?: string | null) {
@@ -673,20 +740,27 @@ export class PageAssistDatabase {
   }
 
   async emptyTrash(expectedOwnerId?: string | null): Promise<number> {
-    // Permanently delete all trashed prompts
+    // Permanently delete all trashed prompts: the numeric-deletedAt index
+    // range selects the trash directly instead of JS-scanning every prompt.
     const ownerId = await resolvePromptOwnerId(expectedOwnerId);
-    const deleted = await db.prompts.filter(p => !!p.deletedAt && isPromptOwnedBy(p, ownerId)).toArray();
+    const deleted = await db.prompts
+      .where('deletedAt')
+      .above(0)
+      .filter(p => isPromptOwnedBy(p, ownerId))
+      .toArray();
     const ids = deleted.map(p => p.id);
     await db.prompts.bulkDelete(ids);
     return ids.length;
   }
 
   async autoCleanupTrash(maxAgeDays: number = 30, expectedOwnerId?: string | null): Promise<number> {
-    // Auto-purge prompts deleted more than maxAgeDays ago
+    // Auto-purge prompts deleted more than maxAgeDays ago (0 < deletedAt < cutoff).
     const ownerId = await resolvePromptOwnerId(expectedOwnerId);
     const cutoff = Date.now() - (maxAgeDays * 24 * 60 * 60 * 1000);
     const expired = await db.prompts
-      .filter(p => !!p.deletedAt && p.deletedAt < cutoff && isPromptOwnedBy(p, ownerId))
+      .where('deletedAt')
+      .between(0, cutoff, false, false)
+      .filter(p => isPromptOwnedBy(p, ownerId))
       .toArray();
     const ids = expired.map(p => p.id);
     await db.prompts.bulkDelete(ids);
@@ -865,7 +939,7 @@ export class PageAssistDatabase {
     const { replaceExisting = false, mergeData = true } = options;
 
     // Preserve this destination's guard, never imported authority, under the replacement lock.
-    await db.transaction('rw', [db.chatHistories, db.messages, db.compareStates], async () => {
+    await db.transaction('rw', [db.chatHistories, db.messages, db.compareStates, db.searchTokens], async () => {
       const histories = data.filter(item => item.history).map(item => sanitizeImportedHistory(item.history));
       for (const history of histories) {
         const destination = await db.chatHistories.get(history.id);
@@ -898,6 +972,7 @@ export class PageAssistDatabase {
       if (allMessages.length > 0) {
         if (replaceExisting) {
           await db.messages.bulkPut(allMessages);
+          await indexMessagesSearchTokens(allMessages);
         } else {
           // Filter out existing messages
           const existingIds = new Set(
@@ -907,6 +982,7 @@ export class PageAssistDatabase {
           const newMessages = allMessages.filter(m => !existingIds.has(m.id));
           if (newMessages.length > 0) {
             await db.messages.bulkPut(newMessages);
+            await indexMessagesSearchTokens(newMessages);
           }
         }
       }
@@ -1017,8 +1093,10 @@ export class PageAssistDatabase {
         if (mergeData) {
           // Merge files arrays
           const mergedFiles = [...existingSessionFile.files];
+          const mergedFileIds = new Set(mergedFiles.map((f) => f.id));
           for (const newFile of sessionFile.files) {
-            if (!mergedFiles.find(f => f.id === newFile.id)) {
+            if (!mergedFileIds.has(newFile.id)) {
+              mergedFileIds.add(newFile.id);
               mergedFiles.push(newFile);
             }
           }

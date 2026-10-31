@@ -22,9 +22,9 @@ const PAGE_ASSIST_SCHEMA: Record<string, string> = {
     "[profile_id+client_session_id+owner_key+conversation_id], owner_key, conversation_id",
   historyProjections: "[owner_key+conversation_id+projection_id], owner_key, conversation_id",
   chatHistories:
-    "id, title, is_rag, message_source, is_pinned, createdAt, doc_id, last_used_prompt, model_id, root_id, parent_conversation_id, server_chat_id",
+    "id, title, is_rag, message_source, is_pinned, createdAt, doc_id, last_used_prompt, model_id, root_id, parent_conversation_id, server_chat_id, [createdAt+id]",
   messages:
-    "id, history_id, name, role, content, createdAt, messageType, modelName, clusterId, modelId, parent_message_id",
+    "id, history_id, name, role, content, createdAt, messageType, modelName, clusterId, modelId, parent_message_id, [history_id+createdAt]",
   prompts:
     "id, title, content, is_system, createdBy, createdAt, deletedAt, serverId, studioProjectId, syncStatus, sourceSystem, usageCount, lastUsedAt",
   webshares: "id, title, url, api_url, share_id, createdAt",
@@ -46,7 +46,8 @@ const PAGE_ASSIST_SCHEMA: Record<string, string> = {
   ttsClips: "id, createdAt, historyId, serverChatId, messageId, serverMessageId, provider",
   sttRecordings: "id, createdAt",
   mediaReadAlongAudioCache:
-    "id, createdAt, lastUsedAt, [lastUsedAt+sizeBytes+id], mediaId, mediaKind, segmentId, settingsSignature, textHash"
+    "id, createdAt, lastUsedAt, [lastUsedAt+sizeBytes+id], mediaId, mediaKind, segmentId, settingsSignature, textHash",
+  searchTokens: "&[token+history_id], token"
 }
 
 const clone = <T,>(value: T): T => (value === undefined ? value : structuredClone(value))
@@ -277,6 +278,18 @@ export class MemoryWhereClause {
   equalsIgnoreCase(value: string) {
     return this.collection(
       (candidate) => typeof candidate === "string" && candidate.toLowerCase() === value.toLowerCase()
+    )
+  }
+  startsWithIgnoreCase(prefix: string) {
+    const needle = prefix.toLowerCase()
+    return this.collection(
+      (candidate) => typeof candidate === "string" && candidate.toLowerCase().startsWith(needle)
+    )
+  }
+  anyOfIgnoreCase(values: string[]) {
+    const needles = values.map((value) => value.toLowerCase())
+    return this.collection(
+      (candidate) => typeof candidate === "string" && needles.includes(candidate.toLowerCase())
     )
   }
   anyOf(...values: Array<Key | Key[]>) {

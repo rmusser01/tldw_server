@@ -9,7 +9,8 @@ const memory: Record<string, any> = vi.hoisted(() => {
     "sessionFiles",
     "compareStates",
     "historySelections",
-    "historyProjections"
+    "historyProjections",
+    "searchTokens"
   ]) {
     const rows = new Map<string, any>()
     const key = (v: any) =>
@@ -18,6 +19,8 @@ const memory: Record<string, any> = vi.hoisted(() => {
           ? [v.profile_id, v.client_session_id, v.owner_key, v.conversation_id]
           : name === "historyProjections"
             ? [v.owner_key, v.conversation_id, v.projection_id]
+          : name === "searchTokens"
+            ? [v.token, v.history_id]
             : (v.id ?? v.sessionId ?? v.history_id)
       )
     tables[name] = {

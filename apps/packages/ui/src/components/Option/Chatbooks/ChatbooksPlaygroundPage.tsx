@@ -1596,8 +1596,9 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     const importUpdates = await Promise.all(
       importActive.map((job) => tldwClient.getChatbookImportJob(job.job_id).catch(() => job))
     )
+    const importActiveByJobId = new Map(importActive.map((job) => [job.job_id, job]))
     const completedImportRefreshNeeded = importUpdates.some((job) => {
-      const previous = importActive.find((item) => item.job_id === job.job_id)
+      const previous = importActiveByJobId.get(job.job_id)
       const mergedJob = {
         ...previous,
         ...job,

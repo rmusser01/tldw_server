@@ -13,6 +13,7 @@ const state = vi.hoisted(() => {
   })
   return { calls: 0, owner: "recipe-owner:sha256:" + "a".repeat(64), rows, table: {
     toArray: query().toArray,
+    count: async () => rows.size,
     get: async (id: string) => rows.get(id),
     add: async (p: any) => { rows.set(p.id, structuredClone(p)) },
     put: async (p: any) => { rows.set(p.id, structuredClone(p)) },
@@ -27,7 +28,15 @@ const state = vi.hoisted(() => {
     clear: async () => { rows.clear() },
     bulkPut: async (prompts: any[]) => { prompts.forEach(prompt => rows.set(prompt.id, structuredClone(prompt))) },
     filter: query().filter,
-    where: (key: string) => ({ equals: (value: unknown) => query(p => p[key] === value), anyOf: (values: unknown[]) => query(p => values.includes(p[key])) })
+    where: (key: string) => ({
+      equals: (value: unknown) => query(p => p[key] === value),
+      anyOf: (values: unknown[]) => query(p => values.includes(p[key])),
+      // WP-25: the trash queries select the numeric-deletedAt index range
+      // instead of scanning the whole table.
+      above: (value: unknown) => query(p => p[key] > value),
+      between: (lower: unknown, upper: unknown, includeLower = true, includeUpper = false) =>
+        query(p => (includeLower ? p[key] >= lower : p[key] > lower) && (includeUpper ? p[key] <= upper : p[key] < upper))
+    })
   } }
 })
 vi.mock("../schema", () => ({ db: { prompts: state.table, transaction: async (_mode: unknown, _table: unknown, fn: () => unknown) => fn() } }))

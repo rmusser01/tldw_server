@@ -45,20 +45,50 @@ it('releases cached chat payloads when their TTL expires while idle', async () =
 it('sweeps old chat payloads when another chat is accessed after a clock jump', async () => {
   await client.listChatMessages('first')
   vi.setSystemTime(Date.now() + 600_000)
+  // Idle memory reclamation moved off the read path (WP-31): the module
+  // sweep releases the stale payload under the jumped clock. The real key
+  // carries the scope params toChatScopeParams() always injects.
+  await vi.advanceTimersByTimeAsync(60_001)
+  expect(client.chatMessagesCache.has('first?scope_type=global')).toBe(false)
   await client.listChatMessages('second')
   expect(client.chatMessagesCache.size).toBe(1)
 })
 
 it('bounds both shared cache families across many distinct IDs', async () => {
-  for (let id = 0; id < 50; id++) {
+  // 150 distinct IDs forces eviction past the 100-entry cap; asserting on a
+  // smaller insert count would pass vacuously with no cap at all.
+  for (let id = 0; id < 150; id++) {
     await client.listChatMessages(id)
     client.characterCache.set(String(id), {
       value: { name: 'character' },
       expiresAt: Date.now() + 300_000
     })
   }
-  expect(client.chatMessagesCache.size).toBeLessThanOrEqual(32)
-  expect(client.characterCache.size).toBeLessThanOrEqual(32)
+  // Plan Stage 4 cap: ~100 entries per cache family (TASK-13523); the
+  // TASK-13450 byte budget still applies on top of it. Insertion-order
+  // eviction must have dropped the OLDEST ids, not arbitrary ones.
+  expect(client.chatMessagesCache.size).toBe(100)
+  expect(client.characterCache.size).toBe(100)
+  expect(client.chatMessagesCache.has('0?scope_type=global')).toBe(false)
+  expect(client.chatMessagesCache.has('49?scope_type=global')).toBe(false)
+  expect(client.chatMessagesCache.has('50?scope_type=global')).toBe(true)
+  expect(client.chatMessagesCache.has('149?scope_type=global')).toBe(true)
+  expect(client.characterCache.has('0')).toBe(false)
+  expect(client.characterCache.has('49')).toBe(false)
+  expect(client.characterCache.has('50')).toBe(true)
+  expect(client.characterCache.has('149')).toBe(true)
+})
+
+it('caps cached query shapes per chat at five', async () => {
+  for (let page = 0; page < 7; page++) {
+    await client.listChatMessages('chat', { page })
+  }
+  // Every key carries the scope params toChatScopeParams() injects; only the
+  // page shape varies. The oldest shape is evicted, the newest five stay.
+  const chatKeys = [...client.chatMessagesCache.keys()].filter(key => key.startsWith('chat'))
+  expect(chatKeys).toHaveLength(5)
+  expect(client.chatMessagesCache.has('chat?scope_type=global&page=0')).toBe(false)
+  expect(client.chatMessagesCache.has('chat?scope_type=global&page=6')).toBe(true)
 })
 
 it('returns a large chat response without retaining it in the shared cache', async () => {

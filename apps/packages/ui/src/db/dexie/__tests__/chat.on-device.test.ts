@@ -40,12 +40,54 @@ function collection<T>(input: () => T[]) {
       state.afterRead?.();
       return result;
     },
+    async first() {
+      if (state.fail) throw new Error("storage unavailable");
+      const result = select();
+      state.afterRead?.();
+      return result.length ? structuredClone(result[0]) : undefined;
+    },
+    async last() {
+      if (state.fail) throw new Error("storage unavailable");
+      const result = select();
+      state.afterRead?.();
+      return result.length ? structuredClone(result[result.length - 1]) : undefined;
+    },
+    async each(callback: (row: T) => void) {
+      if (state.fail) throw new Error("storage unavailable");
+      const rows = structuredClone(select());
+      state.afterRead?.();
+      rows.forEach(callback);
+    },
     async count() {
       return select().length;
     },
   };
   return api;
 }
+// Compound-index support (v18 / WP-26): parse "[a+b]" index names, read the
+// tuple value off a row, and order tuples lexicographically with a primary-
+// key tiebreak — the order a Dexie compound index yields.
+const compoundParts = (field: string) =>
+  field.startsWith("[") && field.endsWith("]") ? field.slice(1, -1).split("+") : null;
+const indexValue = (row: unknown, field: string): unknown => {
+  const parts = compoundParts(field);
+  if (!parts) return (row as Record<string, unknown>)[field];
+  return parts.map(part => (row as Record<string, unknown>)[part]);
+};
+const compareIndexValues = (left: unknown, right: unknown): number => {
+  if (Array.isArray(left) && Array.isArray(right)) {
+    for (let index = 0; index < Math.min(left.length, right.length); index += 1) {
+      const compared = compareIndexValues(left[index], right[index]);
+      if (compared !== 0) return compared;
+    }
+    return left.length - right.length;
+  }
+  if (left === right) return 0;
+  return (left as number) < (right as number) ? -1 : 1;
+};
+const byIndexThenPrimaryKey = (field: string) => (a: { id: string }, b: { id: string }) =>
+  compareIndexValues(indexValue(a, field), indexValue(b, field)) ||
+  String(a.id).localeCompare(String(b.id));
 function table<T extends { id: string }>(rows: () => T[]) {
   return {
     get: async (id: string) => rows().find((row) => row.id === id),
@@ -58,7 +100,28 @@ function table<T extends { id: string }>(rows: () => T[]) {
     filter: (test: (row: T) => boolean) => collection(rows).filter(test),
     where: (field: keyof T) => ({
       equals: (value: unknown) =>
-        collection(rows).filter((row) => row[field] === value),
+        collection(() =>
+          [...rows()]
+            .filter(row => compareIndexValues(indexValue(row, field as string), value) === 0)
+            .sort(byIndexThenPrimaryKey(field as string)),
+        ),
+      between: (lower: unknown, upper: unknown, includeLower = true, includeUpper = false) =>
+        collection(() =>
+          [...rows()]
+            .filter(row => {
+              const value = indexValue(row, field as string);
+              const low = compareIndexValues(value, lower);
+              const high = compareIndexValues(value, upper);
+              return (includeLower ? low >= 0 : low > 0) && (includeUpper ? high <= 0 : high < 0);
+            })
+            .sort(byIndexThenPrimaryKey(field as string)),
+        ),
+      above: (value: unknown) =>
+        collection(() =>
+          [...rows()]
+            .filter(row => compareIndexValues(indexValue(row, field as string), value) > 0)
+            .sort(byIndexThenPrimaryKey(field as string)),
+        ),
       anyOf: (values: unknown[]) =>
         collection(rows).filter((row) => values.includes(row[field])),
       startsWithIgnoreCase: (query: string) => ({
@@ -78,11 +141,42 @@ function table<T extends { id: string }>(rows: () => T[]) {
     delete: state.writes,
   };
 }
-vi.mock("../schema", () => ({
+// Token side-table for content search (WP-23): candidates are derived from
+// the seeded messages with the production tokenizer, mirroring a database
+// whose write paths (or v17 backfill) kept the index fresh. Declared as a
+// function so the hoisted vi.mock factory can reference it.
+function searchTokensTable(tokenize: (text: string) => string[]) {
+  return {
+    where: (field: string) => ({
+      anyOf: (tokens: string[]) => ({
+        primaryKeys: async () => {
+          if (field !== "token") throw new Error(`searchTokens.where(${field}) unsupported`);
+          const wanted = new Set(tokens);
+          const seen = new Set<string>();
+          const keys: Array<[string, string]> = [];
+          for (const message of state.messages) {
+            for (const token of tokenize(message.content)) {
+              if (!wanted.has(token)) continue;
+              const pair = `${token}|${message.history_id}`;
+              if (seen.has(pair)) continue;
+              seen.add(pair);
+              keys.push([token, message.history_id]);
+            }
+          }
+          return keys;
+        }
+      })
+    })
+  };
+}
+vi.mock("../schema", async () => {
+  const { tokenizeSearchText } = await import("../search-tokenizer");
+  return {
   db: {
     name: "PageAssistDatabase",
     chatHistories: table(() => state.rows),
     messages: table(() => state.messages),
+    searchTokens: searchTokensTable(tokenizeSearchText),
     userSettings: {
       get: async () =>
         state.profile
@@ -97,7 +191,8 @@ vi.mock("../schema", () => ({
       fn: () => Promise<unknown>,
     ) => fn(),
   },
-}));
+  };
+});
 import Dexie from "dexie";
 import { PageAssistDatabase, watchOnDeviceHistoryChanges } from "../chat";
 const database = new PageAssistDatabase();

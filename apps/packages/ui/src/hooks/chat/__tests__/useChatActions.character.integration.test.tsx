@@ -36,6 +36,7 @@ vi.mock("@/db/dexie/schema", () => {
     first: vi.fn().mockResolvedValue(undefined),
     count: vi.fn().mockResolvedValue(0),
     bulkPut: vi.fn().mockResolvedValue(undefined),
+    bulkGet: vi.fn().mockResolvedValue([]),
     bulkDelete: vi.fn().mockResolvedValue(undefined)
   })
   return {
@@ -44,6 +45,7 @@ vi.mock("@/db/dexie/schema", () => {
       messages: table(),
       modelNickname: table(),
       sessionFiles: table(),
+      searchTokens: table(),
       transaction: vi.fn().mockImplementation(async (_mode, _tables, operation) => operation())
     },
     PageAssistDexieDB: vi.fn()
@@ -502,12 +504,14 @@ const bindMirrorStorage = (histories: Map<string, HistoryInfo>, savedMessages: M
   const bindTable = <T extends { id: string }>(target: any, rows: Map<string, T>) => {
     const methods = {
       get: async (id: string) => rows.get(id),
+      bulkGet: async (ids: string[]) => ids.map(id => rows.get(id)),
       add: async (row: T) => {
         if (rows.has(row.id)) throw new Error("duplicate primary key")
         rows.set(row.id, structuredClone(row))
         return row.id
       },
       put: async (row: T) => { rows.set(row.id, structuredClone(row)); return row.id },
+      bulkPut: async (list: T[]) => { for (const row of list) rows.set(row.id, structuredClone(row)); return list.map(row => row.id) },
       update: async (id: string, changes: Partial<T>) => {
         if (!rows.has(id)) return 0
         rows.set(id, { ...rows.get(id)!, ...changes })
@@ -1565,14 +1569,19 @@ describe("useChatActions character integration", () => {
     let writeEntered!: () => void
     const entered = new Promise<void>(resolve => { writeEntered = resolve })
     const held = new Promise<void>(resolve => { finishWrite = resolve })
+    // The mirror's first reconcile write is one batched bulkPut (WP-24); the
+    // link boundary still enters through a single chatHistories.add.
     const table = boundary === "link" ? db.chatHistories : db.messages
-    vi.spyOn(table, "add").mockImplementationOnce((row: any) => Dexie.Promise.resolve().then(async () => {
-      if (boundary === "link") histories.set(row.id, structuredClone(row))
-      else savedMessages.set(row.id, structuredClone(row))
-      writeEntered()
-      await held
-      return row.id
-    }))
+    const write = boundary === "link"
+      ? (row: any) => (histories.set(row.id, structuredClone(row)), [row.id])
+      : (rows: any[]) => { for (const row of rows) savedMessages.set(row.id, structuredClone(row)); return rows.map((row: any) => row.id) }
+    vi.spyOn(table, boundary === "link" ? "add" : "bulkPut").mockImplementationOnce(((rowOrRows: any) =>
+      Dexie.Promise.resolve().then(async () => {
+        const ids = write(rowOrRows)
+        writeEntered()
+        await held
+        return ids
+      })) as any)
     const options = {
       ...createHookOptions(), historyId: parent.id,
       messages: [

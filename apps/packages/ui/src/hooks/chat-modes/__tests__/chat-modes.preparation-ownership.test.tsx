@@ -40,7 +40,8 @@ const storage = vi.hoisted(() => {
     "historyProjections",
     "forkOperations",
     "modelNickname",
-    "prompts"
+    "prompts",
+    "searchTokens"
   ]) {
     const rows = new Map<string, Row>()
     const key = (row: Row) =>
@@ -52,7 +53,9 @@ const storage = vi.hoisted(() => {
               row.owner_key,
               row.conversation_id
             ]
-          : row.id
+          : name === "searchTokens"
+            ? [row.token, row.history_id]
+            : row.id
       )
     const collection = (matches: (row: Row) => boolean): Collection => ({
       toArray: async () => structuredClone([...rows.values()].filter(matches)),

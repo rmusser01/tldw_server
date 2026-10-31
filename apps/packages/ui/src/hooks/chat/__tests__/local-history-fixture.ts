@@ -9,7 +9,8 @@ export const memory: Record<string, any> = (() => {
     "compareStates",
     "historySelections",
     "forkOperations",
-    "historyProjections"
+    "historyProjections",
+    "searchTokens"
   ]) {
     const rows = new Map<string, any>()
     const key = (v: any) =>
@@ -18,7 +19,9 @@ export const memory: Record<string, any> = (() => {
           ? [v.profile_id, v.client_session_id, v.owner_key, v.conversation_id]
           : name === "historyProjections"
             ? [v.owner_key, v.conversation_id, v.projection_id]
-            : v.id ?? v.sessionId ?? v.history_id
+            : name === "searchTokens"
+              ? [v.token, v.history_id]
+              : v.id ?? v.sessionId ?? v.history_id
       )
     tables[name] = {
       rows,
@@ -30,6 +33,9 @@ export const memory: Record<string, any> = (() => {
         rows.set(key(v), structuredClone(v))
       },
       bulkAdd: async (vs: any[]) => {
+        for (const v of vs) rows.set(key(v), structuredClone(v))
+      },
+      bulkPut: async (vs: any[]) => {
         for (const v of vs) rows.set(key(v), structuredClone(v))
       },
       update: async (id: any, patch: any) => {

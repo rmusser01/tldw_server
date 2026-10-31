@@ -5,8 +5,10 @@ import type { HistoryInfo, Message } from "../types"
 const state = vi.hoisted(() => ({ histories: new Map<string, HistoryInfo>(), messages: new Map<string, Message>(), compareStates: new Map<string, { id: string }>(), beforeRead: null as (() => void) | null, afterDelete: null as (() => void) | null }))
 function table<T extends { id: string }>(rows: Map<string, T>) { return ({
   get: async (id: string) => rows.get(id),
+  bulkGet: async (ids: string[]) => ids.map(id => (rows.has(id) ? structuredClone(rows.get(id)!) : undefined)),
   add: async (row: T) => { if (rows.has(row.id)) throw new Error("duplicate primary key"); rows.set(row.id, structuredClone(row)); return row.id },
   put: async (row: T) => { rows.set(row.id, structuredClone(row)); return row.id },
+  bulkPut: async (list: T[]) => { for (const row of list) rows.set(row.id, structuredClone(row)); return list.map(row => row.id) },
   delete: async (id: string) => { rows.delete(id); state.afterDelete?.() },
   update: async (id: string, changes: Partial<T>) => { if (!rows.has(id)) return 0; rows.set(id, { ...rows.get(id)!, ...changes }); return 1 },
   where: (field: string) => ({ equals: (value: unknown) => ({
@@ -16,6 +18,8 @@ function table<T extends { id: string }>(rows: Map<string, T>) { return ({
 }) }
 vi.mock("../schema", () => ({ db: {
   chatHistories: table(state.histories), messages: table(state.messages), compareStates: table(state.compareStates), modelNickname: {}, sessionFiles: {},
+  // Token side-table for content search (WP-23): mirror writes index words.
+  searchTokens: { bulkPut: async () => undefined, where: () => ({ anyOf: () => ({ primaryKeys: async () => [] }) }) },
   transaction: async (_mode: string, _tables: unknown[], operation: (transaction: { abort: () => void }) => Promise<unknown>) => {
     const tables = [state.histories, state.messages, state.compareStates]
     const before = tables.map(rows => structuredClone([...rows]))
@@ -230,8 +234,11 @@ describe("owned server Chat mirror", () => {
       historyId: ownedId, chatId: "chat-1", ownerKey: "A",
       messages: [incoming("question", "Current question"), incoming("answer", "Current answer")]
     })
+    // Rows come back in Dexie index-scan order: equal history_id keys are
+    // ordered by primary key, so the synthetic "…:server:answer" id sorts
+    // before "…:server:question".
     expect(result.rows.map(message => [message.serverMessageId, message.content])).toEqual([
-      ["question", "Current question"], ["answer", "Current answer"]
+      ["answer", "Current answer"], ["question", "Current question"]
     ])
     expect(result.localIds.get("question")).not.toBe("question")
     expect(state.messages.get("question")).toMatchObject({ history_id: "legacy", content: "Legacy question" })
