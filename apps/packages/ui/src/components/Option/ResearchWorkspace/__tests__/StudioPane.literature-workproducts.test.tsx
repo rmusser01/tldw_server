@@ -287,9 +287,10 @@ vi.mock("@/store/model", () => ({
 }))
 
 vi.mock("@/store/workspace", () => ({
-  useWorkspaceStore: (
+  hasResearchWorkspaceMigrationTombstone: () => false,
+  useWorkspaceStore: Object.assign((
     selector: (state: typeof workspaceStoreState) => unknown
-  ) => selector(workspaceStoreState)
+  ) => selector(workspaceStoreState), { getState: () => workspaceStoreState })
 }))
 
 vi.mock("antd", async () => {

@@ -7,7 +7,7 @@ import {
   readWorkspaceArtifactClientPayload,
   bindWorkspaceArtifactOrigin,
 } from '@/store/workspace-artifact-codec';
-import { hydrateWorkspaceFromServer } from '@/store/workspace-api';
+import { mapServerArtifactToLocal, hydrateWorkspaceFromServer } from '@/store/workspace-api';
 import { isServicePromptRequestPath } from '@/services/tldw/service-prompt-scope-error';
 
 const io = vi.hoisted(() => ({ request: vi.fn(), migrated: true }));
@@ -303,4 +303,36 @@ describe('canonical Workspace draft persistence', () => {
       false
     );
   });
+  it.each(['content', 'client'] as const)('preserves raw canonical lineage, ownership and producer fields during a %s-only update', async (updateOnly) => {
+    const original = {
+      ...row(),
+      source_lineage: {
+        media_ids: [1, 2], selected_source_ids: ['src_1'],
+        sources: [{ source_id: 'src_1', media_id: 1, opaque: { retained: true } }],
+        canonicalExtra: { policy: 'retain' }
+      },
+      producer_metadata: { producerType: 'worker', opaque: { retained: true } },
+      owner_scope: 'research_workspace', owner_id: 'workspace-owned',
+      project_id: 'project-1', task_id: 'task-2', source_collection_id: 'collection-3',
+      review_metadata: { reviewer: 'retained' }, redaction: { support_safe: false, opaque: true },
+    };
+    const draft = bindWorkspaceArtifactOrigin(
+      { ...mapServerArtifactToLocal(original), content: 'Revised card content', data: { questions: [{ question: 'Revised', options: ['yes'], answer: 'yes' }] } },
+      'server:alice', 'workspace-owned'
+    );
+    let stored = original;
+    io.request.mockImplementation(async (request) => {
+      if (request.method === 'GET') return [stored];
+      stored = { ...stored, ...request.body, version: stored.version + 1 };
+      return stored;
+    });
+    const saved = await persistWorkspaceArtifact(draft, { ...lease().options, updateOnly });
+    for (const key of ['source_lineage', 'producer_metadata', 'owner_scope', 'owner_id', 'project_id',
+      'task_id', 'source_collection_id', 'review_metadata', 'redaction'] as const)
+      expect(stored[key]).toEqual(original[key]);
+    expect(stored.content).toBe(updateOnly === 'content' ? 'Revised card content' : original.content);
+    expect(saved.data).toEqual({ questions: [{ question: 'Revised', options: ['yes'], answer: 'yes' }] });
+    expect(saved.workspaceArtifactVersion).toBe(2);
+  });
+
 });

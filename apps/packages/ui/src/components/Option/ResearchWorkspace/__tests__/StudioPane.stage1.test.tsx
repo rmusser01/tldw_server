@@ -246,6 +246,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 vi.mock("@/services/tldw", () => ({
   tldwModels: {
     getChatModels: mockGetChatModels,
+    clearCache: vi.fn(async () => undefined),
     getModel: mockGetModel,
     getProviderDisplayName: (provider: string) => provider
   }
@@ -264,9 +265,10 @@ vi.mock("@/store/model", () => ({
 }))
 
 vi.mock("@/store/workspace", () => ({
-  useWorkspaceStore: (
+  hasResearchWorkspaceMigrationTombstone: () => false,
+  useWorkspaceStore: Object.assign((
     selector: (state: typeof workspaceStoreState) => unknown
-  ) => selector(workspaceStoreState)
+  ) => selector(workspaceStoreState), { getState: () => workspaceStoreState })
 }))
 
 vi.mock("antd", async () => {
@@ -2197,7 +2199,8 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
       expect(mockGenerateFlashcardsService).toHaveBeenCalledWith(
         expect.objectContaining({
           text: expect.stringContaining("DSPy Prompting Talk")
-        })
+        }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
       )
     })
 
@@ -2451,5 +2454,56 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     }
   },
 )
+
+  it("retires the original Generate click when the authenticated account changes during capability refresh", async () => {
+    let finish!: (value: unknown) => void
+    const refresh = vi.fn(() => new Promise<ReturnType<typeof buildUnknownResearchWorkspaceCapabilities>>((resolve) => { finish = resolve }))
+    renderStudioPane({ onRefreshResearchWorkspaceCapabilities: refresh })
+    fireEvent.click(screen.getByRole("button", { name: "Summary" }))
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+    await act(async () => {
+      window.dispatchEvent(new Event("tldw:auth-principal-changed"))
+      finish(buildUnknownResearchWorkspaceCapabilities())
+    })
+    expect(mockGetMediaDetails).not.toHaveBeenCalled()
+    expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+    expect(mockAddArtifact).not.toHaveBeenCalled()
+    expect(mockMessageSuccess).not.toHaveBeenCalled()
+  })
+
+  it("retires a held Generate capability refresh when Studio unmounts", async () => {
+    let finish!: (value: ReturnType<typeof buildUnknownResearchWorkspaceCapabilities>) => void
+    const refresh = vi.fn(() => new Promise<ReturnType<typeof buildUnknownResearchWorkspaceCapabilities>>(resolve => { finish = resolve }))
+    const view = renderStudioPane({ onRefreshResearchWorkspaceCapabilities: refresh })
+    fireEvent.click(screen.getByRole("button", { name: "Summary" }))
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+    view.unmount()
+    await act(async () => { finish(buildUnknownResearchWorkspaceCapabilities()) })
+    expect(mockAddArtifact).not.toHaveBeenCalled()
+    expect(mockGetMediaDetails).not.toHaveBeenCalled()
+    expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+  })
+
+  it("retires a held Generate click across a workspace A-B-A round trip", async () => {
+    let finish!: (value: ReturnType<typeof buildUnknownResearchWorkspaceCapabilities>) => void
+    const refresh = vi.fn(() => new Promise<ReturnType<typeof buildUnknownResearchWorkspaceCapabilities>>(resolve => { finish = resolve }))
+    Object.assign(workspaceStoreState, { workspaceId: "click-workspace-a" })
+    try {
+      const props = { onRefreshResearchWorkspaceCapabilities: refresh }
+      const view = renderStudioPane(props)
+      fireEvent.click(screen.getByRole("button", { name: "Summary" }))
+      await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+      Object.assign(workspaceStoreState, { workspaceId: "click-workspace-b" })
+      view.rerender(<StudioPane {...props} />)
+      Object.assign(workspaceStoreState, { workspaceId: "click-workspace-a" })
+      view.rerender(<StudioPane {...props} />)
+      await act(async () => { finish(buildUnknownResearchWorkspaceCapabilities()) })
+      expect(mockAddArtifact).not.toHaveBeenCalled()
+      expect(mockGetMediaDetails).not.toHaveBeenCalled()
+      expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+    } finally {
+      Reflect.deleteProperty(workspaceStoreState, "workspaceId")
+    }
+  })
 
 })

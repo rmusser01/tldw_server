@@ -1,4 +1,4 @@
-import { requestScopeFields } from "./service-prompts"
+import { requestScopeFields, type ServicePromptRequestScope } from "./service-prompts"
 import {
   bgRequest,
   sanitizeResponseData
@@ -84,6 +84,7 @@ export type TldwSpeechOptions = {
   backend?: string
   allowFallback?: boolean
   stream?: boolean
+  requestScope?: ServicePromptRequestScope
   signal?: AbortSignal
   timeoutMs?: number
 }
@@ -173,8 +174,18 @@ const getTtsCapabilityScope = (config: unknown): string => {
 
 const supportsExplicitTtsBackend = async (
   client: TldwApiClientCore,
-  config: unknown
+  config: unknown,
+  options?: { requestScope?: ServicePromptRequestScope; signal?: AbortSignal }
 ): Promise<boolean> => {
+  if (options?.requestScope) {
+    options.signal?.throwIfAborted()
+    const response = await bgRequest<{ supports_explicit_backend?: boolean }>({
+      path: "/api/v1/audio/providers", method: "GET",
+      ...requestScopeFields(options.requestScope), abortSignal: options.signal, timeoutMs: 15000,
+    })
+    options.signal?.throwIfAborted()
+    return response?.supports_explicit_backend === true
+  }
   const scope = getTtsCapabilityScope(config)
   const now = monotonicNow()
   pruneTtsCapabilityCache(now)
@@ -1172,7 +1183,7 @@ export const modelsAudioMethods = {
     text: string,
     options?: TldwSpeechOptions
   ): Promise<TldwSpeechDetailedResult> {
-    const config = await this.ensureConfigForRequest(true)
+    const config = options?.requestScope?.config ?? await this.ensureConfigForRequest(true)
     const body: Record<string, any> = { input: text, text }
     if (options?.voice) body.voice = options.voice
     if (options?.model) body.model = options.model
@@ -1185,7 +1196,7 @@ export const modelsAudioMethods = {
     if (options?.extraParams) body.extra_params = options.extraParams
     if (options?.stream != null) body.stream = options.stream
     const negotiatedScope =
-      options?.backend && await supportsExplicitTtsBackend(this, config)
+      options?.backend && await supportsExplicitTtsBackend(this, config, options)
         ? getTtsCapabilityScope(config)
         : undefined
     const accept = (() => {
@@ -1211,8 +1222,7 @@ export const modelsAudioMethods = {
           return "audio/mpeg"
       }
     })()
-    const response = await this.requestWithCurrentConfig<any>(
-      (dispatchConfig) => {
+    const buildRequest = (dispatchConfig: TldwConfig) => {
         const dispatchBody = { ...body }
         if (
           negotiatedScope &&
@@ -1234,14 +1244,17 @@ export const modelsAudioMethods = {
           method: "POST",
           headers: { Accept: accept },
           body: dispatchBody,
-          responseType: "arrayBuffer",
+          responseType: "arrayBuffer" as const,
           abortSignal: options?.signal,
           timeoutMs,
           returnResponse: true
         }
-      },
-      true
-    )
+      }
+    const response = options?.requestScope
+      ? await bgRequest<unknown>({ ...buildRequest(config), ...requestScopeFields(options.requestScope),
+          path: "/api/v1/audio/speech", method: "POST",
+          headers: { Accept: accept, ...requestScopeFields(options.requestScope).headers } })
+      : await this.requestWithCurrentConfig<any>(buildRequest, true)
     const responseRecord =
       response &&
       typeof response === "object" &&

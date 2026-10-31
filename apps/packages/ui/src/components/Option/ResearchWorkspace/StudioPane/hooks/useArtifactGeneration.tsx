@@ -1,4 +1,10 @@
 import React, { useState, useEffect, useRef } from "react"
+import { hasResearchWorkspaceMigrationTombstone, useWorkspaceStore } from "@/store/workspace"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import { bindWorkspaceArtifactOrigin, hasWorkspaceArtifactOrigin, sameWorkspaceArtifactPayload, workspaceArtifactDraftPayload } from "@/store/workspace-artifact-codec"
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
+import { persistWorkspaceArtifact, hasCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import type { MessageInstance } from "antd/es/message/interface"
 import { tldwClient, type VisualStyleRecord } from "@/services/tldw/TldwApiClient"
 import type {
@@ -259,6 +265,8 @@ type UsageMetrics = {
 }
 
 type GenerationResult = {
+  workspaceArtifactId?: string
+  workspaceArtifactVersion?: number
   serverId?: number | string
   content?: string
   contentType?: string
@@ -328,12 +336,15 @@ const ensureWorkspaceRecordForOwnership = async (options: {
   workspaceId?: string
   workspaceName?: string
   studyMaterialsPolicy?: WorkspaceStudyMaterialsMode
+  requestScope?: ServicePromptRequestScope
+  abortSignal?: AbortSignal
 }): Promise<string | null> => {
   const workspaceId = typeof options.workspaceId === "string" ? options.workspaceId.trim() : ""
   if (!workspaceId) {
     return null
   }
 
+  if (options.requestScope) return workspaceId
   await tldwClient.upsertWorkspace(workspaceId, {
     name:
       typeof options.workspaceName === "string" && options.workspaceName.trim()
@@ -342,7 +353,7 @@ const ensureWorkspaceRecordForOwnership = async (options: {
     study_materials_policy: normalizeStudyMaterialsPolicyForServer(
       options.studyMaterialsPolicy
     )
-  })
+  }, { requestScope: options.requestScope, signal: options.abortSignal })
 
   return workspaceId
 }
@@ -577,6 +588,7 @@ type SourceContentGenerationOptions = {
   topP: number
   maxTokens: number
   abortSignal?: AbortSignal
+  requestScope?: ServicePromptRequestScope
 }
 
 type SummaryGenerationOptions = SourceContentGenerationOptions & {
@@ -611,6 +623,7 @@ type StudioRagGenerationRequest = {
   mediaIds: number[]
   topK: number
   abortSignal?: AbortSignal
+  requestScope?: ServicePromptRequestScope
   enableCitations?: boolean
 }
 
@@ -972,6 +985,7 @@ const loadStudioSourceContextBundle = async (
         include_content: true,
         include_versions: false,
         include_version_content: false,
+        requestScope: options.requestScope,
         signal: options.abortSignal
       })
       const source = sourceByMediaId.get(mediaId)
@@ -1081,6 +1095,7 @@ const requestStudioRagGeneration = async ({
   mediaIds,
   topK,
   abortSignal,
+  requestScope,
   enableCitations = false
 }: StudioRagGenerationRequest): Promise<any> =>
   tldwClient.ragSearch(query, {
@@ -1090,7 +1105,8 @@ const requestStudioRagGeneration = async ({
     enable_citations: enableCitations,
     generation_prompt: generationPrompt,
     timeoutMs: STUDIO_GENERATION_RAG_TIMEOUT_MS,
-    signal: abortSignal
+    signal: abortSignal,
+    requestScope
   })
 
 const requireUsableTextResult = (
@@ -1324,6 +1340,8 @@ const toGeneratedArtifactFromWorkspaceArtifact = (
   }
 
   return {
+    workspaceArtifactId: response.id,
+    workspaceArtifactVersion: response.version,
     serverId,
     content: response.content ?? undefined,
     contentType: response.content_type ?? undefined,
@@ -1393,14 +1411,15 @@ const generateBackendMediaOutput = async (
       tts_voice:
         type === "video_overview" ? options.audioSettings.voice : undefined
     }
-  })
+  }, { signal: options.abortSignal, requestScope: options.requestScope })
 
   const startedAt = Date.now()
   while (Date.now() - startedAt < MEDIA_OUTPUT_POLL_TIMEOUT_MS) {
     throwIfAborted(options.abortSignal)
     const status = await tldwClient.getWorkspaceOutputStatus(
       workspaceId,
-      submitResponse.job_id
+      submitResponse.job_id,
+      { signal: options.abortSignal, requestScope: options.requestScope }
     )
     options.onProgress?.(status)
 
@@ -1408,6 +1427,9 @@ const generateBackendMediaOutput = async (
       if (!status.artifact) {
         throw new Error("Media output completed without an artifact.")
       }
+      if (status.artifact.workspace_id !== workspaceId ||
+          !status.artifact.id || !Number.isSafeInteger(status.artifact.version) ||
+          status.artifact.version < 1) throw new Error("Media output has an invalid workspace identity.")
       return toGeneratedArtifactFromWorkspaceArtifact(status.artifact, type)
     }
 
@@ -1476,7 +1498,8 @@ ${sourceText}`
       max_tokens: options.maxTokens
     },
     {
-      signal: options.abortSignal,
+      requestScope: options.requestScope,
+        signal: options.abortSignal,
       timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
     }
   )
@@ -1530,7 +1553,8 @@ ${sourceText}`
           : options.maxTokens
     },
     {
-      signal: options.abortSignal,
+      requestScope: options.requestScope,
+        signal: options.abortSignal,
       timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
     }
   )
@@ -1676,7 +1700,8 @@ async function generateQuizFromMedia(
       ? await ensureWorkspaceRecordForOwnership({
           workspaceId: options.workspaceId,
           workspaceName: options.workspaceName,
-          studyMaterialsPolicy: options.studyMaterialsPolicy
+          studyMaterialsPolicy: options.studyMaterialsPolicy,
+          requestScope: options.requestScope, abortSignal: options.abortSignal
         })
       : null
   const useWorkspaceOwnership = shouldAttachWorkspaceOwnership(
@@ -1703,7 +1728,8 @@ async function generateQuizFromMedia(
         : {})
     },
     {
-      signal: options.abortSignal,
+      requestScope: options.requestScope,
+        signal: options.abortSignal,
       timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
     }
   )
@@ -1787,7 +1813,8 @@ async function generateVerifiedWorkspaceDraft(
       max_tokens: options.maxTokens
     },
     {
-      signal: options.abortSignal,
+      requestScope: options.requestScope,
+        signal: options.abortSignal,
       timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
     }
   )
@@ -1807,11 +1834,12 @@ async function generateVerifiedWorkspaceDraft(
 
 const saveFlashcardsWithFallback = async (
   flashcardInputs: FlashcardCreate[],
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  requestScope?: ServicePromptRequestScope
 ): Promise<{ createdCount: number; failedCount: number }> => {
   try {
     const bulkResponse = await createFlashcardsBulk(flashcardInputs, {
-      signal: abortSignal
+      signal: abortSignal, requestScope
     })
     const createdCount = Array.isArray(bulkResponse.items)
       ? bulkResponse.items.length
@@ -1831,7 +1859,7 @@ const saveFlashcardsWithFallback = async (
 
   const settledResults = await Promise.allSettled(
     flashcardInputs.map((input) =>
-      createFlashcard(input, { signal: abortSignal })
+      createFlashcard(input, { signal: abortSignal, requestScope })
     )
   )
   const createdCount = settledResults.filter(
@@ -1901,14 +1929,14 @@ async function generateFlashcards(
         !isPlaceholderGeneratedText(card.back)
     )
 
-  let generated = await generateFlashcardDrafts(generationRequest)
+  let generated = await generateFlashcardDrafts(generationRequest, { signal: options.abortSignal, requestScope: options.requestScope })
   let flashcards = normalizeGeneratedFlashcards(generated.flashcards)
   if (flashcards.length === 0) {
     generated = await generateFlashcardDrafts({
       ...generationRequest,
       num_cards: 8,
       difficulty: "easy"
-    })
+    }, { signal: options.abortSignal, requestScope: options.requestScope })
     flashcards = normalizeGeneratedFlashcards(generated.flashcards)
   }
   if (!flashcards.length) {
@@ -1918,14 +1946,15 @@ async function generateFlashcards(
     ? generated.claim_verification
     : null
 
-  const decks = await listDecks({ signal: options.abortSignal })
+  const decks = await listDecks({ signal: options.abortSignal }, { requestScope: options.requestScope, signal: options.abortSignal })
   let deckId: number | undefined
   const workspaceOwnershipId =
     shouldAttachWorkspaceOwnership(options.workspaceId, options.studyMaterialsPolicy)
       ? await ensureWorkspaceRecordForOwnership({
           workspaceId: options.workspaceId,
           workspaceName: options.workspaceName,
-          studyMaterialsPolicy: options.studyMaterialsPolicy
+          studyMaterialsPolicy: options.studyMaterialsPolicy,
+          requestScope: options.requestScope, abortSignal: options.abortSignal
         })
       : null
   const useWorkspaceOwnership = shouldAttachWorkspaceOwnership(
@@ -1946,7 +1975,8 @@ async function generateFlashcards(
           ? { workspace_id: workspaceOwnershipId }
           : {})
       },
-      { signal: options.abortSignal }
+      { requestScope: options.requestScope,
+        signal: options.abortSignal }
     )
     deckId = newDeck.id
   }
@@ -1967,7 +1997,8 @@ async function generateFlashcards(
 
   const { createdCount, failedCount } = await saveFlashcardsWithFallback(
     flashcardInputs,
-    options.abortSignal
+    options.abortSignal,
+    options.requestScope
   )
   const summaryLine =
     failedCount > 0
@@ -2046,7 +2077,8 @@ async function generateAudioOverview(
       speed: options.audioSettings.speed,
       backend: options.audioSettings.backend || undefined,
       allowFallback: options.audioSettings.allowFallback ?? true,
-      signal: options.abortSignal
+      requestScope: options.requestScope,
+        signal: options.abortSignal
     })
     if (!(result.buffer instanceof ArrayBuffer) || result.buffer.byteLength === 0) {
       throw new Error("Audio generation failed because speech synthesis did not return audio.")
@@ -2102,7 +2134,8 @@ async function generateSlidesFromApi(
   try {
     // Use the Slides API to generate a real presentation
     const presentation = await tldwClient.generateSlidesFromMedia(mediaId, {
-      signal: options?.abortSignal,
+      signal: options?.abortSignal ?? fallbackOptions.abortSignal,
+      requestScope: fallbackOptions.requestScope,
       visualStyleId: options?.visualStyleId ?? undefined,
       visualStyleScope: options?.visualStyleScope ?? undefined,
       provider: fallbackOptions.apiProvider,
@@ -2251,7 +2284,8 @@ async function generateLiteratureMatrix(
       response_format: { type: "json_object" }
     },
     {
-      signal: options.abortSignal,
+      requestScope: options.requestScope,
+        signal: options.abortSignal,
       timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
     }
   )
@@ -2327,7 +2361,8 @@ async function generateCorpusGapFinder(
       response_format: { type: "json_object" }
     },
     {
-      signal: options.abortSignal,
+      requestScope: options.requestScope,
+        signal: options.abortSignal,
       timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
     }
   )
@@ -2424,7 +2459,8 @@ async function generateEvidenceBoundHypotheses(
       response_format: { type: "json_object" }
     },
     {
-      signal: options.abortSignal,
+      requestScope: options.requestScope,
+        signal: options.abortSignal,
       timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
     }
   )
@@ -2530,7 +2566,8 @@ async function generateResearchProposalPack(
       max_tokens: options.maxTokens
     },
     {
-      signal: options.abortSignal,
+      requestScope: options.requestScope,
+        signal: options.abortSignal,
       timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
     }
   )
@@ -2720,6 +2757,16 @@ export interface UseArtifactGenerationDeps {
   t: TFunction
 }
 
+const isVisibleArtifactDraft = (artifact: GeneratedArtifact): boolean => {
+  const current = useWorkspaceStore.getState().generatedArtifacts.find(entry => entry.id === artifact.id)
+  if (!current) return false
+  try {
+    return sameWorkspaceArtifactPayload(
+      workspaceArtifactDraftPayload(current), workspaceArtifactDraftPayload(artifact)
+    )
+  } catch { return false }
+}
+
 export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
   const {
     messageApi,
@@ -2753,6 +2800,88 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
   } = deps
 
   const generationAbortRef = useRef<AbortController | null>(null)
+  const generationSavingRef = useRef(false)
+  const currentWorkspaceRef = useRef(workspaceId)
+  currentWorkspaceRef.current = workspaceId
+  const pendingSaveRef = useRef<{
+    artifact: GeneratedArtifact
+    scope: ServicePromptSnapshot
+    controller: AbortController
+    workspaceId: string
+    release: () => void
+    updateOnly?: "client"
+  } | null>(null)
+  const [unsavedArtifact, setUnsavedArtifact] = useState<GeneratedArtifact | null>(null)
+  const [isSavingArtifact, setIsSavingArtifact] = useState(false)
+  const savingArtifactRef = useRef(false)
+
+  const handleRetryArtifactSave = React.useCallback(async () => {
+    const pending = pendingSaveRef.current
+    if (!pending || savingArtifactRef.current) return
+    const isCurrent = () => pendingSaveRef.current === pending &&
+      currentWorkspaceRef.current === pending.workspaceId &&
+      useWorkspaceStore.getState().workspaceId === pending.workspaceId &&
+      !pending.controller.signal.aborted && !pending.scope.scopeInvalidatedSignal.aborted &&
+      isVisibleArtifactDraft(pending.artifact)
+    if (!isCurrent()) {
+      pendingSaveRef.current = null
+      pending.release()
+      setUnsavedArtifact(null)
+      return
+    }
+    savingArtifactRef.current = true
+    setIsSavingArtifact(true)
+    try {
+      const saved = await persistWorkspaceArtifact(pending.artifact, {
+        workspaceId: pending.workspaceId, scope: pending.scope, isCurrent, updateOnly: pending.updateOnly,
+      })
+      if (!isCurrent()) return
+      updateArtifactStatus(saved.id, saved.status, { ...saved, errorMessage: undefined })
+      pendingSaveRef.current = null
+      setUnsavedArtifact(null)
+      pending.release()
+      messageApi.success(t("playground:studio.outputSaved", "Output saved."))
+    } catch {
+      if (isCurrent()) messageApi.error(t("playground:studio.outputSaveFailed",
+        "Output is generated but could not be saved. Retry saving without generating again."))
+    } finally {
+      if (pendingSaveRef.current === pending && !isCurrent()) {
+        pendingSaveRef.current = null
+        pending.controller.abort()
+        pending.release()
+        setUnsavedArtifact(null)
+      }
+      savingArtifactRef.current = false
+      setIsSavingArtifact(false)
+    }
+  }, [messageApi, t, updateArtifactStatus])
+
+  useEffect(() => {
+    const pending = pendingSaveRef.current
+    if (pending && !isVisibleArtifactDraft(pending.artifact)) {
+      pendingSaveRef.current = null
+      pending.controller.abort()
+      pending.release()
+      setUnsavedArtifact(null)
+    }
+  }, [generatedArtifacts])
+
+  useEffect(() => {
+    const pending = pendingSaveRef.current
+    if (pending && pending.workspaceId !== workspaceId) {
+      pending.controller.abort()
+      pending.release()
+      pendingSaveRef.current = null
+      setUnsavedArtifact(null)
+    }
+    return () => {
+      generationAbortRef.current?.abort()
+      const held = pendingSaveRef.current
+      held?.controller.abort()
+      held?.release()
+      pendingSaveRef.current = null
+    }
+  }, [workspaceId])
   const generationRollbackRef = useRef<(() => void) | null>(null)
   const [generationPhase, setGenerationPhase] = useState<
     "preparing" | "retrieving" | "generating" | "finalizing" | null
@@ -3103,7 +3232,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
   // Cancel
   const handleCancelGeneration = React.useCallback(() => {
     const activeAbort = generationAbortRef.current
-    if (!activeAbort) return
+    if (!activeAbort || generationSavingRef.current) return
     void trackResearchWorkspaceTelemetry({
       type: "operation_cancelled",
       workspace_id: workspaceTag || null,
@@ -3120,10 +3249,17 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
       options: ArtifactGenerationOptions = {}
     ) => {
       if (generationAbortRef.current) return
+      if (pendingSaveRef.current) {
+        messageApi.warning(t("playground:studio.saveBeforeGenerating",
+          "Save the generated output before generating another."))
+        return
+      }
       setRecentOutputTypes(recordRecentOutputType(type))
       if (!hasSelectedSources) return
 
-      const mediaIds = selectedMediaIds
+      const mediaIds = [...selectedMediaIds]
+      let operationSources = selectedSources.map(source => ({ ...source }))
+      let operationArtifacts = [...generatedArtifacts]
       if (mediaIds.length === 0) return
       if (type === "compare_sources" && mediaIds.length < 2) {
         messageApi.warning(
@@ -3136,6 +3272,13 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
       }
 
       const activeAbort = new AbortController()
+      let accountRetired = false
+      const stopAccountWatch = watchChatAccountChanges((invalidated) => {
+        if (invalidated) {
+          accountRetired = true
+          activeAbort.abort()
+        }
+      })
       generationAbortRef.current = activeAbort
 
       // Start generation with phased progress
@@ -3146,8 +3289,74 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
 
       let artifact: GeneratedArtifact | null = null
       let previousArtifact: GeneratedArtifact | null = null
+      let scope: ServicePromptSnapshot | null = null
+      let releaseScope: (() => void) | undefined
+      let requestScope: ServicePromptRequestScope | undefined
+      let operationSignal = activeAbort.signal
+      const isCurrent = () => generationAbortRef.current === activeAbort &&
+        currentWorkspaceRef.current === workspaceId &&
+        useWorkspaceStore.getState().workspaceId === workspaceId &&
+        !activeAbort.signal.aborted && !scope?.scopeInvalidatedSignal.aborted
+      const assertCurrent = () => {
+        if (!isCurrent()) throw new DOMException("Workspace or account changed.", "AbortError")
+      }
 
       try {
+        const enrolled = generatedArtifacts.find(entry => entry.id === options.targetArtifactId)?.workspaceArtifactId
+        if (workspaceId && (hasResearchWorkspaceMigrationTombstone(workspaceId) ||
+            hasCanonicalArtifactWorkspace(workspaceId) || enrolled ||
+            type === "video_overview" || type === "infographic")) {
+          const preflightTimeout = setTimeout(() => activeAbort.abort(), 15000)
+          try {
+            scope = await loadServicePromptSnapshot([], { signal: activeAbort.signal })
+            const ownedScope = scope
+            const retire = () => {
+              activeAbort.abort()
+              if (pendingSaveRef.current?.scope === ownedScope) {
+                pendingSaveRef.current = null
+                setUnsavedArtifact(null)
+                releaseScope?.()
+              }
+            }
+            ownedScope.scopeInvalidatedSignal.addEventListener("abort", retire, { once: true })
+            releaseScope = () => {
+              ownedScope.scopeInvalidatedSignal.removeEventListener("abort", retire)
+              ownedScope.release()
+            }
+            assertCurrent()
+            if (hasCanonicalArtifactWorkspace(workspaceId) &&
+                !hasCanonicalArtifactWorkspace(workspaceId, scope.scopeKey))
+              throw new Error("Reopen this workspace in the current account before generating.")
+            operationArtifacts = operationArtifacts.filter(artifact =>
+              hasWorkspaceArtifactOrigin(artifact, scope!.scopeKey, workspaceId))
+            const previous = generatedArtifacts.find(entry => entry.id === options.targetArtifactId)
+            if (previous && !hasWorkspaceArtifactOrigin(previous, scope.scopeKey, workspaceId))
+              throw new Error("Reload this saved output before replacing it.")
+            requestScope = scope.requestScope
+            operationSignal = AbortSignal.any([
+              activeAbort.signal, scope.scopeSignal, scope.scopeInvalidatedSignal,
+            ])
+            const canonicalSources = await tldwClient.getWorkspaceSources(workspaceId, {
+              signal: operationSignal, requestScope,
+            })
+            assertCurrent()
+            if (!Array.isArray(canonicalSources) ||
+                canonicalSources.some(source => source.workspace_id !== workspaceId))
+              throw new Error("Selected sources belong to another workspace.")
+            if (new Set(mediaIds).size !== mediaIds.length ||
+                operationSources.length !== mediaIds.length ||
+                mediaIds.some(id => !operationSources.some(source => source.mediaId === id)))
+              throw new Error("Reload the selected sources before generating.")
+            operationSources = operationSources.map(source => {
+              const matches = canonicalSources.filter(row => row.id === source.id && row.media_id === source.mediaId)
+              if (matches.length !== 1) throw new Error("Reload the selected sources before generating.")
+              return { ...source, title: matches[0].title }
+            })
+          } finally {
+            clearTimeout(preflightTimeout)
+          }
+        }
+        assertCurrent()
         const workProductTemplate = options.templateId
           ? getWorkProductTemplate(options.templateId)
           : null
@@ -3160,7 +3369,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
         const templateMetadata = workProductTemplate
           ? {
               templateId: workProductTemplate.id,
-              sourceLineage: buildTemplateSourceLineage(selectedSources),
+              sourceLineage: buildTemplateSourceLineage(operationSources),
               reviewChecklist: buildTemplateReviewChecklist(workProductTemplate)
             }
           : {}
@@ -3169,7 +3378,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
           outputButtons.find((b) => b.type === type)?.label ||
           type
         const shouldReplaceExisting =
-          options.mode === "replace" && Boolean(options.targetArtifactId)
+          options.mode === "replace" && Boolean(options.targetArtifactId) &&
+          type !== "video_overview" && type !== "infographic"
 
         if (shouldReplaceExisting) {
           const existingArtifact = generatedArtifacts.find(
@@ -3201,12 +3411,16 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
             estimatedCostUsd,
             ...templateMetadata,
             previousVersionId:
-              options.mode === "new_version" ? options.targetArtifactId : undefined
+              options.mode === "new_version" || options.mode === "replace"
+                ? options.targetArtifactId : undefined
           })
         }
 
         generationRollbackRef.current = () => {
-          if (generationAbortRef.current !== activeAbort || !artifact) return
+          if (generationAbortRef.current !== activeAbort || !artifact ||
+              currentWorkspaceRef.current !== workspaceId ||
+              useWorkspaceStore.getState().workspaceId !== workspaceId ||
+              scope?.scopeInvalidatedSignal.aborted || accountRetired) return
           updateArtifactStatus(artifact.id, previousArtifact?.status ?? "failed", {
             ...(previousArtifact ?? {}),
             errorMessage: t("playground:studio.generateCancelled", "Generation canceled before completion.")
@@ -3220,7 +3434,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
 
         // Small delay to ensure UI updates before heavy work
         await new Promise((resolve) => setTimeout(resolve, 50))
-        throwIfAborted(activeAbort.signal)
+        throwIfAborted(operationSignal)
+        assertCurrent()
 
         // Phase: generating output
         setGenerationPhase("generating")
@@ -3230,13 +3445,14 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
             const summaryRuntime = await resolveStudioChatRuntime()
             result = await generateSummary({
               mediaIds,
-              selectedSources,
+              selectedSources: operationSources,
               model: summaryRuntime.model,
               apiProvider: summaryRuntime.provider,
               temperature: resolvedTemperature,
               topP: resolvedTopP,
               maxTokens: resolvedNumPredict,
-              abortSignal: activeAbort.signal,
+              abortSignal: operationSignal,
+              requestScope,
               summaryInstruction: resolvedSummaryInstruction
             })
             break
@@ -3245,13 +3461,14 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
             const reportRuntime = await resolveStudioChatRuntime()
             const reportOptions = {
               mediaIds,
-              selectedSources,
+              selectedSources: operationSources,
               model: reportRuntime.model,
               apiProvider: reportRuntime.provider,
               temperature: resolvedTemperature,
               topP: resolvedTopP,
               maxTokens: resolvedNumPredict,
-              abortSignal: activeAbort.signal
+              abortSignal: operationSignal,
+              requestScope
             }
             if (isExecutiveBriefTemplate && workProductTemplate) {
               result = await generateExecutiveBrief({
@@ -3262,13 +3479,13 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               result = await generateEvidenceBoundHypotheses({
                 ...reportOptions,
                 template: workProductTemplate,
-                generatedArtifacts
+                generatedArtifacts: operationArtifacts
               })
             } else if (isResearchProposalTemplate && workProductTemplate) {
               result = await generateResearchProposalPack({
                 ...reportOptions,
                 template: workProductTemplate,
-                generatedArtifacts
+                generatedArtifacts: operationArtifacts
               })
             } else {
               result = await generateReport(reportOptions)
@@ -3281,13 +3498,14 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
             result = await generateCompareSources(
               {
                 mediaIds,
-                selectedSources,
+                selectedSources: operationSources,
                 model: compareRuntime.model,
                 apiProvider: compareRuntime.provider,
                 temperature: resolvedTemperature,
                 topP: resolvedTopP,
                 maxTokens: resolvedNumPredict,
-                abortSignal: activeAbort.signal,
+                abortSignal: operationSignal,
+                requestScope,
                 workspaceTag
               }
             )
@@ -3298,13 +3516,14 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               const timelineRuntime = await resolveStudioChatRuntime()
             result = await generateTimeline({
               mediaIds,
-              selectedSources,
+              selectedSources: operationSources,
               model: timelineRuntime.model,
               apiProvider: timelineRuntime.provider,
               temperature: resolvedTemperature,
               topP: resolvedTopP,
               maxTokens: resolvedNumPredict,
-              abortSignal: activeAbort.signal
+              abortSignal: operationSignal,
+              requestScope
             })
             break
             }
@@ -3314,7 +3533,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
             result = await generateQuizFromMedia(
               {
                 mediaIds,
-                selectedSources,
+                selectedSources: operationSources,
                 model: quizRuntime.model,
                 apiProvider: quizRuntime.provider,
                 claimsVerificationProvider,
@@ -3326,7 +3545,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
                 temperature: resolvedTemperature,
                 topP: resolvedTopP,
                 maxTokens: resolvedNumPredict,
-                abortSignal: activeAbort.signal
+                abortSignal: operationSignal,
+                requestScope
               }
             )
             break
@@ -3335,7 +3555,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
             const flashcardRuntime = await resolveStudioChatRuntime()
             result = await generateFlashcards({
               mediaIds,
-              selectedSources,
+              selectedSources: operationSources,
               workspaceId,
               workspaceName,
               workspaceTag,
@@ -3349,7 +3569,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               maxTokens: resolvedNumPredict,
               preferredDeckId:
                 selectedFlashcardDeck === "auto" ? undefined : selectedFlashcardDeck,
-              abortSignal: activeAbort.signal
+              abortSignal: operationSignal,
+              requestScope
             })
             break
           }
@@ -3357,7 +3578,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
             const mindmapRuntime = await resolveStudioChatRuntime()
             result = await generateMindMap({
               mediaIds,
-              selectedSources,
+              selectedSources: operationSources,
               model: mindmapRuntime.model,
               apiProvider: mindmapRuntime.provider,
               claimsVerificationProvider,
@@ -3365,7 +3586,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               temperature: resolvedTemperature,
               topP: resolvedTopP,
               maxTokens: resolvedNumPredict,
-              abortSignal: activeAbort.signal
+              abortSignal: operationSignal,
+              requestScope
             })
             break
           }
@@ -3373,7 +3595,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
             const audioRuntime = await resolveStudioChatRuntime()
             result = await generateAudioOverview({
               mediaIds,
-              selectedSources,
+              selectedSources: operationSources,
               model: audioRuntime.model,
               apiProvider: audioRuntime.provider,
               claimsVerificationProvider,
@@ -3382,7 +3604,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               topP: resolvedTopP,
               maxTokens: resolvedNumPredict,
               audioSettings,
-              abortSignal: activeAbort.signal
+              abortSignal: operationSignal,
+              requestScope
             })
             break
           }
@@ -3391,7 +3614,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
             const mediaRuntime = await resolveStudioChatRuntime()
             result = await generateBackendMediaOutput(type, {
               mediaIds,
-              selectedSources,
+              selectedSources: operationSources,
               model: mediaRuntime.model,
               apiProvider: mediaRuntime.provider,
               temperature: resolvedTemperature,
@@ -3401,9 +3624,10 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               workspaceId,
               workspaceName,
               slidesVisualStyleValue: effectiveSlidesVisualStyleValue,
-              abortSignal: activeAbort.signal,
+              abortSignal: operationSignal,
+              requestScope,
               onProgress: (status) => {
-                if (!artifact) return
+                if (!artifact || !isCurrent()) return
                 updateArtifactStatus(artifact.id, "generating", {
                   producerMetadata: {
                     ...(artifact.producerMetadata || {}),
@@ -3426,16 +3650,17 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               mediaIds[0],
               {
                 mediaIds,
-                selectedSources,
+                selectedSources: operationSources,
                 model: slidesRuntime.model,
                 apiProvider: slidesRuntime.provider,
                 temperature: resolvedTemperature,
                 topP: resolvedTopP,
                 maxTokens: resolvedNumPredict,
-                abortSignal: activeAbort.signal
+                abortSignal: operationSignal,
+                requestScope
               },
               {
-                abortSignal: activeAbort.signal,
+                abortSignal: operationSignal,
                 visualStyleId,
                 visualStyleScope,
                 claimsVerificationProvider,
@@ -3449,34 +3674,36 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               const matrixRuntime = await resolveStudioChatRuntime()
               result = await generateLiteratureMatrix({
                 mediaIds,
-                selectedSources,
+                selectedSources: operationSources,
                 model: matrixRuntime.model,
                 apiProvider: matrixRuntime.provider,
                 temperature: resolvedTemperature,
                 topP: resolvedTopP,
                 maxTokens: resolvedNumPredict,
-                abortSignal: activeAbort.signal,
+                abortSignal: operationSignal,
+                requestScope,
                 template: workProductTemplate
               })
             } else if (workProductTemplate?.id === "corpus_gap_finder") {
               const gapRuntime = await resolveStudioChatRuntime()
               result = await generateCorpusGapFinder({
                 mediaIds,
-                selectedSources,
+                selectedSources: operationSources,
                 model: gapRuntime.model,
                 apiProvider: gapRuntime.provider,
                 temperature: resolvedTemperature,
                 topP: resolvedTopP,
                 maxTokens: resolvedNumPredict,
-                abortSignal: activeAbort.signal,
+                abortSignal: operationSignal,
+                requestScope,
                 template: workProductTemplate,
-                generatedArtifacts
+                generatedArtifacts: operationArtifacts
               })
             } else {
               const dataTableRuntime = await resolveStudioChatRuntime()
               result = await generateDataTable({
                 mediaIds,
-                selectedSources,
+                selectedSources: operationSources,
                 model: dataTableRuntime.model,
                 apiProvider: dataTableRuntime.provider,
                 claimsVerificationProvider,
@@ -3484,7 +3711,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
                 temperature: resolvedTemperature,
                 topP: resolvedTopP,
                 maxTokens: resolvedNumPredict,
-                abortSignal: activeAbort.signal
+                abortSignal: operationSignal,
+                requestScope
               })
             }
             break
@@ -3492,8 +3720,9 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
             throw new Error(`Unsupported output type: ${type}`)
         }
 
-        throwIfAborted(activeAbort.signal)
-        if (generationAbortRef.current !== activeAbort) return
+        throwIfAborted(operationSignal)
+        assertCurrent()
+        if (!isCurrent()) return
 
         // Phase: finalizing
         setGenerationPhase("finalizing")
@@ -3507,7 +3736,9 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
           audioProvider: audioSettings.provider
         })
 
-        updateArtifactStatus(artifact.id, "completed", {
+        const completed: GeneratedArtifact = { ...artifact, status: "completed",
+          workspaceArtifactId: result.workspaceArtifactId ?? artifact.workspaceArtifactId,
+          workspaceArtifactVersion: result.workspaceArtifactVersion ?? artifact.workspaceArtifactVersion,
           serverId: result.serverId,
           content: result.content,
           audioUrl: result.audioUrl,
@@ -3548,7 +3779,42 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
                 reviewStatus: "draft" as const
               }
             : {})
-        })
+        }
+        generationRollbackRef.current = null
+        generationSavingRef.current = true
+        if (!completed.sourceLineage) completed.sourceLineage = buildTemplateSourceLineage(operationSources)
+        if (scope && workspaceId) {
+          if (!previousArtifact?.workspaceArtifactId)
+            bindWorkspaceArtifactOrigin(completed, scope.scopeKey, workspaceId)
+        }
+        assertCurrent()
+        updateArtifactStatus(completed.id, "completed", completed)
+        if (scope && workspaceId) {
+          try {
+            const saveIsCurrent = () => isCurrent() && isVisibleArtifactDraft(completed)
+            const saved = await persistWorkspaceArtifact(completed, {
+              workspaceId, scope, isCurrent: saveIsCurrent,
+              updateOnly: result.workspaceArtifactId ? "client" : undefined,
+            })
+            if (!saveIsCurrent()) return
+            updateArtifactStatus(saved.id, saved.status, { ...saved, errorMessage: undefined })
+          } catch {
+            if (!isCurrent() || !isVisibleArtifactDraft(completed)) return
+            pendingSaveRef.current = {
+              artifact: completed, scope, controller: activeAbort, workspaceId,
+              release: releaseScope!,
+              updateOnly: result.workspaceArtifactId ? "client" : undefined,
+            }
+            setUnsavedArtifact(completed)
+            updateArtifactStatus(completed.id, "completed", {
+              errorMessage: t("playground:studio.outputSaveFailed",
+                "Output is generated but could not be saved. Retry saving without generating again.")
+            })
+            messageApi.error(t("playground:studio.outputSaveFailed",
+              "Output is generated but could not be saved. Retry saving without generating again."))
+            return
+          }
+        }
 
         messageApi.success(
           t("playground:studio.generateSuccess", "{{type}} generated successfully", {
@@ -3556,7 +3822,10 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
           })
         )
       } catch (error) {
-        if (generationAbortRef.current !== activeAbort) return
+        if (generationAbortRef.current !== activeAbort ||
+            currentWorkspaceRef.current !== workspaceId ||
+            useWorkspaceStore.getState().workspaceId !== workspaceId ||
+            scope?.scopeInvalidatedSignal.aborted || accountRetired) return
         const generationWasAborted = activeAbort.signal.aborted || isAbortLikeError(error)
         const sourceCoverage = isLiteratureSourceCoverageError(error)
           ? error.sourceCoverage
@@ -3587,6 +3856,9 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
           )
         }
       } finally {
+        generationSavingRef.current = false
+        stopAccountWatch()
+        if (pendingSaveRef.current?.scope !== scope) releaseScope?.()
         if (generationAbortRef.current === activeAbort) {
           generationAbortRef.current = null
           generationRollbackRef.current = null
@@ -3649,6 +3921,9 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
     // callbacks
     handleGenerateOutput,
     handleCancelGeneration,
+    unsavedArtifact,
+    isSavingArtifact,
+    handleRetryArtifactSave,
     loadFlashcardDecks,
     resolveStudioChatRuntime,
     resolveStudioChatModel,

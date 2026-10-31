@@ -23,7 +23,18 @@ export type WorkspaceArtifactSaveScope = {
   isCurrent: () => boolean;
   deadline?: number;
   reviewChangeOnly?: boolean;
+  updateOnly?: "content" | "client";
 };
+
+const canonicalWorkspaces = new Map<string, string>();
+
+export const rememberCanonicalArtifactWorkspace = (workspaceId: string, scopeKey: string): void => {
+  // Cached workspace switches must retain enrollment for this page lifetime.
+  canonicalWorkspaces.set(workspaceId, scopeKey);
+};
+export const hasCanonicalArtifactWorkspace = (workspaceId: string, scopeKey?: string): boolean =>
+  canonicalWorkspaces.has(workspaceId) &&
+  (scopeKey === undefined || canonicalWorkspaces.get(workspaceId) === scopeKey);
 
 const pending = new Map<string, Promise<unknown>>();
 
@@ -46,11 +57,17 @@ export const persistWorkspaceArtifact = async (
       throw new DOMException('Saving the draft exceeded 15 seconds. Retry saving.', 'TimeoutError');
   };
   assertCurrent();
+  if (options.reviewChangeOnly && options.updateOnly)
+    throw new Error("Choose one artifact update mode.");
   if (!workspaceId.trim() || workspaceId !== workspaceId.trim() || workspaceId.length > 128)
     throw new Error('Invalid artifact workspace.');
   // Legacy/offline workspaces keep ADR-008's local cache; enrollment survives a missing tombstone.
-  if (!artifact.workspaceArtifactId && !hasResearchWorkspaceMigrationTombstone(workspaceId))
+  if (!artifact.workspaceArtifactId && !hasResearchWorkspaceMigrationTombstone(workspaceId) &&
+    !hasCanonicalArtifactWorkspace(workspaceId))
     return artifact;
+  if (hasCanonicalArtifactWorkspace(workspaceId) &&
+    !hasCanonicalArtifactWorkspace(workspaceId, scope.scopeKey))
+    throw createServicePromptScopeChangedError();
   if (!hasWorkspaceArtifactOrigin(artifact, scope.scopeKey, workspaceId))
     throw new Error('This draft has no verified origin in the current account and workspace.');
   const key = JSON.stringify([
@@ -103,13 +120,28 @@ export const persistWorkspaceArtifact = async (
         throw new Error('Saved artifact acknowledgement does not match the draft.');
       const restored = mapServerArtifactToLocal(row);
       return bindWorkspaceArtifactOrigin(
-        options.reviewChangeOnly ? restored : { ...artifact, ...restored },
+        options.reviewChangeOnly || options.updateOnly ? restored : { ...artifact, ...restored },
         scope.scopeKey,
         workspaceId
       );
     };
     const existing = await read();
-    if (options.reviewChangeOnly) {
+    if (options.updateOnly) {
+      if (!existing) throw new Error('The saved draft is no longer available.');
+      readWorkspaceArtifactClientPayload(existing.version_metadata);
+      const client = payload.version_metadata?.workspaceClient;
+      payload = {
+        id: existing.id,
+        version_metadata: {
+          ...existing.version_metadata,
+          workspaceClient: {
+            ...(existing.version_metadata?.workspaceClient as Record<string, unknown> | undefined),
+            ...(client as Record<string, unknown>),
+          },
+        },
+        ...(options.updateOnly === 'content' ? { content: artifact.content ?? null } : {}),
+      };
+    } else if (options.reviewChangeOnly) {
       if (!existing) throw new Error('The saved draft is no longer available.');
       readWorkspaceArtifactClientPayload(existing.version_metadata);
       const previousMetadata = existing.version_metadata ?? {};
