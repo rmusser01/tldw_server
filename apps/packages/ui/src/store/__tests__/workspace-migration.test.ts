@@ -3,7 +3,9 @@ import {
   buildResearchWorkspaceMigrationPlan,
   buildResearchWorkspaceMigrationTombstone,
   buildResearchWorkspaceMigrationTombstoneKey,
-  runResearchWorkspaceMigration
+  runResearchWorkspaceMigration,
+  saveResearchWorkspaceChatReference,
+  readSavedResearchWorkspaceChatReference
 } from "@/store/workspace-migration"
 
 describe("Research Workspace migration manifest planning", () => {
@@ -612,3 +614,89 @@ it.each([false, true])(
     expect(JSON.stringify(marker)).not.toContain("Do not retain this answer")
   }
 )
+
+
+describe("Account-scoped Chat reference inventory", () => {
+  beforeEach(() => localStorage.clear())
+
+  it("retains actual saved Chat reference metadata while planning another Workspace", async () => {
+    const owner = { scopeKey: "owner:alice", isCurrent: () => true }
+    saveResearchWorkspaceChatReference(
+      "ws-alice",
+      "ws-alice",
+      "saved-chat",
+      owner,
+    )
+    const hint = readSavedResearchWorkspaceChatReference(
+      localStorage,
+      "ws-alice",
+      owner.scopeKey,
+    )
+    const contentKey = "tldw-workspace:workspace:ws-bob:snapshot"
+    localStorage.setItem(contentKey, JSON.stringify({ workspaceId: "ws-bob" }))
+    const plan = await buildResearchWorkspaceMigrationPlan({
+      targetWorkspaceId: "ws-bob",
+      targetWorkspaceName: "Bob",
+      discoveredLocalStorageKeys: [hint.key, contentKey],
+      readLocalStorageValue: async (key) => localStorage.getItem(key),
+    })
+    expect(plan.manifest.unknown_surface_ids).toEqual([])
+    expect(plan.manifest.retained_local_surface_ids).toEqual([
+      "localStorage:" + hint.key,
+    ])
+    expect(plan.manifest.covered_surface_ids).toEqual([
+      "localStorage:" + contentKey,
+    ])
+    expect(plan.localDeletionEligibility.eligible).toBe(true)
+    expect(localStorage.getItem(hint.key)).toBe(hint.raw)
+  })
+
+  it("never uploads the hint payload as a chunk or deletes its retained key", async () => {
+    const owner = { scopeKey: "owner:alice", isCurrent: () => true }
+    saveResearchWorkspaceChatReference(
+      "ws-alice",
+      "ws-alice",
+      "saved-chat",
+      owner,
+    )
+    const hint = readSavedResearchWorkspaceChatReference(
+      localStorage,
+      "ws-alice",
+      owner.scopeKey,
+    )
+    const contentKey = "tldw-workspace:workspace:ws-bob:snapshot"
+    localStorage.setItem(contentKey, JSON.stringify({ workspaceId: "ws-bob" }))
+    const receipt = {
+      id: "migration-bob",
+      status: "finalized",
+      client_delete_eligible: true,
+    }
+    const put = vi.fn(async () => ({}))
+    const create = vi.fn(async (_body: unknown) => receipt)
+    const result = await runResearchWorkspaceMigration({
+      targetWorkspaceId: "ws-bob",
+      targetWorkspaceName: "Bob",
+      discoveredLocalStorageKeys: [hint.key, contentKey],
+      readLocalStorageValue: async (key) => localStorage.getItem(key),
+      api: {
+        createWorkspaceMigration: create,
+        putWorkspaceMigrationChunk: put,
+        finalizeWorkspaceMigration: vi.fn(async () => receipt),
+        getWorkspaceMigration: vi.fn(async () => receipt),
+        ackWorkspaceMigrationClientDelete: vi.fn(async () => ({})),
+      },
+      deleteLocalStorageValue: (key) => localStorage.removeItem(key),
+      writeLocalStorageValue: (key, value) => localStorage.setItem(key, value),
+    })
+    expect(result.status).toBe("deleted")
+    expect(localStorage.getItem(contentKey)).toBeNull()
+    expect(localStorage.getItem(hint.key)).toBe(hint.raw)
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      manifest: { retained_local_surface_ids: ["localStorage:" + hint.key] }
+    })
+    expect(JSON.stringify(create.mock.calls)).not.toContain("saved-chat")
+    expect(put).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(put.mock.calls)).not.toContain("saved-chat")
+    expect(JSON.stringify(put.mock.calls)).not.toContain(hint.key)
+  })
+})

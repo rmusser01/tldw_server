@@ -13,6 +13,8 @@ export const RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFIX =
   "tldw:research-workspace:migration:tombstone";
 export const RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFLIGHT_PREFIX =
   "tldw:research-workspace:migration:tombstone-preflight";
+export const RESEARCH_WORKSPACE_CHAT_REFERENCE_PREFIX =
+  "tldw:research-workspace:chat-reference"
 export const RESEARCH_WORKSPACE_RECONCILIATION_MARKER_PREFIX =
   "tldw:research-workspace:reconciliation:v1"
 
@@ -95,6 +97,7 @@ export interface ResearchWorkspaceLegacyDeletionEligibility {
 
 const workspaceSplitKeyPattern = /^tldw-workspace:workspace:([^:]+):(snapshot|chat)$/
 const markerPrefixes = [
+  RESEARCH_WORKSPACE_CHAT_REFERENCE_PREFIX,
   RESEARCH_WORKSPACE_RECONCILIATION_MARKER_PREFIX,
   RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFIX,
   RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFLIGHT_PREFIX,
@@ -261,11 +264,15 @@ const inventory = [
     (prefix): ResearchWorkspaceLegacyStorageInventoryItem => ({
       id: "localStorage:" + prefix + ":*",
       kind: "local_storage",
-      keyPattern: prefix + ":<workspace_id>",
+      keyPattern:
+        prefix +
+        (prefix === RESEARCH_WORKSPACE_CHAT_REFERENCE_PREFIX
+          ? ":<scope_key>:<workspace_id>"
+          : ":<workspace_id>"),
       classification: "metadata",
       deletionPolicy: "retain_local",
       description:
-        "Local reconciliation or migration receipt marker. It is retained and grants no content or deletion authority.",
+        "Local Chat reference, reconciliation or migration receipt marker. It is retained and grants no content or deletion authority.",
       contentClasses: [],
       serverDestination: null,
       authoritativeForMigration: false,
@@ -382,29 +389,40 @@ const classifySplitWorkspaceKey = (
 }
 
 const classifyReconciliationMarkerKey = (
-  key: string
+  key: string,
 ): ResearchWorkspaceLegacyStorageSurface | null => {
-  const prefix = markerPrefixes.find((value) => key.startsWith(value + ":"));
-  if (!prefix) return null;
-  const encoded = key.slice(prefix.length + 1);
-  let workspaceId: string;
+  const prefix = markerPrefixes.find((value) => key.startsWith(value + ":"))
+  if (!prefix) return null
+  const encodedParts = key.slice(prefix.length + 1).split(":")
+  if (
+    encodedParts.length !==
+    (prefix === RESEARCH_WORKSPACE_CHAT_REFERENCE_PREFIX ? 2 : 1)
+  )
+    return null
+  let parts: string[]
   try {
-    workspaceId = decodeURIComponent(encoded);
+    parts = encodedParts.map(decodeURIComponent)
   } catch {
-    return null;
+    return null
   }
-  if (!workspaceId.trim() || encodeURIComponent(workspaceId) !== encoded)
-    return null;
+  if (
+    parts.some(
+      (part, index) =>
+        !part.trim() || encodeURIComponent(part) !== encodedParts[index],
+    )
+  )
+    return null
+  const workspaceId = parts[parts.length - 1]
   const inventoryItem = inventory.find(
     (item) => item.id === "localStorage:" + prefix + ":*",
-  );
+  )
   return inventoryItem
     ? cloneInventoryItem(inventoryItem, {
         id: "localStorage:" + key,
         key,
         workspaceId,
       })
-    : null;
+    : null
 }
 
 const classifyIndexedDbStore = (
