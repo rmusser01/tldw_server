@@ -1,4 +1,4 @@
-"""The keeper rule, the open-PR cache and the open-PR duplicate list of the duplicate-id renumbering (TASK-N1)."""
+"""The keeper rule, the open-PR cache and the open-PR duplicate list of the duplicate-id renumbering (TASK-13960)."""
 
 import json
 from pathlib import Path

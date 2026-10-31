@@ -1,4 +1,4 @@
-"""Fail when two backlog task files share an id (TASK-N1).
+"""Fail when two backlog task files share an id (TASK-13960).
 
 Ids come from each file's ``id:`` frontmatter, or its file name when that is missing.
 backend-required's ``changes`` job runs this on every PR, backlog-only ones included.

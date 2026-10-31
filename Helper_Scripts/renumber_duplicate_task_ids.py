@@ -1,9 +1,9 @@
-"""Decide, and with --apply carry out, the renumbering of duplicate backlog task ids (TASK-N1).
+"""Decide, and with --apply carry out, the renumbering of duplicate backlog task ids (TASK-13960).
 
 Run from the repository root, on a branch based on current origin/dev:
 
-    PYTHONPATH=tools/backlog-py/src python Helper_Scripts/renumber_duplicate_task_ids.py --task TASK-N1
-    PYTHONPATH=tools/backlog-py/src python Helper_Scripts/renumber_duplicate_task_ids.py --task TASK-N1 --apply
+    PYTHONPATH=tools/backlog-py/src python Helper_Scripts/renumber_duplicate_task_ids.py --task TASK-13960
+    PYTHONPATH=tools/backlog-py/src python Helper_Scripts/renumber_duplicate_task_ids.py --task TASK-13960 --apply
 
 Both write the record, Docs/Development/Backlog_Task_Id_Renumbering.md. --apply then renumbers through
 backlog-py, retargets dependencies through backlog-py, and rewrites file-name links in files that are
