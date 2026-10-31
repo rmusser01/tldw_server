@@ -77,7 +77,7 @@
   "api/v1/endpoints/quizzes.py": {"calls": 1, "reason": null},
   "api/v1/endpoints/rag_health.py": {"calls": 12, "reason": null},
   "api/v1/endpoints/rag_unified.py": {"calls": 4, "reason": null},
-  "api/v1/endpoints/reading.py": {"calls": 9, "reason": "get_default_provider() is a call-time config read, not a service; TASK-13950.14 moved it here from an import-time DEFAULT_LLM_PROVIDER import"},
+  "api/v1/endpoints/reading.py": {"calls": 8, "reason": "get_default_provider() is a call-time config read, not a service; TASK-13950.14 moved it here from an import-time DEFAULT_LLM_PROVIDER import"},
   "api/v1/endpoints/reminders.py": {"calls": 2, "reason": null},
   "api/v1/endpoints/rpg.py": {"calls": 1, "reason": null},
   "api/v1/endpoints/sandbox.py": {"calls": 8, "reason": null},

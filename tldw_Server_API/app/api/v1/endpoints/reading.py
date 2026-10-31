@@ -993,9 +993,7 @@ async def summarize_reading_item(
     if payload.recursive and payload.chunked:
         raise HTTPException(status_code=400, detail="reading_summary_invalid_strategy")
 
-    provider = (payload.provider or get_default_provider()).strip()
-    if not provider:
-        provider = get_default_provider()
+    provider = (payload.provider or "").strip() or get_default_provider().strip()
     loop = asyncio.get_running_loop()
     try:
         summary = await loop.run_in_executor(
