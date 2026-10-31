@@ -302,6 +302,9 @@ jobs:
             tldw_Server_API/tests/lint/test_layering_contract.py \
             tldw_Server_API/tests/lint/test_db_management_logic_imports.py \
             tldw_Server_API/tests/lint/test_core_to_api_import_boundary.py \
+            tldw_Server_API/tests/lint/test_authnz_alias_imports.py \
+            tldw_Server_API/tests/AuthNZ/unit/test_backend_detection_guardrail.py \
+            tldw_Server_API/tests/AuthNZ/unit/test_guardrail_sql_audit.py \
             tldw_Server_API/tests/lint/test_direct_llm_adapter_calls_ratchet.py \
             tldw_Server_API/tests/lint/test_service_singleton_ratchet.py \
             tldw_Server_API/tests/lint/test_llm_calls_import_isolation.py \

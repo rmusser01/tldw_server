@@ -1729,3 +1729,47 @@ def test_frontend_critical_keeps_first_attempt_evidence_within_job_deadline() ->
     assert "test-results/" in upload["with"]["path"]
     assert ".tmp/frontend-e2e/" in upload["with"]["path"]
     assert upload["with"]["include-hidden-files"] is True
+
+
+MOVED_E2E_PATHS = [
+    "tldw_Server_API/app/core/Provider_Credentials/byok_runtime.py",
+    "tldw_Server_API/app/core/Provider_Credentials/repos/user_provider_secrets_repo.py",
+]
+AUTHNZ_FLOOR_TARGETS = {"tldw_Server_API/app/core/AuthNZ", "tldw_Server_API/app/core/Provider_Credentials"}
+
+
+@pytest.mark.unit
+def test_moved_provider_credential_code_keeps_authnz_ci_posture() -> None:
+    """TASK-13950.17: code moved out of core/AuthNZ keeps AuthNZ's e2e trigger and coverage floor."""
+    from Helper_Scripts.ci.path_classifier import classify_paths
+
+    assert [path for path in MOVED_E2E_PATHS if not classify_paths([path])["e2e_changed"]] == []  # nosec B101
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/coverage-required.yml").read_text())
+    floor = next(
+        step for step in workflow["jobs"]["coverage-required"]["steps"] if step.get("name") == "AuthNZ coverage floor"
+    )
+    words = shlex.split(floor["run"].replace("\\\n", " "), comments=True)
+    assert {word.split("=", 1)[1] for word in words if word.startswith("--cov=")} >= AUTHNZ_FLOOR_TARGETS  # nosec B101
+    assert "--cov-fail-under=35" in words  # nosec B101
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "guard",
+    [
+        "tldw_Server_API/tests/lint/test_authnz_alias_imports.py",
+        "tldw_Server_API/tests/AuthNZ/unit/test_backend_detection_guardrail.py",
+        "tldw_Server_API/tests/AuthNZ/unit/test_guardrail_sql_audit.py",
+        "tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py",
+    ],
+)
+def test_backend_required_enforces_provider_credential_guards(guard: str) -> None:
+    """TASK-13950.17: the alias gate, the widened AuthNZ guardrails and the CI-posture pins run in a required step."""
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    gate = next(
+        step
+        for step in workflow["jobs"]["backend-required"]["steps"]
+        if step.get("name") == "Enforce CI contracts and code ratchets"
+    )
+    assert not gate.get("continue-on-error", False)  # nosec B101
+    assert guard in shlex.split(gate["run"].replace("\\\n", " "), comments=True)  # nosec B101

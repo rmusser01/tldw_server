@@ -1,8 +1,8 @@
-"""Gate: app code does not use an AuthNZ alias path of a moved module (TASK-13950.17).
+"""Gate: app code, the CLI and Helper_Scripts do not use an AuthNZ alias path of a moved module (TASK-13950.17).
 
 The provider-credential modules moved from ``core/AuthNZ`` to ``core/Provider_Credentials``.
 Each old path is a ``sys.modules`` alias of the moved module, kept so tests and their
-monkeypatch targets keep working. App code may not use an old path from ``MOVED``: not at
+monkeypatch targets keep working. App code, ``tldw_Server_API/cli`` and ``Helper_Scripts`` may not use an old path from ``MOVED``: not at
 module or function level, not absolute or relative, not as
 ``from ...AuthNZ import byok_runtime``, and not as a string equal to an alias path (for
 ``importlib.import_module``). In-app ``tests`` packages are skipped, as in the layering
@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.tests.lint._ast_cache import APP_ROOT, parse_tree
+from tldw_Server_API.tests.lint._ast_cache import APP_ROOT, REPO_ROOT, parse_tree
 from tldw_Server_API.tests.lint.test_layering_contract import _module_name
 
 pytestmark = pytest.mark.unit
@@ -53,6 +53,13 @@ MOVED: dict[str, str] = {
     },
 }
 
+# Scanned root -> the dotted package name of that root (for resolving relative imports).
+ROOTS: dict[Path, str] = {
+    APP_ROOT: APP,
+    REPO_ROOT / "tldw_Server_API" / "cli": "tldw_Server_API.cli",
+    REPO_ROOT / "Helper_Scripts": "Helper_Scripts",
+}
+
 _OLD = {f"{APP}.core.{old}": f"{APP}.core.{new}" for old, new in MOVED.items()}
 
 
@@ -66,7 +73,7 @@ def _names(node: ast.AST, module: str, is_package: bool) -> Iterator[str]:
             parts = parts if is_package else parts[:-1]
             if node.level - 1 > len(parts):
                 return
-            base = ".".join([APP, *parts[: len(parts) - node.level + 1], *([node.module] if node.module else [])])
+            base = ".".join([*parts[: len(parts) - node.level + 1], *([node.module] if node.module else [])])
         else:
             base = node.module or ""
         yield base
@@ -75,19 +82,20 @@ def _names(node: ast.AST, module: str, is_package: bool) -> Iterator[str]:
         yield node.value
 
 
-def violations(root: Path = APP_ROOT) -> list[str]:
-    """One ``"<relative path>:<line> uses <old>; use <new>"`` per use of an alias path."""
-    root = root.resolve()
+def violations(roots: dict[Path, str] | None = None) -> list[str]:
+    """One ``"<package>/<relative path>:<line> uses <old>; use <new>"`` per use of an alias path."""
     problems = []
-    for path, tree in parse_tree(root).items():
-        relative = path.relative_to(root)
-        if "tests" in relative.parts[:-1]:
-            continue  # an in-app test package, not app code
-        module = _module_name(relative)
-        for node in ast.walk(tree):
-            for name in _names(node, module, path.name == "__init__.py"):
-                if name in _OLD:
-                    problems.append(f"{relative.as_posix()}:{node.lineno} uses {name}; use {_OLD[name]}")
+    for root, package in (ROOTS if roots is None else roots).items():
+        root = root.resolve()
+        for path, tree in parse_tree(root).items():
+            relative = path.relative_to(root)
+            if "tests" in relative.parts[:-1]:
+                continue  # an in-app test package, not app code
+            module = ".".join(part for part in (package, _module_name(relative)) if part)
+            for node in ast.walk(tree):
+                for name in _names(node, module, path.name == "__init__.py"):
+                    if name in _OLD:
+                        problems.append(f"{root.name}/{relative.as_posix()}:{node.lineno} uses {name}; use {_OLD[name]}")
     return problems
 
 
@@ -98,18 +106,40 @@ def test_app_code_imports_no_authnz_alias_path() -> None:
 
 def test_a_seeded_alias_import_fails(tmp_path: Path) -> None:
     files = {
-        "core/X/a.py": f"from {APP}.core.AuthNZ.byok_runtime import y\n",
-        "core/X/b.py": f"def f():\n    from {APP}.core.AuthNZ import byok_runtime\n",
-        "core/X/c.py": "from ..AuthNZ.repos.user_provider_secrets_repo import R\n",
-        "core/X/d.py": f"import importlib\nm = importlib.import_module('{APP}.core.AuthNZ.llm_provider_overrides')\n",
-        "core/X/ok.py": f"from {APP}.core.Provider_Credentials.byok_runtime import y\nfrom {APP}.core.AuthNZ import settings\n",
-        "core/X/tests/test_t.py": f"from {APP}.core.AuthNZ.byok_runtime import y\n",
+        "app/core/X/a.py": f"from {APP}.core.AuthNZ.byok_runtime import y\n",
+        "app/core/X/b.py": f"def f():\n    from {APP}.core.AuthNZ import byok_runtime\n",
+        "app/core/X/c.py": "from ..AuthNZ.repos.user_provider_secrets_repo import R\n",
+        "app/core/X/d.py": f"import importlib\nm = importlib.import_module('{APP}.core.AuthNZ.llm_provider_overrides')\n",
+        "app/core/X/ok.py": f"from {APP}.core.Provider_Credentials.byok_runtime import y\nfrom {APP}.core.AuthNZ import settings\n",
+        "app/core/X/tests/test_t.py": f"from {APP}.core.AuthNZ.byok_runtime import y\n",
+        "Helper_Scripts/s.py": f"from {APP}.core.AuthNZ.byok_rotation import y\n",
+        "Helper_Scripts/ok.py": f"from {APP}.core.Provider_Credentials.byok_rotation import y\n",
+        "cli/c.py": f"from {APP}.core.AuthNZ import byok_helpers\n",
+        "cli/r.py": "from ..app.core.AuthNZ.byok_config import y\n",
+        "cli/ok.py": f"from {APP}.core.AuthNZ import settings\n",
     }
     for relative, source in files.items():
-        path = tmp_path / "app" / relative
+        path = tmp_path / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(source, encoding="utf-8")
+    roots = {
+        tmp_path / "app": APP,
+        tmp_path / "Helper_Scripts": "Helper_Scripts",
+        tmp_path / "cli": "tldw_Server_API.cli",
+    }
 
-    found = sorted(problem.split(":")[0] for problem in violations(tmp_path / "app"))
+    found = sorted(problem.split(":")[0] for problem in violations(roots))
 
-    assert found == ["core/X/a.py", "core/X/b.py", "core/X/c.py", "core/X/d.py"]
+    assert found == [
+        "Helper_Scripts/s.py",
+        "app/core/X/a.py",
+        "app/core/X/b.py",
+        "app/core/X/c.py",
+        "app/core/X/d.py",
+        "cli/c.py",
+        "cli/r.py",
+    ]
+
+
+def test_every_scanned_root_exists() -> None:
+    assert [root for root in ROOTS if not root.is_dir()] == []
