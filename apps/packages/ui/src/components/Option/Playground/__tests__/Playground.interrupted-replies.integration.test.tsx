@@ -328,9 +328,11 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
   // CM-02: a Stop before any text arrives keeps the question once, says so,
   // and Retry asks it again without saving it a second time.
   it.each([
-    { label: "a fresh chat", saved: false },
-    { label: "a saved server chat", saved: true }
-  ])("CM-02: Stop before the first token in $label keeps the question once and Retry asks it again", async ({ saved }) => {
+    { label: "a fresh chat", saved: false, initialText: "" },
+    { label: "a saved server chat", saved: true, initialText: "" },
+    { label: "a fresh chat after whitespace-only output", saved: false, initialText: " \n\t" },
+    { label: "a saved server chat after whitespace-only output", saved: true, initialText: " \n\t" }
+  ])("CM-02: Stop before any reply text in $label keeps the question once and Retry asks it again", async ({ saved, initialText }) => {
     const server = createFakeTldwServer()
     if (saved)
       server.seedChat({
@@ -341,9 +343,13 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
           { role: "assistant", content: "Saved answer" }
         ]
       })
-    // Held before any text; released at the end so nothing outlives the test.
+    // Held before visible reply text; released at the end so nothing outlives the test.
     const held = deferred()
-    server.planCompletion({ chunks: ["never sent"], pauseAfterChunks: 0, resume: held.promise })
+    server.planCompletion({
+      chunks: [...(initialText ? [initialText] : []), "never sent"],
+      pauseAfterChunks: initialText ? 1 : 0,
+      resume: held.promise
+    })
     server.planCompletion({ reply: "Answer after retry" })
     const view = await renderPlayground({
       server,
@@ -360,6 +366,7 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
     try {
     await startSend(view, "Stop me early")
     await waitFor(() => expect(server.completionRequests()).toHaveLength(1), HARNESS_WAIT)
+    if (initialText) await waitForStreamedText(initialText)
     await view.user.click(screen.getByRole("button", { name: "Stop Streaming" }))
     await waitForChatIdle()
 

@@ -3465,12 +3465,14 @@ describe("real full and compact Scene consumers across persistence and steering"
   })
 
   it.each((["full", "compact"] as const).flatMap(surface =>
-    (["complete", "duplicate", "provider partial", "drop after saved", "missing admission", "missing final", "foreign CID", "foreign user", "conflicting admission", "conflicting final", "final before admission"] as const)
+    (["complete", "duplicate", "provider partial", "drop after saved", "missing admission", "missing final", "foreign CID", "foreign user", "conflicting admission", "conflicting final", "final before admission", "Stop before admission", "Stop after admission"] as const)
       .map(boundary => ({ surface, boundary }))))(
     "actual mounted $surface native completion uses server settlement at $boundary without browser appends",
     async ({ surface, boundary }) => {
       const scoped = answerSnapshot()
-      vi.spyOn(servicePrompts, "loadServicePromptSnapshot").mockResolvedValue(scoped)
+      const stopped = boundary === "Stop before admission" || boundary === "Stop after admission"
+      vi.spyOn(servicePrompts, "loadServicePromptSnapshot").mockImplementation(async (_ids, options) =>
+        stopped ? { ...scoped, scopeSignal: options!.signal! } : scoped)
       const { rows, append } = declareNativeMirrorTransport(true)
       const journal = vi.spyOn(storage.tables.historySelections, "put")
       vi.mocked(tldwChat.streamMessage).mockImplementation(async function* (_messages, options, onChunk) {
@@ -3482,8 +3484,16 @@ describe("real full and compact Scene consumers across persistence and steering"
           const admission = { tldw_history_admission_v1: { version: 1, owner_key: "server-owner", conversation_id: newServerId,
             input_message_id: "canonical-input", input_message_revision: "1", selection_digest: selection.selection_digest,
             messages: selection.messages, originating_selection_revision: selection.selection_revision } }
+          if (boundary === "Stop before admission") {
+            consumer.mounted.result.current.stopStreamingRequest()
+            throw new DOMException("Stopped before admission receipt", "AbortError")
+          }
           if (boundary === "final before admission") await onChunk?.(final)
           if (boundary !== "missing admission") await onChunk?.(admission)
+          if (boundary === "Stop after admission") {
+            consumer.mounted.result.current.stopStreamingRequest()
+            throw new DOMException("Stopped before final receipt", "AbortError")
+          }
           if (boundary === "duplicate") await onChunk?.(admission)
           if (boundary === "conflicting admission") await onChunk?.({ tldw_history_admission_v1: { ...admission.tldw_history_admission_v1, input_message_id: "foreign-input" } })
         }
@@ -3516,9 +3526,9 @@ describe("real full and compact Scene consumers across persistence and steering"
         expect(request?.tldw_history_selection_v1).toBeDefined()
         expect(append).not.toHaveBeenCalled()
         const acknowledged = ["complete", "duplicate", "provider partial", "drop after saved", "conflicting final"].includes(boundary)
-        expect(refresh).toHaveBeenCalledTimes(1 + (boundary === "missing admission" || boundary === "final before admission" ? 0 : 1) + (acknowledged ? 1 : 0))
+        expect(refresh).toHaveBeenCalledTimes(1 + (boundary === "missing admission" || boundary === "final before admission" || boundary === "Stop before admission" ? 0 : 1) + (acknowledged ? 1 : 0))
         expect(refresh).toHaveBeenCalledWith({ queryKey: ["serverChatHistory"] })
-        expect(cancellation).toHaveBeenCalledTimes(1 + (boundary === "missing admission" || boundary === "final before admission" ? 0 : 1) + (acknowledged ? 1 : 0))
+        expect(cancellation).toHaveBeenCalledTimes(1 + (boundary === "missing admission" || boundary === "final before admission" || boundary === "Stop before admission" ? 0 : 1) + (acknowledged ? 1 : 0))
         releaseOverview(["obsolete pre-creation page"])
         await heldOverview
         expect(consumer.queryClient.getQueryData(heldKey)).toBeUndefined()
@@ -3539,6 +3549,8 @@ describe("real full and compact Scene consumers across persistence and steering"
           const recovery = consumer.selection.recoveries?.[0]?.turn
           expect(recovery).toMatchObject({ persistence: "server" })
           expect(recovery?.settled_message_id).toBeUndefined()
+          // An uncertain server outcome must remain visible in guarded recovery.
+          if (stopped) expect(recovery?.stopped_before_reply).toBeUndefined()
           expect(getServerChatSaveStatus(newServerId)).toBe("unconfirmed")
         }
       } finally { consumer.unmount(); useConnectionStore.setState({ state: initialConnection }) }

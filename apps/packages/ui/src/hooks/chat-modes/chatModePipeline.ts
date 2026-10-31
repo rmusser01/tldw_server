@@ -1303,7 +1303,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         // A Stop before any text keeps the question for dev's saved-question
         // retry, instead of a kept turn with no reply to show (CM-02).
         const stoppedBeforeReply =
-          !(historyTurn.persistence === "server" && historyTurn.resultId) &&
+          historyTurn.persistence !== "server" && Boolean(historyTurn.admission) &&
           !replyCompleted && !fullText.trim() && signal.aborted &&
           params.wasStoppedByUser?.() === true
         const outcome: HistoryTurnOutcome | undefined =
@@ -1331,7 +1331,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         try {
           await historyTurn.recover(
             {
-              content: fullText,
+              content: stoppedBeforeReply ? "" : fullText,
               assistantId: resolvedAssistantMessageId,
               createdAt,
               outcome,
