@@ -3,21 +3,21 @@ id: TASK-12705
 title: Audit Security secrets and serialization ADR candidate
 status: Done
 assignee: []
-created_date: '2026-06-07 21:10'
-updated_date: '2026-06-07 21:14'
+created_date: 2026-06-07 21:10
+updated_date: 2026-06-07 21:14
 labels:
-  - docs
-  - process
-  - adr
-  - security
+- docs
+- process
+- adr
+- security
 dependencies:
-  - TASK-2247
+- TASK-15024
 references:
-  - Docs/ADR/inventory/2026-06-04-security-confirmation-audit.md
-  - tldw_Server_API/app/core/Security/README.md
-  - tldw_Server_API/app/core/Security/secret_manager.py
-  - tldw_Server_API/app/core/Security/crypto.py
-  - tldw_Server_API/app/core/Security/safe_pickle.py
+- Docs/ADR/inventory/2026-06-04-security-confirmation-audit.md
+- tldw_Server_API/app/core/Security/README.md
+- tldw_Server_API/app/core/Security/secret_manager.py
+- tldw_Server_API/app/core/Security/crypto.py
+- tldw_Server_API/app/core/Security/safe_pickle.py
 ---
 
 ## Description

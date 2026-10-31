@@ -524,7 +524,7 @@ git diff --check -- `
   tldw_Server_API/Config_Files/tts_providers_config.yaml `
   Helper_Scripts/install_tts_audio_cpp.py `
   Docs/STT-TTS/TTS-SETUP-GUIDE.md `
-  backlog/tasks/task-12125 - Implement-audio.cpp-TTS-provider-and-setup-integration.md `
+  backlog/tasks/task-15059 - Implement-audio.cpp-TTS-provider-and-setup-integration.md `
   docs/superpowers/plans/2026-07-03-audio-cpp-tts-provider-implementation-plan.md
 ```
 
@@ -554,7 +554,7 @@ git add `
   tldw_Server_API/tests/TTS_NEW/unit/adapters/test_audio_cpp_sidecar_supervisor.py `
   tldw_Server_API/tests/TTS_NEW/unit/test_audio_cpp_installer.py `
   tldw_Server_API/tests/TTS_NEW/integration/test_audio_cpp_tts_service.py `
-  backlog/tasks/task-12125 - Implement-audio.cpp-TTS-provider-and-setup-integration.md
+  backlog/tasks/task-15059 - Implement-audio.cpp-TTS-provider-and-setup-integration.md
 git commit -m "feat(tts): add audio_cpp provider integration"
 ```
 

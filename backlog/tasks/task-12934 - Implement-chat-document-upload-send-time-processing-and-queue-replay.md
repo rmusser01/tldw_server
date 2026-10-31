@@ -3,15 +3,15 @@ id: TASK-12934
 title: Implement chat document upload send-time processing and queue replay
 status: Done
 assignee: []
-created_date: '2026-07-09 05:31'
-updated_date: '2026-07-09 06:01'
+created_date: 2026-07-09 05:31
+updated_date: 2026-07-09 06:01
 labels:
-  - implementation
-  - chat
-  - frontend
-  - documents
+- implementation
+- chat
+- frontend
+- documents
 dependencies:
-  - TASK-12092
+- TASK-15040
 ---
 
 ## Description

@@ -11,7 +11,7 @@ Related:
 - `Docs/superpowers/specs/2026-06-09-scheduled-tasks-phase4b-backend-api-foundation-design.md`
 - `Docs/superpowers/plans/2026-06-09-scheduled-tasks-phase3-results-inbox-home-surfacing-implementation-plan.md`
 - `Docs/ADR/003-jobs-vs-scheduler-default.md`
-- `backlog/tasks/task-12072 - Design-Scheduled-Tasks-Phase-4C-Recurring-Question-execution.md`
+- `backlog/tasks/task-15034 - Design-Scheduled-Tasks-Phase-4C-Recurring-Question-execution.md`
 
 ## Summary
 

@@ -382,7 +382,7 @@ git commit -m "feat: add quiz generation mix controls"
 ## Task 5: Final Verification And Backlog Update
 
 **Files:**
-- Modify: `backlog/tasks/task-12169 - Add-advanced-quiz-generation-controls.md`
+- Modify: `backlog/tasks/task-15089 - Add-advanced-quiz-generation-controls.md`
 
 - [ ] **Step 1: Run focused backend tests**
 
@@ -436,7 +436,7 @@ Record:
 - [ ] **Step 5: Commit final task update**
 
 ```bash
-git add 'backlog/tasks/task-12169 - Add-advanced-quiz-generation-controls.md'
+git add 'backlog/tasks/task-15089 - Add-advanced-quiz-generation-controls.md'
 git commit -m "chore: record TASK-12169 verification"
 ```
 

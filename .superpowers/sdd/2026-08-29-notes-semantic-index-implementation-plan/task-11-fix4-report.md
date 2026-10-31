@@ -70,7 +70,7 @@ Tracking:
 
 - `.superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/progress.md`
 - `.superpowers/sdd/2026-08-29-notes-semantic-index-implementation-plan/task-11-fix4-report.md`
-- `backlog/tasks/task-13134 - Implement-Notes-embedding-index-and-semantic-graph-edges.md`
+- `backlog/tasks/task-15135 - Implement-Notes-embedding-index-and-semantic-graph-edges.md`
 
 ## Risks
 

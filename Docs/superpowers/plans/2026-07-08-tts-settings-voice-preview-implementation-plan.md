@@ -23,7 +23,7 @@
   - Extend the existing component harness with mocks for `tldwClient`, `generateSpeech`, `generateOpenAITTS`, `Audio`, `URL`, and `speechSynthesis`.
 - Modify only if needed: `apps/packages/ui/src/services/tts-provider.ts`
   - Add an `elevenLabsApiKey` override only if keeping the preview through `resolveTtsProviderContext` is smaller than direct component calls.
-- Update: `backlog/tasks/task-12920 - Implement-TTS-settings-voice-preview.md`
+- Update: `backlog/tasks/task-15104 - Implement-TTS-settings-voice-preview.md`
   - Record touched files and verification.
 
 ## Task 1: Add Preview Tests First
@@ -189,7 +189,7 @@ No Python code should be touched. Record "Bandit skipped: frontend-only change, 
 ## Task 4: Finish Tracking and Commit
 
 **Files:**
-- Modify: `backlog/tasks/task-12920 - Implement-TTS-settings-voice-preview.md`
+- Modify: `backlog/tasks/task-15104 - Implement-TTS-settings-voice-preview.md`
 
 - [x] **Step 1: Update Backlog**
 

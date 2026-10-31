@@ -111,7 +111,7 @@ originates from a Task 10 changed module or causes a skip.
 - `tldw_Server_API/tests/Admin_Webhooks/test_openapi.py`
 - `apps/tldw-frontend/lib/api/openapi.fingerprint.json`
 - `Docs/superpowers/plans/2026-08-23-canonical-admin-webhook-delivery-substrate.md`
-- `backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md`
+- `backlog/tasks/task-15132 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md`
 - This report.
 
 No load-bearing file outside the fix brief's expected production/test surface

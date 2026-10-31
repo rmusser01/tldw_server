@@ -1634,7 +1634,7 @@ git commit -m "feat: route article fetch through web scraping runtime"
 ## Task 6: Verification And Finalization
 
 **Files:**
-- Modify: `backlog/tasks/task-12160 - Plan-Web-Scraping-refactor-Phase-2-runtime-and-policy-boundary-implementation.md` only if Backlog finalization is part of the implementation branch.
+- Modify: `backlog/tasks/task-15078 - Plan-Web-Scraping-refactor-Phase-2-runtime-and-policy-boundary-implementation.md` only if Backlog finalization is part of the implementation branch.
 
 - [ ] **Step 1: Run focused Phase 2 tests**
 
@@ -1701,7 +1701,7 @@ Expected: `TASK-12160` records verification commands and final status.
 - [ ] **Step 6: Commit verification notes if the task file changed**
 
 ```bash
-git add "backlog/tasks/task-12160 - Plan-Web-Scraping-refactor-Phase-2-runtime-and-policy-boundary-implementation.md"
+git add "backlog/tasks/task-15078 - Plan-Web-Scraping-refactor-Phase-2-runtime-and-policy-boundary-implementation.md"
 git commit -m "docs: finalize web scraping phase 2 runtime task"
 ```
 

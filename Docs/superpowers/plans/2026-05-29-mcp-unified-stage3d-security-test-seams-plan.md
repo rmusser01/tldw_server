@@ -61,7 +61,7 @@ Run the Task 1 pytest command again. Expected: all selected tests pass.
 ### Task 3: Focused Validation And Closeout
 
 **Files:**
-- Modify: `backlog/tasks/task-482 - Implement-MCP-Unified-Stage-3D-security-test-mode-seam-cleanup.md`
+- Modify: `backlog/tasks/task-15008 - Implement-MCP-Unified-Stage-3D-security-test-mode-seam-cleanup.md`
 
 - [x] **Step 1: Run focused regression suite**
 

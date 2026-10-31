@@ -4,7 +4,7 @@ title: Plan Chunker process_text refactor implementation
 status: Done
 created_date: 2026-06-24 21:45
 dependencies:
-- TASK-9935
+- TASK-15029
 labels:
 - chunking
 - refactor

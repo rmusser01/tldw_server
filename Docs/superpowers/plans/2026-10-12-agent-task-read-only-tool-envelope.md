@@ -292,7 +292,7 @@ In the executor dispatch result handling: map `EnvelopeResult.status` — `"appr
 
 **Files:**
 - Modify: `automation_executors.py` (`_definition_system_prompt` extension)
-- Modify: `backlog/tasks/task-13264 - agent-task-phase2-message-store-and-read-only-envelope.md`
+- Modify: `backlog/tasks/task-15158 - agent-task-phase2-message-store-and-read-only-envelope.md`
 - Test: append registry tests (fake `AgentRegistry` entry → prompt override; unknown ref → `LookupError`)
 
 - [ ] **Step 1: Failing test** — `test_agent_ref_resolves_system_prompt` (registry stub returns entry with prompt "You are triage."; assert the LLM call's system_message); `test_unknown_agent_ref_fails_honestly` (registry returns None → `LookupError("agent_ref ... unknown or blocked")`).
