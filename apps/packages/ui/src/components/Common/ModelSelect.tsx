@@ -15,6 +15,10 @@ export type Props = {
   showSelectedName?: boolean
 }
 
+export type ModelSelectHandle = {
+  openAndFocus: () => void
+}
+
 type ChatModel = {
   model: string
   nickname?: string
@@ -41,7 +45,10 @@ const LOCAL_PROVIDERS = new Set([
   "chrome"
 ])
 
-export const ModelSelect: React.FC<Props> = ({iconClassName = "size-5", showSelectedName = false}) => {
+const ModelSelectBase = (
+  { iconClassName = "size-5", showSelectedName = false }: Props,
+  ref: React.ForwardedRef<ModelSelectHandle>
+) => {
   const { t } = useTranslation("common")
   const { setSelectedModel, selectedModel } = useMessage()
   const selectedModelValue =
@@ -57,6 +64,17 @@ export const ModelSelect: React.FC<Props> = ({iconClassName = "size-5", showSele
   )
   const [searchQuery, setSearchQuery] = React.useState("")
   const [dropdownOpen, setDropdownOpen] = React.useState(false)
+  const triggerRef = React.useRef<HTMLButtonElement | null>(null)
+  React.useImperativeHandle(
+    ref,
+    () => ({
+      openAndFocus: () => {
+        setDropdownOpen(true)
+        window.requestAnimationFrame(() => triggerRef.current?.focus())
+      }
+    }),
+    []
+  )
   const { data, isLoading } = useQuery<ChatModel[]>({
     queryKey: ["getAllModelsForSelect"],
     queryFn: () => fetchChatModels({ returnEmpty: true })
@@ -396,6 +414,7 @@ export const ModelSelect: React.FC<Props> = ({iconClassName = "size-5", showSele
                 : t("modelSelect.tooltip", "Changes model for next message")
             }>
             <IconButton
+              ref={triggerRef}
               ariaLabel={t("selectAModel") as string}
               hasPopup="menu"
               dataTestId="chat-model-select"
@@ -417,3 +436,8 @@ export const ModelSelect: React.FC<Props> = ({iconClassName = "size-5", showSele
     </>
   )
 }
+
+export const ModelSelect = React.forwardRef<ModelSelectHandle, Props>(
+  ModelSelectBase
+)
+ModelSelect.displayName = "ModelSelect"

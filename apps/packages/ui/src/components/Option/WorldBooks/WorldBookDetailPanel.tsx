@@ -28,6 +28,9 @@ export type WorldBookDetailPanelProps = {
   settingsFormInstance: any
   entryFilterPreset?: EntryFilterPreset
   settingsBanner?: React.ReactNode
+  attachmentsLoading?: boolean
+  attachmentsError?: boolean
+  onRetryAttachments: () => void
   statsData?: any | null
   statsLoading?: boolean
   statsError?: string | null
@@ -44,12 +47,18 @@ const AttachmentsTabContent: React.FC<{
   worldBookId: number
   attachedCharacters: any[]
   allCharacters: any[]
+  loading?: boolean
+  error?: boolean
+  onRetry: () => void
   onAttachCharacter: (characterId: number) => Promise<void>
   onDetachCharacter: (characterId: number) => Promise<void>
 }> = ({
   worldBookId,
   attachedCharacters,
   allCharacters,
+  loading = false,
+  error = false,
+  onRetry,
   onAttachCharacter,
   onDetachCharacter
 }) => {
@@ -84,10 +93,29 @@ const AttachmentsTabContent: React.FC<{
       <div>
         <h3 className="text-sm font-medium mb-2">
           {t("option:worldBooks.detail.attachments.heading", {
-            defaultValue: `Attached Characters (${attachedCharacters.length})`
+            defaultValue: loading || error
+              ? "Attached Characters"
+              : `Attached Characters (${attachedCharacters.length})`
           })}
         </h3>
-        {attachedCharacters.length === 0 ? (
+        {error ? (
+          <div className="flex items-center gap-2">
+            <p role="alert" className="text-sm text-danger">
+              {t("option:worldBooks.detail.attachments.error", {
+                defaultValue: "Unable to load character attachments. Try again."
+              })}
+            </p>
+            <Button size="small" onClick={onRetry}>
+              {t("common:tryAgain", { defaultValue: "Try again" })}
+            </Button>
+          </div>
+        ) : loading ? (
+          <p role="status" className="text-text-muted text-sm">
+            {t("option:worldBooks.detail.attachments.loading", {
+              defaultValue: "Loading character attachments..."
+            })}
+          </p>
+        ) : attachedCharacters.length === 0 ? (
           <p className="text-text-muted text-sm">
             {t("option:worldBooks.detail.attachments.empty", {
               defaultValue: "No characters attached."
@@ -127,7 +155,7 @@ const AttachmentsTabContent: React.FC<{
       </div>
 
       {/* Attach new character */}
-      {availableCharacters.length > 0 && (
+      {!loading && !error && availableCharacters.length > 0 && (
         <div>
           <h3 className="text-sm font-medium mb-2">
             {t("option:worldBooks.detail.attachments.attachHeading", {
@@ -352,6 +380,9 @@ export const WorldBookDetailPanel: React.FC<WorldBookDetailPanelProps> = ({
   settingsFormInstance,
   entryFilterPreset,
   settingsBanner,
+  attachmentsLoading,
+  attachmentsError,
+  onRetryAttachments,
   statsData,
   statsLoading,
   statsError,
@@ -410,6 +441,9 @@ export const WorldBookDetailPanel: React.FC<WorldBookDetailPanelProps> = ({
           worldBookId={worldBook.id}
           attachedCharacters={attachedCharacters}
           allCharacters={allCharacters}
+          loading={attachmentsLoading}
+          error={attachmentsError}
+          onRetry={onRetryAttachments}
           onAttachCharacter={onAttachCharacter}
           onDetachCharacter={onDetachCharacter}
         />
@@ -492,9 +526,13 @@ export const WorldBookDetailPanel: React.FC<WorldBookDetailPanelProps> = ({
           </span>
         )}
         <span className="text-sm text-text-muted">
-          {t("option:worldBooks.detail.characterSummary", {
-            defaultValue: `${characterCount} ${characterCount === 1 ? "character" : "characters"}`
-          })}
+          {attachmentsLoading || attachmentsError
+            ? t("option:worldBooks.detail.characterSummaryUnavailable", {
+                defaultValue: "Character attachments unavailable"
+              })
+            : t("option:worldBooks.detail.characterSummary", {
+                defaultValue: `${characterCount} ${characterCount === 1 ? "character" : "characters"}`
+              })}
         </span>
         {lastModifiedDisplay.timestamp != null && (
           <span

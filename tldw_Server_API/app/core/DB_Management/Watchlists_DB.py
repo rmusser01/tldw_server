@@ -52,6 +52,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from tldw_Server_API.app.core.DB_Management.schema_once import ensure_once
 from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.DB_Management.content_backend import (
     backend_target_key,
@@ -63,7 +64,7 @@ from tldw_Server_API.app.core.Watchlists.briefing_delivery_state import (
     aggregate_delivery_status,
 )
 
-from .backends.base import BackendType, DatabaseBackend, DatabaseConfig, DatabaseError as _DatabaseError
+from .backends.base import BackendType, DatabaseBackend, DatabaseConfig, DatabaseError as _DatabaseError, UniqueConstraintError
 from .backends.factory import DatabaseBackendFactory
 from .backends.query_utils import prepare_backend_statement
 from .db_path_utils import DatabasePaths
@@ -122,11 +123,6 @@ _OUTPUT_PRESET_TOP_LEVEL_KEYS = {
     "template_name",
     "delivery_config",
 }
-_OUTPUT_PRESET_NAME_CONSTRAINT_MARKERS = (
-    "ux_output_presets_user_name",
-    "watchlist_output_presets_user_id_lower_idx",
-    "watchlist_output_presets_user_id_name_key",
-)
 _NESTED_REGEX_QUANTIFIER_RE = re.compile(
     r"\((?:[^()\\]|\\.)*(?:\*|\+|\{\d+(?:,\d*)?\})(?:[^()\\]|\\.)*\)\s*(?:\*|\+|\{\d+(?:,\d*)?\})"
 )
@@ -467,6 +463,18 @@ def _decorate_watchlists_public_operations(cls: type["WatchlistsDatabase"]) -> t
     return cls
 
 
+# Spans the whole of ensure_schema(): the first table it creates through the
+# last, so a partially built database fails verification.
+_WATCHLISTS_REQUIRED_TABLES = (
+    "sources",
+    "watchlists",
+    "scrape_jobs",
+    "scraped_items",
+    "feed_websub_subscriptions",
+    "deleted_jobs",
+)
+
+
 @_decorate_watchlists_public_operations
 class WatchlistsDatabase:
     # Keep track of schema initialization per DB path to avoid redundant ALTER checks/noise
@@ -533,10 +541,72 @@ class WatchlistsDatabase:
         self._backend_refresh_suspended = True
         try:
             self._backend = backend
-            self.ensure_schema()
+            self._ensure_schema_deduplicated()
         finally:
             self._backend_refresh_suspended = previous_suspend
         WatchlistsDatabase._schema_init_keys.add(db_key)
+
+    def _watchlists_schema_present(self) -> bool:
+        """Cheap check that this database still has the watchlists tables.
+
+        Checks a set spanning the whole of ``ensure_schema()`` rather than one
+        table, so a database holding only part of the schema is rebuilt instead
+        of being accepted. ``deleted_jobs`` is the last table the routine
+        creates, which makes it the strongest single signal that a previous run
+        got all the way through.
+
+        Failures propagate to :func:`ensure_once`, which logs them and rebuilds.
+        """
+        rows = self._backend.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+            "(?, ?, ?, ?, ?, ?)",
+            _WATCHLISTS_REQUIRED_TABLES,
+        )
+        # QueryResult yields dict rows, so the column has to be named:
+        # row[0] raises KeyError, which ensure_once() swallows as "absent"
+        # and then replays the whole schema on every single call.
+        found = {row["name"] for row in rows}
+        return found.issuperset(_WATCHLISTS_REQUIRED_TABLES)
+
+    def _ensure_schema_deduplicated(self) -> None:
+        """Ensure the schema, going through the process-wide memo when possible.
+
+        PostgreSQL has no ``sqlite_path`` for :func:`ensure_once` to identify the
+        database by, so it keeps using the class-level target-key memo; routing
+        it here anyway would fall through to the full DDL on every call.
+        """
+        if self._backend.backend_type == BackendType.POSTGRESQL:
+            self.ensure_schema()
+            return
+        ensure_once(
+            "watchlists",
+            getattr(getattr(self._backend, "config", None), "sqlite_path", None),
+            self.ensure_schema,
+            verify=self._watchlists_schema_present,
+        )
+
+    def ensure_schema_once(self) -> None:
+        """Ensure the schema, skipping the work when it is demonstrably present.
+
+        ``ensure_schema()`` issues roughly sixty DDL statements, and the FastAPI
+        dependency called it on every request.
+
+        The constructor's ``_schema_init_keys`` memo is not sufficient on its
+        own here: for SQLite its key is just the database path, so a database
+        deleted and recreated at that path (test fixtures do exactly this) keeps
+        a stale entry and the schema would be skipped when it no longer exists.
+        A catalogue lookup confirms the tables really are there, and is still far
+        cheaper than replaying the schema.
+
+        Construction goes through the same memo, so the first request for a
+        database does not run the setup twice.
+        """
+        if self._backend.backend_type == BackendType.POSTGRESQL:
+            self._ensure_schema_for_key(
+                self._backend, self._backend_target_key(self._backend)
+            )
+            return
+        self._ensure_schema_deduplicated()
 
     @contextlib.contextmanager
     def _operation_backend_pin(self) -> Generator[DatabaseBackend, None, None]:
@@ -605,7 +675,9 @@ class WatchlistsDatabase:
         cfg = DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=db_path)
         return DatabaseBackendFactory.create_backend(cfg), f"sqlite:{db_path}", False
 
-    def _execute_insert(self, query: str, params: tuple[Any, ...]) -> Any:
+    def _execute_insert(
+        self, query: str, params: tuple[Any, ...], connection: Any | None = None
+    ) -> Any:
         if self.backend.backend_type == BackendType.POSTGRESQL:
             prepared_query, prepared_params = prepare_backend_statement(
                 BackendType.POSTGRESQL,
@@ -614,8 +686,8 @@ class WatchlistsDatabase:
                 apply_default_transform=True,
                 ensure_returning=True,
             )
-            return self.backend.execute(prepared_query, prepared_params)
-        return self.backend.execute(query, params)
+            return self.backend.execute(prepared_query, prepared_params, connection=connection)
+        return self.backend.execute(query, params, connection=connection)
 
     @staticmethod
     def _extract_lastrowid(result: Any) -> int | None:
@@ -4201,6 +4273,10 @@ class WatchlistsDatabase:
         return parsed
 
     def _check_output_preset_name_available(self, *, name: str, exclude_id: int | None = None) -> None:
+        if self._output_preset_name_taken(name=name, exclude_id=exclude_id):
+            raise ValueError("output_preset_name_exists")
+
+    def _output_preset_name_taken(self, *, name: str, exclude_id: int | None = None) -> bool:
         row = self.backend.execute(
             """
             SELECT id
@@ -4210,27 +4286,20 @@ class WatchlistsDatabase:
             (self.user_id, name),
         ).first
         if not row:
-            return
+            return False
         existing_id = row.get("id")
         if existing_id is None:
-            return
-        if exclude_id is not None and int(existing_id) == int(exclude_id):
-            return
-        raise ValueError("output_preset_name_exists")
+            return False
+        return exclude_id is None or int(existing_id) != int(exclude_id)
 
-    @staticmethod
-    def _is_output_preset_name_constraint_error(exc: _DatabaseError) -> bool:
-        message = str(exc).lower()
-        if any(marker in message for marker in _OUTPUT_PRESET_NAME_CONSTRAINT_MARKERS):
-            return True
-        if "duplicate key value" in message and "watchlist_output_presets" in message:
-            return True
-        return "unique constraint failed" in message and "watchlist_output_presets" in message and "name" in message
-
-    @classmethod
-    def _raise_output_preset_constraint_error(cls, exc: _DatabaseError) -> None:
-        if cls._is_output_preset_name_constraint_error(exc):
-            raise ValueError("output_preset_name_exists") from exc
+    def _raise_output_preset_constraint_error(
+        self, exc: _DatabaseError, *, name: str | None, exclude_id: int | None = None
+    ) -> None:
+        if isinstance(exc, UniqueConstraintError) and name is not None:
+            try:
+                self._check_output_preset_name_available(name=name, exclude_id=exclude_id)
+            except ValueError as conflict:
+                raise conflict from exc
         raise exc
 
     def create_output_preset(
@@ -4246,30 +4315,33 @@ class WatchlistsDatabase:
         clean_output_prefs = self._normalize_output_prefs_payload(output_prefs)
         self._check_output_preset_name_available(name=clean_name)
         now = _utcnow_iso()
-        if is_default:
-            self.backend.execute(
-                "UPDATE watchlist_output_presets SET is_default = 0, updated_at = ? WHERE user_id = ?",
-                (now, self.user_id),
-            )
         try:
-            res = self._execute_insert(
-                """
-                INSERT INTO watchlist_output_presets
-                    (user_id, name, description, output_prefs_json, is_default, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    self.user_id,
-                    clean_name,
-                    clean_description,
-                    json.dumps(clean_output_prefs, sort_keys=True),
-                    1 if is_default else 0,
-                    now,
-                    now,
-                ),
-            )
+            with self.transaction() as conn:
+                if is_default:
+                    self.backend.execute(
+                        "UPDATE watchlist_output_presets SET is_default = ?, updated_at = ? WHERE user_id = ?",
+                        (0, now, self.user_id),
+                        connection=conn,
+                    )
+                res = self._execute_insert(
+                    """
+                    INSERT INTO watchlist_output_presets
+                        (user_id, name, description, output_prefs_json, is_default, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        self.user_id,
+                        clean_name,
+                        clean_description,
+                        json.dumps(clean_output_prefs, sort_keys=True),
+                        1 if is_default else 0,
+                        now,
+                        now,
+                    ),
+                    connection=conn,
+                )
         except _DatabaseError as exc:
-            self._raise_output_preset_constraint_error(exc)
+            self._raise_output_preset_constraint_error(exc, name=clean_name)
         preset_id = self._extract_lastrowid(res)
         if not preset_id:
             raise RuntimeError("failed_to_create_output_preset")
@@ -4311,6 +4383,8 @@ class WatchlistsDatabase:
             return current
         sets: list[str] = []
         params: list[Any] = []
+        clean_name: str | None = None
+        make_default = False
         if "name" in fields and fields["name"] is not None:
             clean_name = self._normalize_output_preset_name(str(fields["name"]))
             self._check_output_preset_name_available(name=clean_name, exclude_id=int(preset_id))
@@ -4324,35 +4398,37 @@ class WatchlistsDatabase:
             sets.append("output_prefs_json = ?")
             params.append(json.dumps(clean_output_prefs, sort_keys=True))
         if "is_default" in fields and fields["is_default"] is not None:
-            is_default = bool(fields["is_default"])
-            if is_default:
-                now = _utcnow_iso()
-                self.backend.execute(
-                    """
-                    UPDATE watchlist_output_presets
-                    SET is_default = 0, updated_at = ?
-                    WHERE user_id = ? AND id != ?
-                    """,
-                    (now, self.user_id, int(preset_id)),
-                )
+            make_default = bool(fields["is_default"])
             sets.append("is_default = ?")
-            params.append(1 if is_default else 0)
+            params.append(1 if make_default else 0)
         if not sets:
             return current
         sets.append("updated_at = ?")
         params.append(_utcnow_iso())
         params.extend([int(preset_id), self.user_id])
         try:
-            self.backend.execute(
-                f"""
-                UPDATE watchlist_output_presets
-                SET {', '.join(sets)}
-                WHERE id = ? AND user_id = ?
-                """,  # nosec B608
-                tuple(params),
-            )
+            with self.transaction() as conn:
+                if make_default:
+                    self.backend.execute(
+                        """
+                        UPDATE watchlist_output_presets
+                        SET is_default = ?, updated_at = ?
+                        WHERE user_id = ? AND id != ?
+                        """,
+                        (0, _utcnow_iso(), self.user_id, int(preset_id)),
+                        connection=conn,
+                    )
+                self.backend.execute(
+                    f"""
+                    UPDATE watchlist_output_presets
+                    SET {', '.join(sets)}
+                    WHERE id = ? AND user_id = ?
+                    """,  # nosec B608
+                    tuple(params),
+                    connection=conn,
+                )
         except _DatabaseError as exc:
-            self._raise_output_preset_constraint_error(exc)
+            self._raise_output_preset_constraint_error(exc, name=clean_name, exclude_id=int(preset_id))
         return self.get_output_preset(preset_id=int(preset_id))
 
     def delete_output_preset(self, *, preset_id: int) -> bool:

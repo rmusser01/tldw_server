@@ -433,4 +433,4 @@ def test_registry_includes_index_tts_provider():
 
 
     registry = TTSAdapterRegistry(config={"index_tts_enabled": False})
-    assert TTSProvider.INDEX_TTS in registry._adapter_specs
+    assert TTSProvider.INDEX_TTS.value in registry._adapter_specs

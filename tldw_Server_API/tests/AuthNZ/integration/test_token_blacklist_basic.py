@@ -1,14 +1,14 @@
-import asyncio
 import sqlite3
-from datetime import datetime, timedelta
 import uuid
+from datetime import datetime, timedelta
+
 import pytest
 
-from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist, reset_token_blacklist
-from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager, reset_session_manager
-
+from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist, reset_token_blacklist
+from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 
 pytestmark = pytest.mark.integration
 
@@ -49,37 +49,15 @@ async def test_blacklist_rebinds_pool_after_database_switch(tmp_path, monkeypatc
     db_pool = await bl._ensure_db_pool()
 
     async def ensure_user(pool, username: str, email: str) -> int:
-        async with pool.transaction() as conn:
-            if hasattr(conn, "fetch"):
-                await conn.execute(
-                    """
-                    INSERT INTO users (username, email, password_hash, is_active, is_verified, role)
-                    VALUES ($1, $2, $3, TRUE, TRUE, 'user')
-                    ON CONFLICT (username) DO NOTHING
-                    """,
-                    username,
-                    email,
-                    "hash",
-                )
-                row = await conn.fetchrow(
-                    "SELECT id FROM users WHERE username = $1",
-                    username,
-                )
-                return row["id"]
-            cursor = await conn.execute(
-                """
-                INSERT OR IGNORE INTO users (username, email, password_hash, is_active, is_verified, role)
-                VALUES (?, ?, ?, 1, 1, 'user')
-                """,
-                (username, email, "hash"),
-            )
-            # `cursor` is None for INSERT statements, fetch id separately.
-            cursor = await conn.execute(
-                "SELECT id FROM users WHERE username = ?",
-                (username,),
-            )
-            row = await cursor.fetchone()
-            return row[0]
+        users_db = UsersDB(pool)
+        await users_db.initialize()
+        user = await users_db.create_user(
+            username=username,
+            email=email,
+            password_hash="hash",
+            is_verified=True,
+        )
+        return int(user["id"])
 
     user_id_a = await ensure_user(db_pool, "switch-case-a", "switch-a@example.com")
 
@@ -174,40 +152,16 @@ async def test_revoke_all_user_tokens_marks_sessions(monkeypatch):
     await bl.initialize()
 
     db_pool = await bl._ensure_db_pool()
-    async with db_pool.transaction() as conn:
-        # Ensure sessions table exists for SQLite path
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS sessions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                access_jti TEXT,
-                refresh_jti TEXT,
-                expires_at TEXT,
-                refresh_expires_at TEXT,
-                is_active INTEGER DEFAULT 1,
-                is_revoked INTEGER DEFAULT 0,
-                revoked_at TEXT,
-                revoked_by INTEGER,
-                revoke_reason TEXT
-            )
-            """
-        )
-        unique_username = f"cacheuser_{uuid.uuid4().hex[:8]}"
-        unique_email = f"{unique_username}@example.com"
-        await conn.execute(
-            """
-            INSERT INTO users (username, email, password_hash, is_active, is_verified, role)
-            VALUES (?, ?, ?, 1, 1, 'user')
-            """,
-            (unique_username, unique_email, "hash"),
-        )
-        cursor = await conn.execute(
-            "SELECT id FROM users WHERE username = ?",
-            (unique_username,),
-        )
-        user_row = await cursor.fetchone()
-        user_id = user_row[0]
+    unique_username = f"cacheuser_{uuid.uuid4().hex[:8]}"
+    users_db = UsersDB(db_pool)
+    await users_db.initialize()
+    user = await users_db.create_user(
+        username=unique_username,
+        email=f"{unique_username}@example.com",
+        password_hash="hash",
+        is_verified=True,
+    )
+    user_id = int(user["id"])
 
     access_jti = "session-access-jti"
     refresh_jti = "session-refresh-jti"

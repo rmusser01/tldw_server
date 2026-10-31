@@ -1,3 +1,1 @@
-import dynamic from "next/dynamic"
-
-export default dynamic(() => import("@/routes/option-chat"), { ssr: false })
+export { default } from "@web/routes/chat"

@@ -1,4 +1,4 @@
-import { bgRequest, bgStream } from "@/services/background-proxy"
+import { bgRequest, bgStream, type BgRequestInit } from "@/services/background-proxy"
 import { classifyNotificationError, nextReconnectDelay } from "@/services/notification-lifecycle"
 
 export type NotificationSeverity = "info" | "warning" | "error"
@@ -296,8 +296,11 @@ export async function listNotifications(params?: {
   offset?: number
   include_archived?: boolean
   only_snoozed?: boolean
-}): Promise<NotificationsListResponse> {
+}, options?: Pick<BgRequestInit,
+  "abortSignal" | "servicePromptConfig" | "headers" | "suppressBackendUnavailableEvent" | "expectedStatuses"
+>): Promise<NotificationsListResponse> {
   return bgRequest<NotificationsListResponse>({
+    ...options,
     path: `/api/v1/notifications${buildNotificationsQuery(params || {})}` as any,
     method: "GET"
   })

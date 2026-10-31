@@ -1,0 +1,33 @@
+{
+  "microphone_opened": false,
+  "audio_played": false,
+  "provider": "deepseek",
+  "session_id": "922a7cee-bd77-46ec-b53a-b9d34a153a0c",
+  "first": {
+    "event": "assistant_delta",
+    "session_id": "922a7cee-bd77-46ec-b53a-b9d34a153a0c",
+    "timestamp_ms": 1788650917075,
+    "event_seq": 0,
+    "client_message_id": "uat-greeting",
+    "text_delta": "The blue notebook is ready.",
+    "done": true
+  },
+  "first_seconds": 0.77,
+  "retry": {
+    "event": "assistant_delta",
+    "session_id": "922a7cee-bd77-46ec-b53a-b9d34a153a0c",
+    "timestamp_ms": 1788650918268,
+    "event_seq": 2,
+    "client_message_id": "uat-retry",
+    "text_delta": "Migu recovered.",
+    "done": true
+  },
+  "cancelled_answer_published": false,
+  "prepared": true,
+  "tts_bytes": 25388,
+  "explicit_tool_plan": [
+    "rag_search"
+  ],
+  "tools_approved": false,
+  "stop_status": 200
+}

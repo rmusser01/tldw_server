@@ -22,7 +22,11 @@ def _last_message(messages: list[dict], role: str) -> dict | None:
 
 
 @pytest.mark.integration
-def test_skill_command_system_mode_injects_output_and_preserves_args(monkeypatch, test_client, auth_headers):
+def test_skill_command_system_mode_injects_output_and_preserves_args(
+    monkeypatch,
+    credentialed_test_client,
+    auth_headers,
+):
     monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
     monkeypatch.setenv("CHAT_COMMAND_INJECTION_MODE", "system")
 
@@ -55,7 +59,11 @@ def test_skill_command_system_mode_injects_output_and_preserves_args(monkeypatch
         "messages": [{"role": "user", "content": "/skill summarize release notes"}],
         "stream": False,
     }
-    response = test_client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)
+    response = credentialed_test_client.post(
+        "/api/v1/chat/completions",
+        json=payload,
+        headers=auth_headers,
+    )
     assert response.status_code == 200
 
     messages = captured["messages"] or []
@@ -69,7 +77,11 @@ def test_skill_command_system_mode_injects_output_and_preserves_args(monkeypatch
 
 
 @pytest.mark.integration
-def test_skill_command_preface_mode_prefixes_user_message(monkeypatch, test_client, auth_headers):
+def test_skill_command_preface_mode_prefixes_user_message(
+    monkeypatch,
+    credentialed_test_client,
+    auth_headers,
+):
     monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
     monkeypatch.setenv("CHAT_COMMAND_INJECTION_MODE", "preface")
 
@@ -100,7 +112,11 @@ def test_skill_command_preface_mode_prefixes_user_message(monkeypatch, test_clie
         "messages": [{"role": "user", "content": "/skill summarize release notes"}],
         "stream": False,
     }
-    response = test_client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)
+    response = credentialed_test_client.post(
+        "/api/v1/chat/completions",
+        json=payload,
+        headers=auth_headers,
+    )
     assert response.status_code == 200
 
     messages = captured["messages"] or []
@@ -113,7 +129,11 @@ def test_skill_command_preface_mode_prefixes_user_message(monkeypatch, test_clie
 
 
 @pytest.mark.integration
-def test_skill_command_replace_mode_uses_fork_output(monkeypatch, test_client, auth_headers):
+def test_skill_command_replace_mode_uses_fork_output(
+    monkeypatch,
+    credentialed_test_client,
+    auth_headers,
+):
     monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
     monkeypatch.setenv("CHAT_COMMAND_INJECTION_MODE", "replace")
 
@@ -144,7 +164,11 @@ def test_skill_command_replace_mode_uses_fork_output(monkeypatch, test_client, a
         "messages": [{"role": "user", "content": "/skill summarize release notes"}],
         "stream": False,
     }
-    response = test_client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)
+    response = credentialed_test_client.post(
+        "/api/v1/chat/completions",
+        json=payload,
+        headers=auth_headers,
+    )
     assert response.status_code == 200
 
     messages = captured["messages"] or []
@@ -156,7 +180,11 @@ def test_skill_command_replace_mode_uses_fork_output(monkeypatch, test_client, a
 
 
 @pytest.mark.integration
-def test_skills_command_system_mode_lists_invocable_skills(monkeypatch, test_client, auth_headers):
+def test_skills_command_system_mode_lists_invocable_skills(
+    monkeypatch,
+    credentialed_test_client,
+    auth_headers,
+):
     monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
     monkeypatch.setenv("CHAT_COMMAND_INJECTION_MODE", "system")
 
@@ -186,7 +214,11 @@ def test_skills_command_system_mode_lists_invocable_skills(monkeypatch, test_cli
         "messages": [{"role": "user", "content": "/skills"}],
         "stream": False,
     }
-    response = test_client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)
+    response = credentialed_test_client.post(
+        "/api/v1/chat/completions",
+        json=payload,
+        headers=auth_headers,
+    )
     assert response.status_code == 200
 
     messages = captured["messages"] or []

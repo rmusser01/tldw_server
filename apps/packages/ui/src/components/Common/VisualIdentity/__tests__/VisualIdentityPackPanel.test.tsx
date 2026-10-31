@@ -4,7 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { clearVisualIdentityResolverCaches } from "@/hooks/useVisualIdentityResolver"
 import { VisualIdentityPackPanel } from "../VisualIdentityPackPanel"
-import type { VisualIdentityDraftResponse } from "@/types/visual-identities"
+import type {
+  VisualIdentityCapabilitiesResponse,
+  VisualIdentityDraftResponse
+} from "@/types/visual-identities"
 
 vi.mock("@/hooks/useVisualIdentityResolver", () => ({
   clearVisualIdentityResolverCaches: vi.fn()
@@ -33,7 +36,7 @@ const readyDraft: VisualIdentityDraftResponse = {
 }
 
 const makeClient = () => ({
-  getVisualIdentityCapabilities: vi.fn(async () => ({
+  getVisualIdentityCapabilities: vi.fn(async (): Promise<VisualIdentityCapabilitiesResponse> => ({
     upload_max_bytes: 1024 * 1024,
     archive_max_bytes: 4 * 1024 * 1024,
     max_dimension: 2048,
@@ -110,6 +113,62 @@ const makeClient = () => ({
 describe("VisualIdentityPackPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it("keeps expression resolution available without requesting packs when metadata authoring is unsupported", async () => {
+    const client = makeClient()
+    client.getVisualIdentityCapabilities.mockResolvedValue({
+      upload_max_bytes: 1024 * 1024,
+      archive_max_bytes: 4 * 1024 * 1024,
+      max_dimension: 2048,
+      max_frame_count: 120,
+      supported_mime_types: ["image/png", "image/webp"],
+      avif_enabled: false,
+      metadata_supported: false,
+      metadata_unavailable_reason: "visual identity metadata is unavailable"
+    })
+
+    render(
+      <VisualIdentityPackPanel
+        actorKind="character"
+        actorId={7}
+        actorName="Ari"
+        client={client}
+      />
+    )
+
+    await screen.findByText(/Expression-pack authoring is unavailable on this server/)
+    expect(client.listVisualIdentityExpressionSlots).toHaveBeenCalledTimes(1)
+    expect(client.resolveVisualIdentityBinding).toHaveBeenCalledWith({
+      actor_kind: "character",
+      actor_id: 7,
+      expression_key: "neutral"
+    })
+    expect(client.listVisualIdentityPacks).not.toHaveBeenCalled()
+    expect(screen.getByLabelText("Import expression pack ZIP")).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Import ZIP" })).toBeDisabled()
+  })
+
+  it("keeps pack loading and ZIP authoring enabled when metadata support is explicit", async () => {
+    const client = makeClient()
+    client.getVisualIdentityCapabilities.mockResolvedValue({
+      upload_max_bytes: 1024 * 1024,
+      archive_max_bytes: 4 * 1024 * 1024,
+      max_dimension: 2048,
+      max_frame_count: 120,
+      supported_mime_types: ["image/png", "image/webp"],
+      avif_enabled: false,
+      metadata_supported: true
+    })
+
+    render(<VisualIdentityPackPanel actorKind="character" actorId={7} actorName="Ari" client={client} />)
+
+    const archiveInput = await screen.findByLabelText("Import expression pack ZIP")
+    await waitFor(() => {
+      expect(client.listVisualIdentityPacks).toHaveBeenCalledWith({ status: "active" })
+      expect(archiveInput).not.toBeDisabled()
+    })
+    expect(screen.getByRole("button", { name: "Import ZIP" })).not.toBeDisabled()
   })
 
   it("activates an imported ready draft with the current character binding", async () => {

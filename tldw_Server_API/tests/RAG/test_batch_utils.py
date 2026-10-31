@@ -4,14 +4,12 @@ Tests for batch_utils module (semaphore-based batch execution).
 These tests cover:
 - run_batch with all successes, partial failures, fail_fast, empty input, serial execution
 - run_batch with progress callback
-- run_batch_indexed verifying (index, item) is passed to the callable
 - BatchResult properties: success_rate and has_errors
 """
 
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -19,7 +17,6 @@ import tldw_Server_API.app.core.RAG.rag_service.batch_utils as batch_utils
 from tldw_Server_API.app.core.RAG.rag_service.batch_utils import (
     BatchResult,
     run_batch,
-    run_batch_indexed,
 )
 
 
@@ -310,122 +307,3 @@ class TestRunBatch:
         result2 = await run_batch(items, identity, max_concurrency=-5)
         assert result2.results == [10, 20]
         assert result2.completed == 2
-
-
-# ---------------------------------------------------------------------------
-# run_batch_indexed tests
-# ---------------------------------------------------------------------------
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-class TestRunBatchIndexed:
-    """Tests for run_batch_indexed."""
-
-    async def test_func_receives_index_and_item(self):
-        """The callable should receive (index, item) pairs."""
-        received: list[tuple[int, str]] = []
-
-        async def track(index: int, item: str) -> str:
-            received.append((index, item))
-            return f"{index}:{item}"
-
-        items = ["a", "b", "c"]
-        result = await run_batch_indexed(items, track, max_concurrency=1)
-
-        assert result.results == ["0:a", "1:b", "2:c"]
-        assert result.results_by_index == {0: "0:a", 1: "1:b", 2: "2:c"}
-        assert result.completed == 3
-        assert result.total == 3
-        assert result.has_errors is False
-        # Verify every (index, item) pair was received
-        assert sorted(received) == [(0, "a"), (1, "b"), (2, "c")]
-
-    async def test_indexed_with_failures(self):
-        """Errors in run_batch_indexed should report the correct index."""
-        async def fail_on_odd_index(index: int, item: int) -> int:
-            if index % 2 == 1:
-                raise ValueError(f"odd index {index}")
-            return item * 10
-
-        items = [100, 200, 300, 400]
-        result = await run_batch_indexed(
-            items, fail_on_odd_index, max_concurrency=5, fail_fast=False,
-        )
-
-        assert result.results == [1000, 3000]  # indices 0 and 2 succeed
-        assert result.results_by_index == {0: 1000, 2: 3000}
-        assert result.completed == 2
-        assert result.total == 4
-        error_indices = sorted(idx for idx, _ in result.errors)
-        assert error_indices == [1, 3]
-
-    async def test_indexed_failure_log_sanitizes_exception_details(self):
-        """Indexed failure logs should not expose raw exception details."""
-        secret_path = "/private/rag-indexed.db?token=secret-indexed-token"
-        exc = RuntimeError(f"indexed backend failed at {secret_path}")
-        messages, sink_id = _capture_batch_logs()
-
-        async def fail(index: int, item: int) -> int:
-            _ = (index, item)
-            raise exc
-
-        try:
-            result = await run_batch_indexed([10], fail, max_concurrency=1, fail_fast=False)
-        finally:
-            batch_utils.logger.remove(sink_id)
-
-        assert result.errors[0][1] is exc
-        assert secret_path in str(result.errors[0][1])
-        joined = "\n".join(messages)
-        assert "Batch item 0 failed" in joined
-        assert "rag-indexed.db" not in joined
-        assert "secret-indexed-token" not in joined
-
-    async def test_indexed_empty_items(self):
-        """Empty items list should return zero-count BatchResult."""
-        async def noop(index: int, item: int) -> int:
-            raise AssertionError("should not be called")
-
-        result = await run_batch_indexed([], noop)
-        assert result.total == 0
-        assert result.completed == 0
-        assert result.results == []
-        assert result.results_by_index == {}
-        assert result.errors == []
-
-    async def test_indexed_fail_fast(self):
-        """fail_fast should cancel the batch on the first indexed failure."""
-        async def fail_immediately(index: int, item: int) -> int:
-            if index == 0:
-                raise RuntimeError("stop")
-            await asyncio.sleep(5)
-            return item
-
-        items = [1, 2, 3, 4, 5]
-        result = await run_batch_indexed(
-            items, fail_immediately, max_concurrency=1, fail_fast=True,
-        )
-
-        assert result.cancelled is True
-        assert result.has_errors is True
-        assert result.completed == 0
-
-    async def test_indexed_progress_callback(self):
-        """Progress callback should fire for each successful indexed item."""
-        progress_calls: list[tuple[int, int]] = []
-
-        def on_progress(completed: int, total: int) -> None:
-            progress_calls.append((completed, total))
-
-        async def identity(index: int, item: str) -> str:
-            return item
-
-        items = ["x", "y"]
-        result = await run_batch_indexed(
-            items, identity, max_concurrency=1, on_progress=on_progress,
-        )
-
-        assert result.completed == 2
-        assert len(progress_calls) == 2
-        completed_values = sorted(c for c, _ in progress_calls)
-        assert completed_values == [1, 2]

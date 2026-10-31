@@ -1,0 +1,28 @@
+{
+  "session": {
+    "session_id": "386b8b70-fbe9-42a2-861e-fba2d049ff9d",
+    "persona_id": "e19c631e-e2ac-452d-9935-293af03cee4e",
+    "persona_name": "Migu UAT",
+    "lifecycle": "idle",
+    "status": "active",
+    "is_focused": true,
+    "focused_at": "2026-09-05T14:53:08.395636+00:00",
+    "focus_generation": 1788619988395,
+    "last_activity_at": "2026-09-05T14:53:08.396Z",
+    "pending_approval_count": 0,
+    "active_tool_name": null,
+    "error_state": null,
+    "recovery_hint": null,
+    "suggested_visual_state": "idle",
+    "allowed_actions": [
+      "focus",
+      "stop",
+      "send_text_ws"
+    ],
+    "capabilities": {
+      "text": true,
+      "voice": false,
+      "browser_microphone_required": false
+    }
+  }
+}

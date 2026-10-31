@@ -2722,5 +2722,8 @@
   },
   "repo2txt_status_generated": {
     "message": "Generated output for {{count}} files ({{tokenCount}} tokens)."
+  },
+  "notesSearch_offlineSaveUnavailable": {
+    "message": "Lagring uten nett er ikke tilgjengelig før kontoen din og lokal lagring er bekreftet. Endringene dine forblir ulagret."
   }
 }

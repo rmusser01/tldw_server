@@ -1,23 +1,41 @@
+"""Persistence operations for notes, keywords, and Notes Studio sidecars."""
+
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    DatabaseError as BackendDatabaseError,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    _CHACHA_NONCRITICAL_EXCEPTIONS,
+    _SUPPORTED_NOTE_STUDIO_HANDWRITING_MODES,
+    _SUPPORTED_NOTE_STUDIO_TEMPLATE_TYPES,
     BackendConnectionWrapper,
     BackendType,
     CharactersRAGDBError,
     ConflictError,
     FTSQueryTranslator,
     InputError,
-    _SUPPORTED_NOTE_STUDIO_HANDWRITING_MODES,
-    _SUPPORTED_NOTE_STUDIO_TEMPLATE_TYPES,
-    _CHACHA_NONCRITICAL_EXCEPTIONS,
     logger,
 )
-from tldw_Server_API.app.core.DB_Management.backends.base import (
-    DatabaseError as BackendDatabaseError,
+from tldw_Server_API.app.core.Notes.wikilinks import parse_wikilinks
+from tldw_Server_API.app.core.Sync.v2.models import validate_notes_note_upsert_payload
+from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
+    SYNC_ENVELOPE_MAX_BYTES,
+    NotesMoodboardStudioContractError,
+    StudioDiagramManifestV1,
+    StudioSectionsV1,
+    canonical_json_bytes,
+    diagram_render_hash,
+    notes_studio_document_object_hash,
+    parse_notes_studio_document_tombstone_v1,
+    parse_notes_studio_document_v1,
+    studio_result_hash,
 )
 
 if TYPE_CHECKING:
@@ -33,6 +51,26 @@ class NoteStore:
     def _deleted_value(self, deleted: bool) -> bool | int:
         """Return the backend-native value for a soft-delete flag."""
         return deleted if self._db.backend_type == BackendType.POSTGRESQL else int(deleted)
+
+    @staticmethod
+    def _normalized_text_hash(value: object) -> str:
+        normalized = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+        return f"sha256:{hashlib.sha256(normalized.encode('utf-8')).hexdigest()}"
+
+    @staticmethod
+    def _timestamps_equal(actual: object, expected: str) -> bool:
+        if str(actual) == expected:
+            return True
+        try:
+            actual_time = datetime.fromisoformat(str(actual).replace("Z", "+00:00"))
+            expected_time = datetime.fromisoformat(expected.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if actual_time.tzinfo is None:
+            actual_time = actual_time.replace(tzinfo=timezone.utc)
+        if expected_time.tzinfo is None:
+            expected_time = expected_time.replace(tzinfo=timezone.utc)
+        return actual_time.astimezone(timezone.utc) == expected_time.astimezone(timezone.utc)
 
     # ------------------------------------------------------------------
     # Note creation
@@ -53,6 +91,7 @@ class NoteStore:
             raise InputError("Note content cannot be None.")  # noqa: TRY003
 
         final_note_id = note_id or self._db._generate_uuid()
+        projection = parse_wikilinks(content, source_note_id=final_note_id)
         now = self._db._get_current_utc_timestamp_iso()
         client_id_to_use = self._db.client_id  # Notes use the instance's client_id directly
         normalized_conversation_id = self._db._normalize_nullable_text(conversation_id)
@@ -63,6 +102,7 @@ class NoteStore:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         if self._db.backend_type == BackendType.POSTGRESQL:
+            query += " ON CONFLICT (id) DO NOTHING"
             params = (
                 final_note_id, title.strip(), content, now, client_id_to_use, 1, False, now,
                 normalized_conversation_id, normalized_message_id
@@ -75,7 +115,43 @@ class NoteStore:
 
         try:
             def _execute(transaction_conn: sqlite3.Connection | BackendConnectionWrapper) -> str:
-                transaction_conn.execute(query, params)
+                self._db._require_selected_owner_row(transaction_conn, "messages", normalized_message_id, self._db.client_id)
+                self._db._require_selected_owner_row(transaction_conn, "conversations", normalized_conversation_id, self._db.client_id)
+                try:
+                    inserted = transaction_conn.execute(query, params)
+                except sqlite3.IntegrityError as e:
+                    msg = str(e).lower()
+                    if "foreign key constraint failed" in msg:
+                        raise ConflictError(
+                            "Conversation or message not found.", entity="notes", entity_id=final_note_id
+                        ) from e  # noqa: TRY003
+                    if (
+                        "unique constraint failed: notes.id" in msg
+                        or "unique constraint failed: notes.client_id, notes.id" in msg
+                    ):
+                        raise ConflictError(
+                            f"Note with ID '{final_note_id}' already exists.", entity="notes", entity_id=final_note_id
+                        ) from e  # noqa: TRY003
+                    raise
+                except BackendDatabaseError as e:
+                    if "foreign key" in str(e).lower():
+                        raise ConflictError(
+                            "Conversation or message not found.", entity="notes", entity_id=final_note_id
+                        ) from e  # noqa: TRY003
+                    raise
+                # Only the explicitly named note identifier conflict is ignored
+                # by PostgreSQL. Other unique failures (including projections)
+                # must remain database errors rather than a misleading 409.
+                if self._db.backend_type == BackendType.POSTGRESQL and inserted.rowcount == 0:
+                    raise ConflictError(
+                        f"Note with ID '{final_note_id}' already exists.", entity="notes", entity_id=final_note_id
+                    )  # noqa: TRY003
+                self._db.note_graph_projection_store.replace_projection(
+                    note_id=final_note_id,
+                    source_version=1,
+                    projection=projection,
+                    conn=transaction_conn,
+                )
                 logger.info(f"Added note '{title.strip()}' with ID: {final_note_id}.")
                 return final_note_id
 
@@ -84,18 +160,8 @@ class NoteStore:
                     return _execute(transaction_conn)
             return _execute(conn)
         except sqlite3.IntegrityError as e:
-            msg = str(e).lower()
-            if "foreign key constraint failed" in msg:
-                raise ConflictError("Conversation or message not found.", entity="notes", entity_id=final_note_id) from e  # noqa: TRY003
-            if "unique constraint failed: notes.id" in msg:
-                raise ConflictError(f"Note with ID '{final_note_id}' already exists.", entity="notes", entity_id=final_note_id) from e  # noqa: TRY003
             raise CharactersRAGDBError(f"Database integrity error adding note: {e}") from e  # noqa: TRY003
         except BackendDatabaseError as e:
-            msg = str(e).lower()
-            if "foreign key" in msg:
-                raise ConflictError("Conversation or message not found.", entity="notes", entity_id=final_note_id) from e  # noqa: TRY003
-            if "duplicate key" in msg or "unique constraint" in msg:
-                raise ConflictError(f"Note with ID '{final_note_id}' already exists.", entity="notes", entity_id=final_note_id) from e  # noqa: TRY003
             raise CharactersRAGDBError(f"Backend error adding note: {e}") from e  # noqa: TRY003
         except CharactersRAGDBError as e:
             logger.error(f"Database error adding note '{title.strip()}': {e}")
@@ -112,23 +178,29 @@ class NoteStore:
         sync_client_id: str,
         object_revision: int,
         object_hash: str,
+        expected_product_version: int | None = None,
+        projection_timestamp: str | None = None,
         conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
     ) -> bool:
         """Create or update a note projection from an accepted Sync v2 envelope."""
 
         del object_hash
         normalized_note_id = str(note_id).strip()
-        normalized_title = title.strip() if isinstance(title, str) else ""
+        exact_title = title if isinstance(title, str) else ""
         if not normalized_note_id:
             raise InputError("note_id cannot be empty.")  # noqa: TRY003
-        if not normalized_title:
+        if not exact_title.strip():
             raise InputError("Note title cannot be empty.")  # noqa: TRY003
         if content is None:
             raise InputError("Note content cannot be None.")  # noqa: TRY003
         if object_revision < 1:
             raise InputError("object_revision must be greater than zero.")  # noqa: TRY003
 
-        now = self._db._get_current_utc_timestamp_iso()
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
+        if owner_params and sync_client_id != self._db.client_id:
+            raise ConflictError("Sync projection owner mismatch", entity="notes", entity_id=normalized_note_id)  # noqa: TRY003
+        now = projection_timestamp or self._db._get_current_utc_timestamp_iso()
+        projection = parse_wikilinks(content, source_note_id=normalized_note_id)
         normalized_conversation_id = self._db._normalize_nullable_text(conversation_id)
         normalized_message_id = self._db._normalize_nullable_text(message_id)
         query = """
@@ -147,9 +219,19 @@ class NoteStore:
                 conversation_id = excluded.conversation_id,
                 message_id = excluded.message_id
         """
+        if owner_params:
+            query += " WHERE notes.client_id = ?"
+        insert_if_absent_query = """
+            INSERT INTO notes (
+                id, title, content, last_modified, client_id, version, deleted,
+                created_at, conversation_id, message_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO NOTHING
+        """
         params = (
             normalized_note_id,
-            normalized_title,
+            exact_title,
             content,
             now,
             sync_client_id,
@@ -162,7 +244,115 @@ class NoteStore:
 
         try:
             def _execute(transaction_conn: sqlite3.Connection | BackendConnectionWrapper) -> bool:
-                transaction_conn.execute(query, params)
+                self._db._require_selected_owner_row(transaction_conn, "messages", normalized_message_id, self._db.client_id)
+                self._db._require_selected_owner_row(transaction_conn, "conversations", normalized_conversation_id, self._db.client_id)
+                previous = transaction_conn.execute(
+                    f"SELECT title, content FROM notes WHERE id = ?{owner_clause}",  # nosec B608
+                    (normalized_note_id,) + owner_params,
+                ).fetchone()
+                if expected_product_version is None:
+                    cursor = transaction_conn.execute(query, params + owner_params)
+                    if cursor.rowcount == 0:
+                        raise ConflictError("Note not found for Sync projection", entity="notes", entity_id=normalized_note_id)  # noqa: TRY003
+                elif expected_product_version == 0:
+                    cursor = transaction_conn.execute(insert_if_absent_query, params)
+                    if cursor.rowcount == 0:
+                        if self._matches_ingestion_postcondition(
+                            transaction_conn,
+                            note_id=normalized_note_id,
+                            title=exact_title,
+                            content=content,
+                            conversation_id=normalized_conversation_id,
+                            message_id=normalized_message_id,
+                            sync_client_id=sync_client_id,
+                            object_revision=object_revision,
+                            projection_timestamp=now,
+                            include_created_at=True,
+                        ):
+                            self._db.note_graph_projection_store.replace_projection(
+                                note_id=normalized_note_id,
+                                source_version=object_revision,
+                                projection=projection,
+                                conn=transaction_conn,
+                            )
+                            self._advance_studio_lifecycle(
+                                transaction_conn,
+                                note_id=normalized_note_id,
+                                deleted=False,
+                            )
+                            return False
+                        raise ConflictError(
+                            "Note projection changed after ingestion planning",
+                            entity="notes",
+                            entity_id=normalized_note_id,
+                        )
+                else:
+                    cursor = transaction_conn.execute(
+                        "UPDATE notes SET title = ?, content = ?, last_modified = ?, "
+                        "client_id = ?, version = ?, deleted = ?, conversation_id = ?, "
+                        f"message_id = ? WHERE id = ? AND version = ? AND deleted = ?{owner_clause}",  # nosec B608
+                        (
+                            exact_title,
+                            content,
+                            now,
+                            sync_client_id,
+                            object_revision,
+                            self._deleted_value(False),
+                            normalized_conversation_id,
+                            normalized_message_id,
+                            normalized_note_id,
+                            expected_product_version,
+                            self._deleted_value(False),
+                        ) + owner_params,
+                    )
+                    if cursor.rowcount == 0:
+                        if self._matches_ingestion_postcondition(
+                            transaction_conn,
+                            note_id=normalized_note_id,
+                            title=exact_title,
+                            content=content,
+                            conversation_id=normalized_conversation_id,
+                            message_id=normalized_message_id,
+                            sync_client_id=sync_client_id,
+                            object_revision=object_revision,
+                            projection_timestamp=now,
+                            include_created_at=False,
+                        ):
+                            self._db.note_graph_projection_store.replace_projection(
+                                note_id=normalized_note_id,
+                                source_version=object_revision,
+                                projection=projection,
+                                conn=transaction_conn,
+                            )
+                            self._advance_studio_lifecycle(
+                                transaction_conn,
+                                note_id=normalized_note_id,
+                                deleted=False,
+                            )
+                            return False
+                        raise ConflictError(
+                            "Note projection changed after ingestion planning",
+                            entity="notes",
+                            entity_id=normalized_note_id,
+                        )
+                self._db.note_graph_projection_store.replace_projection(
+                    note_id=normalized_note_id,
+                    source_version=object_revision,
+                    projection=projection,
+                    conn=transaction_conn,
+                )
+                self._advance_studio_lifecycle(
+                    transaction_conn,
+                    note_id=normalized_note_id,
+                    deleted=False,
+                )
+                if previous is not None and (
+                    previous["title"] != exact_title or previous["content"] != content
+                ):
+                    self._db.note_graph_suggestion_store.invalidate_for_note_change(
+                        note_id=normalized_note_id,
+                        conn=transaction_conn,
+                    )
                 logger.info("Upserted note projection from Sync v2 for ID: {}.", normalized_note_id)
                 return True
 
@@ -184,6 +374,45 @@ class NoteStore:
             logger.error("Database error upserting synced note ID {}.", normalized_note_id, exc_info=True)
             raise
 
+    def _matches_ingestion_postcondition(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        *,
+        note_id: str,
+        title: str,
+        content: str,
+        conversation_id: str | None,
+        message_id: str | None,
+        sync_client_id: str,
+        object_revision: int,
+        projection_timestamp: str,
+        include_created_at: bool,
+    ) -> bool:
+        row = conn.execute(
+            "SELECT id, title, content, last_modified, client_id, version, deleted, "
+            "created_at, conversation_id, message_id FROM notes WHERE id = ?",
+            (note_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        matches = (
+            str(row["id"]) == note_id
+            and row["title"] == title
+            and row["content"] == content
+            and str(row["client_id"]) == sync_client_id
+            and int(row["version"]) == object_revision
+            and not bool(row["deleted"])
+            and row["conversation_id"] == conversation_id
+            and row["message_id"] == message_id
+            and self._timestamps_equal(row["last_modified"], projection_timestamp)
+        )
+        if include_created_at:
+            matches = matches and self._timestamps_equal(
+                row["created_at"],
+                projection_timestamp,
+            )
+        return matches
+
     def tombstone_note_from_sync(
         self,
         *,
@@ -202,6 +431,9 @@ class NoteStore:
         if object_revision < 1:
             raise InputError("object_revision must be greater than zero.")  # noqa: TRY003
 
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
+        if owner_params and sync_client_id != self._db.client_id:
+            raise ConflictError("Sync projection owner mismatch", entity="notes", entity_id=normalized_note_id)  # noqa: TRY003
         now = self._db._get_current_utc_timestamp_iso()
         query = """
             UPDATE notes
@@ -211,13 +443,14 @@ class NoteStore:
                    client_id = ?
              WHERE id = ?
         """
+        query += owner_clause
         params = (
             self._deleted_value(True),
             now,
             object_revision,
             sync_client_id,
             normalized_note_id,
-        )
+        ) + owner_params
 
         try:
             def _execute(transaction_conn: sqlite3.Connection | BackendConnectionWrapper) -> bool:
@@ -229,6 +462,16 @@ class NoteStore:
                         entity_id=normalized_note_id,
                     )
                 self._db._invalidate_note_clipper_sidecars(normalized_note_id, conn=transaction_conn, deleted=True)
+                self._db.note_graph_projection_store.mark_lifecycle(
+                    note_id=normalized_note_id,
+                    source_version=object_revision,
+                    conn=transaction_conn,
+                )
+                self._advance_studio_lifecycle(
+                    transaction_conn,
+                    note_id=normalized_note_id,
+                    deleted=True,
+                )
                 logger.info("Soft-deleted note projection from Sync v2 for ID: {}.", normalized_note_id)
                 return True
 
@@ -246,18 +489,101 @@ class NoteStore:
     # Note retrieval
     # ------------------------------------------------------------------
 
+    def get_source_note_projection(
+        self,
+        note_id: str,
+        *,
+        max_chars: int,
+        owner_user_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return one bounded formatted active note plus one overflow sentinel."""
+        if not isinstance(note_id, str) or not note_id.strip():
+            raise InputError("note_id cannot be empty.")  # noqa: TRY003
+        if isinstance(max_chars, bool) or not isinstance(max_chars, int) or max_chars < 0:
+            raise InputError("max_chars must be a non-negative integer.")  # noqa: TRY003
+        if owner_user_id is not None and (not isinstance(owner_user_id, str) or not owner_user_id.strip()):
+            raise InputError("owner_user_id must be a non-empty string.")  # noqa: TRY003
+
+        projected_chars = max_chars + 1
+        is_postgres = self._db.backend_type == BackendType.POSTGRESQL
+        if is_postgres and owner_user_id is None:
+            raise InputError("owner_user_id is required for PostgreSQL source projections.")  # noqa: TRY003
+        deleted_value = False if is_postgres else 0
+        owner_clause = " AND n.client_id = ?" if is_postgres and owner_user_id else ""
+        invalid_expression = (
+            "FALSE"
+            if is_postgres
+            else "(INSTR(COALESCE(n.title, ''), CHAR(0)) > 0 "
+            "OR INSTR(COALESCE(n.content, ''), CHAR(0)) > 0)"
+        )
+        query = f"""
+            SELECT
+                n.id,
+                SUBSTR(
+                    CASE
+                        WHEN n.title IS NOT NULL AND n.title != '' THEN
+                            '# ' || n.title ||
+                            CASE
+                                WHEN n.content IS NOT NULL AND n.content != '' THEN ? || n.content
+                                ELSE ''
+                            END
+                        ELSE COALESCE(n.content, '')
+                    END,
+                    1,
+                    ?
+                ) AS source_text,
+                {invalid_expression} AS source_invalid
+            FROM notes n
+            WHERE n.id = ? AND n.deleted = ?
+              {owner_clause}
+            LIMIT 1
+        """  # nosec B608 - the interpolated clause is fixed by backend type.
+        params: list[Any] = ["\n\n", projected_chars, note_id, deleted_value]
+        if owner_clause:
+            params.append(owner_user_id.strip())
+        failure_type = "UnknownDatabaseError"
+        try:
+            cursor = self._db.execute_query(
+                query,
+                tuple(params),
+                log_params=False,
+                log_errors=False,
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            if isinstance(row, dict):
+                record = dict(row)
+            else:
+                columns = [column[0] for column in cursor.description] if cursor.description else []
+                record = {columns[index]: row[index] for index in range(len(columns))}
+            invalid = record.get("source_invalid")
+            if not isinstance(invalid, (bool, int)) or invalid not in (0, 1):
+                raise CharactersRAGDBError("Invalid source-note validation marker.")
+            record["source_invalid"] = bool(invalid)
+            return record
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            failure_type = type(exc).__name__
+
+        logger.error(
+            "Database error fetching bounded source note ({})",
+            failure_type,
+        )
+        raise CharactersRAGDBError("Source-note projection failed.")
+
     def get_note_by_id(
         self,
         note_id: str,
         include_deleted: bool = False,
         include_studio_summary: bool = False,
     ) -> dict[str, Any] | None:
-        query = "SELECT * FROM notes WHERE id = ?"
-        params: list[Any] = [note_id]
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id, "")
+        query = f"SELECT * FROM notes WHERE id = ?{owner_clause}"  # nosec B608
+        params: list[Any] = [note_id, *owner_params]
         if not include_deleted:
             query += " AND deleted = ?"
             params.append(False if self._db.backend_type == BackendType.POSTGRESQL else 0)
-        cursor = self._db.execute_query(query, tuple(params))
+        cursor = self._db.execute_query(query, tuple(params), read_only=True)
         row = cursor.fetchone()
         note = dict(row) if row else None
         if note and include_studio_summary:
@@ -297,16 +623,502 @@ class NoteStore:
         *,
         conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
     ) -> dict[str, Any] | None:
+        params: tuple[Any, ...] = (note_id,)
         query = "SELECT * FROM note_studio_documents WHERE note_id = ?"
+        if self._db._supports_notes_moodboard_studio_v61():
+            owner = str(self._db.client_id)
+            dataset = self._db.resolve_studio_compatibility_dataset_id(
+                owner_user_id=owner,
+                conn=conn,
+            )
+            query += " AND owner_user_id=? AND dataset_id=?"
+            params = (note_id, owner, dataset)
         if conn is None:
-            cursor = self._db.execute_query(query, (note_id,))
+            cursor = self._db.execute_query(query, params)
         else:
-            cursor = conn.execute(query, (note_id,))
+            cursor = conn.execute(query, params)
         row = cursor.fetchone()
-        return self._db._deserialize_row_fields(row, ["payload_json", "diagram_manifest_json"]) if row else None
+        return self._db._deserialize_row_fields(
+            row,
+            ["payload_json", "diagram_manifest_json", "accepted_provenance_json"],
+        ) if row else None
 
     def get_note_studio_document(self, note_id: str) -> dict[str, Any] | None:
         return self._fetch_note_studio_document_row(note_id)
+
+    @staticmethod
+    def _notes_note_head(note: dict[str, Any]) -> tuple[int, str]:
+        """Return the canonical revision and payload hash for a note row.
+
+        Args:
+            note: Deserialized authoritative note row.
+
+        Returns:
+            A ``(revision, sha256 payload hash)`` tuple for Studio lineage.
+        """
+        payload = validate_notes_note_upsert_payload(
+            {
+                "title": note.get("title"),
+                "content": note.get("content"),
+                "conversation_id": note.get("conversation_id"),
+                "message_id": note.get("message_id"),
+            }
+        )
+        encoded = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), default=str
+        ).encode("utf-8")
+        payload_hash = f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+        return max(1, int(note.get("version") or 1)), payload_hash
+
+    @staticmethod
+    def _normalize_studio_compatibility_payload(
+        payload_json: dict[str, Any],
+        *,
+        note: dict[str, Any] | None,
+        source_note_id: str | None,
+        template_type: str,
+        handwriting_mode: str,
+        render_version: int,
+    ) -> dict[str, Any]:
+        """Remove verified legacy aliases from a Studio payload.
+
+        Args:
+            payload_json: Submitted Studio payload.
+            note: Optional authoritative companion note.
+            source_note_id: Authoritative source-note reference.
+            template_type: Authoritative template selection.
+            handwriting_mode: Authoritative handwriting selection.
+            render_version: Authoritative renderer version.
+
+        Returns:
+            A copy containing only canonical Studio payload fields.
+
+        Raises:
+            InputError: If a legacy alias is malformed or conflicts with the
+                authoritative outer document state.
+        """
+        payload = dict(payload_json)
+        meta = payload.pop("meta", None)
+        if meta is not None:
+            if not isinstance(meta, dict) or set(meta) - {"title", "source_note_id"}:
+                raise InputError("Studio payload meta is not a supported compatibility alias.")  # noqa: TRY003
+            expected_meta = {
+                "source_note_id": source_note_id,
+            }
+            if "source_note_id" in meta and meta["source_note_id"] != expected_meta[
+                "source_note_id"
+            ]:
+                raise InputError("Studio payload meta conflicts with authoritative outer state.")  # noqa: TRY003
+            if "title" in meta and (
+                not isinstance(meta["title"], str)
+                or (
+                    note is not None
+                    and meta["title"] != str(note.get("title") or "")
+                )
+            ):
+                raise InputError("Studio payload meta conflicts with authoritative outer state.")  # noqa: TRY003
+        layout = payload.pop("layout", None)
+        if layout is not None:
+            if not isinstance(layout, dict) or set(layout) - {
+                "template_type",
+                "handwriting_mode",
+                "render_version",
+            }:
+                raise InputError("Studio payload layout is not a supported compatibility alias.")  # noqa: TRY003
+            expected_layout = {
+                "template_type": template_type,
+                "handwriting_mode": handwriting_mode,
+                "render_version": render_version,
+            }
+            if any(layout[key] != expected_layout[key] for key in layout):
+                raise InputError("Studio payload layout conflicts with authoritative outer state.")  # noqa: TRY003
+        return payload
+
+    @staticmethod
+    def _normalize_studio_manifest(
+        manifest_value: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Canonicalize a diagram manifest and rebuild its derived render hash.
+
+        Args:
+            manifest_value: Submitted diagram manifest, or ``None``.
+
+        Returns:
+            A canonical manifest copy without cache or legacy alias fields, or
+            ``None`` when no manifest was supplied.
+
+        Raises:
+            InputError: If a legacy alias conflicts with its canonical field.
+        """
+        if manifest_value is None:
+            return None
+        manifest = dict(manifest_value)
+        manifest.pop("cached_svg", None)
+        if "canonical_source" in manifest:
+            if manifest["canonical_source"] != manifest.get("source_graph"):
+                raise InputError("Studio diagram canonical_source alias conflicts with source_graph.")  # noqa: TRY003
+            manifest.pop("canonical_source")
+        if "generation_status" in manifest:
+            if manifest["generation_status"] != manifest.get("status"):
+                raise InputError("Studio diagram generation_status alias conflicts with status.")  # noqa: TRY003
+            manifest.pop("generation_status")
+        if {
+            "diagram_type",
+            "source_graph",
+            "diagram",
+        }.issubset(manifest):
+            parts: list[str] = []
+            for source in manifest.get("source_graph") or []:
+                if not isinstance(source, dict):
+                    continue
+                title = str(source.get("title") or "").strip()
+                content = str(source.get("content") or "").strip()
+                if title:
+                    parts.append(title)
+                if content:
+                    parts.append(content)
+            context = "\n".join(parts) or "Notes Studio diagram"
+            manifest["render_hash"] = diagram_render_hash(
+                diagram_type=str(manifest["diagram_type"]),
+                context=context,
+                diagram=str(manifest["diagram"]),
+            )
+        return manifest
+
+    @staticmethod
+    def _studio_document_mapping(document: dict[str, Any]) -> dict[str, Any]:
+        """Map a stored Studio row to the canonical contract payload."""
+        return {
+            "note_id": document["note_id"],
+            "source_note_id": document.get("source_note_id"),
+            "payload_json": document["payload_json"],
+            "template_type": document["template_type"],
+            "handwriting_mode": document["handwriting_mode"],
+            "excerpt_snapshot": document.get("excerpt_snapshot"),
+            "excerpt_hash": document.get("excerpt_hash"),
+            "diagram_manifest_json": document.get("diagram_manifest_json"),
+            "companion_content_hash": document["companion_content_hash"],
+            "render_version": document["render_version"],
+            "note_revision": document["note_revision"],
+            "note_hash": document["note_hash"],
+            "accepted_provenance": document["accepted_provenance_json"],
+        }
+
+    @staticmethod
+    def _studio_retry_fingerprint(document: dict[str, Any]) -> str:
+        """Hash submitted accepted semantics without derived binding or acceptance facts."""
+        provenance = document.get("accepted_provenance_json")
+        if not isinstance(provenance, dict):
+            provenance = document.get("accepted_provenance")
+        if not isinstance(provenance, dict):
+            provenance = {}
+        semantic = {
+            key: document.get(key)
+            for key in (
+                "note_id",
+                "source_note_id",
+                "payload_json",
+                "template_type",
+                "handwriting_mode",
+                "excerpt_snapshot",
+                "excerpt_hash",
+                "diagram_manifest_json",
+                "render_version",
+            )
+        }
+        semantic["accepted_provenance"] = {
+            key: provenance.get(key)
+            for key in (
+                "kind",
+                "attestation",
+                "provider",
+                "model",
+            )
+        }
+        return hashlib.sha256(canonical_json_bytes(semantic)).hexdigest()
+
+    def _normalized_studio_retry_input(
+        self,
+        *,
+        note_id: str,
+        payload_json: dict[str, Any],
+        template_type: str,
+        handwriting_mode: str,
+        source_note_id: str | None,
+        excerpt_snapshot: str | None,
+        diagram_manifest_json: dict[str, Any] | None,
+        companion_content_hash: str | None,
+        render_version: int,
+        provenance_kind: str,
+        provenance_provider: str | None,
+        provenance_model: str | None,
+    ) -> dict[str, Any]:
+        """Normalize retry input without consulting mutable Notes heads."""
+
+        normalized_source_id = (
+            None if source_note_id is None else str(source_note_id).strip()
+        )
+        normalized_excerpt = (
+            None
+            if excerpt_snapshot is None
+            else str(excerpt_snapshot).replace("\r\n", "\n").replace("\r", "\n")
+        )
+        if normalized_source_id is None and normalized_excerpt is not None:
+            raise InputError("Studio excerpt requires a source note.")  # noqa: TRY003
+        normalized_payload = self._normalize_studio_compatibility_payload(
+            payload_json,
+            note=None,
+            source_note_id=normalized_source_id,
+            template_type=template_type,
+            handwriting_mode=handwriting_mode,
+            render_version=render_version,
+        )
+        normalized_manifest = self._normalize_studio_manifest(diagram_manifest_json)
+        try:
+            parsed_sections = StudioSectionsV1.model_validate(
+                normalized_payload, strict=True
+            ).model_dump(mode="json")
+            parsed_manifest = (
+                None
+                if normalized_manifest is None
+                else StudioDiagramManifestV1.model_validate(
+                    normalized_manifest, strict=True
+                ).model_dump(mode="json")
+            )
+        except ValueError as exc:
+            raise InputError("Studio retry input is not canonical v1 state.") from exc  # noqa: TRY003
+        return {
+            "note_id": note_id,
+            "source_note_id": normalized_source_id,
+            "payload_json": parsed_sections,
+            "template_type": template_type,
+            "handwriting_mode": handwriting_mode,
+            "excerpt_snapshot": normalized_excerpt,
+            "excerpt_hash": (
+                None
+                if normalized_excerpt is None
+                else self._normalized_text_hash(normalized_excerpt)
+            ),
+            "diagram_manifest_json": parsed_manifest,
+            "companion_content_hash": (
+                None
+                if companion_content_hash is None
+                else str(companion_content_hash).strip()
+            ),
+            "render_version": render_version,
+            "accepted_provenance": {
+                "kind": provenance_kind,
+                "attestation": "server",
+                "provider": provenance_provider,
+                "model": provenance_model,
+            },
+        }
+
+    def _prove_stored_studio_retry_state(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        document: dict[str, Any],
+    ) -> None:
+        """Fail closed unless an existing retry target is complete canonical state."""
+
+        note_id = str(document.get("note_id") or "")
+
+        def _reject() -> None:
+            raise ConflictError(
+                f"Note Studio stored state for note ID '{note_id}' is not canonical.",
+                entity="note_studio_documents",
+                entity_id=note_id,
+            )
+
+        if (
+            document.get("source_diagnostic_code") is not None
+            or document.get("source_diagnostic_hash") is not None
+        ):
+            _reject()
+        try:
+            parsed = parse_notes_studio_document_tombstone_v1(
+                self._studio_document_mapping(document)
+            )
+            revision = int(document["canonical_revision"])
+            version = int(document["version"])
+            deleted = bool(document["deleted"])
+            if revision < 1 or version != revision:
+                _reject()
+            expected_hash = notes_studio_document_object_hash(
+                parsed,
+                revision=revision,
+                deleted=deleted,
+            )
+            if document.get("canonical_hash") != expected_hash:
+                _reject()
+            parsed_payload = parsed.model_dump(mode="json")
+            result_state = dict(parsed_payload)
+            provenance = result_state.pop("accepted_provenance")
+            if provenance["result_hash"] != studio_result_hash(result_state):
+                _reject()
+            if self._studio_envelope_size(
+                parsed_payload,
+                revision=revision,
+                deleted=deleted,
+                object_hash=expected_hash,
+            ) > SYNC_ENVELOPE_MAX_BYTES:
+                _reject()
+
+            owner = str(self._db.client_id)
+            parent_row = conn.execute(
+                "SELECT * FROM notes WHERE id=? AND client_id=?",
+                (note_id, owner),
+            ).fetchone()
+            if parent_row is None or bool(parent_row["deleted"]) != deleted:
+                _reject()
+            parent = dict(parent_row)
+            parent_revision, parent_hash = self._notes_note_head(parent)
+            if parsed.note_revision > parent_revision:
+                _reject()
+            if parsed.note_revision == parent_revision and (
+                parsed.note_hash != parent_hash
+                or parsed.companion_content_hash
+                != self._normalized_text_hash(parent.get("content"))
+            ):
+                _reject()
+
+            if parsed.source_note_id is not None:
+                source_row = conn.execute(
+                    "SELECT * FROM notes WHERE id=? AND client_id=?",
+                    (parsed.source_note_id, owner),
+                ).fetchone()
+                if source_row is None:
+                    _reject()
+                source = dict(source_row)
+                source_revision, source_hash = self._notes_note_head(source)
+                accepted_source_revision = parsed.accepted_provenance.source_revision
+                if (
+                    accepted_source_revision is None
+                    or accepted_source_revision > source_revision
+                ):
+                    _reject()
+                if accepted_source_revision == source_revision:
+                    if parsed.accepted_provenance.source_hash != source_hash:
+                        _reject()
+                    if parsed.excerpt_snapshot is not None:
+                        source_content = str(source.get("content") or "").replace(
+                            "\r\n", "\n"
+                        ).replace("\r", "\n")
+                        if parsed.excerpt_snapshot not in source_content:
+                            _reject()
+        except ConflictError:
+            raise
+        except (KeyError, TypeError, ValueError, NotesMoodboardStudioContractError):
+            _reject()
+
+    @staticmethod
+    def _studio_envelope_size(
+        payload: dict[str, Any],
+        *,
+        revision: int,
+        deleted: bool,
+        object_hash: str,
+    ) -> int:
+        """Return the serialized canonical Sync envelope size in bytes.
+
+        Args:
+            payload: Canonical Studio document payload.
+            revision: Canonical object revision.
+            deleted: Whether the envelope represents a tombstone.
+            object_hash: Canonical object payload hash.
+
+        Returns:
+            UTF-8 byte length of the canonical Sync envelope.
+        """
+        operation = "tombstone" if deleted else "upsert"
+        return len(
+            canonical_json_bytes(
+                {
+                    "domain": "notes.studio_document",
+                    "schema_version": 1,
+                    "operation": operation,
+                    "object_id": payload["note_id"],
+                    "parent_id": payload["note_id"],
+                    "object_revision": revision,
+                    "payload_hash": object_hash,
+                    "payload": payload,
+                }
+            )
+        )
+
+    def _advance_studio_lifecycle(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        *,
+        note_id: str,
+        deleted: bool,
+    ) -> None:
+        """Advance only Studio lifecycle lineage while retaining accepted content state."""
+        if not self._db._supports_notes_moodboard_studio_v61():
+            return
+        document = self._fetch_note_studio_document_row(note_id, conn=conn)
+        if document is None or bool(document["deleted"]) == deleted:
+            return
+        revision = int(document["canonical_revision"]) + 1
+        version = int(document["version"]) + 1
+        mapping = self._studio_document_mapping(document)
+        try:
+            parsed = parse_notes_studio_document_tombstone_v1(mapping)
+            canonical_hash = notes_studio_document_object_hash(
+                parsed,
+                revision=revision,
+                deleted=deleted,
+            )
+            if self._studio_envelope_size(
+                parsed.model_dump(mode="json"),
+                revision=revision,
+                deleted=deleted,
+                object_hash=canonical_hash,
+            ) > SYNC_ENVELOPE_MAX_BYTES:
+                raise InputError(
+                    f"Studio canonical Sync envelope exceeds {SYNC_ENVELOPE_MAX_BYTES} bytes."
+                )  # noqa: TRY003
+        except NotesMoodboardStudioContractError as exc:
+            if document.get("source_diagnostic_code") is None:
+                raise ConflictError(
+                    "Studio lifecycle state is not canonical.",
+                    entity="note_studio_documents",
+                    entity_id=note_id,
+                ) from exc  # noqa: TRY003
+            canonical_hash = self._db._note_task_v60_hash(
+                {
+                    "domain": "notes.studio_document.blocked",
+                    "note_id": note_id,
+                    "revision": revision,
+                    "deleted": deleted,
+                    "diagnostic": document.get("source_diagnostic_hash"),
+                }
+            )
+        now = self._db._get_current_utc_timestamp_iso()
+        owner = str(self._db.client_id)
+        dataset = str(document["dataset_id"])
+        cursor = conn.execute(
+            "UPDATE note_studio_documents SET deleted=?,version=?,canonical_revision=?,"
+            "canonical_hash=?,last_modified=? WHERE owner_user_id=? AND dataset_id=? "
+            "AND note_id=? AND version=?",
+            (
+                self._deleted_value(deleted),
+                version,
+                revision,
+                canonical_hash,
+                now,
+                owner,
+                dataset,
+                note_id,
+                document["version"],
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise ConflictError(
+                "Studio lifecycle changed concurrently.",
+                entity="note_studio_documents",
+                entity_id=note_id,
+            )  # noqa: TRY003
 
     def _write_note_studio_document(
         self,
@@ -321,8 +1133,12 @@ class NoteStore:
         diagram_manifest_json: dict[str, Any] | None,
         companion_content_hash: str | None,
         render_version: int,
+        provenance_kind: str = "manual",
+        provenance_provider: str | None = None,
+        provenance_model: str | None = None,
         conn: sqlite3.Connection | BackendConnectionWrapper | None,
         upsert: bool,
+        ensure: bool = False,
     ) -> dict[str, Any]:
         normalized_note_id = str(note_id).strip()
         if not normalized_note_id:
@@ -335,8 +1151,8 @@ class NoteStore:
             raise InputError(
                 f"handwriting_mode must be one of {sorted(_SUPPORTED_NOTE_STUDIO_HANDWRITING_MODES)}."
             )  # noqa: TRY003
-        if not isinstance(render_version, int) or render_version < 1:
-            raise InputError("render_version must be an integer >= 1.")  # noqa: TRY003
+        if not isinstance(render_version, int) or render_version != 1:
+            raise InputError("render_version must be exactly 1.")  # noqa: TRY003
 
         payload_json_str = self._serialize_note_studio_json_field(payload_json, "payload_json", required=True)
         diagram_manifest_json_str = self._serialize_note_studio_json_field(
@@ -346,7 +1162,7 @@ class NoteStore:
         )
         now = self._db._get_current_utc_timestamp_iso()
 
-        if upsert:
+        if not self._db._supports_notes_moodboard_studio_v61() and upsert:
             query = (
                 "INSERT INTO note_studio_documents ("
                 "note_id, payload_json, template_type, handwriting_mode, source_note_id, "
@@ -365,7 +1181,7 @@ class NoteStore:
                 "render_version = excluded.render_version, "
                 "last_modified = excluded.last_modified"
             )
-        else:
+        elif not self._db._supports_notes_moodboard_studio_v61():
             query = (
                 "INSERT INTO note_studio_documents ("
                 "note_id, payload_json, template_type, handwriting_mode, source_note_id, "
@@ -374,27 +1190,276 @@ class NoteStore:
                 ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             )
 
-        params = (
-            normalized_note_id,
-            payload_json_str,
-            template_type,
-            handwriting_mode,
-            source_note_id,
-            excerpt_snapshot,
-            excerpt_hash,
-            diagram_manifest_json_str,
-            companion_content_hash,
-            render_version,
-            now,
-            now,
-        )
+        if not self._db._supports_notes_moodboard_studio_v61():
+            params = (
+                normalized_note_id,
+                payload_json_str,
+                template_type,
+                handwriting_mode,
+                source_note_id,
+                excerpt_snapshot,
+                excerpt_hash,
+                diagram_manifest_json_str,
+                companion_content_hash,
+                render_version,
+                now,
+                now,
+            )
+        else:
+            owner = str(self._db.client_id)
+            input_retry_fingerprint = (
+                self._studio_retry_fingerprint(
+                    self._normalized_studio_retry_input(
+                        note_id=normalized_note_id,
+                        payload_json=payload_json,
+                        template_type=template_type,
+                        handwriting_mode=handwriting_mode,
+                        source_note_id=source_note_id,
+                        excerpt_snapshot=excerpt_snapshot,
+                        diagram_manifest_json=diagram_manifest_json,
+                        companion_content_hash=companion_content_hash,
+                        render_version=render_version,
+                        provenance_kind=provenance_kind,
+                        provenance_provider=provenance_provider,
+                        provenance_model=provenance_model,
+                    )
+                )
+                if ensure
+                else None
+            )
+
+            def _scoped_values(inner_conn: sqlite3.Connection | BackendConnectionWrapper) -> tuple[Any, ...]:
+                dataset = self._db.resolve_studio_compatibility_dataset_id(
+                    owner_user_id=owner,
+                    conn=inner_conn,
+                )
+                note_row = inner_conn.execute(
+                    "SELECT * FROM notes WHERE id=? AND client_id=?",
+                    (normalized_note_id, owner),
+                ).fetchone()
+                if note_row is None:
+                    raise ConflictError(
+                        "Note not found.", entity="notes", entity_id=normalized_note_id
+                    )  # noqa: TRY003
+                note = dict(note_row)
+                previous = inner_conn.execute(
+                    "SELECT * FROM note_studio_documents "
+                    "WHERE owner_user_id=? AND dataset_id=? AND note_id=?",
+                    (owner, dataset, normalized_note_id),
+                ).fetchone()
+                if bool(note.get("deleted")):
+                    raise ConflictError(
+                        "Studio parent note not found or not live.",
+                        entity="notes",
+                        entity_id=normalized_note_id,
+                    )
+                note_revision, note_hash = self._notes_note_head(note)
+                normalized_source_id = (
+                    None if source_note_id is None else str(source_note_id).strip()
+                )
+                source_revision = source_hash = None
+                normalized_excerpt = (
+                    None
+                    if excerpt_snapshot is None
+                    else str(excerpt_snapshot).replace("\r\n", "\n").replace("\r", "\n")
+                )
+                if normalized_source_id is not None:
+                    source_row = inner_conn.execute(
+                        "SELECT * FROM notes WHERE id=? AND client_id=?",
+                        (normalized_source_id, owner),
+                    ).fetchone()
+                    if source_row is None or bool(source_row["deleted"]):
+                        raise ConflictError(
+                            "Source note not found or not live.",
+                            entity="notes",
+                            entity_id=normalized_source_id,
+                        )  # noqa: TRY003
+                    source = dict(source_row)
+                    source_revision, source_hash = self._notes_note_head(source)
+                    if normalized_excerpt is not None:
+                        normalized_source_content = str(source.get("content") or "").replace(
+                            "\r\n", "\n"
+                        ).replace("\r", "\n")
+                        if normalized_excerpt not in normalized_source_content:
+                            raise InputError(
+                                "Studio excerpt must be present in the live source note."
+                            )  # noqa: TRY003
+                elif normalized_excerpt is not None:
+                    raise InputError("Studio excerpt requires a source note.")  # noqa: TRY003
+
+                normalized_payload = self._normalize_studio_compatibility_payload(
+                    payload_json,
+                    note=note,
+                    source_note_id=normalized_source_id,
+                    template_type=template_type,
+                    handwriting_mode=handwriting_mode,
+                    render_version=render_version,
+                )
+                normalized_manifest = self._normalize_studio_manifest(diagram_manifest_json)
+                normalized_excerpt_hash = (
+                    None
+                    if normalized_excerpt is None
+                    else self._normalized_text_hash(normalized_excerpt)
+                )
+                normalized_companion_hash = self._normalized_text_hash(note.get("content"))
+                candidate: dict[str, Any] = {
+                    "note_id": normalized_note_id,
+                    "source_note_id": normalized_source_id,
+                    "payload_json": normalized_payload,
+                    "template_type": template_type,
+                    "handwriting_mode": handwriting_mode,
+                    "excerpt_snapshot": normalized_excerpt,
+                    "excerpt_hash": normalized_excerpt_hash,
+                    "diagram_manifest_json": normalized_manifest,
+                    "companion_content_hash": normalized_companion_hash,
+                    "render_version": render_version,
+                    "note_revision": note_revision,
+                    "note_hash": note_hash,
+                }
+                result_hash = studio_result_hash(candidate)
+                candidate["accepted_provenance"] = {
+                    "kind": provenance_kind,
+                    "attestation": "server",
+                    "provider": provenance_provider,
+                    "model": provenance_model,
+                    "accepted_at": now,
+                    "source_revision": source_revision,
+                    "source_hash": source_hash,
+                    "result_hash": result_hash,
+                }
+                try:
+                    parsed = parse_notes_studio_document_v1(
+                        candidate,
+                        bound_attestation="server",
+                        bound_accepted_at=now,
+                    )
+                except NotesMoodboardStudioContractError as exc:
+                    raise InputError("Studio document is not canonical v1 state.") from exc  # noqa: TRY003
+                version = 1 if previous is None else int(previous["version"]) + 1
+                revision = 1 if previous is None else int(previous["canonical_revision"]) + 1
+                deleted = bool(note.get("deleted"))
+                canonical_hash = notes_studio_document_object_hash(
+                    parsed,
+                    revision=revision,
+                    deleted=deleted,
+                )
+                parsed_payload = parsed.model_dump(mode="json")
+                if self._studio_envelope_size(
+                    parsed_payload,
+                    revision=revision,
+                    deleted=deleted,
+                    object_hash=canonical_hash,
+                ) > SYNC_ENVELOPE_MAX_BYTES:
+                    raise InputError(
+                        f"Studio canonical Sync envelope exceeds {SYNC_ENVELOPE_MAX_BYTES} bytes."
+                    )  # noqa: TRY003
+                return (
+                    owner, dataset, normalized_note_id,
+                    self._db._canonical_json_text_v61(parsed_payload["payload_json"]),
+                    template_type, handwriting_mode, normalized_source_id,
+                    parsed_payload["excerpt_snapshot"], parsed_payload["excerpt_hash"],
+                    (
+                        None
+                        if parsed_payload["diagram_manifest_json"] is None
+                        else self._db._canonical_json_text_v61(parsed_payload["diagram_manifest_json"])
+                    ),
+                    parsed_payload["companion_content_hash"], render_version,
+                    note_revision, note_hash,
+                    self._db._canonical_json_text_v61(parsed_payload["accepted_provenance"]),
+                    now, now,
+                    self._deleted_value(deleted), version, revision,
+                    canonical_hash, None, None,
+                )
+
+            query = (
+                "INSERT INTO note_studio_documents("
+                "owner_user_id,dataset_id,note_id,payload_json,template_type,handwriting_mode,"
+                "source_note_id,excerpt_snapshot,excerpt_hash,diagram_manifest_json,"
+                "companion_content_hash,render_version,note_revision,note_hash,"
+                "accepted_provenance_json,created_at,last_modified,deleted,version,"
+                "canonical_revision,canonical_hash,source_diagnostic_code,source_diagnostic_hash"
+                ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            )
+            conflict_target = (
+                "(note_id)"
+                if self._db.backend_type == BackendType.POSTGRESQL
+                else "(owner_user_id,dataset_id,note_id)"
+            )
+            if upsert:
+                query += (
+                    f" ON CONFLICT{conflict_target} DO UPDATE SET "  # nosec B608 - fixed backend catalog target.
+                    "payload_json=excluded.payload_json,template_type=excluded.template_type,"
+                    "handwriting_mode=excluded.handwriting_mode,source_note_id=excluded.source_note_id,"
+                    "excerpt_snapshot=excluded.excerpt_snapshot,excerpt_hash=excluded.excerpt_hash,"
+                    "diagram_manifest_json=excluded.diagram_manifest_json,"
+                    "companion_content_hash=excluded.companion_content_hash,render_version=excluded.render_version,"
+                    "note_revision=excluded.note_revision,note_hash=excluded.note_hash,"
+                    "accepted_provenance_json=excluded.accepted_provenance_json,"
+                    "last_modified=excluded.last_modified,deleted=excluded.deleted,version=excluded.version,"
+                    "canonical_revision=excluded.canonical_revision,canonical_hash=excluded.canonical_hash,"
+                    "source_diagnostic_code=excluded.source_diagnostic_code,"
+                    "source_diagnostic_hash=excluded.source_diagnostic_hash"
+                )
+            elif ensure:
+                query += f" ON CONFLICT{conflict_target} DO NOTHING"  # nosec B608 - fixed backend catalog target.
+
+        if not self._db._supports_notes_moodboard_studio_v61():
+            candidate_retry_fingerprint = self._studio_retry_fingerprint(
+                {
+                    "note_id": normalized_note_id,
+                    "payload_json": payload_json,
+                    "template_type": template_type,
+                    "handwriting_mode": handwriting_mode,
+                    "source_note_id": source_note_id,
+                    "excerpt_snapshot": excerpt_snapshot,
+                    "excerpt_hash": excerpt_hash,
+                    "diagram_manifest_json": diagram_manifest_json,
+                    "companion_content_hash": companion_content_hash,
+                    "render_version": render_version,
+                }
+            )
+            if ensure:
+                query += " ON CONFLICT(note_id) DO NOTHING"
 
         def _execute(inner_conn: sqlite3.Connection | BackendConnectionWrapper) -> dict[str, Any]:
-            prepared_query, prepared_params = self._db._prepare_backend_statement(query, params)
-            inner_conn.execute(prepared_query, prepared_params or ())
+            if ensure and self._db._supports_notes_moodboard_studio_v61():
+                existing = self._fetch_note_studio_document_row(
+                    normalized_note_id, conn=inner_conn
+                )
+                if existing is not None:
+                    self._prove_stored_studio_retry_state(inner_conn, existing)
+                    if (
+                        self._studio_retry_fingerprint(existing)
+                        != input_retry_fingerprint
+                    ):
+                        raise ConflictError(
+                            f"Note Studio document for note ID '{normalized_note_id}' conflicts with the captured retry.",
+                            entity="note_studio_documents",
+                            entity_id=normalized_note_id,
+                        )
+                    return existing
+            write_params = (
+                params
+                if not self._db._supports_notes_moodboard_studio_v61()
+                else _scoped_values(inner_conn)
+            )
+            prepared_query, prepared_params = self._db._prepare_backend_statement(query, write_params)
+            cursor = inner_conn.execute(prepared_query, prepared_params or ())
             document = self._fetch_note_studio_document_row(normalized_note_id, conn=inner_conn)
             if not document:
                 raise CharactersRAGDBError(f"Failed to read note studio document for note ID '{normalized_note_id}'.")
+            if ensure and cursor.rowcount == 0:
+                if self._db._supports_notes_moodboard_studio_v61():
+                    self._prove_stored_studio_retry_state(inner_conn, document)
+                    expected_retry_fingerprint = input_retry_fingerprint
+                else:
+                    expected_retry_fingerprint = candidate_retry_fingerprint
+                if self._studio_retry_fingerprint(document) != expected_retry_fingerprint:
+                    raise ConflictError(
+                        f"Note Studio document for note ID '{normalized_note_id}' conflicts with the captured retry.",
+                        entity="note_studio_documents",
+                        entity_id=normalized_note_id,
+                    )
             return document
 
         try:
@@ -438,6 +1503,9 @@ class NoteStore:
         diagram_manifest_json: dict[str, Any] | None = None,
         companion_content_hash: str | None = None,
         render_version: int,
+        provenance_kind: str = "manual",
+        provenance_provider: str | None = None,
+        provenance_model: str | None = None,
         conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
     ) -> dict[str, Any]:
         return self._write_note_studio_document(
@@ -451,8 +1519,49 @@ class NoteStore:
             diagram_manifest_json=diagram_manifest_json,
             companion_content_hash=companion_content_hash,
             render_version=render_version,
+            provenance_kind=provenance_kind,
+            provenance_provider=provenance_provider,
+            provenance_model=provenance_model,
             conn=conn,
             upsert=False,
+        )
+
+    def ensure_note_studio_document(
+        self,
+        *,
+        note_id: str,
+        payload_json: dict[str, Any],
+        template_type: str,
+        handwriting_mode: str,
+        source_note_id: str | None = None,
+        excerpt_snapshot: str | None = None,
+        excerpt_hash: str | None = None,
+        diagram_manifest_json: dict[str, Any] | None = None,
+        companion_content_hash: str | None = None,
+        render_version: int,
+        provenance_kind: str = "manual",
+        provenance_provider: str | None = None,
+        provenance_model: str | None = None,
+        conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+    ) -> dict[str, Any]:
+        """Create one sidecar or converge an identical concurrent retry."""
+        return self._write_note_studio_document(
+            note_id=note_id,
+            payload_json=payload_json,
+            template_type=template_type,
+            handwriting_mode=handwriting_mode,
+            source_note_id=source_note_id,
+            excerpt_snapshot=excerpt_snapshot,
+            excerpt_hash=excerpt_hash,
+            diagram_manifest_json=diagram_manifest_json,
+            companion_content_hash=companion_content_hash,
+            render_version=render_version,
+            provenance_kind=provenance_kind,
+            provenance_provider=provenance_provider,
+            provenance_model=provenance_model,
+            conn=conn,
+            upsert=False,
+            ensure=True,
         )
 
     def upsert_note_studio_document(
@@ -468,6 +1577,9 @@ class NoteStore:
         diagram_manifest_json: dict[str, Any] | None = None,
         companion_content_hash: str | None = None,
         render_version: int,
+        provenance_kind: str = "manual",
+        provenance_provider: str | None = None,
+        provenance_model: str | None = None,
         conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
     ) -> dict[str, Any]:
         return self._write_note_studio_document(
@@ -481,6 +1593,9 @@ class NoteStore:
             diagram_manifest_json=diagram_manifest_json,
             companion_content_hash=companion_content_hash,
             render_version=render_version,
+            provenance_kind=provenance_kind,
+            provenance_provider=provenance_provider,
+            provenance_model=provenance_model,
             conn=conn,
             upsert=True,
         )
@@ -493,8 +1608,12 @@ class NoteStore:
         expected_companion_content_hash: str | None,
         expected_render_version: int | None = None,
         expected_last_modified: Any | None = None,
+        provenance_kind: str = "manual",
+        provenance_provider: str | None = None,
+        provenance_model: str | None = None,
         conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
     ) -> dict[str, Any]:
+        """Atomically replace a Studio diagram when the expected state still matches."""
         normalized_note_id = str(note_id).strip()
         if not normalized_note_id:
             raise InputError("note_id cannot be empty.")  # noqa: TRY003
@@ -527,6 +1646,78 @@ class NoteStore:
         ]
 
         def _execute(inner_conn: sqlite3.Connection | BackendConnectionWrapper) -> dict[str, Any]:
+            if self._db._supports_notes_moodboard_studio_v61():
+                owner = str(self._db.client_id)
+                dataset = self._db.resolve_studio_compatibility_dataset_id(
+                    owner_user_id=owner,
+                    conn=inner_conn,
+                )
+                guard_query = (
+                    "SELECT 1 FROM note_studio_documents "
+                    "WHERE note_id=? AND owner_user_id=? AND dataset_id=?"
+                )
+                guard_params: list[Any] = [normalized_note_id, owner, dataset]
+                if expected_companion_content_hash is None:
+                    guard_query += " AND companion_content_hash IS NULL"
+                else:
+                    guard_query += " AND companion_content_hash=?"
+                    guard_params.append(expected_companion_content_hash)
+                if expected_render_version is not None:
+                    guard_query += " AND render_version=?"
+                    guard_params.append(expected_render_version)
+                if expected_last_modified is not None:
+                    guard_query += " AND last_modified=?"
+                    guard_params.append(expected_last_modified)
+                if self._db.backend_type == BackendType.POSTGRESQL:
+                    guard_query += " FOR UPDATE"
+                prepared_guard, prepared_guard_params = self._db._prepare_backend_statement(
+                    guard_query,
+                    tuple(guard_params),
+                )
+                if inner_conn.execute(prepared_guard, prepared_guard_params or ()).fetchone() is None:
+                    current_document = self._fetch_note_studio_document_row(
+                        normalized_note_id,
+                        conn=inner_conn,
+                    )
+                    if not current_document:
+                        raise ConflictError(
+                            "Note studio document not found.",
+                            entity="note_studio_documents",
+                            entity_id=normalized_note_id,
+                        )  # noqa: TRY003
+                    raise ConflictError(
+                        f"Note studio document for note ID '{normalized_note_id}' changed concurrently.",
+                        entity="note_studio_documents",
+                        entity_id=normalized_note_id,
+                    )  # noqa: TRY003
+                current_document = self._fetch_note_studio_document_row(
+                    normalized_note_id,
+                    conn=inner_conn,
+                )
+                if not current_document:
+                    raise ConflictError(
+                        "Note studio document not found.",
+                        entity="note_studio_documents",
+                        entity_id=normalized_note_id,
+                    )  # noqa: TRY003
+                return self._write_note_studio_document(
+                    note_id=normalized_note_id,
+                    payload_json=current_document["payload_json"],
+                    template_type=current_document["template_type"],
+                    handwriting_mode=current_document["handwriting_mode"],
+                    source_note_id=current_document.get("source_note_id"),
+                    excerpt_snapshot=current_document.get("excerpt_snapshot"),
+                    excerpt_hash=current_document.get("excerpt_hash"),
+                    diagram_manifest_json=diagram_manifest_json,
+                    companion_content_hash=current_document.get("companion_content_hash"),
+                    render_version=int(current_document["render_version"]),
+                    provenance_kind=provenance_kind,
+                    provenance_provider=provenance_provider,
+                    provenance_model=provenance_model,
+                    conn=inner_conn,
+                    upsert=True,
+                )
+
             prepared_query, prepared_params = self._db._prepare_backend_statement(query, tuple(params))
             cursor = inner_conn.execute(prepared_query, prepared_params or ())
             if cursor.rowcount == 0:
@@ -573,23 +1764,56 @@ class NoteStore:
         Set ``only_deleted=True`` to list trash items, or ``include_deleted=True``
         to list both active and deleted notes.
         """
-        where_clause = ""
+        where_clause = " WHERE 1 = 1"
         params: list[Any] = []
         if only_deleted:
-            where_clause = " WHERE deleted = ?"
+            where_clause += " AND deleted = ?"
             params.append(True if self._db.backend_type == BackendType.POSTGRESQL else 1)
         elif not include_deleted:
-            where_clause = " WHERE deleted = ?"
+            where_clause += " AND deleted = ?"
             params.append(False if self._db.backend_type == BackendType.POSTGRESQL else 0)
 
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
+        where_clause += owner_clause
+        params.extend(owner_params)
         query = (
             f"SELECT * FROM notes{where_clause} "  # nosec B608
             "ORDER BY last_modified DESC "
             "LIMIT ? OFFSET ?"
         )
         params.extend([limit, offset])
-        cursor = self._db.execute_query(query, tuple(params))
+        cursor = self._db.execute_query(query, tuple(params), read_only=True)
         return [dict(row) for row in cursor.fetchall()]
+
+    def list_note_ids_page(
+        self,
+        *,
+        after_note_id: str | None,
+        limit: int,
+    ) -> tuple[str, ...]:
+        """List owned note IDs, including trash, in stable keyset order."""
+
+        if not 1 <= limit <= 200:
+            raise ValueError("note page limit must be 1..200")
+        query = "SELECT id FROM notes WHERE id > ?"
+        params: list[Any] = [after_note_id or ""]
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            query += " AND client_id = ?"
+            params.append(self._db.client_id)
+        query += " ORDER BY id LIMIT ?"
+        params.append(limit)
+        rows = self._db.execute_query(query, tuple(params)).fetchall()
+        return tuple(str(row["id"]) for row in rows)
+
+    def owns_note_id(self, note_id: str) -> bool:
+        """Return whether this database owner has the note, including trash."""
+
+        query = "SELECT 1 FROM notes WHERE id = ?"
+        params: list[Any] = [note_id]
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            query += " AND client_id = ?"
+            params.append(self._db.client_id)
+        return self._db.execute_query(query, tuple(params)).fetchone() is not None
 
     def list_deleted_notes(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
         """List only soft-deleted notes (trash)."""
@@ -607,9 +1831,11 @@ class NoteStore:
             if not include_deleted:
                 deleted_clause = " AND deleted = ?"
                 params.append(self._deleted_value(False))
+            owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
+            params.extend(owner_params)
             query = (
-                f"SELECT id, title, content, created_at, last_modified, deleted, conversation_id "  # nosec B608
-                f"FROM notes WHERE id IN ({ph}){deleted_clause}"
+                f"SELECT id, title, content, created_at, last_modified, deleted, conversation_id, message_id "  # nosec B608
+                f"FROM notes WHERE id IN ({ph}){deleted_clause}{owner_clause}"
             )
             cur = self._db.execute_query(query, tuple(params))
             for row in cur.fetchall():
@@ -617,6 +1843,7 @@ class NoteStore:
                     "id": row[0], "title": row[1], "content": row[2],
                     "created_at": row[3], "last_modified": row[4],
                     "deleted": row[5], "conversation_id": row[6],
+                    "message_id": row[7],
                 }
                 results.append(r)
         return results
@@ -624,13 +1851,15 @@ class NoteStore:
     def get_all_note_ids_for_graph(self, include_deleted: bool = True, limit: int = 500) -> list[str]:
         """Return note IDs ordered by last_modified DESC, id ASC. For seedless graph."""
         params: list[Any] = [limit]
-        deleted_clause = ""
+        deleted_clause = " WHERE 1 = 1"
         if not include_deleted:
-            deleted_clause = " WHERE deleted = ?"
+            deleted_clause += " AND deleted = ?"
             params.insert(0, self._deleted_value(False))
-        query = f"SELECT id FROM notes{deleted_clause} ORDER BY last_modified DESC, id ASC LIMIT ?"  # nosec B608
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id, "")
+        query = f"SELECT id FROM notes{deleted_clause}{owner_clause} ORDER BY last_modified DESC, id ASC LIMIT ?"  # nosec B608
+        params[-1:-1] = owner_params
         cur = self._db.execute_query(query, tuple(params))
-        return [row[0] for row in cur.fetchall()]
+        return [row["id"] for row in cur.fetchall()]
 
     @staticmethod
     def _normalize_graph_tag_filter(tag: str) -> str:
@@ -660,14 +1889,17 @@ class NoteStore:
         if not normalized_tag or limit <= 0:
             return []
 
+        keyword_table = self._db._map_table_for_backend("keywords")
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id, "n")
+        related_clause, related_params = self._db._selected_owner_filter(self._db.client_id, "k")
         if include_deleted:
             query = (
                 "SELECT DISTINCT n.id, n.last_modified "
                 "FROM notes n "
                 "JOIN note_keywords nk ON nk.note_id = n.id "
-                "JOIN keywords k ON k.id = nk.keyword_id "
+                f"JOIN {keyword_table} k ON k.id = nk.keyword_id "  # nosec B608
                 "WHERE LOWER(k.keyword) = LOWER(?) AND k.deleted = ? "
-                "ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
+                f"{owner_clause}{related_clause} ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
             )
             params: list[Any] = [normalized_tag, self._deleted_value(False), limit]
         else:
@@ -675,9 +1907,9 @@ class NoteStore:
                 "SELECT DISTINCT n.id, n.last_modified "
                 "FROM notes n "
                 "JOIN note_keywords nk ON nk.note_id = n.id "
-                "JOIN keywords k ON k.id = nk.keyword_id "
+                f"JOIN {keyword_table} k ON k.id = nk.keyword_id "  # nosec B608
                 "WHERE LOWER(k.keyword) = LOWER(?) AND k.deleted = ? AND n.deleted = ? "
-                "ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
+                f"{owner_clause}{related_clause} ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
             )
             params = [
                 normalized_tag,
@@ -685,8 +1917,9 @@ class NoteStore:
                 self._deleted_value(False),
                 limit,
             ]
+        params[-1:-1] = owner_params + related_params
         cur = self._db.execute_query(query, tuple(params))
-        return [row[0] for row in cur.fetchall()]
+        return [row["id"] for row in cur.fetchall()]
 
     def get_note_ids_by_source_for_graph(
         self,
@@ -699,13 +1932,15 @@ class NoteStore:
         if not src or limit <= 0:
             return []
 
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id, "n")
+        related_clause, related_params = self._db._selected_owner_filter(self._db.client_id, "c")
         if external_ref is not None and not include_deleted:
             query = (
                 "SELECT DISTINCT n.id, n.last_modified "
                 "FROM notes n "
                 "JOIN conversations c ON c.id = n.conversation_id "
                 "WHERE c.source = ? AND c.external_ref = ? AND n.deleted = ? "
-                "ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
+                f"{owner_clause}{related_clause} ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"  # nosec B608 - fixed owner SQL fragments; values stay bound.
             )
             params: list[Any] = [src, external_ref, self._deleted_value(False), limit]
         elif external_ref is not None:
@@ -714,7 +1949,7 @@ class NoteStore:
                 "FROM notes n "
                 "JOIN conversations c ON c.id = n.conversation_id "
                 "WHERE c.source = ? AND c.external_ref = ? "
-                "ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
+                f"{owner_clause}{related_clause} ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"  # nosec B608 - fixed owner SQL fragments; values stay bound.
             )
             params = [src, external_ref, limit]
         elif not include_deleted:
@@ -723,7 +1958,7 @@ class NoteStore:
                 "FROM notes n "
                 "JOIN conversations c ON c.id = n.conversation_id "
                 "WHERE c.source = ? AND n.deleted = ? "
-                "ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
+                f"{owner_clause}{related_clause} ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"  # nosec B608 - fixed owner SQL fragments; values stay bound.
             )
             params = [src, self._deleted_value(False), limit]
         else:
@@ -732,27 +1967,30 @@ class NoteStore:
                 "FROM notes n "
                 "JOIN conversations c ON c.id = n.conversation_id "
                 "WHERE c.source = ? "
-                "ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
+                f"{owner_clause}{related_clause} ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"  # nosec B608 - fixed owner SQL fragments; values stay bound.
             )
             params = [src, limit]
+        params[-1:-1] = owner_params + related_params
         cur = self._db.execute_query(query, tuple(params))
-        return [row[0] for row in cur.fetchall()]
+        return [row["id"] for row in cur.fetchall()]
 
     def get_note_tag_edges(self, note_ids: list[str]) -> list[dict[str, Any]]:
         """Return (note_id, keyword_id, keyword) for notes with active keywords."""
         if not note_ids:
             return []
+        keyword_table = self._db._map_table_for_backend("keywords")
+        owner_clause, owner_params = self._db._selected_keyword_link_filter("note_keywords", "nk", owner_client_id=self._db.client_id)
         results: list[dict[str, Any]] = []
         for batch in self._db._chunk_list(note_ids, self._db._SQLITE_PARAM_LIMIT):
             ph = ",".join(["?"] * len(batch))
             query = (
                 f"SELECT nk.note_id, k.id AS keyword_id, k.keyword "  # nosec B608
                 f"FROM note_keywords nk "
-                f"JOIN keywords k ON k.id = nk.keyword_id "
-                f"WHERE nk.note_id IN ({ph}) AND k.deleted = ? "
+                f"JOIN {keyword_table} k ON k.id = nk.keyword_id "
+                f"WHERE nk.note_id IN ({ph}) AND k.deleted = ?{owner_clause} "
                 f"ORDER BY nk.note_id ASC, k.id ASC"
             )
-            cur = self._db.execute_query(query, tuple([*batch, self._deleted_value(False)]))
+            cur = self._db.execute_query(query, (*batch, self._deleted_value(False), *owner_params))
             for row in cur.fetchall():
                 r = dict(row) if hasattr(row, "keys") else {
                     "note_id": row[0], "keyword_id": row[1], "keyword": row[2],
@@ -769,18 +2007,21 @@ class NoteStore:
 
         Defaults to active-note count only.
         """
-        where_clause = ""
+        where_clause = " WHERE 1 = 1"
         params: list[Any] = []
         if only_deleted:
-            where_clause = " WHERE deleted = ?"
+            where_clause += " AND deleted = ?"
             params.append(True if self._db.backend_type == BackendType.POSTGRESQL else 1)
         elif not include_deleted:
-            where_clause = " WHERE deleted = ?"
+            where_clause += " AND deleted = ?"
             params.append(False if self._db.backend_type == BackendType.POSTGRESQL else 0)
 
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
+        where_clause += owner_clause
+        params.extend(owner_params)
         query = f"SELECT COUNT(*) AS cnt FROM notes{where_clause}"  # nosec B608
         try:
-            cursor = self._db.execute_query(query, tuple(params) if params else None)
+            cursor = self._db.execute_query(query, tuple(params) if params else None, read_only=True)
             row = cursor.fetchone()
             return int(row["cnt"]) if row else 0
         except CharactersRAGDBError as exc:
@@ -793,26 +2034,22 @@ class NoteStore:
 
     def count_user_notes(self, include_deleted: bool = True) -> int:
         """Count total notes for seedless query gate."""
-        if include_deleted:
-            query = "SELECT COUNT(*) FROM notes"
-            params: tuple[Any, ...] | None = None
-        else:
-            query = "SELECT COUNT(*) FROM notes WHERE deleted = ?"
-            params = (self._deleted_value(False),)
-        cur = self._db.execute_query(query, params)
-        return cur.fetchone()[0]
+        return self.count_notes(include_deleted=include_deleted)
 
     def count_notes_per_tag(self) -> dict[int, int]:
         """Return {keyword_id: note_count} for popularity cutoff."""
+        keyword_table = self._db._map_table_for_backend("keywords")
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id, "n")
+        keyword_clause, keyword_params = self._db._selected_owner_filter(self._db.client_id, "k")
         query = (
             "SELECT nk.keyword_id, COUNT(DISTINCT nk.note_id) AS cnt "
             "FROM note_keywords nk "
             "JOIN notes n ON n.id = nk.note_id AND n.deleted = ? "
-            "JOIN keywords k ON k.id = nk.keyword_id AND k.deleted = ? "
-            "GROUP BY nk.keyword_id"
+            f"JOIN {keyword_table} k ON k.id = nk.keyword_id AND k.deleted = ? "  # nosec B608
+            f"WHERE 1 = 1{owner_clause}{keyword_clause} GROUP BY nk.keyword_id"
         )
-        cur = self._db.execute_query(query, (self._deleted_value(False), self._deleted_value(False)))
-        return {row[0]: row[1] for row in cur.fetchall()}
+        cur = self._db.execute_query(query, (self._deleted_value(False), self._deleted_value(False)) + owner_params + keyword_params)
+        return {row["keyword_id"]: row["cnt"] for row in cur.fetchall()}
 
     def get_note_source_info(self, note_ids: list[str]) -> list[dict[str, Any]]:
         """Return source info for notes that have a conversation with source set."""
@@ -821,14 +2058,27 @@ class NoteStore:
         results: list[dict[str, Any]] = []
         for batch in self._db._chunk_list(note_ids, self._db._SQLITE_PARAM_LIMIT):
             ph = ",".join(["?"] * len(batch))
+            owner_clause = ""
+            owner_params: list[object] = []
+            if self._db.backend_type == BackendType.POSTGRESQL:
+                owner_clause = "AND n.client_id = ? AND c.client_id = ? "
+                owner_params.extend((self._db.client_id, self._db.client_id))
             query = (
                 f"SELECT n.id AS note_id, c.id AS conversation_id, c.source, c.external_ref "  # nosec B608
                 f"FROM notes n "
                 f"JOIN conversations c ON c.id = n.conversation_id "
-                f"WHERE n.id IN ({ph}) AND c.source IS NOT NULL "
+                f"WHERE n.id IN ({ph}) AND n.deleted = ? AND c.deleted = ? "
+                f"{owner_clause}"  # nosec B608
+                f"AND c.source IS NOT NULL "
                 f"ORDER BY n.id ASC, c.source ASC, c.external_ref ASC"
             )
-            cur = self._db.execute_query(query, tuple(batch))
+            params: list[object] = [
+                *batch,
+                self._deleted_value(False),
+                self._deleted_value(False),
+                *owner_params,
+            ]
+            cur = self._db.execute_query(query, tuple(params))
             for row in cur.fetchall():
                 r = dict(row) if hasattr(row, "keys") else {
                     "note_id": row[0], "conversation_id": row[1],
@@ -851,6 +2101,22 @@ class NoteStore:
         if not update_data:
             raise InputError("No data provided for note update.")  # noqa: TRY003
 
+        current_note = self.get_note_by_id(note_id, include_deleted=True)
+        if current_note is None and self._db.backend_type == BackendType.POSTGRESQL:
+            raise ConflictError("Note not found", entity="notes", entity_id=note_id)  # noqa: TRY003
+        current_content = current_note.get("content", "") if current_note else ""
+        next_content = update_data.get("content", current_content)
+        projection = parse_wikilinks(str(next_content or ""), source_note_id=note_id)
+        content_changed = current_note is not None and (
+            ("content" in update_data and update_data["content"] != current_note.get("content"))
+            or (
+                "title" in update_data
+                and isinstance(update_data["title"], str)
+                and update_data["title"].strip() != current_note.get("title")
+            )
+        )
+
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
         now = self._db._get_current_utc_timestamp_iso()
         fields_to_update_sql = []
         params_for_set_clause = []
@@ -882,13 +2148,16 @@ class NoteStore:
         all_set_values.extend([now, next_version_val, self._db.client_id])
 
         where_values = [note_id, expected_version]
-        final_params_for_execute = tuple(all_set_values + where_values)
+        final_params_for_execute = tuple(all_set_values + where_values) + owner_params
 
-        query = f"UPDATE notes SET {', '.join(fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = 0"  # nosec B608
+        query = f"UPDATE notes SET {', '.join(fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = 0{owner_clause}"  # nosec B608
 
         try:
             def _execute(transaction_conn: sqlite3.Connection | BackendConnectionWrapper) -> bool:
-                current_db_version = self._db._get_current_db_version(transaction_conn, "notes", "id", note_id)
+                for field, table in (("message_id", "messages"), ("conversation_id", "conversations")):
+                    if field in update_data:
+                        self._db._require_selected_owner_row(transaction_conn, table, self._db._normalize_nullable_text(update_data[field]), self._db.client_id)
+                current_db_version = self._db._get_current_db_version(transaction_conn, "notes", "id", note_id, owner_client_id=self._db.client_id)
 
                 if current_db_version != expected_version:
                     raise ConflictError(  # noqa: TRY003, TRY301
@@ -899,7 +2168,7 @@ class NoteStore:
                 cursor = transaction_conn.execute(query, final_params_for_execute)
 
                 if cursor.rowcount == 0:
-                    check_again_cursor = transaction_conn.execute("SELECT version, deleted FROM notes WHERE id = ?", (note_id,))
+                    check_again_cursor = transaction_conn.execute(f"SELECT version, deleted FROM notes WHERE id = ?{owner_clause}", (note_id,) + owner_params)  # nosec B608 - fixed owner SQL fragments; values stay bound.
                     final_state = check_again_cursor.fetchone()
                     if not final_state:
                         msg = f"Note ID {note_id} disappeared."
@@ -911,6 +2180,17 @@ class NoteStore:
                         msg = f"Update for note ID {note_id} (expected v{expected_version}) affected 0 rows."
                     raise ConflictError(msg, entity="notes", entity_id=note_id)  # noqa: TRY301
 
+                self._db.note_graph_projection_store.replace_projection(
+                    note_id=note_id,
+                    source_version=next_version_val,
+                    projection=projection,
+                    conn=transaction_conn,
+                )
+                if content_changed:
+                    self._db.note_graph_suggestion_store.invalidate_for_note_change(
+                        note_id=note_id,
+                        conn=transaction_conn,
+                    )
                 logger.info(f"Updated note ID {note_id} from version {expected_version} to version {next_version_val}.")
                 return True
 
@@ -941,18 +2221,19 @@ class NoteStore:
     # ------------------------------------------------------------------
 
     def soft_delete_note(self, note_id: str, expected_version: int) -> bool | None:
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
         now = self._db._get_current_utc_timestamp_iso()
         next_version_val = expected_version + 1
 
-        query = "UPDATE notes SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0"
-        params = (now, next_version_val, self._db.client_id, note_id, expected_version)
+        query = f"UPDATE notes SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 0{owner_clause}"  # nosec B608
+        params = (now, next_version_val, self._db.client_id, note_id, expected_version) + owner_params
 
         try:
             with self._db.transaction() as conn:
                 try:
-                    current_db_version = self._db._get_current_db_version(conn, "notes", "id", note_id)
+                    current_db_version = self._db._get_current_db_version(conn, "notes", "id", note_id, owner_client_id=self._db.client_id)
                 except ConflictError:
-                    check_status_cursor = conn.execute("SELECT deleted, version FROM notes WHERE id = ?", (note_id,))
+                    check_status_cursor = conn.execute(f"SELECT deleted, version FROM notes WHERE id = ?{owner_clause}", (note_id,) + owner_params)  # nosec B608 - fixed owner SQL fragments; values stay bound.
                     record_status = check_status_cursor.fetchone()
                     if record_status and record_status['deleted']:
                         logger.info(f"Note ID {note_id} already soft-deleted. Success (idempotent).")
@@ -968,7 +2249,7 @@ class NoteStore:
                 cursor = conn.execute(query, params)
 
                 if cursor.rowcount == 0:
-                    check_again_cursor = conn.execute("SELECT version, deleted FROM notes WHERE id = ?", (note_id,))
+                    check_again_cursor = conn.execute(f"SELECT version, deleted FROM notes WHERE id = ?{owner_clause}", (note_id,) + owner_params)  # nosec B608 - fixed owner SQL fragments; values stay bound.
                     final_state = check_again_cursor.fetchone()
                     if not final_state:
                         msg = f"Note ID {note_id} disappeared."
@@ -982,6 +2263,16 @@ class NoteStore:
                     raise ConflictError(msg, entity="notes", entity_id=note_id)  # noqa: TRY301
 
                 self._db._invalidate_note_clipper_sidecars(note_id, conn=conn, deleted=True)
+                self._db.note_graph_projection_store.mark_lifecycle(
+                    note_id=note_id,
+                    source_version=next_version_val,
+                    conn=conn,
+                )
+                self._advance_studio_lifecycle(conn, note_id=note_id, deleted=True)
+                self._db.note_graph_suggestion_store.invalidate_for_note_change(
+                    note_id=note_id,
+                    conn=conn,
+                )
                 logger.info(
                     f"Soft-deleted note ID {note_id} (was v{expected_version}), new version {next_version_val}.")
                 return True
@@ -994,18 +2285,20 @@ class NoteStore:
 
     def delete_note(self, note_id: str, expected_version: int | None = None, hard_delete: bool = False) -> bool:
         """Soft or hard delete a note."""
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
         now = self._db._get_current_utc_timestamp_iso()
         try:
             with self._db.transaction() as conn:
-                row = conn.execute("SELECT id, version, deleted FROM notes WHERE id = ?", (note_id,)).fetchone()
+                row = conn.execute(f"SELECT id, version, deleted FROM notes WHERE id = ?{owner_clause}", (note_id,) + owner_params).fetchone()  # nosec B608 - fixed owner SQL fragments; values stay bound.
                 if not row:
                     return False
+                self._db._require_selected_owner_row(conn, "notes", note_id, self._db.client_id, include_deleted=True)
                 cur_ver = int(row["version"])
                 deleted = bool(row["deleted"])
                 if hard_delete:
                     self._db._delete_note_clipper_sidecars(note_id, conn=conn)
                     conn.execute("DELETE FROM note_studio_documents WHERE note_id = ?", (note_id,))
-                    conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+                    conn.execute(f"DELETE FROM notes WHERE id = ?{owner_clause}", (note_id,) + owner_params)  # nosec B608 - fixed owner SQL fragments; values stay bound.
                     return True
                 if deleted:
                     return True
@@ -1014,11 +2307,21 @@ class NoteStore:
                 deleted_val = True if self._db.backend_type == BackendType.POSTGRESQL else 1
                 rc = conn.execute(
                     "UPDATE notes SET deleted = ?, last_modified = ?, version = ?, client_id = ? "
-                    "WHERE id = ? AND deleted = 0",
-                    (deleted_val, now, cur_ver + 1, self._db.client_id, note_id),
+                    f"WHERE id = ? AND deleted = 0{owner_clause}",  # nosec B608 - fixed owner SQL fragments; values stay bound.
+                    (deleted_val, now, cur_ver + 1, self._db.client_id, note_id) + owner_params,
                 ).rowcount
                 if rc > 0:
                     self._db._invalidate_note_clipper_sidecars(note_id, conn=conn, deleted=True)
+                    self._db.note_graph_projection_store.mark_lifecycle(
+                        note_id=note_id,
+                        source_version=cur_ver + 1,
+                        conn=conn,
+                    )
+                    self._advance_studio_lifecycle(conn, note_id=note_id, deleted=True)
+                    self._db.note_graph_suggestion_store.invalidate_for_note_change(
+                        note_id=note_id,
+                        conn=conn,
+                    )
                 return rc > 0
         except BackendDatabaseError as e:
             raise CharactersRAGDBError(f"Failed to delete note: {e}") from e  # noqa: TRY003
@@ -1048,16 +2351,17 @@ class NoteStore:
                            not match, or if a concurrent modification prevents the update.
             CharactersRAGDBError: For other database-related errors.
         """
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
         now = self._db._get_current_utc_timestamp_iso()
         next_version_val = expected_version + 1
 
-        query = "UPDATE notes SET deleted = 0, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 1"
-        params = (now, next_version_val, self._db.client_id, note_id, expected_version)
+        query = f"UPDATE notes SET deleted = 0, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND version = ? AND deleted = 1{owner_clause}"  # nosec B608
+        params = (now, next_version_val, self._db.client_id, note_id, expected_version) + owner_params
 
         try:
             with self._db.transaction() as conn:
                 # First check if record exists at all
-                check_cursor = conn.execute("SELECT deleted, version FROM notes WHERE id = ?", (note_id,))
+                check_cursor = conn.execute(f"SELECT deleted, version FROM notes WHERE id = ?{owner_clause}", (note_id,) + owner_params)  # nosec B608 - fixed owner SQL fragments; values stay bound.
                 record_status = check_cursor.fetchone()
 
                 if not record_status:
@@ -1083,7 +2387,7 @@ class NoteStore:
 
                 if cursor.rowcount == 0:
                     # Race condition: Record changed between pre-check and UPDATE.
-                    check_again_cursor = conn.execute("SELECT version, deleted FROM notes WHERE id = ?", (note_id,))
+                    check_again_cursor = conn.execute(f"SELECT version, deleted FROM notes WHERE id = ?{owner_clause}", (note_id,) + owner_params)  # nosec B608 - fixed owner SQL fragments; values stay bound.
                     final_state = check_again_cursor.fetchone()
                     msg = f"Restore for Note ID {note_id} (expected v{expected_version}) affected 0 rows."
                     if not final_state:
@@ -1100,6 +2404,12 @@ class NoteStore:
                     raise ConflictError(msg, entity="notes", entity_id=note_id)  # noqa: TRY301
 
                 self._db._invalidate_note_clipper_sidecars(note_id, conn=conn, deleted=False)
+                self._db.note_graph_projection_store.mark_lifecycle(
+                    note_id=note_id,
+                    source_version=next_version_val,
+                    conn=conn,
+                )
+                self._advance_studio_lifecycle(conn, note_id=note_id, deleted=False)
                 logger.info(
                     f"Restored note ID {note_id} (was version {expected_version}), new version {next_version_val}.")
                 return True
@@ -1142,16 +2452,19 @@ class NoteStore:
             if not search_term or not str(search_term).strip():
                 logger.debug("Empty notes search term; returning no results.")
                 return []
+            owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id, "n")
             tsquery = FTSQueryTranslator.normalize_query(search_term, 'postgresql')
             fallback_query = """
                 SELECT n.*
                 FROM notes n
-                WHERE n.deleted = FALSE
+                WHERE n.deleted = FALSE{owner_clause}
                   AND (n.title ILIKE ? OR n.content ILIKE ?)
                 ORDER BY n.last_modified DESC
                 LIMIT ? OFFSET ?
-            """
-            fallback_params = (f"%{search_term}%", f"%{search_term}%", limit, offset)
+            """.format_map(
+                locals()
+            )  # nosec B608
+            fallback_params = (*owner_params, f"%{search_term}%", f"%{search_term}%", limit, offset)
             if not tsquery:
                 logger.debug("Notes search term normalized to empty tsquery for input '{}'", search_term)
                 cursor = self._db.execute_query(fallback_query, fallback_params)
@@ -1160,13 +2473,15 @@ class NoteStore:
             query = """
                 SELECT n.*, ts_rank(n.notes_fts_tsv, to_tsquery('english', ?)) AS rank
                 FROM notes n
-                WHERE n.deleted = FALSE
+                WHERE n.deleted = FALSE{owner_clause}
                   AND n.notes_fts_tsv @@ to_tsquery('english', ?)
                 ORDER BY rank DESC, n.last_modified DESC
                 LIMIT ? OFFSET ?
-            """
+            """.format_map(
+                locals()
+            )  # nosec B608
             try:
-                cursor = self._db.execute_query(query, (tsquery, tsquery, limit, offset))
+                cursor = self._db.execute_query(query, (tsquery, *owner_params, tsquery, limit, offset))
                 rows = cursor.fetchall()
                 if rows:
                     return [dict(row) for row in rows]
@@ -1215,6 +2530,8 @@ class NoteStore:
         like_params = [f"%{t}%" for t in tokens]
 
         if self._db.backend_type == BackendType.POSTGRESQL:
+            note_scope, note_owner_params = self._db._selected_owner_filter(self._db.client_id, "n")
+            keyword_scope, keyword_owner_params = self._db._selected_owner_filter(self._db.client_id, "k")
             if search_term and str(search_term).strip():
                 tsquery = FTSQueryTranslator.normalize_query(str(search_term), 'postgresql')
                 if not tsquery:
@@ -1225,27 +2542,31 @@ class NoteStore:
                     FROM notes n
                     JOIN note_keywords nk ON n.id = nk.note_id
                     JOIN {keyword_table} k ON k.id = nk.keyword_id
-                    WHERE n.deleted = FALSE
+                    WHERE n.deleted = FALSE{note_scope}{keyword_scope}
                       AND k.deleted = FALSE
                       AND n.notes_fts_tsv @@ to_tsquery('english', ?)
                       AND ({like_clause})
                     ORDER BY rank DESC, n.last_modified DESC
                     LIMIT ? OFFSET ?
-                """.format_map(locals())  # nosec B608
-                params = (tsquery, tsquery, *like_params, limit, offset)
+                """.format_map(
+                    locals()
+                )  # nosec B608
+                params = (tsquery, *note_owner_params, *keyword_owner_params, tsquery, *like_params, limit, offset)
             else:
                 query = """
                     SELECT DISTINCT n.*
                     FROM notes n
                     JOIN note_keywords nk ON n.id = nk.note_id
                     JOIN {keyword_table} k ON k.id = nk.keyword_id
-                    WHERE n.deleted = FALSE
+                    WHERE n.deleted = FALSE{note_scope}{keyword_scope}
                       AND k.deleted = FALSE
                       AND ({like_clause})
                     ORDER BY n.last_modified DESC
                     LIMIT ? OFFSET ?
-                """.format_map(locals())  # nosec B608
-                params = (*like_params, limit, offset)
+                """.format_map(
+                    locals()
+                )  # nosec B608
+                params = (*note_owner_params, *keyword_owner_params, *like_params, limit, offset)
             cursor = self._db.execute_query(query, params)
             return [dict(row) for row in cursor.fetchall()]
 
@@ -1300,6 +2621,8 @@ class NoteStore:
         like_params = [f"%{t}%" for t in tokens]
 
         if self._db.backend_type == BackendType.POSTGRESQL:
+            note_scope, note_owner_params = self._db._selected_owner_filter(self._db.client_id, "n")
+            keyword_scope, keyword_owner_params = self._db._selected_owner_filter(self._db.client_id, "k")
             if search_term and str(search_term).strip():
                 tsquery = FTSQueryTranslator.normalize_query(str(search_term), 'postgresql')
                 if not tsquery:
@@ -1310,23 +2633,27 @@ class NoteStore:
                     FROM notes n
                     JOIN note_keywords nk ON n.id = nk.note_id
                     JOIN {keyword_table} k ON k.id = nk.keyword_id
-                    WHERE n.deleted = FALSE
+                    WHERE n.deleted = FALSE{note_scope}{keyword_scope}
                       AND k.deleted = FALSE
                       AND n.notes_fts_tsv @@ to_tsquery('english', ?)
                       AND ({like_clause})
-                """.format_map(locals())  # nosec B608
-                params = (tsquery, *like_params)
+                """.format_map(
+                    locals()
+                )  # nosec B608
+                params = (*note_owner_params, *keyword_owner_params, tsquery, *like_params)
             else:
                 query = """
                     SELECT COUNT(DISTINCT n.id) AS cnt
                     FROM notes n
                     JOIN note_keywords nk ON n.id = nk.note_id
                     JOIN {keyword_table} k ON k.id = nk.keyword_id
-                    WHERE n.deleted = FALSE
+                    WHERE n.deleted = FALSE{note_scope}{keyword_scope}
                       AND k.deleted = FALSE
                       AND ({like_clause})
-                """.format_map(locals())  # nosec B608
-                params = tuple(like_params)
+                """.format_map(
+                    locals()
+                )  # nosec B608
+                params = (*note_owner_params, *keyword_owner_params, *like_params)
             cursor = self._db.execute_query(query, params)
             row = cursor.fetchone()
             return int(row["cnt"]) if row else 0
@@ -1367,16 +2694,17 @@ class NoteStore:
     # ------------------------------------------------------------------
 
     def link_note_to_keyword(self, note_id: str, keyword_id: int) -> bool:  # note_id is str
-        return self._db._manage_link("note_keywords", "note_id", note_id, "keyword_id", keyword_id, "link")
+        return self._db._manage_link("note_keywords", "note_id", note_id, "keyword_id", keyword_id, "link", owner_client_id=self._db.client_id)
 
     def unlink_note_from_keyword(self, note_id: str, keyword_id: int) -> bool:  # note_id is str
-        return self._db._manage_link("note_keywords", "note_id", note_id, "keyword_id", keyword_id, "unlink")
+        return self._db._manage_link("note_keywords", "note_id", note_id, "keyword_id", keyword_id, "unlink", owner_client_id=self._db.client_id)
 
     def unlink_note_to_keyword(self, note_id: str, keyword_id: int) -> bool:  # pragma: no cover - compat alias
         """Backward-compatible alias for the extracted facade delegation typo."""
         return self.unlink_note_from_keyword(note_id, keyword_id)
 
     def get_keywords_for_note(self, note_id: str) -> list[dict[str, Any]]:  # note_id is str
+        owner_clause, owner_params = self._db._selected_keyword_link_filter("note_keywords", "nk", owner_client_id=self._db.client_id)
         keyword_table = self._db._map_table_for_backend("keywords")
         order_clause = self._db._case_insensitive_order_clause("k.keyword")
         query = """
@@ -1384,16 +2712,17 @@ class NoteStore:
                 FROM {keyword_table} k \
                          JOIN note_keywords nk ON k.id = nk.keyword_id
                 WHERE nk.note_id = ? \
-                  AND k.deleted = 0 \
+                  AND k.deleted = 0{owner_clause} \
                 {order_clause}
                 """.format_map(locals())  # nosec B608
-        cursor = self._db.execute_query(query, (note_id,))
+        cursor = self._db.execute_query(query, (note_id,) + owner_params, read_only=True)
         return [dict(row) for row in cursor.fetchall()]
 
     def get_keywords_for_notes(self, note_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
         """Return keywords for multiple notes as a map of note_id -> keywords list."""
         if not note_ids:
             return {}
+        owner_clause, owner_params = self._db._selected_keyword_link_filter("note_keywords", "nk", owner_client_id=self._db.client_id)
         keyword_table = self._db._map_table_for_backend("keywords")
         order_clause = self._db._case_insensitive_order_clause("k.keyword")
         out: dict[str, list[dict[str, Any]]] = {nid: [] for nid in note_ids}
@@ -1407,10 +2736,10 @@ class NoteStore:
                     FROM {keyword_table} k \
                              JOIN note_keywords nk ON k.id = nk.keyword_id
                     WHERE nk.note_id IN ({placeholders}) \
-                      AND k.deleted = 0 \
+                      AND k.deleted = 0{owner_clause} \
                     {order_clause}
                     """.format_map(locals())  # nosec B608
-            cursor = self._db.execute_query(query, tuple(batch))
+            cursor = self._db.execute_query(query, tuple(batch) + owner_params, read_only=True)
             rows = cursor.fetchall()
             for row in rows:
                 record = dict(row)
@@ -1421,16 +2750,17 @@ class NoteStore:
         return out
 
     def get_notes_for_keyword(self, keyword_id: int, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        owner_clause, owner_params = self._db._selected_keyword_link_filter("note_keywords", "nk", owner_client_id=self._db.client_id)
         query = """
                 SELECT n.* \
                 FROM notes n \
                          JOIN note_keywords nk ON n.id = nk.note_id
                 WHERE nk.keyword_id = ? \
-                  AND n.deleted = 0
+                  AND n.deleted = 0{owner_clause}
                 ORDER BY n.last_modified DESC LIMIT ? \
                 OFFSET ? \
-                """
-        cursor = self._db.execute_query(query, (keyword_id, limit, offset))
+                """.format_map(locals())  # nosec B608
+        cursor = self._db.execute_query(query, (keyword_id,) + owner_params + (limit, offset))
         return [dict(row) for row in cursor.fetchall()]
 
     def get_note_counts_for_keywords(self, keyword_ids: list[int] | None = None) -> dict[int, int]:
@@ -1460,6 +2790,9 @@ class NoteStore:
         deleted_note_value = "FALSE" if self._db.backend_type == BackendType.POSTGRESQL else "0"
         deleted_keyword_value = "FALSE" if self._db.backend_type == BackendType.POSTGRESQL else "0"
 
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id, "n")
+        keyword_clause, keyword_params = self._db._selected_owner_filter(self._db.client_id, "k")
+        params.extend(owner_params + keyword_params)
         query = """
             SELECT nk.keyword_id AS keyword_id, COUNT(DISTINCT nk.note_id) AS note_count
             FROM note_keywords nk
@@ -1467,11 +2800,11 @@ class NoteStore:
             JOIN {keyword_table} k ON k.id = nk.keyword_id
             WHERE n.deleted = {deleted_note_value}
               AND k.deleted = {deleted_keyword_value}
-              {keyword_filter}
+              {keyword_filter}{owner_clause}{keyword_clause}
             GROUP BY nk.keyword_id
         """.format_map(locals())  # nosec B608
 
-        cursor = self._db.execute_query(query, tuple(params) if params else None)
+        cursor = self._db.execute_query(query, tuple(params) if params else None, read_only=True)
         out: dict[int, int] = {}
         for row in cursor.fetchall():
             try:

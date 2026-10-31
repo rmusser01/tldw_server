@@ -6,31 +6,31 @@ falsification triggering, anti-context retrieval, and adjudication.
 """
 
 import asyncio
-import pytest
 from dataclasses import dataclass, field
 from typing import Any, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
-from tldw_Server_API.app.core.Claims_Extraction.fva_pipeline import (
-    FVAPipeline,
-    FVAConfig,
-    FVAResult,
-    FVABatchResult,
-    create_fva_pipeline,
-)
+import pytest
+
 from tldw_Server_API.app.core.Claims_Extraction.budget_guard import (
     ClaimsJobBudget,
-    ClaimsJobContext,
+)
+from tldw_Server_API.app.core.Claims_Extraction.fva_pipeline import (
+    FVABatchResult,
+    FVAConfig,
+    FVAPipeline,
+    FVAResult,
+    create_fva_pipeline,
 )
 
 # Import types
 try:
     from tldw_Server_API.app.core.RAG.rag_service.types import (
-        VerificationStatus,
+        ClaimType,
         Document,
         MatchLevel,
         SourceAuthority,
-        ClaimType,
+        VerificationStatus,
     )
 except ImportError:
     from enum import Enum
@@ -283,6 +283,69 @@ class TestFVAPipelineProcessClaim:
         assert result.falsification_triggered is True
         assert result.falsification_decision is not None
         assert result.falsification_decision.should_falsify is True
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_process_claim_records_adjudication_scores_when_anti_context_found(self):
+        """Should record adjudication scores when anti-context produces adjudication."""
+        low_conf_verification = MockClaimVerification(
+            claim=MockClaim(id="1", text="Test"),
+            status=VerificationStatus.VERIFIED,
+            confidence=0.5,
+            evidence=[MockEvidence(doc_id="1", snippet="Evidence")],
+        )
+        verifier = MockVerifier(verification=low_conf_verification)
+        claims_engine = MockClaimsEngine(verifier=verifier)
+        anti_docs = [
+            Document(id="anti_1", content="Contradicting evidence", metadata={}, score=0.7),
+        ]
+        retriever = MockRetriever(documents=anti_docs)
+        pipeline = FVAPipeline(claims_engine, retriever)
+
+        with patch(
+            "tldw_Server_API.app.core.Claims_Extraction.fva_pipeline.observe_histogram"
+        ) as observe_histogram, patch(
+            "tldw_Server_API.app.core.Claims_Extraction.fva_pipeline.increment_counter"
+        ) as increment_counter:
+            metric_calls = Mock()
+            metric_calls.attach_mock(observe_histogram, "observe_histogram")
+            metric_calls.attach_mock(increment_counter, "increment_counter")
+            await pipeline.process_claim(
+                claim=MockClaim(id="1", text="Test claim"),
+                query="test",
+                documents=[Document(id="1", content="Support", metadata={}, score=0.8)],
+            )
+
+        metric_order = [
+            (call[0], call.args[0])
+            for call in metric_calls.mock_calls
+            if call.args
+        ]
+        histogram_names = [call.args[0] for call in observe_histogram.call_args_list if call.args]
+        anti_context_index = histogram_names.index("fva_anti_context_docs")
+        first_adjudication_index = histogram_names.index("fva_adjudication_scores")
+        assert anti_context_index < first_adjudication_index
+        adjudication_indices = [
+            index
+            for index, event in enumerate(metric_order)
+            if event == ("observe_histogram", "fva_adjudication_scores")
+        ]
+        duration_index = metric_order.index(("observe_histogram", "fva_processing_duration_seconds"))
+        processed_index = metric_order.index(("increment_counter", "fva_claims_processed_total"))
+        assert adjudication_indices == list(
+            range(adjudication_indices[0], adjudication_indices[0] + 3)
+        )
+        assert adjudication_indices[-1] < duration_index < processed_index
+        score_types = {
+            call.kwargs["labels"]["score_type"]
+            for call in observe_histogram.call_args_list
+            if call.args and call.args[0] == "fva_adjudication_scores"
+        }
+        assert score_types == {"support", "contradict", "contestation"}
+        assert not any(
+            event == ("increment_counter", "fva_wasted_falsification_total")
+            for event in metric_order
+        )
 
     @pytest.mark.unit
     @pytest.mark.asyncio

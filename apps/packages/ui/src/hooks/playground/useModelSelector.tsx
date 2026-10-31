@@ -4,8 +4,10 @@ import { useStorage } from "@plasmohq/storage/hook"
 import { Tooltip } from "antd"
 import { Star } from "lucide-react"
 import { getProviderDisplayName } from "@/utils/provider-registry"
+import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider"
 import { ProviderIcons } from "@/components/Common/ProviderIcon"
 import { tldwModels } from "@/services/tldw"
+import { normalizeProviderAvailabilityKey } from "@/services/tldw/model-provider-availability"
 import { useStoreChatModelSettings } from "@/store/model"
 import {
   LOCAL_PROVIDERS,
@@ -68,6 +70,10 @@ export function useModelSelector({
     typeof apiProvider === "string" && apiProvider.trim()
       ? apiProvider.trim().toLowerCase()
       : null
+  const selectedIdentity = React.useMemo(
+    () => parseProviderQualifiedModelSelection(selectedModel),
+    [selectedModel]
+  )
 
   const normalizedModelUsageByKey = React.useMemo<Record<string, ModelUsageStats>>(() => {
     if (!modelUsageByKey || typeof modelUsageByKey !== "object") return {}
@@ -86,6 +92,15 @@ export function useModelSelector({
   const selectedModelMeta = React.useMemo(() => {
     if (!selectedModel) return null
     const models = (composerModels as any[]) || []
+    if (selectedIdentity.provider) {
+      const provider = normalizeProviderAvailabilityKey(
+        getModelProvider({ provider: selectedIdentity.provider })
+      )
+      return models.find(
+        (model) => normalizeProviderAvailabilityKey(getModelProvider(model)) === provider &&
+          getModelId(model) === selectedIdentity.modelId
+      ) || null
+    }
     const selected = selectedModel.trim()
     const selectedLower = selected.toLowerCase()
     const canonicalMatch = models.find(
@@ -107,13 +122,16 @@ export function useModelSelector({
         return modelId === selected || String(model.model || "") === selected
       }) || null
     )
-  }, [composerModels, selectedModel, selectedProviderHint])
+  }, [composerModels, selectedModel, selectedProviderHint, selectedIdentity])
 
   const selectedModelKey = React.useMemo(() => {
     if (selectedModelMeta) return getCanonicalModelKey(selectedModelMeta)
     if (!selectedModel) return null
-    return getCanonicalModelKey(selectedProviderHint || "custom", selectedModel)
-  }, [selectedModel, selectedModelMeta, selectedProviderHint])
+    return getCanonicalModelKey(
+      selectedIdentity.provider || selectedProviderHint || "custom",
+      selectedIdentity.modelId
+    )
+  }, [selectedModel, selectedModelMeta, selectedProviderHint, selectedIdentity])
 
   const modelContextLength = React.useMemo(() => {
     const candidates = [
@@ -166,8 +184,11 @@ export function useModelSelector({
 
   const resolvedProviderKey = React.useMemo(() => {
     if (selectedModelMeta) return getModelProvider(selectedModelMeta)
+    if (selectedIdentity.provider) {
+      return getModelProvider({ provider: selectedIdentity.provider })
+    }
     return selectedProviderHint || "custom"
-  }, [selectedModelMeta, selectedProviderHint])
+  }, [selectedModelMeta, selectedProviderHint, selectedIdentity])
 
   const providerLabel = React.useMemo(
     () => tldwModels.getProviderDisplayName(resolvedProviderKey || "custom"),
@@ -184,9 +205,9 @@ export function useModelSelector({
     return (
       selectedModelMeta?.nickname ||
       getModelId(selectedModelMeta as ModelSelectorDescriptor) ||
-      selectedModel
+      selectedIdentity.modelId
     )
-  }, [selectedModel, selectedModelMeta, t])
+  }, [selectedModel, selectedModelMeta, selectedIdentity, t])
 
   const apiModelLabel = React.useMemo(() => {
     if (!selectedModel) {
@@ -347,11 +368,7 @@ export function useModelSelector({
     }
 
     const toGroupKey = (providerRaw: string) =>
-      providerRaw === "chrome"
-        ? "default"
-        : LOCAL_PROVIDERS.has(providerRaw)
-          ? "custom"
-          : providerRaw
+      providerRaw === "chrome" ? "default" : providerRaw
 
     const byLabel = (a: any, b: any) => {
       const aProvider = getProviderDisplayName(getModelProvider(a))

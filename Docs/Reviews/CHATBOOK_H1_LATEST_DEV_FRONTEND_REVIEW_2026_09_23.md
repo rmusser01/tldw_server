@@ -1,0 +1,11 @@
+# H1 latest-dev frontend integration review
+
+Tracking: TASK-13261.5. Independent review of the merged shared WebUI and extension chat paths against accepted H1 `ac76c4bc5b` and server `dev` `91e8bbf84c25d3afbba2bb53ed06280d44c35307`.
+
+| Priority | Finding | Resolution |
+|---|---|---|
+| P2 | A mounted selected-history controller with a null or unsupported capture could enter the ordinary regenerate helper, which truncated the transcript before the later submit rejection. | Reject any mounted selected-history controller before transcript mutation. Added an idle-controller regression. |
+| P2 | Controller-free durable local delete bypassed the H1 ownership guard. | Guard durable local deletion while preserving server/private deletion; include `temporaryChat` in callback dependencies. |
+| P2 | In the WebUI, concurrent mirror binds for the same verified owner could install the right local history and then make the slower bind report a false request-scope change. The Next.js development overlay blocked the native fork UI. | Accept the slower bind only when the current local history equals its exact resolved mirror, after abort and owner-lease checks. A focused regression failed before the fix and passed afterward. |
+
+The reviewer independently re-read the fixes, including the later mirror-race and browser wait changes, and found no remaining verified P1/P2 in this scope. The concurrent mirror fix preserves rejection on different-history navigation and does not republish the ID. The reviewer independently ran the hook suite (9/9); the root ran the hook and related H1 suites (91/91). The frontend merge owner ran 389 scoped Vitest tests across eight files, all passing, and found no diagnostics in its owned files in a full UI typecheck; that project-wide typecheck still reports pre-existing errors elsewhere. The WebUI Chromium rerun passed 3/3 without retries, followed by 5/5 failure/recovery flows. The rebuilt extension passed 5/5 full-page/sidepanel flows and 5/5 failure/recovery flows. The WebUI production build passed token sync and bundle budget after Turbopack's local worker was allowed to bind a port. This was a scoped static review and browser qualification, not a claim of complete Chatbook parity.

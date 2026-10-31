@@ -956,7 +956,21 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
     renderChatPane()
     fireEvent.click(screen.getByRole("button", { name: "Create branch" }))
 
-    expect(mockCreateChatBranch).toHaveBeenCalledWith(0)
+    expect(mockCreateChatBranch).toHaveBeenCalledWith("bot-branch")
+  })
+
+  it("preserves the clicked comparison row model and cluster", () => {
+    messageOptionState.messages = [{id: "compare-reply", isBot: true, name: "Assistant", message: "Choice", sources: [], messageType: "compare:reply", clusterId: "cluster", modelId: "provider:model"}]
+    renderChatPane()
+    fireEvent.click(screen.getByRole("button", {name: "Create branch"}))
+    expect(mockCreateChatBranch).toHaveBeenCalledWith("compare-reply", {model_id: "provider:model", cluster_id: "cluster"})
+  })
+
+  it("does not fork a rendered row without a canonical ID", () => {
+    messageOptionState.messages = [{id: "", isBot: true, name: "Assistant", message: "Missing", sources: []}]
+    renderChatPane()
+    fireEvent.click(screen.getByRole("button", {name: "Create branch"}))
+    expect(mockCreateChatBranch).not.toHaveBeenCalled()
   })
 
   it("switches assistant variants using swipe handlers", () => {

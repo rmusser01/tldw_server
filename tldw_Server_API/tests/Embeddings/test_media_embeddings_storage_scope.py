@@ -1,10 +1,12 @@
+from pathlib import Path
+
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.api.v1.endpoints import (
     embeddings_v5_production_enhanced,
     media_embeddings,
 )
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
 
 def test_user_embedding_config_prefers_resolved_test_db_base(monkeypatch, tmp_path):
@@ -22,6 +24,92 @@ def test_user_embedding_config_prefers_resolved_test_db_base(monkeypatch, tmp_pa
     config = media_embeddings._user_embedding_config()
 
     assert config["USER_DB_BASE_DIR"] == str(tmp_path / "isolated-user-dbs")
+
+
+def test_endpoint_chroma_manager_uses_canonical_resolved_base(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    resolved_base = tmp_path / "canonical-user-dbs"
+    created: dict[str, object] = {}
+
+    class FakeChromaDBManager:
+        def __init__(
+            self,
+            *,
+            user_id: str,
+            user_embedding_config: dict[str, object],
+        ) -> None:
+            created["user_id"] = user_id
+            created["user_embedding_config"] = user_embedding_config
+
+    monkeypatch.setattr(
+        embeddings_v5_production_enhanced,
+        "settings",
+        {
+            "EMBEDDING_CONFIG": {"provider": "test"},
+            "USER_DB_BASE_DIR": "Databases/user_databases",
+            "SINGLE_USER_FIXED_ID": "1",
+        },
+    )
+    monkeypatch.setattr(
+        DatabasePaths,
+        "get_user_db_base_dir",
+        staticmethod(lambda: resolved_base),
+    )
+    monkeypatch.setattr(
+        embeddings_v5_production_enhanced,
+        "ChromaDBManager",
+        FakeChromaDBManager,
+    )
+
+    user = type("User", (), {"id": 7})()
+    embeddings_v5_production_enhanced._chroma_manager_for_user(user)
+
+    assert created["user_id"] == "7"
+    config = created["user_embedding_config"]
+    assert isinstance(config, dict)
+    assert config["USER_DB_BASE_DIR"] == str(resolved_base)
+
+
+def test_endpoint_chroma_manager_fails_closed_when_base_resolution_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager_constructed = False
+
+    class FakeChromaDBManager:
+        def __init__(self, **_kwargs: object) -> None:
+            nonlocal manager_constructed
+            manager_constructed = True
+
+    def _fail_resolution() -> Path:
+        raise OSError("synthetic canonical path failure")
+
+    monkeypatch.setattr(
+        embeddings_v5_production_enhanced,
+        "settings",
+        {
+            "EMBEDDING_CONFIG": {},
+            "USER_DB_BASE_DIR": "Databases/stale-user-databases",
+            "SINGLE_USER_FIXED_ID": "1",
+        },
+    )
+    monkeypatch.setattr(
+        DatabasePaths,
+        "get_user_db_base_dir",
+        staticmethod(_fail_resolution),
+    )
+    monkeypatch.setattr(
+        embeddings_v5_production_enhanced,
+        "ChromaDBManager",
+        FakeChromaDBManager,
+    )
+
+    user = type("User", (), {"id": 7})()
+    with pytest.raises(OSError, match="synthetic canonical path failure"):
+        embeddings_v5_production_enhanced._chroma_manager_for_user(user)
+
+    assert manager_constructed is False
 
 
 @pytest.mark.asyncio

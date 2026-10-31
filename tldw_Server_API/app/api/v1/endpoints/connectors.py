@@ -1147,11 +1147,15 @@ async def provider_webhook_callback(
 
 
 @router.get("/jobs/{job_id}")
-async def get_job_status(job_id: int) -> dict[str, Any]:
+async def get_job_status(
+    job_id: int,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+) -> dict[str, Any]:
+    user_id = _get_user_id(principal)
     try:
         from tldw_Server_API.app.core.Jobs.manager import JobManager
         jm = JobManager()
-        job = jm.get_job(int(job_id))
+        job = jm.get_job(int(job_id), owner_user_id=str(user_id))
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
         # Trim payload if large

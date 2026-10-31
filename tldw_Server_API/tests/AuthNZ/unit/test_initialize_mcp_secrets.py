@@ -2,13 +2,23 @@
 Unit tests for MCP secret generation during AuthNZ initialization.
 """
 
+import asyncio
+import runpy
+import sys
 from pathlib import Path
 
+import pytest
+
+from tldw_Server_API.app.core.AuthNZ import initialize as initialize_module
 from tldw_Server_API.app.core.AuthNZ.initialize import (
+    check_environment,
     _detect_env_issues,
+    _ensure_env_file,
     _resolve_env_locations,
     generate_secure_keys,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_detect_env_issues_requires_mcp_secrets(monkeypatch):
@@ -30,6 +40,41 @@ def test_generate_secure_keys_includes_mcp_secrets():
     )
 
 
+def test_generate_secure_keys_does_not_print_secret_values_by_default(capsys):
+    keys = generate_secure_keys()
+    output = capsys.readouterr().out
+    assert all(value not in output for value in keys.values())
+
+
+def test_generate_secure_keys_allows_explicit_manual_key_display(capsys):
+    keys = generate_secure_keys(requested_keys={"MCP_JWT_SECRET"}, show_values=True)
+    output = capsys.readouterr().out
+    assert all(value in output for value in keys.values())
+
+
+def test_initialize_cli_failure_does_not_disclose_secret_text_or_traceback(monkeypatch, capsys):
+    secret = "private-generated-key-sentinel"
+    records = []
+
+    def fail_initialization(coroutine):
+        coroutine.close()
+        raise OSError(secret)
+
+    monkeypatch.setattr(asyncio, "run", fail_initialization)
+    monkeypatch.setattr(sys, "argv", ["initialize", "--non-interactive"])
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    sink = initialize_module.logger.add(records.append, format="{message}")
+    try:
+        with pytest.raises(SystemExit, match="1"):
+            runpy.run_path(initialize_module.__file__, run_name="__main__")
+    finally:
+        initialize_module.logger.remove(sink)
+
+    output = capsys.readouterr()
+    assert secret not in output.out + output.err + "".join(str(record) for record in records)
+    assert all(record.record["exception"] is None for record in records)
+
+
 def test_detect_env_issues_allows_quickstart_default_single_user_key(monkeypatch):
     monkeypatch.setenv("SINGLE_USER_API_KEY", "THIS-IS-A-SECURE-KEY-123-FAKE-KEY")
     env_values = {
@@ -49,3 +94,104 @@ def test_resolve_env_locations_prefers_config_files_env_path():
     assert env_candidates == [cfg_dir / ".env", cfg_dir / ".ENV"]
     assert cfg_dir.name == "Config_Files"
     assert isinstance(cfg_dir, Path)
+
+
+def test_authnz_initializer_excludes_canonical_env_in_exclusive_mode(
+    tmp_path: Path,
+    monkeypatch,
+):
+    sentinel = "TLDW_AUTH_INIT_EXCLUSIVE_SENTINEL"
+    project_root = tmp_path / "tldw_Server_API"
+    canonical_env = project_root / "Config_Files" / ".env"
+    explicit_env = tmp_path / "runtime.env"
+    canonical_env.parent.mkdir(parents=True)
+    canonical_env.write_text(f"{sentinel}=host-secret\n", encoding="utf-8")
+    explicit_env.write_text(
+        "AUTH_MODE=single_user\n"
+        f"SINGLE_USER_API_KEY={'a' * 32}\n"
+        f"MCP_JWT_SECRET={'b' * 32}\n"
+        f"MCP_API_KEY_SALT={'c' * 32}\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        initialize_module,
+        "__file__",
+        str(project_root / "app/core/AuthNZ/initialize.py"),
+    )
+    monkeypatch.setenv("TLDW_ENV_FILE", str(explicit_env))
+    monkeypatch.setenv("TLDW_ENV_FILE_EXCLUSIVE", "true")
+    monkeypatch.delenv(sentinel, raising=False)
+
+    result = check_environment()
+
+    assert result["env_path"] == explicit_env.resolve()  # nosec B101
+    assert sentinel not in initialize_module.os.environ  # nosec B101
+
+
+def test_authnz_initializer_does_not_create_missing_exclusive_env_file(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    missing_env = tmp_path / "missing.env"
+    monkeypatch.setenv("TLDW_ENV_FILE", str(missing_env))
+    monkeypatch.setenv("TLDW_ENV_FILE_EXCLUSIVE", "true")
+
+    with pytest.raises(FileNotFoundError, match="TLDW_ENV_FILE_EXCLUSIVE"):
+        _ensure_env_file()
+
+    assert not missing_env.exists()  # nosec B101
+
+
+def test_prompt_yes_no_uses_yes_default_when_stdin_is_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use and log the displayed yes default when stdin is closed."""
+    messages: list[str] = []
+
+    def _closed_stdin(_prompt: str) -> str:
+        """Simulate a launcher whose standard input is closed."""
+        raise EOFError
+
+    def _record_warning(message: str) -> None:
+        """Capture the non-interactive diagnostic sent through Loguru."""
+        messages.append(message)
+
+    monkeypatch.setattr("builtins.input", _closed_stdin)
+    monkeypatch.setattr(initialize_module.logger, "warning", _record_warning)
+
+    result = initialize_module._prompt_yes_no(
+        "Generate missing keys?",
+        default_yes=True,
+        non_interactive=False,
+    )
+
+    assert result is True
+    assert messages == ["No interactive input detected; using default: yes"]
+
+
+def test_prompt_yes_no_uses_no_default_when_stdin_is_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use and log the displayed no default when stdin is closed."""
+    messages: list[str] = []
+
+    def _closed_stdin(_prompt: str) -> str:
+        """Simulate a launcher whose standard input is closed."""
+        raise EOFError
+
+    def _record_warning(message: str) -> None:
+        """Capture the non-interactive diagnostic sent through Loguru."""
+        messages.append(message)
+
+    monkeypatch.setattr("builtins.input", _closed_stdin)
+    monkeypatch.setattr(initialize_module.logger, "warning", _record_warning)
+
+    result = initialize_module._prompt_yes_no(
+        "Generate replacement keys?",
+        default_yes=False,
+        non_interactive=False,
+    )
+
+    assert result is False
+    assert messages == ["No interactive input detected; using default: no"]

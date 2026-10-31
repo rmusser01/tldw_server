@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from fastapi.routing import APIRoute
 
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 from tldw_Server_API.tests.helpers.app_main_state import reload_app_main
 
@@ -254,8 +255,8 @@ def test_embeddings_batch_route_has_rbac_rate_limit_parity():
     app = reload_app_main().app
     single_route = None
     batch_route = None
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
+    for route in iter_served_routes(app.routes):
+        if not isinstance(route.route, APIRoute):
             continue
         if route.path == "/api/v1/embeddings" and "POST" in route.methods:
             single_route = route

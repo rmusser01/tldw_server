@@ -1,0 +1,17 @@
+{
+  "source_hashes": {
+    "tldw_Server_API/app/core/TTS/adapters/kokoro_adapter.py": "3631e3c40cf44c4cea22a3518eba34dd40f3e4eaaab9c0df960274cbddb0fbe0",
+    "tldw_Server_API/app/core/Persona/live_control.py": "c4cb85f41558e64981485353669c1b10d577f8d5912f674f5cf6700555fca2ee",
+    "tldw_Server_API/app/core/Persona/live_conversation.py": "9ac7d713c4390eaa107934a2c21475b6a13dd90a04081dcae1495000c313840f",
+    "tldw_Server_API/app/core/Persona/live_voice_runtime.py": "7190b44be0c5a6a6090a33622e2b510cf7a5f1ad0545d74104f8d53004189240",
+    "tldw_Server_API/app/api/v1/endpoints/persona.py": "6107443039677ce5cb32dd344223b59f01477845f9503adc75b5db5b7421f446"
+  },
+  "started_at": 1788649162.8983932,
+  "wrapper_pid": 39416,
+  "source_root": "/private/tmp/tldw-server-migu-buddy-uat",
+  "revision": "c1467cddd8e63d82fad8b930d725707a17d2b904",
+  "diff_sha256": "daf3b98604c5e4e3643ddef074da18387e82c7f7815032146917999cd4aed7c0",
+  "microphone_opened_by_launcher": false,
+  "pid": 39423,
+  "source_manifest_scope": "Changed production files only; full source manifest retained in scratch runset."
+}

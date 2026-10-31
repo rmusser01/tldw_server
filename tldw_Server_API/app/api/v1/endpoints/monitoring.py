@@ -15,7 +15,11 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission, get_auth_principal
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    get_auth_principal,
+    require_api_key_scope,
+)
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.monitoring_schemas import (
     AlertItem,
@@ -68,6 +72,7 @@ def _find_project_root(start: Path) -> Path | None:
         if (candidate / ".git").exists():
             return candidate
     return None
+
 
 def get_topic_monitoring_db() -> TopicMonitoringDB:
     """Return a TopicMonitoringDB instance for alert reads/updates."""
@@ -240,9 +245,7 @@ async def _emit_admin_audit_event(
 )
 async def list_watchlists() -> WatchlistListResponse:
     """List all configured topic monitoring watchlists."""
-    watchlists = await asyncio.to_thread(
-        lambda: get_topic_monitoring_service().list_watchlists()
-    )
+    watchlists = await asyncio.to_thread(lambda: get_topic_monitoring_service().list_watchlists())
     return WatchlistListResponse(watchlists=watchlists)
 
 
@@ -251,13 +254,12 @@ async def list_watchlists() -> WatchlistListResponse:
     response_model=WatchlistUpsertResponse,
     tags=["monitoring"],
     summary="Create or update a watchlist",
+    dependencies=[Depends(require_api_key_scope("write"))],
 )
 async def upsert_watchlist(payload: Watchlist) -> WatchlistUpsertResponse:
     """Create a new watchlist or update an existing one."""
     try:
-        wl = await asyncio.to_thread(
-            lambda: get_topic_monitoring_service().upsert_watchlist(payload)
-        )
+        wl = await asyncio.to_thread(lambda: get_topic_monitoring_service().upsert_watchlist(payload))
         return WatchlistUpsertResponse(watchlist=wl, status="ok")
     except ValueError as e:
         raise HTTPException(
@@ -280,12 +282,11 @@ async def upsert_watchlist(payload: Watchlist) -> WatchlistUpsertResponse:
     response_model=WatchlistDeleteResponse,
     tags=["monitoring"],
     summary="Delete a watchlist",
+    dependencies=[Depends(require_api_key_scope("write"))],
 )
 async def delete_watchlist(watchlist_id: str) -> WatchlistDeleteResponse:
     """Delete a watchlist by ID and return the deletion status."""
-    ok = await asyncio.to_thread(
-        lambda: get_topic_monitoring_service().delete_watchlist(watchlist_id)
-    )
+    ok = await asyncio.to_thread(lambda: get_topic_monitoring_service().delete_watchlist(watchlist_id))
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Watchlist not found or failed to delete")
     return WatchlistDeleteResponse(status="deleted", id=watchlist_id)
@@ -296,6 +297,7 @@ async def delete_watchlist(watchlist_id: str) -> WatchlistDeleteResponse:
     response_model=WatchlistsReloadResponse,
     tags=["monitoring"],
     summary="Reload watchlists from file",
+    dependencies=[Depends(require_api_key_scope("write"))],
 )
 async def reload_watchlists(
     delete_missing: bool = Query(False, description="Delete config-managed watchlists missing from file"),
@@ -355,9 +357,7 @@ async def list_alerts(
     )
     alert_identities = [build_alert_identity(row) for row in rows]
     overlay_rows = await repo.list_alert_states(alert_identities)
-    overlay_by_identity = {
-        str(row["alert_identity"]): row for row in overlay_rows if row.get("alert_identity")
-    }
+    overlay_by_identity = {str(row["alert_identity"]): row for row in overlay_rows if row.get("alert_identity")}
     items: list[AlertItem] = []
     for r in rows:
         normalized_row = _decode_alert_metadata(r)
@@ -384,6 +384,7 @@ async def list_alerts(
     response_model=MarkReadResponse,
     tags=["monitoring"],
     summary="Mark an alert as read",
+    dependencies=[Depends(require_api_key_scope("write"))],
 )
 async def mark_alert_read(
     alert_id: int,
@@ -423,6 +424,7 @@ async def mark_alert_read(
     response_model=MarkReadResponse,
     tags=["monitoring"],
     summary="Acknowledge an alert",
+    dependencies=[Depends(require_api_key_scope("write"))],
 )
 async def acknowledge_alert(
     alert_id: int,
@@ -467,6 +469,7 @@ async def acknowledge_alert(
     response_model=MarkReadResponse,
     tags=["monitoring"],
     summary="Dismiss an alert",
+    dependencies=[Depends(require_api_key_scope("write"))],
 )
 async def dismiss_alert(
     alert_id: int,
@@ -524,7 +527,10 @@ async def get_notifications_settings() -> NotificationSettings:
     response_model=NotificationSettings,
     tags=["monitoring"],
     summary="Update notification settings (runtime only)",
-    dependencies=[Depends(RequirePermission(SYSTEM_CONFIGURE))],
+    dependencies=[
+        Depends(RequirePermission(SYSTEM_CONFIGURE)),
+        Depends(require_api_key_scope("write")),
+    ],
 )
 async def update_notifications_settings(
     payload: NotificationSettingsUpdate,
@@ -554,7 +560,10 @@ async def update_notifications_settings(
     response_model=NotificationTestResponse,
     tags=["monitoring"],
     summary="Send a test notification (critical by default)",
-    dependencies=[Depends(RequirePermission(SYSTEM_CONFIGURE))],
+    dependencies=[
+        Depends(RequirePermission(SYSTEM_CONFIGURE)),
+        Depends(require_api_key_scope("write")),
+    ],
 )
 async def send_test_notification(payload: NotificationTestRequest) -> NotificationTestResponse:
     """Send a synthetic test notification using the current settings."""

@@ -107,6 +107,43 @@ describe("TldwApiClient media ingest contract", () => {
     )
   })
 
+  it("keeps request-scope controls out of multipart fields", async () => {
+    mocks.bgUpload.mockResolvedValue({ results: [] })
+    const controller = new AbortController()
+    const requestScope = {
+      config: {
+        serverUrl: "https://api.example.test",
+        authMode: "multi-user" as const,
+        authSource: "manual" as const
+      },
+      userId: 42
+    }
+
+    const client = new TldwApiClient()
+    await client.addMedia("https://example.com/article", {
+      perform_analysis: false,
+      requestScope,
+      signal: controller.signal
+    })
+
+    expect(mocks.bgUpload).toHaveBeenCalledWith({
+      path: "/api/v1/media/add",
+      method: "POST",
+      fields: {
+        media_type: "document",
+        perform_analysis: false,
+        urls: ["https://example.com/article"]
+      },
+      timeoutMs: undefined,
+      abortSignal: controller.signal,
+      headers: { "X-TLDW-Expected-User-ID": "42" },
+      servicePromptConfig: {
+        ...requestScope.config,
+        expectedUserId: 42
+      }
+    })
+  })
+
   it("submits media ingest jobs via multipart fields", async () => {
     mocks.bgUpload.mockResolvedValue({ batch_id: "batch-1", jobs: [] })
 

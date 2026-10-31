@@ -387,7 +387,7 @@ class TestMoonshotProvider:
                 model="moonshot-v1-8k",
             )
 
-        assert "Unauthorized" in str(exc_info.value)
+        assert str(exc_info.value) == "Authentication failed with the chat provider."
 
 
 # ---------------------------------------------------------------------------

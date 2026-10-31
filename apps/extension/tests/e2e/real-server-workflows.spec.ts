@@ -1,7 +1,16 @@
 import { test } from "@playwright/test"
-import { registerRealServerWorkflows, type CreateWorkflowDriver, withFeatures, ALL_FEATURE_FLAGS_ENABLED } from "../../../test-utils/real-server-workflows"
-import { launchWithBuiltExtensionOrSkip } from "./utils/real-server"
+
+import {
+  ALL_FEATURE_FLAGS_ENABLED,
+  type CreateWorkflowDriver,
+  REAL_SERVER_WORKFLOW_LOCAL_STORAGE_SEED,
+  createRealServerWorkflowTldwConfig,
+  createRealServerWorkflowStorageSeed,
+  registerRealServerWorkflows,
+  withFeatures
+} from "../../../test-utils/real-server-workflows"
 import { grantHostPermission } from "./utils/permissions"
+import { launchWithBuiltExtensionOrSkip } from "./utils/real-server"
 
 const shouldSkipHostPermission =
   process.env.TLDW_E2E_SKIP_HOST_PERMISSION !== "0" &&
@@ -20,24 +29,8 @@ const createExtensionDriver: CreateWorkflowDriver = async ({
   testRef
 }) => {
   const baseSeed = {
-    __tldw_first_run_complete: true,
-    tldwConfig: {
-      serverUrl,
-      authMode: "single-user",
-      apiKey
-    },
-    quickIngestInspectorIntroDismissed: true,
-    quickIngestOnboardingDismissed: true,
-    // Skip the "What would you like to do?" landing hub modal
-    // Note: chrome.storage handles serialization automatically - don't JSON.stringify
-    tldw_skip_landing_hub: true,
-    // Dismiss the workflow landing modal (shown on first run)
-    // Note: loadFromStorage in workflows.ts reads directly without JSON.parse
-    "tldw:workflow:landing-config": {
-      showOnFirstRun: true,
-      dismissedAt: Date.now(),
-      completedWorkflows: []
-    }
+    ...createRealServerWorkflowStorageSeed(),
+    tldwConfig: createRealServerWorkflowTldwConfig(serverUrl, apiKey)
   }
   const enabledFlags = Object.entries(featureFlags || {})
     .filter(([, value]) => value)
@@ -46,26 +39,18 @@ const createExtensionDriver: CreateWorkflowDriver = async ({
     ? withFeatures(enabledFlags, baseSeed)
     : baseSeed
 
-  // Seed localStorage for tutorials and tours that don't use chrome.storage
-  const seedLocalStorage = {
-    // Skip the playground tour ("Choose a Model", etc.)
-    "playground-tour-completed": "true",
-    // Skip all tutorial prompts via zustand persisted state
-    "tldw-tutorials": JSON.stringify({
-      state: {
-        completedTutorials: ["playground", "chat", "notes", "media", "settings"],
-        seenPromptPages: ["/", "/chat", "/notes", "/media", "/settings", "/playground", "/research-workspace"]
-      },
-      version: 0
-    })
-  }
-
   const launchResult = await launchWithBuiltExtensionOrSkip(testRef ?? test, {
     seedConfig,
-    seedLocalStorage
+    seedLocalStorage: REAL_SERVER_WORKFLOW_LOCAL_STORAGE_SEED
   })
-  const { context, page, extensionId, optionsUrl, sidepanelUrl, openSidepanel } =
-    launchResult
+  const {
+    context,
+    page,
+    extensionId,
+    optionsUrl,
+    sidepanelUrl,
+    openSidepanel
+  } = launchResult
 
   return {
     kind: "extension",

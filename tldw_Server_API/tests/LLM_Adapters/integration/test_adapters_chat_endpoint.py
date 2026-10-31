@@ -11,16 +11,15 @@ path while keeping CI deterministic and offline.
 """
 
 import os
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
-
 
 NETWORK_TESTS_ENABLED = os.getenv("ENABLE_NETWORK_TESTS", "").lower() in {"1", "true", "yes", "y", "on"}
 
 
 class _FakeResponse:
-    def __init__(self, status_code: int = 200, json_obj: Dict[str, Any] | None = None, lines: List[str] | None = None):
+    def __init__(self, status_code: int = 200, json_obj: dict[str, Any] | None = None, lines: list[str] | None = None):
         self.status_code = status_code
         self._json = json_obj or {
             "id": "cmpl-test",
@@ -34,7 +33,7 @@ class _FakeResponse:
         ]
 
     def raise_for_status(self):
-        if 400 <= self.status_code:
+        if self.status_code >= 400:
             import httpx
             req = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
             resp = httpx.Response(self.status_code, request=req)
@@ -44,8 +43,7 @@ class _FakeResponse:
         return self._json
 
     def iter_lines(self):
-        for line in self._lines:
-            yield line
+        yield from self._lines
 
 
 class _FakeStreamCtx:
@@ -114,12 +112,9 @@ def _real_key(provider: str) -> str | None:
 
 
 def test_chat_completions_non_streaming_via_adapter(monkeypatch, client, auth_token):
-    import tldw_Server_API.app.api.v1.endpoints.chat as chat_endpoint
-
     real = _real_key("openai") if NETWORK_TESTS_ENABLED else None
     if real:
-        # Use real key; do not monkeypatch provider call
-        chat_endpoint.API_KEYS = {**(chat_endpoint.API_KEYS or {}), "openai": real}
+        # Use real key; do not monkeypatch provider call.
         r = client.post_with_auth("/api/v1/chat/completions", auth_token, json=_payload(stream=False))
         assert r.status_code == 200, f"Body: {r.text}"
         data = r.json()
@@ -128,11 +123,7 @@ def test_chat_completions_non_streaming_via_adapter(monkeypatch, client, auth_to
         assert isinstance(data.get("choices"), list) and len(data["choices"]) >= 1
     else:
         # Provide a test key and mock adapter HTTP client to avoid network
-        chat_endpoint.API_KEYS = {
-            **(chat_endpoint.API_KEYS or {}),
-            "openai": "sk-adapter-test-key",
-            "openrouter": "sk-or-test",
-        }
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-adapter-test-key")
         import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as openai_mod
         import tldw_Server_API.app.core.LLM_Calls.providers.openrouter_adapter as openrouter_mod
         monkeypatch.setattr(openai_mod, "http_client_factory", lambda *a, **k: _FakeClient())
@@ -145,11 +136,8 @@ def test_chat_completions_non_streaming_via_adapter(monkeypatch, client, auth_to
 
 
 def test_chat_completions_streaming_via_adapter(monkeypatch, client, auth_token):
-    import tldw_Server_API.app.api.v1.endpoints.chat as chat_endpoint
-
     real = _real_key("openai") if NETWORK_TESTS_ENABLED else None
     if real:
-        chat_endpoint.API_KEYS = {**(chat_endpoint.API_KEYS or {}), "openai": real}
         from tldw_Server_API.tests._plugins.chat_fixtures import get_auth_headers
         headers = get_auth_headers(auth_token, getattr(client, "csrf_token", ""))
         with client.stream("POST", "/api/v1/chat/completions", json=_payload(stream=True), headers=headers) as resp:
@@ -161,11 +149,7 @@ def test_chat_completions_streaming_via_adapter(monkeypatch, client, auth_token)
             assert any(line.startswith("data: ") and "[DONE]" not in line for line in lines)
             assert sum(1 for line in lines if line.strip().lower() == "data: [done]") == 1
     else:
-        chat_endpoint.API_KEYS = {
-            **(chat_endpoint.API_KEYS or {}),
-            "openai": "sk-adapter-test-key",
-            "openrouter": "sk-or-test",
-        }
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-adapter-test-key")
         import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as openai_mod
         import tldw_Server_API.app.core.LLM_Calls.providers.openrouter_adapter as openrouter_mod
         monkeypatch.setattr(openai_mod, "http_client_factory", lambda *a, **k: _FakeClient())

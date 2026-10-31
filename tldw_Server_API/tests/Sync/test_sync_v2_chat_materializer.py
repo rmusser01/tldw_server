@@ -1,9 +1,12 @@
+"""Sync chat materialization and local authority boundary regressions."""
+
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, encode_assistant_startup
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
@@ -144,6 +147,52 @@ def _push_one(service: SyncV2Service, envelope: SyncEnvelopeCreate):
     )
 
 
+@pytest.mark.parametrize("key", ["assistant_startup", "assistant_startup_json"])
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("complete_identity", [False, True])
+def test_sync_forged_origin_cannot_create_or_restore_local_authority(
+    sync_service: SyncV2Service, chacha_db: CharactersRAGDB, key: str, existing: bool, complete_identity: bool,
+) -> None:
+    """Only the actual resulting binding decides whether a preexisting origin survives."""
+    origin = AssistantStartup(source="explicit")
+    forged = AssistantStartup(source="workspace_default", workspace_id="remote-forged-origin", workspace_version=777)
+    raw = None
+    if existing:
+        chacha_db.add_conversation(
+            {"id": "conv-1", "assistant_kind": "persona", "assistant_id": "sync-assistant"},
+            assistant_startup=origin,
+        )
+        raw = chacha_db.get_conversation_by_id("conv-1")["assistant_startup_json"]
+    payload = {"title": "Remote", key: forged.model_dump() if key == "assistant_startup" else encode_assistant_startup(forged)}
+    if complete_identity:
+        payload.update(assistant_kind="persona", assistant_id="sync-assistant")
+    result = _push_one(sync_service, _conversation_envelope(payload=payload))
+    assert len(result.accepted) == 1
+    row = chacha_db.get_conversation_by_id("conv-1")
+    assert row["title"] == "Remote"
+    assert row["assistant_startup_json"] == (raw if complete_identity else None)
+    assert row["assistant_id"] == ("sync-assistant" if complete_identity else "sync-v2")
+    replay = _push_one(sync_service, _conversation_envelope(payload=payload))
+    assert not replay.conflicts
+    assert chacha_db.get_conversation_by_id("conv-1")["assistant_startup_json"] == (raw if complete_identity else None)
+
+
+def _push_one_through_materializer_conflict(
+    service: SyncV2Service,
+    envelope: SyncEnvelopeCreate,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Store accepted stale history only for focused product-conflict tests."""
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            service.store.db,
+            "_require_expected_current_head",
+            lambda *args, **kwargs: None,
+        )
+        return _push_one(service, envelope)
+
+
 def test_chat_conversation_upsert_update_and_tombstone_project_to_chacha(
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
@@ -156,6 +205,7 @@ def test_chat_conversation_upsert_update_and_tombstone_project_to_chacha(
     assert created["title"] == "Planning chat"
     assert created["assistant_kind"] == "persona"
     assert created["assistant_id"] == "sync-assistant"
+    assert created["client_id"] == chacha_db.client_id
 
     base = sync_service.store.get_object_state("dataset-1", "chat.conversation", "conv-1")
     assert base is not None
@@ -216,6 +266,7 @@ def test_chat_conversation_upsert_update_and_tombstone_project_to_chacha(
 def test_stale_conversation_base_conflicts_without_overwriting_projection(
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _push_one(sync_service, _conversation_envelope())
     base = sync_service.store.get_object_state("dataset-1", "chat.conversation", "conv-1")
@@ -234,7 +285,7 @@ def test_stale_conversation_base_conflicts_without_overwriting_projection(
         ),
     )
 
-    stale = _push_one(
+    stale = _push_one_through_materializer_conflict(
         sync_service,
         _conversation_envelope(
             client_envelope_id="env-conv-stale",
@@ -246,6 +297,7 @@ def test_stale_conversation_base_conflicts_without_overwriting_projection(
             payload={"title": "Stale edit", "assistant_kind": "persona", "assistant_id": "sync-assistant"},
             payload_hash="sha256:conv-stale",
         ),
+        monkeypatch,
     )
 
     assert stale.accepted == []
@@ -261,6 +313,7 @@ def test_stale_conversation_base_conflicts_without_overwriting_projection(
 def test_chat_message_append_dedupes_same_payload_and_conflicts_divergent_stable_id(
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _push_one(sync_service, _conversation_envelope())
     first = _push_one(sync_service, _message_envelope())
@@ -275,18 +328,19 @@ def test_chat_message_append_dedupes_same_payload_and_conflicts_divergent_stable
     assert metadata["extra"]["sync_v2"]["stable_message_id"] == "msg-1"
     assert metadata["extra"]["sync_v2"]["payload_hash"] == "sha256:msg-v1"
 
-    duplicate = _push_one(
+    duplicate = _push_one_through_materializer_conflict(
         sync_service,
         _message_envelope(
             client_envelope_id="env-msg-duplicate",
             client_sequence=3,
         ),
+        monkeypatch,
     )
 
     assert [item.client_envelope_id for item in duplicate.accepted] == ["env-msg-duplicate"]
     assert chacha_db.count_messages_for_conversation("conv-1", include_deleted=True) == 1
 
-    divergent = _push_one(
+    divergent = _push_one_through_materializer_conflict(
         sync_service,
         _message_envelope(
             client_envelope_id="env-msg-divergent",
@@ -299,6 +353,7 @@ def test_chat_message_append_dedupes_same_payload_and_conflicts_divergent_stable
             },
             payload_hash="sha256:msg-v2",
         ),
+        monkeypatch,
     )
 
     assert divergent.accepted == []
@@ -319,6 +374,7 @@ def test_chat_message_append_dedupes_same_payload_and_conflicts_divergent_stable
 def test_divergent_message_conflicts_even_when_existing_metadata_is_missing(
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _push_one(sync_service, _conversation_envelope())
     _push_one(sync_service, _message_envelope())
@@ -326,7 +382,7 @@ def test_divergent_message_conflicts_even_when_existing_metadata_is_missing(
     assert base is not None
     chacha_db.execute_query("DELETE FROM message_metadata WHERE message_id = ?", ("msg-1",), commit=True)
 
-    divergent = _push_one(
+    divergent = _push_one_through_materializer_conflict(
         sync_service,
         _message_envelope(
             client_envelope_id="env-msg-divergent-missing-meta",
@@ -339,6 +395,7 @@ def test_divergent_message_conflicts_even_when_existing_metadata_is_missing(
             },
             payload_hash="sha256:msg-v2",
         ),
+        monkeypatch,
     )
 
     assert divergent.accepted == []
@@ -357,6 +414,7 @@ def test_message_metadata_write_failure_is_replayable_without_duplicate_rows(
     chacha_db: CharactersRAGDB,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Metadata failure rolls back the message; retry inserts exactly one complete row."""
     _push_one(sync_service, _conversation_envelope())
 
     monkeypatch.setattr(chacha_db.message_store, "set_message_metadata_extra", lambda *args, **kwargs: False)
@@ -376,7 +434,8 @@ def test_message_metadata_write_failure_is_replayable_without_duplicate_rows(
     )
     assert stored_envelope.apply_status == "failed"
     assert sync_service.store.get_object_state("dataset-1", "chat.message", "msg-1") is None
-    assert chacha_db.get_message_by_id("msg-1") is not None
+    assert chacha_db.get_message_by_id("msg-1") is None
+    assert chacha_db.count_messages_for_conversation("conv-1", include_deleted=True) == 0
     assert chacha_db.get_message_metadata("msg-1") is None
 
     retry = _push_one(sync_service, _message_envelope())
@@ -449,6 +508,11 @@ def test_retry_after_failed_message_conflict_status_keeps_conflict(
     )
 
     monkeypatch.setattr(sync_service.store, "mark_envelope_apply_status", _fail_first_conflict_mark)
+    monkeypatch.setattr(
+        sync_service.store.db,
+        "_require_expected_current_head",
+        lambda *args, **kwargs: None,
+    )
     first_attempt = _push_one(sync_service, divergent)
     monkeypatch.undo()
 
@@ -514,11 +578,12 @@ def test_message_tombstone_soft_deletes_message_without_deleting_conversation(
 def test_message_tombstone_requires_matching_base_state(
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _push_one(sync_service, _conversation_envelope())
     _push_one(sync_service, _message_envelope())
 
-    result = _push_one(
+    result = _push_one_through_materializer_conflict(
         sync_service,
         _message_envelope(
             client_envelope_id="env-msg-delete-missing-base",
@@ -529,6 +594,7 @@ def test_message_tombstone_requires_matching_base_state(
             payload_hash="sha256:msg-delete",
             deleted=True,
         ),
+        monkeypatch,
     )
 
     assert result.accepted == []
@@ -544,6 +610,7 @@ def test_message_tombstone_requires_matching_base_state(
 def test_message_tombstone_deletes_canonical_projection_when_conflict_sorts_first(
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _push_one(sync_service, _conversation_envelope())
     _push_one(
@@ -559,7 +626,7 @@ def test_message_tombstone_deletes_canonical_projection_when_conflict_sorts_firs
     )
     base = sync_service.store.get_object_state("dataset-1", "chat.message", "msg-1")
     assert base is not None
-    _push_one(
+    _push_one_through_materializer_conflict(
         sync_service,
         _message_envelope(
             client_envelope_id="env-msg-divergent-earlier",
@@ -572,10 +639,18 @@ def test_message_tombstone_deletes_canonical_projection_when_conflict_sorts_firs
             },
             payload_hash="sha256:msg-v2",
         ),
+        monkeypatch,
     )
     versions_before = chacha_db.get_messages_by_sync_stable_id("msg-1", include_deleted=True)
     assert len(versions_before) == 2
     assert versions_before[0]["content"] == "Earlier conflicting message"
+    conflict = sync_service.store.list_conflicts("dataset-1")[0]
+    sync_service.resolve_conflict(
+        user_id="user-1",
+        conflict_id=conflict.conflict_id,
+        action="skip",
+        resolved_by_device_id="device-1",
+    )
 
     tombstone = _push_one(
         sync_service,
@@ -683,3 +758,17 @@ def test_chat_materialization_conflict_is_hidden_from_normal_pull(
         "env-conv-create",
         "env-msg-create",
     ]
+
+
+def test_sync_admission_shaped_payload_never_creates_native_authority(sync_service, chacha_db):
+    """Actual v2 materialization cannot manufacture local history acceptance."""
+    _push_one(sync_service, _conversation_envelope())
+    envelope = _message_envelope()
+    forged = {"version": 1, "interpretation": {"kind": "parent_graph_v1"}, "admission": {"selection_digest": "forged"}}
+    payload = {**envelope.payload, "history_admission_json": forged,
+               "metadata_extra": {"tldw_history_admission_v1": forged}}
+    _push_one(sync_service, _message_envelope(payload=payload))
+    with chacha_db.transaction() as conn:
+        rows = conn.execute("SELECT history_admission_json FROM messages WHERE conversation_id = 'conv-1'").fetchall()
+    assert rows and all(row["history_admission_json"] is None for row in rows)
+    assert chacha_db.get_conversation_history_snapshot("conv-1", owner_client_id=chacha_db.client_id).nodes

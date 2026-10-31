@@ -10,6 +10,14 @@ import {
 } from "@/services/prompts-api"
 import { PromptEditorPreview } from "./PromptEditorPreview"
 import { StructuredPromptEditor } from "./Structured/StructuredPromptEditor"
+import { SingleFieldRecipeEditor } from "@/components/Common/PromptAssist/recipes/SingleFieldRecipeEditor"
+import type {
+  RecipeSource,
+  RecipeTarget,
+  SavedRecipeSource,
+  SingleTextRecipeDefinition
+} from "@/components/Common/PromptAssist/recipes/types"
+import { parseRecipeDefinition } from "@/components/Common/PromptAssist/recipes/recipe-editor-state"
 import { useFormDraft, formatDraftAge } from "@/hooks/useFormDraft"
 import {
   estimatePromptTokens,
@@ -22,6 +30,10 @@ import {
   renderStructuredPromptLegacySnapshot,
   stableSerializePromptSnapshot
 } from "./structured-prompt-utils"
+import {
+  classifyPromptRecipe,
+  cloneSavedRecipeSource
+} from "./prompt-recipe-library"
 
 const { TextArea } = Input
 
@@ -30,9 +42,20 @@ type PromptFullPageEditorProps = {
   onClose: () => void
   mode: "create" | "edit"
   initialValues?: Record<string, any> | null
-  onSubmit: (values: any) => void
+  onSubmit: (values: any) => boolean | void | Promise<boolean | void>
   isLoading: boolean
   allTags: string[]
+  savedRecipes?: readonly SavedRecipeSource[]
+  recipePersistenceAvailable?: boolean
+  recipePersistenceUnavailableReason?: string
+  onApplyRecipe?: (compiledText: string, target: RecipeTarget) => void
+  onSaveRecipeAsNew?: (
+    definition: SingleTextRecipeDefinition
+  ) => void | Promise<void>
+  onUpdateRecipe?: (
+    savedSourceId: string,
+    definition: SingleTextRecipeDefinition
+  ) => void | Promise<void>
 }
 
 const DRAFT_KEY_PREFIX = "tldw-prompt-fullpage-draft-"
@@ -78,10 +101,17 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
   onSubmit,
   isLoading,
   allTags,
+  savedRecipes = [],
+  recipePersistenceAvailable,
+  recipePersistenceUnavailableReason,
+  onApplyRecipe,
+  onSaveRecipeAsNew,
+  onUpdateRecipe,
 }) => {
   const { t } = useTranslation(["settings", "common"])
   const [form] = Form.useForm()
   const [dirty, setDirty] = useState(false)
+  const saveInFlightRef = React.useRef(false)
   const [showMobilePreview, setShowMobilePreview] = useState(false)
   const [promptFormat, setPromptFormat] = useState<PromptFormat>("legacy")
   const [structuredPromptDefinition, setStructuredPromptDefinition] =
@@ -104,6 +134,31 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
     () => normalizePromptDraftSnapshot(initialValues),
     [initialValues]
   )
+  const recipeClassification = React.useMemo(
+    () => classifyPromptRecipe(initialValues),
+    [initialValues]
+  )
+  const initialRecipeSource = React.useMemo(() => {
+    if (recipeClassification.kind !== "recipe") return undefined
+    const supplied = initialValues?.recipeSource as RecipeSource | undefined
+    if (supplied?.source_kind === "built_in") {
+      return structuredClone(supplied)
+    }
+    return cloneSavedRecipeSource(initialValues)
+  }, [initialValues, recipeClassification])
+  const targetSavedRecipes = React.useMemo(() => {
+    if (recipeClassification.kind !== "recipe") return []
+    return savedRecipes.filter((source) => {
+      try {
+        return (
+          parseRecipeDefinition(source.definition).assembly_config
+            .target_role === recipeClassification.target
+        )
+      } catch {
+        return false
+      }
+    })
+  }, [recipeClassification, savedRecipes])
 
   useEffect(() => {
     if (!open) return
@@ -191,7 +246,6 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
     const currentSnapshot = normalizePromptDraftSnapshot(form.getFieldsValue(true))
     const hasDirtyValues =
       dirty ||
-      form.isFieldsTouched(true) ||
       stableSerializePromptSnapshot(currentSnapshot) !==
         stableSerializePromptSnapshot(initialSnapshot)
 
@@ -213,7 +267,7 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault()
-        form.submit()
+        if (!isLoading && !saveInFlightRef.current) form.submit()
       }
       if (e.key === "Escape") {
         e.preventDefault()
@@ -222,9 +276,11 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
     }
     window.addEventListener("keydown", handler)
     return () => window.removeEventListener("keydown", handler)
-  }, [open, form, handleRequestClose])
+  }, [open, form, handleRequestClose, isLoading])
 
-  const handleFinish = (values: any) => {
+  const handleFinish = async (values: any) => {
+    if (isLoading || saveInFlightRef.current) return
+    saveInFlightRef.current = true
     const keywords = Array.isArray(values.keywords)
       ? values.keywords
           .map((k: string) => (typeof k === "string" ? k.trim() : ""))
@@ -236,25 +292,33 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
         ? renderStructuredPromptLegacySnapshot(structuredPromptDefinition)
         : null
 
-    onSubmit({
-      ...values,
-      promptFormat,
-      promptSchemaVersion: promptFormat === "structured" ? 1 : null,
-      structuredPromptDefinition:
-        promptFormat === "structured" ? structuredPromptDefinition : null,
-      keywords,
-      name: (values.name || "").trim(),
-      author: (values.author || "").trim(),
-      details: (values.details || "").trim(),
-      system_prompt: (
-        structuredSnapshot?.systemPrompt ?? values.system_prompt ?? ""
-      ).trim(),
-      user_prompt: (
-        structuredSnapshot?.userPrompt ?? values.user_prompt ?? ""
-      ).trim(),
-    })
-    clearDraft()
-    setDirty(false)
+    try {
+      const accepted = await onSubmit({
+        ...values,
+        promptFormat,
+        promptSchemaVersion: promptFormat === "structured" ? 1 : null,
+        structuredPromptDefinition:
+          promptFormat === "structured" ? structuredPromptDefinition : null,
+        keywords,
+        name: (values.name || "").trim(),
+        author: (values.author || "").trim(),
+        details: (values.details || "").trim(),
+        system_prompt: (
+          structuredSnapshot?.systemPrompt ?? values.system_prompt ?? ""
+        ).trim(),
+        user_prompt: (
+          structuredSnapshot?.userPrompt ?? values.user_prompt ?? ""
+        ).trim(),
+      })
+      if (accepted === false) return
+      clearDraft()
+      setDirty(false)
+    } catch {
+      // The mutation reports the error; retain the draft and navigation guard.
+      setDirty(true)
+    } finally {
+      saveInFlightRef.current = false
+    }
   }
 
   const handleConvertToStructured = useCallback(() => {
@@ -305,9 +369,11 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
   const structuredLegacySnapshot = React.useMemo(
     () =>
       promptFormat === "structured"
-        ? renderStructuredPromptLegacySnapshot(structuredPromptDefinition)
+        ? recipeClassification.kind === "ordinary"
+          ? renderStructuredPromptLegacySnapshot(structuredPromptDefinition)
+          : null
         : null,
-    [promptFormat, structuredPromptDefinition]
+    [promptFormat, recipeClassification.kind, structuredPromptDefinition]
   )
   const previewSystemPrompt =
     structuredLegacySnapshot?.systemPrompt || systemPromptValue
@@ -341,9 +407,88 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
         : "Edit Prompt"
       : "New Prompt"
 
+  if (recipeClassification.kind === "quarantined_recipe") {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex flex-col bg-bg"
+        data-testid="prompt-full-page-editor"
+      >
+        <div className="flex items-center border-b border-border px-4 py-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex min-h-11 items-center gap-1 rounded px-2 py-1 text-sm text-text-muted hover:bg-surface2 hover:text-text"
+          >
+            <ArrowLeft className="size-4" />
+            Back to Prompts
+          </button>
+        </div>
+        <div className="mx-auto w-full max-w-2xl p-6">
+          <Alert
+            variant="error"
+            title={t("managePrompts.recipe.unavailableTitle", {
+              defaultValue: "Recipe unavailable"
+            })}
+          >
+            {t("managePrompts.recipe.unavailableDescription", {
+              defaultValue:
+                "This saved recipe cannot be opened safely. Its structured definition is invalid or uses an unsupported version."
+            })}
+          </Alert>
+        </div>
+      </div>
+    )
+  }
+
+  if (recipeClassification.kind === "recipe" && initialRecipeSource) {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex flex-col bg-bg"
+        data-testid="prompt-full-page-editor"
+      >
+        <div className="flex items-center justify-between border-b border-border px-4 py-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex min-h-11 items-center gap-1 rounded px-2 py-1 text-sm text-text-muted hover:bg-surface2 hover:text-text"
+          >
+            <ArrowLeft className="size-4" />
+            Back to Prompts
+          </button>
+          <span className="truncate text-sm font-medium text-text">{title}</span>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+          <div className="mx-auto max-w-6xl">
+            <SingleFieldRecipeEditor
+              target={
+                recipeClassification.target === "system"
+                  ? "system"
+                  : "user_message"
+              }
+              initialSource={initialRecipeSource}
+              savedRecipes={targetSavedRecipes}
+              persistenceAvailable={recipePersistenceAvailable}
+              persistenceUnavailableReason={recipePersistenceUnavailableReason}
+              onApply={(compiledText) =>
+                onApplyRecipe?.(
+                  compiledText,
+                  recipeClassification.target === "system"
+                    ? "system"
+                    : "user_message"
+                )
+              }
+              onSaveAsNew={onSaveRecipeAsNew}
+              onUpdate={onUpdateRecipe}
+            />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-background"
+      className="fixed inset-0 z-50 flex flex-col bg-bg"
       data-testid="prompt-full-page-editor"
     >
       <div className="flex items-center justify-between border-b border-border px-4 py-2">
@@ -387,9 +532,10 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
       </div>
 
       <div className="flex flex-1 min-h-0">
-        <div className="flex-[55] overflow-y-auto border-r border-border p-6">
+        <fieldset disabled={isLoading} className="min-w-0 flex-[55] overflow-y-auto border-r border-border p-6">
           <Form
             form={form}
+            disabled={isLoading}
             layout="vertical"
             onFinish={handleFinish}
             onValuesChange={() => setDirty(true)}
@@ -537,7 +683,7 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
               ]}
             />
           </Form>
-        </div>
+        </fieldset>
 
         <div className="hidden flex-[45] md:flex flex-col bg-surface">
           <PromptEditorPreview
@@ -556,7 +702,7 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
           {showMobilePreview ? "Editor" : "Preview"}
         </button>
         {showMobilePreview && (
-          <div className="fixed inset-0 z-40 bg-background pt-12">
+          <div className="fixed inset-0 z-40 bg-bg pt-12">
             <PromptEditorPreview
               systemPrompt={previewSystemPrompt}
               userPrompt={previewUserPrompt}

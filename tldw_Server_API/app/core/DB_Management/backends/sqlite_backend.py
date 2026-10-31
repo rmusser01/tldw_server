@@ -6,6 +6,7 @@ interface for SQLite databases, maintaining compatibility with the
 existing codebase while enabling multi-backend support.
 """
 
+import hashlib
 import re
 import sqlite3
 import threading
@@ -19,16 +20,22 @@ from typing import Any, Optional, Union
 
 from loguru import logger as _loguru_logger
 
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
+from tldw_Server_API.app.core.Utils.backoff import is_sqlite_locked_error
+
 from ..sqlite_policy import configure_sqlite_connection
 from .base import (
     BackendFeatures,
     BackendType,
     ConnectionPool,
+    ConstraintViolationError,
     DatabaseBackend,
     DatabaseConfig,
     DatabaseError,
     FTSQuery,
     QueryResult,
+    TransientContentionError,
+    UniqueConstraintError,
 )
 from .fts_translator import FTSQueryTranslator
 
@@ -163,42 +170,78 @@ class SQLiteConnectionPool(ConnectionPool):
             cache_size=-2000,
         )
 
+        def history_sha256(value: Any) -> str | None:
+            if value is None:
+                return None
+            return hashlib.sha256(value.encode("utf-8") if isinstance(value, str) else bytes(value)).hexdigest()
+
+        # Register once on the real handle before any statement can use it.
+        conn.create_function("h1_sha256", 1, history_sha256, deterministic=True)
         return conn
 
     def return_connection(self, connection: sqlite3.Connection) -> None:
         """SQLite connections are thread-local, no action needed."""
         pass
 
-    def clear_thread_local_connection(self) -> None:
-        """Clear the current thread's connection reference from the pool.
+    def invalidate_connection(self, connection: sqlite3.Connection) -> None:
+        """Close a failed handle and remove its matching current-thread cache entry.
 
-        This provides a safe way for higher layers to invalidate a broken
-        connection without reaching into private attributes.
+        A different current handle remains cached and usable. Matching cached
+        handles use ``clear_thread_local_connection()``: ordinary close failures
+        are logged by exception type, and the handle is detached to prevent reuse
+        even if the underlying resource could not be closed.
+
+        Args:
+            connection: SQLite handle borrowed on the calling thread, or an
+                uncached handle owned by the caller. Do not reuse it afterward.
+
+        Returns:
+            None.
+
+        Raises:
+            Exception: Close errors for uncached handles propagate unchanged.
+            BaseException: Process-control exceptions during cached close, such
+                as KeyboardInterrupt, propagate after the handle is detached.
+        """
+        with self._lock:
+            if self._connections.get(threading.get_ident()) is connection:
+                self.clear_thread_local_connection()
+            else:
+                connection.close()
+
+    def clear_thread_local_connection(self) -> None:
+        """Close and detach the current thread's cached connection.
+
+        Ordinary exceptions from close are logged with connection/thread context
+        and exception type. The failed handle is still detached so subsequent borrows
+        create a fresh connection; its underlying resource may remain open. This
+        method does not retry or reuse that handle.
+
+        Returns:
+            None.
+
+        Raises:
+            BaseException: Process-control exceptions during close, such as
+                KeyboardInterrupt, propagate after the handle is detached.
         """
         thread_id = threading.get_ident()
         with self._lock:
             try:
                 conn = self._connections.get(thread_id)
                 if conn:
-                    with suppress(OSError, RuntimeError, sqlite3.Error):
+                    try:
                         conn.close()
-                self._connections[thread_id] = None
-            except (AttributeError, KeyError, RuntimeError, TypeError):
-                pass
-            with suppress(AttributeError, KeyError, RuntimeError, TypeError):
+                    except Exception as exc:  # noqa: BLE001 - detach after any ordinary close failure
+                        logger.error(  # noqa: TRY400 - privacy boundary excludes exception details
+                            "Failed to close rejected SQLite connection {connection_id} "
+                            "on thread {thread_id}; detaching it to prevent reuse (error_type={error_type})",
+                            connection_id=id(conn), thread_id=thread_id,
+                            error_type=exception_type_for_log(exc),
+                        )
+            finally:
+                self._connections.pop(thread_id, None)
                 self._thread_refs.pop(thread_id, None)
-            try:
-                if hasattr(self._local, 'connection'):
-                    self._local.connection = None
-            except (AttributeError, RuntimeError, TypeError):
-                pass
-            # Prune stale entries to avoid unbounded growth
-            try:
-                stale_keys = [tid for tid, conn in self._connections.items() if conn is None]
-                for tid in stale_keys:
-                    self._connections.pop(tid, None)
-            except (AttributeError, RuntimeError, TypeError):
-                pass
+                self._local.connection = None
 
     @contextmanager
     def connection(self) -> Generator[sqlite3.Connection, None, None]:
@@ -207,19 +250,35 @@ class SQLiteConnectionPool(ConnectionPool):
         try:
             yield conn
         except Exception as e:
-            logger.exception(f"Error in connection context: {e}")
+            logger.error("SQLite connection context failed (error_type={})", exception_type_for_log(e))  # noqa: TRY400 - no exception data
             raise
 
     def close_all(self) -> None:
-        """Close all connections in the pool."""
+        """Close the pool and the connections no other live thread is using.
+
+        Connections are thread-local and opened with ``check_same_thread=False``,
+        which does not serialize them: closing one from here while its owning
+        thread is mid-statement segfaults the interpreter (CI shutdown did this
+        to a background loop). This thread's connection and those of exited
+        threads close now; another live thread's connection is released from the
+        pool and closes when that thread drops it. New checkouts are refused.
+        """
+        current_thread_id = threading.get_ident()
         with self._lock:
             self._closed = True
-            for conn in self._connections.values():
-                if conn:
-                    try:
-                        conn.close()
-                    except (OSError, RuntimeError, sqlite3.Error) as e:
-                        logger.exception(f"Error closing connection: {e}")
+            for thread_id, conn in self._connections.items():
+                if not conn:
+                    continue
+                owner_ref = self._thread_refs.get(thread_id)
+                owner = owner_ref() if owner_ref is not None else None
+                if thread_id != current_thread_id and owner is not None and owner.is_alive():
+                    continue
+                try:
+                    conn.close()
+                except (OSError, RuntimeError, sqlite3.Error) as e:
+                    logger.error(  # noqa: TRY400 - no exception data
+                        "SQLite connection close failed (error_type={})", exception_type_for_log(e)
+                    )
             self._connections.clear()
             self._thread_refs.clear()
 
@@ -318,22 +377,46 @@ class SQLiteBackend(DatabaseBackend):
         conn = connection or self.get_pool().get_connection()
 
         started = False
+
+        def _rollback() -> None:
+            if not started or not getattr(conn, "in_transaction", False):
+                return
+            try:
+                conn.execute("ROLLBACK")
+            except BaseException as rollback_exc:  # noqa: BLE001
+                logger.bind(exception_type=type(rollback_exc).__name__).warning(
+                    "SQLite transaction rollback failed"
+                )
+
         try:
             if not getattr(conn, "in_transaction", False):
                 conn.execute("BEGIN IMMEDIATE")
                 started = True
+        except BaseException as exc:  # noqa: BLE001
+            if not isinstance(exc, Exception):
+                raise
+            logger.bind(exception_type=type(exc).__name__).error(
+                "SQLite transaction begin failed"
+            )
+            raise DatabaseError("SQLite transaction begin failed") from None
+        try:
             yield conn
-            if started and getattr(conn, "in_transaction", False):
-                conn.execute("COMMIT")
-        except Exception as e:
-            if started and getattr(conn, "in_transaction", False):
-                try:
-                    conn.execute("ROLLBACK")
-                except sqlite3.OperationalError:
-                    # Best effort; ignore if no active transaction
-                    pass
-            logger.exception(f"Transaction failed: {e}")
+        except BaseException:  # noqa: BLE001
+            _rollback()
             raise
+        if started and getattr(conn, "in_transaction", False):
+            try:
+                conn.execute("COMMIT")
+            except BaseException as exc:  # noqa: BLE001
+                _rollback()
+                if not isinstance(exc, Exception):
+                    raise
+                logger.bind(exception_type=type(exc).__name__).error(
+                    "SQLite transaction commit failed"
+                )
+                raise DatabaseError(
+                    "SQLite transaction commit failed"
+                ) from None
 
     def get_pool(self) -> ConnectionPool:
         """Get or create the connection pool."""
@@ -353,10 +436,16 @@ class SQLiteBackend(DatabaseBackend):
         self,
         query: str,
         params: Optional[Union[tuple, dict]] = None,
-        connection: Optional[sqlite3.Connection] = None
+        connection: Optional[sqlite3.Connection] = None,
+        *,
+        log_errors: bool = True,
     ) -> QueryResult:
         """Execute a query and return results."""
         start_time = time.time()
+        redacted_failure = False
+        constraint_failure = False
+        unique_failure = False
+        contention_failure = False
 
         conn = connection or self.get_pool().get_connection()
 
@@ -386,8 +475,28 @@ class SQLiteBackend(DatabaseBackend):
             )
 
         except sqlite3.Error as e:
-            logger.exception(f"Query execution failed: {e}")
-            raise DatabaseError(f"SQLite error: {e}") from e
+            logger.bind(exception_type=type(e).__name__).error(
+                "SQLite query execution failed"
+            )
+            redacted_failure = True
+            # The CLASS of failure only. sqlite3.IntegrityError covers CHECK, NOT NULL,
+            # FOREIGN KEY and UNIQUE. The raise stays outside this except block so the
+            # driver exception is never chained; the message is unchanged.
+            constraint_failure = isinstance(e, sqlite3.IntegrityError)
+            unique_failure = (
+                constraint_failure
+                and getattr(e, "sqlite_errorcode", None) == sqlite3.SQLITE_CONSTRAINT_UNIQUE
+            )
+            contention_failure = is_sqlite_locked_error(e)
+
+        if redacted_failure:
+            if unique_failure:
+                raise UniqueConstraintError("SQLite query execution failed")
+            if constraint_failure:
+                raise ConstraintViolationError("SQLite query execution failed")
+            if contention_failure:
+                raise TransientContentionError("SQLite query execution failed")
+            raise DatabaseError("SQLite query execution failed")
 
     def execute_many(
         self,
@@ -415,8 +524,10 @@ class SQLiteBackend(DatabaseBackend):
             )
 
         except sqlite3.Error as e:
-            logger.exception(f"Batch execution failed: {e}")
-            raise DatabaseError(f"SQLite error: {e}") from e
+            logger.bind(exception_type=type(e).__name__).error(
+                "SQLite batch execution failed"
+            )
+            raise DatabaseError("SQLite batch execution failed") from None
 
     def create_tables(self, schema: str, connection: Optional[sqlite3.Connection] = None) -> None:
         """Create tables from a schema definition."""
@@ -426,7 +537,7 @@ class SQLiteBackend(DatabaseBackend):
             # Execute the schema as a script
             conn.executescript(schema)
         except sqlite3.Error as e:
-            logger.exception(f"Schema creation failed: {e}")
+            logger.error("SQLite schema creation failed (error_type={})", exception_type_for_log(e))  # noqa: TRY400 - privacy boundary excludes exception details
             raise DatabaseError(f"Failed to create schema: {e}") from e
 
     def table_exists(self, table_name: str, connection: Optional[sqlite3.Connection] = None) -> bool:

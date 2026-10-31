@@ -1,0 +1,31 @@
+
+ RUN  v4.0.18 /private/tmp/tldw-server-buddy-persona-ux/apps/packages/ui
+
+ ❯ src/components/Common/PersonaBuddy/__tests__/buddy-conversation-labels.test.ts (3 tests | 1 failed) 39ms
+     × treats nullable legacy timestamps as missing instead of January 1970 34ms
+     ✓ leaves unique titles unchanged and localizes duplicate creation times 2ms
+     ✓ uses stable IDs for missing, invalid or identical timestamps, including prefix collisions 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Common/PersonaBuddy/__tests__/buddy-conversation-labels.test.ts > Buddy conversation labels > treats nullable legacy timestamps as missing instead of January 1970
+AssertionError: expected 'Dec 31, 1969, 04:00:00 PM — Legacy' to be 'one — Legacy' // Object.is equality
+
+Expected: "one — Legacy"
+Received: "Dec 31, 1969, 04:00:00 PM — Legacy"
+
+ ❯ src/components/Common/PersonaBuddy/__tests__/buddy-conversation-labels.test.ts:10:31
+      8|       { id: "two", title: "Legacy" }
+      9|     ])
+     10|     expect(labels.get("one")).toBe("one — Legacy")
+       |                               ^
+     11|     expect(labels.get("two")).toBe("two — Legacy")
+     12|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  23:29:02
+   Duration  1.39s (transform 67ms, setup 334ms, import 24ms, tests 39ms, environment 877ms)

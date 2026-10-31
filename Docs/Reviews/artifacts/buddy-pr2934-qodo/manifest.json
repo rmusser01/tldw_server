@@ -1,0 +1,133 @@
+{
+  "reviewed_head": "3b73d70f0f5dde12e4831c3441dccf656f64f2e6",
+  "uncommitted_review_fixes": true,
+  "scope": "PR2934 Qodo findings1-7 and OpenAPI drift repair; original qualification receipts remain historical.",
+  "files": {
+    "ui-tests.log": {
+      "raw_path": "/private/tmp/server-pr2934-ui-final.log",
+      "raw_sha256": "a077204365b6ef804fa0299c9724910f0cef90a42037d2eab52cb363e150aa80",
+      "retained_sha256": "30c6cad3bf1c020dc22a310cf87387a557fe49e10c6322d73af1bc25b79447c6"
+    },
+    "ui-red.log": {
+      "raw_path": "/private/tmp/tldw-task13229-qodo-ui-red.log",
+      "raw_sha256": "81d83029de9027a6b8eee225555be6b04d9bf2d4c895088f214692a6061b47e0",
+      "retained_sha256": "f77d531eb636657bd9218d0dc7d191f184b36e4b1cde6d5e7afc4f479773ee9d"
+    },
+    "ui-lint.json": {
+      "raw_path": "/private/tmp/tldw-task13229-qodo-ui-lint-configured-summary.log",
+      "raw_sha256": "bd4fea506fc9ba1995af2801d3c8354a1b9f2d5b152a034f84eb1ba3b33037a8",
+      "retained_sha256": "bd4fea506fc9ba1995af2801d3c8354a1b9f2d5b152a034f84eb1ba3b33037a8"
+    },
+    "ui-typecheck.log": {
+      "raw_path": "/private/tmp/tldw-task13229-qodo-ui-typecheck-final.log",
+      "raw_sha256": "5a20ca49db671b44fc4dcc3eadba14484f3119239705d5531971a9dba134c552",
+      "retained_sha256": "5a20ca49db671b44fc4dcc3eadba14484f3119239705d5531971a9dba134c552"
+    },
+    "ui-format.log": {
+      "raw_path": "/private/tmp/tldw-task13229-qodo-ui-format-final.log",
+      "raw_sha256": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20",
+      "retained_sha256": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20"
+    },
+    "backend-tests.log": {
+      "raw_path": "/private/tmp/server-pr2934-backend-after.log",
+      "raw_sha256": "b82e85968cc923989a1a2d6ba7cb5edbad055007cce9db027ad2918e6e7b3804",
+      "retained_sha256": "b82e85968cc923989a1a2d6ba7cb5edbad055007cce9db027ad2918e6e7b3804"
+    },
+    "persona-compatibility.log": {
+      "raw_path": "/private/tmp/server-pr2934-persona-compatibility.log",
+      "raw_sha256": "6c2451951422ae4694df76f924064862cf6827c59ed9bdec68a996fd161cfd1b",
+      "retained_sha256": "6c2451951422ae4694df76f924064862cf6827c59ed9bdec68a996fd161cfd1b"
+    },
+    "backend-static.log": {
+      "raw_path": "/private/tmp/server-pr2934-backend-static-summary.log",
+      "raw_sha256": "254db56f92a7078300fe1d17d11caa683e64368d6eec50cc0f5685450c9a706c",
+      "retained_sha256": "254db56f92a7078300fe1d17d11caa683e64368d6eec50cc0f5685450c9a706c"
+    },
+    "backend-contracts.log": {
+      "raw_path": "/private/tmp/server-pr2934-contract-and-bandit-summary.log",
+      "raw_sha256": "059e842f5110b3dfbcda7c5e06f6d10cf7507c0af03e72fd1b649b3779f808e1",
+      "retained_sha256": "059e842f5110b3dfbcda7c5e06f6d10cf7507c0af03e72fd1b649b3779f808e1"
+    },
+    "bandit-production.json": {
+      "raw_path": "/private/tmp/server-pr2934-bandit-production.json",
+      "raw_sha256": "d5ad0ef10d2614bce5491f6814233d185136854ad06d11140617adffc9662b72",
+      "retained_sha256": "faefd3cacc6497fa4fb10c4da1b54158d6634827fbdbd5f950e54b15c2d39ed2"
+    },
+    "catalog-marker-before.log": {
+      "raw_path": "/private/tmp/server-pr2934-catalog-marker-before.log",
+      "raw_sha256": "1f4d5d28dd55a8b644d81df6d56144b286f1c264e3f405c3326bd5d45fc76722",
+      "retained_sha256": "1f4d5d28dd55a8b644d81df6d56144b286f1c264e3f405c3326bd5d45fc76722"
+    },
+    "catalog-marker-after.log": {
+      "raw_path": "/private/tmp/server-pr2934-catalog-marker-after.log",
+      "raw_sha256": "a767444ce99f012845fd963c4b7ae02198597a06f87f07c2a7a37d7072d4a060",
+      "retained_sha256": "a767444ce99f012845fd963c4b7ae02198597a06f87f07c2a7a37d7072d4a060"
+    },
+    "chrome-build.json": {
+      "retained_sha256": "bb40018dd8d0c637bb81c950b270258abfe6cc817fca01071c331ab2fd3851d5"
+    },
+    "provider-config-adjacent.log": {
+      "raw_path": "/private/tmp/server-pr2934-provider-config-adjacent.log",
+      "raw_sha256": "1be181bbcd7c95661e4f5d65af8b544cef465edf15034944b0e1ed81c0c04337",
+      "retained_sha256": "1be181bbcd7c95661e4f5d65af8b544cef465edf15034944b0e1ed81c0c04337"
+    },
+    "api-validation.json": {
+      "retained_sha256": "04dfb1fce2640cf72421bac3c0b2250fac46f2aa9e660f95ad9c337a570911fe"
+    }
+  },
+  "source_sha256": {
+    "apps/packages/ui/src/components/Common/PersonaBuddy/BuddyInteraction.tsx": "bcaa8c4e5d6d434a14393dc828a4e0a09ff9c7cb31552cbbda9c0a12ab598d2b",
+    "apps/packages/ui/src/components/Common/PersonaBuddy/BuddyManagementModal.tsx": "9fc0af3be20090f7957585cd59645916c8278c3be794b9a5ab12eb4a75841c4f",
+    "apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/BuddyInteraction.test.tsx": "c1e15386e0a87710f6dcf1be20b2641d7cbac7f00bb2a25f0632decb9cc4810e",
+    "apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/BuddyManagementModal.test.tsx": "d9b22f90f6d9bd08c0ecfe9625470faf63709e7d04019abd7492f53928084b88",
+    "apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/IndependentBuddyHost.test.tsx": "0aaa5e329ebd88cfa0e8ec1daf92fcb61667bf8227ee7352a3b2b692a35cb181",
+    "tldw_Server_API/app/api/v1/endpoints/buddies.py": "67db086b73328cfc5e699a1f8c47adfefd1f3ebe23386222c5eff0f0909d105e",
+    "tldw_Server_API/app/api/v1/endpoints/chat.py": "3d2477aade0161c59a024e45d4e16dde1b2cc0d5a9f0db7adf2cf6ae86db0833",
+    "tldw_Server_API/app/api/v1/endpoints/llm_providers.py": "716c9177f435e925abff06e07dc2da4e3d89b2987ccc0a21259ce9885c80da46",
+    "tldw_Server_API/app/core/Buddy/service.py": "27c658c1ea42e2cb810beb5ff72e2d89ee832ca803c44f891b66b8dd158a31e7",
+    "tldw_Server_API/app/core/Chat/persistence_service.py": "061fb9cf0594f3368c20f2cfd379876049a3ea7f55c569ca1c518a4fcbc8abc6",
+    "tldw_Server_API/app/core/LLM_Calls/provider_config_resolution.py": "832b526d5e83c90526a52a0d98cb0098033b0bf48cbf9cdcb334df96bbe7f2eb",
+    "tldw_Server_API/tests/LLM_Adapters/unit/test_llm_providers_optional_metadata.py": "91b3fc3d4c6bc9185b99d4450c29a2926c9b99461e1dfff279dd643891f12637",
+    "tldw_Server_API/tests/Persona/test_buddy_reply_settings.py": "81eca3fc40f4f869e41f9501373cf5b5a84e52bf108b24719cb3ab6f30c02bb2",
+    "tldw_Server_API/tests/Persona/test_buddy_workspace_model_handoff.py": "706d09458a93d04bb8cb7e1e8d00c175d9d647a838f6e5b0e844ee1adb421883"
+  },
+  "openapi": {
+    "fingerprint": {
+      "note": "Regenerate with `make openapi-fingerprint`. A change here means the backend API contract drifted; regenerate the frontend types (`bun run generate:api-types` in apps/tldw-frontend) and review.",
+      "openapi_version": "3.1.0",
+      "path_count": 2086,
+      "schema_count": 3163,
+      "sha256": "3118ac8d2b8d12096b9558cc37caa530a513ac521621f04f80fc334f24a09156"
+    },
+    "generated_ignored_files": {
+      "apps/tldw-frontend/lib/api/generated/openapi.json": {
+        "sha256": "864d55a4f1374e956817c703e7890b81e5da961f7e18950c9b0693a27935a110",
+        "bytes": 11232557
+      },
+      "apps/tldw-frontend/lib/api/generated/schema.d.ts": {
+        "sha256": "79aac03173658dbd86b48ccf6fc6dbc06188c92659fce39009311393c3214926",
+        "bytes": 7164931
+      }
+    }
+  },
+  "review_comments": [
+    3965437853,
+    3965437855,
+    3965437861,
+    3965437868,
+    3965437876,
+    3965437883,
+    3965437890
+  ],
+  "test_results": {
+    "ui": "99 passed across seven files",
+    "backend": "36 Buddy/adjacent, 12 Persona compatibility, 3 catalog unit-marker, 1 adjacent config case passed; 52 distinct cases",
+    "full_suite_run": false
+  },
+  "post_test_documentation_change": {
+    "path": "tldw_Server_API/app/api/v1/endpoints/buddies.py",
+    "tested_sha256": "d7abfe87dc8803b7b30df38c452ce0985532bbce9f401e00d5578abb513541bd",
+    "final_sha256": "67db086b73328cfc5e699a1f8c47adfefd1f3ebe23386222c5eff0f0909d105e",
+    "change": "Removed an unreachable 409 clause from the read-only reply-settings docstring; executable AST unchanged. Canonical schema generation and drift verification were repeated for the new description."
+  }
+}

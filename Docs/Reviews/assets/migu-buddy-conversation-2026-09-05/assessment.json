@@ -1,0 +1,34 @@
+{
+  "microphone_opened": false,
+  "audio_played": false,
+  "provider": "deepseek",
+  "session_id": "75b66f01-3042-4f02-bfd4-97c3bdca6d90",
+  "first": {
+    "event": "assistant_delta",
+    "session_id": "75b66f01-3042-4f02-bfd4-97c3bdca6d90",
+    "timestamp_ms": 1788649359993,
+    "event_seq": 0,
+    "client_message_id": "uat-greeting",
+    "text_delta": "The blue notebook is ready.",
+    "done": true
+  },
+  "first_seconds": 1.11,
+  "retry": {
+    "event": "assistant_delta",
+    "session_id": "75b66f01-3042-4f02-bfd4-97c3bdca6d90",
+    "timestamp_ms": 1788649361413,
+    "event_seq": 2,
+    "client_message_id": "uat-retry",
+    "text_delta": "Migu recovered.",
+    "done": true
+  },
+  "cancelled_answer_published": false,
+  "prepared": true,
+  "tts_bytes": 25388,
+  "explicit_tool_plan": [
+    "rag_search"
+  ],
+  "tools_approved": false,
+  "stop_status": 200,
+  "probe_scope": "Real DeepSeek conversation and supplied transcript voice_commit; no microphone/STT acceptance or audio playback."
+}

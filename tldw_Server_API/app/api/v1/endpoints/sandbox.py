@@ -114,7 +114,6 @@ from tldw_Server_API.app.core.testing import (
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 
 _SANDBOX_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     AttributeError,
     ConnectionError,
     FileNotFoundError,
@@ -2285,10 +2284,16 @@ async def stream_run_logs(websocket: WebSocket, run_id: str) -> None:
             pass
         with contextlib.suppress(_SANDBOX_NONCRITICAL_EXCEPTIONS):
             hub.unsubscribe(run_id, q)
-        with contextlib.suppress(_SANDBOX_NONCRITICAL_EXCEPTIONS):
-            await stream.ws.close()
+        # Release the quota slot before the socket teardown, not after. Everything
+        # above is synchronous; `await stream.ws.close()` is not, and awaiting inside a
+        # finally that is already unwinding a cancellation re-raises CancelledError
+        # immediately -- which would abandon the rest of this block and leak the slot
+        # for the run's lifetime. Ordering it first makes the release independent of
+        # how the socket goes away.
         with contextlib.suppress(_SANDBOX_NONCRITICAL_EXCEPTIONS):
             _sandbox_ws_release_quota(ws_quota_token)
+        with contextlib.suppress(_SANDBOX_NONCRITICAL_EXCEPTIONS):
+            await stream.ws.close()
 
 
 

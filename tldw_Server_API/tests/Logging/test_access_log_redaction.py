@@ -4,7 +4,15 @@ from __future__ import annotations
 
 import logging
 
-from tldw_Server_API.app.core.Logging.access_log_middleware import redact_access_log_message, redact_access_log_path
+from fastapi import FastAPI, Request
+from fastapi.testclient import TestClient
+from loguru import logger
+
+from tldw_Server_API.app.core.Logging.access_log_middleware import (
+    AccessLogMiddleware,
+    redact_access_log_message,
+    redact_access_log_path,
+)
 
 
 def test_redacts_audio_studio_media_ticket_token() -> None:
@@ -68,3 +76,28 @@ def test_intercept_handler_redacts_uvicorn_access_ticket_token(monkeypatch) -> N
     assert captured
     assert "raw-secret-token-123" not in captured[0][1]
     assert "/api/v1/audio-studio/media-tickets/[REDACTED]" in captured[0][1]
+
+
+def test_access_log_never_captures_standalone_source_body() -> None:
+    sentinel = "PRIVATE_HTML_ACCESS_LOG_52e7a5"
+    captured: list[str] = []
+    app = FastAPI()
+
+    @app.post("/api/v1/slides/generations")
+    async def _generation(request: Request) -> dict[str, bool]:
+        await request.body()
+        return {"ok": True}
+
+    app.add_middleware(AccessLogMiddleware)
+    sink_id = logger.add(lambda message: captured.append(str(message)))
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/slides/generations",
+                content=sentinel,
+            )
+    finally:
+        logger.remove(sink_id)
+
+    assert response.status_code == 200
+    assert sentinel not in "".join(captured)

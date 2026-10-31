@@ -6,6 +6,8 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .llamacpp_server_args import ServerArgs
+
 
 class LlamaCppProfileMode(str, Enum):
     CHAT = "chat"
@@ -44,12 +46,14 @@ class LlamaCppProfile(BaseModel):
     host: str = "127.0.0.1"
     port: int = Field(default=8080, ge=1, le=65535)
     port_policy: LlamaCppPortPolicy = LlamaCppPortPolicy.EXPLICIT
-    server_args: dict[str, object] = Field(default_factory=dict)
+    server_args: ServerArgs = Field(default_factory=dict)
     autostart: bool = False
     restart_policy: dict[str, object] = Field(default_factory=dict)
     last_runtime_failure: dict[str, object] = Field(default_factory=dict)
     provider_alias: str | None = None
     tags: list[str] = Field(default_factory=list)
+    snapshots_enabled: bool = False
+    snapshot_retention: int = Field(default=10, ge=1, le=1000)
 
 
 class LlamaCppRuntime(BaseModel):
@@ -59,6 +63,7 @@ class LlamaCppRuntime(BaseModel):
 
     profile_id: str
     state: LlamaCppRuntimeState
+    launch_generation: str | None = None
     pid: int | None = None
     host: str | None = None
     port: int | None = Field(default=None, ge=1, le=65535)

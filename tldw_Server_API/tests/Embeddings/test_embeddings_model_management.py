@@ -102,6 +102,10 @@ def test_list_models_exposes_defaults_and_policy(restore_embedding_settings):
         settings["ALLOWED_EMBEDDING_PROVIDERS"] = ["openai", "huggingface"]
         settings["ALLOWED_EMBEDDING_MODELS"] = ["text-embedding-3-*"]
 
+        # /embeddings/models names configured model ids and allowlist status,
+        # so it now resolves a caller like the rest of this router.
+        app.dependency_overrides[get_request_user] = _override_regular_user
+        app.dependency_overrides[auth_deps.get_auth_principal] = _principal_override(1, False)
         client = _client()
         r = client.get("/api/v1/embeddings/models", headers=_csrf_headers())
         assert r.status_code == 200
@@ -114,6 +118,8 @@ def test_list_models_exposes_defaults_and_policy(restore_embedding_settings):
         assert j.get("allowed_providers") is None or isinstance(j.get("allowed_providers"), list)
         assert j.get("allowed_models") is None or isinstance(j.get("allowed_models"), list)
     finally:
+        app.dependency_overrides.pop(get_request_user, None)
+        app.dependency_overrides.pop(auth_deps.get_auth_principal, None)
         os.environ.pop("TESTING", None)
 
 
@@ -312,6 +318,8 @@ def test_list_models_reflects_disallowed_models(restore_embedding_settings):
         cfg["embedding_provider"] = "openai"
         settings["EMBEDDING_CONFIG"] = cfg
 
+        app.dependency_overrides[get_request_user] = _override_regular_user
+        app.dependency_overrides[auth_deps.get_auth_principal] = _principal_override(1, False)
         client = _client()
         r = client.get("/api/v1/embeddings/models", headers=_csrf_headers())
         assert r.status_code == 200
@@ -321,4 +329,6 @@ def test_list_models_reflects_disallowed_models(restore_embedding_settings):
         assert smalls
         assert all(not x.get("allowed") for x in smalls)
     finally:
+        app.dependency_overrides.pop(get_request_user, None)
+        app.dependency_overrides.pop(auth_deps.get_auth_principal, None)
         os.environ.pop("TESTING", None)

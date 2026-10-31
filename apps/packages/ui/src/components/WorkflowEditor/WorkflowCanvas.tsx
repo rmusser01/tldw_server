@@ -31,8 +31,8 @@ import type { WorkflowStepType, WorkflowNode, WorkflowNodeData } from "@/types/w
 import { useWorkflowEditorStore } from "@/store/workflow-editor"
 import { buildWorkflowNodeTypes } from "./nodes/WorkflowNode"
 import { getStepMetadata } from "./step-registry"
-import { isEditableEventTarget } from "./keyboard-shortcuts"
 import { validateWorkflowConnection } from "./connection-validation"
+import { isEditableTarget } from "@/utils/editable-target"
 
 interface WorkflowCanvasProps {
   className?: string
@@ -126,7 +126,7 @@ const WorkflowCanvasInner = ({ className = "" }: WorkflowCanvasProps) => {
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isEditableEventTarget(e.target)) {
+      if (isEditableTarget(e.target)) {
         return
       }
 

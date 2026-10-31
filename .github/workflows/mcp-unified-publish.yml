@@ -202,7 +202,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install build twine setuptools wheel pytest pytest-asyncio bandit
-          python -m pip install "pydantic>=2.0.0" "loguru>=0.7.0" "PyYAML>=6.0.0" "httpx>=0.24.0" "websockets>=12.0"
+          python -m pip install "pydantic>=2.0.0" "loguru>=0.7.0" "PyYAML>=6.0.0" "httpx>=0.24.0" "websockets>=12.0" "jsonschema>=4.23,<5"
 
       - name: Run internal RC and publish dry run
         run: |
@@ -245,7 +245,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install build twine setuptools wheel pytest pytest-asyncio bandit
-          python -m pip install "pydantic>=2.0.0" "loguru>=0.7.0" "PyYAML>=6.0.0" "httpx>=0.24.0" "websockets>=12.0"
+          python -m pip install "pydantic>=2.0.0" "loguru>=0.7.0" "PyYAML>=6.0.0" "httpx>=0.24.0" "websockets>=12.0" "jsonschema>=4.23,<5"
 
       - name: Build and upload to TestPyPI
         run: |

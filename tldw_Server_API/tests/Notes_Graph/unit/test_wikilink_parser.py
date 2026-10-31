@@ -1,7 +1,14 @@
 """Tests for wikilink_parser.extract_wikilinks()."""
 
+import uuid
+
 import pytest
 
+from tldw_Server_API.app.core.Notes.wikilinks import (
+    MAX_WIKILINK_TARGETS,
+    WIKILINK_PARSER_VERSION,
+    parse_wikilinks,
+)
 from tldw_Server_API.app.core.Notes_Graph.wikilink_parser import (
     WikilinkRef,
     extract_wikilinks,
@@ -98,3 +105,29 @@ class TestExtractWikilinks:
         ref = WikilinkRef(target_note_id="test-id")
         with pytest.raises(AttributeError):
             ref.target_note_id = "other"
+
+
+def test_projection_parser_is_bounded_deterministic_and_omits_self_links() -> None:
+    source_id = str(uuid.UUID(int=1))
+    distinct = [str(uuid.UUID(int=index)) for index in range(1, MAX_WIKILINK_TARGETS + 3)]
+    content = " ".join(
+        [f"[[id:{source_id}]]", *[f"[[id:{value.upper()}]]" for value in distinct], f"[[id:{distinct[1]}]]"]
+    )
+
+    projection = parse_wikilinks(content, source_note_id=source_id)
+
+    assert projection.parser_version == WIKILINK_PARSER_VERSION
+    assert projection.truncated is True
+    assert len(projection.target_note_ids) == MAX_WIKILINK_TARGETS
+    assert source_id not in projection.target_note_ids
+    assert projection.target_note_ids[:2] == (distinct[1], distinct[2])
+    assert parse_wikilinks(content, source_note_id=source_id) == projection
+
+
+def test_legacy_parser_is_a_compatibility_reexport() -> None:
+    target_id = str(uuid.UUID(int=44))
+    projection = parse_wikilinks(f"[[id:{target_id}]]")
+
+    assert extract_wikilinks(f"[[id:{target_id}]]") == [
+        WikilinkRef(target_note_id=projection.target_note_ids[0])
+    ]

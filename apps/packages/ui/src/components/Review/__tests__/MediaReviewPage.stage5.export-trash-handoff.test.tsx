@@ -3,6 +3,10 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import MediaReviewPage from "../MediaReviewPage"
 
+vi.mock("@/hooks/useMediaCapabilities", () => ({
+  useMediaCapabilities: () => ({ canDelete: true, loading: false })
+}))
+
 const sourceItems = [
   {
     id: 1,
@@ -197,10 +201,6 @@ vi.mock("@/services/settings/ui-settings", () => ({
   MEDIA_REVIEW_ORIENTATION_SETTING: { key: "mediaReviewOrientation", defaultValue: "vertical" },
   MEDIA_REVIEW_SELECTION_SETTING: { key: "mediaReviewSelection", defaultValue: [] },
   MEDIA_REVIEW_VIEW_MODE_SETTING: { key: "mediaReviewViewMode", defaultValue: "spread" }
-}))
-
-vi.mock("@/utils/media-detail-content", () => ({
-  extractMediaDetailContent: (detail: any) => detail?.content || detail?.text || ""
 }))
 
 vi.mock("@/components/Media/DiffViewModal", () => ({

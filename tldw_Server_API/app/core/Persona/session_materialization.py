@@ -10,6 +10,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    BackendType,
     CharactersRAGDB,
     CharactersRAGDBError,
     ConflictError,
@@ -99,12 +100,20 @@ def scope_snapshot_id_from_snapshot(scope_snapshot: Any) -> str | None:
 
 
 def ensure_default_persona_profile(db: CharactersRAGDB, *, user_id: str) -> dict[str, Any]:
-    profile = db.get_persona_profile(DEFAULT_PERSONA_ID, user_id=user_id, include_deleted=False)
+    default_id = DEFAULT_PERSONA_ID
+    if (
+        getattr(db, "backend_type", None) == BackendType.POSTGRESQL
+        and db.get_persona_profile(DEFAULT_PERSONA_ID, user_id=user_id, include_deleted=True) is None
+    ):
+        # PostgreSQL shares the primary-key namespace. Keep owned legacy IDs,
+        # including tombstones, while assigning each new owner a stable default.
+        default_id = f"{DEFAULT_PERSONA_ID}:{user_id}"
+    profile = db.get_persona_profile(default_id, user_id=user_id, include_deleted=False)
     if profile is None:
         try:
             _ = db.create_persona_profile(
                 {
-                    "id": DEFAULT_PERSONA_ID,
+                    "id": default_id,
                     "user_id": user_id,
                     "name": DEFAULT_PERSONA_NAME,
                     "mode": "session_scoped",
@@ -114,23 +123,23 @@ def ensure_default_persona_profile(db: CharactersRAGDB, *, user_id: str) -> dict
             )
         except ConflictError:
             pass
-        profile = db.get_persona_profile(DEFAULT_PERSONA_ID, user_id=user_id, include_deleted=False)
+        profile = db.get_persona_profile(default_id, user_id=user_id, include_deleted=False)
     if profile is None:
         profiles = db.list_persona_profiles(user_id=user_id, active_only=True, limit=1)
         if not profiles:
             raise ConflictError(
                 "Unable to resolve a default persona profile for user.",
                 entity="persona_profiles",
-                entity_id=DEFAULT_PERSONA_ID,
+                entity_id=default_id,
             )
         profile = profiles[0]
 
-    if str(profile.get("id") or "") == DEFAULT_PERSONA_ID:
+    if str(profile.get("id") or "") == default_id:
         try:
-            existing = db.list_persona_policy_rules(persona_id=DEFAULT_PERSONA_ID, user_id=user_id)
+            existing = db.list_persona_policy_rules(persona_id=default_id, user_id=user_id)
             if not existing:
                 _ = db.replace_persona_policy_rules(
-                    persona_id=DEFAULT_PERSONA_ID,
+                    persona_id=default_id,
                     user_id=user_id,
                     rules=DEFAULT_PERSONA_POLICY_RULES,
                 )

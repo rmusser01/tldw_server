@@ -1,0 +1,21 @@
+{
+  "fingerprint": {
+    "exit_code": 0,
+    "raw_log": "/private/tmp/server-pr2934-openapi-drift-check-final.log",
+    "raw_sha256": "a283b2be8d332d352146942ffbf3d3a4c438ce3416d83dcc49afdcf34e7d7b4f",
+    "verification_lines": [
+      "2026-09-09 00:12:00.033 | WARNING  | trace= span= tp= req= job= ps=: | tldw_Server_API.app.main:_log_line:617 - [openapi-export] OK \u2014 OpenAPI fingerprint matches the checked-in snapshot."
+    ]
+  },
+  "client_contract": {
+    "exit_code": 0,
+    "raw_log": "/private/tmp/server-pr2934-openapi-client-check-final.log",
+    "raw_sha256": "bc4e3a46a328e7eb0ab4306e9313bfa1bea19ccafc9a12490381b71d4cbf38e7",
+    "verification_lines": [
+      "\u2705 Verified 344 ClientPath entries against OpenAPI spec (generated from tldw_Server_API.app.main via /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python); all paths are present.",
+      "\u2139\ufe0f verify:openapi allowed 10 reviewed exception path(s). Set TLDW_VERIFY_OPENAPI_STRICT=1 to fail on them.",
+      "\u2705 Verified 49 MEDIA_ADD_SCHEMA_FALLBACK fields against /api/v1/media/add (generated from tldw_Server_API.app.main via /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python); all names are present."
+    ]
+  },
+  "generation_environment": "The standard script overwrites PYTHONPATH and the shared venv lacks an editable tldw_profile_core installation. Used its canonical exporter with this checkout plus packages/tldw_profile_core/src on a process-local path, then its openapi-typescript command; no dependency installation or global changes."
+}

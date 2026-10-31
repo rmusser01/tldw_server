@@ -3988,7 +3988,7 @@
           "type": "dependency"
         }
       ],
-      "description": "Returns available chat slash commands with their descriptions. When permission enforcement is enabled, commands requiring a permission are filtered by the current user's privileges in multi-user mode.",
+      "description": "Returns available chat slash commands with their descriptions. Commands requiring a permission are filtered by the current user's privileges.",
       "endpoint": "tldw_Server_API.app.api.v1.endpoints.chat.list_chat_commands",
       "methods": [
         "GET"
@@ -4036,6 +4036,11 @@
           "type": "dependency"
         },
         {
+          "id": "auth_deps.require_expected_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
           "id": "billing_deps._check_limit",
           "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
           "type": "dependency"
@@ -4043,6 +4048,11 @@
         {
           "id": "billing_deps.get_billing_org_id",
           "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "jobs_deps.try_get_job_manager",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.jobs_deps",
           "type": "dependency"
         },
         {
@@ -4850,6 +4860,11 @@
           "type": "dependency"
         },
         {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
           "id": "auth_deps._checker",
           "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
           "type": "dependency"
@@ -4876,6 +4891,43 @@
       "summary": null,
       "tags": [
         "media"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.get_auth_principal",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "llm_routing_deps.get_request_routing_decision_store",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Generate and validate one draft-only candidate without persistence.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.prompts.improve_prompt_endpoint",
+      "methods": [
+        "POST"
+      ],
+      "name": "improve_prompt_endpoint",
+      "path": "/api/v1/prompts/improve",
+      "rate_limit_resources": [],
+      "summary": "Improve one isolated prompt draft with the active chat model",
+      "tags": [
+        "prompts",
+        "prompts"
       ]
     },
     {
@@ -4917,6 +4969,11 @@
         },
         {
           "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.require_expected_user",
           "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
           "type": "dependency"
         },
@@ -6388,7 +6445,7 @@
           "type": "dependency"
         }
       ],
-      "description": "Returns available chat slash commands with their descriptions. When permission enforcement is enabled, commands requiring a permission are filtered by the current user's privileges in multi-user mode.",
+      "description": "Returns available chat slash commands with their descriptions. Commands requiring a permission are filtered by the current user's privileges.",
       "endpoint": "tldw_Server_API.app.api.v1.endpoints.chat.list_chat_commands",
       "methods": [
         "GET"
@@ -6438,6 +6495,11 @@
           "type": "dependency"
         },
         {
+          "id": "auth_deps.require_expected_user",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
           "id": "billing_deps._check_limit",
           "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
           "type": "dependency"
@@ -6445,6 +6507,11 @@
         {
           "id": "billing_deps.get_billing_org_id",
           "module": "tldw_Server_API.app.api.v1.API_Deps.billing_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "jobs_deps.try_get_job_manager",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.jobs_deps",
           "type": "dependency"
         },
         {
@@ -7549,6 +7616,11 @@
           "type": "dependency"
         },
         {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
           "id": "auth_deps._checker",
           "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
           "type": "dependency"
@@ -7575,6 +7647,45 @@
       "summary": null,
       "tags": [
         "media"
+      ]
+    }
+  ],
+  "prompts.improve": [
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.get_auth_principal",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "llm_routing_deps.get_request_routing_decision_store",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Generate and validate one draft-only candidate without persistence.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.prompts.improve_prompt_endpoint",
+      "methods": [
+        "POST"
+      ],
+      "name": "improve_prompt_endpoint",
+      "path": "/api/v1/prompts/improve",
+      "rate_limit_resources": [],
+      "summary": "Improve one isolated prompt draft with the active chat model",
+      "tags": [
+        "prompts",
+        "prompts"
       ]
     }
   ],
@@ -7618,6 +7729,11 @@
         },
         {
           "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.require_expected_user",
           "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
           "type": "dependency"
         },

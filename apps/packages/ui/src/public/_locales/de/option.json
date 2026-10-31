@@ -2755,5 +2755,8 @@
   },
   "header_connectionCard_connectedCaption": {
     "message": "Chat und Tools sind jetzt in den Einstellungen und in der Seitenleiste verfügbar."
+  },
+  "notesSearch_offlineSaveUnavailable": {
+    "message": "Offline-Speichern ist erst verfügbar, wenn Ihr Konto und der lokale Speicher bestätigt sind. Ihre Änderungen bleiben ungespeichert."
   }
 }

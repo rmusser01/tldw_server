@@ -80,6 +80,25 @@ class TestMakeCacheKey:
         k = GraphCache.make_cache_key("user", {"a": 1})
         assert len(k) == 32
 
+    def test_dataset_revision_and_parser_version_are_part_of_the_key(self):
+        common = {
+            "user_id": "user",
+            "dataset_id": "dataset-1",
+            "graph_revision": 7,
+            "parser_version": 2,
+            "query_params": {"radius": 1},
+        }
+        original = GraphCache.make_revision_key(**common)
+        assert original != GraphCache.make_revision_key(
+            **{**common, "dataset_id": "dataset-2"}
+        )
+        assert original != GraphCache.make_revision_key(
+            **{**common, "graph_revision": 8}
+        )
+        assert original != GraphCache.make_revision_key(
+            **{**common, "parser_version": 3}
+        )
+
 
 class TestThreadSafety:
     """Basic thread safety smoke test."""

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -96,6 +97,30 @@ class ImageGenerationConfig:
 
 
 _config_cache: ImageGenerationConfig | None = None
+
+
+def resolve_image_generation_model(
+    backend: str | None, requested_model: str | None, config: ImageGenerationConfig,
+) -> str | None:
+    """Resolve the public model identifier without loading an adapter or model."""
+    if requested_model:
+        return requested_model
+    if backend == "swarmui":
+        return config.swarmui_default_model or None
+    defaults = {
+        "openrouter": ("OPENROUTER_IMAGE_MODEL", config.openrouter_image_default_model, DEFAULT_OPENROUTER_IMAGE_MODEL),
+        "novita": ("NOVITA_IMAGE_MODEL", config.novita_image_default_model, DEFAULT_NOVITA_IMAGE_MODEL),
+        "together": ("TOGETHER_IMAGE_MODEL", config.together_image_default_model, DEFAULT_TOGETHER_IMAGE_MODEL),
+        "modelstudio": (
+            "MODELSTUDIO_IMAGE_MODEL",
+            config.modelstudio_image_default_model,
+            DEFAULT_MODELSTUDIO_IMAGE_MODEL,
+        ),
+    }
+    if backend is None or backend not in defaults:
+        return None
+    env_name, configured_model, default_model = defaults[backend]
+    return os.getenv(env_name) or configured_model or default_model
 
 
 def _coerce_int(value: Any, default: int) -> int:

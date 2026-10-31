@@ -1,16 +1,19 @@
 import pytest
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
+
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_provider_model_allowlists_postgres(test_db_pool, monkeypatch):
-    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
-    from tldw_Server_API.app.main import app
-    from tldw_Server_API.app.core.config import settings as app_settings
     from tldw_Server_API.app.api.v1.API_Deps import auth_deps
     from tldw_Server_API.app.core.AuthNZ import User_DB_Handling as user_db_handling
+    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings as reset_auth_settings
+    from tldw_Server_API.app.core.config import settings as app_settings
+    from tldw_Server_API.app.main import app
 
     # Ensure multi-user mode for AuthNZ (virtual keys + budgets)
     monkeypatch.setenv("AUTH_MODE", "multi_user")
@@ -66,12 +69,7 @@ async def test_provider_model_allowlists_postgres(test_db_pool, monkeypatch):
     monkeypatch.setattr(user_db_handling, "get_api_key_manager", _get_mgr_override)
 
     # Insert user
-    import uuid
-    await pool.execute(
-        "INSERT INTO users (uuid, username, email, password_hash, is_active) VALUES ($1, $2, $3, $4, TRUE)",
-        str(uuid.uuid4()), "vkpg", "vkpg@example.com", "x",
-    )
-    user_id = await pool.fetchval("SELECT id FROM users WHERE username = $1", "vkpg")
+    user_id = await ensure_test_user(pool, "vkpg", "vkpg@example.com")
 
     # Create virtual key with allowlists
     res = await mgr.create_virtual_key(
@@ -108,12 +106,12 @@ async def test_provider_model_allowlists_postgres(test_db_pool, monkeypatch):
 @pytest.mark.asyncio
 async def test_missing_provider_header_allows_when_allowlist_present_postgres(test_db_pool, monkeypatch):
     """If allowed_providers is set but X-LLM-Provider header is missing, middleware should not 403."""
-    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
-    from tldw_Server_API.app.main import app
-    from tldw_Server_API.app.core.config import settings as app_settings
     from tldw_Server_API.app.api.v1.API_Deps import auth_deps
     from tldw_Server_API.app.core.AuthNZ import User_DB_Handling as user_db_handling
+    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings as reset_auth_settings
+    from tldw_Server_API.app.core.config import settings as app_settings
+    from tldw_Server_API.app.main import app
 
     # Ensure multi-user mode for AuthNZ
     monkeypatch.setenv("AUTH_MODE", "multi_user")
@@ -156,12 +154,7 @@ async def test_missing_provider_header_allows_when_allowlist_present_postgres(te
     )
 
     # Insert user
-    import uuid
-    await pool.execute(
-        "INSERT INTO users (uuid, username, email, password_hash, is_active) VALUES ($1, $2, $3, $4, TRUE)",
-        str(uuid.uuid4()), "vkpg-missing", "vkpg-missing@example.com", "x",
-    )
-    user_id = await pool.fetchval("SELECT id FROM users WHERE username = $1", "vkpg-missing")
+    user_id = await ensure_test_user(pool, "vkpg-missing", "vkpg-missing@example.com")
 
     # Create virtual key with provider/model allowlists
     mgr = APIKeyManager(pool)
@@ -196,12 +189,12 @@ async def test_missing_provider_header_allows_when_allowlist_present_postgres(te
 @pytest.mark.asyncio
 async def test_non_json_body_skips_model_enforcement_postgres(test_db_pool, monkeypatch):
     """With non-JSON content-type, model allowlist is skipped; ensure no 403/402 from middleware."""
-    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
-    from tldw_Server_API.app.main import app
-    from tldw_Server_API.app.core.config import settings as app_settings
     from tldw_Server_API.app.api.v1.API_Deps import auth_deps
     from tldw_Server_API.app.core.AuthNZ import User_DB_Handling as user_db_handling
+    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings as reset_auth_settings
+    from tldw_Server_API.app.core.config import settings as app_settings
+    from tldw_Server_API.app.main import app
 
     # Ensure multi-user mode for AuthNZ
     monkeypatch.setenv("AUTH_MODE", "multi_user")
@@ -211,12 +204,7 @@ async def test_non_json_body_skips_model_enforcement_postgres(test_db_pool, monk
     app_settings['CSRF_ENABLED'] = False
 
     # Insert user
-    import uuid
-    await pool.execute(
-        "INSERT INTO users (uuid, username, email, password_hash, is_active) VALUES ($1, $2, $3, $4, TRUE)",
-        str(uuid.uuid4()), "vkpg-nonjson", "vkpg-nonjson@example.com", "x",
-    )
-    user_id = await pool.fetchval("SELECT id FROM users WHERE username = $1", "vkpg-nonjson")
+    user_id = await ensure_test_user(pool, "vkpg-nonjson", "vkpg-nonjson@example.com")
 
     mgr = APIKeyManager(pool)
     await mgr.initialize()
@@ -236,30 +224,26 @@ async def test_non_json_body_skips_model_enforcement_postgres(test_db_pool, monk
     )
     vkey = res['key']
 
-    with TestClient(app) as client:
-        try:
-            r = client.post(
-                "/api/v1/chat/completions",
-                headers={"X-API-KEY": vkey, "Content-Type": "text/plain"},
-                data="hello"
-            )
-            # Should not be blocked by provider/model allowlists or budgets
-            assert r.status_code not in (403, 402), r.text
-        except Exception:
-            # Non-JSON bodies may raise deeper in the stack; middleware under test should not be the blocker.
-            _ = None
+    async with AsyncClient(transport=ASGITransport(app=app, raise_app_exceptions=False), base_url="http://testserver") as client:
+        r = await client.post(
+            "/api/v1/chat/completions",
+            headers={"X-API-KEY": vkey, "Content-Type": "text/plain"},
+            data="hello",
+        )
+        # Downstream parsing may reject non-JSON, but the allowlist and budget must not.
+        assert r.status_code not in (401, 403, 402), r.text
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_invalid_json_body_skips_model_enforcement_postgres(test_db_pool, monkeypatch):
     """Invalid JSON should not trigger model allowlist enforcement; ensure not 403/402."""
-    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
-    from tldw_Server_API.app.main import app
-    from tldw_Server_API.app.core.config import settings as app_settings
     from tldw_Server_API.app.api.v1.API_Deps import auth_deps
     from tldw_Server_API.app.core.AuthNZ import User_DB_Handling as user_db_handling
+    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings as reset_auth_settings
+    from tldw_Server_API.app.core.config import settings as app_settings
+    from tldw_Server_API.app.main import app
 
     # Ensure multi-user mode for AuthNZ
     monkeypatch.setenv("AUTH_MODE", "multi_user")
@@ -269,12 +253,7 @@ async def test_invalid_json_body_skips_model_enforcement_postgres(test_db_pool, 
     app_settings['CSRF_ENABLED'] = False
 
     # Insert user
-    import uuid
-    await pool.execute(
-        "INSERT INTO users (uuid, username, email, password_hash, is_active) VALUES ($1, $2, $3, $4, TRUE)",
-        str(uuid.uuid4()), "vkpg-badjson", "vkpg-badjson@example.com", "x",
-    )
-    user_id = await pool.fetchval("SELECT id FROM users WHERE username = $1", "vkpg-badjson")
+    user_id = await ensure_test_user(pool, "vkpg-badjson", "vkpg-badjson@example.com")
 
     mgr = APIKeyManager(pool)
     await mgr.initialize()
@@ -294,14 +273,11 @@ async def test_invalid_json_body_skips_model_enforcement_postgres(test_db_pool, 
     )
     vkey = res['key']
 
-    with TestClient(app) as client:
-        try:
-            r = client.post(
-                "/api/v1/chat/completions",
-                headers={"X-API-KEY": vkey, "Content-Type": "application/json"},
-                data="this is not json"
-            )
-            assert r.status_code not in (403, 402), r.text
-        except Exception:
-            # Invalid JSON can trip downstream parsing; we're only asserting middleware does not block.
-            _ = None
+    async with AsyncClient(transport=ASGITransport(app=app, raise_app_exceptions=False), base_url="http://testserver") as client:
+        r = await client.post(
+            "/api/v1/chat/completions",
+            headers={"X-API-KEY": vkey, "Content-Type": "application/json"},
+            data="this is not json",
+        )
+        # A malformed body may fail downstream, but it must not trigger these guards.
+        assert r.status_code not in (401, 403, 402), r.text

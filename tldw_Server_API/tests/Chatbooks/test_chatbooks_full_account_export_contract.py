@@ -1,5 +1,6 @@
 import json
 import zipfile
+from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import chatbooks as chatbooks_endpoints
 from tldw_Server_API.app.api.v1.schemas.chatbook_schemas import CreateChatbookRequest
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.Chat.document_generator import (
     DocumentGeneratorService,
@@ -30,8 +32,27 @@ from tldw_Server_API.app.core.Chatbooks.services.jobs_worker import ChatbooksJob
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database
+from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture
+async def full_account_user(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[str]:
+    """Seed the profile required by a full export in a private AuthNZ database."""
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
+    await reset_db_pool()
+    try:
+        pool = await get_db_pool()
+        await create_authnz_test_user(
+            pool,
+            user_id=1,
+            username="account-export",
+            email="account-export@example.test",
+        )
+        yield "account-export@example.test"
+    finally:
+        await reset_db_pool()
 
 
 class _DummyAuditService:
@@ -206,7 +227,9 @@ async def test_service_rejects_zero_item_allowlist_before_creating_archive(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_full_account_export_expands_to_existing_content_and_manifest_summary(tmp_path, monkeypatch):
+async def test_full_account_export_expands_to_existing_content_and_manifest_summary(
+    tmp_path, monkeypatch, full_account_user
+):
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
     secret_user_id = "SECRET_USER_ID_SHOULD_NOT_APPEAR"
     db = CharactersRAGDB(db_path=str(tmp_path / "chatbooks.db"), client_id="chatbooks-contract")
@@ -226,6 +249,7 @@ async def test_full_account_export_expands_to_existing_content_and_manifest_summ
     with zipfile.ZipFile(file_path) as zf:
         names = set(zf.namelist())
         manifest = json.loads(zf.read("manifest.json"))
+        profile = json.loads(zf.read("json/account_profile.json"))
 
     note_path = f"content/notes/note_{note_id}.md"
     assert note_path in names
@@ -244,6 +268,7 @@ async def test_full_account_export_expands_to_existing_content_and_manifest_summ
     assert service.build_export_job_metadata(file_path)["post_write_verification"] is True
     assert manifest["statistics"]["notes"] == 1
     assert manifest["statistics"]["account_profiles"] == 1
+    assert profile["profile"]["identity.email"] == full_account_user
     assert secret_user_id not in json.dumps(manifest)
 
 
@@ -280,7 +305,9 @@ def test_completed_export_api_timestamps_include_explicit_timezone(tmp_path, mon
 
 
 @pytest.mark.asyncio
-async def test_full_account_export_includes_generated_documents_even_when_option_is_false(tmp_path, monkeypatch):
+async def test_full_account_export_includes_generated_documents_even_when_option_is_false(
+    tmp_path, monkeypatch, full_account_user
+):
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
     db = CharactersRAGDB(db_path=str(tmp_path / "chatbooks.db"), client_id="chatbooks-contract")
     doc_service = DocumentGeneratorService(db, user_id="1")
@@ -318,7 +345,7 @@ async def test_full_account_export_includes_generated_documents_even_when_option
 
 
 @pytest.mark.asyncio
-async def test_full_account_export_bundles_owned_media_artifact_bytes(tmp_path, monkeypatch):
+async def test_full_account_export_bundles_owned_media_artifact_bytes(tmp_path, monkeypatch, full_account_user):
     media_id, artifact_bytes = _seed_owned_media_artifact(tmp_path, monkeypatch)
     db = CharactersRAGDB(db_path=str(tmp_path / "chatbooks.db"), client_id="chatbooks-contract")
     service = ChatbookService(user_id="media-user", db=db, user_id_int=1)
@@ -354,7 +381,9 @@ async def test_full_account_export_bundles_owned_media_artifact_bytes(tmp_path, 
 
 
 @pytest.mark.asyncio
-async def test_full_account_export_reports_each_unresolved_media_artifact_pointer(tmp_path, monkeypatch):
+async def test_full_account_export_reports_each_unresolved_media_artifact_pointer(
+    tmp_path, monkeypatch, full_account_user
+):
     media_id = _seed_unresolved_media_artifacts(tmp_path, monkeypatch)
     db = CharactersRAGDB(db_path=str(tmp_path / "chatbooks.db"), client_id="chatbooks-contract")
     service = ChatbookService(user_id="media-user", db=db, user_id_int=1)

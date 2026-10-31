@@ -1,11 +1,30 @@
 // @vitest-environment jsdom
 import React from "react"
-import { act, renderHook } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import i18n from "i18next"
+import { act, renderHook, waitFor } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { createSafeStorage } from "@/utils/safe-storage"
 
 import { useChatActions } from "../useChatActions"
+import type { ChatHistory, Message } from "@/store/option"
+import { useStoreChatModelSettings } from "@/store/model"
+import { chatRagMethods } from "@/services/tldw/domains/chat-rag"
+import { generateID } from "@/db/dexie/helpers"
+import { decodeChatErrorPayload } from "@/utils/chat-error-message"
+import { CHAT_ROUTE_REPLACEMENT_EVENT } from "@/utils/character-chat-mode-intent"
+import { getModelNicknameByID } from "@/db/dexie/nickname"
+import { clearVisualIdentityResolverCaches } from "@/hooks/useVisualIdentityResolver"
+import { db } from "@/db/dexie/schema"
+import type { HistoryInfo, Message as SavedMessage } from "@/db/dexie/types"
+import { reconcileServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
 
 const {
+  getCharacterMock,
+  getChatMock,
+  bgStreamMock,
+  saveLocalSuccessMock,
+  saveLocalErrorMock,
   addChatMessageMock,
   createChatMock,
   detectCharacterMoodMock,
@@ -14,6 +33,11 @@ const {
   normalChatModeMock,
   resolveVisualIdentityBindingMock
 } = vi.hoisted(() => ({
+  getCharacterMock: vi.fn<(id: string | number, options?: unknown) => Promise<Record<string, unknown> | null>>(),
+  getChatMock: vi.fn(),
+  bgStreamMock: vi.fn(),
+  saveLocalErrorMock: vi.fn(async (_payload: unknown) => "history-character"),
+  saveLocalSuccessMock: vi.fn(async (_payload: unknown) => "history-character"),
   addChatMessageMock: vi.fn(async () => ({ id: "user-server-1", version: 1 })),
   createChatMock: vi.fn(),
   detectCharacterMoodMock: vi.fn(),
@@ -39,6 +63,47 @@ const {
   }))
 }))
 
+const directedSettings = vi.hoisted(() => ({ current: {} as { directedCharacterId?: number; greetingEnabled?: boolean } }))
+
+const recoveryAuthority = vi.hoisted(() => ({ controller: new AbortController() }))
+const realBranchMirror = vi.hoisted(() => ({ enabled: false }))
+const realErrorPersistence = vi.hoisted(() => ({ enabled: false }))
+const actualAuthority = vi.hoisted(() => ({
+  enabled: false,
+  config: null as Record<string, unknown> | null,
+  snapshot: null as import("@/services/service-prompts").ServicePromptSnapshot | null
+}))
+const safeStorage = vi.hoisted(() => {
+  const values = new Map<string, unknown>()
+  const watchers = new Set<Record<string, (change: { newValue?: unknown }) => void>>()
+  return {
+    values,
+    watchers,
+    get: async <T,>(key: string) => values.get(key) as T | undefined,
+    set: async <T,>(key: string, value: T) => {
+      values.set(key, value)
+      watchers.forEach((handlers) => handlers[key]?.({ newValue: value }))
+    },
+    remove: async (key: string) => {
+      values.delete(key)
+      watchers.forEach((handlers) => handlers[key]?.({}))
+    }
+  }
+})
+
+vi.mock("@/utils/safe-storage", () => ({
+  createSafeStorage: () => ({
+    get: safeStorage.get,
+    set: safeStorage.set,
+    remove: safeStorage.remove,
+    watch: (handlers: Record<string, (change: { newValue?: unknown }) => void>) =>
+      safeStorage.watchers.add(handlers),
+    unwatch: (handlers: Record<string, (change: { newValue?: unknown }) => void>) =>
+      safeStorage.watchers.delete(handlers)
+  }),
+  safeStorageSerde: { serialize: JSON.stringify, deserialize: JSON.parse }
+}))
+
 const messageStoreState = vi.hoisted(() => ({
   value: {
     selectedModel: "deepseek-chat" as string | null,
@@ -46,6 +111,27 @@ const messageStoreState = vi.hoisted(() => ({
     serverChatCharacterId: null as string | number | null,
     serverChatAssistantKind: null as "character" | "persona" | null,
     serverChatSource: null as string | null
+  }
+}))
+
+vi.mock("@/services/background-proxy", () => ({ bgStream: bgStreamMock, bgRequest: vi.fn(), bgUpload: vi.fn() }))
+
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async (ids: string[], { signal = new AbortController().signal }: { signal?: AbortSignal } = {}) => {
+    if (actualAuthority.enabled) {
+      const actual = await vi.importActual<typeof import("@/services/service-prompts")>("@/services/service-prompts")
+      const snapshot = await actual.loadServicePromptSnapshot(ids as Parameters<typeof actual.loadServicePromptSnapshot>[0], { signal })
+      actualAuthority.snapshot = snapshot
+      return snapshot
+    }
+    return ({
+    scopeKey: "scope:test-chat", requestScope: { config: { serverUrl: "http://127.0.0.1:8000", authMode: "single-user" }, userId: null },
+    scopeSignal: signal, scopeInvalidatedSignal: recoveryAuthority.controller.signal,
+    definitions: Object.fromEntries(ids.map(id => [id, {
+      definition: { id, parts: [{ key: "template", mode: "literal", required_variables: [] }] },
+      parts: { template: "Fixture prompt" }
+    }])), capability: "unchecked", release: vi.fn()
+  })
   }
 }))
 
@@ -69,26 +155,46 @@ vi.mock("@/hooks/chat-modes/documentChatMode", () => ({
   documentChatMode: vi.fn()
 }))
 
-vi.mock("@/hooks/utils/messageHelpers", () => ({
+vi.mock("@/hooks/utils/messageHelpers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/utils/messageHelpers")>()),
   validateBeforeSubmit: vi.fn(() => true),
   createSaveMessageOnSuccess: vi.fn(
-    () =>
-      async (_payload?: unknown): Promise<string | null> =>
-        "history-character"
+    () => saveLocalSuccessMock
   ),
-  createSaveMessageOnError: vi.fn(
-    () =>
-      async (_payload?: unknown): Promise<string | null> =>
-        "history-character"
-  )
+  createSaveMessageOnError: (...args: Parameters<typeof import("@/hooks/utils/messageHelpers").createSaveMessageOnError>) =>
+    realErrorPersistence.enabled
+      ? async (payload: unknown) => {
+          const actual = await vi.importActual<typeof import("@/hooks/utils/messageHelpers")>("@/hooks/utils/messageHelpers")
+          return actual.createSaveMessageOnError(...args)(payload)
+        }
+      : saveLocalErrorMock
 }))
 
-vi.mock("@/hooks/handlers/messageHandlers", () => ({
-  createRegenerateLastMessage: vi.fn(() => vi.fn()),
+vi.mock("@/hooks/handlers/messageHandlers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/handlers/messageHandlers")>()),
   createEditMessage: vi.fn(() => vi.fn()),
-  createStopStreamingRequest: vi.fn(() => vi.fn()),
-  createBranchMessage: vi.fn(() => vi.fn())
+  createStopStreamingRequest: vi.fn(() => vi.fn())
 }))
+
+vi.mock("@/db/dexie/chat-persistence-transaction", async importOriginal => {
+  const actual = await importOriginal<typeof import("@/db/dexie/chat-persistence-transaction")>()
+  return {
+    ...actual,
+    runChatPersistenceTransaction: async (...args: Parameters<typeof actual.runChatPersistenceTransaction>) =>
+      realBranchMirror.enabled ? actual.runChatPersistenceTransaction(...args) : args[1]()
+  }
+})
+
+vi.mock("@/db/dexie/server-chat-mirror", async importOriginal => {
+  const actual = await importOriginal<typeof import("@/db/dexie/server-chat-mirror")>()
+  return {
+    ...actual,
+    linkServerChatMirror: vi.fn(async (options) => realBranchMirror.enabled
+      ? actual.linkServerChatMirror(options) : "fork-local-history"),
+    reconcileServerChatMirror: vi.fn(async (options) => realBranchMirror.enabled
+      ? actual.reconcileServerChatMirror(options) : { localIds: new Map(), rows: [] })
+  }
+})
 
 vi.mock("@/db/dexie/helpers", () => ({
   generateID: vi.fn(() => "generated-id"),
@@ -97,6 +203,9 @@ vi.mock("@/db/dexie/helpers", () => ({
   updateHistory: vi.fn(),
   updateMessage: vi.fn(),
   updateMessageMedia: vi.fn(async () => null),
+  updateLastUsedModel: vi.fn(),
+  updateLastUsedPrompt: vi.fn(),
+  updateChatHistoryCreatedAt: vi.fn(),
   removeMessageByIndex: vi.fn(),
   formatToChatHistory: vi.fn((items: unknown) => items),
   formatToMessage: vi.fn((items: unknown) => items),
@@ -134,7 +243,7 @@ vi.mock("@/utils/selected-character-storage", () => ({
 
 vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
   useChatSettingsRecord: () => ({
-    settings: {},
+    settings: directedSettings.current,
     updateSettings: vi.fn()
   })
 }))
@@ -158,12 +267,15 @@ vi.mock("@/services/tldw/server-capabilities", () => ({
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
+    getCharacter: getCharacterMock,
+    getChat: getChatMock,
     createChat: createChatMock,
     streamCharacterChatCompletion: streamCharacterChatCompletionMock,
     persistCharacterCompletion: persistCharacterCompletionMock,
     addChatMessage: addChatMessageMock,
     getChatSettings: vi.fn(async () => ({ settings: null })),
     initialize: vi.fn(async () => null),
+    ensureConfigForRequest: async () => actualAuthority.config ?? createSafeStorage().get("tldwConfig"),
     resolveVisualIdentityBinding: resolveVisualIdentityBindingMock
   }
 }))
@@ -259,9 +371,69 @@ const createHookOptions = () => ({
   clearMessageSteering: vi.fn()
 })
 
+// Production mirror and persistence helpers run against a rollback-capable
+// storage fixture. Only IndexedDB's tables and transaction boundary are replaced.
+const bindMirrorStorage = (histories: Map<string, HistoryInfo>, savedMessages: Map<string, SavedMessage>) => {
+  const bindTable = <T extends { id: string }>(target: any, rows: Map<string, T>) => {
+    const methods = {
+      get: async (id: string) => rows.get(id),
+      add: async (row: T) => {
+        if (rows.has(row.id)) throw new Error("duplicate primary key")
+        rows.set(row.id, structuredClone(row))
+        return row.id
+      },
+      put: async (row: T) => { rows.set(row.id, structuredClone(row)); return row.id },
+      update: async (id: string, changes: Partial<T>) => {
+        if (!rows.has(id)) return 0
+        rows.set(id, { ...rows.get(id)!, ...changes })
+        return 1
+      },
+      where: (field: string) => ({ equals: (value: unknown) => ({
+        toArray: async () => [...rows.values()].filter(row => row[field] === value)
+      }) })
+    }
+    for (const [method, operation] of Object.entries(methods))
+      vi.spyOn(target, method as any).mockImplementation(operation as any)
+  }
+  bindTable(db.chatHistories, histories)
+  bindTable(db.messages, savedMessages)
+  vi.spyOn(db, "transaction").mockImplementation((async (_mode, _tables, operation) => {
+    const before = [structuredClone(histories), structuredClone(savedMessages)] as const
+    let aborted = false
+    try {
+      const result = await operation({ abort: () => { aborted = true } })
+      if (aborted) throw new DOMException("Transaction aborted", "AbortError")
+      return result
+    } catch (error) {
+      histories.clear(); savedMessages.clear()
+      for (const [id, row] of before[0]) histories.set(id, row)
+      for (const [id, row] of before[1]) savedMessages.set(id, row)
+      throw error
+    }
+  }) as any)
+}
+
 describe("useChatActions character integration", () => {
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); localStorage.clear() })
   beforeEach(() => {
+    directedSettings.current = {}
+    realBranchMirror.enabled = false
+    realErrorPersistence.enabled = false
+    clearVisualIdentityResolverCaches()
+    actualAuthority.enabled = false
+    actualAuthority.config = null
+    actualAuthority.snapshot = null
+    safeStorage.values.clear()
+    safeStorage.watchers.clear()
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    vi.mocked(getModelNicknameByID).mockResolvedValue(null)
+    vi.mocked(generateID).mockImplementation(() => "generated-id")
+    recoveryAuthority.controller = new AbortController()
     vi.clearAllMocks()
+    getCharacterMock.mockReset().mockResolvedValue(null)
+    getChatMock.mockReset().mockResolvedValue({ id: "tracked-chat-1", character_id: "char-tracked" })
+    addChatMessageMock.mockImplementation(async () => ({ id: "user-server-1", version: 1 }))
+    useStoreChatModelSettings.getState().reset()
     normalChatModeMock.mockResolvedValue(undefined)
     createChatMock.mockResolvedValue({
       id: "unexpected-new-chat",
@@ -294,6 +466,1065 @@ describe("useChatActions character integration", () => {
     resolveVisualIdentityBindingMock.mockClear()
   })
 
+
+
+  it.each(["messages", "history", "saved-greeting", "new-chat"] as const)("keeps existing transcript greeting provenance for %s", async kind => {
+    const greeting = "Welcome from the Character default"
+    const user: Message = { id: "earlier-user", name: "You", isBot: false, role: "user", message: "Earlier question", sources: [] }
+    const savedGreeting: Message = { id: "saved-greeting", name: "Guide", isBot: true, role: "assistant", message: greeting, messageType: "character:greeting", sources: [] }
+    const initial = kind === "new-chat" || kind === "history" ? [] : kind === "saved-greeting" ? [savedGreeting, user] : [user]
+    let visible = initial
+    const options = { ...createHookOptions(), selectedCharacter: { id: "char-tracked", name: "Guide", greeting },
+      serverChatId: kind === "new-chat" ? null : "tracked-chat-1", messages: initial,
+      history: kind === "history" ? [{ role: "user", content: "Earlier question" }] : [],
+      setMessages: (next: Message[] | ((old: Message[]) => Message[])) => { visible = typeof next === "function" ? next(visible) : next }
+    }
+    const { result, unmount } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    try {
+      await act(async () => { await result.current.onSubmit({ message: "Follow-up", image: "" }) })
+      const expected = kind === "saved-greeting" || kind === "new-chat" ? 1 : 0
+      expect(visible.filter(row => row.messageType === "character:greeting")).toHaveLength(expected)
+      expect(saveLocalSuccessMock).toHaveBeenCalled()
+      const savedHistory = options.setHistory.mock.calls.at(-1)?.[0] as ChatHistory
+      expect(savedHistory.filter(row => row.content === greeting)).toHaveLength(expected)
+    } finally { unmount() }
+  })
+
+  it.each([
+    ["cleared", false],
+    ["foreign", false],
+    ["cleared", true],
+    ["foreign", true],
+    ["owned", false]
+  ] as const)(
+    "preserves canonical Character speaker after %s shared selection (catalog unavailable: %s)",
+    async (mirror, unavailable) => {
+      const raw =
+        mirror === "cleared"
+          ? null
+          : {
+              id: mirror === "foreign" ? "99" : "42",
+              name:
+                mirror === "foreign"
+                  ? "Other Character"
+                  : "Helpful AI Assistant"
+            }
+      // useMessageOption reconstructs this canonical selection when the shared
+      // preference is cleared or belongs to another conversation.
+      const assistant = {
+        kind: "character",
+        id: "42",
+        name: mirror === "owned" ? "Helpful AI Assistant" : "Assistant",
+        avatar_url: null,
+        system_prompt: null
+      }
+      if (unavailable)
+        getCharacterMock.mockRejectedValue(new Error("Catalog unavailable"))
+      else
+        getCharacterMock.mockResolvedValue({
+          id: 42,
+          name: "Helpful AI Assistant"
+        })
+      let rows: Message[] = []
+      const options = {
+        ...createHookOptions(),
+        serverChatId: "owned-chat",
+        serverChatCharacterId: 42,
+        serverChatAssistantKind: "character",
+        serverChatAssistantId: "42",
+        selectedCharacter: raw,
+        selectedAssistant: assistant,
+        setMessages: (
+          next: Message[] | ((previous: Message[]) => Message[])
+        ) => {
+          rows = typeof next === "function" ? next(rows) : next
+        }
+      }
+      const { result } = renderHook(() =>
+        useChatActions(
+          options as unknown as Parameters<typeof useChatActions>[0]
+        )
+      )
+      await act(async () => {
+        await result.current.onSubmit({ message: "Hello", image: "" })
+      })
+      expect(createChatMock).not.toHaveBeenCalled()
+      expect(streamCharacterChatCompletionMock).toHaveBeenCalledWith(
+        "owned-chat",
+        expect.objectContaining({ include_character_context: true }),
+        expect.any(Object)
+      )
+      const call = persistCharacterCompletionMock.mock.calls.at(-1) as
+        | unknown[]
+        | undefined
+      const payload = call?.[1] as Record<string, unknown>
+      expect(payload).toMatchObject({
+        speaker_character_id: 42,
+        assistant_content: "Tracked reply"
+      })
+      expect(payload.speaker_character_name).toBe(
+        unavailable ? undefined : "Helpful AI Assistant"
+      )
+      if (!unavailable)
+        expect(rows.find((row) => row.isBot)?.name).toBe("Helpful AI Assistant")
+      if (mirror === "owned") expect(getCharacterMock).not.toHaveBeenCalled()
+      else
+        expect(getCharacterMock).toHaveBeenCalledWith(
+          "42",
+          expect.objectContaining({
+            requestScope: expect.objectContaining({ userId: null }),
+            signal: expect.any(AbortSignal)
+          })
+        )
+    }
+  )
+
+  it("does not send or publish Character metadata when account scope changes during hydration", async () => {
+    let finish: (value: Record<string, unknown>) => void = () => {}
+    getCharacterMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    const options = {
+      ...createHookOptions(),
+      serverChatCharacterId: 42,
+      selectedCharacter: null,
+      selectedAssistant: { kind: "character", id: "42", name: "Assistant" }
+    }
+    const { result } = renderHook(() =>
+      useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+    )
+    let send: Promise<unknown>
+    act(() => {
+      send = result.current.onSubmit({ message: "Hello", image: "" })
+    })
+    await waitFor(() => expect(getCharacterMock).toHaveBeenCalled())
+    recoveryAuthority.controller.abort()
+    await act(async () => {
+      finish({ id: 42, name: "Helpful AI Assistant" })
+      await send!
+    })
+    expect(streamCharacterChatCompletionMock).not.toHaveBeenCalled()
+    expect(persistCharacterCompletionMock).not.toHaveBeenCalled()
+    expect(options.setMessages).not.toHaveBeenCalled()
+  })
+
+  it.each(["owned", "placeholder"])(
+    "temporary tracked Character still sends with %s metadata",
+    async (metadata) => {
+      getCharacterMock.mockResolvedValue({
+        id: 42,
+        name: "Helpful AI Assistant"
+      })
+      createChatMock.mockResolvedValue({
+        id: "temporary-character-chat",
+        character_id: 42,
+        title: "Helpful"
+      })
+      const selection = {
+        kind: "character",
+        id: "42",
+        name: metadata === "owned" ? "Helpful AI Assistant" : "Assistant",
+        metadata: { selectionMode: "tracked" }
+      }
+      const options = {
+        ...createHookOptions(),
+        temporaryChat: true,
+        historyId: null,
+        serverChatId: null,
+        serverChatCharacterId: null,
+        selectedCharacter: selection,
+        selectedAssistant: selection
+      }
+      const { result } = renderHook(() =>
+        useChatActions(
+          options as unknown as Parameters<typeof useChatActions>[0]
+        )
+      )
+      await act(async () => {
+        await result.current.onSubmit({ message: "Hello", image: "" })
+      })
+      expect(streamCharacterChatCompletionMock).toHaveBeenCalledTimes(1)
+    }
+  )
+  it.each([42, 88])(
+    "directed participant %s gets a consistent ID and name",
+    async (directed) => {
+      directedSettings.current = { directedCharacterId: directed }
+      try {
+        getCharacterMock.mockResolvedValue({
+          id: 42,
+          name: "Helpful AI Assistant"
+        })
+        const options = {
+          ...createHookOptions(),
+          serverChatCharacterId: 42,
+          serverChatAssistantId: "42",
+          selectedCharacter: null,
+          selectedAssistant: { kind: "character", id: "42", name: "Assistant" }
+        }
+        const { result } = renderHook(() =>
+          useChatActions(
+            options as unknown as Parameters<typeof useChatActions>[0]
+          )
+        )
+        await act(async () => {
+          await result.current.onSubmit({ message: "Hello", image: "" })
+        })
+        const call = persistCharacterCompletionMock.mock.calls.at(-1) as
+          | unknown[]
+          | undefined
+        const payload = call?.[1] as Record<string, unknown>
+        expect(payload.speaker_character_id).toBe(directed)
+        expect(payload.speaker_character_name).toBe(
+          directed === 42 ? "Helpful AI Assistant" : undefined
+        )
+      } finally {
+        directedSettings.current = {}
+      }
+    }
+  )
+  it("user cancellation while Character lookup is held prevents dispatch", async () => {
+    let release!: (value: Record<string, unknown>) => void
+    getCharacterMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        })
+    )
+    const options = {
+      ...createHookOptions(),
+      serverChatCharacterId: 42,
+      serverChatAssistantId: "42",
+      selectedCharacter: null,
+      selectedAssistant: { kind: "character", id: "42", name: "Assistant" }
+    }
+    const { result } = renderHook(() =>
+      useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+    )
+    let send!: Promise<unknown>
+    act(() => {
+      send = result.current.onSubmit({ message: "Hello", image: "" })
+    })
+    await waitFor(() => expect(getCharacterMock).toHaveBeenCalled())
+    const controller = (
+      options.setAbortController.mock.calls as unknown[][]
+    ).find((call) => call[0] instanceof AbortController)?.[0] as AbortController
+    expect(controller).toBeDefined()
+    controller.abort()
+    await act(async () => {
+      release({ id: 42, name: "Helpful AI Assistant" })
+      await send
+    })
+    expect(streamCharacterChatCompletionMock).not.toHaveBeenCalled()
+    expect(persistCharacterCompletionMock).not.toHaveBeenCalled()
+    expect(options.setMessages).not.toHaveBeenCalled()
+  })
+
+  const configureActualAuthority = async (
+    overrides: Record<string, unknown> = {}
+  ) => {
+    const config = {
+      serverUrl: "http://127.0.0.1:8000", authMode: "single-user",
+      apiKey: "synthetic-test-key", credentialSource: "manual",
+      apiKeyPersistence: "device", apiKeyServerOrigin: "http://127.0.0.1:8000",
+      ...overrides
+    }
+    actualAuthority.config = config
+    await createSafeStorage().set("tldwConfig", config)
+  }
+
+  const enableActualAuthority = async () => {
+    actualAuthority.enabled = true
+    await configureActualAuthority()
+    // This is the browser-visible credential boundary consumed by the actual
+    // service-prompt lease. The frontend AuthService emits it on logout, but
+    // this UI-package test must not import a frontend-only module.
+    return () => window.dispatchEvent(
+      new CustomEvent("tldw:auth-credentials-changed", {
+        detail: { authenticated: false }
+      })
+    )
+  }
+
+  it.each(["late-success", "late-failure", "partial-logout", "caller-stop", "partial-error", "same-owner"])(
+    "binds actual auth lease through Character transport: %s", async mode => {
+      const logout = await enableActualAuthority()
+      const actualProxy = await vi.importActual<typeof import("@/services/background-proxy")>("@/services/background-proxy")
+      let delivered!: () => void
+      const partialDelivered = new Promise<void>(resolve => { delivered = resolve })
+      bgStreamMock.mockImplementation(async function* (...args: Parameters<typeof actualProxy.bgStream>) {
+        for await (const chunk of actualProxy.bgStream(...args)) {
+          yield chunk
+          delivered()
+        }
+      })
+      streamCharacterChatCompletionMock.mockImplementation(chatRagMethods.streamCharacterChatCompletion)
+      let sequence = 0
+      vi.mocked(generateID).mockImplementation(() => `authority-${++sequence}`)
+      let entered!: () => void
+      const opened = new Promise<void>(resolve => { entered = resolve })
+      let stream!: ReadableStreamDefaultController<Uint8Array>
+      const aborted = vi.fn()
+      const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+        const body = new ReadableStream<Uint8Array>({ start(controller) { stream = controller } })
+        // Keep the controlled source capable of late delivery after cancellation.
+        // The real transport must still honor its captured signal.
+        init.signal!.addEventListener("abort", aborted, { once: true })
+        entered()
+        return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })
+      })
+      vi.stubGlobal("fetch", fetchMock)
+      const caller = new AbortController()
+      const { result, unmount } = renderHook(() => {
+        const [messages, setMessages] = React.useState<Message[]>([])
+        const [history, setHistory] = React.useState<ChatHistory>([])
+        return { ...useChatActions({ ...createHookOptions(), messages, setMessages, history, setHistory } as unknown as Parameters<typeof useChatActions>[0]), messages, setMessages }
+      })
+      let pending!: ReturnType<typeof result.current.onSubmit>
+      await act(async () => { pending = result.current.onSubmit({ message: "One acknowledged question", image: "", controller: caller }); await Promise.race([opened, pending.then(result => { throw new Error(`Turn settled before opening: ${JSON.stringify(result)}`) })]) })
+      const user = result.current.messages.find(row => !row.isBot)!
+      expect(user.serverMessageId).toBe("user-server-1")
+      const chunk = (content: string) => new TextEncoder().encode(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`)
+      if (mode === "partial-logout" || mode === "caller-stop" || mode === "partial-error") {
+        await act(async () => { stream.enqueue(chunk("Partial owned answer\n")); await partialDelivered })
+      }
+      const ownerChanges = mode !== "caller-stop" && mode !== "same-owner" && mode !== "partial-error"
+      let outcome: unknown
+      await act(async () => {
+        if (ownerChanges) {
+          result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] }])
+          logout()
+          expect(actualAuthority.snapshot!.scopeInvalidatedSignal.aborted).toBe(true)
+          expect(actualAuthority.snapshot!.scopeSignal.aborted).toBe(true)
+          expect(caller.signal.aborted).toBe(false)
+        } else if (mode === "caller-stop") caller.abort()
+        if (mode === "late-failure" || mode === "partial-error") stream.error(new Error("Late old-owner failure"))
+        else { stream.enqueue(chunk("Late Alice answer")); stream.close() }
+        outcome = await pending
+      })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(addChatMessageMock.mock.calls.filter(([, body]) => (body as { role?: string }).role === "user")).toHaveLength(1)
+      if (ownerChanges) {
+        expect(aborted).toHaveBeenCalledTimes(1)
+        expect(persistCharacterCompletionMock).not.toHaveBeenCalled()
+        expect(addChatMessageMock.mock.calls.filter(([, body]) => (body as { role?: string }).role === "assistant")).toHaveLength(0)
+        expect(saveLocalSuccessMock).not.toHaveBeenCalled()
+        expect(saveLocalErrorMock).not.toHaveBeenCalled()
+        expect(result.current.messages).toEqual([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] }])
+        expect(outcome).toEqual({ status: "skipped", reason: "Request scope changed" })
+      } else {
+        expect(result.current.messages.find(row => !row.isBot)).toMatchObject({ id: user.id, serverMessageId: "user-server-1" })
+        expect(actualAuthority.snapshot!.scopeInvalidatedSignal.aborted).toBe(false)
+        if (mode === "same-owner") {
+          expect(persistCharacterCompletionMock).toHaveBeenCalledTimes(1)
+          expect(persistCharacterCompletionMock.mock.calls[0][2]).toEqual(expect.objectContaining({ requestScope: actualAuthority.snapshot!.requestScope, signal: actualAuthority.snapshot!.scopeSignal }))
+          expect(saveLocalSuccessMock).toHaveBeenCalledWith(expect.objectContaining({ scopeInvalidatedSignal: actualAuthority.snapshot!.scopeInvalidatedSignal }))
+        } else {
+          expect(aborted).toHaveBeenCalledTimes(mode === "caller-stop" ? 1 : 0)
+          expect(addChatMessageMock.mock.calls.filter(([, body]) => (body as { role?: string }).role === "assistant")).toHaveLength(mode === "caller-stop" ? 0 : 1)
+          expect(saveLocalErrorMock).toHaveBeenCalledTimes(1)
+        }
+      }
+      unmount()
+    }
+  )
+
+  it.each(["prerequisite", "user-ack", "visual-identity", "persist-success", "persist-failure"])(
+    "rejects late Character side effects after actual logout at %s", async boundary => {
+      const logout = await enableActualAuthority()
+      let replaceDraft = () => {}
+      const invalidate = () => { logout(); replaceDraft() }
+      if (boundary === "prerequisite") vi.mocked(getModelNicknameByID).mockImplementationOnce(async () => { invalidate(); return null })
+      if (boundary === "user-ack") addChatMessageMock.mockImplementationOnce(async () => { invalidate(); return { id: "ack-old-user", version: 2 } })
+      if (boundary === "visual-identity") resolveVisualIdentityBindingMock.mockImplementationOnce(async () => { invalidate(); return null })
+      if (boundary === "persist-success" || boundary === "persist-failure") persistCharacterCompletionMock.mockImplementationOnce(async () => {
+        invalidate()
+        if (boundary === "persist-failure") throw new Error("Late old-owner persist failure")
+        return { assistant_message_id: "old-ack", version: 2 }
+      })
+      const options = { ...createHookOptions(), selectedCharacter: { id: 12, name: "Owned character" }, serverChatCharacterId: 12 }
+      const { result, unmount } = renderHook(() => {
+        const [messages, setMessages] = React.useState<Message[]>([])
+        const [history, setHistory] = React.useState<ChatHistory>([])
+        return { ...useChatActions({ ...options, messages, setMessages, history, setHistory } as unknown as Parameters<typeof useChatActions>[0]), messages, setMessages }
+      })
+      replaceDraft = () => result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] }])
+      let outcome: unknown
+      await act(async () => { outcome = await result.current.onSubmit({ message: "Owned question", image: "" }) })
+      expect(actualAuthority.snapshot!.scopeInvalidatedSignal.aborted).toBe(true)
+      expect(result.current.messages).toEqual([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] }])
+      expect(saveLocalSuccessMock).not.toHaveBeenCalled()
+      expect(saveLocalErrorMock).not.toHaveBeenCalled()
+      expect(addChatMessageMock.mock.calls.filter(([, body]) => (body as { role?: string }).role === "assistant")).toHaveLength(0)
+      if (boundary === "prerequisite") expect(addChatMessageMock).not.toHaveBeenCalled()
+      if (boundary === "prerequisite" || boundary === "user-ack") expect(streamCharacterChatCompletionMock).not.toHaveBeenCalled()
+      expect(persistCharacterCompletionMock).toHaveBeenCalledTimes(boundary.startsWith("persist-") ? 1 : 0)
+      expect(outcome).toEqual({ status: "skipped", reason: "Request scope changed" })
+      unmount()
+    }
+  )
+
+  it.each(["create-ack", "greeting-ack"])("stops Character creation after actual logout at %s", async boundary => {
+    const logout = await enableActualAuthority()
+    let replaceDraft = () => {}
+    const invalidate = () => { logout(); replaceDraft() }
+    createChatMock.mockImplementationOnce(async () => {
+      if (boundary === "create-ack") invalidate()
+      return { id: "new-owned-character", character_id: 12, title: "Owned" }
+    })
+    if (boundary === "greeting-ack") addChatMessageMock.mockImplementationOnce(async () => { invalidate(); return { id: "old-greeting-ack", version: 1 } })
+    const character = { id: 12, name: "Owned character", greeting: "Owned greeting" }
+    const options = {
+      ...createHookOptions(), serverChatId: null, serverChatCharacterId: null, serverChatAssistantKind: null,
+      selectedCharacter: character,
+      selectedAssistant: { ...character, kind: "character", metadata: { selectionMode: "tracked" } }
+    }
+    const { result, unmount } = renderHook(() => {
+      const [messages, setMessages] = React.useState<Message[]>([])
+      return { ...useChatActions({ ...options, messages, setMessages } as unknown as Parameters<typeof useChatActions>[0]), messages, setMessages }
+    })
+    replaceDraft = () => result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] }])
+    let outcome: unknown
+    await act(async () => { outcome = await result.current.onSubmit({ message: "Owned question", image: "" }) })
+    expect(createChatMock).toHaveBeenCalledTimes(1)
+    expect(createChatMock.mock.calls[0][1]).toEqual(expect.objectContaining({ requestScope: actualAuthority.snapshot!.requestScope, signal: actualAuthority.snapshot!.scopeSignal }))
+    expect(addChatMessageMock).toHaveBeenCalledTimes(boundary === "greeting-ack" ? 1 : 0)
+    expect(streamCharacterChatCompletionMock).not.toHaveBeenCalled()
+    expect(persistCharacterCompletionMock).not.toHaveBeenCalled()
+    expect(saveLocalSuccessMock).not.toHaveBeenCalled()
+    expect(saveLocalErrorMock).not.toHaveBeenCalled()
+    expect(result.current.messages).toEqual([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] }])
+    expect(outcome).toEqual({ status: "skipped", reason: "Request scope changed" })
+    unmount()
+  })
+
+  const useRealCharacterTransport = () => {
+    streamCharacterChatCompletionMock.mockImplementation(chatRagMethods.streamCharacterChatCompletion)
+    bgStreamMock.mockImplementation(async function* () {
+      yield JSON.stringify({ choices: [{ delta: { content: "Configured reply" } }] })
+    })
+  }
+
+  it.each(["idle", "explicit-budget", "raw-progress", "caller-abort", "authority-abort"])(
+    "qualifies real Character stream lifetime without changing timeout policy: %s", async mode => {
+      actualAuthority.enabled = true
+      realErrorPersistence.enabled = true
+      await i18n.init({ lng: "en", resources: {} })
+      await configureActualAuthority(
+        mode === "explicit-budget" ? { streamIdleTimeoutMs: 12_000 } : {}
+      )
+      const actualProxy = await vi.importActual<typeof import("@/services/background-proxy")>("@/services/background-proxy")
+      bgStreamMock.mockImplementation(actualProxy.bgStream)
+      streamCharacterChatCompletionMock.mockImplementation(chatRagMethods.streamCharacterChatCompletion)
+      let sequence = 0
+      vi.mocked(generateID).mockImplementation(() => `lifetime-${++sequence}`)
+      let entered!: () => void
+      const opened = new Promise<void>(resolve => { entered = resolve })
+      let stream!: ReadableStreamDefaultController<Uint8Array>
+      const aborted = vi.fn()
+      const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+        const body = new ReadableStream<Uint8Array>({ start(controller) { stream = controller } })
+        init.signal!.addEventListener("abort", () => { aborted(); stream.error(new DOMException("Controlled fetch abort", "AbortError")) }, { once: true })
+        entered()
+        return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })
+      })
+      vi.stubGlobal("fetch", fetchMock)
+      const caller = new AbortController()
+      const { result, unmount } = renderHook(() => {
+        const [messages, setMessages] = React.useState<Message[]>([])
+        const [history, setHistory] = React.useState<ChatHistory>([])
+        return { ...useChatActions({ ...createHookOptions(), messages, setMessages, history, setHistory } as unknown as Parameters<typeof useChatActions>[0]), messages, setMessages }
+      })
+      vi.useFakeTimers()
+      let pending!: ReturnType<typeof result.current.onSubmit>
+      await act(async () => { pending = result.current.onSubmit({ message: "One acknowledged question", image: "", controller: caller }); await opened })
+      const user = result.current.messages.find(row => !row.isBot)!
+      expect(user.serverMessageId).toBe("user-server-1")
+      const emit = async (data: object) => {
+        await act(async () => { stream.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`)); await vi.advanceTimersByTimeAsync(1) })
+      }
+      if (mode === "raw-progress") {
+        await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+        await emit({ choices: [{ delta: { role: "assistant" } }] })
+        await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+        await emit({ choices: [{ delta: { reasoning_content: "Reasoning" } }] })
+        await act(async () => { await vi.advanceTimersByTimeAsync(20_000) })
+        await emit({ choices: [{ delta: { content: "Final answer" } }] })
+        await act(async () => { stream.close(); await pending })
+        expect(result.current.messages.at(-1)?.message).toContain("Final answer")
+        expect(aborted).not.toHaveBeenCalled()
+      } else if (mode === "caller-abort" || mode === "authority-abort") {
+        await act(async () => {
+          if (mode === "authority-abort") {
+            result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] }])
+            recoveryAuthority.controller.abort()
+            // Explicit caller cancellation accompanies this invalidated snapshot.
+            // Invalidation-only delivery is a separately retained diagnostic.
+            caller.abort()
+          } else caller.abort()
+          await pending
+        })
+        expect(aborted).toHaveBeenCalledTimes(1)
+        if (mode === "authority-abort") expect(result.current.messages).toEqual([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] }])
+        expect(persistCharacterCompletionMock).not.toHaveBeenCalled()
+      } else {
+        const budget = mode === "explicit-budget" ? 12_000 : 45_000
+        await act(async () => { await vi.advanceTimersByTimeAsync(budget - 1) })
+        expect(aborted).not.toHaveBeenCalled()
+        await act(async () => { await vi.advanceTimersByTimeAsync(1); await pending })
+        expect(aborted).toHaveBeenCalledTimes(1)
+        expect(result.current.messages.find(row => !row.isBot)).toMatchObject({ id: user.id, serverMessageId: "user-server-1", message: "One acknowledged question" })
+        expect(decodeChatErrorPayload(result.current.messages.at(-1)!.message)?.summary).toMatch(/timed out/i)
+      }
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(addChatMessageMock.mock.calls.filter(([, body]) => (body as { role?: string }).role === "user")).toHaveLength(1)
+      unmount()
+    }
+  )
+
+  it("maps an actual HTTP model-not-available failure and retries the same Character turn through real streaming transport", async () => {
+    actualAuthority.enabled = true
+    realErrorPersistence.enabled = true
+    await i18n.init({ lng: "en", resources: {} })
+    await configureActualAuthority()
+    const actualProxy = await vi.importActual<typeof import("@/services/background-proxy")>("@/services/background-proxy")
+    bgStreamMock.mockImplementation(actualProxy.bgStream)
+    streamCharacterChatCompletionMock.mockImplementation(chatRagMethods.streamCharacterChatCompletion)
+    let localId = 0
+    vi.mocked(generateID).mockImplementation(() => `transport-${++localId}`)
+    const requests: Array<{ url: string; body: Record<string, unknown> }> = []
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      requests.push({ url: String(url), body: JSON.parse(String(init.body)) })
+      if (requests.length === 1) return new Response(JSON.stringify({ detail: { error_code: "model_not_available", message: "Selected model is unavailable", provider: "llama", model: "test-model" } }), { status: 400, headers: { "content-type": "application/json" } })
+      return new Response(new ReadableStream({ start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Recovered answer"}}]}\n\ndata: [DONE]\n\n'))
+        controller.close()
+      } }), { status: 200, headers: { "content-type": "text/event-stream" } })
+    }))
+    const { result } = renderHook(() => {
+      const [messages, setMessages] = React.useState<Message[]>([{ id: "greeting", isBot: true, message: "Welcome", role: "assistant", messageType: "character:greeting", serverMessageId: "greeting-server", sources: [] }])
+      const [history, setHistory] = React.useState<ChatHistory>([{ role: "assistant", content: "Welcome", messageType: "character:greeting" }])
+      const actions = useChatActions({ ...createHookOptions(), messages, setMessages, history, setHistory } as unknown as Parameters<typeof useChatActions>[0])
+      return { ...actions, messages, history }
+    })
+    await act(async () => { await result.current.onSubmit({ message: "Exact user question", image: "" }) })
+    expect(requests, JSON.stringify(result.current.messages)).toHaveLength(1)
+    expect(decodeChatErrorPayload(result.current.messages.at(-1)!.message)).toMatchObject({ summary: "The selected model is not available.", recoveryAction: "open-model-selector" })
+    const identity = result.current.messages.slice(0, 2).map(row => ({ id: row.id, serverMessageId: row.serverMessageId, message: row.message }))
+    await act(async () => { await result.current.regenerateLastMessage() })
+    expect(requests).toHaveLength(2)
+    expect(requests[1]).toEqual(requests[0])
+    expect(result.current.messages.slice(0, 2).map(row => ({ id: row.id, serverMessageId: row.serverMessageId, message: row.message }))).toEqual(identity)
+    expect(result.current.messages.at(-1)?.message).toBe("Recovered answer")
+    expect(createChatMock).not.toHaveBeenCalled()
+    expect(addChatMessageMock.mock.calls.filter(([, body]) => (body as { role?: string }).role === "user")).toHaveLength(1)
+  })
+
+  it("retries failed complete-v2 in its original conversation with the greeting and user receipts intact", async () => {
+    // The regression is the real Retry pre-submit hook branching a failed reply.
+    // Keep the handler, branch factory, SSE parser and failed-history save real;
+    // only the remote endpoint and IndexedDB writes are substituted.
+    realErrorPersistence.enabled = true
+    await i18n.init({ lng: "en", resources: {} })
+    let localId = 0
+    vi.mocked(generateID).mockImplementation(() => `local-${++localId}`)
+    const serverRows = new Map<string, Array<{ id: string; role: string; content: string }>>()
+    createChatMock.mockImplementation(async () => {
+      const id = `conversation-${serverRows.size + 1}`
+      serverRows.set(id, [])
+      return { id, character_id: "char-tracked", title: "Guide" }
+    })
+    addChatMessageMock.mockImplementation(async (chatId: string, payload: { role: string; content: string }) => {
+      const rows = serverRows.get(chatId)!
+      const id = `${chatId}-message-${rows.length + 1}`
+      rows.push({ id, ...payload })
+      return { id, version: 1 }
+    })
+    useRealCharacterTransport()
+    bgStreamMock.mockImplementation(async function* () {
+      yield JSON.stringify({ error: { code: "provider_unavailable", message: "Ollama is unavailable" } })
+    })
+    const character = { id: "char-tracked", name: "Guide", greeting: "Welcome back" }
+    const { result } = renderHook(() => {
+      const [messages, setMessages] = React.useState<Message[]>([{
+        id: "local-greeting", isBot: true, role: "assistant", name: "Guide",
+        message: "Welcome back", messageType: "character:greeting", sources: []
+      }])
+      const [history, setHistory] = React.useState<ChatHistory>([{
+        role: "assistant", content: "Welcome back", messageType: "character:greeting"
+      }])
+      const [serverChatId, setServerChatId] = React.useState<string | null>(null)
+      const [serverChatCharacterId, setServerChatCharacterId] = React.useState<string | number | null>(null)
+      const actions = useChatActions({
+        ...createHookOptions(), messages, setMessages, history, setHistory,
+        serverChatId, setServerChatId, serverChatCharacterId, setServerChatCharacterId,
+        selectedCharacter: character,
+        selectedAssistant: { ...character, kind: "character", metadata: { selectionMode: "tracked" } }
+      } as unknown as Parameters<typeof useChatActions>[0])
+      return { ...actions, messages, history, serverChatId }
+    })
+
+    let initialResult: unknown
+    await act(async () => { initialResult = await result.current.onSubmit({ message: "One question", image: "" }) })
+    expect(initialResult).toMatchObject({ status: "failed" })
+    expect(decodeChatErrorPayload(result.current.messages.at(-1)!.message)).not.toBeNull()
+    await act(async () => { await result.current.regenerateLastMessage() })
+    await act(async () => { await result.current.regenerateLastMessage() })
+
+    expect(result.current.serverChatId).toBe("conversation-1")
+    expect([...serverRows.keys()]).toEqual(["conversation-1"])
+    expect(bgStreamMock.mock.calls.map(([request]) => request.path.split("?")[0])).toEqual([
+      "/api/v1/chats/conversation-1/complete-v2",
+      "/api/v1/chats/conversation-1/complete-v2",
+      "/api/v1/chats/conversation-1/complete-v2"
+    ])
+    expect(serverRows.get("conversation-1")).toEqual([
+      { id: "conversation-1-message-1", role: "assistant", content: "Welcome back" },
+      { id: "conversation-1-message-2", role: "user", content: "One question" }
+    ])
+    expect(result.current.messages).toHaveLength(3)
+    expect(result.current.messages[0].serverMessageId).toBe("conversation-1-message-1")
+    expect(result.current.messages[1].serverMessageId).toBe("conversation-1-message-2")
+    expect(result.current.history.map(row => row.role)).toEqual(["assistant", "user", "assistant"])
+  })
+
+  it("UAT103 keeps a local source diagnostic Retry in the original character conversation", async () => {
+    const { ragMode } = await import("@/hooks/chat-modes/ragMode")
+    vi.mocked(ragMode).mockResolvedValue({ status: "submitted" })
+    const generationInfo = { mode: "rag", grounded: false, reason: "selected_source_retrieval_failed" }
+    const options = { ...createHookOptions(), ragMediaIds: [42], fileRetrievalEnabled: true,
+      messages: [
+        { id: "greeting", isBot: true, message: "Welcome", messageType: "character:greeting", serverMessageId: "greeting-server", sources: [] },
+        { id: "local-user", isBot: false, message: "Source question", generationInfo, sources: [] },
+        { id: "local-diagnostic", isBot: true, message: "Plain diagnostic", parentMessageId: "local-user", generationInfo, sources: [] }
+      ],
+      history: [{ role: "assistant", content: "Welcome", messageType: "character:greeting" }]
+    }
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    await act(async () => { await result.current.regenerateLastMessage() })
+    expect(createChatMock).not.toHaveBeenCalled()
+    expect(options.setServerChatId).not.toHaveBeenCalled()
+    expect(ragMode).toHaveBeenCalledWith("Source question", "", true, expect.any(Array), options.history, expect.any(AbortSignal), expect.objectContaining({ regenerateFromMessage: options.messages[2] }))
+  })
+
+  it.each(["Complete reply", "Partial reply after interruption", "__tldw_error__:malformed"])(
+    "retains server branching when regenerating actual assistant content: %s", async (reply) => {
+      useRealCharacterTransport()
+      const routeReplacements: CustomEvent[] = []
+      const captureRouteReplacement = (event: Event) => {
+        routeReplacements.push(event as CustomEvent)
+      }
+      window.addEventListener(CHAT_ROUTE_REPLACEMENT_EVENT, captureRouteReplacement)
+      const options = {
+        ...createHookOptions(),
+        messages: [
+          { id: "greeting", isBot: true, message: "Welcome", messageType: "character:greeting", serverMessageId: "greeting-server", sources: [] },
+          { id: "user", isBot: false, message: "Question", serverMessageId: "user-server", sources: [] },
+          { id: "assistant", isBot: true, message: reply, sources: [], generationInfo: { interrupted: true } }
+        ],
+        history: [
+          { role: "assistant", content: "Welcome", messageType: "character:greeting" },
+          { role: "user", content: "Question" },
+          { role: "assistant", content: reply }
+        ]
+      }
+      createChatMock.mockResolvedValueOnce({ id: "regenerated-branch", character_id: "char-tracked" })
+      try {
+        const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+        await act(async () => { await result.current.regenerateLastMessage() })
+        expect(createChatMock).toHaveBeenCalledWith(expect.objectContaining({ parent_conversation_id: "tracked-chat-1" }), {
+          requestScope: { config: { serverUrl: "http://127.0.0.1:8000", authMode: "single-user" }, userId: null },
+          signal: expect.any(AbortSignal)
+        })
+        expect(routeReplacements).toHaveLength(1)
+        expect(routeReplacements[0].detail).toMatchObject({
+          serverChatId: "tracked-chat-1",
+          historyId: "history-character",
+          characterId: "char-tracked",
+          nextChatId: "regenerated-branch"
+        })
+        expect(bgStreamMock).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/chats/regenerated-branch/complete-v2?scope_type=global" }))
+      } finally {
+        window.removeEventListener(CHAT_ROUTE_REPLACEMENT_EVENT, captureRouteReplacement)
+      }
+    }
+  )
+
+  it("ordinary Character Retry owns copied image receipts and leaves its parent mirror intact", async () => {
+    realBranchMirror.enabled = true
+    const histories = new Map<string, HistoryInfo>()
+    const savedMessages = new Map<string, SavedMessage>()
+    bindMirrorStorage(histories, savedMessages)
+    const promptService = await import("@/services/service-prompts")
+    const snapshots = vi.spyOn(promptService, "loadServicePromptSnapshot")
+    const requestScope = {
+      config: { serverUrl: "http://127.0.0.1:8000", authMode: "single-user" as const },
+      userId: null
+    }
+    const ownerKey = serverChatMirrorOwnerKey({ requestScope })
+    const parent: HistoryInfo = {
+      id: "parent-local", title: "Parent", is_rag: false, createdAt: 1,
+      server_chat_id: "tracked-chat-1", server_scope_key: ownerKey
+    }
+    const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aJp0AAAAASUVORK5CYII="
+    const rows: Message[] = [
+      { id: "greeting", serverMessageId: "parent-greeting", role: "assistant", isBot: true,
+        name: "Character", message: "Greeting", messageType: "character:greeting", sources: [] },
+      { id: "local-image", serverMessageId: "parent-image", role: "user", isBot: false,
+        name: "You", message: "", images: [image], sources: [] },
+      { id: "local-answer", serverMessageId: "parent-answer", role: "assistant", isBot: true,
+        name: "Character", message: "  First answer  ", parentMessageId: "local-image", sources: [],
+        modelId: "model", modelName: "Model", metadataExtra: { mood: "happy" },
+        variants: [{ id: "old-answer", serverMessageId: "parent-old", message: "Old" },
+          { id: "local-answer", serverMessageId: "parent-answer", message: "  First answer  " }],
+        activeVariantIndex: 1 },
+      { id: "retry-user", serverMessageId: "parent-retry-user", role: "user", isBot: false,
+        name: "You", message: "Retry question", parentMessageId: "local-answer", sources: [] },
+      { id: "retry-answer", serverMessageId: "parent-retry-answer", role: "assistant", isBot: true,
+        name: "Character", message: "Replace this answer", parentMessageId: "retry-user", sources: [] }
+    ]
+    histories.set(parent.id, structuredClone(parent))
+    for (const row of rows) savedMessages.set(row.id!, {
+      id: row.id!, history_id: parent.id, role: row.role!, name: row.name,
+      content: row.message, images: row.images || [], createdAt: 1,
+      serverMessageId: row.serverMessageId
+    })
+    const original = structuredClone([...savedMessages.values()])
+    const originalProjection = structuredClone(rows)
+    vi.mocked(generateID).mockReturnValue("fork-local-history")
+    createChatMock.mockResolvedValue({ id: "fork-chat", character_id: "char-tracked", title: "Fork" })
+    let nextId = 0
+    addChatMessageMock.mockImplementation(async () => ({ id: `fork-${nextId++}`, version: 1 }))
+    let visible = rows
+    const options = {
+      ...createHookOptions(), historyId: parent.id, messages: rows,
+      scope: { type: "workspace" as const, workspaceId: "original" },
+      history: rows.map(row => ({ role: row.role!, content: row.message, images: row.images })),
+      ensureServerChatHistoryId: vi.fn(async () => "fork-local-history"),
+      setMessages: (next: Message[] | ((prior: Message[]) => Message[])) => {
+        visible = typeof next === "function" ? next(visible) : next
+      }
+    }
+    const retire = () => usePlaygroundSessionStore.setState(state => ({ restoreRevision: state.restoreRevision + 1 }))
+    window.addEventListener(CHAT_ROUTE_REPLACEMENT_EVENT, retire)
+    const view = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    try {
+      await act(async () => { await view.result.current.regenerateLastMessage() })
+      const childRows = [...savedMessages.values()].filter(row => row.history_id === "fork-local-history")
+      expect(childRows.map(row => row.serverMessageId)).toEqual(["fork-0", "fork-1", "fork-2", "fork-3"])
+      expect(childRows[1]).toMatchObject({ id: "fork-1", content: "", images: [image] })
+      expect(childRows[2]).toMatchObject({ content: "  First answer  ", parent_message_id: "fork-1",
+        modelId: "model", metadataExtra: { mood: "happy" } })
+      expect(childRows[3].parent_message_id).toBe("fork-2")
+      expect(histories.get("fork-local-history")).toMatchObject({ server_chat_id: "fork-chat", server_scope_key: ownerKey })
+      expect(options.setHistoryId).toHaveBeenCalledWith("fork-local-history", { preserveServerChatId: true })
+      expect(visible[2]).toMatchObject({ id: "fork-2", parentMessageId: "fork-1", variants: undefined, activeVariantIndex: undefined })
+      expect(visible.filter(row => !row.isBot).at(-1)?.id).toBe("fork-3")
+      expect(saveLocalSuccessMock).toHaveBeenCalledWith(expect.objectContaining({ historyId: "fork-local-history", assistantParentMessageId: "fork-3" }))
+      expect(addChatMessageMock.mock.calls.map(call => call[1])).toEqual([
+        { role: "assistant", content: "Greeting" },
+        { role: "user", image_base64: image.split(",")[1] },
+        { role: "assistant", content: "  First answer  ", parent_message_id: "fork-1" },
+        { role: "user", content: "Retry question", parent_message_id: "fork-2" }
+      ])
+      const branchOwner = await snapshots.mock.results[0].value
+      const remoteOptions = { scope: options.scope, requestScope: branchOwner.requestScope, signal: branchOwner.scopeSignal }
+      expect(createChatMock).toHaveBeenCalledWith(expect.objectContaining({ parent_conversation_id: "tracked-chat-1" }), remoteOptions)
+      expect(getChatMock).toHaveBeenCalledWith("tracked-chat-1", remoteOptions)
+      for (const call of addChatMessageMock.mock.calls as unknown as unknown[][]) expect(call[2]).toEqual(remoteOptions)
+      expect(branchOwner.release).toHaveBeenCalledOnce()
+      await reconcileServerChatMirror({ historyId: "fork-local-history", chatId: "fork-chat", ownerKey,
+        messages: visible.slice(0, 4) })
+      expect([...savedMessages.values()].filter(row => row.history_id === "fork-local-history")).toHaveLength(4)
+      expect([...savedMessages.values()].filter(row => row.history_id === parent.id)).toEqual(original)
+      expect(histories.get(parent.id)).toEqual(parent)
+      expect(rows).toEqual(originalProjection)
+    } finally {
+      view.unmount()
+      window.removeEventListener(CHAT_ROUTE_REPLACEMENT_EVENT, retire)
+    }
+  })
+
+  it.each([
+    { greetingEnabled: false, generatedImage: false },
+    { greetingEnabled: true, generatedImage: true },
+    { greetingEnabled: false, generatedImage: true }
+  ])("ordinary Character Retry copies canonical rows independently of provider exclusions (greeting=$greetingEnabled, image=$generatedImage)", async ({ greetingEnabled, generatedImage }) => {
+    realBranchMirror.enabled = true
+    directedSettings.current = { greetingEnabled }
+    const histories = new Map<string, HistoryInfo>()
+    const savedMessages = new Map<string, SavedMessage>()
+    bindMirrorStorage(histories, savedMessages)
+    const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aJp0AAAAASUVORK5CYII="
+    const rows: Message[] = [
+      { id: "greeting", serverMessageId: "parent-greeting", role: "assistant", isBot: true, name: "Character",
+        message: "Saved greeting", messageType: "character:greeting", sources: [] },
+      ...(generatedImage ? [{ id: "generated", serverMessageId: "parent-generated", role: "assistant" as const, isBot: true, name: "Character",
+        message: "Saved artwork", messageType: "image-generation:assistant", images: [image], sources: [] }] : []),
+      { id: "user", serverMessageId: "parent-user", role: "user", isBot: false, name: "You", message: "Question", sources: [] },
+      { id: "answer", serverMessageId: "parent-answer", role: "assistant", isBot: true, name: "Character", message: "Answer", sources: [] }
+    ]
+    const original = structuredClone(rows)
+    const options = {
+      ...createHookOptions(), messages: rows,
+      history: rows.filter(row => !row.messageType?.startsWith("image-generation:") &&
+        (greetingEnabled || row.messageType !== "character:greeting")).map(row => ({ role: row.role!, content: row.message }))
+    }
+    vi.mocked(generateID).mockReturnValue("child-mirror")
+    createChatMock.mockResolvedValue({ id: "child-chat", character_id: "char-tracked" })
+    let receipt = 0
+    addChatMessageMock.mockImplementation(async () => ({ id: `child-${receipt++}`, version: 1 }))
+    const view = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    try {
+      options.setHistory.mockClear()
+      await act(async () => { await view.result.current.regenerateLastMessage() })
+      expect([...savedMessages.values()].map(row => [row.serverMessageId, row.content, row.images])).toEqual([
+        ["child-0", "Saved greeting", []],
+        ...(generatedImage ? [["child-1", "Saved artwork", [image]]] : []),
+        [`child-${generatedImage ? 2 : 1}`, "Question", []]
+      ])
+      const providerPrefix = options.setHistory.mock.calls[0][0] as ChatHistory
+      expect(providerPrefix.map(row => row.content)).toEqual(greetingEnabled ? ["Saved greeting", "Question"] : ["Question"])
+      expect(providerPrefix.some(row => row.messageType?.startsWith("image-generation:"))).toBe(false)
+      expect(rows).toEqual(original)
+    } finally { view.unmount() }
+  })
+
+  it.each(["link", "reconcile"])("ordinary Character Retry rolls back a mirror %s write after its history revision changes", async boundary => {
+    realBranchMirror.enabled = true
+    const parent: HistoryInfo = { id: "parent-local", title: "Parent", is_rag: false, createdAt: 1 }
+    const source: SavedMessage = { id: "source-user", history_id: parent.id, role: "user", name: "You", content: "Question", images: [], createdAt: 1 }
+    const histories = new Map([[parent.id, structuredClone(parent)]])
+    const savedMessages = new Map([[source.id, structuredClone(source)]])
+    bindMirrorStorage(histories, savedMessages)
+    const snapshots = vi.spyOn(await import("@/services/service-prompts"), "loadServicePromptSnapshot")
+    let finishWrite!: () => void
+    let writeEntered!: () => void
+    const entered = new Promise<void>(resolve => { writeEntered = resolve })
+    const held = new Promise<void>(resolve => { finishWrite = resolve })
+    const table = boundary === "link" ? db.chatHistories : db.messages
+    vi.spyOn(table, "add").mockImplementationOnce(async (row: any) => {
+      if (boundary === "link") histories.set(row.id, structuredClone(row))
+      else savedMessages.set(row.id, structuredClone(row))
+      writeEntered()
+      await held
+      return row.id
+    })
+    const options = {
+      ...createHookOptions(), historyId: parent.id,
+      messages: [
+        { id: source.id, serverMessageId: "parent-user", role: "user" as const, isBot: false, name: "You", message: "Question", sources: [] },
+        { id: "answer", role: "assistant" as const, isBot: true, name: "Character", message: "Answer", sources: [] }
+      ],
+      history: [{ role: "user" as const, content: "Question" }, { role: "assistant" as const, content: "Answer" }]
+    }
+    vi.mocked(generateID).mockReturnValue("child-mirror")
+    createChatMock.mockResolvedValue({ id: "child-chat", character_id: "char-tracked" })
+    addChatMessageMock.mockResolvedValue({ id: "child-user", version: 1 })
+    const view = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    try {
+      const pending = view.result.current.regenerateLastMessage()
+      await entered
+      usePlaygroundSessionStore.setState(state => ({ restoreRevision: state.restoreRevision + 1 }))
+      finishWrite()
+      await expect(pending).rejects.toThrow("Failed to create branch for regeneration")
+      expect([...savedMessages.values()]).toEqual([source])
+      expect(histories.get(parent.id)).toEqual(parent)
+      if (boundary === "link") expect([...histories.values()]).toEqual([parent])
+      expect(options.setHistoryId).not.toHaveBeenCalled()
+      expect(options.setServerChatId).not.toHaveBeenCalled()
+      expect(options.setMessages).not.toHaveBeenCalled()
+      expect((await snapshots.mock.results[0].value).release).toHaveBeenCalledOnce()
+    } finally { view.unmount() }
+  })
+
+  it.each([403, 404])("ordinary Character Retry cannot copy a retained source denied to the current owner (%s)", async status => {
+    const release = vi.fn()
+    const owner = {
+      scopeKey: "scope:bob",
+      requestScope: {
+        config: { serverUrl: "http://127.0.0.1:8000", authMode: "multi-user" as const },
+        userId: 202
+      },
+      scopeSignal: new AbortController().signal,
+      scopeInvalidatedSignal: recoveryAuthority.controller.signal,
+      definitions: {}, capability: "unchecked" as const, release
+    }
+    const snapshots = vi.spyOn(await import("@/services/service-prompts"), "loadServicePromptSnapshot")
+    snapshots.mockResolvedValueOnce(owner)
+    getChatMock.mockRejectedValueOnce(Object.assign(new Error("Source not authorized"), { status }))
+    const rows: Message[] = [
+      { id: "alice-user", serverMessageId: "alice-user", role: "user", isBot: false,
+        name: "You", message: "Private source", sources: [] },
+      { id: "alice-answer", serverMessageId: "alice-answer", role: "assistant", isBot: true,
+        name: "Character", message: "Private answer", sources: [],
+        variants: [{ id: "alice-old", message: "Original variant" }], activeVariantIndex: 0 }
+    ]
+    const original = structuredClone(rows)
+    const options = {
+      ...createHookOptions(), serverChatId: "alice-chat", historyId: "alice-local",
+      messages: rows, history: rows.map(row => ({ role: row.role!, content: row.message }))
+    }
+    const mirror = await import("@/db/dexie/server-chat-mirror")
+    const view = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    try {
+      await expect(view.result.current.regenerateLastMessage()).rejects.toThrow("Failed to create branch for regeneration")
+      expect(getChatMock).toHaveBeenCalledWith("alice-chat", { requestScope: owner.requestScope, signal: owner.scopeSignal })
+      expect(createChatMock).not.toHaveBeenCalled()
+      expect(addChatMessageMock).not.toHaveBeenCalled()
+      expect(mirror.linkServerChatMirror).not.toHaveBeenCalled()
+      expect(mirror.reconcileServerChatMirror).not.toHaveBeenCalled()
+      expect(options.setServerChatId).not.toHaveBeenCalled()
+      expect(options.setHistoryId).not.toHaveBeenCalled()
+      expect(options.setMessages).not.toHaveBeenCalled()
+      expect(rows).toEqual(original)
+      expect(release).toHaveBeenCalledOnce()
+    } finally { view.unmount() }
+  })
+
+  it.each(["metadata", "create", "copy"].flatMap(step => ["owner", "revision"].map(boundary => ({ step, boundary }))))(
+    "ordinary Character Retry cannot publish after $boundary changes during $step",
+    async ({ step, boundary }) => {
+      const snapshots = vi.spyOn(await import("@/services/service-prompts"), "loadServicePromptSnapshot")
+      let release!: (value: Record<string, unknown>) => void
+      const held = new Promise<Record<string, unknown>>(resolve => { release = resolve })
+      const remote = step === "metadata" ? getChatMock : step === "create" ? createChatMock : addChatMessageMock
+      remote.mockReturnValueOnce(held)
+      const options = {
+        ...createHookOptions(),
+        messages: [
+          { id: "user", serverMessageId: "parent-user", role: "user" as const, isBot: false, name: "You", message: "Question", sources: [] },
+          { id: "answer", role: "assistant" as const, isBot: true, name: "Character", message: "Answer", sources: [] }
+        ],
+        history: [{ role: "user" as const, content: "Question" }, { role: "assistant" as const, content: "Answer" }]
+      }
+      const view = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+      try {
+        const pending = view.result.current.regenerateLastMessage()
+        await waitFor(() => expect(remote).toHaveBeenCalled())
+        if (boundary === "owner") recoveryAuthority.controller.abort()
+        else usePlaygroundSessionStore.setState(state => ({ restoreRevision: state.restoreRevision + 1 }))
+        release({ id: "child", character_id: "char-tracked", version: 1 })
+        await expect(pending).rejects.toThrow("Failed to create branch for regeneration")
+        expect(options.setServerChatId).not.toHaveBeenCalled()
+        expect(options.setHistoryId).not.toHaveBeenCalled()
+        expect(options.setMessages).not.toHaveBeenCalled()
+        expect(options.notification.error).not.toHaveBeenCalled()
+        expect(createChatMock).toHaveBeenCalledTimes(step === "metadata" ? 0 : 1)
+        expect(addChatMessageMock).toHaveBeenCalledTimes(step === "copy" ? 1 : 0)
+        expect((await snapshots.mock.results[0].value).release).toHaveBeenCalledOnce()
+      } finally { view.unmount() }
+    }
+  )
+
+  const scopedOptions = (scope: string, values: Record<string, number>) => {
+    const store = useStoreChatModelSettings.getState()
+    store.setActiveSettingsScope(scope)
+    for (const [key, value] of Object.entries(values)) {
+      store.updateScopedSetting(scope, key as "numPredict", value)
+    }
+    return { ...createHookOptions(), currentChatModelSettings: useStoreChatModelSettings.getState() }
+  }
+
+  it.each([0, 0.5])("forwards scoped current-chat controls through the real Character transport (sampling=%s)", async sampling => {
+    useRealCharacterTransport()
+    const options = scopedOptions("openai:deepseek-chat", { numPredict: 16, temperature: sampling, topP: sampling, repeatPenalty: sampling })
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    await act(async () => { await result.current.onSubmit({ message: "Configured question", image: "" }) })
+    expect(bgStreamMock).toHaveBeenCalledWith(expect.objectContaining({
+      path: expect.stringContaining("/chats/tracked-chat-1/complete-v2"),
+      body: expect.objectContaining({ max_tokens: 16, temperature: sampling, top_p: sampling, repetition_penalty: sampling, stream: true })
+    }))
+  })
+
+  it("omits unset controls from the real Character request after switching to an unconfigured model scope", async () => {
+    useRealCharacterTransport()
+    scopedOptions("openai:previous-model", { numPredict: 16, temperature: 0.5 })
+    const options = scopedOptions("openai:deepseek-chat", {})
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    await act(async () => { await result.current.onSubmit({ message: "Default question", image: "" }) })
+    const body = bgStreamMock.mock.calls[0][0].body
+    for (const key of ["max_tokens", "temperature", "top_p", "repetition_penalty"]) expect(body).not.toHaveProperty(key)
+  })
+
+  it("retains captured model controls while a pending Character user save outlives a settings-scope change", async () => {
+    useRealCharacterTransport()
+    let release!: (value: { id: string; version: number }) => void
+    addChatMessageMock.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+    const original = scopedOptions("openai:deepseek-chat", { numPredict: 16, temperature: 0.25 })
+    const { result, rerender } = renderHook(({ options }) => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]), { initialProps: { options: original } })
+    let pending!: ReturnType<typeof result.current.onSubmit>
+    await act(async () => { pending = result.current.onSubmit({ message: "Captured question", image: "" }); await Promise.resolve() })
+    await waitFor(() => expect(addChatMessageMock).toHaveBeenCalled())
+    const next = { ...scopedOptions("openai:new-model", { numPredict: 128, temperature: 0.75 }), selectedModel: "new-model" }
+    messageStoreState.value.selectedModel = "new-model"
+    rerender({ options: next })
+    await act(async () => { release({ id: "captured-user", version: 1 }); await pending })
+    expect(bgStreamMock).toHaveBeenCalledWith(expect.objectContaining({ body: expect.objectContaining({ model: "deepseek-chat", max_tokens: 16, temperature: 0.25 }) }))
+    expect(useStoreChatModelSettings.getState().numPredict).toBe(128)
+  })
+
+  it("does not publish recovered IDs or save an old owner's partial after the lease invalidates", async () => {
+    streamCharacterChatCompletionMock.mockImplementationOnce(async function* () { yield "<think>Only reasoning</think>" })
+    addChatMessageMock.mockResolvedValueOnce({ id: "user-server-1", version: 1 })
+    let release!: (value: { id: string; version: number }) => void
+    const held = new Promise<{ id: string; version: number }>(resolve => { release = resolve })
+    addChatMessageMock.mockImplementationOnce(() => held)
+    const options = scopedOptions("owner-a:deepseek-chat", { numPredict: 16 })
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    let pending!: ReturnType<typeof result.current.onSubmit>
+    await act(async () => { pending = result.current.onSubmit({ message: "Question", image: "" }); await new Promise(resolve => setTimeout(resolve, 0)) })
+    await waitFor(() => expect(addChatMessageMock).toHaveBeenCalledTimes(2))
+    recoveryAuthority.controller.abort()
+    scopedOptions("owner-b:deepseek-chat", { numPredict: 128 })
+    options.setMessages.mockClear()
+    await act(async () => { release({ id: "old-assistant", version: 1 }); await pending })
+    expect(saveLocalErrorMock).not.toHaveBeenCalled()
+    expect(options.setMessages).not.toHaveBeenCalled()
+    expect(useStoreChatModelSettings.getState().numPredict).toBe(128)
+  })
+
+  it.each([
+    ["closed", "<think>Only reasoning</think>"],
+    ["unclosed", "<think>Only reasoning"],
+    ["structured", { choices: [{ delta: { reasoning_content: "Only reasoning" } }] }]
+  ])("preserves %s reasoning as a recoverable tracked completion with acknowledged IDs", async (_label, chunk) => {
+    addChatMessageMock.mockResolvedValueOnce({ id: "user-server-1", version: 1 })
+    addChatMessageMock.mockResolvedValueOnce({ id: "assistant-server-1", version: 1 })
+    streamCharacterChatCompletionMock.mockImplementationOnce(async function* () { yield chunk })
+    let rows: Message[] = []
+    const options = { ...createHookOptions(), setMessages: vi.fn((next: Message[] | ((previous: Message[]) => Message[])) => { rows = typeof next === "function" ? next(rows) : next }) }
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    await act(async () => { await result.current.onSubmit({ message: "Question", image: "" }) })
+    expect(saveLocalSuccessMock).not.toHaveBeenCalled()
+    expect(saveLocalErrorMock).toHaveBeenCalledWith(expect.objectContaining({
+      botMessage: expect.stringContaining("Only reasoning"), userServerMessageId: "user-server-1", assistantServerMessageId: "assistant-server-1"
+    }))
+    expect(rows.find(row => row.isBot)).toMatchObject({ generationInfo: { interrupted: true, interruptionReason: expect.stringContaining("final answer") } })
+  })
+
+  it.each(["fallback", "degraded"])("forwards the confirmed assistant ID from %s success to local persistence", async (outcome) => {
+    persistCharacterCompletionMock.mockRejectedValueOnce(outcome === "fallback"
+      ? new Error("Persist endpoint unavailable")
+      : Object.assign(new Error("Saved with validation warning"), {
+          status: 503,
+          detail: { code: "persist_validation_degraded", saved: true, assistant_message_id: "fallback-assistant" }
+        }))
+    addChatMessageMock.mockResolvedValueOnce({ id: "user-server-1", version: 1 })
+    if (outcome === "fallback") addChatMessageMock.mockResolvedValueOnce({ id: "fallback-assistant", version: 1 })
+    const options = createHookOptions()
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    await act(async () => { await result.current.onSubmit({ message: "Question", image: "" }) })
+    expect(addChatMessageMock).toHaveBeenCalledTimes(outcome === "fallback" ? 2 : 1)
+    expect(saveLocalSuccessMock).toHaveBeenCalledWith(expect.objectContaining({
+      userServerMessageId: "user-server-1", assistantServerMessageId: "fallback-assistant",
+      serverMessagesAlreadyPersisted: true
+    }))
+  })
+
   it("keeps tracked character routing anchored to current chat metadata when global character state is stale", async () => {
     const options = createHookOptions()
     const { result } = renderHook(() => useChatActions(options as any))
@@ -305,6 +1536,9 @@ describe("useChatActions character integration", () => {
       })
     })
 
+    expect(saveLocalSuccessMock).toHaveBeenCalledWith(expect.objectContaining({
+      userServerMessageId: "user-server-1", assistantServerMessageId: "assistant-server-1"
+    }))
     expect(createChatMock).not.toHaveBeenCalled()
     expect(streamCharacterChatCompletionMock).toHaveBeenCalledTimes(1)
     expect(streamCharacterChatCompletionMock).toHaveBeenCalledWith(
@@ -319,6 +1553,27 @@ describe("useChatActions character integration", () => {
     expect(options.setServerChatAssistantId).toHaveBeenCalledWith("char-tracked")
     expect(normalChatModeMock).not.toHaveBeenCalled()
     expect(options.setServerChatId).not.toHaveBeenCalledWith(null)
+  })
+
+  it("rebinds a greeting to the newly created conversation after a failed session", async () => {
+    let visibleMessages: any[] = [{
+      id: "local-greeting", isBot: true, message: "Welcome back",
+      messageType: "character:greeting", serverMessageId: "old-chat-greeting"
+    }]
+    addChatMessageMock.mockImplementation(async (_id, payload) => ({
+      id: payload.role === "assistant" ? "new-chat-greeting" : "new-user", version: 1
+    }))
+    const character = { id: "char-stale", name: "Guide", greeting: "Welcome back", system_prompt: "Help the gardener." }
+    const options = {
+      ...createHookOptions(), serverChatId: null, serverChatCharacterId: null,
+      serverChatAssistantKind: null, selectedCharacter: character,
+      selectedAssistant: { ...character, kind: "character", metadata: { selectionMode: "tracked" } },
+      messages: visibleMessages,
+      setMessages: (next: any) => { visibleMessages = typeof next === "function" ? next(visibleMessages) : next }
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+    await act(async () => { await result.current.onSubmit({ message: "Try again", image: "" }) })
+    expect(visibleMessages.find(message => message.messageType === "character:greeting")?.serverMessageId).toBe("new-chat-greeting")
   })
 
   it("handles emote commands without sending chat", async () => {
@@ -422,7 +1677,7 @@ describe("useChatActions character integration", () => {
         assistant_content: "Tracked reply",
         speaker_character_id: 42
       }),
-      undefined
+      expect.objectContaining({ requestScope: expect.any(Object), signal: expect.any(AbortSignal) })
     )
     const lastPersistCall = persistCharacterCompletionMock.mock.calls.at(-1) as
       | unknown[]
@@ -474,7 +1729,8 @@ describe("useChatActions character integration", () => {
     expect(createChatMock).toHaveBeenCalledWith(
       expect.objectContaining({
         character_id: "99"
-      })
+      }),
+      expect.objectContaining({ requestScope: expect.any(Object), signal: expect.any(AbortSignal) })
     )
     expect(streamCharacterChatCompletionMock).toHaveBeenCalledWith(
       "new-miku-chat",
@@ -491,7 +1747,7 @@ describe("useChatActions character integration", () => {
         speaker_character_id: 99,
         speaker_character_name: "Miku"
       }),
-      undefined
+      expect.objectContaining({ requestScope: expect.any(Object), signal: expect.any(AbortSignal) })
     )
   })
 
@@ -549,7 +1805,7 @@ describe("useChatActions character integration", () => {
         speaker_character_id: 4,
         speaker_character_name: "Ashley"
       }),
-      undefined
+      expect.objectContaining({ requestScope: expect.any(Object), signal: expect.any(AbortSignal) })
     )
   })
 
@@ -607,7 +1863,7 @@ describe("useChatActions character integration", () => {
         speaker_character_id: 99,
         speaker_character_name: "Miku"
       }),
-      undefined
+      expect.objectContaining({ requestScope: expect.any(Object), signal: expect.any(AbortSignal) })
     )
   })
 
@@ -646,7 +1902,7 @@ describe("useChatActions character integration", () => {
         character_id: "char-scoped",
         state: "in-progress"
       }),
-      { scope }
+      expect.objectContaining({ scope, requestScope: expect.any(Object), signal: expect.any(AbortSignal) })
     )
     expect(addChatMessageMock).toHaveBeenCalledWith(
       "unexpected-new-chat",
@@ -654,7 +1910,7 @@ describe("useChatActions character integration", () => {
         role: "user",
         content: "Hello workspace character"
       }),
-      { scope }
+      expect.objectContaining({ scope, requestScope: expect.any(Object), signal: expect.any(AbortSignal) })
     )
     expect(streamCharacterChatCompletionMock).toHaveBeenCalledWith(
       "unexpected-new-chat",
@@ -669,7 +1925,7 @@ describe("useChatActions character integration", () => {
       expect.objectContaining({
         assistant_content: "Tracked reply"
       }),
-      { scope }
+      expect.objectContaining({ scope, requestScope: expect.any(Object), signal: expect.any(AbortSignal) })
     )
     expect(normalChatModeMock).not.toHaveBeenCalled()
   })
@@ -779,6 +2035,7 @@ describe("useChatActions character integration", () => {
     expect(persistPayload).not.toHaveProperty("mood_confidence")
     expect(persistPayload).not.toHaveProperty("mood_topic")
     expect(detectCharacterMoodMock).not.toHaveBeenCalled()
+    expect(saveLocalErrorMock).toHaveBeenCalledWith(expect.objectContaining({ assistantServerMessageId: "assistant-server-1" }))
 
     const assistantMessages = messageSnapshots
       .flatMap((snapshot) => snapshot.filter((message) => message?.isBot))
@@ -847,6 +2104,7 @@ describe("useChatActions character integration", () => {
         ([, payload]: [unknown, any]) => payload?.role === "assistant"
       )
       expect(tldwAddCalls).toHaveLength(0)
+      expect(saveLocalErrorMock).toHaveBeenCalledWith(expect.objectContaining({ assistantServerMessageId: "assistant-degraded-1" }))
       expect(messagesState).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -905,4 +2163,50 @@ describe("useChatActions character integration", () => {
       })
     })
   })
+  it.each([false,true])('fork=%s persists only in the selected conversation local history',async fork=>{
+    const actual=await vi.importActual<typeof import('@/hooks/utils/messageHelpers')>('@/hooks/utils/messageHelpers')
+    const helpers=await import('@/db/dexie/helpers')
+    const rows:Message[]=[{id:'greeting',serverMessageId:'parent-greeting',isBot:true,role:'assistant',name:'Character',message:'Welcome',messageType:'character:greeting',sources:[]},{id:'user',serverMessageId:'parent-user',isBot:false,role:'user',name:'You',message:'Question',sources:[]},{id:'answer',serverMessageId:'parent-answer',isBot:true,role:'assistant',name:'Character',message:'Answer',sources:[]}]
+    const options={...createHookOptions(),historyId:'parent-local-history',messages:rows,history:rows.map(row=>({role:row.role!,content:row.message})),ensureServerChatHistoryId:vi.fn(async()=>fork?'fork-local-history':'parent-local-history')}
+    saveLocalSuccessMock.mockImplementation(async payload=>actual.createSaveMessageOnSuccess(false,options.setHistoryId)(payload))
+    createChatMock.mockResolvedValue({id:'new-fork-chat',character_id:'char-tracked'})
+    const view=renderHook(()=>useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    try {
+      await act(async()=>{if(fork)await view.result.current.regenerateLastMessage();else await view.result.current.onSubmit({message:'Follow-up',image:''})})
+      expect(persistCharacterCompletionMock).toHaveBeenCalledWith(fork?'new-fork-chat':'tracked-chat-1',expect.any(Object),expect.any(Object))
+      expect(helpers.saveMessage).toHaveBeenCalledWith(expect.objectContaining({role:'assistant',history_id:fork?'fork-local-history':'parent-local-history'}))
+    } finally {view.unmount();saveLocalSuccessMock.mockImplementation(async()=> 'history-character')}
+  })
+
+  it.each([false,true])('fork=%s new reply parent resolves to its visible copied user',async fork=>{
+    const sourceRows:Message[]=[{id:'greeting',serverMessageId:'parent-greeting',isBot:true,role:'assistant',name:'Character',message:'Welcome',messageType:'character:greeting',sources:[]},{id:'user',serverMessageId:'parent-user',isBot:false,role:'user',name:'You',message:'Question',sources:[]},{id:'answer',serverMessageId:'parent-answer',parentMessageId:'user',isBot:true,role:'assistant',name:'Character',message:'Answer',sources:[]}]
+    let visible=sourceRows
+    const options={...createHookOptions(),messages:sourceRows,history:sourceRows.map(row=>({role:row.role!,content:row.message})),setMessages:(next:Message[]|((prior:Message[])=>Message[]))=>{visible=typeof next==='function'?next(visible):next}}
+    let counter=0
+    addChatMessageMock.mockImplementation(async()=>({id:`copied-${counter++}`,version:1}))
+    createChatMock.mockResolvedValue({id:'new-fork',character_id:'char-tracked'})
+    const view=renderHook(()=>useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    try{
+      await act(async()=>{if(fork)await view.result.current.regenerateLastMessage();else await view.result.current.onSubmit({message:'Next question',image:''})})
+      const user=visible.filter(row=>!row.isBot).at(-1)
+      const reply=visible.filter(row=>row.isBot).at(-1)
+      expect(user).toBeDefined();expect(reply).toBeDefined()
+      expect(reply?.parentMessageId).toBe(user?.id)
+      expect(saveLocalSuccessMock).toHaveBeenCalledWith(expect.objectContaining({assistantParentMessageId:user?.id}))
+    }finally{view.unmount()}
+  })
+
+  it.each(["", "Describe this image", null])("keeps Character user attachment visible for text %s", async text => {
+    const image = text === null ? "" : "data:image/png;base64,aW1hZ2U="
+    let visible: Message[] = []
+    const options = { ...createHookOptions(), messages: [], history: [], setMessages: (next: Message[] | ((prior: Message[]) => Message[])) => { visible = typeof next === "function" ? next(visible) : next } }
+    const view = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    try {
+      await act(async () => { await view.result.current.onSubmit({ message: text ?? "Text-only control", image }) })
+      const user = visible.find(row => row.role === "user")
+      expect(user?.images).toEqual(image ? [image] : [])
+      if (image) expect(addChatMessageMock).toHaveBeenCalledWith("tracked-chat-1", expect.objectContaining({ image_base64: "aW1hZ2U=" }), expect.anything())
+    } finally { view.unmount() }
+  })
+
 })

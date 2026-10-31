@@ -33,6 +33,7 @@ describe("RouteErrorBoundary", () => {
   })
 
   afterEach(() => {
+    vi.unstubAllEnvs()
     vi.restoreAllMocks()
   })
 
@@ -150,5 +151,20 @@ describe("RouteErrorBoundary", () => {
     expect(screen.getByTestId("error-boundary")).toBeInTheDocument()
     expect(screen.getByTestId("route-error-boundary-admin-server")).toBeInTheDocument()
     expect(screen.getByTestId("route-error-route-label")).toHaveTextContent("Server Admin")
+  })
+
+  it("ignores the forced-error fixture in production mode", () => {
+    vi.stubEnv("NODE_ENV", "production")
+
+    render(
+      <MemoryRouter initialEntries={[`/kanban?${ROUTE_ERROR_FIXTURE_QUERY_KEY}=kanban`]}>
+        <RouteErrorBoundary routeId="kanban" routeLabel="Kanban">
+          <StableChild />
+        </RouteErrorBoundary>
+      </MemoryRouter>
+    )
+
+    expect(screen.getByTestId("stable-child")).toBeInTheDocument()
+    expect(screen.queryByTestId("error-boundary")).not.toBeInTheDocument()
   })
 })

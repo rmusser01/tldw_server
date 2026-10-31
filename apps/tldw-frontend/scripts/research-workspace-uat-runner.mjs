@@ -362,7 +362,7 @@ export const createEvidence = ({
     webUrl: config.webUrl,
   },
   fallback:
-    "If standalone Playwright is environment_blocked in a sandboxed Codex macOS session, use the in-app browser/CDP workflow and attach screenshots, console errors, network failures, and timing notes to the UAT matrix.",
+    "If standalone Playwright is environment_blocked, launch Chrome with an explicit Chrome debugging endpoint and use chromium.connectOverCDP; attach screenshots, console errors, network failures, and timing notes to the UAT matrix.",
   failureScope: classification.failureScope,
   finishedAt,
   playwrightExitCode: exitCode,

@@ -162,6 +162,7 @@ class EvidenceChainBuilder:
         enable_llm_extraction: bool = True,
         llm_provider: Optional[str] = None,
         llm_model: Optional[str] = None,
+        credential_runtime: Any = None,
     ):
         """
         Initialize the chain builder.
@@ -173,6 +174,7 @@ class EvidenceChainBuilder:
             enable_llm_extraction: Use LLM for fact extraction
             llm_provider: LLM provider for extraction
             llm_model: LLM model for extraction
+            credential_runtime: Optional request-scoped provider credential runtime
         """
         self.min_confidence = min_confidence
         self.max_chain_length = max_chain_length
@@ -180,6 +182,8 @@ class EvidenceChainBuilder:
         self.enable_llm_extraction = enable_llm_extraction
         self.llm_provider = llm_provider
         self.llm_model = llm_model
+        self.credential_runtime = credential_runtime
+        self._verification_available = True
 
     async def build_chains(
         self,
@@ -208,6 +212,8 @@ class EvidenceChainBuilder:
                 multi_hop_detected=False,
                 metadata={"error": "No documents provided"},
             )
+
+        self._verification_available = True
 
         # Extract claims from the generated answer
         claims = []
@@ -257,6 +263,18 @@ class EvidenceChainBuilder:
                 "total_nodes": len(all_nodes),
                 "total_claims": len(claims),
                 "supported_claims": sum(1 for c in claims if c.is_supported),
+                **(
+                    {
+                        "verification_available": self._verification_available,
+                        **(
+                            {"failure_code": "provider_unavailable"}
+                            if not self._verification_available
+                            else {}
+                        ),
+                    }
+                    if self.credential_runtime is not None
+                    else {}
+                ),
             },
         )
 
@@ -275,6 +293,8 @@ class EvidenceChainBuilder:
                 return await self._llm_extract_facts(doc, query)
             except Exception:
                 logger.debug("LLM fact extraction failed, using heuristic")
+                if self.credential_runtime is not None:
+                    self._verification_available = False
 
         # Fall back to heuristic extraction
         return self._heuristic_extract_facts(doc, query)
@@ -349,9 +369,15 @@ class EvidenceChainBuilder:
         try:
             from .generation import AnswerGenerator
 
+            runtime_kwargs = (
+                {"credential_runtime": self.credential_runtime}
+                if self.credential_runtime is not None
+                else {}
+            )
             generator = AnswerGenerator(
                 provider=self.llm_provider,
                 model=self.llm_model,
+                **runtime_kwargs,
             )
 
             # Truncate document content for prompt
@@ -523,6 +549,7 @@ async def build_evidence_chains(
     query: str,
     documents: list[Document],
     generated_answer: Optional[str] = None,
+    credential_runtime: Any = None,
 ) -> ChainBuildResult:
     """
     Convenience function to build evidence chains.
@@ -531,11 +558,12 @@ async def build_evidence_chains(
         query: The search query
         documents: Source documents
         generated_answer: The generated response
+        credential_runtime: Optional request-scoped provider credential runtime
 
     Returns:
         ChainBuildResult with chains and claims
     """
-    builder = EvidenceChainBuilder()
+    builder = EvidenceChainBuilder(credential_runtime=credential_runtime)
     return await builder.build_chains(
         query=query,
         documents=documents,

@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
-  bgRequest: vi.fn()
+  bgRequest: vi.fn(),
+  tldwRequest: vi.fn(),
+  storage: new Map<string, unknown>()
 }))
 
 vi.mock("@/services/background-proxy", () => ({
@@ -10,11 +12,16 @@ vi.mock("@/services/background-proxy", () => ({
   bgStream: vi.fn()
 }))
 
+vi.mock("@/services/tldw/request-core", async importOriginal => ({
+  ...await importOriginal<typeof import("@/services/tldw/request-core")>(),
+  tldwRequest: (...args: unknown[]) => mocks.tldwRequest(...args)
+}))
+
 vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: () => ({
-    get: vi.fn(async () => null),
-    set: vi.fn(async () => undefined),
-    remove: vi.fn(async () => undefined)
+    get: vi.fn(async (key: string) => mocks.storage.get(key) ?? null),
+    set: vi.fn(async (key: string, value: unknown) => { mocks.storage.set(key, value) }),
+    remove: vi.fn(async (key: string) => { mocks.storage.delete(key) })
   }),
   safeStorageSerde: {
     serialize: (value: unknown) => value,
@@ -27,6 +34,7 @@ import { TldwApiClient } from "@/services/tldw/TldwApiClient"
 describe("TldwApiClient.createChatCompletion (non-streaming sanitizer)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.storage.clear()
   })
 
   it("returns successful completion content verbatim even when it looks like an error", async () => {
@@ -91,26 +99,27 @@ describe("TldwApiClient.createChatCompletion (non-streaming sanitizer)", () => {
 describe("TldwApiClient.synthesizeSpeech (timeout)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.storage.clear()
   })
 
-  const configureClient = (client: TldwApiClient) => {
-    ;(client as any).config = {
+  const configureClient = async (client: TldwApiClient) => {
+    await client.updateConfig({
       serverUrl: "http://127.0.0.1:8000",
       apiKey: "test-api-key-123",
       authMode: "single-user"
-    }
+    })
   }
 
   const findSpeechCall = () =>
-    mocks.bgRequest.mock.calls
+    mocks.tldwRequest.mock.calls
       .map((call) => call[0] as any)
       .find((init) => init?.path === "/api/v1/audio/speech")
 
   it("uses a generous default timeout so long synthesis is not aborted", async () => {
-    mocks.bgRequest.mockResolvedValue(new ArrayBuffer(8))
+    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: new ArrayBuffer(8) })
 
     const client = new TldwApiClient()
-    configureClient(client)
+    await configureClient(client)
     await client.synthesizeSpeech("Some long passage to render.")
 
     const speechCall = findSpeechCall()
@@ -119,10 +128,10 @@ describe("TldwApiClient.synthesizeSpeech (timeout)", () => {
   })
 
   it("lets callers override the timeout", async () => {
-    mocks.bgRequest.mockResolvedValue(new ArrayBuffer(8))
+    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: new ArrayBuffer(8) })
 
     const client = new TldwApiClient()
-    configureClient(client)
+    await configureClient(client)
     await client.synthesizeSpeech("hi", { timeoutMs: 5000 } as any)
 
     const speechCall = findSpeechCall()

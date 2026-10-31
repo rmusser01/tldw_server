@@ -19,6 +19,7 @@ export interface PrivilegedActionOptions {
   confirmText?: string;
   cancelText?: string;
   requirePassword?: boolean;
+  confirmationOnly?: boolean;
 }
 
 export interface PrivilegedActionResult {
@@ -70,8 +71,10 @@ export function PrivilegedActionDialogProvider({ children }: ProviderProps) {
     });
   }, []);
 
-  const requiresPassword = options?.requirePassword ?? true;
-  const canSubmit = reason.trim().length >= 8 && (!requiresPassword || adminPassword.trim().length >= 8);
+  const confirmationOnly = options?.confirmationOnly ?? false;
+  const requiresPassword = !confirmationOnly && (options?.requirePassword ?? true);
+  const canSubmit = confirmationOnly
+    || (reason.trim().length >= 8 && (!requiresPassword || adminPassword.trim().length >= 8));
 
   return (
     <PrivilegedActionContext.Provider value={{ prompt }}>
@@ -84,42 +87,44 @@ export function PrivilegedActionDialogProvider({ children }: ProviderProps) {
             <DialogDescription>{options?.message}</DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="privileged-action-reason">Reason</Label>
-              <textarea
-                id="privileged-action-reason"
-                className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                value={reason}
-                onChange={(event) => setReason(event.target.value)}
-                placeholder="Describe why this action is necessary"
-              />
-              <p className="text-xs text-muted-foreground">
-                Required for auditability. Use at least 8 characters.
-              </p>
-            </div>
-
-            {requiresPassword ? (
+          {!confirmationOnly && (
+            <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="privileged-action-password">Current password</Label>
-                <Input
-                  id="privileged-action-password"
-                  type="password"
-                  value={adminPassword}
-                  onChange={(event) => setAdminPassword(event.target.value)}
-                  placeholder="Re-enter your password"
-                  autoComplete="current-password"
+                <Label htmlFor="privileged-action-reason">Reason</Label>
+                <textarea
+                  id="privileged-action-reason"
+                  className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                  placeholder="Describe why this action is necessary"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Required to reauthenticate before this high-risk action.
+                  Required for auditability. Use at least 8 characters.
                 </p>
               </div>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                Single-user mode requires an audit reason but does not prompt for password reauthentication.
-              </p>
-            )}
-          </div>
+
+              {requiresPassword ? (
+                <div className="space-y-2">
+                  <Label htmlFor="privileged-action-password">Current password</Label>
+                  <Input
+                    id="privileged-action-password"
+                    type="password"
+                    value={adminPassword}
+                    onChange={(event) => setAdminPassword(event.target.value)}
+                    placeholder="Re-enter your password"
+                    autoComplete="current-password"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Required to reauthenticate before this high-risk action.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Single-user mode requires an audit reason but does not prompt for password reauthentication.
+                </p>
+              )}
+            </div>
+          )}
 
           <DialogFooter className="gap-2 sm:gap-0">
             <Button variant="outline" onClick={() => closeDialog(null)}>

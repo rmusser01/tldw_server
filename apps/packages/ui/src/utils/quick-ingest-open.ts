@@ -32,6 +32,7 @@ export type QuickIngestOpenDetail =
     }
   | {
       source: "first_source_milestone"
+      ownerScope?: string
       preferredPreset?: Exclude<IngestPreset, "custom">
       firstSource?: boolean
       firstSourceKind?: FirstSourceQuickIngestKind

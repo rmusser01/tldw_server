@@ -5,14 +5,77 @@ from typing import Any
 import numpy as np
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.scope_context import (
+    ScopeContext,
+    content_authorization_cache_scope,
+)
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
     _clone_cached_documents,
     _resolve_security_user_id,
 )
 
-
 pytestmark = pytest.mark.unit
+
+
+def test_content_authorization_cache_scope_is_sorted_and_copy_safe() -> None:
+    """Authorization cache identity snapshots mutable membership collections."""
+    scope = ScopeContext(
+        user_id=7,
+        org_ids=[30, 10, 30],
+        team_ids=[40, 20, 40],
+        active_org_id=10,
+        active_team_id=20,
+        is_admin=True,
+        session_role="content_reader",
+    )
+
+    identity = content_authorization_cache_scope(scope)
+    scope.org_ids.append(99)
+    scope.team_ids.append(88)
+
+    assert identity == {
+        "user_id": 7,
+        "org_ids": (10, 30),
+        "team_ids": (20, 40),
+        "active_org_id": 10,
+        "active_team_id": 20,
+        "is_admin": True,
+        "session_role": "content_reader",
+    }
+    assert content_authorization_cache_scope(scope) is not identity
+
+
+def test_content_authorization_cache_scope_hashes_full_oversized_role() -> None:
+    """Oversized roles remain bounded without prefix-truncation collisions."""
+    shared_prefix = "r" * 512
+    first_scope = ScopeContext(
+        user_id=7,
+        org_ids=[],
+        team_ids=[],
+        active_org_id=None,
+        active_team_id=None,
+        session_role=f"{shared_prefix}-first",
+    )
+    second_scope = ScopeContext(
+        user_id=7,
+        org_ids=[],
+        team_ids=[],
+        active_org_id=None,
+        active_team_id=None,
+        session_role=f"{shared_prefix}-second",
+    )
+
+    first = content_authorization_cache_scope(first_scope)["session_role"]
+    second = content_authorization_cache_scope(second_scope)["session_role"]
+
+    assert isinstance(first, str)
+    assert isinstance(second, str)
+    assert first.startswith("sha256:")
+    assert second.startswith("sha256:")
+    assert len(first) <= 128
+    assert first != second
+    assert first == content_authorization_cache_scope(first_scope)["session_role"]
 
 
 def test_resolve_security_user_id_prefers_request_user_then_feedback_user() -> None:

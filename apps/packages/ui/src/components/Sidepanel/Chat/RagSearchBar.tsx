@@ -1,4 +1,5 @@
 import React from "react"
+import type { InputRef } from "antd"
 import {
   Button,
   Checkbox,
@@ -127,6 +128,7 @@ export const RagSearchBar: React.FC<Props> = ({
     [isControlled, onOpenChange]
   )
 
+  const searchInputRef = React.useRef<InputRef | null>(null)
   const search = useRagSearchState({ currentMessage, t: translate })
   const resultsDisplay = useRagResultsDisplay({
     results: search.results,
@@ -157,7 +159,7 @@ export const RagSearchBar: React.FC<Props> = ({
 
   React.useEffect(() => {
     if (!isOpen || !autoFocus) return
-    const id = requestAnimationFrame(() => search.searchInputRef.current?.focus())
+    const id = requestAnimationFrame(() => searchInputRef.current?.focus())
     return () => cancelAnimationFrame(id)
   }, [isOpen, autoFocus])
 
@@ -969,7 +971,7 @@ export const RagSearchBar: React.FC<Props> = ({
 
           <div className="mb-2 flex items-center gap-2">
             <Input
-              ref={search.searchInputRef}
+              ref={searchInputRef}
               placeholder={t("sidepanel:rag.searchPlaceholder", "Search query")}
               value={search.draftSettings.query}
               aria-label={t("sidepanel:rag.searchPlaceholder", "Search query")}

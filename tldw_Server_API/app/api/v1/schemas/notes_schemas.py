@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any, Literal
 
 # 3rd-party Libraries
@@ -38,6 +39,30 @@ def _split_keywords(value: Any) -> list[str] | None:
     raise ValueError("Keywords must be a list of strings or a comma-separated string.")
 
 
+def _normalize_folder_paths(value: Any) -> list[str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise ValueError("Folder paths must be a list of relative paths.")
+    normalized: list[str] = []
+    for raw_path in value:
+        if not isinstance(raw_path, str):
+            raise ValueError("Folder paths must be strings.")
+        raw_text = raw_path.strip()
+        posix_text = raw_text.replace("\\", "/")
+        if PurePosixPath(posix_text).is_absolute() or PureWindowsPath(raw_text).drive:
+            raise ValueError("Folder paths must be relative.")
+        text = posix_text.strip("/")
+        parts = [part.strip() for part in text.split("/") if part.strip() and part.strip() != "."]
+        if not parts or any(part == ".." for part in parts):
+            raise ValueError("Folder paths must be non-empty relative paths without parent traversal.")
+        path = "/".join(parts)
+        if len(path) > 500:
+            raise ValueError("Folder paths must be 500 characters or fewer.")
+        normalized.append(path)
+    return normalized
+
+
 # --- Note Schemas ---
 class NoteBase(BaseModel):
     title: str = Field(..., min_length=1, max_length=255, description="Title of the note")
@@ -59,6 +84,10 @@ class NoteCreate(NoteBase):
     keywords: str | list[str] | None = Field(
         default=None,
         description="Optional keywords to attach to the note. Accepts a list of strings or a comma-separated string."
+    )
+    folder_paths: list[str] | None = Field(
+        default=None,
+        description="Optional ordered relative folder paths to attach to the note.",
     )
     # Title auto-generation controls
     # MVP: heuristic-only; Phase 2: 'llm' available behind flag
@@ -84,6 +113,11 @@ class NoteCreate(NoteBase):
                 raise ValueError("Keyword entries must be 100 characters or fewer.")
         return value
 
+    @field_validator("folder_paths", mode="before")
+    @classmethod
+    def validate_folder_paths(cls, value: Any):
+        return _normalize_folder_paths(value)
+
     @property
     def normalized_keywords(self) -> list[str] | None:
         parts = _split_keywords(getattr(self, 'keywords', None))
@@ -103,6 +137,21 @@ class NoteCreate(NoteBase):
             result.append(p)
         return result or None
 
+    @property
+    def normalized_folder_paths(self) -> list[str] | None:
+        paths = _normalize_folder_paths(getattr(self, "folder_paths", None))
+        if paths is None:
+            return None
+        seen: set[str] = set()
+        result: list[str] = []
+        for path in paths:
+            key = path.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(path)
+        return result
+
 
 class NoteUpdate(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=255, description="New title for the note")
@@ -112,6 +161,10 @@ class NoteUpdate(BaseModel):
     keywords: str | list[str] | None = Field(
         default=None,
         description="Optional keywords to attach to the note. Accepts a list of strings or a comma-separated string."
+    )
+    folder_paths: list[str] | None = Field(
+        default=None,
+        description="Optional ordered relative folder paths to attach to the note.",
     )
     # Ensure at least one field is provided for update, or handle in endpoint if empty update is no-op
     # Pydantic v2: model_validator
@@ -129,6 +182,11 @@ class NoteUpdate(BaseModel):
                 raise ValueError("Keyword entries must be 100 characters or fewer.")
         return value
 
+    @field_validator("folder_paths", mode="before")
+    @classmethod
+    def validate_folder_paths(cls, value: Any):
+        return _normalize_folder_paths(value)
+
     @property
     def normalized_keywords(self) -> list[str] | None:
         parts = _split_keywords(getattr(self, 'keywords', None))
@@ -145,6 +203,21 @@ class NoteUpdate(BaseModel):
             seen.add(key)
             result.append(p)
         return result or None
+
+    @property
+    def normalized_folder_paths(self) -> list[str] | None:
+        paths = _normalize_folder_paths(getattr(self, "folder_paths", None))
+        if paths is None:
+            return None
+        seen: set[str] = set()
+        result: list[str] = []
+        for path in paths:
+            key = path.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(path)
+        return result
 
 
 class NoteKeywordSyncStatus(BaseModel):
@@ -173,6 +246,7 @@ class NoteFolderCreate(BaseModel):
 
 class NoteFolderResponse(BaseModel):
     id: int = Field(..., description="Integer ID of the folder")
+    sync_id: str = Field(..., description="Stable opaque Sync identity")
     name: str = Field(..., description="Folder display name")
     path: str = Field(..., description="Normalized relative folder path")
     parent_id: int | None = Field(default=None, description="Parent folder ID, if any")
@@ -242,6 +316,7 @@ class KeywordMergeResponse(BaseModel):
 
 class KeywordResponse(KeywordBase):
     id: int = Field(..., description="Integer ID of the keyword")
+    sync_id: str = Field(..., description="Stable opaque Sync identity")
     created_at: datetime = Field(..., description="Timestamp of keyword creation")
     last_modified: datetime = Field(..., description="Timestamp of last modification")
     version: int = Field(..., description="Version number for optimistic locking")
@@ -348,6 +423,7 @@ class KeywordCollectionUpdate(BaseModel):
 
 class KeywordCollectionResponse(BaseModel):
     id: int = Field(..., ge=1)
+    sync_id: str = Field(..., description="Stable opaque Sync identity")
     name: str = Field(..., min_length=1, max_length=255)
     parent_id: int | None = Field(default=None)
     created_at: datetime

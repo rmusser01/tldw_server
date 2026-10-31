@@ -17,6 +17,8 @@ import {
   type SessionStorageArea
 } from "@/entries/background-session-store"
 
+const requestScope = { config: { serverUrl: "https://owned.test", authMode: "single-user" as const, expectedSingleUserApiKeyScope: "synthetic-scope" }, userId: null }
+
 const createMemoryArea = (): SessionStorageArea & {
   store: Record<string, unknown>
 } => {
@@ -47,11 +49,11 @@ describe("background-session-store serialization", () => {
     const replay = new Set<string>(["ingest-1", "ingest-1", "  "])
     const quick = new Map<
       string,
-      { sessionId: string; cancelled: boolean; abortControllers: Set<unknown> }
+      { sessionId: string; cancelled: boolean; abortControllers: Set<unknown>; requestScope: typeof requestScope }
     >([
       [
         "qi-1",
-        { sessionId: "qi-1", cancelled: true, abortControllers: new Set() }
+        { sessionId: "qi-1", requestScope, cancelled: true, abortControllers: new Set() }
       ]
     ])
 
@@ -63,7 +65,7 @@ describe("background-session-store serialization", () => {
 
     // AbortControllers are dropped (not serializable).
     expect(state.quickIngestSessions).toEqual([
-      { sessionId: "qi-1", cancelled: true }
+      { sessionId: "qi-1", requestScope, cancelled: true }
     ])
     // Blank + duplicate replay ids are collapsed.
     expect(state.pendingAuthReplay).toEqual(["ingest-1"])
@@ -76,7 +78,7 @@ describe("background-session-store serialization", () => {
     })
     expect(restored.pendingAuthReplay).toEqual(["ingest-1"])
     expect(restored.quickIngestSessions).toEqual([
-      { sessionId: "qi-1", cancelled: true }
+      { sessionId: "qi-1", requestScope, cancelled: true }
     ])
   })
 
@@ -129,7 +131,7 @@ describe("background-session-store serialization", () => {
 
 describe("quick-ingest batch resume persistence", () => {
   const buildBatch = (): PersistedQuickIngestBatch => ({
-    sessionId: "qi-batch-1",
+    sessionId: "qi-batch-1", requestScope,
     totalCount: 3,
     processedCount: 1,
     ingestTimeoutMs: 300000,
@@ -141,6 +143,25 @@ describe("quick-ingest batch resume persistence", () => {
     plannedConferenceItems: [
       { key: "e1", collectionId: 7, itemId: 70, idempotencyKey: "idem-1" }
     ]
+  })
+
+  it("drops legacy unowned records while preserving unrelated ingest and replay state", () => {
+    const restored = deserializeSessionState({
+      ingestSessions: { keep: { funnelId: "keep" } }, pendingAuthReplay: ["keep"],
+      quickIngestSessions: [{ sessionId: "old-private", cancelled: false }],
+      quickIngestBatches: [{ ...buildBatch(), requestScope: undefined }]
+    })
+    expect(restored.quickIngestSessions).toEqual([])
+    expect(restored.quickIngestBatches).toEqual([])
+    expect(restored.ingestSessions.keep).toEqual({ funnelId: "keep" })
+    expect(restored.pendingAuthReplay).toEqual(["keep"])
+  })
+
+  it("persists scope metadata without credentials or arbitrary config fields", () => {
+    const input = { ...buildBatch(), requestScope: { ...requestScope, config: { ...requestScope.config, apiKey: "never-persist", accessToken: "never-persist" } } }
+    const [stored] = serializeQuickIngestBatches([input])
+    expect(stored.requestScope).toEqual(requestScope)
+    expect(JSON.stringify(stored)).not.toContain("never-persist")
   })
 
   it("serializes a batch record map and drops malformed remote jobs", () => {

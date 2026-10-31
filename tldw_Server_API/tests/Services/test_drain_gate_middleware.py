@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Iterator, Mapping
 from types import SimpleNamespace
-import os
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+
+from tldw_Server_API.app.core.Security.drain_gate_middleware import (
+    CORS_EXPOSE_HEADERS,
+)
 
 
 @pytest.fixture()
@@ -22,12 +26,15 @@ def test_app(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture()
-def draining_client(test_app):
+def draining_client(
+    test_app: FastAPI,
+    auth_headers: Mapping[str, str],
+) -> Iterator[TestClient]:
+    """Yield an authenticated client while the application is draining."""
+
     from tldw_Server_API.app.services.app_lifecycle import get_or_create_lifecycle_state
 
-    headers = {"X-API-KEY": os.environ.get("SINGLE_USER_API_KEY", "test-api-key-12345")}
-
-    with TestClient(test_app, headers=headers) as client:
+    with TestClient(test_app, headers=auth_headers) as client:
         state = get_or_create_lifecycle_state(test_app)
         state.phase = "draining"
         state.ready = False
@@ -67,7 +74,9 @@ def test_drain_gate_503_preserves_cors_headers_for_browser_clients(draining_clie
         headers={
             "Origin": "http://localhost:3000",
             "Access-Control-Request-Method": "POST",
-            "Access-Control-Request-Headers": "authorization,content-type",
+            "Access-Control-Request-Headers": (
+                "authorization,content-type,idempotency-key,if-match," "x-slides-accept-content-kinds"
+            ),
         },
     )
     if blocked.status_code != 503:
@@ -76,6 +85,34 @@ def test_drain_gate_503_preserves_cors_headers_for_browser_clients(draining_clie
         raise AssertionError("drain gate should preserve CORS allow-origin on blocked responses")
     if blocked.headers.get("Access-Control-Allow-Methods") != "POST":
         raise AssertionError("drain gate should echo requested method for blocked preflight responses")
+    allowed = {item.strip().lower() for item in blocked.headers.get("Access-Control-Allow-Headers", "").split(",")}
+    if not {"idempotency-key", "if-match", "x-slides-accept-content-kinds"} <= allowed:
+        raise AssertionError("drain preflight should allow standalone mutation and negotiation headers")
+    exposed = {item.strip().lower() for item in blocked.headers.get("Access-Control-Expose-Headers", "").split(",")}
+    required = {item.lower() for item in CORS_EXPOSE_HEADERS}
+    if exposed != required:
+        raise AssertionError(f"unexpected drain exposed-header policy: {sorted(exposed)!r}")
+    if "origin" not in blocked.headers.get("Vary", "").lower():
+        raise AssertionError("drain CORS response should vary by Origin")
+    cors_config = draining_client.app.state._tldw_drain_gate_cors_config
+    if cors_config["allow_credentials"]:
+        if blocked.headers.get("Access-Control-Allow-Credentials") != "true":
+            raise AssertionError("drain CORS response should preserve configured credential policy")
+    elif "Access-Control-Allow-Credentials" in blocked.headers:
+        raise AssertionError("drain CORS response should not widen the configured credential policy")
+
+
+def test_drain_gate_actual_error_response_exposes_retry_and_download_headers(draining_client):
+    blocked = draining_client.post(
+        "/api/v1/slides/generations",
+        headers={"Origin": "http://localhost:3000"},
+        content=b"{}",
+    )
+
+    assert blocked.status_code == 503
+    assert blocked.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert "retry-after" in blocked.headers["access-control-expose-headers"].lower()
+    assert "content-disposition" in blocked.headers["access-control-expose-headers"].lower()
 
 
 def test_assert_may_start_work_raises_when_draining(test_app):
@@ -123,6 +160,8 @@ def test_drain_gate_rejects_guarded_request_before_llm_budget_runs(test_app, dra
     [
         ("GET", "/health"),
         ("HEAD", "/health"),
+        ("GET", "/internal/ready"),
+        ("HEAD", "/internal/ready"),
         ("GET", "/ready"),
         ("HEAD", "/ready"),
         ("GET", "/readyz"),

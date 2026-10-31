@@ -5,7 +5,6 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -257,3 +256,42 @@ def test_create_tts_history_entry_returns_postgres_returning_id_and_serializes_p
             None,
         )
     ]
+
+
+def test_gateway_history_identity_uses_existing_provider_and_params_json_without_schema_change(
+    tmp_path,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+
+    db = MediaDatabase(db_path=str(tmp_path / "history.sqlite3"), client_id="gateway-history")
+    try:
+        history_id = db.create_tts_history_entry(
+            user_id="1",
+            text_hash="gateway-hash",
+            provider="gateway:backup",
+            model="Vendor/Backup-TTS",
+            params_json={
+                "requested_backend": "gateway:company",
+                "fallback_used": True,
+                "conversion_used": False,
+            },
+            status="success",
+        )
+        row = db.get_tts_history_entry(user_id="1", history_id=int(history_id))
+        columns = {
+            item["name"]
+            for item in db.execute_query("PRAGMA table_info(tts_history)").fetchall()
+        }
+    finally:
+        db.close_connection()
+
+    assert row is not None
+    assert row["provider"] == "gateway:backup"
+    assert json.loads(row["params_json"]) == {
+        "requested_backend": "gateway:company",
+        "fallback_used": True,
+        "conversion_used": False,
+    }
+    assert "requested_backend" not in columns
+    assert "fallback_used" not in columns
+    assert "conversion_used" not in columns

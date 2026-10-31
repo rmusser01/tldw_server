@@ -426,7 +426,9 @@ describe("SkillsManager imports", () => {
     renderManager()
 
     const loadingStatusRegion = await screen.findByRole("status")
-    expect(loadingStatusRegion).toHaveTextContent("Loading skills")
+    await waitFor(() =>
+      expect(loadingStatusRegion).toHaveTextContent("Loading skills")
+    )
     await waitFor(() => expect(tldwClientMock.listSkills).toHaveBeenCalledTimes(1))
 
     resolveList({

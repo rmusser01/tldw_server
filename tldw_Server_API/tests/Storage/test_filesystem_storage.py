@@ -10,10 +10,11 @@ Tests cover:
 - Path validation and sanitization
 """
 import asyncio
-import pytest
 import tempfile
 from io import BytesIO
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
+
+import pytest
 
 from tldw_Server_API.app.core.Storage.filesystem_storage import FileSystemStorage
 from tldw_Server_API.app.core.Storage.storage_interface import StorageError
@@ -184,6 +185,32 @@ class TestFileSystemStoragePathSecurity:
         assert "escapes base directory" in str(exc_info.value)
 
     @pytest.mark.unit
+    @pytest.mark.parametrize(
+        ("base", "resolved", "expected"),
+        [
+            ("C:/storage", "//?/C:/storage/1/media/1/old.pdf", "C:/storage/1/media/1/old.pdf"),
+            ("//server/share/storage", "//?/UNC/server/share/storage/old.pdf", "//server/share/storage/old.pdf"),
+            ("C:/storage", "//?/C:/storage_evil/secret.pdf", None),
+            ("//server/share/storage", "//?/UNC/server/share/storage_evil/secret.pdf", None),
+        ],
+    )
+    def test_extended_windows_resolution_keeps_storage_boundary(
+        self, storage_backend, base: str, resolved: str, expected: str | None
+    ):
+        """Windows device spelling must not change the resolved path's owner."""
+        storage_backend.base_path = PureWindowsPath(base)
+
+        class ResolvedTarget:
+            def resolve(self):
+                return PureWindowsPath(resolved)
+
+        if expected is not None:
+            assert storage_backend._validate_path(ResolvedTarget()) == PureWindowsPath(expected)
+        else:
+            with pytest.raises(StorageError, match="escapes base directory"):
+                storage_backend._validate_path(ResolvedTarget())
+
+    @pytest.mark.unit
     def test_validate_path_rejects_sibling_prefix_escape(self, tmp_path):
         """Sibling directories whose names share the base prefix must not pass containment."""
         base_path = tmp_path / "store"
@@ -248,6 +275,25 @@ class TestFileSystemStorageExistsAndDelete:
         async def _test():
             deleted = await storage_backend.delete("user1/media/1/nonexistent.pdf")
             assert deleted is False
+
+        asyncio.run(_test())
+
+    @pytest.mark.unit
+    def test_delete_tolerates_another_cleaner_removing_the_file(self, storage_backend: FileSystemStorage, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A file disappearing during deletion is reported as already absent."""
+        from tldw_Server_API.app.core.Storage import filesystem_storage
+
+        async def _test() -> None:
+            """Exercise deletion while another cleaner removes the same file."""
+            path = await storage_backend.store("user1", 1, "file.pdf", b"data")
+
+            async def concurrent_remove(full_path: Path) -> None:
+                """Remove the file before reporting the competing deletion's missing-file error."""
+                full_path.unlink()
+                raise FileNotFoundError(str(full_path))
+
+            monkeypatch.setattr(filesystem_storage.aiofiles.os, "remove", concurrent_remove)
+            assert await storage_backend.delete(path) is False
 
         asyncio.run(_test())
 

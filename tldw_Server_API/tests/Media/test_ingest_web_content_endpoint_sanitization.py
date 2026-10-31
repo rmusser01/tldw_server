@@ -1,7 +1,7 @@
 from typing import Any
 
 import pytest
-from fastapi import BackgroundTasks, HTTPException
+from fastapi import BackgroundTasks, HTTPException, Request
 
 from tldw_Server_API.app.api.v1.endpoints.media import ingest_web_content as ingest_endpoint
 from tldw_Server_API.app.api.v1.schemas.media_request_models import IngestWebContentRequest
@@ -58,7 +58,8 @@ async def test_ingest_web_content_sanitizes_orchestration_failure_log(monkeypatc
 
     with pytest.raises(HTTPException) as exc_info:
         await ingest_endpoint.ingest_web_content(
-            request=IngestWebContentRequest(urls=["https://example.com/"]),
+            request=IngestWebContentRequest(urls=["https://example.com/"], perform_analysis=False),
+            http_request=Request({"type": "http"}),
             background_tasks=BackgroundTasks(),
             token=object(),
             db=object(),

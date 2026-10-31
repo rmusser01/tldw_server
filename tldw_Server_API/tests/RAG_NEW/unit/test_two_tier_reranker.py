@@ -1,16 +1,17 @@
-import os
-import math
 import asyncio
+import threading
 
 import pytest
 
 from tldw_Server_API.app.core.RAG.rag_service.advanced_reranking import (
-    TwoTierReranker,
+    BaseReranker,
+    LLMReranker,
     RerankingConfig,
     ScoredDocument,
-    BaseReranker,
+    TwoTierReranker,
+    _has_reranker_score,
 )
-from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
+from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 
 
 class _FakeCross(BaseReranker):
@@ -53,6 +54,164 @@ class _FakeLLM(BaseReranker):
             ))
         out.sort(key=lambda x: x.rerank_score, reverse=True)
         return out[: self.config.top_k]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_two_tier_missing_llm_client_preserves_original_scores_without_gating():
+    config = RerankingConfig(top_k=2)
+    documents = [
+        Document(
+            id="d1",
+            content="first",
+            metadata={},
+            source=DataSource.MEDIA_DB,
+            score=0.1,
+        ),
+        Document(
+            id="d2",
+            content="second",
+            metadata={},
+            source=DataSource.MEDIA_DB,
+            score=0.8,
+        ),
+    ]
+    reranker = TwoTierReranker(
+        config,
+        cross_reranker=_FakeCross(
+            config,
+            {"d1": 0.2, "d2": 0.9, "sentinel:irrelevant": 0.0},
+        ),
+        llm_reranker=LLMReranker(config, llm_client=None),
+    )
+
+    scored = await reranker.rerank("query", documents)
+
+    assert [item.document.id for item in scored] == ["d1", "d2"]
+    assert [item.original_score for item in scored] == [0.1, 0.8]
+    assert [item.rerank_score for item in scored] == [0.1, 0.8]
+    assert [item.relevance_score for item in scored] == [0.1, 0.8]
+    assert reranker.last_metadata == {
+        "strategy": "two_tier",
+        "degraded": True,
+        "failure_code": "provider_unavailable",
+        "verification_available": False,
+    }
+    assert {
+        "top_doc_prob",
+        "sentinel_scores",
+        "fused_score",
+        "calibrated_prob",
+        "gated",
+    }.isdisjoint(reranker.last_metadata)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "provider_response",
+    [
+        "",
+        "not a numeric score",
+        "Error: upstream failed",
+        "HTTP 500",
+        "Error 500",
+        "score: 0.75",
+        "0.75 confidence",
+        "-0.1",
+        "1.1",
+    ],
+)
+async def test_two_tier_malformed_runtime_score_preserves_originals_without_gating(
+    provider_response: str,
+):
+    class _RuntimeClient:
+        credentials_resolved = True
+        used = False
+
+        def analyze(self, _prompt: str) -> str:
+            return provider_response
+
+    config = RerankingConfig(top_k=2)
+    documents = [
+        Document(id="d1", content="first", metadata={}, source=DataSource.MEDIA_DB, score=0.1),
+        Document(id="d2", content="second", metadata={}, source=DataSource.MEDIA_DB, score=0.8),
+    ]
+    client = _RuntimeClient()
+    reranker = TwoTierReranker(
+        config,
+        cross_reranker=_FakeCross(
+            config,
+            {"d1": 0.2, "d2": 0.9, "sentinel:irrelevant": 0.0},
+        ),
+        llm_reranker=LLMReranker(config, llm_client=client),
+    )
+
+    scored = await reranker.rerank("query", documents)
+
+    assert [item.document.id for item in scored] == ["d1", "d2"]
+    assert [item.rerank_score for item in scored] == [0.1, 0.8]
+    assert client.used is False
+    assert reranker.last_metadata == {
+        "strategy": "two_tier",
+        "degraded": True,
+        "failure_code": "provider_unavailable",
+        "verification_available": False,
+    }
+    assert {"top_doc_prob", "sentinel_scores", "gated"}.isdisjoint(reranker.last_metadata)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("provider_response", ["0", "1", "0.75"])
+def test_runtime_reranker_score_gate_accepts_only_plain_bounded_numbers(
+    provider_response: str,
+) -> None:
+    assert _has_reranker_score(provider_response)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_concurrent_runtime_rerankers_do_not_share_degraded_state():
+    barrier = threading.Barrier(2)
+
+    class _RuntimeClient:
+        credentials_resolved = True
+
+        def __init__(self, response: str) -> None:
+            self.response = response
+            self.used = False
+
+        def analyze(self, _prompt: str) -> str:
+            barrier.wait(timeout=2.0)
+            return self.response
+
+    config = RerankingConfig(top_k=1)
+
+    async def run(response: str) -> tuple[list[ScoredDocument], dict[str, object], bool]:
+        document = Document(
+            id=response or "empty",
+            content="passage",
+            metadata={},
+            source=DataSource.MEDIA_DB,
+            score=0.4,
+        )
+        client = _RuntimeClient(response)
+        reranker = LLMReranker(config, llm_client=client)
+        scored = await reranker.rerank("query", [document])
+        return scored, dict(reranker.last_metadata), client.used
+
+    valid, malformed = await asyncio.gather(run("0.9"), run("malformed"))
+
+    assert valid[0][0].rerank_score == 0.9
+    assert valid[1] == {}
+    assert valid[2] is True
+    assert malformed[0][0].rerank_score == 0.4
+    assert malformed[1] == {
+        "degraded": True,
+        "failure_code": "provider_unavailable",
+        "verification_available": False,
+    }
+    assert malformed[2] is False
 
 
 @pytest.mark.unit

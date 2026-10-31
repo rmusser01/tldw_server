@@ -177,6 +177,12 @@ class Deck(BaseModel):
     scheduler_settings_json: Optional[str] = None
     scheduler_settings: DeckSchedulerSettingsEnvelope = Field(default_factory=DeckSchedulerSettingsEnvelope)
 
+    @field_validator("created_at", "last_modified", mode="before")
+    @classmethod
+    def _serialize_timestamps(cls, value: Any) -> Any:
+        """Keep database datetimes compatible with the public string contract."""
+        return value.isoformat() if isinstance(value, datetime) else value
+
     @model_validator(mode="before")
     def _populate_scheduler_settings(cls, data: Any) -> Any:
         if not isinstance(data, dict):
@@ -359,6 +365,12 @@ class Flashcard(BaseModel):
     scheduler_type: Optional[DeckSchedulerType] = None
     next_intervals: Optional[FlashcardReviewIntervalPreviews] = None
 
+    @field_validator("created_at", "last_modified", "due_at", "last_reviewed_at", mode="before")
+    @classmethod
+    def _serialize_timestamps(cls, value: Any) -> Any:
+        """Keep database datetimes compatible with the public string contract."""
+        return value.isoformat() if isinstance(value, datetime) else value
+
     @model_validator(mode="before")
     def _populate_tags(cls, data):
         if not isinstance(data, dict):
@@ -398,10 +410,20 @@ class FlashcardBulkCreateResponse(BaseModel):
     count: int
 
 
+class FlashcardReviewContext(BaseModel):
+    """Explicit queue scope; a null deck selects an all-decks study run."""
+
+    review_mode: Literal["due", "cram"] = "due"
+    deck_id: int | None = Field(..., ge=1)
+    tag_filter: str | None = Field(None, max_length=256)
+
+
 class FlashcardReviewRequest(BaseModel):
     card_uuid: str
     rating: int = Field(..., ge=0, le=5, description="Anki 0-5 rating")
     answer_time_ms: Optional[int] = None
+    review_context: FlashcardReviewContext | None = None
+    review_session_id: int | None = Field(None, ge=1)
 
 
 class FlashcardReviewResponse(BaseModel):
@@ -421,6 +443,12 @@ class FlashcardReviewResponse(BaseModel):
     next_intervals: FlashcardReviewIntervalPreviews
     review_session_id: int | None = None
 
+    @field_validator("due_at", "last_reviewed_at", "last_modified", mode="before")
+    @classmethod
+    def _serialize_timestamps(cls, value: Any) -> Any:
+        """Keep database datetimes compatible with the public string contract."""
+        return value.isoformat() if isinstance(value, datetime) else value
+
 
 class FlashcardReviewSessionSummary(BaseModel):
     """Public summary of a flashcard review session returned by history endpoints."""
@@ -437,6 +465,12 @@ class FlashcardReviewSessionSummary(BaseModel):
     completed_at: Optional[str] = None
     cards_reviewed: int = 0
     client_id: str
+
+    @field_validator("started_at", "last_activity_at", "completed_at", mode="before")
+    @classmethod
+    def _serialize_timestamps(cls, value: Any) -> Any:
+        """Keep database datetimes compatible with the public string contract."""
+        return value.isoformat() if isinstance(value, datetime) else value
 
     @field_validator("cards_reviewed", mode="before")
     @classmethod
@@ -606,6 +640,12 @@ class StudyAssistantThreadSummary(BaseModel):
     created_at: Optional[str] = None
     last_modified: Optional[str] = None
 
+    @field_validator("last_message_at", "created_at", "last_modified", mode="before")
+    @classmethod
+    def _serialize_timestamps(cls, value: Any) -> Any:
+        """Keep database datetimes compatible with the public string contract."""
+        return value.isoformat() if isinstance(value, datetime) else value
+
 
 class StudyAssistantMessage(BaseModel):
     id: int
@@ -620,6 +660,12 @@ class StudyAssistantMessage(BaseModel):
     model: Optional[str] = None
     created_at: Optional[str] = None
     client_id: str
+
+    @field_validator("created_at", mode="before")
+    @classmethod
+    def _serialize_timestamps(cls, value: Any) -> Any:
+        """Keep database datetimes compatible with the public string contract."""
+        return value.isoformat() if isinstance(value, datetime) else value
 
     @model_validator(mode="before")
     def _populate_json_fields(cls, data):

@@ -1,5 +1,5 @@
 import React from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, type UseQueryResult } from '@tanstack/react-query'
 import { Button, Card, Skeleton, Tag } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { tldwClient } from '@/services/tldw/TldwApiClient'
@@ -62,60 +62,67 @@ const getModelLoadErrorStatus = (error: unknown): number | null => {
   return typeof status === 'number' && Number.isFinite(status) ? status : null
 }
 
-export const AvailableModelsList: React.FC = () => {
-  const { t } = useTranslation(['settings', 'common'])
-  const { data, status, error, refetch, isFetching } = useQuery({
-    queryKey: ['tldw-providers-models'],
-    queryFn: async () => {
-      await tldwClient.initialize()
-      let modelList: unknown[] | null = null
-      try {
-        // Accept either the legacy flat array or the current { models, total } envelope.
-        const meta = await tldwClient.getModelsMetadata()
-        modelList = Array.isArray(meta)
-          ? meta
-          : meta && typeof meta === "object" && Array.isArray((meta as { models?: unknown[] }).models)
-            ? (meta as { models: unknown[] }).models
-            : null
-      } catch (requestError) {
-        if (isAbortLikeError(requestError)) {
-          return {}
-        }
-        throw requestError
+export const modelsCatalogQueryOptions = {
+  queryKey: ['tldw-providers-models'],
+  queryFn: async () => {
+    await tldwClient.initialize()
+    let modelList: unknown[] | null = null
+    try {
+      // Accept either the legacy flat array or the current { models, total } envelope.
+      const meta = await tldwClient.getModelsMetadata()
+      modelList = Array.isArray(meta)
+        ? meta
+        : meta && typeof meta === "object" && Array.isArray((meta as { models?: unknown[] }).models)
+          ? (meta as { models: unknown[] }).models
+          : null
+    } catch (requestError) {
+      if (isAbortLikeError(requestError)) {
+        return {}
       }
-      if (!Array.isArray(modelList)) {
-        throw new Error("Unexpected models metadata response")
-      }
-      const normalized: ProviderMap = {}
-      for (const item of modelList) {
-        const record =
-          item && typeof item === 'object' ? (item as Record<string, unknown>) : {}
-        const provider = String(record.provider || 'unknown')
-        const id = String(record.id || record.model || record.name)
-        const context_length =
-          typeof record.context_length === 'number'
-            ? record.context_length
-            : typeof record.contextLength === 'number'
-              ? record.contextLength
-              : undefined
-        const capabilities = Array.isArray(record.capabilities)
-          ? record.capabilities.map(String)
-          : Array.isArray(record.features)
-            ? record.features.map(String)
-            : undefined
-        if (!normalized[provider]) normalized[provider] = []
-        // Avoid duplicates
-        if (!normalized[provider].some((m) => m.id === id)) {
-          normalized[provider].push({ id, context_length, capabilities })
-        }
-      }
-      // Sort each provider list and providers alphabetically
-      for (const p of Object.keys(normalized)) {
-        normalized[p] = normalized[p].sort((a, b) => a.id.localeCompare(b.id))
-      }
-      return normalized
+      throw requestError
     }
-  })
+    if (!Array.isArray(modelList)) {
+      throw new Error("Unexpected models metadata response")
+    }
+    const normalized: ProviderMap = {}
+    for (const item of modelList) {
+      const record =
+        item && typeof item === 'object' ? (item as Record<string, unknown>) : {}
+      const provider = String(record.provider || 'unknown')
+      const id = String(record.id || record.model || record.name)
+      const context_length =
+        typeof record.context_length === 'number'
+          ? record.context_length
+          : typeof record.contextLength === 'number'
+            ? record.contextLength
+            : undefined
+      const capabilities = Array.isArray(record.capabilities)
+        ? record.capabilities.map(String)
+        : Array.isArray(record.features)
+          ? record.features.map(String)
+          : undefined
+      if (!normalized[provider]) normalized[provider] = []
+      // Avoid duplicates
+      if (!normalized[provider].some((m) => m.id === id)) {
+        normalized[provider].push({ id, context_length, capabilities })
+      }
+    }
+    // Sort each provider list and providers alphabetically
+    for (const p of Object.keys(normalized)) {
+      normalized[p] = normalized[p].sort((a, b) => a.id.localeCompare(b.id))
+    }
+    return normalized
+  }
+}
+
+export const AvailableModelsList: React.FC = () => {
+  const catalog = useQuery(modelsCatalogQueryOptions)
+  return <ModelsCatalog catalog={catalog} />
+}
+
+export const ModelsCatalog = ({ catalog }: { catalog: UseQueryResult<ProviderMap> }) => {
+  const { t } = useTranslation(['settings', 'common'])
+  const { data, status, error, refetch, isFetching } = catalog
 
   if (status === 'pending' && !data) {
     return <Skeleton paragraph={{ rows: 6 }} />
@@ -123,23 +130,26 @@ export const AvailableModelsList: React.FC = () => {
 
   if (status === 'error') {
     const errorMessage = getModelLoadErrorMessage(error)
+    const errorStatus = getModelLoadErrorStatus(error)
+    const title = errorStatus === 401
+      ? t('settings:models.authRequiredTitle', 'Sign in to load models')
+      : t('settings:models.loadErrorTitle', 'Unable to load models from server')
     const recoveryState = buildCapabilityState({
       featureName: 'Models',
       capabilityName: 'model metadata catalog',
       endpoint: MODELS_METADATA_PATH,
       method: 'GET',
-      status: getModelLoadErrorStatus(error),
+      status: errorStatus,
       rawMessage: errorMessage ?? 'Model metadata request failed',
-      title: t('settings:models.loadErrorTitle', 'Unable to load models from server'),
-      message: t(
-        'settings:models.loadErrorBody',
-        'The models endpoint returned an error. Check your server URL and API key, then try again.'
-      )
+      title,
+      message: errorStatus === 401
+        ? t('settings:models.authRequiredBody', 'Sign in again or check your connection credentials, then retry.')
+        : t('settings:models.catalogLoadErrorBody', 'The model catalog could not be loaded. Check the server connection, then retry.')
     })
     return (
       <RecoveryCallout
         state={recoveryState.state}
-        title={t('settings:models.loadErrorTitle', 'Unable to load models from server')}
+        title={title}
         message={recoveryState.message}
         diagnostics={recoveryState.diagnostics}
         primaryAction={{
@@ -194,12 +204,12 @@ export const AvailableModelsList: React.FC = () => {
       {isEmpty && (
         <div className="text-sm text-text-muted">
           <div className="mb-1 font-medium">
-            {t('settings:models.noProvidersTitle', 'No providers available.')}
+            {t('settings:models.catalogEmptyTitle', 'No models in the catalog.')}
           </div>
           <div className="text-xs">
             {t(
-              'settings:models.noProvidersBody',
-              'The extension could not load providers from your tldw_server. Check your server URL and API key in Settings, ensure the server is running, then use Retry (or Refresh) to try again.'
+              'settings:models.catalogEmptyBody',
+              'Retry after configuring a provider on the server.'
             )}
           </div>
           <Button

@@ -41,7 +41,6 @@ from tldw_Server_API.app.services import admin_bundle_service as svc
 router = APIRouter()
 
 _BUNDLE_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

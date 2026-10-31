@@ -7,11 +7,12 @@ import asyncio
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 from loguru import logger
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, User
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
 from tldw_Server_API.app.api.v1.schemas.document_insights import (
     DocumentInsightsResponse,
@@ -36,6 +37,7 @@ from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     parse_structured_output,
 )
+from tldw_Server_API.app.core.Prompt_Management.document_insights import prepare_document_insights_prompt
 
 router = APIRouter(tags=["Document Workspace"])
 
@@ -55,6 +57,7 @@ def _build_insights_cache_key(
     user_id: str,
     db_scope: str,
     max_content_length: int,
+    prompt_fingerprint: str,
 ) -> str:
     """Build cache key for insights based on media, user scope, and request params."""
     categories_str = ",".join(sorted(c.value for c in request.categories)) if request.categories else "all"
@@ -62,35 +65,8 @@ def _build_insights_cache_key(
     scope_str = f"user:{user_id}:db:{db_scope}"
     return (
         f"cache:/api/v1/media/{media_id}/insights:{scope_str}:"
-        f"{categories_str}:{model_str}:maxlen:{max_content_length}"
+        f"{categories_str}:{model_str}:maxlen:{max_content_length}:prompt:{prompt_fingerprint}"
     )
-
-
-# System prompt for generating insights
-INSIGHTS_SYSTEM_PROMPT = """You are a research analyst. Analyze the following document and extract structured insights.
-For each category, provide a concise title and detailed content.
-
-Categories to analyze:
-- research_gap: What problem or gap does this work address?
-- research_question: What is the main research question?
-- motivation: Why is this research important?
-- methods: What methods or approaches were used?
-- key_findings: What are the main results or findings?
-- limitations: What are the limitations or caveats?
-- future_work: What future work is suggested?
-- summary: A brief 2-3 sentence summary
-
-Return JSON with this structure:
-{"insights": [{"category": "...", "title": "...", "content": "..."}]}
-
-Important:
-- Only include categories that are relevant to the document
-- Keep titles short (5-10 words)
-- Keep content concise but informative (1-3 sentences)
-- If the document is not a research paper, adapt the categories as appropriate
-- For non-academic documents, focus on: summary, key_findings, and any applicable categories
-- Return ONLY valid JSON, no other text
-"""
 
 
 def _get_adapter(provider: str):
@@ -164,6 +140,7 @@ def _normalize_insights(raw_insights: list[Any]) -> list[InsightItem]:
     },
 )
 async def generate_document_insights(
+    http_request: Request,
     media_id: int = Path(..., description="The ID of the media item"),
     request: GenerateInsightsRequest | None = None,
     db: Any = Depends(get_media_db_for_user),
@@ -211,6 +188,21 @@ async def generate_document_insights(
     max_content_length = request.max_content_length or DEFAULT_MAX_CONTENT_LENGTH
     db_scope = _get_db_scope(db)
 
+    # Resolve before cache lookup so edits cannot reuse old-guidance results.
+    try:
+        prompts_db = await get_prompts_db_for_user(http_request, current_user)
+
+        system_prompt, prompt_fingerprint = await asyncio.to_thread(prepare_document_insights_prompt, prompts_db)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(
+            "Failed to resolve document insights guidance (media_id={}, user_id={}, prompt_id=media.document.insights)",
+            media_id,
+            user_id,
+        )
+        raise HTTPException(status_code=500, detail="Failed to load document insights guidance") from exc
+
     # Check cache first unless forced (cached responses don't count against rate limit)
     cache_key = _build_insights_cache_key(
         media_id,
@@ -218,6 +210,7 @@ async def generate_document_insights(
         user_id=user_id,
         db_scope=db_scope,
         max_content_length=max_content_length,
+        prompt_fingerprint=prompt_fingerprint,
     )
     if not request.force:
         cached = get_cached_response(cache_key)
@@ -293,7 +286,7 @@ async def generate_document_insights(
 
     # 5. Call LLM
     messages_payload = [
-        {"role": "system", "content": INSIGHTS_SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
     response_format = {"type": "json_object"}

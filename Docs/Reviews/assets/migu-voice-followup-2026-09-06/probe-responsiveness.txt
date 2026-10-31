@@ -1,0 +1,88 @@
+"""Real local Whisper cadence probe using synthetic Kokoro speech, no microphone."""
+import asyncio
+import hashlib
+import json
+import subprocess
+import time
+from pathlib import Path
+
+import httpx
+import numpy as np
+from dotenv import dotenv_values
+
+from tldw_Server_API.app.core.Persona.live_stt import create_persona_live_stt_transcriber
+
+ROOT = Path('/private/tmp/tldw-server-migu-buddy-uat')
+RUN = Path('/private/tmp/migu-voice-followup-20260906')
+
+
+async def main():
+    env = dotenv_values('/private/tmp/migu-server-uat/runtime.env')
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post('http://127.0.0.1:9101/api/v1/audio/speech',
+            headers={'X-API-KEY': env['SINGLE_USER_API_KEY']},
+            json={'model':'kokoro','input':'Reply with the blue notebook is ready.',
+                  'voice':'af_heart','response_format':'mp3'})
+        response.raise_for_status()
+    pcm = subprocess.run(['ffmpeg','-v','error','-i','pipe:0','-f','f32le','-ar','16000','-ac','1','pipe:1'],
+        input=response.content,capture_output=True,check=True).stdout
+    speech = np.frombuffer(pcm, dtype=np.float32)
+    transcriber = create_persona_live_stt_transcriber(voice_runtime={'stt_model':'tiny.en','stt_language':'en'})
+    await asyncio.to_thread(transcriber.initialize)
+    decode_times = []
+    original = transcriber._transcribe_audio
+    def measured(audio):
+        start = time.monotonic()
+        try:
+            return original(audio)
+        finally:
+            decode_times.append({'samples':len(audio),'started':start,'finished':time.monotonic()})
+    transcriber._transcribe_audio = measured
+    tick_gaps = []
+    running = True
+    async def ticker():
+        previous = time.monotonic()
+        while running:
+            await asyncio.sleep(0.01)
+            now = time.monotonic(); tick_gaps.append(now-previous); previous=now
+    heartbeat = asyncio.create_task(ticker())
+    latencies, snapshots = [], []
+    audio = np.concatenate([np.zeros(60800,dtype=np.float32),speech,np.zeros(32000,dtype=np.float32)])
+    try:
+        for offset in range(0,len(audio),4096):
+            started=time.monotonic()
+            result=await transcriber.process_audio_chunk(audio[offset:offset+4096].tobytes())
+            latencies.append(time.monotonic()-started)
+            if result is not None: snapshots.append(result['text'])
+            await asyncio.sleep(max(0,0.256-(time.monotonic()-started)))
+        async with asyncio.timeout(10):
+            while True:
+                result=await transcriber.process_audio_chunk(b'')
+                if result is not None: snapshots.append(result['text'])
+                if not transcriber.recognition_pending and decode_times[-1]['samples']==len(audio): break
+                await asyncio.sleep(0.05)
+        report = {
+            'microphone_used':False, 'external_provider_used':False,
+            'speech_source':'local Kokoro synthetic speech', 'recognizer':'Whisper tiny.en CPU int8',
+            'purpose':'Whisper regression only; physical UAT uses normal Parakeet ONNX CPU',
+            'source_sha256':hashlib.sha256((ROOT/'tldw_Server_API/app/core/Persona/whisper_transcriber.py').read_bytes()).hexdigest(),
+            'audio_seconds':len(audio)/16000, 'callback_count':len(latencies), 'decode_count':len(decode_times),
+            'max_ingestion_ms':round(max(latencies)*1000,3),
+            'max_heartbeat_gap_ms':round(max(tick_gaps)*1000,3),
+            'decode_duration_ms':[round((r['finished']-r['started'])*1000,3) for r in decode_times],
+            'inter_decode_gap_ms':[round((b['started']-a['finished'])*1000,3) for a,b in zip(decode_times,decode_times[1:])],
+            'final_snapshot':transcriber.get_full_transcript(), 'snapshots':snapshots,
+        }
+        (RUN/'responsiveness-result.json').write_text(json.dumps(report,indent=2)+'\n')
+        print(json.dumps(report),flush=True)
+        assert 'blue notebook is ready' in report['final_snapshot'].lower()
+        assert max(latencies)<0.1
+        assert max(tick_gaps)<0.15
+        assert all(gap>=340 for gap in report['inter_decode_gap_ms'])
+    finally:
+        running=False
+        await heartbeat
+        transcriber.cleanup()
+        while transcriber.recognition_pending: await asyncio.sleep(0.01)
+
+asyncio.run(main())

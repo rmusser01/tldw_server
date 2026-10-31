@@ -1,10 +1,11 @@
 import React from "react"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 
 import {
-  BuddyShellRenderContextProvider
+  BuddyShellRenderContextProvider,
+  useSetBuddyShellRenderContext
 } from "../BuddyShellRenderContext"
 import { PERSONA_BUDDY_SHELL_ENABLED_SETTING } from "@/services/settings/ui-settings"
 import {
@@ -21,8 +22,35 @@ import { BuddyShellHost } from "../BuddyShellHost"
 
 const mocks = vi.hoisted(() => ({
   isDesktop: true,
+  reducedMotion: false,
   selectedAssistant: null as Record<string, unknown> | null,
   buddyShellEnabled: true
+}))
+
+const companionMocks = vi.hoisted(() => ({
+  calls: [] as unknown[],
+  snapshot: {
+    generation: 1,
+    phase: "idle",
+    actionToken: null as number | null,
+    requestedState: null as string | null,
+    facing: "right",
+    transientOffsetX: 0,
+    suspension: "none"
+  },
+  react: vi.fn(() => true),
+  completeAction: vi.fn()
+}))
+
+const preferenceMocks = vi.hoisted(() => ({
+  getBuddyPreferences: vi.fn(),
+  getPersonaBuddyPreferences: vi.fn(),
+  updateBuddyPreferences: vi.fn(),
+  updatePersonaBuddyPreferences: vi.fn()
+}))
+
+const assetMocks = vi.hoisted(() => ({
+  acquirePersonaVisualAsset: vi.fn()
 }))
 
 const capabilityMocks = vi.hoisted(() => ({
@@ -62,8 +90,28 @@ const liveControlMocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@/hooks/useMediaQuery", () => ({
-  useDesktop: () => mocks.isDesktop
+  useDesktop: () => mocks.isDesktop,
+  useMediaQuery: () => mocks.reducedMotion
 }))
+
+vi.mock("../usePersonaCompanion", () => ({
+  usePersonaCompanion: (input: { semanticState?: string }) => {
+    companionMocks.calls.push(input)
+    return {
+      snapshot: {
+        ...companionMocks.snapshot,
+        requestedState:
+          companionMocks.snapshot.requestedState ?? input.semanticState ?? "idle"
+      },
+      react: companionMocks.react,
+      completeAction: companionMocks.completeAction
+    }
+  }
+}))
+
+vi.mock("@/services/persona-buddy", () => preferenceMocks)
+
+vi.mock("@/services/persona-visual-assets", () => assetMocks)
 
 vi.mock("@/hooks/useSelectedAssistant", () => ({
   useSelectedAssistant: () => [
@@ -281,8 +329,8 @@ const mockDockRect = () =>
   } as DOMRect)
 
 const dragBuddyBy = async (deltaX: number) => {
-  const dragHandle = await screen.findByTestId("persona-buddy-drag-handle")
-  fireEvent.pointerDown(dragHandle, {
+  const buddy = await screen.findByRole("button", { name: /Buddy for/i })
+  fireEvent.pointerDown(buddy, {
     button: 0,
     pointerId: 1,
     clientX: 140,
@@ -320,11 +368,84 @@ const renderHost = ({
   )
 }
 
+const ContextDrivenHost: React.FC<{
+  root: "web" | "sidepanel"
+  context: PersonaBuddyRenderContext
+}> = ({ root, context }) => {
+  const setRenderContext = useSetBuddyShellRenderContext()
+  React.useEffect(() => setRenderContext(context), [context, setRenderContext])
+  return <BuddyShellHost root={root} />
+}
+
+const renderSwitchableHost = (
+  context: PersonaBuddyRenderContext,
+  root: "web" | "sidepanel" = "sidepanel"
+) =>
+  render(
+    <MemoryRouter>
+      <BuddyShellRenderContextProvider>
+        <ContextDrivenHost root={root} context={context} />
+      </BuddyShellRenderContextProvider>
+    </MemoryRouter>
+  )
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, reject, resolve }
+}
+
+const personaContext = (personaId: string): PersonaBuddyRenderContext => ({
+  surface_id: "persona-garden",
+  surface_active: true,
+  active_persona_id: personaId,
+  position_bucket: "sidepanel-desktop",
+  persona_source: "route-local",
+  buddy_summary: buildBuddySummary(personaId),
+  live_voice_state: "idle"
+})
+
 describe("BuddyShellHost", () => {
   beforeEach(() => {
     mocks.isDesktop = true
     mocks.selectedAssistant = null
     mocks.buddyShellEnabled = true
+    mocks.reducedMotion = false
+    companionMocks.calls = []
+    companionMocks.snapshot = {
+      generation: 1,
+      phase: "idle",
+      actionToken: null,
+      requestedState: null,
+      facing: "right",
+      transientOffsetX: 0,
+      suspension: "none"
+    }
+    companionMocks.react.mockReset().mockReturnValue(true)
+    companionMocks.completeAction.mockReset()
+    preferenceMocks.getBuddyPreferences.mockReset().mockResolvedValue({
+      ambient_mode: "expressive",
+      version: null,
+      stored: false
+    })
+    preferenceMocks.getPersonaBuddyPreferences.mockReset().mockResolvedValue({
+      ambient_mode: null,
+      version: 1,
+      stored: false
+    })
+    preferenceMocks.updateBuddyPreferences.mockReset()
+    preferenceMocks.updatePersonaBuddyPreferences.mockReset()
+    assetMocks.acquirePersonaVisualAsset.mockReset().mockImplementation(
+      async (asset: { id: string; mime_type: string }) => ({
+        url: `blob:${asset.id}`,
+        mimeType: asset.mime_type,
+        release: vi.fn()
+      })
+    )
     capabilityMocks.state = {
       capabilities: {
         hasPersonaLiveControl: true
@@ -364,6 +485,7 @@ describe("BuddyShellHost", () => {
     localStorage.clear()
     usePersonaBuddyShellStore.setState({
       isOpen: false,
+      firstUseHintDismissed: false,
       positions: {
         "web-desktop": {
           ...DEFAULT_PERSONA_BUDDY_SHELL_POSITIONS["web-desktop"]
@@ -381,6 +503,88 @@ describe("BuddyShellHost", () => {
 
   afterEach(() => {
     cleanup()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it("keeps expanded controls in the viewport and restores their usable position on remount", () => {
+    vi.stubGlobal("innerWidth", 1280)
+    vi.stubGlobal("innerHeight", 720)
+    usePersonaBuddyShellStore.getState().setPosition("web-desktop", {
+      x: 1120,
+      y: 640
+    })
+    vi.spyOn(HTMLDivElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLDivElement) {
+        const open = Boolean(
+          this.querySelector('[data-testid="persona-buddy-popover"]')
+        )
+        return { width: open ? 220 : 160, height: open ? 687 : 95 } as DOMRect
+      })
+    const context: PersonaBuddyRenderContext = {
+      surface_id: "chat",
+      surface_active: true,
+      active_persona_id: "persona-1",
+      position_bucket: "web-desktop",
+      persona_source: "route-local",
+      buddy_summary: buildBuddySummary("persona-1")
+    }
+    const view = renderHost({ context })
+    expect(screen.getByTestId("persona-buddy-dock")).toHaveStyle({
+      left: "1104px", top: "609px"
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Buddy controls" }))
+    expect(screen.getByTestId("persona-buddy-dock")).toHaveStyle({
+      left: "1044px", top: "17px"
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Close Buddy controls" }))
+    view.unmount()
+    renderHost({ context })
+    expect(screen.getByTestId("persona-buddy-dock")).toHaveStyle({
+      left: "1044px", top: "17px"
+    })
+    expect(screen.queryByTestId("persona-buddy-popover")).not.toBeInTheDocument()
+  })
+
+  it("reclamps content growth without repeated position writes and responds to viewport resize", () => {
+    vi.stubGlobal("innerWidth", 1280)
+    vi.stubGlobal("innerHeight", 720)
+    usePersonaBuddyShellStore.getState().setPosition("web-desktop", {
+      x: 1120,
+      y: 640
+    })
+    let height = 95
+    const notifications = new Set<() => void>()
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(private callback: () => void) {}
+      observe() { notifications.add(this.callback) }
+      disconnect() { notifications.delete(this.callback) }
+    })
+    vi.spyOn(HTMLDivElement.prototype, "getBoundingClientRect")
+      .mockImplementation(() => ({ width: 220, height }) as DOMRect)
+    renderHost({ context: {
+      surface_id: "chat",
+      surface_active: true,
+      active_persona_id: "persona-1",
+      position_bucket: "web-desktop",
+      persona_source: "route-local",
+      buddy_summary: buildBuddySummary("persona-1")
+    } })
+    fireEvent.click(screen.getByRole("button", { name: "Open Buddy controls" }))
+
+    height = 600
+    act(() => { [...notifications].forEach((notify) => notify()) })
+    expect(screen.getByTestId("persona-buddy-dock")).toHaveStyle({ left: "1044px", top: "104px" })
+    const settledPosition = usePersonaBuddyShellStore.getState().positions["web-desktop"]
+    act(() => { [...notifications].forEach((notify) => notify()) })
+    expect(usePersonaBuddyShellStore.getState().positions["web-desktop"]).toBe(settledPosition)
+
+    vi.stubGlobal("innerWidth", 1024)
+    vi.stubGlobal("innerHeight", 640)
+    fireEvent(window, new Event("resize"))
+    expect(screen.getByTestId("persona-buddy-dock")).toHaveStyle({ left: "788px", top: "24px" })
   })
 
   it("stays dormant until the current surface explicitly activates buddy rendering", () => {
@@ -530,10 +734,10 @@ describe("BuddyShellHost", () => {
       selectedAssistant: buildPersonaSelection({ id: "persona-1" })
     })
 
-    expect(screen.getByTestId("persona-buddy-dock")).toHaveTextContent(
-      "Persona persona-2"
-    )
-    expect(screen.getByTestId("persona-buddy-dock")).toHaveTextContent("owl")
+    expect(screen.getByRole("button", {
+      name: "Buddy for Persona persona-2"
+    })).toBeInTheDocument()
+    expect(screen.getByTestId("persona-buddy-dock")).not.toHaveTextContent("owl")
   })
 
   it("treats an explicit null surface summary as authoritative over cached assistant buddy data", () => {
@@ -554,9 +758,9 @@ describe("BuddyShellHost", () => {
       "data-dormant",
       "true"
     )
-    expect(screen.getByTestId("persona-buddy-dock")).toHaveTextContent(
-      "buddy unavailable"
-    )
+    expect(screen.getByRole("button", {
+      name: "Buddy for Persona Buddy"
+    })).toBeDisabled()
     expect(screen.getByTestId("persona-buddy-dock")).not.toHaveTextContent("owl")
   })
 
@@ -696,7 +900,7 @@ describe("BuddyShellHost", () => {
     await waitFor(() => {
       expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
         "src",
-        expect.stringContaining("/assets/idle.png")
+        "blob:idle-asset"
       )
     })
   })
@@ -747,7 +951,7 @@ describe("BuddyShellHost", () => {
     await waitFor(() => {
       expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
         "src",
-        expect.stringContaining("/assets/idle.png")
+        "blob:idle-asset"
       )
     })
   })
@@ -788,7 +992,9 @@ describe("BuddyShellHost", () => {
       "The Buddy runtime cannot render live2d packs yet."
     )
     expect(screen.queryByTestId("persona-visual-frame")).not.toBeInTheDocument()
-    expect(screen.getByTestId("persona-buddy-dock")).toHaveTextContent("Persona persona-1")
+    expect(screen.getByRole("button", {
+      name: "Buddy for Persona persona-1"
+    })).toBeInTheDocument()
   })
 
   it("falls back when sprite-frame packs have assets but no resolvable frame asset", async () => {
@@ -832,7 +1038,9 @@ describe("BuddyShellHost", () => {
       "idle-asset"
     )
     expect(screen.queryByTestId("persona-visual-frame")).not.toBeInTheDocument()
-    expect(screen.getByTestId("persona-buddy-dock")).toHaveTextContent("Persona persona-1")
+    expect(screen.getByRole("button", {
+      name: "Buddy for Persona persona-1"
+    })).toBeInTheDocument()
   })
 
   it("clears published visual diagnostics when the host unmounts", async () => {
@@ -887,7 +1095,7 @@ describe("BuddyShellHost", () => {
     })
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Toggle buddy for Persona persona-1" })
+      screen.getByRole("button", { name: "Open Buddy controls" })
     )
 
     expect(
@@ -895,7 +1103,31 @@ describe("BuddyShellHost", () => {
     ).toHaveAttribute("href", "/persona?persona_id=persona-1&tab=visuals")
   })
 
-  it("shows a focused live session status in the dock", async () => {
+  it("closes controls through the named button and Escape", () => {
+    renderHost({
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "web-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1")
+      }
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Buddy controls" }))
+    fireEvent.click(screen.getByRole("button", { name: "Close Buddy controls" }))
+    expect(usePersonaBuddyShellStore.getState().isOpen).toBe(false)
+    expect(companionMocks.calls.at(-1)).toEqual(
+      expect.objectContaining({ controlsOpen: false })
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Buddy controls" }))
+    fireEvent.keyDown(window, { key: "Escape" })
+    expect(usePersonaBuddyShellStore.getState().isOpen).toBe(false)
+  })
+
+  it("keeps connected resting chrome quiet", async () => {
     liveControlMocks.state = {
       ...liveControlMocks.state,
       focusedSessionId: "live-session-1",
@@ -917,9 +1149,7 @@ describe("BuddyShellHost", () => {
       root: "sidepanel"
     })
 
-    expect(screen.getByTestId("persona-buddy-live-status")).toHaveTextContent(
-      "Connected"
-    )
+    expect(screen.queryByTestId("persona-buddy-live-status")).not.toBeInTheDocument()
   })
 
   it("hides live controls when the server capability is unavailable", () => {
@@ -951,7 +1181,7 @@ describe("BuddyShellHost", () => {
     })
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Toggle buddy for Persona persona-1" })
+      screen.getByRole("button", { name: "Open Buddy controls" })
     )
 
     expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument()
@@ -999,12 +1229,12 @@ describe("BuddyShellHost", () => {
     })
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Toggle buddy for Persona persona-1" })
+      screen.getByRole("button", { name: "Open Buddy controls" })
     )
 
     expect(screen.getByRole("link", { name: "Stop listening" })).toHaveAttribute(
       "href",
-      "/persona?persona_id=persona-1&tab=live"
+      "/persona?persona_id=persona-1&tab=live&session_id=live-session-1"
     )
   })
 
@@ -1044,12 +1274,13 @@ describe("BuddyShellHost", () => {
         "idle"
       )
     })
-    await dragBuddyBy(48)
+    await dragBuddyBy(-48)
 
     expect(screen.getByTestId("persona-buddy-urgent-badge")).toHaveTextContent("3")
-    expect(usePersonaVisualRuntimeStore.getState().override?.state).toBe(
-      "moving_right"
+    expect(companionMocks.calls.at(-1)).toEqual(
+      expect.objectContaining({ dragging: true })
     )
+    expect(usePersonaVisualRuntimeStore.getState().override).toBeNull()
     rectSpy.mockRestore()
   })
 
@@ -1068,13 +1299,43 @@ describe("BuddyShellHost", () => {
     })
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Toggle buddy for Persona persona-1" })
+      screen.getByRole("button", { name: "Open Buddy controls" })
     )
 
     expect(
       screen.queryByRole("link", { name: "Choose/Change Buddy" })
     ).not.toBeInTheDocument()
   })
+
+  it.each(["idle", "listening", "thinking", "speaking"] as const)(
+    "renders the active Live voice %s state on the floating Buddy",
+    async (state) => {
+      const basePack = buildVisualPack("persona-1")
+      const visualPack = {
+        ...basePack,
+        manifest: {
+          ...basePack.manifest,
+          states: { ...basePack.manifest.states, [state]: { animation_id: state } },
+          animations: { ...basePack.manifest.animations, [state]: {
+            frames: [{ asset_id: "voice-state-asset", duration_ms: 100 }]
+          } }
+        },
+        assets_by_id: { ...basePack.assets_by_id, "voice-state-asset": {
+          ...basePack.assets_by_id["idle-asset"], id: "voice-state-asset", url: `/assets/${state}.png`
+        } }
+      }
+      visualMocks.listPersonaVisualPacks.mockResolvedValue({ packs: [visualPack], active_pack: visualPack })
+      renderHost({ context: {
+        surface_id: "persona-garden", surface_active: true, active_persona_id: "persona-1",
+        position_bucket: "web-desktop", persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"), live_session_id: "live-session-1",
+        live_voice_state: state, live_voice_is_listening: state === "listening"
+      } })
+      await waitFor(() => expect(screen.getByTestId("persona-visual-frame"))
+        .toHaveAttribute("data-visual-state", state))
+      expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute("src", "blob:voice-state-asset")
+    }
+  )
 
   it("maps active tool status into the tool_running visual state", async () => {
     const visualPack = buildVisualPack("persona-1")
@@ -1105,7 +1366,7 @@ describe("BuddyShellHost", () => {
     })
     expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
       "src",
-      expect.stringContaining("/assets/tool.png")
+      "blob:tool-asset"
     )
   })
 
@@ -1184,7 +1445,7 @@ describe("BuddyShellHost", () => {
     })
     expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
       "src",
-      expect.stringContaining("/assets/tool-notes-search.png")
+      "blob:tool-notes-search-asset"
     )
   })
 
@@ -1258,11 +1519,11 @@ describe("BuddyShellHost", () => {
     })
     expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute(
       "src",
-      expect.stringContaining("/assets/tool-notes-search.png")
+      "blob:tool-notes-search-asset"
     )
   })
 
-  it("sets a moving_right runtime override while dragging right when the pack declares it", async () => {
+  it("keeps declared movement states inside the hook-owned drag flow", async () => {
     const rectSpy = mockDockRect()
     const visualPack = buildMovementVisualPack("persona-1", ["moving_right"])
     visualMocks.listPersonaVisualPacks.mockResolvedValue({
@@ -1292,18 +1553,14 @@ describe("BuddyShellHost", () => {
     })
     await dragBuddyBy(48)
 
-    expect(usePersonaVisualRuntimeStore.getState().override).toEqual(
-      expect.objectContaining({
-        personaId: "persona-1",
-        sessionId: "session-1",
-        state: "moving_right",
-        reason: "buddy_drag"
-      })
+    expect(companionMocks.calls.at(-1)).toEqual(
+      expect.objectContaining({ dragging: true })
     )
+    expect(usePersonaVisualRuntimeStore.getState().override).toBeNull()
     rectSpy.mockRestore()
   })
 
-  it("sets a moving_left runtime override while dragging left when the pack declares it", async () => {
+  it("does not create a second runtime override while dragging left", async () => {
     const rectSpy = mockDockRect()
     const visualPack = buildMovementVisualPack("persona-1", ["moving_left"])
     visualMocks.listPersonaVisualPacks.mockResolvedValue({
@@ -1333,18 +1590,14 @@ describe("BuddyShellHost", () => {
     })
     await dragBuddyBy(-48)
 
-    expect(usePersonaVisualRuntimeStore.getState().override).toEqual(
-      expect.objectContaining({
-        personaId: "persona-1",
-        sessionId: null,
-        state: "moving_left",
-        reason: "buddy_drag"
-      })
+    expect(companionMocks.calls.at(-1)).toEqual(
+      expect.objectContaining({ dragging: true })
     )
+    expect(usePersonaVisualRuntimeStore.getState().override).toBeNull()
     rectSpy.mockRestore()
   })
 
-  it("clears the Buddy drag movement override on pointer release", async () => {
+  it("ends hook-owned dragging and sends the drag reaction on pointer release", async () => {
     const rectSpy = mockDockRect()
     const visualPack = buildMovementVisualPack("persona-1", ["moving_right"])
     visualMocks.listPersonaVisualPacks.mockResolvedValue({
@@ -1372,13 +1625,16 @@ describe("BuddyShellHost", () => {
       )
     })
     await dragBuddyBy(48)
-    expect(usePersonaVisualRuntimeStore.getState().override?.state).toBe(
-      "moving_right"
+    expect(companionMocks.calls.at(-1)).toEqual(
+      expect.objectContaining({ dragging: true })
     )
 
     fireEvent.pointerUp(window, { pointerId: 1 })
 
-    expect(usePersonaVisualRuntimeStore.getState().override).toBeNull()
+    expect(companionMocks.calls.at(-1)).toEqual(
+      expect.objectContaining({ dragging: false })
+    )
+    expect(companionMocks.react).toHaveBeenCalledWith("drag")
     rectSpy.mockRestore()
   })
 
@@ -1389,9 +1645,6 @@ describe("BuddyShellHost", () => {
       packs: [visualPack],
       active_pack: visualPack
     })
-    const initialPosition =
-      usePersonaBuddyShellStore.getState().positions["sidepanel-desktop"]
-
     renderHost({
       context: {
         surface_id: "persona-garden",
@@ -1411,9 +1664,15 @@ describe("BuddyShellHost", () => {
         "idle"
       )
     })
-    await dragBuddyBy(48)
+    const initialPosition =
+      usePersonaBuddyShellStore.getState().positions["sidepanel-desktop"]
+    await dragBuddyBy(-48)
 
     expect(usePersonaVisualRuntimeStore.getState().override).toBeNull()
+    expect(
+      usePersonaBuddyShellStore.getState().positions["sidepanel-desktop"]
+    ).toEqual(initialPosition)
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 92, clientY: 130 })
     expect(
       usePersonaBuddyShellStore.getState().positions["sidepanel-desktop"]
     ).not.toEqual(initialPosition)
@@ -1438,7 +1697,9 @@ describe("BuddyShellHost", () => {
     await waitFor(() => {
       expect(visualMocks.listPersonaVisualPacks).toHaveBeenCalledWith("persona-1")
     })
-    expect(screen.getByTestId("persona-buddy-dock")).toHaveTextContent("Persona persona-1")
+    expect(screen.getByRole("button", {
+      name: "Buddy for Persona persona-1"
+    })).toBeInTheDocument()
     expect(screen.getByTestId("persona-buddy-visual-diagnostic")).toHaveTextContent(
       "Visual pack did not load"
     )
@@ -1478,9 +1739,778 @@ describe("BuddyShellHost", () => {
         "Visual asset is missing"
       )
     })
-    expect(screen.getByTestId("persona-buddy-dock")).toHaveTextContent("Persona persona-1")
+    expect(screen.getByRole("button", {
+      name: "Buddy for Persona persona-1"
+    })).toBeInTheDocument()
     expect(screen.getByTestId("persona-buddy-visual-diagnostic")).toHaveTextContent(
       "tool-asset"
     )
+  })
+
+  it("drives the single companion hook with fail-closed layered settings and sidepanel coercion", async () => {
+    preferenceMocks.getBuddyPreferences.mockResolvedValue({
+      ambient_mode: "roaming",
+      version: 4,
+      stored: true
+    })
+
+    renderHost({
+      root: "sidepanel",
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"),
+        live_voice_state: "idle"
+      }
+    })
+
+    await waitFor(() => {
+      expect(companionMocks.calls.at(-1)).toEqual(
+        expect.objectContaining({
+          personaId: "persona-1",
+          mode: "expressive",
+          surface: "sidepanel",
+          semanticState: "idle"
+        })
+      )
+    })
+    expect(preferenceMocks.getBuddyPreferences).toHaveBeenCalledTimes(1)
+    expect(preferenceMocks.getPersonaBuddyPreferences).toHaveBeenCalledWith(
+      "persona-1"
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Open Buddy controls" }))
+    expect(screen.getByTestId("persona-buddy-effective-mode")).toHaveTextContent(
+      "Effective: Expressive · Roaming is limited to Expressive in the sidepanel."
+    )
+  })
+
+  it("refetches layered settings and reports a stale per-Persona update", async () => {
+    preferenceMocks.getPersonaBuddyPreferences
+      .mockResolvedValueOnce({
+        ambient_mode: null,
+        version: 2,
+        stored: false
+      })
+      .mockResolvedValueOnce({
+        ambient_mode: "off",
+        version: 3,
+        stored: true
+      })
+    preferenceMocks.updatePersonaBuddyPreferences.mockRejectedValue(
+      Object.assign(new Error("stale"), { status: 409 })
+    )
+
+    renderHost({
+      root: "sidepanel",
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"),
+        live_voice_state: "idle"
+      }
+    })
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open Buddy controls" }))
+    const personaModes = screen.getByRole("group", { name: "For this Persona" })
+    fireEvent.click(within(personaModes).getByRole("radio", { name: "Roaming" }))
+
+    await waitFor(() => {
+      expect(preferenceMocks.updatePersonaBuddyPreferences).toHaveBeenCalledWith(
+        "persona-1",
+        { ambient_mode: "roaming", expected_version: 2 }
+      )
+      expect(preferenceMocks.getPersonaBuddyPreferences).toHaveBeenCalledTimes(2)
+    })
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Settings changed elsewhere. Latest values were loaded."
+    )
+    expect(within(personaModes).getByRole("radio", { name: "Off" })).toBeChecked()
+  })
+
+  it("lets the only layered Persona read settle after a global save completes", async () => {
+    const initialGlobalRead = deferred<{
+      ambient_mode: "expressive"
+      version: number
+      stored: boolean
+    }>()
+    const initialPersonaRead = deferred<{
+      ambient_mode: null
+      version: number
+      stored: boolean
+    }>()
+    preferenceMocks.getBuddyPreferences.mockReturnValue(initialGlobalRead.promise)
+    preferenceMocks.getPersonaBuddyPreferences.mockReturnValue(initialPersonaRead.promise)
+    preferenceMocks.updateBuddyPreferences.mockResolvedValue({
+      ambient_mode: "roaming",
+      version: 2,
+      stored: true
+    })
+
+    renderSwitchableHost(personaContext("persona-1"), "web")
+    fireEvent.click(await screen.findByRole("button", { name: "Open Buddy controls" }))
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Buddy behavior" }))
+        .getByRole("radio", { name: "Roaming" })
+    )
+    await waitFor(() => {
+      expect(preferenceMocks.updateBuddyPreferences).toHaveBeenCalledWith({
+        ambient_mode: "roaming",
+        expected_version: null
+      })
+    })
+
+    await act(async () => {
+      initialGlobalRead.resolve({ ambient_mode: "expressive", version: 1, stored: true })
+      initialPersonaRead.resolve({ ambient_mode: null, version: 1, stored: false })
+      await Promise.all([initialGlobalRead.promise, initialPersonaRead.promise])
+    })
+
+    expect(screen.getByTestId("persona-buddy-effective-mode")).toHaveTextContent(
+      "Effective: Roaming"
+    )
+    expect(
+      within(screen.getByRole("group", { name: "For this Persona" }))
+        .getByRole("radio", { name: "Use global" })
+    ).toBeChecked()
+  })
+
+  it("keeps a completed global save across a Persona switch and a stale layered global read", async () => {
+    const globalUpdate = deferred<{
+      ambient_mode: "roaming"
+      version: number
+      stored: boolean
+    }>()
+    const personaBGlobalRead = deferred<{
+      ambient_mode: "expressive"
+      version: number
+      stored: boolean
+    }>()
+    const personaBRead = deferred<{
+      ambient_mode: null
+      version: number
+      stored: boolean
+    }>()
+    preferenceMocks.getBuddyPreferences
+      .mockResolvedValueOnce({ ambient_mode: "expressive", version: 1, stored: true })
+      .mockReturnValueOnce(personaBGlobalRead.promise)
+    preferenceMocks.getPersonaBuddyPreferences.mockImplementation(
+      (personaId: string) => personaId === "persona-1"
+        ? Promise.resolve({ ambient_mode: null, version: 1, stored: false })
+        : personaBRead.promise
+    )
+    preferenceMocks.updateBuddyPreferences.mockReturnValue(globalUpdate.promise)
+
+    const view = renderSwitchableHost(personaContext("persona-1"), "web")
+    fireEvent.click(await screen.findByRole("button", { name: "Open Buddy controls" }))
+    await waitFor(() => {
+      expect(
+        within(screen.getByRole("group", { name: "For this Persona" }))
+          .getByRole("radio", { name: "Use global" })
+      ).toBeChecked()
+    })
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Buddy behavior" }))
+        .getByRole("radio", { name: "Roaming" })
+    )
+    await waitFor(() => {
+      expect(preferenceMocks.updateBuddyPreferences).toHaveBeenCalledTimes(1)
+    })
+
+    view.rerender(
+      <MemoryRouter>
+        <BuddyShellRenderContextProvider>
+          <ContextDrivenHost root="web" context={personaContext("persona-2")} />
+        </BuddyShellRenderContextProvider>
+      </MemoryRouter>
+    )
+    await waitFor(() => {
+      expect(preferenceMocks.getPersonaBuddyPreferences).toHaveBeenCalledWith("persona-2")
+    })
+
+    await act(async () => {
+      globalUpdate.resolve({ ambient_mode: "roaming", version: 2, stored: true })
+      await globalUpdate.promise
+      personaBGlobalRead.resolve({ ambient_mode: "expressive", version: 1, stored: true })
+      personaBRead.resolve({ ambient_mode: null, version: 1, stored: false })
+      await Promise.all([personaBGlobalRead.promise, personaBRead.promise])
+    })
+
+    expect(screen.getByTestId("persona-buddy-effective-mode")).toHaveTextContent(
+      "Effective: Roaming"
+    )
+    expect(
+      within(screen.getByRole("group", { name: "For this Persona" }))
+        .getByRole("radio", { name: "Use global" })
+    ).toBeChecked()
+  })
+
+  it("ignores a delayed Persona preference read after focus moves to another Persona", async () => {
+    const personaA = deferred<{
+      ambient_mode: "roaming"
+      version: number
+      stored: boolean
+    }>()
+    const personaB = deferred<{
+      ambient_mode: "off"
+      version: number
+      stored: boolean
+    }>()
+    preferenceMocks.getPersonaBuddyPreferences.mockImplementation(
+      (personaId: string) => personaId === "persona-1" ? personaA.promise : personaB.promise
+    )
+
+    const view = renderSwitchableHost(personaContext("persona-1"))
+    await waitFor(() => {
+      expect(preferenceMocks.getPersonaBuddyPreferences).toHaveBeenCalledWith("persona-1")
+    })
+    view.rerender(
+      <MemoryRouter>
+        <BuddyShellRenderContextProvider>
+          <ContextDrivenHost root="sidepanel" context={personaContext("persona-2")} />
+        </BuddyShellRenderContextProvider>
+      </MemoryRouter>
+    )
+    await waitFor(() => {
+      expect(preferenceMocks.getPersonaBuddyPreferences).toHaveBeenCalledWith("persona-2")
+    })
+    await act(async () => {
+      personaB.resolve({ ambient_mode: "off", version: 7, stored: true })
+      await personaB.promise
+    })
+    await act(async () => {
+      personaA.resolve({ ambient_mode: "roaming", version: 3, stored: true })
+      await personaA.promise
+    })
+
+    expect(companionMocks.calls.at(-1)).toEqual(
+      expect.objectContaining({ personaId: "persona-2", mode: "off" })
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Open Buddy controls" }))
+    expect(
+      within(screen.getByRole("group", { name: "For this Persona" }))
+        .getByRole("radio", { name: "Off" })
+    ).toBeChecked()
+  })
+
+  it.each(["success", "error", "conflict"] as const)(
+    "ignores a delayed Persona A preference write %s after focus moves to Persona B",
+    async (outcome) => {
+      preferenceMocks.getPersonaBuddyPreferences.mockImplementation(
+        async (personaId: string) => personaId === "persona-1"
+          ? { ambient_mode: null, version: 1, stored: false }
+          : { ambient_mode: "off", version: 4, stored: true }
+      )
+      const update = deferred<{
+        ambient_mode: "roaming"
+        version: number
+        stored: boolean
+      }>()
+      preferenceMocks.updatePersonaBuddyPreferences.mockReturnValue(update.promise)
+      const view = renderSwitchableHost(personaContext("persona-1"))
+      fireEvent.click(await screen.findByRole("button", { name: "Open Buddy controls" }))
+      await waitFor(() => {
+        expect(
+          within(screen.getByRole("group", { name: "For this Persona" }))
+            .getByRole("radio", { name: "Use global" })
+        ).toBeChecked()
+      })
+      fireEvent.click(
+        within(screen.getByRole("group", { name: "For this Persona" }))
+          .getByRole("radio", { name: "Roaming" })
+      )
+      await waitFor(() => {
+        expect(preferenceMocks.updatePersonaBuddyPreferences).toHaveBeenCalledWith(
+          "persona-1",
+          { ambient_mode: "roaming", expected_version: 1 }
+        )
+      })
+
+      view.rerender(
+        <MemoryRouter>
+          <BuddyShellRenderContextProvider>
+            <ContextDrivenHost root="sidepanel" context={personaContext("persona-2")} />
+          </BuddyShellRenderContextProvider>
+        </MemoryRouter>
+      )
+      await waitFor(() => {
+        expect(companionMocks.calls.at(-1)).toEqual(
+          expect.objectContaining({ personaId: "persona-2", mode: "off" })
+        )
+      })
+
+      await act(async () => {
+        if (outcome === "success") {
+          update.resolve({ ambient_mode: "roaming", version: 2, stored: true })
+        } else {
+          update.reject(
+            Object.assign(new Error(outcome), {
+              status: outcome === "conflict" ? 409 : 500
+            })
+          )
+        }
+        try {
+          await update.promise
+        } catch {
+          // The component owns the rejection; the test only releases it.
+        }
+      })
+
+      expect(companionMocks.calls.at(-1)).toEqual(
+        expect.objectContaining({ personaId: "persona-2", mode: "off" })
+      )
+      expect(screen.queryByText("Buddy settings could not be saved.")).not.toBeInTheDocument()
+      expect(
+        screen.queryByText("Settings changed elsewhere. Latest values were loaded.")
+      ).not.toBeInTheDocument()
+      expect(
+        within(screen.getByRole("group", { name: "For this Persona" }))
+          .getByRole("radio", { name: "Off" })
+      ).toBeChecked()
+    }
+  )
+
+  it.each(["error", "success"] as const)(
+    "ignores a delayed Persona A preference write %s after an A to B to A focus cycle",
+    async (outcome) => {
+      preferenceMocks.getPersonaBuddyPreferences
+        .mockResolvedValueOnce({ ambient_mode: null, version: 1, stored: false })
+        .mockResolvedValueOnce({ ambient_mode: "off", version: 4, stored: true })
+        .mockResolvedValueOnce({ ambient_mode: "off", version: 9, stored: true })
+      const staleUpdate = deferred<{
+        ambient_mode: "roaming"
+        version: number
+        stored: boolean
+      }>()
+      preferenceMocks.updatePersonaBuddyPreferences
+        .mockReturnValueOnce(staleUpdate.promise)
+        .mockResolvedValue({ ambient_mode: "expressive", version: 10, stored: true })
+
+      const view = renderSwitchableHost(personaContext("persona-1"))
+      fireEvent.click(await screen.findByRole("button", { name: "Open Buddy controls" }))
+      const personaModes = screen.getByRole("group", { name: "For this Persona" })
+      await waitFor(() => {
+        expect(
+          within(personaModes).getByRole("radio", { name: "Use global" })
+        ).toBeChecked()
+      })
+      fireEvent.click(within(personaModes).getByRole("radio", { name: "Roaming" }))
+      await waitFor(() => {
+        expect(preferenceMocks.updatePersonaBuddyPreferences).toHaveBeenCalledWith(
+          "persona-1",
+          { ambient_mode: "roaming", expected_version: 1 }
+        )
+      })
+
+      view.rerender(
+        <MemoryRouter>
+          <BuddyShellRenderContextProvider>
+            <ContextDrivenHost root="sidepanel" context={personaContext("persona-2")} />
+          </BuddyShellRenderContextProvider>
+        </MemoryRouter>
+      )
+      await waitFor(() => {
+        expect(
+          within(screen.getByRole("group", { name: "For this Persona" }))
+            .getByRole("radio", { name: "Off" })
+        ).toBeChecked()
+      })
+
+      view.rerender(
+        <MemoryRouter>
+          <BuddyShellRenderContextProvider>
+            <ContextDrivenHost root="sidepanel" context={personaContext("persona-1")} />
+          </BuddyShellRenderContextProvider>
+        </MemoryRouter>
+      )
+      await waitFor(() => {
+        expect(preferenceMocks.getPersonaBuddyPreferences).toHaveBeenCalledTimes(3)
+        expect(
+          within(screen.getByRole("group", { name: "For this Persona" }))
+            .getByRole("radio", { name: "Off" })
+        ).toBeChecked()
+      })
+
+      await act(async () => {
+        if (outcome === "success") {
+          staleUpdate.resolve({ ambient_mode: "roaming", version: 2, stored: true })
+        } else {
+          staleUpdate.reject(Object.assign(new Error("offline"), { status: 500 }))
+        }
+        try {
+          await staleUpdate.promise
+        } catch {
+          // The component owns the rejection; the test only releases it.
+        }
+      })
+
+      const currentPersonaModes = screen.getByRole("group", { name: "For this Persona" })
+      expect(within(currentPersonaModes).getByRole("radio", { name: "Off" })).toBeChecked()
+      expect(screen.queryByText("Buddy settings could not be saved.")).not.toBeInTheDocument()
+      expect(
+        screen.queryByText("Settings changed elsewhere. Latest values were loaded.")
+      ).not.toBeInTheDocument()
+
+      fireEvent.click(
+        within(currentPersonaModes).getByRole("radio", { name: "Expressive" })
+      )
+      await waitFor(() => {
+        expect(preferenceMocks.updatePersonaBuddyPreferences).toHaveBeenLastCalledWith(
+          "persona-1",
+          { ambient_mode: "expressive", expected_version: 9 }
+        )
+      })
+    }
+  )
+
+  it("renders grounded transient movement without persisting it as an anchor", async () => {
+    companionMocks.snapshot = {
+      ...companionMocks.snapshot,
+      transientOffsetX: 48
+    }
+    renderHost({
+      root: "sidepanel",
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"),
+        live_voice_state: "idle"
+      }
+    })
+
+    const dock = await screen.findByTestId("persona-buddy-dock")
+    const groundedAnchor =
+      usePersonaBuddyShellStore.getState().positions["sidepanel-desktop"]
+    expect(dock).toHaveStyle({
+      left: `${groundedAnchor.x + 48}px`,
+      top: `${groundedAnchor.y}px`
+    })
+    expect(
+      usePersonaBuddyShellStore.getState().positions["sidepanel-desktop"]
+    ).toEqual(groundedAnchor)
+  })
+
+  it("offers a focusable controls button and persists first-use hint dismissal", async () => {
+    renderHost({
+      root: "sidepanel",
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"),
+        live_voice_state: "idle"
+      }
+    })
+
+    const controls = await screen.findByRole("button", { name: "Open Buddy controls" })
+    controls.focus()
+    expect(controls).toHaveFocus()
+    fireEvent.click(controls)
+    expect(usePersonaBuddyShellStore.getState().isOpen).toBe(true)
+    expect(screen.getByTestId("persona-buddy-first-use-hint")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Got it" }))
+    expect(screen.queryByTestId("persona-buddy-first-use-hint")).not.toBeInTheDocument()
+    expect(usePersonaBuddyShellStore.getState().firstUseHintDismissed).toBe(true)
+  })
+
+  it("treats a touch tap as one deferred reaction without opening controls", async () => {
+    renderHost({
+      root: "sidepanel",
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"),
+        live_voice_state: "idle"
+      }
+    })
+    const buddy = await screen.findByRole("button", {
+      name: "Buddy for Persona persona-1"
+    })
+    vi.useFakeTimers()
+    fireEvent.pointerDown(buddy, {
+      button: 0,
+      pointerId: 12,
+      pointerType: "touch",
+      clientX: 100,
+      clientY: 100
+    })
+    fireEvent.pointerUp(window, {
+      pointerId: 12,
+      pointerType: "touch",
+      clientX: 100,
+      clientY: 100
+    })
+    act(() => vi.advanceTimersByTime(299))
+    expect(companionMocks.react).not.toHaveBeenCalled()
+    act(() => vi.advanceTimersByTime(1))
+    expect(companionMocks.react).toHaveBeenCalledWith("click")
+    expect(usePersonaBuddyShellStore.getState().isOpen).toBe(false)
+    vi.useRealTimers()
+  })
+
+  it("defers one pointer click but lets a second click open controls without reacting", async () => {
+    renderHost({
+      root: "sidepanel",
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"),
+        live_voice_state: "idle"
+      }
+    })
+    const buddy = await screen.findByRole("button", {
+      name: "Buddy for Persona persona-1"
+    })
+    vi.useFakeTimers()
+    fireEvent.pointerDown(buddy, { button: 0, pointerId: 1, clientX: 100, clientY: 100 })
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 100, clientY: 100 })
+    fireEvent.pointerDown(buddy, { button: 0, pointerId: 2, clientX: 100, clientY: 100 })
+    fireEvent.pointerUp(window, { pointerId: 2, clientX: 100, clientY: 100 })
+    act(() => vi.advanceTimersByTime(500))
+
+    expect(companionMocks.react).not.toHaveBeenCalled()
+    expect(usePersonaBuddyShellStore.getState().isOpen).toBe(true)
+    vi.useRealTimers()
+  })
+
+  it("drops a deferred click when the focused Persona changes", async () => {
+    const view = renderSwitchableHost(personaContext("persona-1"))
+    const buddy = await screen.findByRole("button", {
+      name: "Buddy for Persona persona-1"
+    })
+    vi.useFakeTimers()
+    fireEvent.pointerDown(buddy, { button: 0, pointerId: 21, clientX: 100, clientY: 100 })
+    fireEvent.pointerUp(window, { pointerId: 21, clientX: 100, clientY: 100 })
+
+    view.rerender(
+      <MemoryRouter>
+        <BuddyShellRenderContextProvider>
+          <ContextDrivenHost root="sidepanel" context={personaContext("persona-2")} />
+        </BuddyShellRenderContextProvider>
+      </MemoryRouter>
+    )
+    act(() => vi.advanceTimersByTime(300))
+
+    expect(companionMocks.react).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it("drops a deferred click when the companion engine generation changes", async () => {
+    const context = personaContext("persona-1")
+    const view = renderSwitchableHost(context)
+    const buddy = await screen.findByRole("button", {
+      name: "Buddy for Persona persona-1"
+    })
+    vi.useFakeTimers()
+    fireEvent.pointerDown(buddy, { button: 0, pointerId: 22, clientX: 100, clientY: 100 })
+    fireEvent.pointerUp(window, { pointerId: 22, clientX: 100, clientY: 100 })
+    companionMocks.snapshot = { ...companionMocks.snapshot, generation: 2 }
+    view.rerender(
+      <MemoryRouter>
+        <BuddyShellRenderContextProvider>
+          <ContextDrivenHost root="sidepanel" context={context} />
+        </BuddyShellRenderContextProvider>
+      </MemoryRouter>
+    )
+    act(() => vi.advanceTimersByTime(300))
+
+    expect(companionMocks.react).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it("drops a deferred click when the active visual pack changes", async () => {
+    const packA = buildVisualPack("persona-1")
+    const packB = { ...buildVisualPack("persona-1"), id: "pack-2" }
+    visualMocks.listPersonaVisualPacks
+      .mockResolvedValueOnce({ packs: [packA], active_pack: packA })
+      .mockResolvedValue({ packs: [packB], active_pack: packB })
+    renderSwitchableHost(personaContext("persona-1"))
+    const buddy = await screen.findByRole("button", {
+      name: "Buddy for Persona persona-1"
+    })
+    await waitFor(() => {
+      expect(companionMocks.calls.at(-1)).toEqual(
+        expect.objectContaining({ packId: "pack-1" })
+      )
+    })
+    vi.useFakeTimers()
+    fireEvent.pointerDown(buddy, { button: 0, pointerId: 24, clientX: 100, clientY: 100 })
+    fireEvent.pointerUp(window, { pointerId: 24, clientX: 100, clientY: 100 })
+    await act(async () => {
+      fireEvent(
+        window,
+        new CustomEvent(PERSONA_VISUAL_PACK_ACTIVATED_EVENT, {
+          detail: { personaId: "persona-1", packId: "pack-2" }
+        })
+      )
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(companionMocks.calls.at(-1)).toEqual(
+      expect.objectContaining({ packId: "pack-2" })
+    )
+    act(() => vi.advanceTimersByTime(300))
+
+    expect(companionMocks.react).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it("removes a fallback nudge immediately on semantic or reduced-motion transitions", async () => {
+    const pack = buildVisualPack("persona-1")
+    visualMocks.listPersonaVisualPacks.mockResolvedValue({
+      packs: [pack],
+      active_pack: pack
+    })
+    companionMocks.react.mockReturnValue(false)
+    const idleContext = personaContext("persona-1")
+    const view = renderSwitchableHost(idleContext)
+    const buddy = await screen.findByRole("button", {
+      name: "Buddy for Persona persona-1"
+    })
+    await screen.findByTestId("persona-buddy-visual-wrapper")
+    vi.useFakeTimers()
+    fireEvent.keyDown(buddy, { key: " " })
+    expect(screen.getByTestId("persona-buddy-visual-wrapper")).toHaveStyle({
+      transform: "scaleX(1) translateX(4px)"
+    })
+
+    view.rerender(
+      <MemoryRouter>
+        <BuddyShellRenderContextProvider>
+          <ContextDrivenHost
+            root="sidepanel"
+            context={{ ...idleContext, visual_state: "thinking" }}
+          />
+        </BuddyShellRenderContextProvider>
+      </MemoryRouter>
+    )
+    expect(screen.getByTestId("persona-buddy-visual-wrapper")).toHaveStyle({
+      transform: "scaleX(1) translateX(0)"
+    })
+
+    view.rerender(
+      <MemoryRouter>
+        <BuddyShellRenderContextProvider>
+          <ContextDrivenHost root="sidepanel" context={idleContext} />
+        </BuddyShellRenderContextProvider>
+      </MemoryRouter>
+    )
+    fireEvent.keyDown(buddy, { key: " " })
+    expect(screen.getByTestId("persona-buddy-visual-wrapper")).toHaveStyle({
+      transform: "scaleX(1) translateX(4px)"
+    })
+    mocks.reducedMotion = true
+    view.rerender(
+      <MemoryRouter>
+        <BuddyShellRenderContextProvider>
+          <ContextDrivenHost root="sidepanel" context={idleContext} />
+        </BuddyShellRenderContextProvider>
+      </MemoryRouter>
+    )
+    expect(screen.getByTestId("persona-buddy-visual-wrapper")).toHaveStyle({
+      transform: "scaleX(1) translateX(0)"
+    })
+    act(() => vi.advanceTimersByTime(500))
+    expect(screen.getByTestId("persona-buddy-visual-wrapper")).toHaveStyle({
+      transform: "scaleX(1) translateX(0)"
+    })
+    vi.useRealTimers()
+  })
+
+  it("persists no drag position before the 8px threshold and stores only the final anchor", async () => {
+    const rectSpy = mockDockRect()
+    renderHost({
+      root: "sidepanel",
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"),
+        live_voice_state: "idle"
+      }
+    })
+    const buddy = await screen.findByRole("button", {
+      name: "Buddy for Persona persona-1"
+    })
+    const initial = usePersonaBuddyShellStore.getState().positions["sidepanel-desktop"]
+    fireEvent.pointerDown(buddy, { button: 0, pointerId: 9, clientX: 140, clientY: 130 })
+    fireEvent.pointerMove(window, { pointerId: 9, clientX: 147, clientY: 130 })
+    expect(usePersonaBuddyShellStore.getState().positions["sidepanel-desktop"]).toEqual(initial)
+    fireEvent.pointerMove(window, { pointerId: 9, clientX: 92, clientY: 130 })
+    expect(usePersonaBuddyShellStore.getState().positions["sidepanel-desktop"]).toEqual(initial)
+    fireEvent.pointerUp(window, { pointerId: 9, clientX: 92, clientY: 130 })
+    expect(usePersonaBuddyShellStore.getState().positions["sidepanel-desktop"]).not.toEqual(initial)
+    rectSpy.mockRestore()
+  })
+
+  it("cancels a moved pointer without persisting a partial drag or reacting", async () => {
+    const rectSpy = mockDockRect()
+    renderHost({ root: "sidepanel", context: personaContext("persona-1") })
+    const buddy = await screen.findByRole("button", {
+      name: "Buddy for Persona persona-1"
+    })
+    const initial = usePersonaBuddyShellStore.getState().positions["sidepanel-desktop"]
+    fireEvent.pointerDown(buddy, { button: 0, pointerId: 23, clientX: 140, clientY: 130 })
+    fireEvent.pointerMove(window, { pointerId: 23, clientX: 92, clientY: 130 })
+    fireEvent.pointerCancel(window, { pointerId: 23, clientX: 92, clientY: 130 })
+
+    expect(usePersonaBuddyShellStore.getState().positions["sidepanel-desktop"]).toEqual(initial)
+    expect(companionMocks.react).not.toHaveBeenCalled()
+    rectSpy.mockRestore()
+  })
+
+  it("opens on Enter, reacts on Space without scrolling, and forwards the exact renderer action token", async () => {
+    companionMocks.snapshot = {
+      ...companionMocks.snapshot,
+      phase: "action",
+      actionToken: 42,
+      generation: 7
+    }
+    const pack = buildVisualPack("persona-1")
+    visualMocks.listPersonaVisualPacks.mockResolvedValue({ packs: [pack], active_pack: pack })
+    vi.useFakeTimers()
+    renderHost({
+      root: "sidepanel",
+      context: {
+        surface_id: "persona-garden",
+        surface_active: true,
+        active_persona_id: "persona-1",
+        position_bucket: "sidepanel-desktop",
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"),
+        live_voice_state: "idle"
+      }
+    })
+    await act(async () => {})
+    const buddy = screen.getByRole("button", {
+      name: "Buddy for Persona persona-1"
+    })
+    fireEvent.keyDown(buddy, { key: "Enter" })
+    expect(usePersonaBuddyShellStore.getState().isOpen).toBe(true)
+    const spaceAllowed = fireEvent.keyDown(buddy, { key: " " })
+    expect(spaceAllowed).toBe(false)
+    expect(companionMocks.react).toHaveBeenCalledWith("space")
+    act(() => vi.advanceTimersByTime(100))
+    expect(companionMocks.completeAction).toHaveBeenCalledWith(42, true)
+    vi.useRealTimers()
   })
 })

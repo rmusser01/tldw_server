@@ -1,0 +1,10 @@
+Pages directory cannot be found at /private/tmp/tldw-server-buddy-persona-ux/pages or /private/tmp/tldw-server-buddy-persona-ux/src/pages. If using a custom path, please configure with the `no-html-link-for-pages` rule in your eslint config file.
+apps/packages/ui/src/store/persona-buddy-shell.ts: ESLint PASS, no added findings (0 baseline errors/1 baseline warnings; 0 current errors/1 current warnings)
+  Prettier changed lines 40-42: PASS
+apps/packages/ui/src/store/__tests__/persona-buddy-shell.test.ts: ESLint PASS, no added findings (4 baseline errors/0 baseline warnings; 4 current errors/0 current warnings)
+  Prettier changed lines 25-61: PASS
+  Prettier changed lines 68-68: PASS
+  Prettier changed lines 79-82: PASS
+apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx: ESLint PASS, no added findings (0 baseline errors/0 baseline warnings; 0 current errors/0 current warnings)
+  Prettier changed lines 391-394: PASS
+  Prettier changed lines 432-435: PASS

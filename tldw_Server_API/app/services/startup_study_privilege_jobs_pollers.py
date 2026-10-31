@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 from loguru import logger
 
+from tldw_Server_API.app.core.testing import env_flag_enabled
 from tldw_Server_API.app.services.lifecycle_worker_specs import (
     ShutdownPhase,
     WorkerLifecycleContext,
@@ -18,6 +19,7 @@ from tldw_Server_API.app.services.lifecycle_worker_specs import (
     stop_event_worker_spec,
 )
 from tldw_Server_API.app.services.lifecycle_workers import WorkerRegistry
+from tldw_Server_API.app.services.worker_startup_policy import should_start_inprocess_worker
 
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
@@ -51,19 +53,33 @@ def provide_study_privilege_jobs_worker_specs(
             worker_service=_run_study_pack_jobs_worker_service,
             category="jobs",
             phase=ShutdownPhase.JOB_POLLER_QUIESCE,
-            enabled=route_enabled_predicate(
-                "STUDY_PACK_JOBS_WORKER_ENABLED",
-                "flashcards",
-            ),
+            enabled=_study_pack_worker_enabled,
         ),
         stop_event_worker_spec(
             name="study_suggestions_jobs_task",
             worker_service=_run_study_suggestions_jobs_worker_service,
             category="jobs",
             phase=ShutdownPhase.JOB_POLLER_QUIESCE,
-            enabled=route_enabled_predicate(
-                "STUDY_SUGGESTIONS_JOBS_WORKER_ENABLED",
-                "study-suggestions",
+            enabled=_study_suggestions_worker_enabled,
+        ),
+        stop_event_worker_spec(
+            name="notes_graph_suggestions_jobs_task",
+            worker_service=_run_notes_graph_suggestions_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=lambda context: _notes_graph_worker_enabled(
+                context,
+                "NOTES_GRAPH_SUGGESTIONS_WORKER_ENABLED",
+            ),
+        ),
+        stop_event_worker_spec(
+            name="notes_graph_suggestions_maintenance_task",
+            worker_service=_run_notes_graph_suggestions_maintenance_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=lambda context: _notes_graph_worker_enabled(
+                context,
+                "NOTES_GRAPH_SUGGESTIONS_MAINTENANCE_ENABLED",
             ),
         ),
         stop_event_worker_spec(
@@ -76,6 +92,43 @@ def provide_study_privilege_jobs_worker_specs(
                 "privileges",
             ),
         ),
+    )
+
+
+def _study_pack_worker_enabled(context: WorkerLifecycleContext) -> bool:
+    """Default to the Flashcards route while respecting operator worker controls."""
+    if not context.route_enabled("flashcards"):
+        return False
+    return should_start_inprocess_worker(
+        "STUDY_PACK_JOBS_WORKER_ENABLED",
+        "flashcards",
+        sidecar_mode=context.sidecar_mode,
+        test_mode=context.test_mode,
+        route_enabled=context.route_enabled,
+    )
+
+
+def _study_suggestions_worker_enabled(context: WorkerLifecycleContext) -> bool:
+    """Process suggestions by default when their route and worker policy allow it."""
+    if not context.route_enabled("study-suggestions"):
+        return False
+    return should_start_inprocess_worker(
+        "STUDY_SUGGESTIONS_JOBS_WORKER_ENABLED",
+        "study-suggestions",
+        sidecar_mode=context.sidecar_mode,
+        test_mode=context.test_mode,
+        route_enabled=context.route_enabled,
+    )
+
+
+def _notes_graph_worker_enabled(
+    context: WorkerLifecycleContext,
+    flag: str,
+) -> bool:
+    return (
+        not context.sidecar_mode
+        and env_flag_enabled(flag)
+        and bool(context.route_enabled("notes"))
     )
 
 
@@ -277,6 +330,22 @@ def _run_study_suggestions_jobs_worker_service(stop_event: Any) -> Any:
     )
 
     return _run_study_suggestions_jobs_worker(stop_event)
+
+
+def _run_notes_graph_suggestions_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.notes_graph_suggestions_worker import (
+        run_notes_graph_suggestions_worker,
+    )
+
+    return run_notes_graph_suggestions_worker(stop_event)
+
+
+def _run_notes_graph_suggestions_maintenance_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.notes_graph_suggestions_maintenance import (
+        run_notes_graph_suggestions_maintenance,
+    )
+
+    return run_notes_graph_suggestions_maintenance(stop_event)
 
 
 def _run_privilege_snapshot_worker_service(stop_event: Any) -> Any:

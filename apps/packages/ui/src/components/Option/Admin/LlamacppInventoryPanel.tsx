@@ -1,5 +1,5 @@
 import React from "react"
-import { Button, Card, Input, List, Space, Tag, Typography } from "antd"
+import { Button, Card, Input, Space, Tag, Typography } from "antd"
 import { RefreshCw } from "lucide-react"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import type {
@@ -117,30 +117,22 @@ export const LlamacppInventoryPanel: React.FC<LlamacppInventoryPanelProps> = ({
         )}
 
         {models.length > 0 ? (
-          <List
-            size="small"
-            bordered
-            dataSource={models}
-            renderItem={(item) => {
+          <ul
+            role="list"
+            aria-label="Local GGUF models"
+            className="m-0 list-none divide-y divide-border rounded-lg border border-border p-0"
+          >
+            {models.map((item) => {
               const selected = selectedModelId === item.model_id
               const active = isActiveModel(item, activeModel)
               const size = formatBytes(item.size_bytes)
 
               return (
-                <List.Item
-                  actions={[
-                    <Button
-                      key="select"
-                      size="small"
-                      type={selected ? "default" : "link"}
-                      onClick={() => onSelectModel(item.model_id)}
-                      disabled={selected}
-                    >
-                      {selected ? "Selected" : "Select"}
-                    </Button>
-                  ]}
+                <li
+                  key={item.model_id}
+                  className="flex flex-col gap-3 px-4 py-2 sm:flex-row sm:items-center sm:justify-between"
                 >
-                  <Space orientation="vertical" size={4} className="w-full">
+                  <Space orientation="vertical" size={4} className="min-w-0 flex-1">
                     <Space wrap size="small">
                       <Text strong>{item.display_name}</Text>
                       {active && <Tag color="green">Active</Tag>}
@@ -172,10 +164,20 @@ export const LlamacppInventoryPanel: React.FC<LlamacppInventoryPanelProps> = ({
                       </Space>
                     )}
                   </Space>
-                </List.Item>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    <Button
+                      size="small"
+                      type={selected ? "default" : "link"}
+                      onClick={() => onSelectModel(item.model_id)}
+                      disabled={selected}
+                    >
+                      {selected ? "Selected" : "Select"}
+                    </Button>
+                  </div>
+                </li>
               )
-            }}
-          />
+            })}
+          </ul>
         ) : (
           <Text type="secondary">
             No local GGUF models detected. Rescan or register a local GGUF path.

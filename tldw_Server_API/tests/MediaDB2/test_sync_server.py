@@ -12,7 +12,7 @@ import pytest
 # 3rd-party Libraries
 #
 # Local Imports
-from tldw_Server_API.app.api.v1.endpoints.sync import ServerSyncProcessor
+from tldw_Server_API.app.core.Sync.server_sync_processor import ServerSyncProcessor
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
@@ -402,7 +402,7 @@ class TestServerSyncProcessorConflict:
         # server_authoritative_time_str should be "2023-11-01T12:00:20.123Z"
 
         # Patching logic remains the same
-        with patch('tldw_Server_API.app.api.v1.endpoints.sync.datetime') as mock_datetime_module:
+        with patch('tldw_Server_API.app.core.Sync.server_sync_processor.datetime') as mock_datetime_module:
             mock_datetime_module.now.return_value = mock_now_dt_object
             # Provide strptime if needed (the code *does* use it now for parsing)
             mock_datetime_module.strptime = datetime.strptime
@@ -454,7 +454,7 @@ class TestServerSyncProcessorConflict:
                                                                  second=15, microsecond=456000)
 
         # Patching logic remains the same
-        with patch('tldw_Server_API.app.api.v1.endpoints.sync.datetime') as mock_datetime_module:
+        with patch('tldw_Server_API.app.core.Sync.server_sync_processor.datetime') as mock_datetime_module:
             mock_datetime_module.now.return_value = mock_now_dt_object
             mock_datetime_module.strptime = datetime.strptime
 
@@ -511,7 +511,7 @@ class TestServerSyncProcessorConflict:
             second=15,
             microsecond=111000,
         )
-        with patch("tldw_Server_API.app.api.v1.endpoints.sync.datetime") as mock_datetime_module:
+        with patch("tldw_Server_API.app.core.Sync.server_sync_processor.datetime") as mock_datetime_module:
             mock_datetime_module.now.return_value = mock_now_dt_object
             mock_datetime_module.strptime = datetime.strptime
             success, errors = server_processor.apply_client_changes_batch([client_change])
@@ -563,7 +563,7 @@ class TestServerSyncProcessorConflict:
             microsecond=250000,
         )
         expected_authoritative_time_str = mock_now_dt_object.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-        with patch("tldw_Server_API.app.api.v1.endpoints.sync.datetime") as mock_datetime_module:
+        with patch("tldw_Server_API.app.core.Sync.server_sync_processor.datetime") as mock_datetime_module:
             mock_datetime_module.now.return_value = mock_now_dt_object
             mock_datetime_module.strptime = datetime.strptime
             success, errors = server_processor.apply_client_changes_batch([client_change])

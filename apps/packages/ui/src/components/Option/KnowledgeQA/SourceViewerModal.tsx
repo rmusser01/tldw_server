@@ -7,6 +7,7 @@ import { ExternalLink, X } from "lucide-react"
 import { cn } from "@/libs/utils"
 import { openExternalUrl } from "@/utils/safe-external-url"
 import type { RagResult } from "./types"
+import { getSourceOpenAction } from "./sourceOpenAction"
 import {
   getEvidenceOrigin,
   getEvidenceOriginLabel,
@@ -15,6 +16,7 @@ import {
   getResultSourceId,
   getUnavailableEvidenceMessage,
   getSourceTypeLabel,
+  getResultSourceType,
 } from "./sourceListUtils"
 
 type SourceViewerModalProps = {
@@ -49,8 +51,8 @@ export function SourceViewerModal({
   const title = result.metadata?.title || result.metadata?.source || "Source"
   const content = getResultEvidenceText(result)
   const unavailableMessage = getUnavailableEvidenceMessage(result)
-  const url = result.metadata?.url
-  const sourceType = result.sourceType || result.metadata?.source_type
+  const openAction = getSourceOpenAction(result)
+  const sourceType = getResultSourceType(result)
   const sourceLabel = getSourceTypeLabel(sourceType)
   const evidenceOrigin = getEvidenceOrigin(result)
   const evidenceOriginLabel =
@@ -94,14 +96,14 @@ export function SourceViewerModal({
             </p>
           </div>
           <div className="ml-3 flex items-center gap-2">
-            {url && (
+            {openAction && (
               <button
                 type="button"
-                onClick={() => openExternalUrl(url, "_blank", "noopener,noreferrer")}
+                onClick={() => openExternalUrl(openAction.href, "_blank", "noopener,noreferrer")}
                 className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-subtle hover:bg-hover hover:text-text transition-colors"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
-                Open original
+                {openAction.label}
               </button>
             )}
             <button

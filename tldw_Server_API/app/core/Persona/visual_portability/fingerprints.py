@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
-
 
 _VOLATILE_FINGERPRINT_KEYS = {
     "archive_hash",
@@ -78,6 +77,47 @@ def canonical_payload_fingerprint(payload: Mapping[str, Any]) -> str:
     """Return a stable fingerprint that ignores volatile export metadata."""
     canonical_payload = _canonical_payload_value(payload)
     return sha256_bytes(canonical_json_bytes(canonical_payload))
+
+
+def build_persona_visual_pack_fingerprint(
+    pack: Mapping[str, Any],
+    assets: Sequence[Mapping[str, Any]],
+) -> str:
+    """Fingerprint the reviewed pack payload and reachable immutable assets."""
+    payload = {
+        "renderer_type": pack.get("renderer_type"),
+        "manifest_version": pack.get("manifest_version"),
+        "manifest": pack.get("manifest"),
+        "companion_behavior": pack.get("companion_behavior"),
+        "provenance": pack.get("provenance"),
+        "provenance_version": pack.get("provenance_version"),
+        "converter_version": pack.get("converter_version"),
+        "assets": [
+            _fingerprint_asset(asset)
+            for asset in sorted(assets, key=lambda row: str(row.get("id") or ""))
+        ],
+    }
+    return canonical_payload_fingerprint(payload)
+
+
+def _fingerprint_asset(asset: Mapping[str, Any]) -> dict[str, Any]:
+    """Project immutable asset metadata into the reviewed fingerprint payload."""
+    return {
+        key: asset.get(key)
+        for key in (
+            "id",
+            "asset_role",
+            "mime_type",
+            "byte_size",
+            "checksum_sha256",
+            "width",
+            "height",
+            "duration_ms",
+            "provenance",
+            "provenance_version",
+            "converter_version",
+        )
+    }
 
 
 def _canonical_payload_value(value: Any, path: tuple[str, ...] = ()) -> Any:

@@ -38,6 +38,7 @@ class SidecarOwnedJobsPollerHandles:
 
     reminder_jobs_stop_event: Any | None = None
     reminder_jobs_task: Any | None = None
+    agent_task_jobs_task: Any | None = None
     admin_backup_jobs_stop_event: Any | None = None
     admin_backup_jobs_task: Any | None = None
     admin_byok_validation_jobs_stop_event: Any | None = None
@@ -62,6 +63,16 @@ def provide_sidecar_owned_jobs_worker_specs(
             enabled=lambda context: _sidecar_owned_worker_enabled(
                 context,
                 _reminder_jobs_worker_enabled,
+            ),
+        ),
+        stop_event_worker_spec(
+            name="agent_task_jobs_task",
+            worker_service=_run_agent_task_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=lambda context: _sidecar_owned_worker_enabled(
+                context,
+                _agent_task_jobs_worker_enabled,
             ),
         ),
         stop_event_worker_spec(
@@ -127,6 +138,12 @@ def _reminder_jobs_worker_enabled() -> bool:
     from tldw_Server_API.app.core.testing import env_flag_enabled
 
     return env_flag_enabled("REMINDER_JOBS_WORKER_ENABLED")
+
+
+def _agent_task_jobs_worker_enabled() -> bool:
+    from tldw_Server_API.app.core.testing import env_flag_enabled
+
+    return env_flag_enabled("AGENT_TASK_JOBS_WORKER_ENABLED")
 
 
 def _admin_backup_jobs_worker_enabled() -> bool:
@@ -477,6 +494,14 @@ def _run_reminder_jobs_worker_service(stop_event: Any) -> Any:
     )
 
     return _run_reminder_jobs_worker_impl(stop_event=stop_event)
+
+
+def _run_agent_task_jobs_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.agent_task_jobs_worker import (
+        run_agent_task_jobs_worker as _run_agent_task_jobs_worker_impl,
+    )
+
+    return _run_agent_task_jobs_worker_impl(stop_event=stop_event)
 
 
 def _start_admin_backup_jobs_worker_service(*, stop_event: Any) -> Any:

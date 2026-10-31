@@ -128,7 +128,7 @@ describe("workspace API domain contract", () => {
     expect(response.items[0]?.id).toBe("workspace-alpha")
     expect(mocks.bgRequest).toHaveBeenCalledWith(
       expect.objectContaining({
-        path: "/api/v1/workspaces",
+        path: "/api/v1/workspaces/",
         method: "GET"
       })
     )

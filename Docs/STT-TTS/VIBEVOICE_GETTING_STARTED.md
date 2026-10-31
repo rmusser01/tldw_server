@@ -4,7 +4,7 @@ This guide walks you through installing, configuring, and using the VibeVoice te
 
 ## 1) Prerequisites
 
-- Python 3.10+
+- Python 3.11+
 - ffmpeg installed and on `PATH`
 - GPU optional (CUDA recommended for performance).
 - Sufficient disk space to cache models under `./models/vibevoice`.

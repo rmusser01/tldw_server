@@ -1,4 +1,7 @@
 {
+  "onboarding_loginSettingsError": {
+    "message": "تعذّر فتح إعدادات تسجيل الدخول. حاول مرة أخرى."
+  },
   "navigation_serverAndAuth": {
     "message": "الخادم والمصادقة"
   },

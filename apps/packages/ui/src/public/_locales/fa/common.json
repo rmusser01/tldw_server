@@ -1261,5 +1261,17 @@
   },
   "modelSelect_sort_localFirst": {
     "message": "Local-first"
+  },
+  "help_loadFailed": {
+    "message": "راهنما بارگیری نشد. دوباره متصل شوید، تغییرات را ذخیره کنید و سپس صفحه را دوباره بارگیری کنید."
+  },
+  "help_loading": {
+    "message": "در حال بارگیری راهنما…"
+  },
+  "help_confirmReload": {
+    "message": "این صفحه دوباره بارگیری شود؟ ممکن است تغییرات ذخیره‌نشده از بین بروند."
+  },
+  "help_reload": {
+    "message": "بارگیری دوبارهٔ صفحه"
   }
 }

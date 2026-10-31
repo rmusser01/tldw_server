@@ -113,7 +113,7 @@ def test_chat_completion_injects_persona_exemplar_guidance_and_debug_meta(
     assert selection.get("selected_count", 0) >= 1
     assert exemplar_id in (selection.get("selected_exemplar_ids") or [])
     telemetry = persona_meta.get("telemetry") or {}
-    assert set(["ioo", "ior", "lcs", "safety_flags"]).issubset(set(telemetry.keys()))
+    assert {"ioo", "ior", "lcs", "safety_flags"}.issubset(telemetry)
     assert 0.0 <= float(telemetry.get("ioo", -1.0)) <= 1.0
     assert 0.0 <= float(telemetry.get("ior", -1.0)) <= 1.0
     assert 0.0 <= float(telemetry.get("lcs", -1.0)) <= 1.0
@@ -164,7 +164,7 @@ def test_chat_completion_persona_strategy_off_skips_exemplar_injection(
     assert persona_meta.get("applied") is False
     assert persona_meta.get("reason") == "disabled_by_strategy"
     telemetry = persona_meta.get("telemetry") or {}
-    assert set(["ioo", "ior", "lcs", "safety_flags"]).issubset(set(telemetry.keys()))
+    assert {"ioo", "ior", "lcs", "safety_flags"}.issubset(telemetry)
 
 
 def test_chat_completion_uses_configured_persona_default_budget_when_override_missing(
@@ -315,7 +315,7 @@ def test_streaming_chat_computes_persona_telemetry_without_debug_meta(
         chunks = list(response.iter_text())
         assert any("data:" in chunk for chunk in chunks)
 
-    assert observed["telemetry_calls"] >= 1
+    assert observed["telemetry_calls"] >= 1, f"stream={chunks!r}"
 
 
 def test_chat_completion_computes_persona_telemetry_without_debug_meta(

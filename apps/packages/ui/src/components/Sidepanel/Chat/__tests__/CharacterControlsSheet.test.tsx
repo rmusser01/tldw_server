@@ -8,7 +8,13 @@ const mocks = vi.hoisted(() => ({
   dispatchOpenAssistantSelect: vi.fn(),
   updateSettings: vi.fn(async () => null),
   clearChat: vi.fn(),
+  surfaceResetChat: vi.fn(),
   selectServerChat: vi.fn(),
+  setServerChatAssistantKind: vi.fn(),
+  setServerChatAssistantId: vi.fn(),
+  setServerChatCharacterId: vi.fn(),
+  setServerChatPersonaMemoryMode: vi.fn(),
+  setServerChatMetaLoaded: vi.fn(),
   setSelectedAssistant: vi.fn(async () => undefined),
   beforeTrackedStart: vi.fn(async () => undefined),
   onRequestClose: vi.fn(),
@@ -31,7 +37,12 @@ const state = vi.hoisted(() => ({
     serverChatId: "chat-1",
     serverChatAssistantKind: null as string | null,
     serverChatAssistantId: null as string | null,
-    serverChatCharacterId: null as string | null
+    serverChatCharacterId: null as string | null,
+    setServerChatAssistantKind: mocks.setServerChatAssistantKind,
+    setServerChatAssistantId: mocks.setServerChatAssistantId,
+    setServerChatCharacterId: mocks.setServerChatCharacterId,
+    setServerChatPersonaMemoryMode: mocks.setServerChatPersonaMemoryMode,
+    setServerChatMetaLoaded: mocks.setServerChatMetaLoaded
   },
   history: [
     {
@@ -61,8 +72,24 @@ vi.mock("@/components/Common/AssistantSelect", () => ({
   AssistantSelect: (props: Record<string, unknown>) => {
     mocks.assistantSelect(props)
     return (
-      <button type="button">
-        {String(props.labelOverride ?? "AssistantSelect")}
+      <button
+        type="button"
+        onClick={() => {
+          const onSelectionComplete = props.onSelectionComplete as
+            | ((selection: Record<string, unknown>) => void | Promise<void>)
+            | undefined
+          void onSelectionComplete?.({
+            kind: "character",
+            id: "char-2",
+            name: "Tracked Character"
+          })
+        }}
+      >
+        {String(
+          props.variant === "inline"
+            ? "Choose tracked assistant"
+            : props.labelOverride ?? "AssistantSelect"
+        )}
       </button>
     )
   }
@@ -141,7 +168,12 @@ describe("CharacterControlsSheet", () => {
       serverChatId: "chat-1",
       serverChatAssistantKind: null,
       serverChatAssistantId: null,
-      serverChatCharacterId: null
+      serverChatCharacterId: null,
+      setServerChatAssistantKind: mocks.setServerChatAssistantKind,
+      setServerChatAssistantId: mocks.setServerChatAssistantId,
+      setServerChatCharacterId: mocks.setServerChatCharacterId,
+      setServerChatPersonaMemoryMode: mocks.setServerChatPersonaMemoryMode,
+      setServerChatMetaLoaded: mocks.setServerChatMetaLoaded
     }
     state.history = [
       {
@@ -201,7 +233,12 @@ describe("CharacterControlsSheet", () => {
       serverChatId: "chat-1",
       serverChatAssistantKind: "character",
       serverChatAssistantId: null,
-      serverChatCharacterId: "char-7"
+      serverChatCharacterId: "char-7",
+      setServerChatAssistantKind: mocks.setServerChatAssistantKind,
+      setServerChatAssistantId: mocks.setServerChatAssistantId,
+      setServerChatCharacterId: mocks.setServerChatCharacterId,
+      setServerChatPersonaMemoryMode: mocks.setServerChatPersonaMemoryMode,
+      setServerChatMetaLoaded: mocks.setServerChatMetaLoaded
     }
     state.settings = {
       assistantOverlay: {
@@ -240,6 +277,7 @@ describe("CharacterControlsSheet", () => {
       <CharacterControlsSheet
         beforeTrackedStart={mocks.beforeTrackedStart}
         onRequestClose={mocks.onRequestClose}
+        resetChat={mocks.surfaceResetChat}
       />
     )
 
@@ -252,13 +290,37 @@ describe("CharacterControlsSheet", () => {
       assistantOverlay: null
     })
     expect(mocks.setSelectedAssistant).toHaveBeenCalledWith(null)
+    expect(mocks.onRequestClose).not.toHaveBeenCalled()
+    expect(mocks.surfaceResetChat).not.toHaveBeenCalled()
+    expect(mocks.clearChat).not.toHaveBeenCalled()
+    expect(mocks.dispatchOpenAssistantSelect).not.toHaveBeenCalled()
+    expect(mocks.assistantSelect).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        variant: "inline",
+        selectionModePreference: "tracked",
+        initialTab: "character",
+        onSelectionComplete: expect.any(Function)
+      })
+    )
+
+    await user.click(
+      screen.getByRole("button", { name: "Choose tracked assistant" })
+    )
+
     expect(mocks.onRequestClose).toHaveBeenCalledTimes(1)
-    expect(mocks.clearChat).toHaveBeenCalledTimes(1)
-    expect(mocks.dispatchOpenAssistantSelect).toHaveBeenCalledWith({
-      tab: "character",
-      applyAs: "tracked",
-      source: "sidepanel-character-controls"
-    })
+    expect(mocks.surfaceResetChat).toHaveBeenCalledTimes(1)
+    expect(mocks.clearChat).not.toHaveBeenCalled()
+    expect(mocks.setServerChatAssistantKind).toHaveBeenCalledWith("character")
+    expect(mocks.setServerChatAssistantId).toHaveBeenCalledWith("char-2")
+    expect(mocks.setServerChatCharacterId).toHaveBeenCalledWith("char-2")
+    expect(mocks.setServerChatPersonaMemoryMode).toHaveBeenCalledWith(null)
+    expect(mocks.setServerChatMetaLoaded).toHaveBeenCalledWith(false)
+    expect(mocks.surfaceResetChat.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.setServerChatAssistantKind.mock.invocationCallOrder[0]
+    )
+    expect(mocks.setServerChatMetaLoaded.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.onRequestClose.mock.invocationCallOrder[0]
+    )
   })
 
   it("opens tracked sessions through the standard server-chat selection path", async () => {
@@ -288,7 +350,12 @@ describe("CharacterControlsSheet", () => {
       serverChatId: "chat-1",
       serverChatAssistantKind: "character",
       serverChatAssistantId: null,
-      serverChatCharacterId: "42"
+      serverChatCharacterId: "42",
+      setServerChatAssistantKind: mocks.setServerChatAssistantKind,
+      setServerChatAssistantId: mocks.setServerChatAssistantId,
+      setServerChatCharacterId: mocks.setServerChatCharacterId,
+      setServerChatPersonaMemoryMode: mocks.setServerChatPersonaMemoryMode,
+      setServerChatMetaLoaded: mocks.setServerChatMetaLoaded
     }
 
     render(<CharacterControlsSheet />)
@@ -314,7 +381,12 @@ describe("CharacterControlsSheet", () => {
       serverChatId: "chat-1",
       serverChatAssistantKind: "character",
       serverChatAssistantId: null,
-      serverChatCharacterId: "42"
+      serverChatCharacterId: "42",
+      setServerChatAssistantKind: mocks.setServerChatAssistantKind,
+      setServerChatAssistantId: mocks.setServerChatAssistantId,
+      setServerChatCharacterId: mocks.setServerChatCharacterId,
+      setServerChatPersonaMemoryMode: mocks.setServerChatPersonaMemoryMode,
+      setServerChatMetaLoaded: mocks.setServerChatMetaLoaded
     }
 
     render(<CharacterControlsSheet />)

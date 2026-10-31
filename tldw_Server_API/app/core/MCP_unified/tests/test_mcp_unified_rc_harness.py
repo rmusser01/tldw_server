@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import sys
+from email.parser import Parser
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -52,6 +53,19 @@ def test_default_paths_point_to_apps_package() -> None:
     assert paths.package_project == Path("/repo/apps/mcp-unified")  # nosec B101
     assert paths.package_src == Path("/repo/apps/mcp-unified/src/mcp_unified")  # nosec B101
     assert paths.evidence_dir == Path("/repo/.artifacts/mcp-unified-rc")  # nosec B101
+
+
+def test_jsonschema_dependency_accepts_duplicate_identical_metadata_headers() -> None:
+    """Equivalent repeated sdist headers must represent one semantic dependency."""
+
+    metadata = Parser().parsestr(
+        "Requires-Dist: jsonschema<5,>=4.23\n"
+        "Requires-Dist: jsonschema>=4.23,<5\n"
+        'Requires-Dist: jsonschema<5,>=4.23; extra == "dev"\n'
+        "\n"
+    )
+
+    assert mcp_unified_rc._jsonschema_base_dependency(metadata) == "jsonschema<5,>=4.23"
 
 
 def _create_publish_plan_artifacts(tmp_path: Path) -> mcp_unified_rc.RcPaths:
@@ -279,20 +293,22 @@ def test_user_guide_uat_install_spec_uses_apps_project_by_default() -> None:
     """User-guide UAT install specs should default to the app package project."""
 
     harness = _load_user_guide_harness()
+    repo_root = Path("/repo")
+    project = repo_root / "apps" / "mcp-unified"
     wheel = Path("/tmp/mcp_unified-0.1.0-py3-none-any.whl")  # nosec B108
     relative_wheel = Path("dist/mcp_unified-0.1.0-py3-none-any.whl")
 
-    assert harness.default_package_project(Path("/repo")) == Path("/repo/apps/mcp-unified")  # nosec B101
+    assert harness.default_package_project(repo_root) == project  # nosec B101
     assert harness.package_install_spec(
-        repo_root=Path("/repo"),
+        repo_root=repo_root,
         wheel_path=None,
         editable=False,
-    ) == ["/repo/apps/mcp-unified[gateway]"]  # nosec B101
+    ) == [f"{project}[gateway]"]  # nosec B101
     assert harness.package_install_spec(
-        repo_root=Path("/repo"),
+        repo_root=repo_root,
         wheel_path=None,
         editable=True,
-    ) == ["-e", "/repo/apps/mcp-unified[gateway]"]  # nosec B101
+    ) == ["-e", f"{project}[gateway]"]  # nosec B101
     assert harness.package_install_spec(
         repo_root=Path("/repo"),
         wheel_path=wheel,
@@ -647,8 +663,11 @@ def test_rc_create_venv_uses_symlinks_on_posix(
     assert captured["venv_dir"] == tmp_path / ".venv"  # nosec B101
 
 
-def test_rc_pip_dependency_outage_records_optional_skip(tmp_path: Path) -> None:
+def test_rc_pip_dependency_outage_records_optional_skip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Local dependency-index outages should be optional skips outside CI."""
+
+    # Outages are only optional off GitHub Actions; pin the local branch.
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
 
     recorder = mcp_unified_rc.RcEvidenceRecorder(
         evidence_dir=tmp_path,
@@ -737,8 +756,11 @@ def test_rc_pip_dependency_outage_is_required_failure_in_ci(
     assert recorder.has_required_failures() is True  # nosec B101
 
 
-def test_rc_user_guide_uat_dependency_outage_records_optional_skip(tmp_path: Path) -> None:
+def test_rc_user_guide_uat_dependency_outage_records_optional_skip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """User-guide UAT dependency outages should be optional skips locally."""
+
+    # Outages are only optional off GitHub Actions; pin the local branch.
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
 
     report_path = tmp_path / "user-guide-uat.json"
     report_path.write_text(
@@ -850,7 +872,7 @@ def test_rc_cli_uat_runs_user_guide_wheel_mode(
 
     assert len(commands) == 1  # nosec B101
     command = commands[0]
-    assert "Helper_Scripts/Testing-related/mcp_standalone_user_guide_uat.py" in command  # nosec B101
+    assert str(Path("Helper_Scripts") / "Testing-related" / "mcp_standalone_user_guide_uat.py") in command  # nosec B101
     assert "--wheel" in command  # nosec B101
     assert str(wheel) in command  # nosec B101
     assert "--json-report" in command  # nosec B101
@@ -922,7 +944,7 @@ def test_rc_smoke_uat_runs_user_guide_transport_checks(
 
     assert len(commands) == 1  # nosec B101
     command = commands[0]
-    assert "Helper_Scripts/Testing-related/mcp_standalone_user_guide_uat.py" in command  # nosec B101
+    assert str(Path("Helper_Scripts") / "Testing-related" / "mcp_standalone_user_guide_uat.py") in command  # nosec B101
     assert "--wheel" in command  # nosec B101
     assert str(wheel) in command  # nosec B101
     assert recorder.results[0]["phase"] == "smoke_uat"  # nosec B101
@@ -1025,11 +1047,10 @@ def test_rc_extras_matrix_records_tier_specific_checks(
     assert "gateway_config_validation" in names  # nosec B101
     assert "sqlite_storage_smoke" in names  # nosec B101
     assert "dev_artifact_gate_selection" in names  # nosec B101
-    flattened_commands = [" ".join(command) for command in commands]
-    assert any("mcp-unified-gateway package-info" in command for command in flattened_commands)  # nosec B101
-    assert any("mcp-unified-gateway validate-config" in command for command in flattened_commands)  # nosec B101
-    assert any("SQLiteMCPStore" in command for command in flattened_commands)  # nosec B101
-    assert any(".github/tests/test_mcp_unified_artifact_gate.py" in command for command in flattened_commands)  # nosec B101
+    assert any(Path(command[0]).stem == "mcp-unified-gateway" and command[1] == "package-info" for command in commands)  # nosec B101
+    assert any(Path(command[0]).stem == "mcp-unified-gateway" and command[1] == "validate-config" for command in commands)  # nosec B101
+    assert any("SQLiteMCPStore" in arg for command in commands for arg in command)  # nosec B101
+    assert any(Path(arg).as_posix().endswith(".github/tests/test_mcp_unified_artifact_gate.py") for command in commands for arg in command)  # nosec B101
 
 
 def test_mcp_unified_dev_extra_declares_artifact_gate_dependencies() -> None:
@@ -1061,6 +1082,8 @@ def test_mcp_unified_dev_extra_declares_artifact_gate_dependencies() -> None:
 
     assert "build" in dev_dependency_names  # nosec B101
     assert "tomli" in dev_dependency_names  # nosec B101
+    assert "setuptools>=79.0.1" in build_dependencies  # nosec B101
+    assert "setuptools>=79.0.1" in dev_dependencies  # nosec B101
     assert build_dependency_names.issubset(dev_dependency_names)  # nosec B101
     assert any(  # nosec B101
         "python_version" in dependency
@@ -1124,6 +1147,40 @@ def test_result_recorder_marks_required_failure(tmp_path: Path) -> None:
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["ok"] is False  # nosec B101
     assert payload["summary"] == {"passed": 0, "failed": 1, "skipped": 0}  # nosec B101
+
+
+def test_failed_rc_logs_only_failed_check_names(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CI must identify failed checks without disclosing captured command output."""
+
+    recorder = mcp_unified_rc.RcEvidenceRecorder(
+        evidence_dir=tmp_path,
+        package_name="mcp-unified",
+        package_version="0.2.0",
+        package_status="public-alpha",
+        publishing_status="published",
+        commit="deadbeef",
+        source_path="apps/mcp-unified",
+        layout="src",
+    )
+    recorder.record(
+        phase="artifact_gate",
+        name="windows_stdio",
+        status="failed",
+        duration_ms=1,
+        reason="private failure payload",
+    )
+    messages: list[str] = []
+    monkeypatch.setattr(
+        mcp_unified_rc.logger,
+        "error",
+        lambda message, *args: messages.append(message.format(*args)),
+    )
+
+    assert mcp_unified_rc._write_and_report(recorder) == 1  # nosec B101
+    assert messages == ["RC status: failed (artifact_gate/windows_stdio)"]  # nosec B101
 
 
 def test_result_recorder_includes_artifact_hashes(tmp_path: Path) -> None:

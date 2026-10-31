@@ -54,6 +54,7 @@ def _assert_deny_headers(resp) -> None:
 def test_e2e_rag_deny_headers_retry_after(monkeypatch, tmp_path, rg_backend):
 
 
+    monkeypatch.setenv("RG_ENABLED", "true")
     monkeypatch.setenv("RG_BACKEND", rg_backend)
     monkeypatch.setenv("RG_POLICY_RELOAD_ENABLED", "false")
     monkeypatch.setenv(
@@ -84,6 +85,7 @@ def test_e2e_rag_deny_headers_retry_after(monkeypatch, tmp_path, rg_backend):
 def test_e2e_media_deny_headers_retry_after(monkeypatch, tmp_path, rg_backend):
 
 
+    monkeypatch.setenv("RG_ENABLED", "true")
     monkeypatch.setenv("RG_BACKEND", rg_backend)
     monkeypatch.setenv("RG_POLICY_RELOAD_ENABLED", "false")
     monkeypatch.setenv(
@@ -116,6 +118,7 @@ def test_e2e_media_deny_headers_retry_after(monkeypatch, tmp_path, rg_backend):
 def test_e2e_research_deny_headers_retry_after(monkeypatch, tmp_path, rg_backend):
 
 
+    monkeypatch.setenv("RG_ENABLED", "true")
     monkeypatch.setenv("RG_BACKEND", rg_backend)
     monkeypatch.setenv("RG_POLICY_RELOAD_ENABLED", "false")
     monkeypatch.setenv(
@@ -164,6 +167,7 @@ def test_e2e_research_deny_headers_retry_after(monkeypatch, tmp_path, rg_backend
 def test_e2e_prompt_studio_deny_headers_retry_after(monkeypatch, tmp_path, auth_headers, rg_backend):
 
 
+    monkeypatch.setenv("RG_ENABLED", "true")
     monkeypatch.setenv("RG_BACKEND", rg_backend)
     monkeypatch.setenv("RG_POLICY_RELOAD_ENABLED", "false")
     monkeypatch.setenv(

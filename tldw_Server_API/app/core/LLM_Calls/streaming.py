@@ -16,14 +16,62 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    DaemonCapacityError,
+    await_owned_worker,
+    start_bounded_stream_cleanup_daemon,
+    start_bounded_stream_daemon,
+)
+from tldw_Server_API.app.core.Chat.streaming_utils import (
+    normalize_provider_stream_error,
+)
 from tldw_Server_API.app.core.http_client import RetryPolicy, astream_sse
-from tldw_Server_API.app.core.LLM_Calls.error_utils import is_chunked_encoding_error
+from tldw_Server_API.app.core.LLM_Calls.error_utils import is_chunked_encoding_error, log_provider_failure
 
-from .sse import is_done_line, normalize_provider_line, sse_data
-
+from .sse import finalize_stream, is_done_line, normalize_provider_line, sse_data, sse_done
 
 _DEFAULT_SYNC_STREAM_QUEUE_SIZE = 16
 _SYNC_STREAM_QUEUE_TIMEOUT_SECONDS = 0.05
+_PROVIDER_STREAM_ERROR_CODE = "provider_unavailable"
+_PROVIDER_STREAM_ERROR_MESSAGE = "The chat service provider is currently unavailable."
+
+
+def _bounded_provider_name(value: Any) -> str:
+    """Return a bounded provider label safe for public error types and logs."""
+    normalized = "".join(
+        char
+        for char in str(value or "").strip().lower()
+        if char.isalnum() or char in ".-_"
+    )[:64]
+    return normalized or "provider"
+
+
+def provider_stream_error_frame(provider: Any) -> str:
+    """Build the shared bounded SSE error emitted by low-level adapters."""
+    provider_name = _bounded_provider_name(provider)
+    return sse_data(
+        {
+            "error": {
+                "code": _PROVIDER_STREAM_ERROR_CODE,
+                "message": _PROVIDER_STREAM_ERROR_MESSAGE,
+                "type": f"{provider_name}_stream_error",
+            }
+        }
+    )
+
+
+def _log_provider_stream_error(provider: Any, exc: BaseException) -> None:
+    """Record an upstream stream failure at error level, with bounded metadata only.
+
+    Clients get an error frame either way; this is the operator's only record of
+    which provider failed mid-stream and how (log_provider_failure logs no URLs,
+    bodies or exception text).
+    """
+    log_provider_failure(
+        _bounded_provider_name(provider),
+        exc,
+        phase="stream_connection" if is_chunked_encoding_error(exc) else "stream_iteration",
+    )
 
 
 def iter_sse_lines_requests(
@@ -43,7 +91,12 @@ def iter_sse_lines_requests(
       raising mid-stream.
     """
     try:
-        for raw_line in response.iter_lines(decode_unicode=decode_unicode):
+        try:
+            raw_lines = response.iter_lines(decode_unicode=decode_unicode)
+        except TypeError:
+            # httpx.Response.iter_lines() takes no arguments and already yields str.
+            raw_lines = response.iter_lines()
+        for raw_line in raw_lines:
             if not raw_line:
                 continue
             # raw_line can be bytes when decode_unicode=False
@@ -53,6 +106,8 @@ def iter_sse_lines_requests(
             if is_done_line(line):
                 # Suppress forwarding provider's [DONE]; caller will append one.
                 continue
+            if normalize_provider_stream_error(line) is not None:
+                raise RuntimeError("Provider returned an error event")
             passthru = (
                 provider_control_passthru
                 if provider_control_passthru is not None
@@ -67,12 +122,38 @@ def iter_sse_lines_requests(
                 continue
             yield normalized
     except Exception as e_stream:
-        # Surface as an SSE error frame so the client can handle gracefully
-        if is_chunked_encoding_error(e_stream):
-            message = f"Stream connection error: {str(e_stream)}"
-        else:
-            message = f"Stream iteration error: {str(e_stream)}"
-        yield sse_data({"error": {"message": message, "type": f"{provider}_stream_error"}})
+        _log_provider_stream_error(provider, e_stream)
+        yield provider_stream_error_frame(provider)
+
+
+def iter_sse_lines_raising(response: Any, *, provider: str) -> Iterator[str]:
+    """Yield normalized SSE lines for adapters that surface failures as exceptions.
+
+    Unlike iter_sse_lines_requests, nothing is swallowed: an in-band SSE error
+    raises the status-aware sanitized ChatAPIError and transport errors
+    propagate, so the adapter's own handler can map them. The first provider
+    DONE is forwarded in place, later ones are dropped, and one DONE is
+    appended (and the response closed) if the provider never sent one.
+    """
+    from tldw_Server_API.app.core.LLM_Calls.providers.base import (
+        raise_if_in_band_provider_error,
+    )
+
+    seen_done = False
+    for raw in response.iter_lines():
+        if not raw:
+            continue
+        line = raw.decode("utf-8", errors="replace") if isinstance(raw, (bytes, bytearray)) else str(raw)
+        raise_if_in_band_provider_error(provider, line, phase="stream_response")
+        if is_done_line(line):
+            if not seen_done:
+                seen_done = True
+                yield sse_done()
+            continue
+        normalized = normalize_provider_line(line)
+        if normalized is not None:
+            yield normalized
+    yield from finalize_stream(response=response, done_already=seen_done)
 
 
 async def aiter_sse_lines_httpx(
@@ -94,6 +175,8 @@ async def aiter_sse_lines_httpx(
                 continue
             if is_done_line(line):
                 continue
+            if normalize_provider_stream_error(line) is not None:
+                raise RuntimeError("Provider returned an error event")
             passthru = (
                 provider_control_passthru
                 if provider_control_passthru is not None
@@ -108,7 +191,8 @@ async def aiter_sse_lines_httpx(
                 continue
             yield normalized
     except Exception as e_stream:
-        yield sse_data({"error": {"message": f"Stream iteration error: {str(e_stream)}", "type": f"{provider}_stream_error"}})
+        _log_provider_stream_error(provider, e_stream)
+        yield provider_stream_error_frame(provider)
 
 
 async def wrap_sync_stream(
@@ -124,6 +208,7 @@ async def wrap_sync_stream(
     stop_event = threading.Event()
     close_lock = threading.Lock()
     closed = False
+    worker_released = threading.Event()
 
     def _close_sync_iter() -> None:
         nonlocal closed
@@ -136,7 +221,10 @@ async def wrap_sync_stream(
             if callable(close_fn):
                 close_fn()
         except Exception as close_error:
-            logger.debug("Sync stream iterator close failed during cleanup: {}", close_error)
+            logger.debug(
+                "Sync stream iterator close failed during cleanup error_type={}",
+                type(close_error).__name__,
+            )
 
     def _put_item(item: Any) -> bool:
         if stop_event.is_set():
@@ -145,7 +233,10 @@ async def wrap_sync_stream(
             put_future = asyncio.run_coroutine_threadsafe(queue.put(item), loop)
         except RuntimeError as queue_error:
             if not stop_event.is_set():
-                logger.debug("Sync stream queue put failed before scheduling: {}", queue_error)
+                logger.debug(
+                    "Sync stream queue put failed before scheduling error_type={}",
+                    type(queue_error).__name__,
+                )
             return False
 
         while True:
@@ -161,7 +252,10 @@ async def wrap_sync_stream(
                 return False
             except Exception as put_error:
                 if not stop_event.is_set():
-                    logger.debug("Sync stream queue put failed: {}", put_error)
+                    logger.debug(
+                        "Sync stream queue put failed error_type={}",
+                        type(put_error).__name__,
+                    )
                 return False
         return False
 
@@ -178,11 +272,31 @@ async def wrap_sync_stream(
         except Exception as exc:
             _put_item(exc)
         finally:
-            _close_sync_iter()
             _put_sentinel()
+            _close_sync_iter()
 
-    thread = threading.Thread(target=_worker, daemon=True)
-    thread.start()
+    def _close_unstarted_sync_stream_bounded() -> None:
+        """Close an unstarted iterator without using saturated worker capacity."""
+
+        try:
+            start_bounded_stream_cleanup_daemon(
+                _close_sync_iter,
+                name="llm-sync-stream-admission-close",
+            )
+        except DaemonCapacityError:
+            logger.warning(
+                "Unstarted LLM sync stream close skipped: cleanup capacity exhausted"
+            )
+
+    try:
+        start_bounded_stream_daemon(
+            _worker,
+            name="llm-sync-stream-bridge",
+            released_event=worker_released,
+        )
+    except DaemonCapacityError:
+        _close_unstarted_sync_stream_bounded()
+        raise
 
     try:
         while True:
@@ -194,41 +308,9 @@ async def wrap_sync_stream(
             yield item
     finally:
         stop_event.set()
-        _close_sync_iter()
 
+        async def _await_worker_release() -> None:
+            while not worker_released.is_set():
+                await asyncio.sleep(0.001)
 
-async def aiter_normalized_sse(
-    url: str,
-    *,
-    method: str = "GET",
-    headers: Optional[dict] = None,
-    params: Optional[dict] = None,
-    json: Optional[dict] = None,
-    data: Optional[dict] = None,
-    retry: Optional[RetryPolicy] = None,
-    provider: str = "provider",
-    provider_control_passthru: Optional[bool] = None,
-    control_filter: Optional[Callable[[str, str], Optional[tuple[str, str]]]] = None,
-) -> AsyncIterator[str]:
-    """Standardized SSE iterator built on the centralized astream_sse helper.
-
-    - Enforces egress policy and retries per PRD defaults.
-    - Normalizes provider lines using existing helpers.
-    """
-    passthru = (
-        provider_control_passthru
-        if provider_control_passthru is not None
-        else os.getenv("STREAM_PROVIDER_CONTROL_PASSTHRU", "0") == "1"
-    )
-    async for ev in astream_sse(url=url, method=method, headers=headers, params=params, json=json, data=data, retry=retry):
-        if not ev or not ev.data:
-            continue
-        # Normalize SSE payload as if it were a provider line
-        normalized = normalize_provider_line(
-            ev.data,
-            provider_control_passthru=passthru,
-            control_filter=control_filter,
-        )
-        if normalized is None:
-            continue
-        yield normalized
+        await await_owned_worker(_await_worker_release())

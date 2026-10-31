@@ -29,7 +29,8 @@ def update_media_reprocess_state(
         with self.transaction() as conn:
             row = self._fetchone_with_connection(
                 conn,
-                "SELECT uuid, version FROM Media WHERE id = ? AND deleted = 0 AND is_trash = 0",
+                "SELECT uuid, version FROM Media WHERE id = ? AND deleted = 0 "
+                "AND is_trash = 0 AND system_operation_id IS NULL",
                 (media_id,),
             )
             if not row:
@@ -53,7 +54,7 @@ def update_media_reprocess_state(
                 params.append(0)
                 payload["vector_processing"] = 0
 
-            update_sql = f"UPDATE Media SET {', '.join(set_parts)} WHERE id = ? AND version = ?"  # nosec B608
+            update_sql = f"UPDATE Media SET {', '.join(set_parts)} WHERE id = ? AND version = ? AND system_operation_id IS NULL"  # nosec B608
             update_params = (*params, media_id, current_version)
             cursor = self._execute_with_connection(conn, update_sql, update_params)
             if cursor.rowcount == 0:
@@ -78,7 +79,8 @@ def mark_embeddings_error(self, media_id: int, error_message: str) -> None:
         with self.transaction() as conn:
             row = self._fetchone_with_connection(
                 conn,
-                "SELECT uuid, version FROM Media WHERE id = ? AND deleted = 0 AND is_trash = 0",
+                "SELECT uuid, version FROM Media WHERE id = ? AND deleted = 0 "
+                "AND is_trash = 0 AND system_operation_id IS NULL",
                 (media_id,),
             )
             if not row:
@@ -110,7 +112,8 @@ def mark_embeddings_error(self, media_id: int, error_message: str) -> None:
 
             update_sql = (
                 "UPDATE Media SET last_modified = ?, version = ?, client_id = ?, "
-                "vector_processing = ?, chunking_status = ? WHERE id = ? AND version = ?"
+                "vector_processing = ?, chunking_status = ? WHERE id = ? AND version = ? "
+                "AND system_operation_id IS NULL"
             )
             update_params = (*params, media_id, current_version)
             cursor = self._execute_with_connection(conn, update_sql, update_params)

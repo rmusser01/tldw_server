@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 
 def test_postgres_users_schema_file_exists_with_core_columns() -> None:
@@ -6,8 +7,7 @@ def test_postgres_users_schema_file_exists_with_core_columns() -> None:
     assert schema_path.exists()
 
     sql = schema_path.read_text(encoding="utf-8").lower()
-    assert "create table if not exists users" in sql
-    assert "create table if not exists organizations" in sql
-    assert "create table if not exists teams" in sql
+    for table in ("users", "organizations", "teams"):
+        assert re.search(rf"create\s+table\s+if\s+not\s+exists\s+(?:public\.)?{table}\s*\(", sql)
     for required in ("username", "email", "password_hash", "is_active", "is_verified", "role"):
         assert required in sql

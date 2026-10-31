@@ -16,14 +16,15 @@ Note on plugin discovery and subtree runs
   restore deterministic fixture availability.
 """
 
+import copy
 import os
 import sys
 import types
+
 import pytest
 
 from tldw_Server_API.tests._plugins.authnz_fixtures import authnz_schema_ready_sync  # noqa: F401
 from tldw_Server_API.tests.helpers.app_main_state import restore_app_main, set_app_main, snapshot_app_main
-
 
 _DISABLED_ROUTE_KEYS_FOR_ADAPTER_TESTS = [
     "media",
@@ -112,6 +113,30 @@ def _preserve_app_main_state(monkeypatch):
     yield
     restore_app_main(previous_main)
 
+
+@pytest.fixture(autouse=True)
+def _isolate_provider_override_cache():
+    """Prevent unit-test refresh workers from poisoning later adapter tests."""
+    from tldw_Server_API.app.core.AuthNZ import (
+        llm_provider_overrides as overrides_module,
+    )
+
+    with overrides_module._OVERRIDE_LOCK:
+        original = copy.deepcopy(overrides_module._OVERRIDE_CACHE)
+        original_healthy = overrides_module._OVERRIDE_CACHE_HEALTHY
+        original_ttl_enabled = (
+            not overrides_module._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS
+        )
+    overrides_module.set_llm_provider_overrides_cache_for_tests({})
+    try:
+        yield
+    finally:
+        overrides_module.set_llm_provider_overrides_cache_for_tests(
+            original,
+            healthy=original_healthy,
+            ttl_enabled=original_ttl_enabled,
+        )
+
 # Shared chat fixtures are registered at the repository root conftest.py
 # However, when running this subtree in isolation or with plugin autoloading
 # disabled, those fixtures may be unavailable. Provide lightweight fallbacks
@@ -134,12 +159,20 @@ def client_user_only(request):  # noqa: D401 - compatibility alias with fallback
     try:
         request.getfixturevalue("authnz_schema_ready_sync")
         client, _logger = request.getfixturevalue("client_with_single_user")
-        return client
     except Exception:
         # Last resort: construct a minimal TestClient against the app
         from fastapi.testclient import TestClient
         fastapi_app = _resolve_app_for_fallback_client()
-        return TestClient(fastapi_app)
+        client = TestClient(fastapi_app)
+
+    # Lifespan startup replaces the snapshot seeded by the autouse fixture.
+    # Adapter tests need their deterministic policy after startup completes.
+    from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+        set_llm_provider_overrides_cache_for_tests,
+    )
+
+    set_llm_provider_overrides_cache_for_tests({})
+    return client
 
 
 @pytest.fixture
@@ -155,7 +188,7 @@ def client(client_user_only):
     try:
         resp = test_client.get("/api/v1/health")
         csrf_token = getattr(test_client, "csrf_token", None) or resp.cookies.get("csrf_token", "")
-        setattr(test_client, "csrf_token", csrf_token)
+        test_client.csrf_token = csrf_token
     except Exception:
         csrf_token = ""
 
@@ -176,7 +209,7 @@ def client(client_user_only):
             _ = None
         return test_client.post(url, headers=headers, **kwargs)
 
-    setattr(test_client, "post_with_auth", post_with_auth)
+    test_client.post_with_auth = post_with_auth
     return test_client
 
 
@@ -194,7 +227,7 @@ def authenticated_client(client_user_only, auth_token):
     try:
         resp = test_client.get("/api/v1/health")
         csrf_token = getattr(test_client, "csrf_token", None) or resp.cookies.get("csrf_token", "")
-        setattr(test_client, "csrf_token", csrf_token)
+        test_client.csrf_token = csrf_token
     except Exception:
         csrf_token = getattr(test_client, "csrf_token", "")
 
@@ -243,8 +276,9 @@ def authenticated_client(client_user_only, auth_token):
 def auth_token():  # pragma: no cover - simple token helper
     """Provide a plausible auth token for tests that include it in requests."""
     try:
-        from tldw_Server_API.app.core.AuthNZ.settings import get_settings
         import os as _os
+
+        from tldw_Server_API.app.core.AuthNZ.settings import get_settings
         settings = get_settings()
         if settings.AUTH_MODE == "multi_user":
             # Not generating a real JWT here; tests using this fixture don't validate it.

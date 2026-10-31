@@ -1,6 +1,7 @@
+import asyncio
 import types
+from contextlib import asynccontextmanager
 
-import builtins
 import pytest
 
 import tldw_Server_API.app.core.http_client as hc
@@ -40,6 +41,194 @@ class DummyClient:
 _DUMMY_HTTP_BACKEND = types.SimpleNamespace(Client=DummyClient)
 
 
+async def _allow_async_egress(*_args, **_kwargs):
+    return None
+
+
+def test_network_error_preserves_status_code_and_timeout_classification():
+    error = hc.NetworkError(
+        "ReadTimeout",
+        status_code=504,
+        classification="timeout",
+    )
+
+    assert str(error) == "ReadTimeout"
+    assert error.status_code == 504
+    assert error.classification == "timeout"
+
+
+class _CapturedTracingManager:
+    def __init__(self):
+        self.spans = []
+        self.attributes = []
+        self.events = []
+
+    @asynccontextmanager
+    async def async_span(self, name, *, attributes=None, **_kwargs):
+        self.spans.append((name, dict(attributes or {})))
+        yield None
+
+    def set_attributes(self, attributes):
+        self.attributes.append(dict(attributes))
+
+    def add_event(self, name, attributes=None):
+        self.events.append((name, dict(attributes or {})))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["httpx", "aiohttp"])
+async def test_afetch_timeout_errors_have_stable_classification(monkeypatch, backend):
+    logs = []
+    uses_aiohttp_adapter = backend == "aiohttp"
+    monkeypatch.setattr(hc, "_avalidate_egress_or_raise", _allow_async_egress)
+    monkeypatch.setattr(hc, "_is_aiohttp_client", lambda _client: uses_aiohttp_adapter)
+
+    async def raise_timeout(**_kwargs):
+        if backend == "httpx":
+            raise hc.httpx.ReadTimeout(
+                "httpx-timeout-secret",
+                request=hc.httpx.Request("GET", "https://example.com/"),
+            )
+        raise hc.aiohttp.ServerTimeoutError("aiohttp-timeout-secret")
+
+    io_name = "_httpx_arequest_io" if backend == "httpx" else "_aiohttp_request_io"
+    monkeypatch.setattr(hc, io_name, raise_timeout)
+
+    sink_id = hc.logger.add(
+        lambda message: logs.append(str(message)),
+        level="DEBUG",
+        format="{message}|{extra}",
+    )
+    try:
+        with pytest.raises(hc.NetworkError) as raised:
+            await hc.afetch(
+                method="GET",
+                url=(
+                    "https://user-secret:password-secret@example.com/"
+                    "timeout?token=query-secret"
+                ),
+                client=object(),
+                retry=hc.RetryPolicy(attempts=1),
+                sensitive_observability=True,
+            )
+    finally:
+        hc.logger.remove(sink_id)
+
+    assert raised.value.classification == "timeout"
+    assert "secret" not in str(raised.value)
+    combined_logs = " ".join(logs)
+    expected_exception = "ReadTimeout" if backend == "httpx" else "ServerTimeoutError"
+    assert expected_exception in combined_logs
+    for secret in (
+        "httpx-timeout-secret",
+        "aiohttp-timeout-secret",
+        "user-secret",
+        "password-secret",
+        "query-secret",
+    ):
+        assert secret not in combined_logs
+
+
+@pytest.mark.asyncio
+async def test_afetch_probe_sensitive_observability_excludes_all_secrets(monkeypatch):
+    tracing = _CapturedTracingManager()
+    logs = []
+    monkeypatch.setattr(hc, "_avalidate_egress_or_raise", _allow_async_egress)
+    monkeypatch.setattr(hc, "_is_aiohttp_client", lambda _client: False)
+    monkeypatch.setattr(hc, "get_tracing_manager", lambda: tracing)
+
+    async def raise_timeout(**_kwargs):
+        raise hc.httpx.ReadTimeout(
+            "exception-secret-2f",
+            request=hc.httpx.Request("GET", "https://example.com/"),
+        )
+
+    monkeypatch.setattr(hc, "_httpx_arequest_io", raise_timeout)
+    sink_id = hc.logger.add(
+        lambda message: logs.append(str(message)),
+        level="DEBUG",
+        format="{message}|{extra}",
+    )
+    try:
+        with pytest.raises(hc.NetworkError):
+            await hc.afetch(
+                method="GET",
+                url=(
+                    "https://user-secret-9c:password-secret-0d@example.com/"
+                    "path-secret-7a?token=query-secret-8b#fragment-secret-3g"
+                ),
+                client=object(),
+                headers={"Authorization": "header-secret-1e"},
+                retry=hc.RetryPolicy(attempts=1),
+                sensitive_observability=True,
+            )
+    finally:
+        hc.logger.remove(sink_id)
+
+    captured = repr((logs, tracing.spans, tracing.attributes, tracing.events))
+    for secret in (
+        "path-secret-7a",
+        "query-secret-8b",
+        "user-secret-9c",
+        "password-secret-0d",
+        "header-secret-1e",
+        "exception-secret-2f",
+        "fragment-secret-3g",
+    ):
+        assert secret not in captured
+    assert "sensitive-endpoint.invalid" in captured
+
+
+@pytest.mark.asyncio
+async def test_afetch_sensitive_observability_scope_is_concurrent_and_resets(monkeypatch):
+    entered = 0
+    release = asyncio.Event()
+
+    class RecordingAdapter:
+        async def arequest(self, *, url, **_kwargs):
+            nonlocal entered
+            entered += 1
+            if entered == 2:
+                release.set()
+            await release.wait()
+            return hc._sanitize_url_for_logs(url)
+
+    monkeypatch.setattr(hc, "_get_transport_adapter", lambda _name: RecordingAdapter())
+
+    safe_result, default_result = await asyncio.gather(
+        hc.afetch(
+            method="GET",
+            url="https://example.com/safe-path-secret",
+            sensitive_observability=True,
+        ),
+        hc.afetch(
+            method="GET",
+            url="https://example.com/default-path-visible",
+        ),
+    )
+
+    assert safe_result == "https://example.com"
+    assert default_result == "https://example.com/default-path-visible"
+    assert hc._sanitize_url_for_logs("https://example.com/after-scope") == ("https://example.com/after-scope")
+
+
+@pytest.mark.asyncio
+async def test_afetch_sensitive_observability_parse_failure_never_returns_raw_url(monkeypatch):
+    class RecordingAdapter:
+        async def arequest(self, *, url, **_kwargs):
+            return hc._sanitize_url_for_logs(url)
+
+    monkeypatch.setattr(hc, "_get_transport_adapter", lambda _name: RecordingAdapter())
+
+    result = await hc.afetch(
+        method="GET",
+        url="malformed-path-secret?query-secret",
+        sensitive_observability=True,
+    )
+
+    assert result == ""
+
+
 def test_httpx_fetch_sanitizes_accept_encoding_and_backend_label(monkeypatch):
     # allow egress
     monkeypatch.setattr(hc, "_is_url_allowed", lambda url: True)
@@ -64,7 +253,7 @@ def test_httpx_fetch_accept_encoding_case_and_params(monkeypatch):
     resp = hc.fetch("https://example.com/", headers=headers, backend="httpx")
 
     # Original exact lower-case key should not remain; canonical should be present
-    assert "accept-encoding" not in resp["headers"].keys()  # nosec B101
+    assert "accept-encoding" not in resp["headers"]  # nosec B101
     enc = resp["headers"].get("Accept-Encoding", "")
     assert "zstd" not in enc.lower()  # nosec B101
     assert "gzip" in enc.lower() and "br" in enc.lower()  # nosec B101
@@ -80,7 +269,7 @@ def test_httpx_fetch_accept_encoding_all_removed(monkeypatch):
     resp = hc.fetch("https://example.com/", headers=headers, backend="httpx")
 
     # Accept-Encoding should be removed entirely if no tokens remain
-    keys_lower = {k.lower() for k in resp["headers"].keys()}
+    keys_lower = {k.lower() for k in resp["headers"]}
     assert "accept-encoding" not in keys_lower  # nosec B101
 
 

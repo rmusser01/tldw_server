@@ -2,6 +2,9 @@ import React from "react"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import MediaReviewPage from "../MediaReviewPage"
+import * as mediaHandoff from "@/services/tldw/media-chat-handoff"
+
+vi.mock("@/hooks/useHomeMilestoneScope", () => ({ useHomeMilestoneScope: () => "server:alice" }))
 
 const sourceItems = [
   {
@@ -34,6 +37,7 @@ const detailById: Record<number, { content: string; summary?: string }> = {
 }
 
 const mocks = vi.hoisted(() => ({
+  canDelete: true,
   bgRequest: vi.fn(),
   messageInfo: vi.fn(),
   messageWarning: vi.fn(),
@@ -47,6 +51,10 @@ const mocks = vi.hoisted(() => ({
   setSelectedKnowledge: vi.fn(),
   setRagMediaIds: vi.fn(),
   navigate: vi.fn()
+}))
+
+vi.mock("@/hooks/useMediaCapabilities", () => ({
+  useMediaCapabilities: () => ({ canDelete: mocks.canDelete, loading: false })
 }))
 
 const interpolate = (template: string, values?: Record<string, unknown>) =>
@@ -192,10 +200,6 @@ vi.mock("@/services/settings/ui-settings", () => ({
   MEDIA_REVIEW_ORIENTATION_SETTING: { key: "mediaReviewOrientation", defaultValue: "vertical" },
   MEDIA_REVIEW_SELECTION_SETTING: { key: "mediaReviewSelection", defaultValue: [] },
   MEDIA_REVIEW_VIEW_MODE_SETTING: { key: "mediaReviewViewMode", defaultValue: "spread" }
-}))
-
-vi.mock("@/utils/media-detail-content", () => ({
-  extractMediaDetailContent: (detail: any) => detail?.content || detail?.text || ""
 }))
 
 vi.mock("@/components/Media/DiffViewModal", () => ({
@@ -384,6 +388,7 @@ vi.mock("@/components/Media/diff-worker-client", () => ({
 
 describe("MediaReviewPage stage5 batch toolbar", () => {
   beforeEach(() => {
+    mocks.canDelete = true
     mocks.bgRequest.mockReset()
     mocks.messageInfo.mockReset()
     mocks.messageWarning.mockReset()
@@ -466,6 +471,23 @@ describe("MediaReviewPage stage5 batch toolbar", () => {
     fireEvent.click(checkbox, options)
   }
 
+  it("addresses every selected source to this tab without changing Chat before acceptance", async () => {
+    sessionStorage.clear()
+    mocks.navigate.mockClear()
+    mocks.setChatMode.mockClear()
+    mocks.setRagMediaIds.mockClear()
+    render(<MediaReviewPage />)
+    await screen.findByText("0 / 30 selected")
+    selectItemByCheckbox("Alpha paper")
+    selectItemByCheckbox("Beta notes")
+    fireEvent.click(screen.getByRole("button", { name: "Chat about selection (2)" }))
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledTimes(1))
+    const token = new URL(mocks.navigate.mock.calls[0][0], "http://localhost").searchParams.get(mediaHandoff.MEDIA_CHAT_HANDOFF_PARAM)!
+    expect(await mediaHandoff.readMediaChatHandoff(token, "server:alice")).toEqual({ ownerScope: "server:alice", mediaId: "1", mediaIds: [1, 2], mode: "rag_media" })
+    expect(mocks.setChatMode).not.toHaveBeenCalled()
+    expect(mocks.setRagMediaIds).not.toHaveBeenCalled()
+  })
+
   it("shows batch toolbar when selection is non-empty", async () => {
     render(<MediaReviewPage />)
 
@@ -478,6 +500,14 @@ describe("MediaReviewPage stage5 batch toolbar", () => {
     await waitFor(() => {
       expect(screen.getByTestId("media-multi-batch-toolbar")).toBeInTheDocument()
     })
+  })
+
+  it("disables bulk trash when the account lacks delete permission", async () => {
+    mocks.canDelete = false
+    render(<MediaReviewPage />)
+    await screen.findByText("0 / 30 selected")
+    selectItemByCheckbox("Alpha paper")
+    expect(screen.getByTestId("media-multi-batch-trash")).toBeDisabled()
   })
 
   it("pins move-to-trash at the far right edge of the batch toolbar", async () => {

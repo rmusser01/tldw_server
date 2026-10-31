@@ -4,7 +4,7 @@ import asyncio
 import os
 import time
 from collections.abc import Awaitable
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -42,6 +42,7 @@ from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     WebhookUpdateRequest,
 )
 from tldw_Server_API.app.api.v1.schemas.auth_schemas import MessageResponse
+from tldw_Server_API.app.core.AuthNZ import compliance_stats
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.rbac_repo import AuthnzRbacRepo
@@ -137,6 +138,7 @@ from tldw_Server_API.app.services.admin_system_ops_service import (
 from tldw_Server_API.app.services.admin_system_ops_service import (
     upsert_feature_flag as svc_upsert_feature_flag,
 )
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_ROLES
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.AuthNZ.repos.maintenance_rotation_runs_repo import (
@@ -144,11 +146,14 @@ if TYPE_CHECKING:
     )
 
 router = APIRouter()
+legacy_webhooks_router = APIRouter()
 
-_INCIDENT_ASSIGNABLE_ROLES = frozenset({"admin", "owner", "super_admin"})
+# Same set as the platform admin roles, kept under a local name because that is how
+# this module reads. Imported so adding a platform admin role reaches incident
+# assignment automatically; see AuthNZ/platform_admin.py.
+_INCIDENT_ASSIGNABLE_ROLES = PLATFORM_ADMIN_ROLES
 
 _OPS_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,
@@ -839,7 +844,10 @@ async def notify_incident_stakeholders(
     return IncidentNotifyResponse(**result)
 
 
-@router.post("/incidents/{incident_id}/notify-webhooks", response_model=IncidentNotifyResponse)
+@legacy_webhooks_router.post(
+    "/incidents/{incident_id}/notify-webhooks",
+    response_model=IncidentNotifyResponse,
+)
 async def notify_incident_webhooks(
     incident_id: str,
     request: Request,
@@ -894,7 +902,7 @@ async def notify_incident_webhooks(
 # ---------------------------------------------------------------------------------------------------------------------
 
 
-@router.get("/webhooks", response_model=WebhookListResponse)
+@legacy_webhooks_router.get("/webhooks", response_model=WebhookListResponse)
 async def list_webhooks(
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> WebhookListResponse:
@@ -914,7 +922,7 @@ async def list_webhooks(
     )
 
 
-@router.post("/webhooks", response_model=WebhookCreateResponse)
+@legacy_webhooks_router.post("/webhooks", response_model=WebhookCreateResponse)
 async def create_webhook(
     payload: WebhookCreateRequest,
     request: Request,
@@ -941,12 +949,15 @@ async def create_webhook(
         resource_type="webhook",
         resource_id=webhook.get("id"),
         action="webhook.create",
-        metadata={"url": webhook.get("url"), "events": webhook.get("events")},
+        metadata={
+            "event_count": len(webhook.get("events") or []),
+            "enabled": bool(webhook.get("enabled")),
+        },
     )
     return WebhookCreateResponse(**webhook)
 
 
-@router.patch("/webhooks/{webhook_id}", response_model=WebhookItem)
+@legacy_webhooks_router.patch("/webhooks/{webhook_id}", response_model=WebhookItem)
 async def update_webhook(
     webhook_id: str,
     payload: WebhookUpdateRequest,
@@ -977,12 +988,15 @@ async def update_webhook(
         resource_type="webhook",
         resource_id=webhook_id,
         action="webhook.update",
-        metadata={"url": webhook.get("url"), "events": webhook.get("events")},
+        metadata={
+            "event_count": len(webhook.get("events") or []),
+            "enabled": bool(webhook.get("enabled")),
+        },
     )
     return WebhookItem(**webhook)
 
 
-@router.delete("/webhooks/{webhook_id}", response_model=MessageResponse)
+@legacy_webhooks_router.delete("/webhooks/{webhook_id}", response_model=MessageResponse)
 async def delete_webhook(
     webhook_id: str,
     request: Request,
@@ -1010,7 +1024,10 @@ async def delete_webhook(
     return MessageResponse(message="webhook_deleted")
 
 
-@router.get("/webhooks/{webhook_id}/deliveries", response_model=WebhookDeliveryListResponse)
+@legacy_webhooks_router.get(
+    "/webhooks/{webhook_id}/deliveries",
+    response_model=WebhookDeliveryListResponse,
+)
 async def list_webhook_deliveries(
     webhook_id: str,
     limit: int = Query(default=50, ge=1, le=1000),
@@ -1038,7 +1055,10 @@ async def list_webhook_deliveries(
     )
 
 
-@router.post("/webhooks/{webhook_id}/test", response_model=WebhookDeliveryItem)
+@legacy_webhooks_router.post(
+    "/webhooks/{webhook_id}/test",
+    response_model=WebhookDeliveryItem,
+)
 async def test_webhook(
     webhook_id: str,
     request: Request,
@@ -1292,28 +1312,12 @@ async def get_compliance_posture(
     _require_platform_admin(principal)
 
     pool = await get_db_pool()
-    is_pg = bool(getattr(pool, "pool", None))
 
     # --- MFA adoption ----------------------------------------------------------
     mfa_enabled = 0
     total_users = 0
     try:
-        if is_pg:
-            row = await pool.fetchone(
-                "SELECT COUNT(*) AS total,"
-                " COUNT(*) FILTER (WHERE COALESCE(two_factor_enabled, FALSE) = TRUE) AS mfa_on"
-                " FROM users WHERE is_active = TRUE"
-            )
-        else:
-            row = await pool.fetchone(
-                "SELECT COUNT(*) AS total,"
-                " SUM(CASE WHEN COALESCE(two_factor_enabled, 0) = 1 THEN 1 ELSE 0 END) AS mfa_on"
-                " FROM users WHERE is_active = 1"
-            )
-        if row:
-            r = dict(row) if hasattr(row, "keys") or isinstance(row, dict) else {"total": row[0], "mfa_on": row[1]}
-            total_users = int(r.get("total") or 0)
-            mfa_enabled = int(r.get("mfa_on") or 0)
+        total_users, mfa_enabled = await compliance_stats.mfa_adoption(pool)
     except Exception:
         logger.warning("compliance/posture: MFA query failed")
 
@@ -1323,27 +1327,8 @@ async def get_compliance_posture(
     keys_needing_rotation = 0
     rotation_threshold_days = 180
     try:
-        now = datetime.now(timezone.utc)
-        if is_pg:
-            row = await pool.fetchone(
-                "SELECT COUNT(*) AS total,"
-                " COUNT(*) FILTER (WHERE created_at >= $1) AS compliant"
-                " FROM api_keys WHERE status = 'active'",
-                now - timedelta(days=rotation_threshold_days),
-            )
-        else:
-            threshold_iso = (now - timedelta(days=rotation_threshold_days)).isoformat()
-            row = await pool.fetchone(
-                "SELECT COUNT(*) AS total,"
-                " SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS compliant"
-                " FROM api_keys WHERE status = 'active'",
-                threshold_iso,
-            )
-        if row:
-            r = dict(row) if hasattr(row, "keys") or isinstance(row, dict) else {"total": row[0], "compliant": row[1]}
-            keys_total = int(r.get("total") or 0)
-            keys_compliant = int(r.get("compliant") or 0)
-            keys_needing_rotation = keys_total - keys_compliant
+        keys_total, keys_compliant = await compliance_stats.api_key_rotation(pool, rotation_threshold_days)
+        keys_needing_rotation = keys_total - keys_compliant
     except Exception:
         logger.warning("compliance/posture: API key rotation query failed")
 

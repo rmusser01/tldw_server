@@ -1,12 +1,13 @@
+import io
 import sqlite3
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
 from tldw_Server_API.app.core.AuthNZ.migrations import get_authnz_migrations
 from tldw_Server_API.app.core.AuthNZ.settings import Settings
-
 
 pytestmark = pytest.mark.unit
 
@@ -73,7 +74,10 @@ def _seed_current_sqlite_db_with_legacy_scope_default(db_path) -> None:  # noqa:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
                 email TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL
+                password_hash TEXT NOT NULL,
+                profile_version TEXT NOT NULL DEFAULT (
+                    STRFTIME('%Y-%m-%dT%H:%M:%f000Z', 'now')
+                )
             )
             """
         )
@@ -151,6 +155,7 @@ def _seed_current_sqlite_db_with_legacy_scope_default(db_path) -> None:  # noqa:
 
 @pytest.mark.asyncio
 async def test_database_pool_raises_when_sqlite_harmonization_fails_in_strict_mode(monkeypatch, tmp_path):
+    secret = "sqlite path=/private/authnz.db token=secret"
     settings = Settings(
         AUTH_MODE="multi_user",
         DATABASE_URL=f"sqlite:///{tmp_path / 'strict.db'}",
@@ -160,7 +165,7 @@ async def test_database_pool_raises_when_sqlite_harmonization_fails_in_strict_mo
 
     monkeypatch.setattr(
         "tldw_Server_API.app.core.AuthNZ.database.ensure_authnz_tables",
-        lambda _path: (_ for _ in ()).throw(RuntimeError("boom")),
+        lambda _path: (_ for _ in ()).throw(RuntimeError(secret)),
     )
     monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.is_test_mode", lambda: False)
     monkeypatch.setattr(
@@ -168,8 +173,17 @@ async def test_database_pool_raises_when_sqlite_harmonization_fails_in_strict_mo
         lambda: False,
     )
 
-    with pytest.raises(DatabaseError, match="boom"):
-        await pool.initialize()
+    output = io.StringIO()
+    sink = logger.add(output, format="{message} {extra}")
+    try:
+        with pytest.raises(DatabaseError, match="Database initialization failed") as raised:
+            await pool.initialize()
+    finally:
+        logger.remove(sink)
+
+    assert raised.value.__cause__ is None
+    assert secret not in str(raised.value)
+    assert secret not in output.getvalue()
 
 
 @pytest.mark.asyncio
@@ -213,7 +227,7 @@ async def test_database_pool_raises_when_current_sqlite_schema_is_drifted_in_str
         lambda: False,
     )
 
-    with pytest.raises(DatabaseError, match="missing required columns"):
+    with pytest.raises(DatabaseError, match="profile_version"):
         await pool.initialize()
 
 
@@ -235,5 +249,5 @@ async def test_database_pool_raises_when_current_sqlite_schema_keeps_legacy_scop
         lambda: False,
     )
 
-    with pytest.raises(DatabaseError, match="must not define a default"):
+    with pytest.raises(DatabaseError, match="Database initialization failed"):
         await pool.initialize()

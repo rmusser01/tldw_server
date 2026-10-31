@@ -320,3 +320,44 @@ async def test_create_user_sanitizes_registration_errors(
     assert exc_info.value.status_code == status_code
     assert exc_info.value.detail == detail
     assert raw_token not in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("candidate", "requirement"),
+    [
+        ("Rw8!abcK6@mT2#nP", "Password must not contain sequential or repeated characters"),
+        ("Rw8!aaaK6@mT2#nP", "Password must not contain sequential or repeated characters"),
+        ("Rw8!newuserK6@mT2#nP", "Password must not contain your username"),
+        ("rw8!k6@mt2#np4$vz", "Password must contain at least one uppercase letter"),
+        ("Rw8!k6@Mt2", "Password must be at least 14 characters long"),
+    ],
+)
+async def test_create_user_explains_validator_rule_without_exposing_input(
+    monkeypatch, candidate, requirement,
+) -> None:
+    from unittest.mock import Mock
+
+    from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
+    from tldw_Server_API.app.services.registration_service import RegistrationService
+
+    monkeypatch.setattr(service, "get_profile", lambda: "multi_user")
+    settings = SimpleNamespace(
+        ENABLE_REGISTRATION=True, REQUIRE_REGISTRATION_CODE=False,
+        PASSWORD_MIN_LENGTH=14, ARGON2_TIME_COST=1,
+        ARGON2_MEMORY_COST=8192, ARGON2_PARALLELISM=1,
+    )
+    transaction = Mock(side_effect=AssertionError("Rejected credentials must not enter a transaction"))
+    registration = RegistrationService(
+        db_pool=SimpleNamespace(transaction=transaction),
+        password_service=PasswordService(settings=settings),
+        settings=settings,
+    )
+    payload = _payload().model_copy(update={"password": candidate})
+    with pytest.raises(HTTPException) as exc_info:
+        await service.create_user(payload, _principal(), registration)
+
+    assert exc_info.value.status_code == 400
+    assert requirement in exc_info.value.detail
+    assert candidate not in exc_info.value.detail
+    transaction.assert_not_called()

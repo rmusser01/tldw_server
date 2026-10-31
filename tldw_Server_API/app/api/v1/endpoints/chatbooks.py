@@ -75,6 +75,7 @@ from ..schemas.chatbook_schemas import (
 from ..schemas.chatbook_schemas import (
     ChatbookVersion as SchemaChatbookVersion,
 )
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 _CHATBOOKS_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -99,7 +100,7 @@ router = APIRouter(prefix="/chatbooks", tags=["chatbooks"])
 
 # Use central limiter instance
 
-_ADMIN_CLAIM_PERMISSIONS = {"*", "system.configure"}
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 _IMPORT_UPLOAD_PREFIX_RE = re.compile(r"^import_[0-9a-fA-F]{32}_(.+)$")
 _QUOTED_ABSOLUTE_PATH_RE = re.compile(
     r"([\"'])((?:[A-Za-z]:\\|\\\\|/)[^\"'\r\n]+)\1"
@@ -1781,7 +1782,9 @@ async def download_chatbook(
             import hashlib
             import hmac
 
-            msg = f"{job_id}:{exp_int}".encode()
+            # The owner is part of the signed message, so a token minted for one
+            # account cannot be replayed by another even if it leaks.
+            msg = f"{job_id}:{exp_int}:{job.user_id}".encode()
             expected = hmac.new(secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
             if not hmac.compare_digest(expected, token):
                 raise HTTPException(status_code=403, detail="Invalid signature")

@@ -2,15 +2,17 @@
 Unit tests for JWT service.
 """
 
+from datetime import timedelta
+
 import pytest
 from jose import jwt
 
-from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
-from tldw_Server_API.app.core.AuthNZ.settings import Settings
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     InvalidTokenError,
-    TokenExpiredError
+    TokenExpiredError,
 )
+from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
+from tldw_Server_API.app.core.AuthNZ.settings import Settings
 
 
 class TestJWTServiceUnit:
@@ -226,6 +228,30 @@ class TestJWTServiceUnit:
 
         assert payload["session_id"] == "session-123"
         assert payload["custom_claim"] == "custom_value"
+
+    def test_access_token_explicit_lifetime_override(self, jwt_service):
+        token = jwt_service.create_access_token(
+            user_id=1,
+            username="testuser",
+            role="user",
+            expires_delta=timedelta(minutes=15),
+        )
+
+        payload = jwt_service.decode_access_token(token)
+
+        assert payload["exp"] - payload["iat"] == 15 * 60
+
+    def test_access_token_explicit_zero_lifetime_override(self, jwt_service):
+        token = jwt_service.create_access_token(
+            user_id=1,
+            username="testuser",
+            role="user",
+            expires_delta=timedelta(seconds=0),
+        )
+
+        payload = jwt.get_unverified_claims(token)
+
+        assert payload["exp"] == payload["iat"]
 
     def test_additional_claims_cannot_override_reserved_access_claims(self, jwt_service):
 

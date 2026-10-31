@@ -1,3 +1,5 @@
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+
 // Durable, worker-survivable storage for MV3 background session state.
 //
 // Chrome suspends idle MV3 service workers (~30s), which wipes the in-memory
@@ -14,6 +16,7 @@
 export type PersistedIngestSession = Record<string, unknown>
 
 export type PersistedQuickIngestSession = {
+  requestScope?: ServicePromptRequestScope
   sessionId: string
   cancelled: boolean
 }
@@ -37,6 +40,7 @@ export type PersistedQuickIngestPlannedItem = {
 // the in-flight multipart UPLOAD phase that produced these job ids cannot be
 // resumed (there is no live fetch to abort/resume).
 export type PersistedQuickIngestBatch = {
+  requestScope?: ServicePromptRequestScope
   sessionId: string
   totalCount: number
   processedCount: number
@@ -67,6 +71,24 @@ export const emptySessionState = (): PersistedSessionState => ({
   quickIngestBatches: []
 })
 
+/** Only an explicit credential-free owner can authorize worker resume. */
+export const readQuickIngestRequestScope = (value: unknown): ServicePromptRequestScope | null => {
+  if (!value || typeof value !== "object") return null
+  const raw = value as Record<string, unknown>
+  const config = raw.config as Record<string, unknown> | null
+  if (!config || typeof config !== "object" || typeof config.serverUrl !== "string" || !config.serverUrl.trim()) return null
+  if (config.authMode !== "single-user" && config.authMode !== "multi-user") return null
+  if (config.authMode === "single-user" && (typeof config.expectedSingleUserApiKeyScope !== "string" || !config.expectedSingleUserApiKeyScope)) return null
+  if (config.authMode === "multi-user" && ((typeof raw.userId !== "string" && typeof raw.userId !== "number") || !String(raw.userId).trim())) return null
+  if (config.authSource != null && config.authSource !== "manual" && config.authSource !== "cookie-session") return null
+  return { config: {
+    serverUrl: config.serverUrl, authMode: config.authMode,
+    ...(config.authSource ? { authSource: config.authSource } : {}),
+    ...(typeof config.orgId === "number" ? { orgId: config.orgId } : {}),
+    ...(config.authMode === "single-user" ? { expectedSingleUserApiKeyScope: config.expectedSingleUserApiKeyScope as string } : {})
+  }, userId: config.authMode === "single-user" ? null : raw.userId as string | number }
+}
+
 const toFiniteInt = (value: unknown): number | null => {
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) return null
@@ -83,6 +105,8 @@ const normalizeQuickIngestBatch = (
   const record = value as Record<string, unknown>
   const sessionId = String(record.sessionId || "").trim()
   if (!sessionId) return null
+  const requestScope = readQuickIngestRequestScope(record.requestScope)
+  if (!requestScope) return null
 
   const remoteJobs: PersistedQuickIngestRemoteJob[] = []
   if (Array.isArray(record.remoteJobs)) {
@@ -128,7 +152,7 @@ const normalizeQuickIngestBatch = (
     : []
 
   return {
-    sessionId,
+    sessionId, requestScope,
     totalCount: Math.max(0, toFiniteInt(record.totalCount) ?? 0),
     processedCount: Math.max(0, toFiniteInt(record.processedCount) ?? 0),
     ingestTimeoutMs: Math.max(0, toFiniteInt(record.ingestTimeoutMs) ?? 0),
@@ -157,13 +181,14 @@ export const serializePendingReplay = (ids: Set<string>): string[] =>
   )
 
 export const serializeQuickIngestSessions = (
-  sessions: Map<string, { sessionId?: string; cancelled?: boolean }>
+  sessions: Map<string, { sessionId?: string; cancelled?: boolean; requestScope?: ServicePromptRequestScope }>
 ): PersistedQuickIngestSession[] => {
   const out: PersistedQuickIngestSession[] = []
   for (const [key, value] of sessions) {
     const sessionId = String(value?.sessionId || key || "").trim()
-    if (sessionId) {
-      out.push({ sessionId, cancelled: Boolean(value?.cancelled) })
+    const requestScope = readQuickIngestRequestScope(value?.requestScope)
+    if (sessionId && requestScope) {
+      out.push({ sessionId, requestScope, cancelled: Boolean(value?.cancelled) })
     }
   }
   return out
@@ -218,9 +243,10 @@ export const deserializeSessionState = (raw: unknown): PersistedSessionState => 
         const sessionId = String(
           (entry as Record<string, unknown>).sessionId || ""
         ).trim()
-        if (sessionId) {
+        const requestScope = readQuickIngestRequestScope((entry as Record<string, unknown>).requestScope)
+        if (sessionId && requestScope) {
           state.quickIngestSessions.push({
-            sessionId,
+            sessionId, requestScope,
             cancelled: Boolean((entry as Record<string, unknown>).cancelled)
           })
         }

@@ -1,5 +1,5 @@
 import { Component, Fragment, type ReactNode, type ErrorInfo } from "react"
-import * as SentryModule from "@sentry/nextjs"
+import { captureException } from "@sentry/nextjs"
 import BackendUnavailableRecovery, {
   type BackendUnavailableRecoveryDetails
 } from "@/components/Common/BackendUnavailableRecovery"
@@ -125,8 +125,8 @@ export default class ErrorBoundary extends Component<
     }
 
     // Use direct @sentry/nextjs import when available, fall back to window.Sentry
-    if (SentryModule?.captureException) {
-      SentryModule.captureException(error, {
+    if (captureException) {
+      captureException(error, {
         extra: { componentStack: info.componentStack }
       })
     } else {

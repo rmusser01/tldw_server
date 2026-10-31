@@ -1,14 +1,36 @@
-import pytest
-from fastapi import Request
-from fastapi.testclient import TestClient
+import asyncio
+from contextlib import contextmanager
+from types import SimpleNamespace
 
-from tldw_Server_API.app.main import app as fastapi_app
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+import pytest
+from fastapi import HTTPException, Request
+from fastapi.testclient import TestClient
+from loguru import logger
+
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.DB_Management.scope_context import (
+    get_scope,
+    scoped_context,
+)
+from tldw_Server_API.app.main import app as fastapi_app
 
 pytestmark = pytest.mark.integration
+
+
+class _RecordingRuntime:
+    instances = []
+
+    def __init__(self, **scope):
+        self.scope = scope
+        self.close_calls = 0
+        self.close_scope = None
+        type(self).instances.append(self)
+
+    async def close(self):
+        self.close_calls += 1
+        self.close_scope = get_scope()
 
 
 @pytest.fixture(autouse=True)
@@ -50,8 +72,8 @@ def client_with_overrides(monkeypatch, auth_headers):
     fastapi_app.dependency_overrides[check_rate_limit] = _noop
     # Avoid DB initialization by overriding DB deps to return None
     try:
-        from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user as _get_media_db
         from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user as _get_chacha_db
+        from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user as _get_media_db
         async def _none_media_db():
             return None
         async def _none_chacha_db():
@@ -82,6 +104,58 @@ def _set_checkpoint_dir(monkeypatch, tmp_path):
         str(tmp_path / "checkpoints"),
     )
     return cp_mod
+
+
+def _override_principal(principal):
+    async def _principal(request: Request):  # noqa: ARG001
+        return principal
+
+    fastapi_app.dependency_overrides[get_auth_principal] = _principal
+
+
+def _override_user(user_id: int):
+    async def _user():
+        return User(id=user_id, username=f"user-{user_id}", email=None)
+
+    fastapi_app.dependency_overrides[get_request_user] = _user
+
+
+def _install_recording_runtime(monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+
+    _RecordingRuntime.instances.clear()
+    monkeypatch.setattr(rag_ep, "ProviderCredentialRuntime", _RecordingRuntime)
+
+
+def _patch_current_memberships(monkeypatch, *, team_ids=(), org_ids=(), calls=None):
+    import tldw_Server_API.app.core.AuthNZ.orgs_teams as orgs_teams
+
+    async def _teams(user_id: int):
+        if calls is not None:
+            calls.append(("team", user_id))
+        return [{"team_id": team_id} for team_id in team_ids]
+
+    async def _orgs(user_id: int):
+        if calls is not None:
+            calls.append(("org", user_id))
+        return [{"org_id": org_id, "status": "active"} for org_id in org_ids]
+
+    monkeypatch.setattr(orgs_teams, "list_active_team_memberships_for_user", _teams)
+    monkeypatch.setattr(orgs_teams, "list_org_memberships_for_user", _orgs)
+
+
+def _user_principal(user_id: int, **claims):
+    return AuthPrincipal(
+        kind="user",
+        user_id=user_id,
+        subject=f"user:{user_id}",
+        token_type="access",
+        roles=claims.get("roles", []),
+        permissions=claims.get("permissions", ["media.read"]),
+        is_admin=claims.get("is_admin", False),
+        org_ids=claims.get("org_ids", []),
+        team_ids=claims.get("team_ids", []),
+    )
 
 
 def test_rag_batch_resume_respects_query_indices(client_with_overrides, monkeypatch, tmp_path):
@@ -164,7 +238,7 @@ def test_rag_batch_resume_records_errors(client_with_overrides, monkeypatch, tmp
     bad_entry = status_map.get(1)
     assert bad_entry is not None
     assert bad_entry.get("status") == "error"
-    assert any("boom" in str(err) for err in bad_entry.get("errors", []))
+    assert bad_entry.get("errors") == ["batch_query_failed"]
 
 
 def test_rag_batch_resume_reuses_shared_batch_resolution(
@@ -212,3 +286,654 @@ def test_rag_batch_resume_reuses_shared_batch_resolution(
     assert list(kwargs["retrieval_plan"].sources) == kwargs["sources"]
     assert kwargs["resolved_request"].user_id == kwargs["user_id"]
     assert kwargs["resolved_request"].feedback_user_id == kwargs["feedback_user_id"]
+
+
+def test_rag_batch_resume_rejects_owner_mismatch_before_complete_response_or_runtime(
+    client_with_overrides,
+    monkeypatch,
+    tmp_path,
+):
+    cp_mod = _set_checkpoint_dir(monkeypatch, tmp_path)
+    checkpoint = cp_mod.CheckpointManager().create(
+        "rag_batch",
+        total_items=0,
+        config={"queries": []},
+        metadata={
+            "credential_scope": {
+                "owner_user_id": 42,
+                "team_ids": [],
+                "org_ids": [],
+            }
+        },
+    )
+    _override_principal(_user_principal(1))
+    _install_recording_runtime(monkeypatch)
+
+    response = client_with_overrides.post(
+        f"/api/v1/rag/batch/resume/{checkpoint.checkpoint_id}"
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "checkpoint_owner_forbidden"
+    assert _RecordingRuntime.instances == []
+
+
+@pytest.mark.parametrize(
+    "claims",
+    [
+        {"is_admin": True},
+        {"roles": [" AdMiN "]},
+        {"permissions": ["*"]},
+        {"permissions": ["media.read", "SYSTEM.CONFIGURE"]},
+    ],
+)
+def test_rag_batch_resume_accepts_explicit_admin_claims(
+    client_with_overrides,
+    monkeypatch,
+    tmp_path,
+    claims,
+):
+    cp_mod = _set_checkpoint_dir(monkeypatch, tmp_path)
+    checkpoint = cp_mod.CheckpointManager().create(
+        "rag_batch",
+        total_items=0,
+        config={"queries": []},
+        metadata={
+            "credential_scope": {
+                "owner_user_id": 42,
+                "team_ids": [],
+                "org_ids": [],
+            }
+        },
+    )
+    _override_principal(_user_principal(99, **claims))
+
+    response = client_with_overrides.post(
+        f"/api/v1/rag/batch/resume/{checkpoint.checkpoint_id}"
+    )
+
+    assert response.status_code == 200, response.text
+
+
+def test_rag_batch_resume_rejects_revoked_checkpoint_membership(
+    client_with_overrides,
+    monkeypatch,
+    tmp_path,
+):
+    cp_mod = _set_checkpoint_dir(monkeypatch, tmp_path)
+    manager = cp_mod.CheckpointManager()
+    credential_sentinel = "sk-revoked-checkpoint-credential-must-not-leak"
+    checkpoint = manager.create(
+        "rag_batch",
+        total_items=1,
+        config={"queries": ["revoked scope must stop before credential resolution"]},
+        metadata={
+            "credential_scope": {
+                "owner_user_id": 42,
+                "team_ids": [7],
+                "org_ids": [11],
+            }
+        },
+    )
+    assert checkpoint.total_items == 1
+    checkpoint_path = manager.get_checkpoint_path(checkpoint.checkpoint_id)
+    checkpoint_before = checkpoint_path.read_bytes()
+    assert credential_sentinel.encode() not in checkpoint_before
+    _override_principal(_user_principal(42))
+    _patch_current_memberships(monkeypatch)
+    _install_recording_runtime(monkeypatch)
+
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime
+
+    server_fallback_calls: list[str] = []
+    provider_calls: list[str] = []
+
+    def fail_server_fallback(provider: str):
+        server_fallback_calls.append(provider)
+        return credential_sentinel
+
+    async def fail_provider_dispatch(*_args, **_kwargs):
+        provider_calls.append("unified_batch_pipeline")
+        raise AssertionError("provider dispatch reached")
+
+    monkeypatch.setattr(
+        provider_credential_runtime,
+        "resolve_static_server_fallback_from_snapshot",
+        lambda provider, _snapshot: fail_server_fallback(provider),
+    )
+    monkeypatch.setattr(rag_ep, "unified_batch_pipeline", fail_provider_dispatch)
+
+    logs: list[str] = []
+    sink_id = logger.add(logs.append, format="{message}")
+    try:
+        response = client_with_overrides.post(
+            f"/api/v1/rag/batch/resume/{checkpoint.checkpoint_id}"
+        )
+    finally:
+        logger.remove(sink_id)
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "credential_scope_revoked"
+    assert _RecordingRuntime.instances == []
+    assert server_fallback_calls == []
+    assert provider_calls == []
+    assert credential_sentinel not in response.text
+    assert credential_sentinel not in "".join(logs)
+    assert checkpoint_path.read_bytes() == checkpoint_before
+    assert credential_sentinel.encode() not in checkpoint_path.read_bytes()
+
+
+def test_rag_batch_resume_fails_closed_when_membership_store_is_unavailable(
+    client_with_overrides,
+    monkeypatch,
+    tmp_path,
+):
+    cp_mod = _set_checkpoint_dir(monkeypatch, tmp_path)
+    checkpoint = cp_mod.CheckpointManager().create(
+        "rag_batch",
+        total_items=0,
+        config={"queries": []},
+        metadata={
+            "credential_scope": {
+                "owner_user_id": 42,
+                "team_ids": [7],
+                "org_ids": [],
+            }
+        },
+    )
+    _override_principal(_user_principal(42))
+
+    import tldw_Server_API.app.core.AuthNZ.orgs_teams as orgs_teams
+
+    async def _unavailable(user_id: int):  # noqa: ARG001
+        raise RuntimeError("private membership database detail")
+
+    monkeypatch.setattr(
+        orgs_teams,
+        "list_active_team_memberships_for_user",
+        _unavailable,
+    )
+
+    response = client_with_overrides.post(
+        f"/api/v1/rag/batch/resume/{checkpoint.checkpoint_id}"
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "credential_scope_unavailable"
+    assert "private membership database detail" not in response.text
+
+
+@pytest.mark.parametrize(
+    ("scope_kind", "invalid_id"),
+    [
+        ("team", 7.9),
+        ("team", True),
+        ("team", "7"),
+        ("org", 11.9),
+        ("org", True),
+        ("org", "11"),
+    ],
+)
+def test_rag_batch_resume_rejects_malformed_current_membership_rows(
+    client_with_overrides,
+    monkeypatch,
+    tmp_path,
+    scope_kind,
+    invalid_id,
+):
+    cp_mod = _set_checkpoint_dir(monkeypatch, tmp_path)
+    stored_team_ids = [7] if scope_kind == "team" else []
+    stored_org_ids = [11] if scope_kind == "org" else []
+    checkpoint = cp_mod.CheckpointManager().create(
+        "rag_batch",
+        total_items=0,
+        config={"queries": []},
+        metadata={
+            "credential_scope": {
+                "owner_user_id": 42,
+                "team_ids": stored_team_ids,
+                "org_ids": stored_org_ids,
+            }
+        },
+    )
+    _override_principal(_user_principal(42))
+    _install_recording_runtime(monkeypatch)
+
+    import tldw_Server_API.app.core.AuthNZ.orgs_teams as orgs_teams
+
+    async def _teams(user_id: int):  # noqa: ARG001
+        return [{"team_id": invalid_id}]
+
+    async def _orgs(user_id: int):  # noqa: ARG001
+        return [{"org_id": invalid_id, "status": "active"}]
+
+    monkeypatch.setattr(orgs_teams, "list_active_team_memberships_for_user", _teams)
+    monkeypatch.setattr(orgs_teams, "list_org_memberships_for_user", _orgs)
+
+    response = client_with_overrides.post(
+        f"/api/v1/rag/batch/resume/{checkpoint.checkpoint_id}"
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "credential_scope_unavailable"
+    assert _RecordingRuntime.instances == []
+
+
+def test_rag_batch_resume_rejects_present_but_malformed_scope(
+    client_with_overrides,
+    monkeypatch,
+    tmp_path,
+):
+    cp_mod = _set_checkpoint_dir(monkeypatch, tmp_path)
+    checkpoint = cp_mod.CheckpointManager().create(
+        "rag_batch",
+        total_items=0,
+        config={"queries": []},
+        metadata={
+            "credential_scope": {
+                "owner_user_id": "42",
+                "team_ids": [],
+                "org_ids": [],
+            }
+        },
+    )
+    _override_principal(_user_principal(42))
+    _install_recording_runtime(monkeypatch)
+
+    response = client_with_overrides.post(
+        f"/api/v1/rag/batch/resume/{checkpoint.checkpoint_id}"
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "credential_scope_invalid"
+    assert _RecordingRuntime.instances == []
+
+
+@pytest.mark.parametrize(
+    ("permissions", "expected_trusted"),
+    [(["media.read"], False), (["media.read", "system.configure"], True)],
+)
+def test_rag_batch_resume_rebuilds_owner_runtime_with_current_base_url_authority(
+    client_with_overrides,
+    monkeypatch,
+    tmp_path,
+    permissions,
+    expected_trusted,
+):
+    cp_mod = _set_checkpoint_dir(monkeypatch, tmp_path)
+    checkpoint = cp_mod.CheckpointManager().create(
+        "rag_batch",
+        total_items=1,
+        config={"queries": ["resume me"], "max_concurrent": 1},
+        metadata={
+            "credential_scope": {
+                "owner_user_id": 42,
+                "team_ids": [7],
+                "org_ids": [11],
+            }
+        },
+    )
+    _override_principal(_user_principal(42, permissions=permissions))
+    _override_user(42)
+    _patch_current_memberships(monkeypatch, team_ids=[7], org_ids=[11])
+    _install_recording_runtime(monkeypatch)
+
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as up
+
+    owner_media = SimpleNamespace(db_path="owner-media.db")
+    owner_chacha = SimpleNamespace(db_path="owner-chacha.db")
+    owner_prompts = SimpleNamespace(db_path_str="owner-prompts.db")
+    owner_resource_calls = []
+    captured = {}
+
+    @contextmanager
+    def _owner_media(owner_user_id: int):
+        owner_resource_calls.append(("media_enter", owner_user_id))
+        captured["media_scope"] = get_scope()
+        try:
+            yield owner_media
+        finally:
+            captured["media_exit_scope"] = get_scope()
+            owner_resource_calls.append(("media_exit", owner_user_id))
+
+    async def _owner_chacha(owner_user_id: int):
+        owner_resource_calls.append(("chacha", owner_user_id))
+        return owner_chacha
+
+    async def _owner_prompts(request: Request, owner_user: User):  # noqa: ARG001
+        owner_resource_calls.append(("prompts", owner_user.id))
+        return owner_prompts
+
+    async def fake_batch_pipeline(**kwargs):
+        captured["pipeline"] = kwargs
+        captured["pipeline_scope"] = get_scope()
+        return [up.UnifiedSearchResult(documents=[], query="resume me", errors=[])]
+
+    monkeypatch.setattr(rag_ep, "managed_media_db_for_owner", _owner_media)
+    monkeypatch.setattr(rag_ep, "get_chacha_db_for_owner", _owner_chacha)
+    monkeypatch.setattr(rag_ep, "get_prompts_db_for_user", _owner_prompts)
+    monkeypatch.setattr(rag_ep, "unified_batch_pipeline", fake_batch_pipeline)
+
+    with scoped_context(
+        user_id=42,
+        org_ids=[199],
+        team_ids=[299],
+        active_org_id=199,
+        active_team_id=299,
+        is_admin=True,
+    ) as request_scope:
+        response = client_with_overrides.post(
+            f"/api/v1/rag/batch/resume/{checkpoint.checkpoint_id}"
+        )
+        restored_scope = get_scope()
+
+    assert response.status_code == 200, response.text
+    runtime = _RecordingRuntime.instances[0]
+    assert runtime.scope["user_id"] == 42
+    assert runtime.scope["team_ids"] == [7]
+    assert runtime.scope["org_ids"] == [11]
+    assert runtime.scope["trusted_base_url_override"] is expected_trusted
+    assert runtime.close_calls == 1
+    assert captured["pipeline"]["media_db"] is owner_media
+    assert captured["pipeline"]["chacha_db"] is owner_chacha
+    assert captured["pipeline"]["prompts_db"] is owner_prompts
+    for scope in (
+        captured["media_scope"],
+        captured["pipeline_scope"],
+        runtime.close_scope,
+        captured["media_exit_scope"],
+    ):
+        assert scope.user_id == 42
+        assert scope.org_ids == [11]
+        assert scope.team_ids == [7]
+        assert scope.active_org_id == 11
+        assert scope.active_team_id == 7
+        assert scope.is_admin is False
+    assert restored_scope == request_scope
+    assert owner_resource_calls == [
+        ("media_enter", 42),
+        ("chacha", 42),
+        ("prompts", 42),
+        ("media_exit", 42),
+    ]
+
+
+def test_rag_batch_admin_resume_uses_checkpoint_owner_scope(
+    client_with_overrides,
+    monkeypatch,
+    tmp_path,
+):
+    cp_mod = _set_checkpoint_dir(monkeypatch, tmp_path)
+    checkpoint = cp_mod.CheckpointManager().create(
+        "rag_batch",
+        total_items=1,
+        config={"queries": ["resume me"], "max_concurrent": 1},
+        metadata={
+            "credential_scope": {
+                "owner_user_id": 42,
+                "team_ids": [7],
+                "org_ids": [11],
+            }
+        },
+    )
+    _override_principal(
+        _user_principal(99, permissions=["media.read", "system.configure"])
+    )
+    membership_calls = []
+    _patch_current_memberships(
+        monkeypatch,
+        team_ids=[7],
+        org_ids=[11],
+        calls=membership_calls,
+    )
+    _install_recording_runtime(monkeypatch)
+
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as up
+
+    owner_media = SimpleNamespace(db_path="owner-media.db")
+    owner_chacha = SimpleNamespace(db_path="owner-chacha.db")
+    owner_prompts = SimpleNamespace(db_path_str="owner-prompts.db")
+    owner_resource_calls = []
+    captured = {}
+
+    @contextmanager
+    def _owner_media(owner_user_id: int):
+        owner_resource_calls.append(("media_enter", owner_user_id))
+        captured["media_scope"] = get_scope()
+        try:
+            yield owner_media
+        finally:
+            captured["media_exit_scope"] = get_scope()
+            owner_resource_calls.append(("media_exit", owner_user_id))
+
+    async def _owner_chacha(owner_user_id: int):
+        owner_resource_calls.append(("chacha", owner_user_id))
+        return owner_chacha
+
+    async def _owner_prompts(request: Request, owner_user: User):  # noqa: ARG001
+        owner_resource_calls.append(("prompts", owner_user.id))
+        return owner_prompts
+
+    original_build_bundle = rag_ep._build_batch_request_bundle
+
+    def _recording_build_bundle(*args, **kwargs):
+        bundle = original_build_bundle(*args, **kwargs)
+        captured["current_user"] = kwargs["current_user"]
+        captured["resolved_request"] = bundle.resolved_request
+        captured["db_paths"] = kwargs["db_paths"]
+        return bundle
+
+    async def fake_batch_pipeline(**kwargs):
+        captured["pipeline"] = kwargs
+        captured["pipeline_scope"] = get_scope()
+        return [up.UnifiedSearchResult(documents=[], query="resume me", errors=[])]
+
+    monkeypatch.setattr(
+        rag_ep,
+        "managed_media_db_for_owner",
+        _owner_media,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        rag_ep,
+        "get_chacha_db_for_owner",
+        _owner_chacha,
+        raising=False,
+    )
+    monkeypatch.setattr(rag_ep, "get_prompts_db_for_user", _owner_prompts)
+    monkeypatch.setattr(rag_ep, "_build_batch_request_bundle", _recording_build_bundle)
+    monkeypatch.setattr(rag_ep, "unified_batch_pipeline", fake_batch_pipeline)
+
+    with scoped_context(
+        user_id=99,
+        org_ids=[199],
+        team_ids=[299],
+        active_org_id=199,
+        active_team_id=299,
+        is_admin=True,
+    ) as admin_scope:
+        response = client_with_overrides.post(
+            f"/api/v1/rag/batch/resume/{checkpoint.checkpoint_id}"
+        )
+        restored_scope = get_scope()
+
+    assert response.status_code == 200, response.text
+    runtime = _RecordingRuntime.instances[0]
+    assert runtime.scope["user_id"] == 42
+    assert runtime.scope["team_ids"] == [7]
+    assert runtime.scope["org_ids"] == [11]
+    assert runtime.scope["trusted_base_url_override"] is True
+    assert membership_calls == [("team", 42), ("org", 42)]
+    assert captured["pipeline"]["media_db"] is owner_media
+    assert captured["pipeline"]["chacha_db"] is owner_chacha
+    assert captured["pipeline"]["prompts_db"] is owner_prompts
+    assert captured["current_user"].id == 42
+    assert captured["resolved_request"].user_id == "42"
+    assert captured["resolved_request"].feedback_user_id == "42"
+    assert captured["db_paths"]["media_db_path"] == "owner-media.db"
+    assert captured["db_paths"]["notes_db_path"] == "owner-chacha.db"
+    assert captured["db_paths"]["character_db_path"] == "owner-chacha.db"
+    assert captured["db_paths"]["prompts_db_path"] == "owner-prompts.db"
+    assert "42" in captured["db_paths"]["kanban_db_path"]
+    for scope in (
+        captured["media_scope"],
+        captured["pipeline_scope"],
+        runtime.close_scope,
+        captured["media_exit_scope"],
+    ):
+        assert scope.user_id == 42
+        assert scope.org_ids == [11]
+        assert scope.team_ids == [7]
+        assert scope.active_org_id == 11
+        assert scope.active_team_id == 7
+        assert scope.is_admin is False
+    assert restored_scope == admin_scope
+    assert owner_resource_calls == [
+        ("media_enter", 42),
+        ("chacha", 42),
+        ("prompts", 42),
+        ("media_exit", 42),
+    ]
+
+
+def test_rag_batch_legacy_checkpoint_uses_server_runtime_scope(
+    client_with_overrides,
+    monkeypatch,
+    tmp_path,
+):
+    cp_mod = _set_checkpoint_dir(monkeypatch, tmp_path)
+    checkpoint = cp_mod.CheckpointManager().create(
+        "rag_batch",
+        total_items=1,
+        config={"queries": ["resume me"], "max_concurrent": 1},
+    )
+    _override_principal(
+        _user_principal(42, permissions=["media.read", "system.configure"])
+    )
+    _install_recording_runtime(monkeypatch)
+
+    import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as up
+
+    async def fake_pipeline(query: str, **kwargs):  # noqa: ARG001
+        return up.UnifiedSearchResult(documents=[], query=query, errors=[])
+
+    monkeypatch.setattr(up, "unified_rag_pipeline", fake_pipeline)
+
+    response = client_with_overrides.post(
+        f"/api/v1/rag/batch/resume/{checkpoint.checkpoint_id}"
+    )
+
+    assert response.status_code == 200, response.text
+    runtime = _RecordingRuntime.instances[0]
+    assert runtime.scope["user_id"] is None
+    assert runtime.scope["team_ids"] == []
+    assert runtime.scope["org_ids"] == []
+    assert runtime.scope["trusted_base_url_override"] is False
+
+
+@pytest.mark.parametrize("request_user_id", [42, 99])
+def test_rag_batch_legacy_checkpoint_denies_ordinary_principal_before_runtime(
+    client_with_overrides,
+    monkeypatch,
+    tmp_path,
+    request_user_id,
+):
+    cp_mod = _set_checkpoint_dir(monkeypatch, tmp_path)
+    manager = cp_mod.CheckpointManager()
+    checkpoint = manager.create(
+        "rag_batch",
+        total_items=1,
+        config={
+            "queries": ["legacy checkpoint must stay server-authorized"],
+            "max_concurrent": 1,
+            "user_id": "42",
+        },
+    )
+    checkpoint_path = manager.get_checkpoint_path(checkpoint.checkpoint_id)
+    checkpoint_before = checkpoint_path.read_bytes()
+    credential_sentinel = "sk-legacy-checkpoint-must-not-resolve-or-persist"
+    assert credential_sentinel.encode() not in checkpoint_before
+
+    _override_principal(_user_principal(request_user_id))
+    _override_user(request_user_id)
+    _install_recording_runtime(monkeypatch)
+
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime
+
+    server_fallback_calls: list[str] = []
+    provider_calls: list[str] = []
+
+    def fail_server_fallback(provider: str):
+        server_fallback_calls.append(provider)
+        return credential_sentinel
+
+    async def fail_provider_dispatch(*_args, **_kwargs):
+        provider_calls.append("unified_batch_pipeline")
+        raise AssertionError("provider dispatch reached")
+
+    monkeypatch.setattr(
+        provider_credential_runtime,
+        "resolve_static_server_fallback_from_snapshot",
+        lambda provider, _snapshot: fail_server_fallback(provider),
+    )
+    monkeypatch.setattr(rag_ep, "unified_batch_pipeline", fail_provider_dispatch)
+
+    logs: list[str] = []
+    sink_id = logger.add(logs.append, format="{message}")
+    try:
+        response = client_with_overrides.post(
+            f"/api/v1/rag/batch/resume/{checkpoint.checkpoint_id}"
+        )
+    finally:
+        logger.remove(sink_id)
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "checkpoint_owner_forbidden"
+    assert _RecordingRuntime.instances == []
+    assert server_fallback_calls == []
+    assert provider_calls == []
+    assert credential_sentinel not in response.text
+    assert credential_sentinel not in "".join(logs)
+    assert checkpoint_path.read_bytes() == checkpoint_before
+    assert credential_sentinel.encode() not in checkpoint_path.read_bytes()
+
+
+def test_rag_batch_legacy_checkpoint_concurrently_denies_ordinary_principals(
+    monkeypatch,
+    tmp_path,
+):
+    cp_mod = _set_checkpoint_dir(monkeypatch, tmp_path)
+    checkpoint = cp_mod.CheckpointManager().create(
+        "rag_batch",
+        total_items=0,
+        config={"queries": [], "user_id": "42"},
+    )
+
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+
+    async def exercise():
+        return await asyncio.gather(
+            *(
+                rag_ep._checkpoint_resume_credential_scope(
+                    checkpoint,
+                    _user_principal(user_id),
+                )
+                for user_id in (42, 99, 42, 99)
+            ),
+            return_exceptions=True,
+        )
+
+    outcomes = asyncio.run(exercise())
+
+    assert all(isinstance(outcome, HTTPException) for outcome in outcomes)
+    assert [outcome.status_code for outcome in outcomes] == [403, 403, 403, 403]
+    assert [outcome.detail for outcome in outcomes] == [
+        "checkpoint_owner_forbidden",
+        "checkpoint_owner_forbidden",
+        "checkpoint_owner_forbidden",
+        "checkpoint_owner_forbidden",
+    ]

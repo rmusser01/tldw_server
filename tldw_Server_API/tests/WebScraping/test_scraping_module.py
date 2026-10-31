@@ -1,10 +1,20 @@
+import dataclasses
+import types
 from collections.abc import Mapping
 from typing import Any
-import types
+from unittest.mock import AsyncMock
 
 import pytest
 
-from tldw_Server_API.app.core.Web_Scraping.runtime import FetchRequest, FetchResponse, PolicyDecision
+from tldw_Server_API.app.core.Web_Scraping import preflight as preflight_facade
+from tldw_Server_API.app.core.Web_Scraping.contracts import PreflightResult
+from tldw_Server_API.app.core.Web_Scraping.preflight import PreflightTarget
+from tldw_Server_API.app.core.Web_Scraping.runtime import (
+    FetchRequest,
+    FetchResponse,
+    PolicyDecision,
+    RuntimeRequestContext,
+)
 
 
 class FakeArticlePolicyChecker:
@@ -35,14 +45,93 @@ class FakeArticleFetchClient:
         return self.response
 
 
+def _allowed_article_target(url: str) -> PreflightTarget:
+    return PreflightTarget(
+        url=url,
+        decision=PolicyDecision(
+            allowed=True,
+            mode="compat",
+            reason="allowed",
+            stage="pre_fetch",
+            source="article_extract",
+        ),
+        request_context=RuntimeRequestContext(source="article_extract", stage="pre_fetch"),
+    )
+
+
+def _install_article_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    config: Mapping[str, Any],
+    target: PreflightTarget,
+    fetch_client: Any,
+    extract: Any,
+    backend: str = "auto",
+    run_preflight: Any | None = None,
+    browser_acquire: Any | None = None,
+) -> Any:
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article as canonical
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import (
+        ArticleLimits,
+        ArticlePlan,
+        DirectBrowserProfile,
+    )
+
+    async def acquire(*_args: Any, **_kwargs: Any) -> str:
+        raise AssertionError("browser should not run")
+
+    async def evaluate_target(*_args: Any, **_kwargs: Any) -> PreflightTarget:
+        return target
+
+    default_dependencies = canonical._build_default_dependencies
+
+    def build_dependencies(cookies: Any) -> Any:
+        plan = ArticlePlan(
+            url=target.url,
+            domain="example.com",
+            backend=backend,
+            browser=DirectBrowserProfile("test", tuple(cookies), 1, 1_000, False, 0),
+            limits=ArticleLimits(),
+        )
+        dependencies = default_dependencies(cookies)
+        return dataclasses.replace(
+            dependencies,
+            load_config=lambda: config,
+            resolve_plan=lambda _url, _config: plan,
+            evaluate_target=evaluate_target,
+            run_preflight=run_preflight or dependencies.run_preflight,
+            fetch_client=fetch_client,
+            browser=types.SimpleNamespace(acquire=browser_acquire or acquire),
+            extract=extract,
+            js_required=lambda *_args, **_kwargs: False,
+        )
+
+    monkeypatch.setattr(canonical, "_build_default_dependencies", build_dependencies)
+    return canonical
+
+
+def _enhanced_target(url: str, *, allowed: bool, reason: str) -> PreflightTarget:
+    return PreflightTarget(
+        url=url,
+        decision=PolicyDecision(
+            allowed=allowed,
+            mode="compat",
+            reason=reason,
+            stage="pre_fetch",
+            source="enhanced_scrape",
+        ),
+        request_context=RuntimeRequestContext(source="enhanced_scrape", stage="pre_fetch"),
+    )
+
+
 @pytest.mark.asyncio
 async def test_egress_denied_scrape_article(monkeypatch):
-    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
-
     # Deny egress
     from tldw_Server_API.app.core.Security import egress as eg
+    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
+
     pol = types.SimpleNamespace(allowed=False, reason="deny_test")
-    monkeypatch.setattr(eg, 'evaluate_url_policy', lambda url: pol)
+    monkeypatch.setattr(eg, "evaluate_url_policy", lambda url: pol)
 
     result = await ael.scrape_article("https://example.com")
     assert result["extraction_successful"] is False
@@ -51,13 +140,26 @@ async def test_egress_denied_scrape_article(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_egress_denied_enhanced_scraper(monkeypatch):
-    from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import EnhancedWebScraper
-    from tldw_Server_API.app.core.Security import egress as eg
+    from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping as enhanced
 
-    pol = types.SimpleNamespace(allowed=False, reason="deny_test")
-    monkeypatch.setattr(eg, 'evaluate_url_policy', lambda url: pol)
+    monkeypatch.setattr(enhanced, "preflight_facade", preflight_facade, raising=False)
+    monkeypatch.setattr(
+        preflight_facade,
+        "evaluate_target",
+        AsyncMock(return_value=_enhanced_target("https://example.com", allowed=False, reason="deny_test")),
+    )
 
-    scraper = EnhancedWebScraper()
+    async def deny_legacy(*_args, **_kwargs):
+        return enhanced.WebOutboundPolicyDecision(
+            allowed=False,
+            mode="compat",
+            reason="deny_test",
+            stage="pre_fetch",
+            source="enhanced_scrape",
+        )
+
+    monkeypatch.setattr(enhanced, "decide_web_outbound_policy", deny_legacy)
+    scraper = enhanced.EnhancedWebScraper()
     result = await scraper.scrape_article("https://example.com")
     assert result["extraction_successful"] is False
     assert "Egress denied" in (result.get("error") or "")
@@ -65,30 +167,28 @@ async def test_egress_denied_enhanced_scraper(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_article_scrape_blocks_on_shared_policy_before_network(monkeypatch):
-    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
-
-    monkeypatch.setattr(ael, "load_and_log_configs", lambda: {"web_scraper": {}})
-    monkeypatch.setattr(
-        ael,
-        "_ARTICLE_POLICY_CHECKER",
-        FakeArticlePolicyChecker(
-            PolicyDecision(
-                allowed=False,
-                mode="strict",
-                reason="robots_unreachable",
-                stage="pre_fetch",
-                source="article_extract",
-            )
+    url = "https://example.com/blocked"
+    target = PreflightTarget(
+        url=url,
+        decision=PolicyDecision(
+            allowed=False,
+            mode="strict",
+            reason="robots_unreachable",
+            stage="pre_fetch",
+            source="article_extract",
         ),
+        request_context=RuntimeRequestContext(source="article_extract", stage="pre_fetch"),
+    )
+    fetch_client = FakeArticleFetchClient(AssertionError("fetch should not run"))
+    canonical = _install_article_dependencies(
+        monkeypatch,
+        config={"web_scraper": {"web_scraper_preflight_analyzers": False}},
+        target=target,
+        fetch_client=fetch_client,
+        extract=lambda *_args, **_kwargs: pytest.fail("extraction should not run"),
     )
 
-    def fail_http_fetch(*args, **kwargs):
-        raise AssertionError("network fetch should not run when outbound policy blocks")
-
-    monkeypatch.setattr(ael, "http_fetch", fail_http_fetch)
-    monkeypatch.setattr(ael, "_ARTICLE_FETCH_CLIENT", FakeArticleFetchClient(AssertionError("fetch should not run")))
-
-    result = await ael.scrape_article("https://example.com/blocked")
+    result = await canonical.scrape_article(url)
 
     assert result["extraction_successful"] is False
     assert result["error"] == "Blocked by outbound policy"
@@ -97,15 +197,15 @@ async def test_article_scrape_blocks_on_shared_policy_before_network(monkeypatch
 
 def test_scrape_article_blocking_sanitizes_policy_evaluation_error(monkeypatch):
     from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article as canonical
 
-    def fail_policy(*args, **kwargs):
+    async def fail_policy(*args, **kwargs):
         raise RuntimeError("secret-token")
 
     monkeypatch.setattr(
-        ael,
-        "decide_web_outbound_policy_sync",
+        canonical.preflight_facade,
+        "evaluate_target",
         fail_policy,
-        raising=False,
     )
 
     result = ael.scrape_article_blocking("https://example.com/private")
@@ -212,7 +312,7 @@ def test_provider_missing_keys_google(monkeypatch):
             },
         }
 
-    monkeypatch.setattr(ws, 'get_loaded_config', fake_cfg)
+    monkeypatch.setattr(ws, "get_loaded_config", fake_cfg)
 
     with pytest.raises(ValueError):
         ws.search_web_google("query")
@@ -224,43 +324,49 @@ def test_provider_missing_keys_kagi(monkeypatch):
     def fake_cfg():
         return {"search_engines": {"kagi_search_api_key": ""}}
 
-    monkeypatch.setattr(ws, 'get_loaded_config', fake_cfg)
+    monkeypatch.setattr(ws, "get_loaded_config", fake_cfg)
 
     with pytest.raises(ValueError):
         ws.search_web_kagi("query", 5)
 
 
 def test_preflight_advice_prefers_playwright_for_js():
-    from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import EnhancedWebScraper
-
     analysis = {"results": {"js": {"status": "success", "js_required": True}}}
-    backend, method, notes = EnhancedWebScraper._apply_preflight_advice(
-        analysis, "httpx", "auto", "auto"
+    backend, method, result = preflight_facade.apply_preflight_advice(
+        PreflightResult(analysis=analysis),
+        backend="httpx",
+        method="auto",
+        backend_setting="auto",
     )
     assert method == "playwright"
-    assert "js_required" in notes
+    assert result is not None
+    assert "js_required" in result.advice.notes
 
 
 def test_preflight_advice_prefers_curl_for_tls_when_auto():
-    from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import EnhancedWebScraper
-
     analysis = {"results": {"tls": {"status": "active"}}}
-    backend, method, notes = EnhancedWebScraper._apply_preflight_advice(
-        analysis, "httpx", "auto", "auto"
+    backend, method, result = preflight_facade.apply_preflight_advice(
+        PreflightResult(analysis=analysis),
+        backend="httpx",
+        method="auto",
+        backend_setting="auto",
     )
     assert backend == "curl"
-    assert "tls_active" in notes
+    assert result is not None
+    assert "tls_active" in result.advice.notes
 
 
 def test_preflight_advice_respects_explicit_backend():
-    from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import EnhancedWebScraper
-
     analysis = {"results": {"tls": {"status": "active"}}}
-    backend, method, notes = EnhancedWebScraper._apply_preflight_advice(
-        analysis, "httpx", "auto", "httpx"
+    backend, method, result = preflight_facade.apply_preflight_advice(
+        PreflightResult(analysis=analysis),
+        backend="httpx",
+        method="auto",
+        backend_setting="httpx",
     )
     assert backend == "httpx"
-    assert "tls_active" not in notes
+    assert result is not None
+    assert "tls_active" not in result.advice.notes
 
 
 def test_scoring_includes_fingerprint_and_integrity():
@@ -315,101 +421,35 @@ def test_recommendations_include_fingerprint_and_integrity_guidance():
 
 @pytest.mark.asyncio
 async def test_article_preflight_prefers_playwright_for_js(monkeypatch):
-    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
-    from tldw_Server_API.app.core.Web_Scraping import scraper_analyzers as sa
-    from tldw_Server_API.app.core.Security import egress as eg
-
-    monkeypatch.setattr(eg, "evaluate_url_policy", lambda url: types.SimpleNamespace(allowed=True))
-
-    def fake_cfg():
-        return {
-            "web_scraper": {
-                "web_scraper_preflight_analyzers": True,
-                "web_scraper_preflight_scan_depth": "default",
-                "web_scraper_preflight_timeout_s": 0,
-                "web_scraper_default_backend": "auto",
-                "web_scraper_respect_robots": True,
-            }
-        }
-
-    monkeypatch.setattr(ael, "load_and_log_configs", fake_cfg)
-    monkeypatch.setattr(
-        ael,
-        "_ARTICLE_POLICY_CHECKER",
-        FakeArticlePolicyChecker(
-            PolicyDecision(
-                allowed=True,
-                mode="compat",
-                reason="allowed",
-                stage="pre_fetch",
-                source="article_extract",
-            )
-        ),
-    )
-    monkeypatch.setattr(
-        sa,
-        "run_analysis",
-        lambda *args, **kwargs: {"results": {"js": {"status": "success", "js_required": True}}},
-    )
-
     playwright_used = {"used": False}
-
-    class FakePage:
-        async def goto(self, *args, **kwargs):
-            return None
-
-        async def wait_for_load_state(self, *args, **kwargs):
-            return None
-
-        async def content(self):
-            return "<html><body><article>hello</article></body></html>"
-
-    class FakeContext:
-        async def add_cookies(self, *args, **kwargs):
-            return None
-
-        async def new_page(self):
-            return FakePage()
-
-        async def close(self):
-            return None
-
-    class FakeBrowser:
-        async def new_context(self, *args, **kwargs):
-            return FakeContext()
-
-        async def close(self):
-            return None
-
-    class FakeChromium:
-        async def launch(self, *args, **kwargs):
-            return FakeBrowser()
-
-    class FakePlaywright:
-        def __init__(self):
-            self.chromium = FakeChromium()
-
-    class FakePlaywrightContext:
-        async def __aenter__(self):
-            playwright_used["used"] = True
-            return FakePlaywright()
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-    def fake_async_playwright():
-        return FakePlaywrightContext()
 
     def fake_extract(*args, **kwargs):
         return {"extraction_successful": True, "content": "ok", "title": "t"}
 
-    monkeypatch.setattr(ael, "async_playwright", fake_async_playwright)
-    monkeypatch.setattr(ael, "extract_article_with_pipeline", fake_extract)
     fetch_client = FakeArticleFetchClient(AssertionError("fetch should not run"))
-    monkeypatch.setattr(ael, "_ARTICLE_FETCH_CLIENT", fetch_client)
-    monkeypatch.setattr(ael, "http_fetch", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError()))
 
-    result = await ael.scrape_article("https://example.com")
+    async def acquire(*_args, **_kwargs):
+        playwright_used["used"] = True
+        return "<html><body><article>hello</article></body></html>"
+
+    canonical = _install_article_dependencies(
+        monkeypatch,
+        config={
+            "web_scraper": {
+                "web_scraper_preflight_analyzers": True,
+                "web_scraper_default_backend": "auto",
+            }
+        },
+        target=_allowed_article_target("https://example.com"),
+        fetch_client=fetch_client,
+        extract=fake_extract,
+        run_preflight=AsyncMock(
+            return_value=PreflightResult(analysis={"results": {"js": {"status": "success", "js_required": True}}})
+        ),
+        browser_acquire=acquire,
+    )
+
+    result = await canonical.scrape_article("https://example.com")
     assert result.get("extraction_successful") is True
     assert playwright_used["used"] is True
     assert fetch_client.requests == []
@@ -417,43 +457,6 @@ async def test_article_preflight_prefers_playwright_for_js(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_article_preflight_prefers_curl_for_tls(monkeypatch):
-    from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
-    from tldw_Server_API.app.core.Web_Scraping import scraper_analyzers as sa
-    from tldw_Server_API.app.core.Security import egress as eg
-
-    monkeypatch.setattr(eg, "evaluate_url_policy", lambda url: types.SimpleNamespace(allowed=True))
-
-    def fake_cfg():
-        return {
-            "web_scraper": {
-                "web_scraper_preflight_analyzers": True,
-                "web_scraper_preflight_scan_depth": "default",
-                "web_scraper_preflight_timeout_s": 0,
-                "web_scraper_default_backend": "auto",
-                "web_scraper_respect_robots": True,
-            }
-        }
-
-    monkeypatch.setattr(ael, "load_and_log_configs", fake_cfg)
-    monkeypatch.setattr(
-        ael,
-        "_ARTICLE_POLICY_CHECKER",
-        FakeArticlePolicyChecker(
-            PolicyDecision(
-                allowed=True,
-                mode="compat",
-                reason="allowed",
-                stage="pre_fetch",
-                source="article_extract",
-            )
-        ),
-    )
-    monkeypatch.setattr(
-        sa,
-        "run_analysis",
-        lambda *args, **kwargs: {"results": {"tls": {"status": "active"}}},
-    )
-
     fetch_client = FakeArticleFetchClient(
         FetchResponse(
             url="https://example.com",
@@ -466,10 +469,20 @@ async def test_article_preflight_prefers_curl_for_tls(monkeypatch):
     def fake_extract(*args, **kwargs):
         return {"extraction_successful": True, "content": "ok", "title": "t"}
 
-    monkeypatch.setattr(ael, "_ARTICLE_FETCH_CLIENT", fetch_client)
-    monkeypatch.setattr(ael, "extract_article_with_pipeline", fake_extract)
-    monkeypatch.setattr(ael, "http_fetch", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError()))
+    canonical = _install_article_dependencies(
+        monkeypatch,
+        config={
+            "web_scraper": {
+                "web_scraper_preflight_analyzers": True,
+                "web_scraper_default_backend": "auto",
+            }
+        },
+        target=_allowed_article_target("https://example.com"),
+        fetch_client=fetch_client,
+        extract=fake_extract,
+        run_preflight=AsyncMock(return_value=PreflightResult(analysis={"results": {"tls": {"status": "active"}}})),
+    )
 
-    result = await ael.scrape_article("https://example.com")
+    result = await canonical.scrape_article("https://example.com")
     assert result.get("extraction_successful") is True
     assert fetch_client.requests[0].backend == "curl"

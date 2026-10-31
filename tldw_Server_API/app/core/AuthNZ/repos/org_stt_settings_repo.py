@@ -6,6 +6,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import row_dict
 
 
 class AuthnzOrgSttSettingsRepo:
@@ -98,14 +99,7 @@ class AuthnzOrgSttSettingsRepo:
 
     @classmethod
     def _row_to_dict(cls, row: Any) -> dict[str, Any]:
-        if isinstance(row, dict):
-            raw = dict(row)
-        else:
-            try:
-                keys = row.keys()
-                raw = {key: row[key] for key in keys}
-            except Exception:
-                raw = dict(row)
+        raw = row_dict(row)
         return {
             "org_id": int(raw["org_id"]),
             "delete_audio_after_success": bool(raw["delete_audio_after_success"]),

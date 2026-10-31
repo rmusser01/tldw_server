@@ -1,5 +1,7 @@
 # tldw_server User Guide
 
+- [Persona Buddy: setup, voice, approvals, and troubleshooting](Persona_Buddy_Guide.md).
+
 This guide shows how to use the Next.js WebUI and API to ingest media, search and retrieve, chat with LLMs, generate embeddings, and run evaluations.
 
 ## Quick Start

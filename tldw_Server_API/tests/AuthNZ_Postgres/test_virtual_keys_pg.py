@@ -1,7 +1,7 @@
-import os
-from pathlib import Path
 
 import pytest
+
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
 
 @pytest.mark.integration
@@ -75,12 +75,7 @@ async def test_virtual_keys_and_budget_postgres(test_db_pool):
     )
 
     # Insert a user
-    import uuid
-    await pool.execute(
-        "INSERT INTO users (uuid, username, email, password_hash, is_active) VALUES ($1, $2, $3, $4, TRUE)",
-        str(uuid.uuid4()), "pguser", "pguser@example.com", "x",
-    )
-    user_id = await pool.fetchval("SELECT id FROM users WHERE username = $1", "pguser")
+    user_id = await ensure_test_user(pool, "pguser", "pguser@example.com")
 
     # Create virtual key with small budget
     res = await mgr.create_virtual_key(

@@ -84,6 +84,8 @@ describe("TtsAdvancedTab", () => {
         onSsmlChange={vi.fn()}
         removeReasoning={true}
         onRemoveReasoningChange={vi.fn()}
+        allowFallback={true}
+        onAllowFallbackChange={vi.fn()}
         isTldw={true}
         onOpenVoiceCloning={vi.fn()}
       />

@@ -203,9 +203,9 @@ export function KnowledgeQALayout({
 
   const hasResults = results.length > 0 || Boolean(answer)
   const showNoResultsState =
-    hasSearched && !isSearching && !error && results.length === 0 && !answer
+    hasSearched && queryStage !== "cancelled" && !isSearching && !error && results.length === 0 && !answer
   const hasVisibleResultsArea =
-    hasResults || showNoResultsState || Boolean(error) || isSearching
+    hasResults || showNoResultsState || Boolean(error) || isSearching || queryStage === "cancelled"
   const recentHistoryItem = useMemo(() => {
     const sortedHistory = sortHistoryNewestFirst(searchHistory)
     const recentKnowledgeThreadItem = sortedHistory.find(

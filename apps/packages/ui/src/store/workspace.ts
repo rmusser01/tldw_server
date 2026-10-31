@@ -3217,7 +3217,15 @@ const coerceAudioSettingsForRehydrate = (
     format:
       isAudioOutputFormat(candidate.format)
         ? candidate.format
-        : DEFAULT_AUDIO_SETTINGS.format
+        : DEFAULT_AUDIO_SETTINGS.format,
+    backend:
+      typeof candidate.backend === "string"
+        ? candidate.backend.trim()
+        : DEFAULT_AUDIO_SETTINGS.backend,
+    allowFallback:
+      typeof candidate.allowFallback === "boolean"
+        ? candidate.allowFallback
+        : DEFAULT_AUDIO_SETTINGS.allowFallback
   }
 }
 

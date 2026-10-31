@@ -1,3 +1,5 @@
+import type { QuickIngestOperation } from "@/services/tldw/quick-ingest-authority"
+import { requestScopeFields } from "@/services/tldw/domains/service-prompts"
 import React, { useState, useEffect, useCallback, useRef, Suspense } from "react"
 import { useTranslation } from "react-i18next"
 import { useSearchParams } from "react-router-dom"
@@ -46,6 +48,7 @@ import {
   useReadingProgressSaveOnClose,
   useResizablePanel,
 } from "@/hooks/document-workspace"
+import { isEditableTarget } from "@/utils/editable-target"
 
 const DocumentPickerModal = React.lazy(() => import("./DocumentPickerModal"))
 const DocumentViewer = React.lazy(() =>
@@ -648,11 +651,7 @@ export const DocumentWorkspacePage: React.FC = () => {
   // Workspace-level keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement
-      const isInputField =
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable
+      const isInputField = isEditableTarget(e.target)
 
       const mod = e.metaKey || e.ctrlKey
 
@@ -757,15 +756,17 @@ export const DocumentWorkspacePage: React.FC = () => {
   }, [])
 
   const openDocumentById = useCallback(
-    async (mediaId: number, docTypeHint?: "pdf" | "epub" | null) => {
+    async (mediaId: number, docTypeHint?: "pdf" | "epub" | null, operation?: QuickIngestOperation) => {
+      operation?.assertCurrent()
       const requestId = ++openDocumentRequestRef.current
       setLoadingDocumentId(mediaId)
       try {
         const details = await tldwClient.getMediaDetails(mediaId, {
           include_content: false,
-          include_versions: false
+          include_versions: false,
+          requestScope: operation?.requestScope, signal: operation?.signal,
         })
-        if (openDocumentRequestRef.current !== requestId) {
+        if (openDocumentRequestRef.current !== requestId || (operation && !operation.isCurrent())) {
           return
         }
 
@@ -820,13 +821,15 @@ export const DocumentWorkspacePage: React.FC = () => {
         let data: ArrayBuffer | Blob
         try {
           data = await bgRequest<ArrayBuffer>({
+            ...requestScopeFields(operation?.requestScope),
+            abortSignal: operation?.signal,
             path: `/api/v1/media/${mediaId}/file`,
             method: "GET",
             responseType: "arrayBuffer",
             timeoutMs: DOCUMENT_FILE_TIMEOUT_MS
           })
         } catch (err: unknown) {
-          if (openDocumentRequestRef.current !== requestId) {
+          if (openDocumentRequestRef.current !== requestId || (operation && !operation.isCurrent())) {
             return
           }
           const status = isErrorWithStatus(err) ? err.status : undefined
@@ -859,7 +862,7 @@ export const DocumentWorkspacePage: React.FC = () => {
           }
           throw err
         }
-        if (openDocumentRequestRef.current !== requestId) {
+        if (openDocumentRequestRef.current !== requestId || (operation && !operation.isCurrent())) {
           return
         }
 
@@ -889,7 +892,7 @@ export const DocumentWorkspacePage: React.FC = () => {
           url
         })
       } catch (err) {
-        if (openDocumentRequestRef.current !== requestId) {
+        if (openDocumentRequestRef.current !== requestId || (operation && !operation.isCurrent())) {
           return
         }
         message.error(

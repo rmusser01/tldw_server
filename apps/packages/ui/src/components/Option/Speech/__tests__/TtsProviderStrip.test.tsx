@@ -45,4 +45,18 @@ describe("TtsProviderStrip", () => {
     expect(screen.getByText("Browser local output")).toBeInTheDocument()
     expect(screen.queryByText("mp3")).not.toBeInTheDocument()
   })
+
+  it("shows the exact requested backend and strict fallback policy", () => {
+    render(
+      <TtsProviderStrip
+        {...defaults}
+        provider="tldw"
+        backend="gateway:Company"
+        allowFallback={false}
+      />
+    )
+
+    expect(screen.getByText("gateway:Company")).toBeInTheDocument()
+    expect(screen.getByText("Fallback off")).toBeInTheDocument()
+  })
 })

@@ -1,12 +1,12 @@
+import { requestScopeFields } from "./service-prompts"
+import type { ScopedRequestOptions } from "../TldwApiClient"
 import { bgRequest, bgStream } from '@/services/background-proxy'
 import { buildQuery } from '../client-utils'
 import { appendPathQuery } from '../path-utils'
-import { createSafeStorage } from '@/utils/safe-storage'
 import { tldwRequest } from '@/services/tldw/request-core'
 import type { AllowedPath } from '@/services/tldw/openapi-guard'
 import type { TldwApiClientCore } from '../TldwApiClient'
 import type {
-  TldwConfig,
   CharacterListQueryParams,
   CharacterListQueryResponse,
   CharacterVersionEntry,
@@ -53,13 +53,16 @@ export const characterMethods = {
     return []
   },
 
-  async listCharacters(this: TldwApiClientCore, params?: Record<string, any>): Promise<any[]> {
+  async listCharacters(this: TldwApiClientCore, params?: Record<string, any>, options?: ScopedRequestOptions): Promise<any[]> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const query = buildQuery(params)
-    const listPathCandidates = ["/api/v1/characters", "/api/v1/characters/"] as const
+    const listPathCandidates = ["/api/v1/characters/", "/api/v1/characters"] as const
     const base = await this.resolveApiPath("characters.list", [...listPathCandidates])
     const requestList = async (path: string) =>
       this.normalizeCharacterListResponse(
         await bgRequest<any>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
           path: appendPathQuery(path as AllowedPath, query),
           method: "GET"
         })
@@ -397,13 +400,16 @@ export const characterMethods = {
     return characters
   },
 
-  async searchCharacters(this: TldwApiClientCore, query: string, params?: Record<string, any>): Promise<any[]> {
+  async searchCharacters(this: TldwApiClientCore, query: string, params?: Record<string, any>, options?: ScopedRequestOptions): Promise<any[]> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const qp = buildQuery({ query, ...(params || {}) })
     const base = await this.resolveApiPath("characters.search", [
       "/api/v1/characters/search",
       "/api/v1/characters/search/"
     ])
     return await bgRequest<any[]>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: appendPathQuery(base, qp),
       method: 'GET'
     })
@@ -428,8 +434,16 @@ export const characterMethods = {
     })
   },
 
-  async getCharacter(this: TldwApiClientCore, id: string | number, options?: { forceRefresh?: boolean }): Promise<any> {
+  async getCharacter(this: TldwApiClientCore, id: string | number, options?: ScopedRequestOptions & { forceRefresh?: boolean }): Promise<any> {
     const cid = String(id)
+    if (options?.requestScope) {
+      // A verified owner must never join an ID-only cache or another owner's read.
+      const template = await this.resolveApiPath("characters.get", ["/api/v1/characters/{id}", "/api/v1/characters/{id}/"])
+      return bgRequest({
+        path: this.fillPathParams(template, cid), method: "GET",
+        ...requestScopeFields(options.requestScope), abortSignal: options.signal
+      })
+    }
     const forceRefresh = options?.forceRefresh === true
     if (!forceRefresh) {
       const cached = this.characterCache.get(cid)
@@ -618,7 +632,6 @@ export const characterMethods = {
     const requestCreateDirect = async (
       requestPath: string
     ): Promise<any> => {
-      const storage = createSafeStorage({ area: "local" })
       const response = await tldwRequest(
         {
           path: requestPath as AllowedPath,
@@ -627,8 +640,7 @@ export const characterMethods = {
           body: payload
         },
         {
-          getConfig: () =>
-            storage.get<TldwConfig>("tldwConfig").catch(() => null)
+          getConfig: () => this.getConfig()
         }
       )
       if (response?.ok) {
@@ -966,11 +978,13 @@ export const characterMethods = {
     )
   },
 
-  async getPersonaProfile(this: TldwApiClientCore, id: string | number): Promise<PersonaProfile> {
+  async getPersonaProfile(this: TldwApiClientCore, id: string | number, options?: ScopedRequestOptions): Promise<PersonaProfile> {
     const personaId = encodeURIComponent(String(id))
     const payload = await this.request<any>({
       path: `/api/v1/persona/profiles/${personaId}`,
-      method: "GET"
+      method: "GET",
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal
     })
     return normalizePersonaProfile(
       payload as Record<string, unknown> | null | undefined

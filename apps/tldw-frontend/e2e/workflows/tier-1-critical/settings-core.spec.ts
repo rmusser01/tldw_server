@@ -11,7 +11,7 @@ const SETTINGS_SECTIONS_VIA_PAGE_OBJECT = [
 
 // Settings pages that exist but are outside the page-object union — use direct URL
 const SETTINGS_SECTIONS_DIRECT_NAV = [
-  "chatbooks", "world-books", "prompt-studio",
+  "chatbooks", "chat-macros", "world-books", "prompt-studio",
   "share", "about", "family-guardrails",
 ] as const
 
@@ -94,6 +94,19 @@ test.describe("Settings", () => {
     })
   }
 
+  test("settings/tldw has one Form initialization source per field", async ({
+    diagnostics,
+  }) => {
+    await settings.gotoSection("tldw")
+    await settings.waitForReady()
+
+    const duplicateFieldWarnings = diagnostics.console.filter(
+      ({ text }) =>
+        /initialValues/i.test(text) && /rememberApiKey/i.test(text)
+    )
+    expect(duplicateFieldWarnings).toEqual([])
+  })
+
   test.describe("Prompt route intent", () => {
     test("legacy prompt studio route redirects to the prompts studio tab", async ({
       authedPage,
@@ -112,7 +125,7 @@ test.describe("Settings", () => {
       await assertNoCriticalErrors(diagnostics)
     })
 
-    test("prompt workspace link settings and prompt studio settings stay distinct", async ({
+    test("workflow prompts and prompt studio settings stay distinct", async ({
       authedPage,
       diagnostics,
     }) => {
@@ -138,10 +151,10 @@ test.describe("Settings", () => {
 
       await expect(authedPage).toHaveURL(/\/settings\/prompt(?:\?.*)?$/)
       await expect(
-        authedPage.getByRole("heading", { name: "Prompts workspace" })
+        authedPage.getByRole("heading", { name: "Workflow prompts" }).first()
       ).toBeVisible({ timeout: 20_000 })
       await expect(
-        authedPage.getByRole("button", { name: /open prompts workspace/i })
+        authedPage.getByRole("link", { name: /open reusable prompts workspace/i })
       ).toBeVisible({ timeout: 20_000 })
       await expect(
         authedPage.getByRole("button", { name: /test prompt studio/i })
@@ -156,6 +169,16 @@ test.describe("Settings", () => {
       await settings.goto()
       await settings.waitForReady()
 
+      await expect(
+        settings.page.getByRole("heading", { level: 1, name: "Settings" })
+      ).toHaveCount(1)
+      await expect(
+        settings.page.getByRole("heading", {
+          level: 2,
+          name: "Setup & Recovery",
+        })
+      ).toBeVisible()
+
       const promptSettingsLink = settings.page.getByTestId(
         "settings-nav-link--settings-prompt"
       )
@@ -163,9 +186,12 @@ test.describe("Settings", () => {
         "settings-nav-link--settings-prompt-studio"
       )
 
-      await expect(promptSettingsLink).toContainText(/manage prompts/i)
-      await expect(promptSettingsLink).not.toContainText(/prompt studio/i)
-      await expect(promptStudioSettingsLink).toContainText(/prompt studio/i)
+      await expect(promptSettingsLink).toHaveAccessibleName(
+        /^workflow prompts$/i
+      )
+      await expect(promptStudioSettingsLink).toHaveAccessibleName(
+        /^prompt studio$/i
+      )
 
       await assertNoCriticalErrors(diagnostics)
     })

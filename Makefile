@@ -59,7 +59,7 @@ help:
 # -----------------------------------------------------------------------------
 # Quickstart targets (first-time setup)
 # -----------------------------------------------------------------------------
-.PHONY: setup-wizard-tools setup-docker-single start-docker-single verify-docker-single setup-docker-multi start-docker-multi verify-docker-multi install-local setup-local-single start-local-single verify-local-single quickstart quickstart-install quickstart-prereqs quickstart-local quickstart-docker quickstart-docker-bootstrap quickstart-docker-webui model-cycle verify pypi-build pypi-check pypi-check-contents tooling-install tooling-smoke show-api-key release release-patch release-minor mcp-unified-build mcp-unified-check mcp-unified-uat mcp-unified-rc mcp-unified-publish-dry-run
+.PHONY: setup-wizard-tools setup-docker-single start-docker-single verify-docker-single setup-docker-multi start-docker-multi verify-docker-multi install-local setup-local-single start-local-single verify-local-single quickstart quickstart-install quickstart-prereqs quickstart-local quickstart-docker quickstart-docker-bootstrap quickstart-docker-webui model-cycle verify pypi-build pypi-check pypi-check-contents tooling-install tooling-smoke show-api-key release release-patch release-minor mcp-unified-build mcp-unified-check mcp-unified-uat mcp-unified-rc mcp-unified-publish-dry-run production-preflight production-deploy production-rollback
 
 PYTHON ?= python3
 VENV_DIR ?= .venv
@@ -70,6 +70,9 @@ DOCKER_BASE_COMPOSE ?= Dockerfiles/docker-compose.yml
 DOCKER_SINGLE_COMPOSE ?= Dockerfiles/docker-compose.single-user.yml
 DOCKER_MULTI_COMPOSE ?= Dockerfiles/docker-compose.multi-user-postgres.yml
 DOCKER_WEBUI_COMPOSE ?= Dockerfiles/docker-compose.webui.yml
+PRODUCTION_COMPOSE ?= Dockerfiles/docker-compose.production.yml
+PRODUCTION_ENV_FILE ?=
+PRODUCTION_MANIFEST ?=
 SETUP_VENV_DIR ?= .setup-venv
 SETUP_VENV_PYTHON ?= $(SETUP_VENV_DIR)/bin/python
 TLDW_SETUP ?= $(SETUP_VENV_PYTHON) -m tldw_Server_API.cli.wizard.cli
@@ -91,9 +94,22 @@ MODEL_CYCLE_SECOND_BOOT_WAIT ?=0
 MODEL_CYCLE_DRY_RUN ?=false
 RELEASE_DRY_RUN ?=false
 
+production-preflight:
+	@test -n "$(PRODUCTION_ENV_FILE)" || (echo "Set PRODUCTION_ENV_FILE to an absolute raw env path" >&2; exit 2)
+	$(PYTHON) Helper_Scripts/Deployment/production_preflight.py --env-file "$(PRODUCTION_ENV_FILE)" --compose-file "$(PRODUCTION_COMPOSE)"
+
+production-deploy:
+	@test -n "$(PRODUCTION_ENV_FILE)" || (echo "Set PRODUCTION_ENV_FILE to an absolute raw env path" >&2; exit 2)
+	$(PYTHON) Helper_Scripts/Deployment/production_deploy.py deploy --env-file "$(PRODUCTION_ENV_FILE)" --compose-file "$(PRODUCTION_COMPOSE)"
+
+production-rollback:
+	@test -n "$(PRODUCTION_ENV_FILE)" || (echo "Set PRODUCTION_ENV_FILE to an absolute raw env path" >&2; exit 2)
+	@test -n "$(PRODUCTION_MANIFEST)" || (echo "Set PRODUCTION_MANIFEST to a verified pre-upgrade manifest" >&2; exit 2)
+	$(PYTHON) Helper_Scripts/Deployment/production_deploy.py rollback --restore-artifacts --env-file "$(PRODUCTION_ENV_FILE)" --compose-file "$(PRODUCTION_COMPOSE)" --manifest "$(PRODUCTION_MANIFEST)"
+
 quickstart-prereqs:
-	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[quickstart] $(PYTHON) not found. Install Python 3.10+ and retry." && exit 1)
-	@$(PYTHON) -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' || (echo "[quickstart] Python 3.10+ is required." && exit 1)
+	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[quickstart] $(PYTHON) not found. Install Python 3.11+ and retry." && exit 1)
+	@$(PYTHON) -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' || (echo "[quickstart] Python 3.11+ is required." && exit 1)
 	@$(PYTHON) -c 'import loguru, fastapi, uvicorn, dotenv' >/dev/null 2>&1 || (echo "[quickstart] Missing Python dependencies. Run: make quickstart-install" && exit 1)
 	@if ! command -v ffmpeg >/dev/null 2>&1; then \
 		echo "[quickstart] Warning: ffmpeg not found; audio/video features will be limited."; \
@@ -112,8 +128,8 @@ quickstart-prereqs:
 	fi
 
 setup-wizard-tools:
-	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[setup-wizard-tools] $(PYTHON) not found. Install Python 3.10+ and retry." && exit 1)
-	@$(PYTHON) -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' || (echo "[setup-wizard-tools] Python 3.10+ is required." && exit 1)
+	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[setup-wizard-tools] $(PYTHON) not found. Install Python 3.11+ and retry." && exit 1)
+	@$(PYTHON) -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' || (echo "[setup-wizard-tools] Python 3.11+ is required." && exit 1)
 	@if [ ! -x "$(SETUP_VENV_PYTHON)" ]; then \
 		echo "[setup-wizard-tools] Creating lightweight wizard virtualenv at $(SETUP_VENV_DIR)"; \
 		$(PYTHON) -m venv $(SETUP_VENV_DIR); \
@@ -158,8 +174,8 @@ verify-docker-multi: setup-wizard-tools
 	@$(TLDW_SETUP) verify --profile docker-multi-postgres --env-file "$(TLDW_ENV_FILE)" --base-url "$(TLDW_BASE_URL)" --first-value
 
 install-local:
-	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[install-local] $(PYTHON) not found. Install Python 3.10+ and retry." && exit 1)
-	@$(PYTHON) -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' || (echo "[install-local] Python 3.10+ is required." && exit 1)
+	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[install-local] $(PYTHON) not found. Install Python 3.11+ and retry." && exit 1)
+	@$(PYTHON) -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' || (echo "[install-local] Python 3.11+ is required." && exit 1)
 	@if [ ! -x "$(VENV_PYTHON)" ]; then \
 		echo "[install-local] Creating virtualenv at $(VENV_DIR)"; \
 		$(PYTHON) -m venv $(VENV_DIR); \
@@ -198,8 +214,8 @@ quickstart-install: install-local
 quickstart-local: install-local setup-local-single start-local-single
 
 tooling-install:
-	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[tooling-install] $(PYTHON) not found. Install Python 3.10+ and retry." && exit 1)
-	@$(PYTHON) -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' || (echo "[tooling-install] Python 3.10+ is required." && exit 1)
+	@command -v $(PYTHON) >/dev/null 2>&1 || (echo "[tooling-install] $(PYTHON) not found. Install Python 3.11+ and retry." && exit 1)
+	@$(PYTHON) -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' || (echo "[tooling-install] Python 3.11+ is required." && exit 1)
 	@if [ ! -x "$(VENV_PYTHON)" ]; then \
 		echo "[tooling-install] Creating virtualenv at $(VENV_DIR)"; \
 		$(PYTHON) -m venv $(VENV_DIR); \

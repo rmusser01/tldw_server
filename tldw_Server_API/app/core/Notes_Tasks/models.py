@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from tldw_Server_API.app.core.Notes_Tasks.projection_markers import TaskMarker
+
 
 class _ValueTextEnum(str, Enum):
     """Python 3.10-safe string enum with value-based string conversion."""
@@ -56,6 +58,8 @@ class ParsedChecklistItem:
     warnings: list[str]
     locator: TaskLocator
     has_child_content: bool = False
+    marker: TaskMarker | None = None
+    marker_reason_code: str | None = None
 
 
 @dataclass(frozen=True)

@@ -6,7 +6,8 @@ import { ComposerToolbar } from "../ComposerToolbar"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: string) => fallback || key
+    t: (key: string, fallback?: string | { defaultValue?: string }) =>
+      typeof fallback === "string" ? fallback : fallback?.defaultValue ?? key
   })
 }))
 

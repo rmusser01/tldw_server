@@ -1,0 +1,32 @@
+{
+  "messages": 100,
+  "elapsed_seconds": 2.2261632080189884,
+  "messages_per_second": 44.92033631666553,
+  "counts": {
+    "sql_select": 1931,
+    "sql_create": 124,
+    "sql_update": 105,
+    "sql_alter": 20,
+    "sql_drop": 2,
+    "sql_insert": 1202,
+    "add_media_with_keywords": 100,
+    "read_persisted_email_content": 100,
+    "sql_delete": 300,
+    "upsert_email_message_graph": 100
+  },
+  "seconds": {
+    "sql_select": 0.6808615806512535,
+    "sql_create": 0.03189838060643524,
+    "sql_update": 0.044849753263406456,
+    "sql_alter": 0.004756374633871019,
+    "sql_drop": 0.0004510829458013177,
+    "sql_insert": 0.48110432003159076,
+    "add_media_with_keywords": 1.207244868739508,
+    "read_persisted_email_content": 0.12299712747335434,
+    "sql_delete": 0.0756837889784947,
+    "upsert_email_message_graph": 0.5997639627894387
+  },
+  "guard_root": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-postgres-5ba1zg_5",
+  "outbound_attempts": 0,
+  "model_attempts": 0
+}

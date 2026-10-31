@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import contextlib
 from dataclasses import replace
 import json
 import os
@@ -33,6 +31,8 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.types import (
     normalize_ocr_format,
 )
 from tldw_Server_API.app.core.Utils.Utils import logging
+from tldw_Server_API.app.core.Utils.coercion import env_bool
+from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.runtime_support import image_payload
 
 _LlamaCppProfile = RemoteOCRProfile | ManagedOCRProfile | CLIOCRProfile
 _LLAMACPP_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
@@ -58,10 +58,7 @@ _MANAGED_LIFECYCLE_LOCK = RLock()
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+    return env_bool(name, default=default)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -251,16 +248,7 @@ def _ocr_via_remote(image_bytes: bytes, prompt: str) -> str:
     timeout = _env_int("LLAMACPP_OCR_TIMEOUT", 60)
     use_data_url = _env_bool("LLAMACPP_OCR_USE_DATA_URL", True)
 
-    temp_path: str | None = None
-    try:
-        if use_data_url:
-            image_url = f"data:image/png;base64,{base64.b64encode(image_bytes).decode('ascii')}"
-        else:
-            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
-                handle.write(image_bytes)
-                image_url = handle.name
-                temp_path = handle.name
-
+    with image_payload(image_bytes, use_data_url=use_data_url) as content_image:
         payload = {
             "model": model,
             "messages": [
@@ -268,7 +256,7 @@ def _ocr_via_remote(image_bytes: bytes, prompt: str) -> str:
                     "role": "user",
                     "content": [
                         {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": image_url}},
+                        content_image,
                     ],
                 }
             ],
@@ -285,10 +273,6 @@ def _ocr_via_remote(image_bytes: bytes, prompt: str) -> str:
             timeout=timeout,
         )
         return _extract_message_content(response)
-    finally:
-        if temp_path:
-            with contextlib.suppress(OSError):
-                os.unlink(temp_path)
 
 
 def _resolve_managed_endpoint() -> tuple[str, int]:
@@ -384,16 +368,7 @@ def _ocr_via_managed(image_bytes: bytes, prompt: str) -> str:
     timeout = _env_int("LLAMACPP_OCR_TIMEOUT", 60)
     use_data_url = _env_bool("LLAMACPP_OCR_USE_DATA_URL", True)
 
-    temp_path: str | None = None
-    try:
-        if use_data_url:
-            image_url = f"data:image/png;base64,{base64.b64encode(image_bytes).decode('ascii')}"
-        else:
-            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
-                handle.write(image_bytes)
-                image_url = handle.name
-                temp_path = handle.name
-
+    with image_payload(image_bytes, use_data_url=use_data_url) as content_image:
         payload = {
             "model": model,
             "messages": [
@@ -401,7 +376,7 @@ def _ocr_via_managed(image_bytes: bytes, prompt: str) -> str:
                     "role": "user",
                     "content": [
                         {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": image_url}},
+                        content_image,
                     ],
                 }
             ],
@@ -418,10 +393,6 @@ def _ocr_via_managed(image_bytes: bytes, prompt: str) -> str:
             timeout=timeout,
         )
         return _extract_message_content(response)
-    finally:
-        if temp_path:
-            with contextlib.suppress(OSError):
-                os.unlink(temp_path)
 
 
 def _remote_configured() -> bool:

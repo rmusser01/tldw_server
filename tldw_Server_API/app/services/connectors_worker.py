@@ -26,6 +26,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
     create_media_database,
     get_media_repository,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.email_persisted_content import (
+    read_persisted_email_content,
+)
 from tldw_Server_API.app.core.testing import env_flag_enabled
 
 _CONNECTOR_NONCRITICAL_EXCEPTIONS = (
@@ -1708,6 +1711,7 @@ async def _process_import_job(
                             "subject": subject,
                             "date": date_header,
                             "internal_date": internal_date,
+                            "body_was_empty": not bool(body_text),
                             "from": from_text,
                             "to": to_text,
                             "cc": cc_text,
@@ -1740,10 +1744,21 @@ async def _process_import_job(
 
                     if media_id and email_native_persist_enabled:
                         try:
+                            saved_metadata, saved_body = read_persisted_email_content(
+                                mdb, int(media_id), tenant_id=str(user_id),
+                            )
+                            # Labels are live provider state, even when immutable mail content is retained.
+                            saved_metadata["labels"] = label_ids
+                            saved_metadata["email"] = dict(saved_metadata.get("email") or {})
+                            saved_metadata["email"]["labels"] = label_ids
+                            if saved_metadata["email"].get(
+                                "body_was_empty", saved_body == f"[empty content for gmail:{fid}]"
+                            ):
+                                saved_body = ""
                             mdb.upsert_email_message_graph(
                                 media_id=int(media_id),
-                                metadata=metadata_map,
-                                body_text=body_text,
+                                metadata=saved_metadata,
+                                body_text=saved_body,
                                 tenant_id=str(user_id),
                                 provider="gmail",
                                 source_key=str(source_id),

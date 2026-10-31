@@ -1,5 +1,5 @@
 import os
-import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -52,6 +52,7 @@ def test_endpoint_requeue_quarantined_sqlite(monkeypatch, tmp_path):
         assert r2.json()["affected"] >= 1
         row3 = jm.get_job(int(j["id"]))
         assert row3 and row3.get("status") == "queued"
+        assert row3.get("available_at") is None
         assert (row3.get("failure_streak_count") or 0) == 0
 
 
@@ -65,7 +66,7 @@ def test_requeue_quarantined_updates_counters_sqlite(monkeypatch, tmp_path):
 
     jm = JobManager()
     # Quarantine one job
-    j = jm.create_job(domain="chatbooks", queue="default", job_type="export", payload={}, owner_user_id="1")
+    jm.create_job(domain="chatbooks", queue="default", job_type="export", payload={}, owner_user_id="1")
     acq = jm.acquire_next_job(domain="chatbooks", queue="default", lease_seconds=1, worker_id="w")
     jm.fail_job(int(acq["id"]), error="boom", retryable=True, backoff_seconds=0, worker_id="w", lease_id=str(acq.get("lease_id")), error_code="E1")
 

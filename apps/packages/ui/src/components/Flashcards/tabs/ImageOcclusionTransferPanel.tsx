@@ -1,3 +1,4 @@
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import { Button, Card, Form, Input, Select, Space, Typography } from "antd"
 import { useQueryClient } from "@tanstack/react-query"
 import React from "react"
@@ -42,6 +43,7 @@ type InlineAlertState = {
 }
 
 interface ImageOcclusionTransferPanelProps {
+  generationScope?: ServicePromptSnapshot | null
   onTransferAction?: (summary: {
     area: "occlusion"
     status: TransferActionStatus
@@ -127,16 +129,45 @@ const normalizeCreatedItems = (value: unknown): Array<{ uuid: string }> => {
 }
 
 export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelProps> = ({
+  generationScope,
   onTransferAction
 }) => {
   const { t } = useTranslation(["option", "common"])
   const message = useAntdMessage()
   const { showUndoNotification } = useUndoNotification()
   const queryClient = useQueryClient()
-  const decksQuery = useDecksQuery()
+  const decksQuery = useDecksQuery(generationScope === undefined ? undefined : { scope: generationScope })
   const createDeckMutation = useCreateDeckMutation()
   const createBulkMutation = useCreateFlashcardsBulkMutation()
-  const decks = decksQuery.data || []
+  const [createdDeck, setCreatedDeck] = React.useState<{ scope: typeof generationScope; deck: Deck; listUpdatedAt: number } | null>(null)
+  const decks = React.useMemo(() => {
+    const listed = decksQuery.data || []
+    const created = createdDeck && createdDeck.scope === generationScope && createdDeck.listUpdatedAt === decksQuery.dataUpdatedAt ? createdDeck.deck : null
+    return created && !listed.some(deck => deck.id === created.id) ? [...listed, created] : listed
+  }, [decksQuery.data, decksQuery.dataUpdatedAt, createdDeck, generationScope])
+  const deckListReady = generationScope === undefined
+    ? !decksQuery.isLoading && !decksQuery.isError
+    : decksQuery.isSuccess
+
+  // The create acknowledgment bridges only the current list revision. A later
+  // successful catalogue is authoritative, including an empty one.
+  const latestListUpdatedAt = React.useRef(decksQuery.dataUpdatedAt)
+  latestListUpdatedAt.current = decksQuery.dataUpdatedAt
+  const mounted = React.useRef(false)
+  const currentScope = React.useRef(generationScope)
+  currentScope.current = generationScope
+  React.useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+  const isCurrentScope = React.useCallback(() => mounted.current && currentScope.current === generationScope && generationScope !== null && !generationScope?.scopeSignal.aborted, [generationScope])
+  const assertCurrentScope = React.useCallback(() => {
+    if (!isCurrentScope()) throw new DOMException("The source account changed.", "AbortError")
+  }, [isCurrentScope])
+  const requestOptions = React.useMemo(() => generationScope ? {
+    requestScope: generationScope.requestScope,
+    signal: generationScope.scopeSignal
+  } : undefined, [generationScope])
 
   const [panelState, setPanelState] = React.useState<ImageOcclusionPanelState>({
     sourceFile: null,
@@ -178,16 +209,22 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
   )
 
   React.useEffect(() => {
-    if (targetDeckId != null) return
+    if (!deckListReady || targetDeckId === NEW_DECK_OPTION_VALUE) return
+    if (typeof targetDeckId === "number" && decks.some(deck => deck.id === targetDeckId)) return
     if (decks.length > 0) {
       setTargetDeckId(decks[0].id)
       return
     }
     setTargetDeckId(NEW_DECK_OPTION_VALUE)
-  }, [decks, targetDeckId])
+  }, [deckListReady, decks, targetDeckId])
 
   const resolveTargetDeckId = React.useCallback(async (): Promise<number> => {
-    if (typeof targetDeckId === "number") return targetDeckId
+    assertCurrentScope()
+    if (!deckListReady) throw new Error("Wait for the current account's decks to load before saving.")
+    if (typeof targetDeckId === "number") {
+      if (decks.some(deck => deck.id === targetDeckId)) return targetDeckId
+      throw new Error("Choose a deck from the current account before saving.")
+    }
     if (targetDeckId === undefined && decks.length > 0) return decks[0].id
     if (targetDeckId === NEW_DECK_OPTION_VALUE || (targetDeckId == null && decks.length === 0)) {
       const name = newDeckName.trim()
@@ -207,11 +244,14 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
         )
       }
       const createdDeck = await createDeckMutation.mutateAsync({
+        ...(requestOptions ? { requestOptions } : {}),
         name,
         review_prompt_side: reviewPromptSide,
         scheduler_type: schedulerSettings.scheduler_type,
         scheduler_settings: schedulerSettings.scheduler_settings
       })
+      assertCurrentScope()
+      setCreatedDeck({ scope: generationScope, deck: createdDeck, listUpdatedAt: latestListUpdatedAt.current })
       setTargetDeckId(createdDeck.id)
       return createdDeck.id
     }
@@ -221,7 +261,7 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
         defaultValue: "Enter a deck name."
       })
     )
-  }, [createDeckMutation, decks, newDeckName, reviewPromptSide, schedulerDraft, t, targetDeckId])
+  }, [assertCurrentScope, generationScope, deckListReady, requestOptions, createDeckMutation, decks, newDeckName, reviewPromptSide, schedulerDraft, t, targetDeckId])
 
   const updateDraft = React.useCallback((id: string, patch: Partial<ImageOcclusionDraft>) => {
     setDrafts((current) =>
@@ -234,6 +274,7 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
   }, [])
 
   const handleGenerateDrafts = React.useCallback(async () => {
+    if (!isCurrentScope()) return
     const sourceFile = panelState.sourceFile
     const regions = panelState.regions
 
@@ -277,24 +318,29 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
     setInlineAlert(null)
 
     try {
+      assertCurrentScope()
       const assets = await generateImageOcclusionAssets(sourceFile, regions)
+      assertCurrentScope()
       const batchTags = appendSystemTag(parseTagInput(tagsInput), IMAGE_OCCLUSION_SYSTEM_TAG)
 
       const sourceAsset = await uploadFlashcardAsset(
-        toUploadFile(assets.source.blob, "image-occlusion-source.webp")
+        toUploadFile(assets.source.blob, "image-occlusion-source.webp"), requestOptions
       )
 
+      assertCurrentScope()
       const nextDrafts: ImageOcclusionDraft[] = []
       for (const [index, generatedRegion] of assets.regions.entries()) {
         const region = regions.find((item) => item.id === generatedRegion.regionId)
         if (!region) continue
         const promptAsset = await uploadFlashcardAsset(
-          toUploadFile(generatedRegion.promptBlob, `image-occlusion-prompt-${index + 1}.webp`)
+          toUploadFile(generatedRegion.promptBlob, `image-occlusion-prompt-${index + 1}.webp`), requestOptions
         )
+        assertCurrentScope()
         const answerAsset = await uploadFlashcardAsset(
-          toUploadFile(generatedRegion.answerBlob, `image-occlusion-answer-${index + 1}.webp`)
+          toUploadFile(generatedRegion.answerBlob, `image-occlusion-answer-${index + 1}.webp`), requestOptions
         )
 
+        assertCurrentScope()
         nextDrafts.push({
           id: `occlusion-${generatedRegion.regionId}`,
           front: `Identify the occluded region.\n\n${promptAsset.markdown_snippet}`,
@@ -318,6 +364,7 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
         message: successCopy
       })
     } catch (generationError: unknown) {
+      if (!isCurrentScope()) return
       const errorMessage =
         generationError instanceof Error
           ? generationError.message
@@ -332,11 +379,12 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
         message: errorMessage
       })
     } finally {
-      setIsGenerating(false)
+      if (isCurrentScope()) setIsGenerating(false)
     }
-  }, [message, onTransferAction, panelState, t, tagsInput])
+  }, [assertCurrentScope, isCurrentScope, requestOptions, message, onTransferAction, panelState, t, tagsInput])
 
   const handleSaveDrafts = React.useCallback(async () => {
+    if (!isCurrentScope()) return
     const validDrafts = drafts.filter((draft) => draft.front.trim() && draft.back.trim())
     if (validDrafts.length === 0) {
       message.warning(
@@ -351,6 +399,7 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
     setInlineAlert(null)
     try {
       const deckId = await resolveTargetDeckId()
+      assertCurrentScope()
       const payload: FlashcardCreate[] = validDrafts.map((draft) => ({
         deck_id: deckId,
         front: draft.front.trim(),
@@ -365,7 +414,8 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
         source_ref_id: draft.source_ref_id
       }))
 
-      const created = await createBulkMutation.mutateAsync(payload)
+      const created = await createBulkMutation.mutateAsync(requestOptions ? { cards: payload, requestOptions } : payload)
+      assertCurrentScope()
       const createdItems = normalizeCreatedItems(created.items)
 
       if (createdItems.length === 0) {
@@ -408,22 +458,28 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
           }),
           duration: OCCLUSION_UNDO_SECONDS,
           onUndo: async () => {
+            assertCurrentScope()
             let failedRollbacks = 0
             await processInChunks(createdItems, OCCLUSION_UNDO_CHUNK_SIZE, async (chunk) => {
               const results = await Promise.allSettled(
                 chunk.map(async (item) => {
-                  const latest = await getFlashcard(item.uuid)
-                  await deleteFlashcard(item.uuid, latest.version)
+                  assertCurrentScope()
+                  const latest = await getFlashcard(item.uuid, requestOptions)
+                  assertCurrentScope()
+                  await deleteFlashcard(item.uuid, latest.version, requestOptions)
+                  assertCurrentScope()
                 })
               )
               failedRollbacks += results.filter((result) => result.status === "rejected").length
             })
+            assertCurrentScope()
             await queryClient.invalidateQueries({
               predicate: (query) =>
                 Array.isArray(query.queryKey) &&
                 typeof query.queryKey[0] === "string" &&
                 query.queryKey[0].startsWith("flashcards:")
             })
+            assertCurrentScope()
             if (failedRollbacks > 0) {
               throw new Error(
                 t("option:flashcards.importUndoPartialFailure", {
@@ -435,6 +491,7 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
         })
       }
     } catch (saveError: unknown) {
+      if (!isCurrentScope()) return
       const errorMessage =
         saveError instanceof Error
           ? saveError.message
@@ -449,9 +506,12 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
         message: errorMessage
       })
     } finally {
-      setIsSaving(false)
+      if (isCurrentScope()) setIsSaving(false)
     }
   }, [
+    assertCurrentScope,
+    isCurrentScope,
+    requestOptions,
     createBulkMutation,
     drafts,
     message,
@@ -526,6 +586,7 @@ export const ImageOcclusionTransferPanel: React.FC<ImageOcclusionTransferPanelPr
       <Button
         type="primary"
         onClick={handleGenerateDrafts}
+        disabled={generationScope === null || Boolean(generationScope?.scopeSignal.aborted)}
         loading={isGenerating}
         data-testid="flashcards-occlusion-generate-button"
       >

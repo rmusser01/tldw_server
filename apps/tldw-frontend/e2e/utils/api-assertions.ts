@@ -179,7 +179,8 @@ export function assertApiSequence(
 /* ------------------------------------------------------------------ */
 
 /**
- * Starts capturing all /api/ calls. Returns a handle to stop and retrieve.
+ * Captures metadata for all /api/ calls and bodies for JSON responses only.
+ * Returns a handle to stop and retrieve; open streams do not delay capture.
  *
  * @example
  * const capture = captureAllApiCalls(page);
@@ -191,8 +192,9 @@ export function captureAllApiCalls(page: Page): {
   stop: () => Promise<CapturedApiCall[]>
 } {
   const calls: CapturedApiCall[] = []
+  const inFlight = new Set<Promise<void>>()
 
-  const handler = async (request: Request) => {
+  const captureRequest = async (request: Request): Promise<void> => {
     if (!request.url().includes("/api/")) return
     const response = await request.response()
     if (!response) return
@@ -201,7 +203,11 @@ export function captureAllApiCalls(page: Page): {
     try { requestBody = request.postDataJSON() } catch { /* no body */ }
 
     let responseBody: unknown = null
-    try { responseBody = await response.json() } catch { /* non-json */ }
+    const contentType = response.headers()["content-type"]?.split(";")[0].trim().toLowerCase()
+    // Event streams may stay open for the entire session; capture only JSON bodies.
+    if (contentType === "application/json" || contentType?.endsWith("+json")) {
+      try { responseBody = await response.json() } catch { /* invalid JSON or aborted response */ }
+    }
 
     calls.push({
       method: request.method(),
@@ -213,11 +219,18 @@ export function captureAllApiCalls(page: Page): {
     })
   }
 
-  page.on("requestfinished", handler)
+  const handler = (request: Request): void => {
+    const pending = captureRequest(request)
+    inFlight.add(pending)
+    void pending.finally(() => inFlight.delete(pending))
+  }
+
+  page.on("request", handler)
 
   return {
     stop: async () => {
-      page.removeListener("requestfinished", handler)
+      page.removeListener("request", handler)
+      await Promise.allSettled([...inFlight])
       return calls
     },
   }

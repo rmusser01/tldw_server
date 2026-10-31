@@ -97,6 +97,8 @@ export type QuickIngestSessionResultSummary = {
 
 export type QuickIngestSessionRecord = {
   id: string
+  /** Verified server/principal identity; never contains credentials. */
+  authorityKey?: string
   visibility: "visible" | "hidden"
   lifecycle: QuickIngestSessionLifecycle
   currentStep: WizardStep
@@ -129,6 +131,9 @@ const isCustomBasePreset = (
   typeof value === "string" && value in DEFAULT_PRESETS
 
 type QuickIngestSessionState = QuickIngestSessionPersistedState & {
+  authorityKey: string | null
+  generation: number
+  setAuthority: (key: string | null, retainSession?: boolean) => void
   triggerSummary: QuickIngestTriggerSummary
   createDraftSession: (
     seed?: Partial<QuickIngestSessionRecord>
@@ -476,7 +481,7 @@ const buildTriggerSummary = (
 const sanitizeSession = (
   session: QuickIngestSessionRecord | null
 ): QuickIngestSessionRecord | null => {
-  if (!session) return null
+  if (!session || typeof session.authorityKey !== "string" || !session.authorityKey.trim()) return null
 
   const createdAt =
     typeof session.createdAt === "number" && Number.isFinite(session.createdAt)
@@ -493,6 +498,7 @@ const sanitizeSession = (
 
   return {
     id: session.id || generateSessionId(),
+    authorityKey: session.authorityKey,
     visibility: session.visibility === "hidden" ? "hidden" : "visible",
     lifecycle: session.lifecycle || "draft",
     currentStep: session.currentStep || 1,
@@ -603,29 +609,56 @@ const withSessionUpdate = (
   })
 }
 
-export const createQuickIngestSessionStore = () =>
-  createWithEqualityFn<QuickIngestSessionState>()(
+export const createQuickIngestSessionStore = (storage = createSessionStorage()) => {
+  let authorityRevision = 0
+  let quarantined: QuickIngestSessionRecord | null = null
+  const guardedStorage: StateStorage = {
+    ...storage,
+    getItem: (name) => {
+      const revision = authorityRevision
+      const value = storage.getItem(name)
+      return value && typeof value === "object" && "then" in value
+        ? Promise.resolve(value).then(result => revision === authorityRevision ? result : null)
+        : value
+    },
+  }
+  return createWithEqualityFn<QuickIngestSessionState>()(
     persist(
-      (set, get) => ({
-        ...createInitialState(),
+      (set, get) => {
+        const replace = (patch: Partial<QuickIngestSessionState>) => {
+          const generation = get().generation + 1
+          set({ ...patch, generation, ...actions(generation) })
+        }
+        // Each published action belongs to one authority/session generation.
+        // An async caller retaining it cannot mutate a replacement session.
+        const actions = (generation: number) => {
+          const isCurrent = () => get().generation === generation && Boolean(get().authorityKey)
+          return {
         createDraftSession: (seed) => {
+          if (!isCurrent()) throw new Error("Verify the current account before starting Quick Ingest.")
+          authorityRevision += 1
+          quarantined = null
           const next = sanitizeSession({
             ...createEmptyQuickIngestSession(),
             ...(seed || {}),
+            authorityKey: get().authorityKey!,
             updatedAt: Date.now(),
           })
-          set({
+          replace({
             session: next,
             triggerSummary: buildTriggerSummary(next),
           })
           return next as QuickIngestSessionRecord
         },
-        upsertSession: (next) =>
+        upsertSession: (next) => {
+          if (!isCurrent()) return
           withSessionUpdate(set, (current) => {
-            const base = current || createEmptyQuickIngestSession()
+            if (!current || (next.id && next.id !== current.id)) return current
+            const base = current
             return {
               ...base,
               ...next,
+              authorityKey: base.authorityKey,
               badge: {
                 ...base.badge,
                 ...(next.badge || {}),
@@ -642,19 +675,22 @@ export const createQuickIngestSessionStore = () =>
                   : mergeTracking(base.tracking, next.tracking),
               updatedAt: Date.now(),
             }
-          }),
-        showSession: () =>
+          })
+        },
+        showSession: () => {
+          if (!isCurrent()) return
+          if (!get().session) { get().createDraftSession(); return }
           withSessionUpdate(set, (current) => {
-            if (!current) {
-              return createEmptyQuickIngestSession()
-            }
+            if (!current) return null
             return {
               ...current,
               visibility: "visible",
               updatedAt: Date.now(),
             }
-          }),
-        hideSession: () =>
+          })
+        },
+        hideSession: () => {
+          if (!isCurrent()) return
           withSessionUpdate(set, (current) => {
             if (!current) return current
             return {
@@ -662,10 +698,13 @@ export const createQuickIngestSessionStore = () =>
               visibility: "hidden",
               updatedAt: Date.now(),
             }
-          }),
-        markProcessingTracking: (tracking) =>
+          })
+        },
+        markProcessingTracking: (tracking) => {
+          if (!isCurrent()) return
           withSessionUpdate(set, (current) => {
-            const base = current || createEmptyQuickIngestSession()
+            if (!current) return null
+            const base = current
             return {
               ...base,
               lifecycle: "processing",
@@ -676,8 +715,10 @@ export const createQuickIngestSessionStore = () =>
               }),
               updatedAt: Date.now(),
             }
-          }),
-        markInterrupted: (reason) =>
+          })
+        },
+        markInterrupted: (reason) => {
+          if (!isCurrent()) return
           withSessionUpdate(set, (current) => {
             if (!current) return current
             return {
@@ -695,42 +736,65 @@ export const createQuickIngestSessionStore = () =>
               errorMessage: reason || "Quick ingest was interrupted.",
               updatedAt: Date.now(),
             }
-          }),
+          })
+        },
         clearSession: () =>
           {
-            set({
+            if (get().generation !== generation) return
+            authorityRevision += 1
+            quarantined = null
+            replace({
               session: null,
               triggerSummary: buildTriggerSummary(null),
             })
-            createSessionStorage().removeItem(STORAGE_KEY)
+            void storage.removeItem(STORAGE_KEY)
           },
         replaceWithNewDraft: (seed) => {
+          if (!isCurrent()) throw new Error("Verify the current account before starting Quick Ingest.")
           get().clearSession()
           return get().createDraftSession(seed)
         },
-      }),
+          } satisfies Omit<QuickIngestSessionState, keyof QuickIngestSessionPersistedState | "triggerSummary" | "authorityKey" | "generation" | "setAuthority">
+        }
+        return {
+          ...createInitialState(), authorityKey: null, generation: 0,
+          ...actions(0),
+          setAuthority: (key, retainSession = false) => {
+            if (key && get().authorityKey === key) return
+            if (get().authorityKey || !key) authorityRevision += 1
+            if (retainSession) quarantined = get().session || quarantined
+            else if (get().authorityKey || !key) quarantined = null
+            const session = key && quarantined?.authorityKey === key ? quarantined : null
+            if (key) quarantined = null
+            replace({ authorityKey: key, session, triggerSummary: buildTriggerSummary(session) })
+          },
+        }
+      },
       {
         name: STORAGE_KEY,
         // Baseline version so future shape changes can migrate instead of discarding
         // persisted state (see apps/FRONTEND_AUDIT.md §6 / TASK-12102).
-        version: 1,
+        version: 2,
         migrate: (persisted) => persisted as any,
-        storage: createJSONStorage(() => createSessionStorage()),
-        partialize: (state) => buildPersistedState(state.session),
+        storage: createJSONStorage(() => guardedStorage),
+        partialize: (state) => buildPersistedState(state.session || quarantined),
         merge: (persistedState, currentState) => {
           const nextSession = sanitizeSession(
             (persistedState as QuickIngestSessionPersistedState | undefined)?.session ||
               null
           )
+          quarantined = currentState.authorityKey ? null : nextSession
+          const visible = currentState.session || (nextSession?.authorityKey === currentState.authorityKey ? nextSession : null)
           return {
             ...currentState,
-            session: nextSession,
-            triggerSummary: buildTriggerSummary(nextSession),
+            session: visible,
+            triggerSummary: buildTriggerSummary(visible),
           }
         },
       }
     )
   )
+}
 
 export const useQuickIngestSessionStore = createQuickIngestSessionStore()
 

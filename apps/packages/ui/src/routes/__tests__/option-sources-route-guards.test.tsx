@@ -120,12 +120,15 @@ describe("sources option route guards", () => {
 
     renderRoute(<OptionSourcesDetail />)
 
-    expect(screen.getByText("Sources are unavailable")).toBeInTheDocument()
+    expect(
+      screen.getByText("Sources are unavailable on this server")
+    ).toBeInTheDocument()
     expect(
       screen.getByText("The connected server does not advertise ingestion source management.")
     ).toBeInTheDocument()
+    // Diagnostics redact concrete endpoints via sanitizeServerErrorMessage.
     expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
-      "/api/v1/ingestion-sources"
+      "[server-endpoint]"
     )
     expect(screen.queryByTestId("source-detail-page")).not.toBeInTheDocument()
   })

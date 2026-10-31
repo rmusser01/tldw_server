@@ -1,27 +1,31 @@
 import types
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from unittest.mock import MagicMock
 
 from tldw_Server_API.app.core.TTS.tts_exceptions import TTSGenerationError
 
 
 @pytest.mark.asyncio
-async def test_audio_health_endpoint_smoke():
+async def test_audio_health_endpoint_smoke(monkeypatch):
     # Import router lazily to avoid heavy imports at module load time
     from tldw_Server_API.app.api.v1.endpoints.audio.audio import router
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", "test-api-key-1234567890")
+    monkeypatch.setenv("SINGLE_USER_TEST_API_KEY", "test-api-key-1234567890")
+    reset_settings()
     app = FastAPI()
     app.include_router(router, prefix="")
     with TestClient(app) as client:
-        resp = client.get("/health")
-    assert resp.status_code in (200, 500)
-    if resp.status_code == 200:
-        data = resp.json()
-        assert "status" in data
-        assert "providers" in data
+        resp = client.get("/health", headers={"X-API-KEY": "test-api-key-1234567890"})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert "status" in data
+    assert "providers" in data
 
 
 @pytest.mark.asyncio
@@ -97,7 +101,7 @@ async def test_kokoro_pytorch_requires_pkg(monkeypatch):
         raising=False,
     )
 
-    from tldw_Server_API.app.core.TTS.adapters.base import TTSRequest, AudioFormat
+    from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, TTSRequest
 
     req = TTSRequest(text="hello", voice="af_bella", format=AudioFormat.WAV, stream=True)
     # Expect a generation error indicating kokoro package requirement

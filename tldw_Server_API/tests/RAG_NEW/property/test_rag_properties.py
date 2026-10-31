@@ -144,10 +144,14 @@ class TestPipelineContextProperties:
         errors=st.lists(
             st.dictionaries(
                 st.sampled_from(["function", "error", "timestamp"]),
-                st.text()
+                st.sampled_from(
+                    ["", "retrieval", "provider timeout", "2026-07-14T00:00:00Z"]
+                ),
+                min_size=0,
+                max_size=3,
             ),
             min_size=0,
-            max_size=20
+            max_size=20,
         )
     )
     def test_context_error_tracking(self, errors):

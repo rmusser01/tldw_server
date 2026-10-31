@@ -8,6 +8,7 @@ import OptionIndex from "../option-index"
 let hostedMode = false
 let hasCompletedFirstRun = false
 let phase: ConnectionPhase | null = null
+let firstRunState: { status: string } | null = null
 let currentLocation = {
   pathname: "/",
   search: "",
@@ -63,6 +64,16 @@ vi.mock("@/hooks/useComposerFocus", () => ({
   useFocusComposerOnConnect: () => undefined
 }))
 
+vi.mock("@/hooks/usePostOnboardingMediaReadiness", () => ({
+  usePostOnboardingMediaReadiness: () => ({
+    status: "idle",
+    config: null,
+    errorMessage: null,
+    recoverWithApiKey: vi.fn(),
+    retry: vi.fn()
+  })
+}))
+
 vi.mock("@/hooks/useDarkmode", () => ({
   useDarkMode: () => ({
     mode: "dark",
@@ -86,29 +97,18 @@ vi.mock("react-router-dom", () => ({
   useLocation: () => currentLocation
 }))
 
-vi.mock("@/components/Option/Onboarding/OnboardingWizard", () => ({
-  OnboardingWizard: ({
-    entryIntent,
-    returnTo,
-    onFinish
-  }: {
-    entryIntent?: string
-    returnTo?: string | null
-    onFinish?: () => void | Promise<void>
-  }) => (
-    <div>
-      <div data-testid="onboarding-wizard">Wizard</div>
-      <div data-testid="onboarding-entry-intent">{entryIntent ?? "none"}</div>
-      <div data-testid="onboarding-return-to">{returnTo ?? "none"}</div>
-      <button
-        data-testid="onboarding-finish"
-        onClick={() => {
-          void onFinish?.()
-        }}
-      >
-        Finish onboarding
-      </button>
-    </div>
+vi.mock("@/hooks/useSetupOnboarding", () => ({
+  useSetupOnboarding: () => ({
+    state: firstRunState,
+    metadata: null,
+    loading: false,
+    adoptState: vi.fn()
+  })
+}))
+
+vi.mock("@/components/Option/Onboarding/UnifiedSetupWizard", () => ({
+  UnifiedSetupWizard: () => (
+    <div data-testid="unified-setup-wizard">Unified setup wizard</div>
   )
 }))
 
@@ -127,6 +127,8 @@ describe("OptionIndex setup-flow routing", () => {
     hostedMode = false
     hasCompletedFirstRun = false
     phase = null
+    firstRunState = null
+    window.localStorage.clear()
     currentLocation = {
       pathname: "/",
       search: "",
@@ -158,10 +160,14 @@ describe("OptionIndex setup-flow routing", () => {
   })
 
   it("renders first-run onboarding in a headerless setup shell", async () => {
+    phase = ConnectionPhase.UNCONFIGURED
+    firstRunState = { status: "not_started" }
+
     render(<OptionIndex />)
 
-    expect(screen.getByRole("heading", { name: "Home Onboarding" })).toBeInTheDocument()
-    expect(await screen.findByTestId("onboarding-wizard")).toBeInTheDocument()
+    expect(
+      await screen.findByTestId("unified-setup-wizard")
+    ).toBeInTheDocument()
     expect(optionLayoutMock).toHaveBeenLastCalledWith(
       expect.objectContaining({
         hideHeader: true,
@@ -170,40 +176,31 @@ describe("OptionIndex setup-flow routing", () => {
     )
   })
 
-  it("preserves character-chat onboarding intent and return target", async () => {
-    currentLocation = {
-      pathname: "/",
-      search:
-        "?intent=character-chat&returnTo=%2Fcharacters%3Ffrom%3Dheader-select%26create%3Dtrue",
-      hash: "",
-      state: null
-    }
+  it("shows a resume-setup banner instead of the wizard for connected users", async () => {
+    hasCompletedFirstRun = true
+    phase = ConnectionPhase.CONNECTED
+    firstRunState = { status: "in_progress" }
 
     render(<OptionIndex />)
 
-    expect(
-      screen.getByRole("heading", { name: "Character Chat Onboarding" })
-    ).toBeInTheDocument()
-    expect(await screen.findByTestId("onboarding-entry-intent")).toHaveTextContent(
-      "character-chat"
-    )
-    expect(screen.getByTestId("onboarding-return-to")).toHaveTextContent(
-      "/characters?from=header-select&create=true"
-    )
+    const banner = await screen.findByTestId("resume-setup-banner")
+    expect(banner).toBeInTheDocument()
+    expect(screen.queryByTestId("unified-setup-wizard")).not.toBeInTheDocument()
+    expect(await screen.findByTestId("companion-home-shell")).toBeInTheDocument()
 
-    fireEvent.click(screen.getByTestId("onboarding-finish"))
+    fireEvent.click(screen.getByRole("button", { name: "Resume setup" }))
+    expect(navigateMock).toHaveBeenCalledWith("/setup")
 
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
     await waitFor(() => {
-      expect(markFirstRunCompleteMock).toHaveBeenCalledTimes(1)
+      expect(screen.queryByTestId("resume-setup-banner")).not.toBeInTheDocument()
     })
-    expect(navigateMock).toHaveBeenCalledWith(
-      "/characters?from=header-select&create=true"
-    )
   })
 
   it("renders companion home in the normal app shell after first run", async () => {
     hasCompletedFirstRun = true
     phase = ConnectionPhase.CONNECTED
+    firstRunState = { status: "completed" }
 
     render(<OptionIndex />)
 
@@ -214,19 +211,25 @@ describe("OptionIndex setup-flow routing", () => {
     expect(layoutProps).not.toHaveProperty("hideSidebar")
   })
 
-  it("begins onboarding after hydration when first run is unconfigured", async () => {
+  it("walls a true first run (no connection) with the wizard after hydration", async () => {
     phase = ConnectionPhase.UNCONFIGURED
+    firstRunState = null
 
     render(<OptionIndex />)
 
-    await waitFor(() => {
-      expect(beginOnboardingMock).toHaveBeenCalledTimes(1)
-    })
+    expect(
+      await screen.findByTestId("unified-setup-wizard")
+    ).toBeInTheDocument()
+    expect(checkOnceMock).toHaveBeenCalled()
+    expect(
+      screen.queryByTestId("resume-setup-banner")
+    ).not.toBeInTheDocument()
   })
 
   it("refreshes connection state for completed first-run users", async () => {
     hasCompletedFirstRun = true
     phase = ConnectionPhase.CONNECTED
+    firstRunState = { status: "completed" }
 
     render(<OptionIndex />)
 

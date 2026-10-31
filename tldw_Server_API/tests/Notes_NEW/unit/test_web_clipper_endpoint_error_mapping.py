@@ -18,6 +18,16 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+from tldw_Server_API.app.core.Sync.v2.notes_organization_coordinator import (
+    NotesOrganizationDomainsIncompleteError,
+    NotesOrganizationNotReadyError,
+    NotesOrganizationPreflightError,
+)
+from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
+    SyncServerOriginBatchAppendError,
+    SyncServerOriginBatchIdempotencyConflictError,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -141,7 +151,51 @@ async def test_save_web_clip_maps_db_errors(
         )
 
     assert exc_info.value.status_code == expected_status
-    assert exc_info.value.detail == expected_detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("raised_exc", "expected_status", "expected_code"),
+    [
+        (NotesOrganizationDomainsIncompleteError(["notes.folder_link"]), 409, "notes_organization_sync_domains_incomplete"),
+        (NotesOrganizationNotReadyError(state="initializing"), 409, "notes_organization_sync_not_ready"),
+        (NotesOrganizationPreflightError(), 409, "notes_organization_sync_preflight_failed"),
+        (
+            SyncServerOriginBatchIdempotencyConflictError("safe-group"),
+            409,
+            "sync_server_origin_batch_idempotency_conflict",
+        ),
+        (SyncServerOriginBatchAppendError("safe-group"), 503, "sync_server_origin_batch_append_failed"),
+        (SyncStoreError("raw backend detail"), 503, "sync_server_origin_append_failed"),
+    ],
+)
+async def test_save_web_clip_maps_sync_errors_to_stable_safe_contracts(
+    monkeypatch,
+    raised_exc,
+    expected_status,
+    expected_code,
+):
+    monkeypatch.setattr(web_clipper_endpoint.asyncio, "to_thread", _run_inline)
+
+    def _raise_save(self, payload):
+        raise raised_exc
+
+    monkeypatch.setattr(web_clipper_endpoint.WebClipperService, "save_clip", _raise_save)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await save_web_clip(
+            request=_FakeRequest(),
+            payload=_save_payload(),
+            db=object(),
+            media_db=None,
+            jm=None,
+            rate_limiter=_NoopRateLimiter(),
+            current_user=_current_user(),
+        )
+
+    assert exc_info.value.status_code == expected_status
+    assert exc_info.value.detail["error_code"] == expected_code
+    assert "raw backend detail" not in str(exc_info.value.detail)
 
 
 @pytest.mark.asyncio

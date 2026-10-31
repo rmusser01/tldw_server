@@ -9,7 +9,6 @@ import asyncio
 import hashlib
 import hmac
 import json
-import os
 import secrets
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -543,26 +542,9 @@ class WebhookManager:
         event: WebhookEvent
     ) -> list[dict[str, Any]]:
         """Get active webhooks for user and event."""
-        # In TEST_MODE, ignore event filtering to maximize delivery determinism
-        from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
-        if _is_test_mode():
-            with self.db_adapter.transaction():
-                rows = self.db_adapter.fetch_all("""
-                    SELECT id, url, secret, retry_count, timeout_seconds
-                    FROM webhook_registrations
-                    WHERE user_id = ? AND active = ?
-                """, (user_id, self._active_flag(True)))
-                return [
-                    {
-                        "id": row['id'],
-                        "url": row['url'],
-                        "secret": row['secret'],
-                        "retry_count": row['retry_count'],
-                        "timeout_seconds": row['timeout_seconds']
-                    }
-                    for row in rows
-                ]
-
+        # Always scoped by user_id AND event. Former TEST_MODE relaxations (drop the event
+        # filter; fall back to every user's webhooks) were gated on an env var a deployment
+        # can carry, so they could deliver to, and leak, other users' URLs and secrets.
         with self.db_adapter.transaction():
             rows = self.db_adapter.fetch_all("""
                 SELECT id, url, secret, retry_count, timeout_seconds
@@ -581,40 +563,6 @@ class WebhookManager:
                     "timeout_seconds": row['timeout_seconds']
                 })
 
-            # In TEST_MODE, if no event-specific webhooks found, fall back to all active webhooks for the user
-            from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
-            if not webhooks and _is_test_mode():
-                rows = self.db_adapter.fetch_all("""
-                    SELECT id, url, secret, retry_count, timeout_seconds
-                    FROM webhook_registrations
-                    WHERE user_id = ? AND active = ?
-                """, (user_id, self._active_flag(True)))
-                for row in rows:
-                    webhooks.append({
-                        "id": row['id'],
-                        "url": row['url'],
-                        "secret": row['secret'],
-                        "retry_count": row['retry_count'],
-                        "timeout_seconds": row['timeout_seconds']
-                    })
-
-            # Final safety: in TEST_MODE, if still no webhooks for this user, try all active webhooks
-            from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
-            if not webhooks and _is_test_mode():
-                rows = self.db_adapter.fetch_all("""
-                    SELECT id, url, secret, retry_count, timeout_seconds
-                    FROM webhook_registrations
-                    WHERE active = ?
-                """, (self._active_flag(True),))
-                for row in rows:
-                    webhooks.append({
-                        "id": row['id'],
-                        "url": row['url'],
-                        "secret": row['secret'],
-                        "retry_count": row['retry_count'],
-                        "timeout_seconds": row['timeout_seconds']
-                    })
-
             return webhooks
 
     async def _deliver_webhook(
@@ -627,10 +575,12 @@ class WebhookManager:
         url = webhook["url"]
         secret = webhook["secret"]
 
-        # In tests, skip DNS validation to keep runs deterministic.
-        from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
-        testing_env = (_is_test_mode() or "PYTEST_CURRENT_TEST" in os.environ)
-        skip_dns = testing_env
+        # Under an active pytest run, skip DNS validation to keep runs deterministic.
+        # TEST_MODE alone must not do this: it is a server env var a deployment can
+        # carry, and skipping here disables the SSRF / DNS-rebinding check.
+        from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime
+
+        skip_dns = is_explicit_pytest_runtime()
         delivery_url = url
         host_headers: dict[str, str] = {}
         if not skip_dns:

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mockBgRequest = vi.hoisted(() => vi.fn())
+const mockList = vi.hoisted(() => vi.fn())
 
 vi.mock("@/services/background-proxy", () => ({
   bgRequest: mockBgRequest
@@ -8,7 +9,7 @@ vi.mock("@/services/background-proxy", () => ({
 
 vi.mock("@/services/resource-client", () => ({
   createResourceClient: vi.fn(() => ({
-    list: vi.fn(),
+    list: mockList,
     get: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock("@/services/resource-client", () => ({
 
 import {
   generateQuiz,
+  listQuizzes,
   listQuizGenerationProfiles,
   QUIZ_GENERATION_TIMEOUT_MS
 } from "@/services/quizzes"
@@ -26,6 +28,18 @@ describe("quizzes service", () => {
   beforeEach(() => {
     mockBgRequest.mockReset()
     mockBgRequest.mockResolvedValue({ quiz: { id: 1 }, questions: [] })
+    mockList.mockReset()
+    mockList.mockResolvedValue({ items: [], count: 0 })
+  })
+
+  it("explicitly requests all activity types from the shared quiz list", async () => {
+    await listQuizzes({ limit: 20, offset: 0 })
+
+    expect(mockList).toHaveBeenCalledWith(expect.objectContaining({
+      activity_type: "all",
+      limit: 20,
+      offset: 0
+    }))
   })
 
   it("uses extended timeout by default for quiz generation", async () => {

@@ -113,8 +113,16 @@ async def test_project_websocket_resolves_database_after_authentication(monkeypa
     async def allow_auth(_websocket, **_kwargs):
         return "42"
 
-    async def get_db(user_context):
-        return fake_db
+    class ManagedDbScope:
+        def __enter__(self):
+            return fake_db
+
+        def __exit__(self, *_args):
+            return None
+
+    def get_db(user_context):
+        assert user_context["user_id"] == "42"
+        return ManagedDbScope()
 
     async def require_access(project_id, user_context, db):
         access_calls.append((project_id, user_context, db))
@@ -124,7 +132,7 @@ async def test_project_websocket_resolves_database_after_authentication(monkeypa
         return False
 
     monkeypatch.setattr(ws_mod, "_allow_prompt_studio_cookie_websocket", allow_auth)
-    monkeypatch.setattr(ws_mod, "get_prompt_studio_db", get_db)
+    monkeypatch.setattr(ws_mod, "managed_prompt_studio_db", get_db)
     monkeypatch.setattr(ws_mod, "require_project_access", require_access)
     monkeypatch.setattr(ws_mod, "_guard_prompt_studio_websocket_start", stop_before_accept)
 
@@ -143,6 +151,75 @@ async def test_project_websocket_resolves_database_after_authentication(monkeypa
             fake_db,
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_project_authorization_uses_managed_database_scope(monkeypatch):
+    websocket = _ClosingWebSocket()
+    fake_db = object()
+    lifecycle: list[str] = []
+
+    class ManagedDbScope:
+        def __enter__(self):
+            lifecycle.append("entered")
+            return fake_db
+
+        def __exit__(self, *_args):
+            lifecycle.append("released")
+
+    def managed_db(user_context):
+        assert user_context == {
+            "user_id": "owner-1",
+            "client_id": "websocket",
+        }
+        return ManagedDbScope()
+
+    async def unmanaged_db(_user_context):
+        raise AssertionError("direct WebSocket DB access bypassed the managed lease")
+
+    async def require_access(project_id, user_context, db):
+        assert lifecycle == ["entered"]
+        assert project_id == 7
+        assert user_context["user_id"] == "owner-1"
+        assert db is fake_db
+        return True
+
+    monkeypatch.setattr(
+        ws_mod,
+        "managed_prompt_studio_db",
+        managed_db,
+        raising=False,
+    )
+    monkeypatch.setattr(ws_mod, "get_prompt_studio_db", unmanaged_db)
+    monkeypatch.setattr(ws_mod, "require_project_access", require_access)
+
+    authorized = await ws_mod._authorize_prompt_studio_project(
+        websocket,
+        {"user_id": "owner-1", "client_id": "websocket"},
+        7,
+    )
+
+    assert authorized is True
+    assert lifecycle == ["entered", "released"]
+
+
+@pytest.mark.asyncio
+async def test_websocket_event_does_not_pollute_entity_sync_log():
+    db = MagicMock()
+    db.client_id = "client-1"
+    db.user_id = "owner-1"
+    connection_manager = MagicMock()
+    connection_manager.broadcast_to_client = AsyncMock()
+    broadcaster = EventBroadcaster(connection_manager, db)
+
+    await broadcaster.broadcast_event(
+        EventType.OPTIMIZATION_STARTED,
+        {"optimization_id": 7},
+        project_id=3,
+    )
+
+    db._log_sync_event.assert_not_called()
+    assert connection_manager.broadcast_to_client.await_count == 2
 
 
 @pytest.mark.asyncio

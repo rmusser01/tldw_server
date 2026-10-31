@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from contextlib import contextmanager
 
 import pytest
@@ -36,6 +37,24 @@ class _FailingDebugDb:
     @contextmanager
     def get_connection(self):
         raise RuntimeError("debug schema leaked /private/tmp/media-debug.db")
+
+
+class _StagedMediaDebugDb:
+    @contextmanager
+    def get_connection(self):
+        connection = sqlite3.connect(":memory:")
+        try:
+            connection.execute(
+                "CREATE TABLE Media (id INTEGER PRIMARY KEY, system_operation_id TEXT)"
+            )
+            connection.execute("CREATE TABLE MediaModifications (id INTEGER PRIMARY KEY)")
+            connection.executemany(
+                "INSERT INTO Media (id, system_operation_id) VALUES (?, ?)",
+                ((1, None), (2, "clone-operation")),
+            )
+            yield connection
+        finally:
+            connection.close()
 
 
 def _assert_sanitized_error_log(logger_stub: _LoggerStub) -> None:
@@ -77,3 +96,9 @@ async def test_media_debug_schema_sanitizes_failure_log(monkeypatch):
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Internal error while reading media schema."
     _assert_sanitized_error_log(logger_stub)
+
+
+async def test_media_debug_schema_excludes_operation_staged_media():
+    response = await debug_endpoint.debug_schema(db=_StagedMediaDebugDb())
+
+    assert response.media_count == 1

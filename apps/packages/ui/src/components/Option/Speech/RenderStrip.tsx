@@ -14,6 +14,8 @@ export type RenderStripState = "idle" | "generating" | "ready" | "playing" | "er
 
 export type RenderStripConfig = {
   provider: string
+  backend?: string
+  allowFallback?: boolean
   voice?: string
   model?: string
   format?: string
@@ -147,6 +149,11 @@ export const RenderStrip: React.FC<RenderStripProps> = ({
     metadata?.inputTextHash ? `Hash ${metadata.inputTextHash}` : undefined,
     formatByteSize(metadata?.audioSizeBytes),
     formatClientLatency(metadata?.clientLatencyMs),
+    metadata?.requestedBackend
+      ? `Requested ${metadata.requestedBackend}`
+      : undefined,
+    metadata?.actualBackend ? `Actual ${metadata.actualBackend}` : undefined,
+    metadata?.fallbackUsed ? "Fallback used" : undefined,
     disabled ? "Disabled for Generate All" : undefined
   ].filter((tag): tag is string => Boolean(tag))
 
@@ -296,7 +303,7 @@ export const RenderStrip: React.FC<RenderStripProps> = ({
           label={`${providerLabel} ${config.voice} audio`}
           compact
           format={config.format}
-          downloadFilename={`tts-${config.provider}-${config.voice}-${Date.now()}`}
+          downloadFilename={`tts-${config.provider}-${config.voice}-${id}`}
           forcePaused={forcePaused}
           onPlay={() => onPlay?.(id)}
           onPause={() => onPause?.(id)}

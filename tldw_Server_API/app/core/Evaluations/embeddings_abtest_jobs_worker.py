@@ -35,6 +35,7 @@ from tldw_Server_API.app.api.v1.schemas.embeddings_abtest_schemas import (
     EmbeddingsABTestConfig,
 )
 from tldw_Server_API.app.core.DB_Management.DB_Manager import get_content_backend_instance
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import resolve_user_id_value
 from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     DatabasePaths,
     get_user_media_db_path,
@@ -77,7 +78,11 @@ def _coerce_int(value: Any, default: int) -> int:
 
 def _normalize_user_id(value: Any) -> str:
     if value is None or str(value).strip() == "":
-        return str(DatabasePaths.get_single_user_id())
+        # Fail rather than silently substituting user 1. resolve_user_id_value
+        # still falls back to the fixed id in single-user mode, where that is
+        # correct; in multi-user mode a job with no owner raises instead of
+        # reading another account's evaluations.
+        value = resolve_user_id_value(None, allow_none=False)
     return canonical_evaluations_user_scope(
         value,
         fallback=DatabasePaths.get_single_user_id(),

@@ -103,6 +103,7 @@ export function useComposerInput(deps: UseComposerInputDeps) {
   // wired separately below so we can size against `messageDisplayValue`.
   const composerText = useComposerText({
     draftKey: "tldw:playgroundChatDraft",
+    tabScopedDraft: true,
     textareaRef,
     isProMode,
     maxHeight: textareaMaxHeightOverride,
@@ -118,7 +119,18 @@ export function useComposerInput(deps: UseComposerInputDeps) {
       restoreCollapseState(value, metadata as any);
     },
   });
-  const { form, textAreaFocus, draftSaved, textareaMaxHeight } = composerText;
+  const {
+    form,
+    messageRevision,
+    promptAssistMutation,
+    beginPromptAssistReset,
+    markPromptAssistAttemptSaved,
+    promptAssistSavedAttemptId,
+    textAreaFocus,
+    draftSaved,
+    draftReady,
+    textareaMaxHeight,
+  } = composerText;
 
   const setFieldValueRef = React.useRef(form.setFieldValue);
   React.useEffect(() => {
@@ -564,6 +576,11 @@ export function useComposerInput(deps: UseComposerInputDeps) {
 
   return {
     form,
+    messageRevision,
+    promptAssistMutation,
+    beginPromptAssistReset,
+    markPromptAssistAttemptSaved,
+    promptAssistSavedAttemptId,
     typing,
     // Message value helpers
     setMessageValue,
@@ -589,5 +606,6 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     wrapComposerProfile,
     // Draft persistence
     draftSaved,
+    draftReady,
   };
 }

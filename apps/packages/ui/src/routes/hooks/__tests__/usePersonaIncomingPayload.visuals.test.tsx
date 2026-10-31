@@ -7,6 +7,34 @@ import { usePersonaIncomingPayload } from "../usePersonaIncomingPayload"
 
 const noop = () => undefined
 
+it("does not publish rejected late voice replies but retains ordinary text replies", () => {
+  const appendLog = vi.fn()
+  const handlePayload = vi.fn((): boolean | void => false)
+  const { result } = renderHook(() => usePersonaIncomingPayload({
+    appendLog, liveVoiceController: { handlePayload }, personaId: "persona-1", sessionId: "session-1",
+    clearResolvedApprovalFadeTimer: noop, consumeSetupHandoffAction: noop,
+    emitSetupAnalyticsEvent: noop, personaSetupWizardCurrentStep: "test",
+    personaSetupWizardIsSetupRequired: false, resolvedApprovalSnapshot: null,
+    setApprovedStepMap: noop, setPendingApprovals: noop, setPendingPlan: noop,
+    setResolvedApprovalSnapshot: noop, setSetupTestOutcome: noop, setSetupLiveDetour: noop,
+    setSetupTestResumeNote: noop, setupLiveDetourRef: React.useRef(null),
+    setupHandoffRef: React.useRef(null), activeTabRef: React.useRef("live"),
+    setupWizardAwaitingLiveResponseRef: React.useRef(false), setupWizardLastLiveTextRef: React.useRef("")
+  }))
+  act(() => result.current({ event: "assistant_delta", text_delta: "late voice" }))
+  expect(appendLog).not.toHaveBeenCalled()
+  handlePayload.mockReturnValue(undefined)
+  act(() => result.current({ event: "assistant_delta", text_delta: "ordinary text reply" }))
+  expect(appendLog).toHaveBeenCalledWith("assistant", "ordinary text reply")
+  appendLog.mockClear()
+  act(() => result.current({ event: "partial_transcript", transcript: "blue note", text_delta: "blue note" }))
+  act(() => result.current({ event: "partial_transcript", transcript: "blue notebook", text_delta: "book" }))
+  expect(appendLog).not.toHaveBeenCalled()
+  act(() => result.current({ event: "notice", reason_code: "VOICE_TURN_COMMITTED", transcript: "blue notebook", message: "Voice turn committed." }))
+  expect(appendLog.mock.calls.filter(([kind]) => kind === "user")).toEqual([["user", "blue notebook"]])
+
+})
+
 describe("usePersonaIncomingPayload visual state overrides", () => {
   beforeEach(() => {
     vi.useFakeTimers()

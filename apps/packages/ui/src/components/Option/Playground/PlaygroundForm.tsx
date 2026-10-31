@@ -1,13 +1,17 @@
+import { watchChatAccountChanges } from "@/services/chat-account-boundary";
+import { useDefaultCharacterSelection } from "@/hooks/useDefaultCharacterSelection";
 import {
   ChatComposer,
   useComposerVariantPreference,
 } from "@/components/Chat/composer/ChatComposer";
+import { PromptAssistComposerAction } from "@/components/Chat/composer/PromptAssistComposerAction";
 import { useComposerEnabledPreference } from "@/components/Chat/composer/hooks/useComposerEnabledPreference";
 import { AudioSourcePicker } from "@/components/Common/AudioSourcePicker";
 import { BetaTag } from "@/components/Common/Beta";
 // getImageBackendConfigs, normalizeImageBackendConfig, resolveImageBackendConfig moved to usePlaygroundImageGen
 import { CharacterSelect } from "@/components/Common/CharacterSelect";
 import { ChatQueuePanel } from "@/components/Common/ChatQueuePanel";
+import { BuddyManagementButton } from "@/components/Common/PersonaBuddy/BuddyManagementButton";
 import { type KnowledgeTab } from "@/components/Knowledge";
 import type { SlashCommandItem } from "@/components/Sidepanel/Chat/SlashCommandMenu";
 import { isFirefoxTarget } from "@/config/platform";
@@ -34,6 +38,9 @@ import {
 // TldwButton moved to extracted sub-components
 import { useAntdNotification } from "@/hooks/useAntdNotification";
 import { useAudioSourceCatalog } from "@/hooks/useAudioSourceCatalog";
+import { usePlaygroundSessionStore } from "@/store/playground-session";
+import { useHomeMilestoneScope } from "@/hooks/useHomeMilestoneScope";
+import { useMilestoneStore } from "@/store/milestones";
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig";
 import { useChatMoodBadgePreference } from "@/hooks/useChatMoodBadgePreference";
 import {
@@ -54,9 +61,11 @@ import { useVoiceChatStream } from "@/hooks/useVoiceChatStream";
 // useQueuedRequests moved to usePlaygroundQueueManagement
 import type { ChatDocuments } from "@/models/ChatTypes";
 import { clearSetting, getSetting } from "@/services/settings/registry";
-import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope";
 import {
-  DISCUSS_MEDIA_PROMPT_SETTING,
+  buildChatSurfaceScopeKeyFromConfig,
+  derivePromptAssistAuthorizationRevision,
+} from "@/services/chat-surface-scope";
+import {
   DISCUSS_WATCHLIST_PROMPT_SETTING,
 } from "@/services/settings/ui-settings";
 import {
@@ -73,8 +82,11 @@ import {
 import {
   buildDiscussMediaHint,
   getMediaChatHandoffMode,
-  normalizeMediaChatHandoffPayload,
   parseMediaIdAsNumber,
+  consumeMediaChatHandoff,
+  removeMediaChatHandoff,
+  MEDIA_CHAT_HANDOFF_PARAM,
+  type MediaChatHandoffPayload,
 } from "@/services/tldw/media-chat-handoff";
 import {
   normalizeVoiceConversationRuntimeError,
@@ -106,6 +118,7 @@ import {
   assistantSelectionToCharacter,
   characterToAssistantSelection,
   getAssistantSelectionMode,
+  type AssistantSelection,
 } from "@/types/assistant-selection";
 import { ConnectionPhase, deriveConnectionUxState } from "@/types/connection";
 import { PASTED_TEXT_CHAR_LIMIT } from "@/utils/constant";
@@ -115,8 +128,6 @@ import {
 } from "@/utils/focus-return";
 // resolveApiProviderForModel moved to usePlaygroundRawPreview and usePlaygroundImageGen
 import {
-  DEFAULT_CHARACTER_STORAGE_KEY,
-  defaultCharacterStorage,
   isFreshChatState,
   resolveCharacterSelectionId,
   shouldApplyDefaultCharacter,
@@ -163,7 +174,7 @@ import {
 } from "lucide-react";
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { useStorage } from "@plasmohq/storage/hook";
 
@@ -198,6 +209,7 @@ import {
 } from "./PlaygroundSendControl";
 import { SidepanelImportedContextBanner } from "./SidepanelImportedContextBanner";
 import { PlaygroundToolsPopover } from "./PlaygroundToolsPopover";
+import { openModelSelector } from "./playground-cockpit-actions";
 import type { RolePlaySetupApplyPayload } from "./RolePlaySetupDrawer";
 import { TokenProgressBar } from "./TokenProgressBar";
 import { VoiceChatIndicator } from "./VoiceChatIndicator";
@@ -290,9 +302,7 @@ type Props = {
   characterChatModelUsabilityTitle?: string | null;
 };
 
-type DefaultCharacterPreferenceQueryResult = {
-  defaultCharacterId: string | null;
-};
+
 
 type PlaygroundQueuedSourceContext = {
   documents?: ChatDocuments;
@@ -500,6 +510,7 @@ export const PlaygroundForm = ({
   );
   const notificationApi = useAntdNotification();
   const navigate = useNavigate();
+  const location = useLocation();
   const [attachedResearchContextDraft, setAttachedResearchContextDraft] =
     React.useState<AttachedResearchContext | null>(null);
   const [followUpResearchModalOpen, setFollowUpResearchModalOpen] =
@@ -531,16 +542,20 @@ export const PlaygroundForm = ({
   );
   const {
     onSubmit,
+    regenerateLastMessage,
     messages,
     setMessages,
     selectedModel,
     selectedModelIsLoading,
+    selectedAssistant: resolvedAssistantSelection,
+    effectiveAssistantState,
     setSelectedModel,
     chatMode,
     setChatMode,
     compareMode,
     setCompareMode,
     compareFeatureEnabled,
+    compareFeatureReady,
     setCompareFeatureEnabled,
     compareSelectedModels,
     setCompareSelectedModels,
@@ -663,6 +678,24 @@ export const PlaygroundForm = ({
   const mcpSettingsReturnFocusSelectorRef = React.useRef<string | null>(null);
   const [openActorSettings, setOpenActorSettings] = React.useState(false);
   const [rolePlaySetupOpen, setRolePlaySetupOpen] = React.useState(false);
+  const rolePlaySetupReturnFocusRef = React.useRef<HTMLElement | null>(null);
+  const openRolePlaySetup = React.useCallback(() => {
+    const active = document.activeElement;
+    if (
+      active instanceof HTMLElement &&
+      active !== document.body &&
+      !active.closest('[role="dialog"]')
+    ) {
+      rolePlaySetupReturnFocusRef.current = active;
+    } else if (!rolePlaySetupReturnFocusRef.current?.isConnected) {
+      rolePlaySetupReturnFocusRef.current =
+        document.querySelector<HTMLElement>(
+          '[data-testid="composer-role-play-setup"]',
+        ) ??
+        textareaRef.current;
+    }
+    setRolePlaySetupOpen(true);
+  }, [textareaRef]);
   const [noticesExpanded, setNoticesExpanded] = React.useState(false);
   const actorSettings = useActorStore((state) => state.settings);
   const setActorSettings = useActorStore((state) => state.setSettings);
@@ -732,6 +765,23 @@ export const PlaygroundForm = ({
     config: canonicalConnectionConfig,
     loading: canonicalConnectionLoading,
   } = useCanonicalConnectionConfig();
+  const homeScope = useHomeMilestoneScope();
+  const homeScopeRef = React.useRef(homeScope);
+  homeScopeRef.current = homeScope;
+  const promptAssistBackendKey = React.useMemo(
+    () =>
+      canonicalConnectionLoading || !canonicalConnectionConfig
+        ? null
+        : buildChatSurfaceScopeKeyFromConfig(canonicalConnectionConfig),
+    [canonicalConnectionConfig, canonicalConnectionLoading],
+  );
+  const promptAssistAuthorizationRevision = React.useMemo(
+    () =>
+      canonicalConnectionLoading || !canonicalConnectionConfig
+        ? null
+        : derivePromptAssistAuthorizationRevision(canonicalConnectionConfig),
+    [canonicalConnectionConfig, canonicalConnectionLoading],
+  );
   const [ttsProvider] = useStorage("ttsProvider", "browser");
   const [tldwTtsModel] = useStorage("tldwTtsModel", "kokoro");
   const [tldwTtsVoice] = useStorage("tldwTtsVoice", "af_heart");
@@ -1009,14 +1059,21 @@ export const PlaygroundForm = ({
   );
   const [sttSegEmbeddingsProvider] = useStorage("sttSegEmbeddingsProvider", "");
   const [sttSegEmbeddingsModel] = useStorage("sttSegEmbeddingsModel", "");
-  const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null);
+  const [selectedAssistant, setSelectedAssistant, assistantMeta] = useSelectedAssistant(null);
   const selectedAssistantMode = React.useMemo(
     () => getAssistantSelectionMode(selectedAssistant),
     [selectedAssistant]
   );
-  const selectedCharacter = React.useMemo(
+  const storedCharacter = React.useMemo(
     () => assistantSelectionToCharacter<Character>(selectedAssistant),
     [selectedAssistant]
+  );
+  const activeAssistantSelection = effectiveAssistantState?.mode === "plain"
+    ? null
+    : resolvedAssistantSelection;
+  const selectedCharacter = React.useMemo(
+    () => assistantSelectionToCharacter<Character>(activeAssistantSelection),
+    [activeAssistantSelection]
   );
   const setSelectedCharacter = React.useCallback(
     async (next: Character | null) => {
@@ -1041,25 +1098,8 @@ export const PlaygroundForm = ({
       }),
     [chatSettings, selectedAssistant]
   );
-  const [defaultCharacter, setDefaultCharacter] = useStorage<Character | null>(
-    {
-      key: DEFAULT_CHARACTER_STORAGE_KEY,
-      instance: defaultCharacterStorage,
-    },
-    null,
-  );
-  const { data: defaultCharacterPreference } =
-    useQuery<DefaultCharacterPreferenceQueryResult>({
-      queryKey: ["tldw:defaultCharacterPreference:playground"],
-      queryFn: async () => {
-        await tldwClient.initialize();
-        const defaultCharacterId =
-          await tldwClient.getDefaultCharacterPreference();
-        return { defaultCharacterId };
-      },
-      staleTime: 60 * 1000,
-      throwOnError: false,
-    });
+  const [defaultCharacter, setDefaultCharacter, defaultCharacterMeta] = useDefaultCharacterSelection();
+  const defaultCharacterPreference = defaultCharacterMeta.preference;
   const [showMoodConfidence, setShowMoodConfidence] = useStorage(
     "chatShowMoodConfidence",
     Boolean(selectedCharacter?.id) && !compareMode,
@@ -1139,8 +1179,8 @@ export const PlaygroundForm = ({
     : "";
 
   const storedCharacterId = React.useMemo(
-    () => resolveCharacterSelectionId(selectedCharacter),
-    [selectedCharacter],
+    () => resolveCharacterSelectionId(storedCharacter),
+    [storedCharacter],
   );
   const localDefaultCharacterId = React.useMemo(
     () => resolveCharacterSelectionId(defaultCharacter),
@@ -1205,7 +1245,7 @@ export const PlaygroundForm = ({
   }, [isFreshChat]);
 
   React.useEffect(() => {
-    if (!effectiveDefaultCharacter || !effectiveDefaultCharacterId) return;
+    if (assistantMeta?.isLoading || defaultCharacterMeta.isLoading || !effectiveDefaultCharacter || !effectiveDefaultCharacterId) return;
     if (
       !shouldApplyDefaultCharacter({
         defaultCharacterId: effectiveDefaultCharacterId,
@@ -1220,6 +1260,8 @@ export const PlaygroundForm = ({
     defaultCharacterBootstrapAppliedRef.current = true;
     void setSelectedCharacter(effectiveDefaultCharacter);
   }, [
+    assistantMeta?.isLoading,
+    defaultCharacterMeta.isLoading,
     effectiveDefaultCharacter,
     effectiveDefaultCharacterId,
     isFreshChat,
@@ -1518,6 +1560,7 @@ export const PlaygroundForm = ({
     selectedModel,
     setSelectedModel,
     compareFeatureEnabled,
+    compareFeatureReady,
     compareMode,
     setCompareMode,
     compareSelectedModels,
@@ -1566,6 +1609,62 @@ export const PlaygroundForm = ({
     return options;
   }, [composerModels, t]);
 
+  const assistantActionMountedRef = React.useRef(true);
+  const assistantActionRevisionRef = React.useRef(0);
+  React.useEffect(() => {
+    assistantActionMountedRef.current = true;
+    return () => { assistantActionMountedRef.current = false; };
+  }, []);
+  const captureAssistantActionGuard = React.useCallback(() => {
+    const actionRevision = assistantActionRevisionRef.current;
+    const expected = useStoreMessageOption.getState();
+    const targetId = expected.serverChatId;
+    const historyId = expected.historyId;
+    const restoreRevision = usePlaygroundSessionStore.getState().restoreRevision;
+    return () => {
+      const current = useStoreMessageOption.getState();
+      return assistantActionMountedRef.current &&
+        assistantActionRevisionRef.current === actionRevision &&
+        usePlaygroundSessionStore.getState().restoreRevision === restoreRevision &&
+        current.serverChatId === targetId && current.historyId === historyId;
+    };
+  }, []);
+  const applyAssistantSelection = React.useCallback(
+    async (selection: AssistantSelection | null): Promise<boolean> => {
+      assistantActionRevisionRef.current++;
+      const activeChat = useStoreMessageOption.getState();
+      const matchesActiveChat = selection?.kind === "character"
+        ? activeChat.serverChatAssistantKind === "character" &&
+          String(activeChat.serverChatCharacterId) === selection.id
+        : selection?.kind === "persona"
+          ? activeChat.serverChatAssistantKind === "persona" &&
+            String(activeChat.serverChatAssistantId) === selection.id
+          : activeChat.serverChatMetaLoaded &&
+            (activeChat.serverChatAssistantKind === null || activeChat.serverChatAssistantKind === undefined) &&
+            (activeChat.serverChatAssistantId === null || activeChat.serverChatAssistantId === undefined) &&
+            (activeChat.serverChatCharacterId === null || activeChat.serverChatCharacterId === undefined);
+      if (
+        activeChat.serverChatId &&
+        !matchesActiveChat &&
+        getAssistantSelectionMode(selection) !== "overlay"
+      ) {
+        activeChat.setHistoryId(null, { preserveServerChatId: false });
+        activeChat.setHistory([]);
+        activeChat.setMessages([]);
+        activeChat.setServerChatCharacterId(null);
+        activeChat.setServerChatAssistantKind(null);
+        activeChat.setServerChatAssistantId(null);
+        activeChat.setServerChatPersonaMemoryMode(null);
+        activeChat.setServerChatMetaLoaded(false);
+        activeChat.setServerChatId(null);
+      }
+      const isCurrent = captureAssistantActionGuard();
+      await setSelectedAssistant(selection, { isCurrent });
+      return isCurrent();
+    },
+    [captureAssistantActionGuard, setSelectedAssistant],
+  );
+
   const promptTemplates = usePromptTemplates({
     startupTemplatesRaw,
     setStartupTemplatesRaw,
@@ -1581,8 +1680,7 @@ export const PlaygroundForm = ({
     setSelectedSystemPrompt,
     setSelectedQuickPrompt,
     setSystemPrompt,
-    setSelectedCharacter,
-    setSelectedAssistant,
+    applyAssistantSelection,
     setRagPinnedResults,
     updateChatModelSettings,
     compareModeActive,
@@ -1602,7 +1700,7 @@ export const PlaygroundForm = ({
     selectedSystemPromptRecord,
     handleSaveStartupTemplate,
     handleOpenStartupTemplatePreview,
-    handleApplyStartupTemplate,
+    applyStartupTemplateBundle,
     handleDeleteStartupTemplate,
     handleTemplateSelect,
     promptSummaryLabel,
@@ -1887,6 +1985,11 @@ export const PlaygroundForm = ({
   });
   const {
     form,
+    messageRevision,
+    promptAssistMutation,
+    beginPromptAssistReset,
+    markPromptAssistAttemptSaved,
+    promptAssistSavedAttemptId,
     typing,
     setMessageValue,
     restoreMessageValue,
@@ -1907,6 +2010,7 @@ export const PlaygroundForm = ({
     onComposerRenderProfile,
     wrapComposerProfile,
     draftSaved,
+    draftReady,
   } = composerInput;
 
   const hasDraft = (form.values.message || "").trim().length > 0;
@@ -2098,10 +2202,17 @@ export const PlaygroundForm = ({
   }, [updateChatModelSetting]);
   const setSelectedSystemPromptForComposer = React.useCallback(
     (id: string | undefined) => {
+      if (id === selectedSystemPrompt) return;
       clearBehaviorTemplateIdentity();
+      updateChatModelSetting("systemPrompt", undefined);
       setSelectedSystemPrompt(id);
     },
-    [clearBehaviorTemplateIdentity, setSelectedSystemPrompt],
+    [
+      clearBehaviorTemplateIdentity,
+      selectedSystemPrompt,
+      setSelectedSystemPrompt,
+      updateChatModelSetting,
+    ],
   );
   const setSelectedQuickPromptForComposer = React.useCallback(
     (prompt: string | undefined) => {
@@ -2111,9 +2222,8 @@ export const PlaygroundForm = ({
     [clearBehaviorTemplateIdentity, setSelectedQuickPrompt],
   );
   const clearRolePlayIdentity = React.useCallback(() => {
-    void setSelectedCharacter(null);
-    void setSelectedAssistant(null);
-  }, [setSelectedAssistant, setSelectedCharacter]);
+    void applyAssistantSelection(null);
+  }, [applyAssistantSelection]);
   const resetRolePlayGenerationStyle = React.useCallback(() => {
     const preset = getPresetByKey("balanced");
     if (!preset) return;
@@ -2122,7 +2232,9 @@ export const PlaygroundForm = ({
   const handleApplyRolePlaySetup = React.useCallback(
     async (payload: RolePlaySetupApplyPayload) => {
       if (payload.clearIdentity) {
-        clearRolePlayIdentity();
+        if (!await applyAssistantSelection(null)) return false;
+      } else if (payload.identitySelection) {
+        if (!await applyAssistantSelection(payload.identitySelection)) return false;
       }
       if (payload.clearBehavior) {
         clearPromptContext();
@@ -2137,40 +2249,61 @@ export const PlaygroundForm = ({
           updateChatModelSettings(preset.settings);
         }
       }
+      return true;
     },
     [
       clearPromptContext,
-      clearRolePlayIdentity,
       handleTemplateSelect,
       resetRolePlayGenerationStyle,
+      applyAssistantSelection,
       updateChatModelSettings,
     ],
   );
   const handleApplyStartupTemplatePreview = React.useCallback(async () => {
-    if (!startupTemplatePreview?.rolePlay) {
-      handleApplyStartupTemplate();
-      return;
-    }
+    if (!startupTemplatePreview) return;
 
-    if (startupTemplatePreview.rolePlay.source === "role-play-setup") {
-      const nextScene =
-        startupTemplatePreview.rolePlay.scene ?? createDefaultActorSettings();
-      await saveActorSettingsForChat({
-        historyId,
-        serverChatId,
-        settings: nextScene,
+    const applied = applyStartupTemplateBundle(startupTemplatePreview);
+    const destination = useStoreMessageOption.getState();
+    const targetId = destination.serverChatId;
+    const targetHistoryId = destination.historyId;
+    const isCurrent = captureAssistantActionGuard();
+    let settingsAccepted = false;
+    try {
+      if (await applied === false || !isCurrent()) return;
+      settingsAccepted = true;
+      if (startupTemplatePreview.rolePlay) {
+        const nextScene = startupTemplatePreview.rolePlay.scene ?? createDefaultActorSettings();
+        const saved = await saveActorSettingsForChat({
+          historyId: targetHistoryId,
+          serverChatId: targetId,
+          settings: nextScene,
+        });
+        if (!isCurrent()) return;
+        if (!saved) throw new Error("Scene settings save failed");
+        setActorSettings(nextScene);
+        const preview = summarizeRolePlayScene(nextScene);
+        setActorPreviewAndTokens(preview.prompt, preview.tokenCount);
+      }
+      setStartupTemplatePreview(null);
+      setModeAnnouncement(startupTemplatePreview.rolePlay
+        ? t("playground:composer.rolePlaySetupAppliedNotice", "Role-play setup applied.")
+        : t("playground:composer.startupTemplateAppliedNotice", "Startup template applied."));
+    } catch {
+      if (!isCurrent()) return;
+      notificationApi.error({
+        message: t("common:error", "Error"),
+        description: settingsAccepted && startupTemplatePreview.rolePlay
+          ? t("playground:composer.rolePlayScenePartialSaveError", "Identity and behavior were applied, but scene settings could not be saved. Your draft is still here; retry Apply.")
+          : t("playground:composer.rolePlayApplyError", "Settings could not be applied. Your draft is still here; retry Apply."),
       });
-      setActorSettings(nextScene);
-      const preview = summarizeRolePlayScene(nextScene);
-      setActorPreviewAndTokens(preview.prompt, preview.tokenCount);
     }
-
-    await handleApplySavedRolePlaySetup(startupTemplatePreview);
   }, [
-    handleApplySavedRolePlaySetup,
-    handleApplyStartupTemplate,
-    historyId,
-    serverChatId,
+    captureAssistantActionGuard,
+    applyStartupTemplateBundle,
+    notificationApi,
+    setModeAnnouncement,
+    setStartupTemplatePreview,
+    t,
     setActorPreviewAndTokens,
     setActorSettings,
     startupTemplatePreview,
@@ -2252,6 +2385,11 @@ export const PlaygroundForm = ({
       connectionStatusWarning={
         !isConnectionReady || connectionUxState === "connected_degraded"
       }
+      modelUsabilityLabel={characterChatModelUsabilityLabel ?? undefined}
+      modelUsabilityTitle={characterChatModelUsabilityTitle ?? undefined}
+      modelUsabilityWarning={Boolean(
+        characterChatModelUsability && !characterChatModelUsability.canSend
+      )}
       modelDropdownMenuItems={modelDropdownMenuItems}
       modelDropdownOpen={modelDropdownOpen}
       modelSearchQuery={modelSearchQuery}
@@ -2382,65 +2520,110 @@ export const PlaygroundForm = ({
     };
   }, [toggleCompareMode]);
 
-  const applyDiscussMediaPayload = React.useCallback(
-    (
-      rawPayload: unknown,
-      options?: {
-        clearAfterUse?: boolean;
-      },
-    ) => {
-      const payload = normalizeMediaChatHandoffPayload(rawPayload);
-      if (!payload) {
-        if (options?.clearAfterUse) {
-          void clearSetting(DISCUSS_MEDIA_PROMPT_SETTING);
-        }
-        return;
-      }
-      if (options?.clearAfterUse) {
-        void clearSetting(DISCUSS_MEDIA_PROMPT_SETTING);
-      }
+  const mediaHandoffToken = new URLSearchParams(location.search).get(MEDIA_CHAT_HANDOFF_PARAM);
+  const mediaDestinationRef = React.useRef({ token: mediaHandoffToken, owner: homeScope, draftReady, text: form.values.message });
+  mediaDestinationRef.current = { token: mediaHandoffToken, owner: homeScope, draftReady, text: form.values.message };
+  const handoffBoundaryRevision = React.useRef(0);
+  React.useLayoutEffect(() => watchChatAccountChanges(invalidated => {
+    if (invalidated) handoffBoundaryRevision.current += 1;
+  }), []);
+  const mediaLifetime = React.useRef<AbortController | null>(null);
+  React.useLayoutEffect(() => {
+    const lifetime = new AbortController();
+    mediaLifetime.current = lifetime;
+    return () => lifetime.abort();
+  }, []);
+  const handledMediaHandoffs = React.useRef(new Set<string>());
+  const [mediaHandoffConflict, setMediaHandoffConflict] = React.useState<{ token: string; owner: string } | null>(null);
+  const cleanMediaHandoffRoute = () => {
+    const params = new URLSearchParams(location.search);
+    params.delete(MEDIA_CHAT_HANDOFF_PARAM);
+    navigate({ pathname: location.pathname, search: params.toString() ? `?${params}` : "", hash: location.hash }, { replace: true });
+  };
+
+  const applyDiscussMediaPayload = (
+    payload: MediaChatHandoffPayload,
+    message: string,
+  ) => {
+      useStoreMessageOption.getState().setSelectedKnowledge(null);
       const mode = getMediaChatHandoffMode(payload);
       if (mode === "rag_media") {
         const mediaId = parseMediaIdAsNumber(payload);
-        if (mediaId != null) {
+        const mediaIds = payload.mediaIds || (mediaId == null ? [] : [mediaId]);
+        if (mediaIds.length) {
+          usePlaygroundSessionStore.getState().markSourceSelectionIntent();
           setChatMode("rag");
-          setRagMediaIds([mediaId]);
+          setRagMediaIds(mediaIds);
+          setFileRetrievalEnabled(true);
         }
       } else {
+        usePlaygroundSessionStore.getState().markSourceSelectionIntent();
         setChatMode("normal");
         setRagMediaIds(null);
       }
-      const hint = buildDiscussMediaHint(payload);
-      if (!hint) return;
-      setMessageValue(hint, { collapseLarge: true, forceCollapse: true });
+      if (!message) return;
+      setMessageValue(message, { collapseLarge: true, forceCollapse: true });
       textAreaFocus();
-    },
-    [setChatMode, setMessageValue, setRagMediaIds, textAreaFocus],
-  );
+  };
+  const applyMediaRef = React.useRef(applyDiscussMediaPayload);
+  applyMediaRef.current = applyDiscussMediaPayload;
+  const cleanMediaRouteRef = React.useRef(cleanMediaHandoffRoute);
+  cleanMediaRouteRef.current = cleanMediaHandoffRoute;
 
-  // Seed composer when a media item requests discussion (e.g., from Quick ingest or Review page)
+  const acceptMediaHandoff = React.useCallback(async (
+    token: string, owner: string, action: "auto" | "insert" | "replace", current: () => boolean = () => true,
+  ) => {
+    const boundaryRevision = handoffBoundaryRevision.current;
+    const lifetime = mediaLifetime.current;
+    if (!lifetime || lifetime.signal.aborted) return;
+    await consumeMediaChatHandoff(token, owner, payload => {
+      const destination = mediaDestinationRef.current;
+      if (boundaryRevision !== handoffBoundaryRevision.current || lifetime.signal.aborted || !current() || !destination.draftReady || destination.token !== token || destination.owner !== owner || handledMediaHandoffs.current.has(token)) return false;
+      const hint = buildDiscussMediaHint(payload);
+      if (action === "auto" && destination.text.trim()) {
+        setMediaHandoffConflict({ token, owner });
+        return false;
+      }
+      const text = action === "insert" && destination.text ? `${destination.text}\n\n${hint}` : hint;
+      handledMediaHandoffs.current.add(token);
+      applyMediaRef.current(payload, text);
+      setMediaHandoffConflict(null);
+      cleanMediaRouteRef.current();
+      return true;
+    });
+  }, []);
+
+  // Only this tab's explicit destination token may deliver source text. Legacy
+  // shared pending settings and unaddressed window events are never consumed.
   React.useEffect(() => {
+    if (!mediaHandoffToken || !homeScope || !draftReady || handledMediaHandoffs.current.has(mediaHandoffToken)) return;
     let cancelled = false;
-    void (async () => {
-      const payload = await getSetting(DISCUSS_MEDIA_PROMPT_SETTING);
-      if (cancelled || !payload) return;
-      applyDiscussMediaPayload(payload, { clearAfterUse: true });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [applyDiscussMediaPayload]);
+    void acceptMediaHandoff(mediaHandoffToken, homeScope, "auto", () => !cancelled);
+    return () => { cancelled = true; };
+  }, [acceptMediaHandoff, mediaHandoffToken, homeScope, draftReady]);
 
-  React.useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent).detail;
-      applyDiscussMediaPayload(detail);
-    };
-    window.addEventListener("tldw:discuss-media", handler as any);
-    return () => {
-      window.removeEventListener("tldw:discuss-media", handler as any);
-    };
-  }, [applyDiscussMediaPayload]);
+  const previousMediaOwner = React.useRef(homeScope);
+  React.useLayoutEffect(() => {
+    const previous = previousMediaOwner.current;
+    previousMediaOwner.current = homeScope;
+    if (previous && previous !== homeScope) {
+      setMediaHandoffConflict(null);
+      if (mediaHandoffToken) {
+        handledMediaHandoffs.current.add(mediaHandoffToken);
+        // Drop this destination request without clearing another owner’s token.
+        // Expiration handles a transfer abandoned across an account boundary.
+        cleanMediaRouteRef.current();
+      }
+    }
+  }, [homeScope, mediaHandoffToken]);
+
+  const cancelMediaHandoff = () => {
+    if (!mediaHandoffConflict) return;
+    handledMediaHandoffs.current.add(mediaHandoffConflict.token);
+    void removeMediaChatHandoff(mediaHandoffConflict.token).catch(() => undefined);
+    setMediaHandoffConflict(null);
+    cleanMediaHandoffRoute();
+  };
 
   const applyDiscussWatchlistPayload = React.useCallback(
     (rawPayload: unknown, options?: { clearAfterUse?: boolean }) => {
@@ -2869,10 +3052,14 @@ export const PlaygroundForm = ({
     mutationFn: onSubmit,
     onMutate: () => ({
       errorKeyToDismiss: chatErrorBanner?.key ?? null,
+      ownerScope: homeScope,
     }),
     onSuccess: (data, _variables, context) => {
       const result = normalizeChatSubmitResult(data);
       if (isChatSubmitSuccess(result)) {
+        if (context?.ownerScope) {
+          useMilestoneStore.getState().markScopedMilestone(context.ownerScope, "first_chat");
+        }
         dismissChatErrorAfterSuccessfulSubmit(context?.errorKeyToDismiss ?? null);
         void trackOnboardingChatSubmitSuccess(
           typeof window !== "undefined" ? window.location.pathname : "/chat",
@@ -2889,33 +3076,8 @@ export const PlaygroundForm = ({
   });
 
   const handleRetryChatError = React.useCallback(() => {
-    let lastUserMessage: any = null
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const entry = messages[i]
-      const role = typeof entry?.role === "string" ? entry.role.toLowerCase() : ""
-      if (role === "user" || entry?.isBot === false) {
-        lastUserMessage = entry
-        break
-      }
-    }
-    const retryText =
-      typeof lastUserMessage?.message === "string"
-        ? lastUserMessage.message
-        : typeof lastUserMessage?.content === "string"
-          ? lastUserMessage.content
-          : ""
-    const trimmed = retryText.trim()
-    if (!trimmed) {
-      textAreaFocus()
-      return
-    }
-
-    void sendMessage({
-      message: trimmed,
-      image: "",
-      docs: [],
-    })
-  }, [messages, sendMessage, textAreaFocus])
+    void regenerateLastMessage().catch(() => textAreaFocus())
+  }, [regenerateLastMessage, textAreaFocus])
 
   const handleEditChatProvider = React.useCallback(() => {
     setOpenModelSettings(true)
@@ -3052,6 +3214,10 @@ export const PlaygroundForm = ({
     clearSelectedDocuments,
     clearUploadedFiles,
     textAreaFocus,
+    onEnqueueSuccess: () => {
+      const attemptId = beginPromptAssistReset();
+      markPromptAssistAttemptSaved(attemptId);
+    },
     notificationApi,
     t,
   });
@@ -3151,6 +3317,8 @@ export const PlaygroundForm = ({
 
   const { submitForm, submitFormRef, isPreparingDocuments } = usePlaygroundSubmit({
     form,
+    beginPromptAssistReset,
+    markPromptAssistAttemptSaved,
     isSending,
     isConnectionReady,
     webSearch,
@@ -3249,6 +3417,8 @@ export const PlaygroundForm = ({
     setServerChatAssistantId,
     setServerChatPersonaMemoryMode,
     history,
+    messages,
+    setMessages,
     clearChat,
     selectedCharacter,
     selectedAssistantMode,
@@ -3474,6 +3644,7 @@ export const PlaygroundForm = ({
     };
   }, [
     compareFeatureEnabled,
+    compareFeatureReady,
     compareSelectedModels.length,
     form,
     notificationApi,
@@ -4159,13 +4330,13 @@ export const PlaygroundForm = ({
     : 0;
   const rolePlayIdentity = React.useMemo<RolePlayIdentity | null>(() => {
     if (
-      selectedAssistant?.kind === "character" ||
-      selectedAssistant?.kind === "persona"
+      activeAssistantSelection?.kind === "character" ||
+      activeAssistantSelection?.kind === "persona"
     ) {
       return {
-        kind: selectedAssistant.kind,
-        id: selectedAssistant.id,
-        name: selectedAssistant.name,
+        kind: activeAssistantSelection.kind,
+        id: activeAssistantSelection.id,
+        name: activeAssistantSelection.name,
       };
     }
     if (selectedCharacter?.id || selectedCharacter?.name) {
@@ -4179,7 +4350,7 @@ export const PlaygroundForm = ({
       };
     }
     return null;
-  }, [selectedAssistant, selectedCharacter]);
+  }, [activeAssistantSelection, selectedCharacter]);
   const rolePlayState = React.useMemo(
     () =>
       deriveRolePlayState({
@@ -4281,7 +4452,7 @@ export const PlaygroundForm = ({
     onClearRolePlayBehavior: clearPromptContext,
     onResetRolePlayGenerationStyle: resetRolePlayGenerationStyle,
     onDisableCompareMode: compareModeActive ? toggleCompareMode : undefined,
-    onOpenRolePlaySetup: () => setRolePlaySetupOpen(true),
+    onOpenRolePlaySetup: openRolePlaySetup,
     t,
   });
 
@@ -4831,6 +5002,36 @@ export const PlaygroundForm = ({
       t={t}
     />
   );
+  const promptAssistAction = (
+    <PromptAssistComposerAction
+      form={form}
+      messageRevision={messageRevision}
+      promptAssistMutation={promptAssistMutation}
+      promptAssistSavedAttemptId={promptAssistSavedAttemptId}
+      modelSelection={selectedModel?.trim()
+        ? {
+            selected_model: selectedModel,
+            provider_hint: currentChatModelSettings.apiProvider,
+          }
+        : null}
+      promptAssistContextKey={serverChatId
+        ? `server:${serverChatId}`
+        : historyId
+          ? `local:${historyId}`
+          : "local:playground-draft"}
+      promptAssistBackendKey={promptAssistBackendKey}
+      promptAssistAuthorizationRevision={promptAssistAuthorizationRevision}
+      sending={isSending}
+      surfaceOpen
+      narrow={isMobileViewport}
+      onSelectModel={() =>
+        openModelSelector({
+          returnFocusSelector: "[aria-label='Improve prompt']",
+        })
+      }
+      onReturnFocus={textAreaFocus}
+    />
+  );
 
   const startupTemplatePromptResolution = startupTemplatePreview
     ? resolveStartupTemplatePrompt(startupTemplatePreview, promptLibrary)
@@ -5032,6 +5233,16 @@ export const PlaygroundForm = ({
                     />,
                   )
                 : null}
+              {mediaHandoffConflict ? (
+                <div role="status" aria-label={t("mediaHandoff.conflictLabel", "Media handoff conflict")} className="mb-2 rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-text">
+                  <p>{t("mediaHandoff.conflict", "Your composer already has a draft. Insert the media source, replace your draft, or cancel the import.")}</p>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" className="min-h-7 rounded border border-border px-3 py-1" onClick={() => { void acceptMediaHandoff(mediaHandoffConflict.token, mediaHandoffConflict.owner, "insert"); }}>{t("mediaHandoff.insert", "Insert media source")}</button>
+                    <button type="button" className="min-h-7 rounded border border-border px-3 py-1" onClick={() => { void acceptMediaHandoff(mediaHandoffConflict.token, mediaHandoffConflict.owner, "replace"); }}>{t("mediaHandoff.replace", "Replace current draft")}</button>
+                    <button type="button" className="min-h-7 rounded border border-border px-3 py-1" onClick={cancelMediaHandoff}>{t("mediaHandoff.cancel", "Cancel import")}</button>
+                  </div>
+                </div>
+              ) : null}
               {sidepanelHandoffConflict ? (
                 <div
                   role="status"
@@ -5517,7 +5728,10 @@ export const PlaygroundForm = ({
                         onAddFile={handleKnowledgeAddFile}
                         onRemoveFile={removeUploadedFile}
                         onClearFiles={clearUploadedFiles}
-                        onFileRetrievalChange={setFileRetrievalEnabled}
+                        onFileRetrievalChange={(enabled) => {
+                          usePlaygroundSessionStore.getState().markSourceSelectionIntent();
+                          setFileRetrievalEnabled(enabled);
+                        }}
                         wrapComposerProfile={wrapComposerProfile}
                         t={t}
                       />
@@ -5675,10 +5889,11 @@ export const PlaygroundForm = ({
                                 data-testid="composer-inline-send-control"
                                 className={
                                   isMobileViewport
-                                    ? "col-span-2 flex shrink-0 justify-end self-end"
-                                    : "flex shrink-0 items-end self-end"
+                                    ? "col-span-2 flex shrink-0 items-end justify-end gap-2 self-end"
+                                    : "flex shrink-0 items-end gap-2 self-end"
                                 }
                               >
+                                {promptAssistAction}
                                 {sendControl}
                               </div>
                             </div>
@@ -5960,6 +6175,9 @@ export const PlaygroundForm = ({
                                 onDictationToggle={handleDictationToggle}
                                 onTemplateSelect={handleTemplateSelect}
                                 selectedModel={selectedModel}
+                                currentProvider={
+                                  currentChatModelSettings.apiProvider
+                                }
                                 resolvedProviderKey={resolvedProviderKey}
                                 messages={messages}
                                 selectedDocumentsCount={
@@ -5967,6 +6185,17 @@ export const PlaygroundForm = ({
                                 }
                                 uploadedFilesCount={uploadedFiles.length}
                                 serverChatId={serverChatId}
+                                promptAssistContextKey={
+                                  serverChatId
+                                    ? `server:${serverChatId}`
+                                    : historyId
+                                      ? `local:${historyId}`
+                                      : "local:playground-draft"
+                                }
+                                promptAssistBackendKey={promptAssistBackendKey}
+                                promptAssistAuthorizationRevision={
+                                  promptAssistAuthorizationRevision
+                                }
                                 showServerPersistenceHint={
                                   showServerPersistenceHint
                                 }
@@ -5976,8 +6205,7 @@ export const PlaygroundForm = ({
                                 onFocusConnectionCard={focusConnectionCard}
                                 contextItems={contextItems}
                                 rolePlayActions={{
-                                  onOpenRolePlaySetup: () =>
-                                    setRolePlaySetupOpen(true),
+                                  onOpenRolePlaySetup: openRolePlaySetup,
                                 }}
                               />,
                             )}
@@ -5986,7 +6214,24 @@ export const PlaygroundForm = ({
                         const composerToolbarSlot =
                           suppressComposerToolbarForMobileCockpit
                             ? (
-                                <div className="hidden">{composerToolbarNode}</div>
+                                <>
+                                  <div
+                                    className="flex min-w-0 justify-end"
+                                    onClickCapture={(event) => {
+                                      rolePlaySetupReturnFocusRef.current =
+                                        event.currentTarget.querySelector("button");
+                                    }}
+                                  >
+                                    <BuddyManagementButton
+                                      target={serverChatId ? {
+                                        scope_type: "conversation",
+                                        scope_id: serverChatId,
+                                      } : null}
+                                      onConversationSettings={openRolePlaySetup}
+                                    />
+                                  </div>
+                                  <div className="hidden">{composerToolbarNode}</div>
+                                </>
                               )
                             : composerToolbarNode;
 
@@ -6412,6 +6657,7 @@ export const PlaygroundForm = ({
           <React.Suspense fallback={null}>
             <LazyRolePlaySetupDrawer
               open={rolePlaySetupOpen}
+              returnFocusRef={rolePlaySetupReturnFocusRef}
               beforeState={rolePlayState}
               historyId={historyId}
               serverChatId={serverChatId}
@@ -6430,6 +6676,7 @@ export const PlaygroundForm = ({
               savedSetupNameFallback={startupTemplateNameFallback}
               onClose={() => setRolePlaySetupOpen(false)}
               onApply={handleApplyRolePlaySetup}
+              captureApplyGuard={captureAssistantActionGuard}
               onSavedSetupDraftNameChange={setStartupTemplateDraftName}
               onSaveRolePlaySetup={handleSaveRolePlaySetup}
               onPreviewSavedSetup={handleOpenStartupTemplatePreview}

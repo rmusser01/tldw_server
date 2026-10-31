@@ -10,6 +10,7 @@
   - Shared outbound-policy mode: one `compat|strict` rollout surface for scrape and websearch data-plane callers, with async scrape paths using robots-aware policy and provider paths staying on raw egress-only policy.
   - Browser-like headers and UA profiles for provider and site requests.
   - Egress/SSRF policy checks for all outbound HTTP requests.
+  - Governed advisory preflight through the canonical `Web_Scraping.preflight` package.
 - Inputs/Outputs:
   - Scrape result: Dict including `url`, `title`, `author`, `date`, `content`, `extraction_successful`, and `error` on failure.
   - Optional preflight metadata (when enabled): `preflight_analysis` with `analysis` results and `advice` (backend/method/notes).
@@ -32,7 +33,7 @@
   - Article scraping (standalone): `scrape_article` — tldw_Server_API/app/core/Web_Scraping/Article_Extractor_Lib.py:335
   - Enhanced scraper: `EnhancedWebScraper` with `RateLimiter`, `CookieManager`, `ContentDeduplicator`, and `ScrapingJobQueue` — tldw_Server_API/app/core/Web_Scraping/enhanced_web_scraping.py:1, :580
   - Service integration: `WebScrapingService` — tldw_Server_API/app/services/enhanced_web_scraping_service.py:1
-  - Scraper analyzers (advisory preflight): robots/tls/js/captcha/behavioral/rate-limit/waf/fingerprint/integrity — tldw_Server_API/app/core/Web_Scraping/scraper_analyzers/runner.py:25
+  - Governed preflight: package-level facade plus robots/tls/js/captcha/behavioral/rate-limit/waf/fingerprint/integrity analyzers — tldw_Server_API/app/core/Web_Scraping/preflight/:1
 - Provider Adapters (selected)
   - Google: `search_web_google` — tldw_Server_API/app/core/Web_Scraping/WebSearch_APIs.py:1542; `parse_google_results` — :1713
   - Brave: `search_web_brave` — :1199; `parse_brave_results` — :1269
@@ -46,25 +47,32 @@
 - Dependencies
   - HTTP: `aiohttp`, `httpx`
   - Parsing/Extraction: `BeautifulSoup`, `trafilatura`, `lxml`
-  - Browser automation (optional): `playwright`
+  - Browser automation (optional): `playwright>=1.48.0`
   - LLM/relevance/aggregation: `chat_orchestrator` and `LLM_Calls.Summarization_General_Lib.analyze`
 - Configuration
   - Web search: Provider keys/URLs under `search_engines` in `Config_Files/config.txt` (e.g., `google_search_api_key`, `google_search_engine_id`, `brave_search_api_key`, `searx_search_api_url`, `serper_search_api_key`, `tavily_search_api_key`).
   - Relevance/aggregation tuning in `Web-Scraping` config section (e.g., `relevance_llm_timeout_s`, `relevance_jitter_ms`).
   - Enhanced scraper (section `web_scraper`): `max_rps`, `max_rpm`, `max_rph`, `connector_limit`, `connector_limit_per_host`, `web_scraper_respect_robots`, `web_outbound_policy_mode`, `web_crawl_max_pages`, `web_crawl_include_external`, `web_crawl_keywords`, `web_crawl_enable_keyword_scorer`, `web_crawl_allowed_domains`, `web_crawl_blocked_domains`.
-  - Preflight analyzers (optional): `web_scraper_preflight_analyzers`, `web_scraper_preflight_timeout_s`, `web_scraper_preflight_scan_depth`, `web_scraper_preflight_find_all_waf`, `web_scraper_preflight_impersonate`, `web_scraper_preflight_include_results`.
+  - Preflight analyzers (optional): `web_scraper_preflight_analyzers`, `web_scraper_preflight_timeout_s`, `web_scraper_preflight_scan_depth`, `web_scraper_preflight_find_all_waf`, `web_scraper_preflight_impersonate`, `web_scraper_preflight_include_results`, `web_scraper_preflight_enable_external_tools`, and `web_scraper_playwright_no_sandbox`.
+  - When `web_scraper_preflight_enable_external_tools` is absent, Phase 3 preserves the legacy enabled-when-installed `wafw00f` behavior and emits one process-level compatibility warning and metric if that fallback is used. Explicit true or false is authoritative, and malformed explicit values disable the tool with a sanitized warning. Phase 7 changes the absent-setting default to disabled after the migration period.
 - Concurrency & Performance
   - Web search Phase 1 is executed in a thread pool to avoid blocking the event loop — tldw_Server_API/app/api/v1/endpoints/research.py:321
   - Enhanced scraper maintains a bounded async worker pool with rate limiting and per-host connection caps — tldw_Server_API/app/core/Web_Scraping/enhanced_web_scraping.py:420
 - Error Handling
   - Provider adapters and parsers populate `processing_error` on failures; endpoint wraps unexpected exceptions as HTTP 500.
   - Aggregation returns a safe fallback when the final-answer LLM is not configured.
+  - Primary scrape admission remains blocking: a denied target or primary policy-evaluation failure prevents analyzer and extraction network work.
+  - Preflight remains advisory and fail-open for extraction. Analyzer policy denials, timeouts, unavailable dependencies, budget exhaustion, and unexpected analyzer errors affect only that analyzer result. An overall preflight timeout or orchestration failure preserves the caller's original route and omits advice and public preflight metadata.
+  - `web_scraper_preflight_include_results` controls the optional public `preflight_analysis` payload. Disabled inclusion, disabled preflight, or overall preflight failure produces no payload.
 - Security
   - Raw host/IP/port enforcement still lives in `app/core/Security/egress.py`.
   - Scrape and websearch callers now route through the shared helper in `app/core/Web_Scraping/outbound_policy.py`.
   - `compat` keeps the legacy fail-open behavior for scrape-path robots fetch failures; `strict` blocks scrape-path requests when robots cannot be fetched.
   - Provider API calls remain raw egress-only in this wave; robots checks are not synthesized for provider endpoints.
   - Browser-like headers help reduce bot detection; robots.txt honoring is configurable.
+  - Analyzer browser probes require Playwright 1.48 or newer so HTTP and WebSocket routes can be installed before page creation. Browser contexts block service workers because service-worker-owned requests cannot be reliably intercepted otherwise; an older or incomplete runtime is reported as unavailable instead of using an ungoverned fallback.
+  - Browser routing enforces policy at the URL level but does not pin DNS resolution to the address approved by the guard. Full browser DNS-rebinding protection requires a governed proxy or pinned transport and is outside Phase 3.
+  - External tools are opaque active probes. Preflight governs whether `wafw00f` starts, its approved launch target, budget, timeout, cancellation, and exposed output, but cannot pin the tool's DNS resolution or inspect and policy-check its internal redirects and requests.
 - Observability
   - Scrape metrics are emitted via Metrics Manager (`scrape_fetch_total`, `scrape_fetch_latency_seconds`, `scrape_content_length_bytes`, `scrape_playwright_fallback_total`, `scrape_blocked_by_robots_total`) with backend/outcome labels.
   - JS-required heuristics (noscript prompts, anti-bot interstitials, SPA shells, domain hints) trigger early Playwright fallback when content is thin.
@@ -88,6 +96,8 @@
   - `WebSearch_APIs.py`: Web search orchestration, provider adapters, relevance/aggregation helpers.
   - `Article_Extractor_Lib.py`: Direct article scraping and HTML→text/markdown utilities.
   - `enhanced_web_scraping.py`: Queue-based scraper (rate limits, cookies, dedup, Playwright/Trafi­latura/BS4).
+  - `preflight/`: Canonical owner of preflight options, facade, analyzers, scoring, recommendations, and governed probe adapters. Application consumers import the package-level facade only.
+  - `scraper_analyzers/`: Temporary Phase 7 compatibility shims with explicit re-exports and no runtime logic. Legacy imports remain functional during migration and are deprecated without runtime deprecation warnings.
   - `ua_profiles.py`: UA/header profiles; helper for browser-like headers.
   - `filters.py`, `scoring.py`, `url_utils.py`, `scraper_router.py`: Crawl heuristics, filters, and routing utilities.
 - Extension Points

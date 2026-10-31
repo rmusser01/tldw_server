@@ -12,6 +12,9 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
+from tldw_Server_API.app.core.stt_observability_context import (
+    get_opaque_stt_endpoint_id,
+)
 from tldw_Server_API.app.core.testing import is_truthy
 
 DEFAULT_ALLOWED_SCHEMES = {"http", "https"}
@@ -34,6 +37,7 @@ DNS_RESOLVER_SLOT_WAIT_SECONDS_ENV = "WORKFLOWS_EGRESS_DNS_SLOT_WAIT_SECONDS"
 
 _DNS_RESOLVER_MAX_OUTSTANDING_DEFAULT = 64
 _DNS_RESOLVER_SLOT_WAIT_SECONDS_DEFAULT = 0.05
+_SENSITIVE_LOG_HOST = "sensitive_endpoint"
 
 
 def _log_invalid_dns_config(name: str, raw: object, default: int | float, reason: str) -> None:
@@ -281,17 +285,44 @@ def _dns_slot_wait_seconds(timeout_s: float) -> float:
     return min(configured, timeout_s)
 
 
-def _release_dns_resolver_slot(host: str, reason: str) -> None:
+def _dns_log_fields(
+    host: str,
+    *,
+    sensitive_observability: bool = False,
+    endpoint_id: str | None = None,
+    **fields: object,
+) -> dict[str, object]:
+    """Return a redacted, opaque, or legacy host identity for DNS logs."""
+    opaque_id = endpoint_id or get_opaque_stt_endpoint_id()
+    if opaque_id is not None:
+        identity = {"endpoint_id": opaque_id}
+    elif sensitive_observability:
+        identity = {"host": _SENSITIVE_LOG_HOST}
+    else:
+        identity = {"host": host}
+    identity.update(fields)
+    return identity
+
+
+def _release_dns_resolver_slot(
+    host: str,
+    reason: str,
+    *,
+    sensitive_observability: bool = False,
+    endpoint_id: str | None = None,
+) -> None:
     """Release one DNS resolver slot and log impossible double-release cases."""
     try:
         _DNS_RESOLVER_SLOTS.release()
     except ValueError as exc:
-        logger.bind(
-            host=host,
+        logger.bind(**_dns_log_fields(
+            host,
+            sensitive_observability=sensitive_observability,
+            endpoint_id=endpoint_id,
             reason=reason,
             exception_type=type(exc).__name__,
             event="dns_resolver_slot_release_failed",
-        ).debug("DNS resolver slot release failed")
+        )).debug("DNS resolver slot release failed")
 
 
 def _remaining_dns_budget(start_time: float, timeout_s: float) -> float:
@@ -299,14 +330,22 @@ def _remaining_dns_budget(start_time: float, timeout_s: float) -> float:
     return max(0.0, timeout_s - (time.monotonic() - start_time))
 
 
-def _getaddrinfo_with_timeout(host: str, timeout_s: float = 2.0) -> list[tuple]:
+def _getaddrinfo_with_timeout(
+    host: str,
+    timeout_s: float = 2.0,
+    *,
+    sensitive_observability: bool = False,
+) -> list[tuple]:
     """Resolve a host with fail-closed timeout and DNS worker saturation guards."""
+    endpoint_id = get_opaque_stt_endpoint_id()
     if not math.isfinite(timeout_s) or timeout_s <= 0:
-        logger.bind(
-            host=host,
+        logger.bind(**_dns_log_fields(
+            host,
+            sensitive_observability=sensitive_observability,
+            endpoint_id=endpoint_id,
             timeout_s=timeout_s,
             event="dns_resolver_invalid_timeout",
-        ).warning("Invalid DNS resolver timeout; failing closed")
+        )).warning("Invalid DNS resolver timeout; failing closed")
         return []
 
     start_time = time.monotonic()
@@ -317,28 +356,37 @@ def _getaddrinfo_with_timeout(host: str, timeout_s: float = 2.0) -> list[tuple]:
         else _DNS_RESOLVER_SLOTS.acquire(timeout=slot_wait_s)
     )
     if not acquired:
-        logger.bind(
-            host=host,
+        logger.bind(**_dns_log_fields(
+            host,
+            sensitive_observability=sensitive_observability,
+            endpoint_id=endpoint_id,
             slot_wait_s=slot_wait_s,
             elapsed_s=time.monotonic() - start_time,
             timeout_s=timeout_s,
             event="dns_resolver_slots_exhausted",
-        ).warning("DNS resolver slots exhausted; failing closed")
+        )).warning("DNS resolver slots exhausted; failing closed")
         return []
 
     remaining_s = _remaining_dns_budget(start_time, timeout_s)
     if remaining_s <= 0:
-        _release_dns_resolver_slot(host, "timeout budget exhausted before worker start")
-        logger.bind(
-            host=host,
+        _release_dns_resolver_slot(
+            host,
+            "timeout budget exhausted before worker start",
+            sensitive_observability=sensitive_observability,
+            endpoint_id=endpoint_id,
+        )
+        logger.bind(**_dns_log_fields(
+            host,
+            sensitive_observability=sensitive_observability,
+            endpoint_id=endpoint_id,
             elapsed_s=time.monotonic() - start_time,
             timeout_s=timeout_s,
             event="dns_resolver_timeout_budget_exhausted",
-        ).warning("DNS resolver timeout budget exhausted before worker start; failing closed")
+        )).warning("DNS resolver timeout budget exhausted before worker start; failing closed")
         return []
 
     result: list[list[tuple]] = []
-    error: list[BaseException] = []
+    error_types: list[str] = []
 
     def _worker() -> None:
         """Run the blocking OS resolver and always release the resolver slot."""
@@ -351,55 +399,79 @@ def _getaddrinfo_with_timeout(host: str, timeout_s: float = 2.0) -> list[tuple]:
                     type=socket.SOCK_STREAM,
                 )
             )
-        except (OSError, ValueError) as exc:
-            error.append(exc)
+        except Exception as exc:  # noqa: BLE001 - contain resolver worker failures
+            error_types.append(type(exc).__name__)
         finally:
-            _release_dns_resolver_slot(host, "worker completion")
+            _release_dns_resolver_slot(
+                host,
+                "worker completion",
+                sensitive_observability=sensitive_observability,
+                endpoint_id=endpoint_id,
+            )
 
     thread = threading.Thread(target=_worker, daemon=True)
     try:
         thread.start()
     except RuntimeError as exc:
-        _release_dns_resolver_slot(host, "thread start failure")
-        logger.bind(
-            host=host,
+        _release_dns_resolver_slot(
+            host,
+            "thread start failure",
+            sensitive_observability=sensitive_observability,
+            endpoint_id=endpoint_id,
+        )
+        bound_logger = logger.bind(**_dns_log_fields(
+            host,
+            sensitive_observability=sensitive_observability,
+            endpoint_id=endpoint_id,
             exception_type=type(exc).__name__,
             event="dns_resolver_worker_start_failed",
-        ).opt(
-            exception=exc
-        ).warning("DNS resolver worker could not start; failing closed")
+        ))
+        if sensitive_observability or endpoint_id is not None:
+            bound_logger.warning("DNS resolver worker could not start; failing closed")
+        else:
+            bound_logger.opt(exception=exc).warning("DNS resolver worker could not start; failing closed")
         return []
 
     remaining_s = _remaining_dns_budget(start_time, timeout_s)
     if remaining_s <= 0:
-        logger.bind(
-            host=host,
+        logger.bind(**_dns_log_fields(
+            host,
+            sensitive_observability=sensitive_observability,
+            endpoint_id=endpoint_id,
             elapsed_s=time.monotonic() - start_time,
             timeout_s=timeout_s,
             event="dns_resolver_timeout",
-        ).warning("DNS resolver timed out before waiting for worker; failing closed")
+        )).warning("DNS resolver timed out before waiting for worker; failing closed")
         return []
     thread.join(remaining_s)
     if thread.is_alive():
-        logger.bind(
-            host=host,
+        logger.bind(**_dns_log_fields(
+            host,
+            sensitive_observability=sensitive_observability,
+            endpoint_id=endpoint_id,
             elapsed_s=time.monotonic() - start_time,
             timeout_s=timeout_s,
             event="dns_resolver_timeout",
-        ).warning("DNS resolver timed out; failing closed")
+        )).warning("DNS resolver timed out; failing closed")
         return []
-    if error:
-        exc = error[0]
-        logger.bind(
-            host=host,
-            exception_type=type(exc).__name__,
+    if error_types:
+        logger.bind(**_dns_log_fields(
+            host,
+            sensitive_observability=sensitive_observability,
+            endpoint_id=endpoint_id,
+            exception_type=error_types[0],
             event="dns_resolver_error",
-        ).debug("DNS resolver failed; failing closed")
+        )).debug("DNS resolver failed; failing closed")
         return []
     return result[0] if result else []
 
 
-def resolve_host_ips(host: str, timeout_s: float = 2.0) -> tuple[str, ...]:
+def resolve_host_ips(
+    host: str,
+    timeout_s: float = 2.0,
+    *,
+    sensitive_observability: bool = False,
+) -> tuple[str, ...]:
     """Resolve a host to every A/AAAA address within a bounded timeout.
 
     The wrapper deliberately does not read egress profiles or allowlists. It
@@ -407,7 +479,14 @@ def resolve_host_ips(host: str, timeout_s: float = 2.0) -> tuple[str, ...]:
     or result-shape error fails closed as an empty tuple.
     """
     try:
-        infos = _getaddrinfo_with_timeout(host, timeout_s=timeout_s)
+        if sensitive_observability:
+            infos = _getaddrinfo_with_timeout(
+                host,
+                timeout_s=timeout_s,
+                sensitive_observability=True,
+            )
+        else:
+            infos = _getaddrinfo_with_timeout(host, timeout_s=timeout_s)
         if not infos:
             return ()
 
@@ -427,17 +506,36 @@ def resolve_host_ips(host: str, timeout_s: float = 2.0) -> tuple[str, ...]:
         # Preserve order but deduplicate
         return tuple(dict.fromkeys(addrs))
     except (OSError, TypeError, ValueError) as exc:
-        logger.debug(
-            "Host resolution failed for {} with {}; treating as unsafe",
-            host,
-            type(exc).__name__,
-        )
+        endpoint_id = get_opaque_stt_endpoint_id()
+        if sensitive_observability or endpoint_id is not None:
+            logger.bind(**_dns_log_fields(
+                host,
+                sensitive_observability=sensitive_observability,
+                endpoint_id=endpoint_id,
+                exception_type=type(exc).__name__,
+                event="dns_resolver_failed_closed",
+            )).debug("Host resolution failed; treating as unsafe")
+        else:
+            logger.debug(
+                "Host resolution failed for {} with {}; treating as unsafe",
+                host,
+                type(exc).__name__,
+            )
         return ()
 
 
-def _resolve_host_ips(host: str) -> list[str]:
+def _resolve_host_ips(
+    host: str,
+    *,
+    sensitive_observability: bool = False,
+) -> list[str]:
     """Compatibility wrapper for callers expecting a mutable address list."""
-    return list(resolve_host_ips(host))
+    return list(
+        resolve_host_ips(
+            host,
+            sensitive_observability=sensitive_observability,
+        )
+    )
 
 
 def _is_private_ip(ip: str) -> bool:
@@ -467,14 +565,21 @@ def _same_resolved_ip_set(left: Sequence[str], right: Sequence[str]) -> bool:
     return {str(ip).strip() for ip in left if str(ip).strip()} == {str(ip).strip() for ip in right if str(ip).strip()}
 
 
-def _resolve_and_check_private(host: str) -> tuple[bool, list[str]]:
+def _resolve_and_check_private(
+    host: str,
+    *,
+    sensitive_observability: bool = False,
+) -> tuple[bool, list[str]]:
     ips: list[str] = []
     # If the host is already an IP address, check directly
     try:
         ipaddress.ip_address(host)
         ips = [host]
     except ValueError:
-        ips = _resolve_host_ips(host)
+        if sensitive_observability:
+            ips = _resolve_host_ips(host, sensitive_observability=True)
+        else:
+            ips = _resolve_host_ips(host)
 
     if not ips:
         return False, []
@@ -485,11 +590,17 @@ def _resolve_and_check_private(host: str) -> tuple[bool, list[str]]:
     return True, ips
 
 
-def _resolve_host_or_literal(host: str) -> list[str]:
+def _resolve_host_or_literal(
+    host: str,
+    *,
+    sensitive_observability: bool = False,
+) -> list[str]:
     """Return a literal address or every DNS answer for a scoped hostname."""
     try:
         return [str(ipaddress.ip_address(host))]
     except ValueError:
+        if sensitive_observability:
+            return _resolve_host_ips(host, sensitive_observability=True)
         return _resolve_host_ips(host)
 
 
@@ -554,6 +665,7 @@ def evaluate_url_policy(
     resolved_ips_override: Sequence[str] | None = None,
     pinned_resolved_ips: Sequence[str] | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
+    sensitive_observability: bool = False,
 ) -> URLPolicyResult:
     """Evaluate whether a URL passes the egress policy."""
     try:
@@ -653,7 +765,10 @@ def evaluate_url_policy(
         raw_ips = (
             list(resolved_ips_override)
             if resolved_ips_override is not None
-            else _resolve_host_or_literal(host)
+            else _resolve_host_or_literal(
+                host,
+                sensitive_observability=sensitive_observability,
+            )
         )
         resolved_ips = _normalize_scoped_resolved_ips(raw_ips)
         if not resolved_ips:
@@ -686,7 +801,13 @@ def evaluate_url_policy(
                     "address_forbidden",
                 )
         else:
-            ok, ips = _resolve_and_check_private(host)
+            if sensitive_observability:
+                ok, ips = _resolve_and_check_private(
+                    host,
+                    sensitive_observability=True,
+                )
+            else:
+                ok, ips = _resolve_and_check_private(host)
             resolved_ips = _normalize_resolved_ips(ips)
             if not ok:
                 if not resolved_ips:
@@ -739,9 +860,38 @@ def _parse_list_env(value: str | None) -> list[str]:
         if not v:
             continue
         if v.startswith("*."):
-            v = v[1:]
+            v = v[2:]
         out.append(_normalize_hostname(v))
     return out
+
+
+def evaluate_platform_webhook_url_policy(url: str) -> URLPolicyResult:
+    """Evaluate a platform webhook target with all global policy families."""
+    allowlist = list(
+        dict.fromkeys(
+            [
+                *_get_allowlist(os.getenv(GLOBAL_ALLOWLIST_ENV, "")),
+                *_get_allowlist(os.getenv(ALLOWLIST_ENV, "")),
+                *_parse_list_env(os.getenv(WEBHOOK_ALLOWLIST_ENV)),
+            ]
+        )
+    )
+    denylist = list(
+        dict.fromkeys(
+            [
+                *_get_allowlist(os.getenv(GLOBAL_DENYLIST_ENV, "")),
+                *_get_allowlist(os.getenv(DENYLIST_ENV, "")),
+                *_parse_list_env(os.getenv(WEBHOOK_DENYLIST_ENV)),
+            ]
+        )
+    )
+    return evaluate_url_policy(
+        url,
+        allowlist=allowlist,
+        denylist=denylist,
+        block_private_override=True,
+        sensitive_observability=True,
+    )
 
 
 def is_webhook_url_allowed_for_tenant(url: str, tenant_id: str) -> bool:

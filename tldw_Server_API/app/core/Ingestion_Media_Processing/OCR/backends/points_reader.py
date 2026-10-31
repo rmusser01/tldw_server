@@ -8,6 +8,7 @@ import threading
 
 from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.base import OCRBackend
 from tldw_Server_API.app.core.Utils.Utils import logging
+from tldw_Server_API.app.core.Utils.coercion import env_bool
 
 _TF_MODEL = None
 _TF_TOKENIZER = None
@@ -146,7 +147,7 @@ def _ocr_via_sglang(image_path: str, prompt: str) -> str:
     url = os.getenv("POINTS_SGLANG_URL", "http://127.0.0.1:8081/v1/chat/completions")
     model = os.getenv("POINTS_SGLANG_MODEL", "WePoints")
     timeout = int(os.getenv("POINTS_SGLANG_TIMEOUT", "60"))
-    use_data_url = str(os.getenv("POINTS_SGLANG_USE_DATA_URL", "false")).lower() in ("1","true","yes")
+    use_data_url = env_bool("POINTS_SGLANG_USE_DATA_URL", default=False)
 
     def _getf(env, cast, default):
         try:
@@ -179,7 +180,7 @@ def _ocr_via_sglang(image_path: str, prompt: str) -> str:
         "repetition_penalty": _getf("POINTS_REPETITION_PENALTY", float, 1.05),
         "top_p": _getf("POINTS_TOP_P", float, 0.8),
         "top_k": _getf("POINTS_TOP_K", int, 20),
-        "do_sample": _getf("POINTS_DO_SAMPLE", lambda x: str(x).lower() in ("1","true","yes"), True),
+        "do_sample": env_bool("POINTS_DO_SAMPLE", default=True),
     }
 
     from tldw_Server_API.app.core.http_client import fetch_json
@@ -255,7 +256,7 @@ def _ocr_via_transformers(image_path: str, prompt: str) -> str:
         "temperature": _getf("POINTS_TEMPERATURE", float, 0.7),
         "top_p": _getf("POINTS_TOP_P", float, 0.8),
         "top_k": _getf("POINTS_TOP_K", int, 20),
-        "do_sample": _getf("POINTS_DO_SAMPLE", lambda x: str(x).lower() in ("1","true","yes"), True),
+        "do_sample": env_bool("POINTS_DO_SAMPLE", default=True),
     }
 
     try:

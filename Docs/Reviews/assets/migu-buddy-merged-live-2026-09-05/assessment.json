@@ -1,0 +1,27 @@
+{
+  "create_status": 200,
+  "capabilities": {
+    "text": true,
+    "voice": false,
+    "browser_microphone_required": false
+  },
+  "handshake": "connected",
+  "events": [
+    {
+      "event": "notice",
+      "reason_code": "WS_CONNECTED"
+    },
+    {
+      "event": "tool_plan",
+      "reason_code": null
+    }
+  ],
+  "conversational_response_received": false,
+  "plan_tools": [
+    "rag_search"
+  ],
+  "microphone_opened": false,
+  "tool_approvals_sent": false,
+  "stop_status": 200,
+  "assessment": "Buddy greeting receives a correlated rag_search tool plan; no conversational reply observed. Session advertises voice=false."
+}

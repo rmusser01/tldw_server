@@ -2,7 +2,7 @@
 
 import React from "react"
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { ItemsTab } from "../ItemsTab/ItemsTab"
 import { useWatchlistsStore } from "@/store/watchlists"
 
@@ -325,8 +325,13 @@ describe("ItemsTab chat handoff", () => {
       expect(screen.getByTestId("watchlists-item-row-103")).toBeInTheDocument()
     })
 
-    // Select the item with no title, summary, or content
-    fireEvent.click(screen.getByTestId("watchlists-item-row-103"))
+    // Select the item with no title, summary, or content. Selection lives on
+    // the row's inner "Open update" button, not the wrapper div.
+    fireEvent.click(
+      within(screen.getByTestId("watchlists-item-row-103")).getByRole("button", {
+        name: /open update/i
+      })
+    )
 
     await waitFor(() => {
       const chatButton = screen.getByTestId("watchlists-item-chat-about")

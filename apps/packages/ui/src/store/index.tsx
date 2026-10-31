@@ -1,5 +1,6 @@
 import { createWithEqualityFn } from "zustand/traditional"
 import type { DiscoSkillComment } from "@/types/disco-skills"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 
 export type Message = {
   id?: string
@@ -105,3 +106,14 @@ export const useStoreMessage = createWithEqualityFn<State>((set) => ({
   useOCR: false,
   setUseOCR: (useOCR) => set({ useOCR })
 }))
+
+const stopWatchingAccount = watchChatAccountChanges((invalidated) => {
+  if (!invalidated) return
+  useStoreMessage.setState({
+    messages: [], history: [], historyId: null, streaming: false,
+    isFirstMessage: true, isLoading: false, isProcessing: false, isEmbedding: false,
+    selectedSystemPrompt: null, selectedQuickPrompt: null, currentURL: ""
+  })
+})
+const hot = (import.meta as { hot?: { dispose: (callback: () => void) => void } }).hot
+hot?.dispose(stopWatchingAccount)

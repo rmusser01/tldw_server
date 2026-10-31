@@ -13,6 +13,22 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 
 pytestmark = pytest.mark.integration
 
+
+def test_prompt_improvement_static_routes_precede_dynamic_prompt_identifier_routes():
+    """Static discovery/action routes must not be captured as prompt IDs."""
+
+    paths = [route.path for route in prompts_router.routes]
+    dynamic_indices = [
+        index
+        for index, path in enumerate(paths)
+        if path.startswith("/{prompt_identifier}")
+    ]
+
+    assert dynamic_indices
+    assert paths.index("/capabilities") < min(dynamic_indices)
+    assert paths.index("/improve") < min(dynamic_indices)
+
+
 # ========================================================================
 # Prompt CRUD Endpoint Tests
 # ========================================================================

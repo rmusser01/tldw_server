@@ -26,7 +26,6 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -175,7 +174,7 @@ def _build_real_principal_app() -> FastAPI:
     return app
 
 
-def _real_jwt_service() -> "JWTService":
+def _real_jwt_service() -> JWTService:
     """A real JWTService (real HS256 signing/verification), no DB required.
 
     Replaces the former _FakeJwtService whose decode asserted its own
@@ -202,10 +201,10 @@ class _NullBlacklistSessionManager:
         return False
 
 
-def _build_token_scope_app(jwt_service: "JWTService") -> FastAPI:
+def _build_token_scope_app(jwt_service: JWTService) -> FastAPI:
     app = FastAPI()
 
-    async def real_jwt_service_dep() -> "JWTService":
+    async def real_jwt_service_dep() -> JWTService:
         return jwt_service
 
     async def fake_db_pool() -> object:
@@ -555,8 +554,6 @@ def test_tools_router_uses_standard_permission_factory_alias() -> None:
     [
         "add",
         "listing",
-        "process_web_scraping",
-        "process_videos",
         "reprocess",
         "ingest_jobs",
         "item",
@@ -569,6 +566,57 @@ def test_media_leaf_routers_use_standard_permission_factory_alias(module_name: s
 
     assert module.RequirePermission is auth_deps.RequirePermission
     assert not hasattr(module, "require_permissions")
+
+
+@pytest.mark.parametrize("module_name", ["process_web_scraping", "process_videos"])
+def test_media_processing_routers_use_shared_media_create_dependencies(module_name: str) -> None:
+    """e751293efe moved these guards into media_route_deps.media_create_dependencies."""
+    from tldw_Server_API.app.api.v1.API_Deps import media_route_deps
+
+    module = importlib.import_module(
+        f"tldw_Server_API.app.api.v1.endpoints.media.{module_name}",
+    )
+
+    assert module.media_create_dependencies is media_route_deps.media_create_dependencies
+    assert media_route_deps.RequirePermission is auth_deps.RequirePermission
+    assert media_route_deps.rbac_rate_limit is auth_deps.rbac_rate_limit
+    assert not hasattr(module, "require_permissions")
+    guarded_routes = [
+        route for route in module.router.routes if getattr(route, "dependant", None) is not None
+    ]
+    assert guarded_routes
+    for route in guarded_routes:
+        dependency_names = {
+            getattr(dependency.call, "__qualname__", "") for dependency in route.dependant.dependencies
+        }
+        assert any("RequirePermission" in name or "require_permissions" in name for name in dependency_names), (
+            route.path,
+            dependency_names,
+        )
+
+
+@pytest.mark.parametrize(
+    ("module_name", "path"),
+    [
+        ("process_web_scraping", "/process-web-scraping"),
+        ("process_videos", "/process-videos"),
+    ],
+)
+def test_media_processing_routes_deny_missing_create_permission(
+    module_name: str,
+    path: str,
+) -> None:
+    module = importlib.import_module(
+        f"tldw_Server_API.app.api.v1.endpoints.media.{module_name}",
+    )
+    app = _build_app(_principal(permissions=[]))
+    app.include_router(module.router)
+
+    with TestClient(app) as client:
+        response = client.post(path, json={})
+
+    assert response.status_code == 403
+    assert "media.create" in response.json()["detail"]
 
 
 def test_media_ingest_web_content_router_uses_standard_token_scope_alias() -> None:

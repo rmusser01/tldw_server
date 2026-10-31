@@ -18,10 +18,14 @@ from .fixtures import api_client, test_user_credentials, APIClient
 
 @pytest.mark.multi_user
 def test_multi_user_register_login_and_admin_access(api_client, test_user_credentials):
-    # Determine auth mode via health or environment
-    info = api_client.health_check()
+    # Public liveness remains available before or without diagnostic permission.
+    liveness = api_client.client.get("/health")
+    assert liveness.status_code == 200
+    assert liveness.json() == {"status": "ok"}
+
+    # The public response intentionally omits deployment details such as auth mode.
     mode_env = os.getenv("AUTH_MODE", "").lower()
-    if (info.get("auth_mode") or mode_env) not in {"multi_user", "multi-user", "multiuser"}:
+    if mode_env not in {"multi_user", "multi-user", "multiuser"}:
         pytest.skip("Not in multi_user mode")
 
     # Use an isolated client so we don't mutate the shared session client

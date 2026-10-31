@@ -97,3 +97,18 @@ describe("SidepanelHeaderSimple WebUI chat handoff", () => {
     expect(tabsCreateMock).not.toHaveBeenCalled()
   })
 })
+
+import { HistorySelectionContext, historySelectionExpansionPath, parseHistorySelectionHandoff } from "@/hooks/chat/useHistorySelection"
+it("opens H1 expansion in the extension full page with only a scoped bookmark address", async () => {
+  const onOpenChatInWebUi = vi.fn()
+  const reference = { profile_id: "profile", client_session_id: "view-a", owner_key: "owner", conversation_id: "chat" }
+  render(<HistorySelectionContext.Provider value={{ reference, owner: { kind: "local" }, prepareExpansionPath: async () => historySelectionExpansionPath({ reference, owner: { kind: "local" } as any }) } as any}>
+    <SidepanelHeaderSimple onOpenChatInWebUi={onOpenChatInWebUi} />
+  </HistorySelectionContext.Provider>)
+  fireEvent.click(screen.getByRole("button", { name: "Expand in full page" }))
+  await waitFor(() => expect(tabsCreateMock).toHaveBeenCalled())
+  const url = tabsCreateMock.mock.calls.at(-1)![0].url
+  expect(url.startsWith("chrome-extension://test/options.html#/chat?")).toBe(true)
+  expect(parseHistorySelectionHandoff(url)).toEqual({ ...reference, owner_kind: "local" })
+  expect(onOpenChatInWebUi).not.toHaveBeenCalled()
+})

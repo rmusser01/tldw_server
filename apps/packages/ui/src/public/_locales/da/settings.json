@@ -1,4 +1,7 @@
 {
+  "onboarding_loginSettingsError": {
+    "message": "Loginindstillingerne kunne ikke åbnes. Prøv igen."
+  },
   "navigation_serverAndAuth": {
     "message": "Server og godkendelse"
   },

@@ -1,0 +1,60 @@
+import asyncio
+import json
+import time
+import uuid
+from pathlib import Path
+
+import httpx
+import websockets
+from dotenv import dotenv_values
+
+
+async def main():
+    cfg = dotenv_values('/private/tmp/migu-server-uat/runtime.env')
+    result = {'microphone_opened': False, 'provider_message_sent': False}
+    async with httpx.AsyncClient(base_url='http://127.0.0.1:9101', headers={'X-API-KEY': cfg['SINGLE_USER_API_KEY']}, timeout=30) as client:
+        response = await client.post('/api/v1/persona/live/sessions', json={'persona_id': 'e19c631e-e2ac-452d-9935-293af03cee4e', 'surface': 'migu-voice-readiness-uat'})
+        response.raise_for_status()
+        session = response.json()['session']
+        sid = session['session_id']
+        result['before'] = session['capabilities']
+        try:
+            async with websockets.connect('ws://127.0.0.1:9101/api/v1/persona/stream', subprotocols=['bearer', cfg['SINGLE_USER_API_KEY']], origin='http://127.0.0.1:18384') as ws:
+                await ws.send(json.dumps({'type': 'voice_config', 'session_id': sid, 'stt': {'model': 'tiny.en', 'language': 'en'}, 'tts': {'provider': 'kokoro', 'voice': 'af_heart'}}))
+                while True:
+                    frame = json.loads(await asyncio.wait_for(ws.recv(), 15))
+                    if frame.get('reason_code') == 'VOICE_CONFIG_UPDATED':
+                        break
+                started = time.monotonic()
+                await ws.send(json.dumps({'type': 'voice_prepare', 'session_id': sid, 'client_message_id': 'readiness-' + uuid.uuid4().hex}))
+                frames = []
+                while True:
+                    frame = json.loads(await asyncio.wait_for(ws.recv(), 90))
+                    frames.append(frame)
+                    if frame.get('event') == 'voice_readiness':
+                        result['readiness'] = frame
+                        break
+                result['prepare_seconds'] = round(time.monotonic() - started, 2)
+                status = await client.get('/api/v1/persona/live/sessions')
+                result['after_status'] = status.status_code
+                if status.status_code == 200:
+                    result['after'] = next(item['capabilities'] for item in status.json()['sessions'] if item['session_id'] == sid)
+                stopped = await client.post('/api/v1/persona/live/sessions/' + sid + '/stop')
+                result['stop_while_connected_status'] = stopped.status_code
+                while True:
+                    frame = json.loads(await asyncio.wait_for(ws.recv(), 15))
+                    if frame.get('reason_code') == 'SESSION_TERMINAL':
+                        result['terminal_notice_received'] = frame.get('session_id') == sid
+                        break
+                status = await client.get('/api/v1/persona/live/sessions')
+                result['after_stop'] = next(item['capabilities'] for item in status.json()['sessions'] if item['session_id'] == sid)
+        except Exception as exc:
+            result['error_type'] = type(exc).__name__
+        finally:
+            stopped = await client.post('/api/v1/persona/live/sessions/' + sid + '/stop')
+            result['stop_status'] = stopped.status_code
+    Path('/private/tmp/migu-server-voice-runset/readiness-result.json').write_text(json.dumps(result, indent=2))
+    print(json.dumps(result))
+
+
+asyncio.run(main())

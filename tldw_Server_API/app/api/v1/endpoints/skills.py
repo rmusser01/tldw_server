@@ -29,7 +29,7 @@ from fastapi import (
 from fastapi.responses import Response
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import CurrentPrincipal
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import CurrentPrincipal, check_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 
@@ -67,7 +67,7 @@ from tldw_Server_API.app.core.Skills.runtime_metadata import build_skill_runtime
 from tldw_Server_API.app.core.Skills.skill_executor import RequestContext, SkillExecutor
 from tldw_Server_API.app.core.Skills.skills_service import SkillsService
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(check_rate_limit)])
 
 MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES = 6 * 1024 * 1024
 _ZIP_UPLOAD_SIGNATURES = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")

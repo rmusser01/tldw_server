@@ -10,6 +10,8 @@ import tempfile
 
 from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.base import OCRBackend
 from tldw_Server_API.app.core.Utils.Utils import logging
+from tldw_Server_API.app.core.Utils.coercion import env_bool
+from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.runtime_support import image_payload
 
 
 class DotsOCRBackend(OCRBackend):
@@ -179,24 +181,11 @@ def _extract_text_from_any(obj) -> str:
 
 
 def _ocr_via_vllm(image_bytes: bytes, prompt: str) -> str:
-    import base64
 
     url = os.getenv("DOTS_VLLM_URL").rstrip("/")
     model = os.getenv("DOTS_VLLM_MODEL", "model")
     timeout = int(os.getenv("DOTS_VLLM_TIMEOUT", "60"))
-    use_data_url = str(os.getenv("DOTS_VLLM_USE_DATA_URL", "true")).lower() in ("1", "true", "yes")
-
-    content_image = None
-    if use_data_url:
-        b64 = base64.b64encode(image_bytes).decode("ascii")
-        content_image = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
-    else:
-        # Must write temp file to pass a path-based URL, but remote servers likely can't read it
-        # so default is data URL
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=True) as f:
-            f.write(image_bytes)
-            f.flush()
-            content_image = {"type": "image_url", "image_url": {"url": f.name}}
+    use_data_url = env_bool("DOTS_VLLM_USE_DATA_URL", default=True)
 
     def _getf(env, cast, default):
         try:
@@ -204,27 +193,28 @@ def _ocr_via_vllm(image_bytes: bytes, prompt: str) -> str:
         except (TypeError, ValueError):
             return default
 
-    data = {
-        "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    content_image,
-                ],
-            }
-        ],
-        "max_new_tokens": _getf("DOTS_VLLM_MAX_NEW_TOKENS", int, 2048),
-        "temperature": _getf("DOTS_VLLM_TEMPERATURE", float, 0.7),
-        "repetition_penalty": _getf("DOTS_VLLM_REPETITION_PENALTY", float, 1.05),
-        "top_p": _getf("DOTS_VLLM_TOP_P", float, 0.8),
-        "top_k": _getf("DOTS_VLLM_TOP_K", int, 20),
-        "do_sample": _getf("DOTS_VLLM_DO_SAMPLE", lambda x: str(x).lower() in ("1","true","yes"), True),
-    }
+    with image_payload(image_bytes, use_data_url=use_data_url) as content_image:
+        data = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        content_image,
+                    ],
+                }
+            ],
+            "max_new_tokens": _getf("DOTS_VLLM_MAX_NEW_TOKENS", int, 2048),
+            "temperature": _getf("DOTS_VLLM_TEMPERATURE", float, 0.7),
+            "repetition_penalty": _getf("DOTS_VLLM_REPETITION_PENALTY", float, 1.05),
+            "top_p": _getf("DOTS_VLLM_TOP_P", float, 0.8),
+            "top_k": _getf("DOTS_VLLM_TOP_K", int, 20),
+            "do_sample": env_bool("DOTS_VLLM_DO_SAMPLE", default=True),
+        }
 
-    from tldw_Server_API.app.core.http_client import fetch_json
-    j = fetch_json(method="POST", url=url, json=data, timeout=timeout)
+        from tldw_Server_API.app.core.http_client import fetch_json
+        j = fetch_json(method="POST", url=url, json=data, timeout=timeout)
     return (
         j.get("choices", [{}])[0]
         .get("message", {})

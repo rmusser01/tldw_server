@@ -102,6 +102,7 @@ import {
   getWatchlistChatTotalChars,
   WATCHLIST_CHAT_CONTENT_WARN_THRESHOLD
 } from "@/services/tldw/watchlist-chat-handoff"
+import { isEditableTarget } from "@/utils/editable-target"
 
 const { Search } = Input
 
@@ -305,17 +306,10 @@ const getDomain = (url: string | null | undefined): string | null => {
   }
 }
 
-const isEditableTarget = (target: EventTarget | null): boolean => {
-  if (!(target instanceof HTMLElement)) return false
-  if (target.isContentEditable) return true
-  const tagName = target.tagName.toLowerCase()
-  if (tagName === "input" || tagName === "textarea" || tagName === "select") {
-    return true
-  }
-  if (target.closest("[contenteditable='true']")) return true
-  if (target.closest(".ant-select-dropdown")) return true
-  return false
-}
+// Ant Select renders its option list in a portal; keys there belong to the select.
+const isShortcutBlockedTarget = (target: EventTarget | null): boolean =>
+  isEditableTarget(target) ||
+  (target instanceof Element && target.closest(".ant-select-dropdown") !== null)
 
 const useSafeNavigate = () => {
   try {
@@ -349,6 +343,12 @@ export const ItemsTab: React.FC = () => {
 
   const [sources, setSources] = useState<WatchlistSource[]>([])
   const [sourcesLoading, setSourcesLoading] = useState(false)
+  const [sourcesLoaded, setSourcesLoaded] = useState(false)
+  // No watchlist feeds exist at all (confirmed by a successful load): there
+  // is nothing to triage, so the saved-views / bulk-action machinery hides
+  // behind the create-first-watchlist empty state (#2899 I5).
+  const trulyEmptyWatchlists =
+    sourcesLoaded && !sourcesLoading && sources.length === 0
   const [sourcesCappedAtLimit, setSourcesCappedAtLimit] = useState(false)
   const [sourceSearch, setSourceSearch] = useState("")
   const [runs, setRuns] = useState<WatchlistRun[]>([])
@@ -664,6 +664,7 @@ export const ItemsTab: React.FC = () => {
       if (requestToken !== sourcesRequestTokenRef.current) return
       const capped = loaded.slice(0, SOURCE_LOAD_MAX_ITEMS)
       setSources(capped)
+      setSourcesLoaded(true)
       const normalizedTotal = sourceTotal > 0 ? sourceTotal : capped.length
       setSourcesCappedAtLimit(normalizedTotal > SOURCE_LOAD_MAX_ITEMS)
     } catch (error) {
@@ -2105,7 +2106,7 @@ export const ItemsTab: React.FC = () => {
   const handleShortcutKeyDown = useCallback((event: KeyboardEvent) => {
     if (event.defaultPrevented) return
     if (event.metaKey || event.ctrlKey || event.altKey) return
-    if (isEditableTarget(event.target)) return
+    if (isShortcutBlockedTarget(event.target)) return
     if (shortcutsOpen && event.key !== "Escape") return
 
     if (shortcutsOpen && event.key === "Escape") {
@@ -2239,7 +2240,7 @@ export const ItemsTab: React.FC = () => {
         <p className="text-sm text-text-muted">
           {t(
             "watchlists:items.description",
-            "Review collected updates, alert matches, and briefing candidates from this Watchlist."
+            "Review collected updates, alert matches, and briefing candidates across your watchlists."
           )}
         </p>
         <Space>
@@ -2538,6 +2539,11 @@ export const ItemsTab: React.FC = () => {
                 />
               </div>
 
+              {/* Hide the triage machinery only when there is genuinely
+                  nothing to triage: no feeds AND no (historical) items -
+                  deleting all sources does not delete collected items. */}
+              {!(trulyEmptyWatchlists && !itemsLoading && items.length === 0) ? (
+              <>
               <div className="rounded-lg border border-border bg-surface/70 p-2.5">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
@@ -2750,6 +2756,8 @@ export const ItemsTab: React.FC = () => {
                 </p>
 
               </div>
+              </>
+              ) : null}
             </div>
 
             <div
@@ -2764,8 +2772,21 @@ export const ItemsTab: React.FC = () => {
               ) : items.length === 0 ? (
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={t("watchlists:items.empty", "No updates found")}
-                />
+                  description={
+                    trulyEmptyWatchlists
+                      ? t(
+                          "watchlists:items.emptyNoWatchlists",
+                          "No watchlist feeds yet. Create a watchlist to start collecting updates."
+                        )
+                      : t("watchlists:items.empty", "No updates found")
+                  }
+                >
+                  {trulyEmptyWatchlists && navigate ? (
+                    <Button type="primary" onClick={() => navigate("/watchlists")}>
+                      {t("watchlists:items.createWatchlist", "Create a watchlist")}
+                    </Button>
+                  ) : null}
+                </Empty>
               ) : (
                 sortedItems.map((item) => {
                   const selected = item.id === selectedItemId

@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest"
 import {
+  captureSystemPromptOverrideSnapshot,
   normalizeSystemPromptOverrideValue,
   resolveEffectiveSystemPromptState,
-  resolveSelectedSystemPromptContent
+  resolveSelectedSystemPromptContent,
+  restoreSystemPromptOverrideSnapshot
 } from "../system-prompt-utils"
 
 const makePrompt = (content: string) => ({
@@ -42,6 +44,37 @@ describe("system prompt utils", () => {
     })
   })
 
+  it.each([undefined, ""])(
+    "resolves raw override %s to the selected template without an active override",
+    async (systemPrompt) => {
+      await expect(
+        resolveEffectiveSystemPromptState({
+          selectedSystemPrompt: "prompt-1",
+          systemPrompt,
+          getPromptByIdFn: vi.fn(async () => makePrompt("Template body"))
+        })
+      ).resolves.toEqual({
+        templateContent: "Template body",
+        effectiveContent: "Template body",
+        overrideActive: false
+      })
+    }
+  )
+
+  it("treats a raw value matching the selected template as no override", async () => {
+    await expect(
+      resolveEffectiveSystemPromptState({
+        selectedSystemPrompt: "prompt-1",
+        systemPrompt: "Template body",
+        getPromptByIdFn: vi.fn(async () => makePrompt("Template body"))
+      })
+    ).resolves.toEqual({
+      templateContent: "Template body",
+      effectiveContent: "Template body",
+      overrideActive: false
+    })
+  })
+
   it("falls back to an empty reset value when template lookup fails", async () => {
     await expect(
       resolveSelectedSystemPromptContent(
@@ -61,4 +94,29 @@ describe("system prompt utils", () => {
       })
     ).toBe("")
   })
+
+  it.each([
+    [undefined, ""],
+    ["", ""],
+    ["Template body", ""],
+    ["Conversation override", "Conversation override"]
+  ])("normalizes draft %s to override %s", (draft, expected) => {
+    expect(
+      normalizeSystemPromptOverrideValue({
+        draft,
+        templateContent: "Template body"
+      })
+    ).toBe(expected)
+  })
+
+  it.each([undefined, "", "Conversation override"])(
+    "round-trips the exact raw override snapshot %s",
+    (rawOverride) => {
+      expect(
+        restoreSystemPromptOverrideSnapshot(
+          captureSystemPromptOverrideSnapshot(rawOverride)
+        )
+      ).toBe(rawOverride)
+    }
+  )
 })

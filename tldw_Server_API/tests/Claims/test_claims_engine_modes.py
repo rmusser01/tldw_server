@@ -1,5 +1,7 @@
 import asyncio
-from typing import Any, Coroutine, Dict, Optional
+import threading
+from collections.abc import Coroutine
+from typing import Any, Optional
 
 import pytest
 
@@ -283,7 +285,7 @@ def test_claims_engine_multi_pass_dedupes_first_pass_wins(
     """
     import tldw_Server_API.app.core.Claims_Extraction.claims_engine as engine_mod
 
-    calls: Dict[str, int] = {"extract": 0}
+    calls: dict[str, int] = {"extract": 0}
 
     monkeypatch.setattr(engine_mod, "_resolve_claims_extraction_passes", lambda: 3)
     monkeypatch.setattr(engine_mod, "_resolve_claims_context_window_chars", lambda: 64)
@@ -307,7 +309,7 @@ def test_claims_engine_multi_pass_dedupes_first_pass_wins(
 
     async def _run() -> None:
         """Run ClaimsEngine with Doc input and assert first-pass de-dupe behavior."""
-        result: Dict[str, Any] = await engine.run(
+        result: dict[str, Any] = await engine.run(
             answer="Repeated multi-pass claim.",
             query="Q",
             documents=[Doc("d1", "Repeated multi-pass claim context.", 0.5)],
@@ -360,7 +362,7 @@ def test_claims_engine_summary_includes_refuted_status_count() -> None:
 
     async def _run() -> None:
         """Run ClaimsEngine and assert refuted_status is counted in summary."""
-        result: Dict[str, Any] = await engine.run(
+        result: dict[str, Any] = await engine.run(
             answer="Claim to refute.",
             query="Q",
             documents=[Doc("d1", "Contradictory context.", 0.9)],
@@ -373,3 +375,401 @@ def test_claims_engine_summary_includes_refuted_status_count() -> None:
 
     run_coro: Coroutine[Any, Any, None] = _run()
     asyncio.run(run_coro)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_llm_extractor_rejects_shared_pool_saturation_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A saturated process-wide provider cap cannot queue claim extraction."""
+    import tldw_Server_API.app.core.Claims_Extraction.claims_engine as engine_mod
+    from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
+
+    holder_entered = threading.Event()
+    holder_release = threading.Event()
+    analyze_started = threading.Event()
+    pool = BoundedDaemonPool(1)
+
+    def hold_capacity() -> None:
+        holder_entered.set()
+        holder_release.wait(timeout=2.0)
+
+    def analyze_claims(*_args: Any, **_kwargs: Any) -> str:
+        analyze_started.set()
+        return '{"claims": [{"text": "Provider claim."}]}'
+
+    monkeypatch.setattr(engine_mod, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+    holder = pool.start(
+        hold_capacity,
+        name="claims-capacity-holder",
+        exhaustion_message="test capacity exhausted",
+    )
+    try:
+        for _ in range(1000):
+            if holder_entered.is_set():
+                break
+            await asyncio.sleep(0.001)
+        assert holder_entered.is_set()
+
+        claims = await engine_mod.LLMBasedClaimExtractor(analyze_claims).extract(
+            "Fallback claim sentence.",
+            max_claims=2,
+        )
+
+        assert analyze_started.is_set() is False
+        assert [claim.text for claim in claims] == ["Fallback claim sentence."]
+        assert pool.active_count == 1
+    finally:
+        holder_release.set()
+        holder.join(timeout=1.0)
+
+    assert analyze_started.is_set() is False
+    assert pool.active_count == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_real_claim_verifier_fanout_never_exceeds_shared_provider_capacity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Claims concurrency cannot multiply the process-wide provider cap."""
+    import tldw_Server_API.app.core.Claims_Extraction.claims_engine as engine_mod
+    from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
+
+    release = threading.Event()
+    two_started = threading.Event()
+    counter_lock = threading.Lock()
+    started = 0
+    pool = BoundedDaemonPool(2)
+
+    def analyze_verification(*_args: Any, **_kwargs: Any) -> str:
+        nonlocal started
+        with counter_lock:
+            started += 1
+            if started >= 2:
+                two_started.set()
+        release.wait(timeout=2.0)
+        return '{"label": "supported", "confidence": 0.9, "rationale": "ok"}'
+
+    monkeypatch.setattr(engine_mod, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+    monkeypatch.setattr(
+        engine_mod,
+        "suggest_claims_concurrency",
+        lambda *, requested, **_kwargs: requested,
+    )
+    engine = ClaimsEngine(analyze_verification)
+    claims = [Claim(id=f"c{index}", text=f"Claim {index}.") for index in range(4)]
+    task = asyncio.create_task(
+        engine.verify_claims_only(
+            claims=claims,
+            query="query",
+            documents=[Doc("d1", "Evidence for all claims.", 0.9)],
+            claim_verifier="llm",
+            claims_concurrency=4,
+        )
+    )
+    try:
+        for _ in range(1000):
+            if two_started.is_set():
+                break
+            await asyncio.sleep(0.001)
+        assert two_started.is_set()
+        await asyncio.sleep(0.03)
+
+        with counter_lock:
+            assert started == 2
+        assert pool.active_count == 2
+
+        release.set()
+        result = await asyncio.wait_for(task, timeout=1.0)
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert len(result.verifications) == 4
+    assert pool.active_count == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_claim_provider_timeout_and_cancellation_hold_capacity_until_actual_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both deadline and caller cancellation retain the admitted claims worker."""
+    import tldw_Server_API.app.core.Claims_Extraction.claims_engine as engine_mod
+    from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
+
+    async def run_case(*, cancel: bool) -> None:
+        entered = threading.Event()
+        release = threading.Event()
+        lifecycle: list[str] = []
+
+        class TrackingPool(BoundedDaemonPool):
+            def _release_capacity(self) -> None:
+                lifecycle.append("capacity-release")
+                super()._release_capacity()
+
+        def blocking_analyze(*_args: Any, **_kwargs: Any) -> str:
+            lifecycle.append("provider-start")
+            entered.set()
+            release.wait(timeout=2.0)
+            lifecycle.append("provider-exit")
+            return '{"claims": [{"text": "Provider claim."}]}'
+
+        pool = TrackingPool(1)
+        monkeypatch.setattr(engine_mod, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+        monkeypatch.setattr(
+            engine_mod,
+            "CLAIMS_PROVIDER_CALL_TIMEOUT_SECONDS",
+            0.01 if not cancel else 1.0,
+            raising=False,
+        )
+        task = asyncio.create_task(
+            engine_mod.LLMBasedClaimExtractor(blocking_analyze).extract(
+                "Fallback claim sentence.",
+                max_claims=2,
+            )
+        )
+        try:
+            for _ in range(1000):
+                if entered.is_set():
+                    break
+                await asyncio.sleep(0.001)
+            assert entered.is_set()
+            if cancel:
+                task.cancel()
+            await asyncio.sleep(0.03)
+
+            assert task.done() is False
+            assert pool.active_count == 1
+            assert lifecycle == ["provider-start"]
+
+            release.set()
+            if cancel:
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(task, timeout=1.0)
+            else:
+                claims = await asyncio.wait_for(task, timeout=1.0)
+                assert [claim.text for claim in claims] == ["Fallback claim sentence."]
+        finally:
+            release.set()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        assert pool.active_count == 0
+        assert lifecycle == [
+            "provider-start",
+            "provider-exit",
+            "capacity-release",
+        ]
+
+    await run_case(cancel=False)
+    await run_case(cancel=True)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_local_nli_verification_does_not_consume_provider_capacity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Local deterministic NLI remains independent of the remote-provider pool."""
+    import tldw_Server_API.app.core.Claims_Extraction.claims_engine as engine_mod
+    from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
+
+    holder_entered = threading.Event()
+    holder_release = threading.Event()
+    provider_called = threading.Event()
+    pool = BoundedDaemonPool(1)
+
+    def hold_capacity() -> None:
+        holder_entered.set()
+        holder_release.wait(timeout=2.0)
+
+    def forbidden_provider(*_args: Any, **_kwargs: Any) -> str:
+        provider_called.set()
+        raise AssertionError("local NLI must not dispatch a provider call")
+
+    def local_nli(_payload: dict[str, str]) -> list[list[dict[str, Any]]]:
+        return [[
+            {"label": "entailment", "score": 0.99},
+            {"label": "neutral", "score": 0.01},
+        ]]
+
+    monkeypatch.setattr(engine_mod, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+    verifier = engine_mod.HybridClaimVerifier(forbidden_provider)
+    verifier._nli = local_nli
+    holder = pool.start(
+        hold_capacity,
+        name="nli-provider-capacity-holder",
+        exhaustion_message="test capacity exhausted",
+    )
+    try:
+        for _ in range(1000):
+            if holder_entered.is_set():
+                break
+            await asyncio.sleep(0.001)
+        assert holder_entered.is_set()
+
+        result = await verifier.verify(
+            claim=Claim(id="c1", text="Acme was founded in 2000."),
+            query="When was Acme founded?",
+            base_documents=[Doc("d1", "Acme was founded in 2000.", 0.9)],
+            mode="nli",
+            conf_threshold=0.7,
+        )
+
+        assert result.status.value == "verified"
+        assert provider_called.is_set() is False
+        assert pool.active_count == 1
+    finally:
+        holder_release.set()
+        holder.join(timeout=1.0)
+
+    assert provider_called.is_set() is False
+    assert pool.active_count == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_aps_extraction_saturation_degrades_locally_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """APS cannot bypass the process-wide provider cap or queue secret work."""
+    import tldw_Server_API.app.core.Claims_Extraction.claims_engine as engine_mod
+    from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
+    from tldw_Server_API.app.core.Chunking.strategies import propositions
+
+    holder_entered = threading.Event()
+    holder_release = threading.Event()
+    aps_started = threading.Event()
+    analyze_started = threading.Event()
+    pool = BoundedDaemonPool(1)
+
+    class BlockingAPSStrategy:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        def chunk(self, **_kwargs: Any) -> list[str]:
+            aps_started.set()
+            return ["Provider-only proposition."]
+
+    def hold_capacity() -> None:
+        holder_entered.set()
+        holder_release.wait(timeout=2.0)
+
+    def analyze_claims(*_args: Any, **_kwargs: Any) -> str:
+        analyze_started.set()
+        return '["Provider-only proposition."]'
+
+    monkeypatch.setattr(engine_mod, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+    monkeypatch.setattr(propositions, "PropositionChunkingStrategy", BlockingAPSStrategy)
+    monkeypatch.setattr(engine_mod, "_resolve_claims_extraction_passes", lambda: 1)
+    monkeypatch.setattr(engine_mod, "_resolve_claims_context_window_chars", lambda: 0)
+    holder = pool.start(
+        hold_capacity,
+        name="aps-capacity-holder",
+        exhaustion_message="test capacity exhausted",
+    )
+    try:
+        for _ in range(1000):
+            if holder_entered.is_set():
+                break
+            await asyncio.sleep(0.001)
+        assert holder_entered.is_set()
+
+        claims, _mode = await ClaimsEngine(analyze_claims)._extract_claims_by_mode(
+            answer="Fallback claim sentence.",
+            claim_extractor="aps",
+            claims_max=2,
+            budget=None,
+            job_context=None,
+        )
+
+        assert [claim.text for claim in claims] == ["Fallback claim sentence."]
+        assert aps_started.is_set() is False
+        assert analyze_started.is_set() is False
+        assert pool.active_count == 1
+    finally:
+        holder_release.set()
+        holder.join(timeout=1.0)
+
+    assert pool.active_count == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_aps_extraction_deadline_keeps_event_loop_responsive_and_degrades(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A late APS strategy drains its worker but cannot block the event loop."""
+    import tldw_Server_API.app.core.Claims_Extraction.claims_engine as engine_mod
+    from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
+    from tldw_Server_API.app.core.Chunking.strategies import propositions
+
+    started = threading.Event()
+    release = threading.Event()
+    lifecycle: list[str] = []
+
+    class TrackingPool(BoundedDaemonPool):
+        def _release_capacity(self) -> None:
+            super()._release_capacity()
+            lifecycle.append("capacity-release")
+
+    class LateAPSStrategy:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        def chunk(self, **_kwargs: Any) -> list[str]:
+            lifecycle.append("aps-start")
+            started.set()
+            release.wait(timeout=1.0)
+            lifecycle.append("aps-exit")
+            return ["Late provider proposition."]
+
+    async def heartbeat() -> None:
+        for _ in range(1000):
+            if started.is_set():
+                break
+            await asyncio.sleep(0.001)
+        assert started.is_set()
+        await asyncio.sleep(0.04)
+        lifecycle.append("loop-heartbeat")
+        release.set()
+
+    pool = TrackingPool(1)
+    monkeypatch.setattr(engine_mod, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+    monkeypatch.setattr(
+        engine_mod,
+        "CLAIMS_PROVIDER_CALL_TIMEOUT_SECONDS",
+        0.01,
+        raising=False,
+    )
+    monkeypatch.setattr(propositions, "PropositionChunkingStrategy", LateAPSStrategy)
+    engine = ClaimsEngine(lambda *_args, **_kwargs: None)
+    safety_release = threading.Timer(0.15, release.set)
+    safety_release.daemon = True
+    safety_release.start()
+    extraction = asyncio.create_task(
+        engine._extract_aps_claim_texts("Late provider sentence.", 2)
+    )
+    loop_heartbeat = asyncio.create_task(heartbeat())
+    try:
+        claim_texts = await asyncio.wait_for(extraction, timeout=1.0)
+        await asyncio.wait_for(loop_heartbeat, timeout=1.0)
+    finally:
+        release.set()
+        safety_release.cancel()
+        await asyncio.gather(extraction, loop_heartbeat, return_exceptions=True)
+
+    assert claim_texts == []
+    assert lifecycle == [
+        "aps-start",
+        "loop-heartbeat",
+        "aps-exit",
+        "capacity-release",
+    ]
+    assert pool.active_count == 0

@@ -1,4 +1,5 @@
 import React from "react"
+import { isEditableTarget } from "@/utils/editable-target"
 
 type UseDictionaryEntryManagerShortcutsParams = {
   editingEntry: any | null
@@ -6,15 +7,6 @@ type UseDictionaryEntryManagerShortcutsParams = {
   editEntryForm: { submit: () => void }
   runValidation: () => Promise<unknown> | unknown
   openValidationPanel: () => void
-}
-
-function shouldIgnoreGlobalShortcut(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false
-  const element = target as HTMLElement
-  if (element.isContentEditable) return true
-  const tag = (element.tagName || "").toLowerCase()
-  if (tag === "input" || tag === "textarea" || tag === "select") return true
-  return Boolean(element.closest('input,textarea,select,[contenteditable="true"]'))
 }
 
 export function useDictionaryEntryManagerShortcuts({
@@ -34,7 +26,7 @@ export function useDictionaryEntryManagerShortcuts({
       const lowered = event.key.toLowerCase()
 
       if (lowered === "v" && event.shiftKey) {
-        if (shouldIgnoreGlobalShortcut(event.target)) return
+        if (isEditableTarget(event.target)) return
         event.preventDefault()
         openValidationPanel()
         void runValidation()

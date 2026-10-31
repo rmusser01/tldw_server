@@ -2,43 +2,41 @@
 # Description: Comprehensive tests for TTS exception hierarchy
 #
 # Imports
+
 import pytest
-from typing import Dict, Any
 
 #
 # Local Imports
 from tldw_Server_API.app.core.TTS.tts_exceptions import (
-    TTSError,
-    TTSConfigurationError,
-    TTSProviderNotConfiguredError,
-    TTSProviderInitializationError,
-    TTSModelNotFoundError,
-    TTSModelLoadError,
-    TTSGenerationError,
-    TTSValidationError,
-    TTSInvalidInputError,
-    TTSUnsupportedFormatError,
-    TTSUnsupportedLanguageError,
-    TTSVoiceNotFoundError,
-    TTSTextTooLongError,
-    TTSInvalidVoiceReferenceError,
     TTSAuthenticationError,
-    TTSRateLimitError,
-    TTSNetworkError,
-    TTSTimeoutError,
-    TTSProviderError,
-    TTSResourceError,
-    TTSInsufficientMemoryError,
+    TTSError,
+    TTSGenerationError,
     TTSGPUError,
-    categorize_error,
-    is_retryable_error,
-    get_http_status_for_error,
+    TTSInsufficientMemoryError,
+    TTSModelLoadError,
+    TTSModelNotFoundError,
+    TTSNetworkError,
+    TTSProviderError,
+    TTSProviderInitializationError,
+    TTSProviderNotConfiguredError,
+    TTSProviderUnavailableError,
+    TTSQuotaExceededError,
+    TTSRateLimitError,
+    TTSResourceError,
+    TTSTextTooLongError,
+    TTSTimeoutError,
+    TTSUnsupportedFormatError,
+    TTSValidationError,
+    TTSVoiceNotFoundError,
     auth_error,
-    rate_limit_error,
+    categorize_error,
+    get_http_status_for_error,
+    is_retryable_error,
     network_error,
+    rate_limit_error,
+    resource_error,
     timeout_error,
     validation_error,
-    resource_error,
 )
 
 #
@@ -139,6 +137,11 @@ class TestErrorCategorization:
         # API errors
         assert categorize_error(TTSAuthenticationError("test")) == "authentication"
         assert categorize_error(TTSRateLimitError("test")) == "rate_limit"
+        assert categorize_error(TTSQuotaExceededError("test")) == "quota"
+        assert (
+            categorize_error(TTSProviderUnavailableError("test"))
+            == "provider_unavailable"
+        )
 
         # Network errors
         assert categorize_error(TTSNetworkError("test")) == "network"
@@ -228,12 +231,20 @@ class TestConvenienceFunctions:
 
     def test_network_error(self):
         """Test network_error convenience function"""
-        original_error = ConnectionError("Connection failed")
-        error = network_error("test_provider", original_error)
+        sentinel_url = "https://user:secret@tts-helper.invalid/path?token=private"
+        original_error = ConnectionError(sentinel_url)
+        error = network_error(
+            "test_provider",
+            original_error,
+            details={"original_error": sentinel_url},
+        )
 
         assert isinstance(error, TTSNetworkError)
         assert error.provider == "test_provider"
-        assert "Connection failed" in error.details["original_error"]
+        assert str(error) == "Network request failed for test_provider"
+        assert error.details == {"error_type": "ConnectionError"}
+        assert sentinel_url not in repr(error)
+        assert sentinel_url not in repr(error.details)
 
     def test_timeout_error(self):
         """Test timeout_error convenience function"""

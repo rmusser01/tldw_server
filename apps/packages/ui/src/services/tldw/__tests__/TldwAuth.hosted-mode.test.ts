@@ -135,4 +135,15 @@ describe("TldwAuthService hosted mode", () => {
     expect(loadSourceReviewHandoff(handoffToken, false)).toBeNull()
     expect(sessionStorage.getItem("unrelated")).toBe("keep")
   })
+
+  it("returns a stable unauthenticated discriminator for a logged-out hosted session", async () => {
+    mocks.bgRequest.mockResolvedValue({ authenticated: false, user: null })
+    const { TldwAuthService } = await import("@/services/tldw/TldwAuth")
+
+    await expect(new TldwAuthService().getCurrentUser()).rejects.toMatchObject({
+      message: "Not authenticated",
+      status: 401,
+      code: "not_authenticated"
+    })
+  })
 })

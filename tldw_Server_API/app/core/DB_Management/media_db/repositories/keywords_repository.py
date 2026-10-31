@@ -13,6 +13,8 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     InputError,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import MediaDbLike
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
+
 
 class KeywordsRepository:
     """Repository for keyword rows and media-keyword links."""
@@ -21,7 +23,7 @@ class KeywordsRepository:
         self.session = session
 
     @classmethod
-    def from_legacy_db(cls, db: MediaDbLike) -> "KeywordsRepository":
+    def from_legacy_db(cls, db: MediaDbLike) -> KeywordsRepository:
         return cls(session=db)
 
     def fetch_for_media(self, media_id: int) -> list[str]:
@@ -31,18 +33,14 @@ class KeywordsRepository:
             "JOIN MediaKeywords mk ON k.id = mk.keyword_id "
             "JOIN Media m ON mk.media_id = m.id "
             "WHERE mk.media_id = ? AND k.deleted = ? AND m.deleted = ? "
+            "AND m.system_operation_id IS NULL "
             f"ORDER BY {order_expr}"
         )
         try:
             cursor = self.session.execute_query(query, (media_id, False, False))
             return [row["keyword"] for row in cursor.fetchall()]
         except (DatabaseError, sqlite3.Error) as exc:
-            logger.error(
-                "Error fetching keywords for media_id {} from {}: {}",
-                media_id,
-                self.session.db_path_str,
-                exc,
-            )
+            logger.error("Keyword lookup failed (error_type={})", exception_type_for_log(exc))
             raise DatabaseError(f"Failed fetch keywords {media_id}") from exc  # noqa: TRY003
 
     def add(self, keyword: str, conn: Any | None = None) -> tuple[int | None, str | None]:
@@ -69,12 +67,7 @@ class KeywordsRepository:
                     current_version = existing["version"]
                     if is_deleted:
                         new_version = current_version + 1
-                        logger.info(
-                            "Undeleting keyword '{}' (ID: {}). New ver: {}",
-                            keyword,
-                            kw_id,
-                            new_version,
-                        )
+                        logger.info("Keyword restored (keyword_id={}, version={})", kw_id, new_version)
                         update_cursor = db._execute_with_connection(
                             conn,
                             "UPDATE Keywords SET deleted=0, last_modified=?, version=?, client_id=? WHERE id=? AND version=?",
@@ -97,7 +90,7 @@ class KeywordsRepository:
 
                 new_uuid = db._generate_uuid()
                 new_version = 1
-                logger.info("Adding new keyword '{}' UUID {}", keyword, new_uuid)
+                logger.info("Adding keyword")
                 insert_sql = (
                     "INSERT INTO Keywords (keyword, uuid, last_modified, version, client_id) "
                     "VALUES (?, ?, ?, ?, ?)"
@@ -132,16 +125,12 @@ class KeywordsRepository:
             with db.transaction() as tx_conn:
                 return self.add(keyword, conn=tx_conn)
         except (InputError, ConflictError, DatabaseError, sqlite3.Error) as exc:
-            logger.exception(
-                "Error in add keyword '{}'",
-                keyword,
-                exc_info=isinstance(exc, (DatabaseError, sqlite3.Error)),
-            )
+            logger.error("Keyword persistence failed (error_type={})", exception_type_for_log(exc))
             if isinstance(exc, (InputError, ConflictError, DatabaseError)):
                 raise
             raise DatabaseError(f"Failed to add/update keyword: {exc}") from exc  # noqa: TRY003
         except Exception as exc:
-            logger.error("Unexpected error in add keyword '{}': {}", keyword, exc, exc_info=True)
+            logger.error("Keyword persistence failed unexpectedly (error_type={})", exception_type_for_log(exc))
             raise DatabaseError(f"Unexpected error adding/updating keyword: {exc}") from exc  # noqa: TRY003
 
     def replace_keywords(
@@ -160,7 +149,8 @@ class KeywordsRepository:
         try:
             media_info = db._fetchone_with_connection(
                 connection,
-                "SELECT uuid FROM Media WHERE id = ? AND deleted = 0",
+                "SELECT uuid FROM Media WHERE id = ? AND deleted = 0 "
+                "AND system_operation_id IS NULL",
                 (media_id,),
             )
             if not media_info:
@@ -243,12 +233,12 @@ class KeywordsRepository:
                 logger.debug("No keyword changes media {}.", media_id)
             return True
         except (InputError, ConflictError, DatabaseError, sqlite3.Error) as exc:
-            logger.error("Error updating keywords for media {}: {}", media_id, exc, exc_info=True)
+            logger.error("Media keyword update failed (error_type={})", exception_type_for_log(exc))
             if isinstance(exc, (InputError, ConflictError, DatabaseError)):
                 raise
             raise DatabaseError(f"Keyword update failed: {exc}") from exc  # noqa: TRY003
         except Exception as exc:
-            logger.error("Unexpected keywords error for media {}: {}", media_id, exc, exc_info=True)
+            logger.error("Media keyword update failed unexpectedly (error_type={})", exception_type_for_log(exc))
             raise DatabaseError(f"Unexpected keyword update error: {exc}") from exc  # noqa: TRY003
 
     def soft_delete(self, keyword: str) -> bool:
@@ -268,7 +258,7 @@ class KeywordsRepository:
                     (keyword,),
                 )
                 if not keyword_info:
-                    logger.warning("Keyword '{}' not found/deleted.", keyword)
+                    logger.warning("Keyword deletion skipped: keyword unavailable")
                     return False
 
                 keyword_id = keyword_info["id"]
@@ -276,12 +266,7 @@ class KeywordsRepository:
                 current_version = keyword_info["version"]
                 new_version = current_version + 1
 
-                logger.info(
-                    "Soft deleting keyword '{}' (ID: {}). New ver: {}",
-                    keyword,
-                    keyword_id,
-                    new_version,
-                )
+                logger.info("Soft deleting keyword (keyword_id={}, version={})", keyword_id, new_version)
                 update_cursor = db._execute_with_connection(
                     conn,
                     "UPDATE Keywords SET deleted=1, last_modified=?, version=?, client_id=? WHERE id=? AND version=?",
@@ -302,7 +287,9 @@ class KeywordsRepository:
 
                 linked_cursor = db._execute_with_connection(
                     conn,
-                    "SELECT mk.media_id, m.uuid AS media_uuid FROM MediaKeywords mk JOIN Media m ON mk.media_id = m.id WHERE mk.keyword_id = ? AND m.deleted = 0",
+                    "SELECT mk.media_id, m.uuid AS media_uuid FROM MediaKeywords mk "
+                    "JOIN Media m ON mk.media_id = m.id WHERE mk.keyword_id = ? "
+                    "AND m.deleted = 0 AND m.system_operation_id IS NULL",
                     (keyword_id,),
                 )
                 media_to_unlink = linked_cursor.fetchall()
@@ -358,17 +345,13 @@ class KeywordsRepository:
                                 unlink_version,
                                 unlink_payload,
                             )
-                        logger.info(
-                            "Unlinked keyword '{}' from {} items.",
-                            keyword,
-                            deleted_link_count,
-                        )
+                        logger.info("Keyword links removed (count={})", deleted_link_count)
                 return True
         except (InputError, ConflictError, DatabaseError, sqlite3.Error) as exc:
-            logger.error("Error soft delete keyword '{}': {}", keyword, exc, exc_info=True)
+            logger.error("Keyword soft deletion failed (error_type={})", exception_type_for_log(exc))
             if isinstance(exc, (InputError, ConflictError, DatabaseError)):
                 raise
             raise DatabaseError(f"Failed soft delete keyword: {exc}") from exc  # noqa: TRY003
         except Exception as exc:
-            logger.error("Unexpected soft delete keyword error '{}': {}", keyword, exc, exc_info=True)
+            logger.error("Keyword soft deletion failed unexpectedly (error_type={})", exception_type_for_log(exc))
             raise DatabaseError(f"Unexpected soft delete keyword error: {exc}") from exc  # noqa: TRY003

@@ -298,21 +298,25 @@ describe("OverviewTab alert and health summary", () => {
       .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: ready }))
       .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: ready }))
 
-    render(<OverviewTab />)
-    await screen.findByRole("heading", { name: "Latest briefing" })
-    expect(screen.getAllByTestId("watchlists-overview-live-polite")).toHaveLength(1)
-    expect(screen.getAllByTestId("watchlists-overview-live-assertive")).toHaveLength(1)
+    vi.useFakeTimers()
+    try {
+      render(<OverviewTab />)
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(screen.getByRole("heading", { name: "Latest briefing" })).toBeVisible()
+      expect(screen.getAllByTestId("watchlists-overview-live-polite")).toHaveLength(1)
+      expect(screen.getAllByTestId("watchlists-overview-live-assertive")).toHaveLength(1)
 
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
-    await waitFor(() => {
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
       expect(screen.getByTestId("watchlists-overview-live-polite")).toHaveTextContent(
         "Signal Check is ready. Audio and show notes are available."
       )
-    })
 
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
-    await waitFor(() => expect(mocks.fetchOverviewMock).toHaveBeenCalledTimes(3))
-    expect(screen.getByTestId("watchlists-overview-live-assertive")).toHaveTextContent("")
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+      expect(mocks.fetchOverviewMock).toHaveBeenCalledTimes(3)
+      expect(screen.getByTestId("watchlists-overview-live-assertive")).toHaveTextContent("")
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("opens the exact briefing report and suppresses AbortError refresh noise", async () => {
@@ -335,16 +339,22 @@ describe("OverviewTab alert and health summary", () => {
       .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: projection }))
       .mockRejectedValueOnce(Object.assign(new Error("superseded"), { name: "AbortError" }))
 
-    render(<OverviewTab />)
-    fireEvent.click(await screen.findByRole("button", { name: "Open report for Signal Check" }))
-    expect(mocks.setActiveTabMock).toHaveBeenCalledWith("outputs")
-    expect(mocks.openOutputPreviewMock).toHaveBeenCalledWith(71)
+    vi.useFakeTimers()
+    try {
+      render(<OverviewTab />)
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      fireEvent.click(screen.getByRole("button", { name: "Open report for Signal Check" }))
+      expect(mocks.setActiveTabMock).toHaveBeenCalledWith("outputs")
+      expect(mocks.openOutputPreviewMock).toHaveBeenCalledWith(71)
 
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
-    await waitFor(() => expect(mocks.fetchOverviewMock).toHaveBeenCalledTimes(2))
-    expect(screen.queryByText("Failed to load overview")).not.toBeInTheDocument()
-    expect(screen.getByTestId("watchlists-overview-live-polite")).toHaveTextContent("")
-    expect(screen.getByTestId("watchlists-overview-live-assertive")).toHaveTextContent("")
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+      expect(mocks.fetchOverviewMock).toHaveBeenCalledTimes(2)
+      expect(screen.queryByText("Failed to load overview")).not.toBeInTheDocument()
+      expect(screen.getByTestId("watchlists-overview-live-polite")).toHaveTextContent("")
+      expect(screen.getByTestId("watchlists-overview-live-assertive")).toHaveTextContent("")
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("leads with Latest and tests the earliest active monitor before any occurrence exists", async () => {
@@ -366,8 +376,8 @@ describe("OverviewTab alert and health summary", () => {
     const { container } = render(<OverviewTab />)
     const heading = await screen.findByRole("heading", { name: "Latest briefing" })
     const latest = heading.closest("section") as HTMLElement
-    const description = screen.getByText("At-a-glance watchlist health, activity, and failure signals.")
-    expect(latest.compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const alertHealthSummary = screen.getByTestId("watchlists-overview-alert-health-summary")
+    expect(latest.compareDocumentPosition(alertHealthSummary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.getByText(/Sunday, July 12 at 6:00 PM GMT-7/)).toBeVisible()
 
     fireEvent.click(within(latest).getByRole("button", { name: "Test now" }))
@@ -488,19 +498,26 @@ describe("OverviewTab alert and health summary", () => {
       .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: failed }))
       .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: newer }))
 
-    render(<OverviewTab />)
-    fireEvent.click(await screen.findByRole("button", { name: "Retry saving report for Old occurrence" }))
-    await waitFor(() => expect(mocks.retryWatchlistBriefingStageMock).toHaveBeenCalledTimes(1))
-    const retryOptions = mocks.retryWatchlistBriefingStageMock.mock.calls[0][2]
-    expect(retryOptions.signal).toBeInstanceOf(AbortSignal)
+    vi.useFakeTimers()
+    try {
+      render(<OverviewTab />)
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      fireEvent.click(screen.getByRole("button", { name: "Retry saving report for Old occurrence" }))
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(mocks.retryWatchlistBriefingStageMock).toHaveBeenCalledTimes(1)
+      const retryOptions = mocks.retryWatchlistBriefingStageMock.mock.calls[0][2]
+      expect(retryOptions.signal).toBeInstanceOf(AbortSignal)
 
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
-    expect(await screen.findByText("New occurrence")).toBeVisible()
-    expect(retryOptions.signal.aborted).toBe(true)
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+      expect(screen.getByText("New occurrence")).toBeVisible()
+      expect(retryOptions.signal.aborted).toBe(true)
 
-    await act(async () => resolveRetry(failed))
-    expect(screen.queryByText("Old occurrence")).not.toBeInTheDocument()
-    expect(screen.getByText("New occurrence")).toBeVisible()
+      await act(async () => resolveRetry(failed))
+      expect(screen.queryByText("Old occurrence")).not.toBeInTheDocument()
+      expect(screen.getByText("New occurrence")).toBeVisible()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("resets announcement identity when the selected Watchlist changes", async () => {
@@ -538,16 +555,23 @@ describe("OverviewTab alert and health summary", () => {
       .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: ready }))
       .mockResolvedValueOnce(createOverviewPayload({ latestBriefing: otherWatchlist }))
 
-    const { rerender } = render(<OverviewTab />)
-    await screen.findByText("First Watchlist")
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
-    await waitFor(() => expect(screen.getByTestId("watchlists-overview-live-polite"))
-      .toHaveTextContent("First Watchlist is ready"))
+    vi.useFakeTimers()
+    try {
+      const { rerender } = render(<OverviewTab />)
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(screen.getByText("First Watchlist")).toBeVisible()
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+      expect(screen.getByTestId("watchlists-overview-live-polite"))
+        .toHaveTextContent("First Watchlist is ready")
 
-    mocks.selectedWatchlistId = 99
-    rerender(<OverviewTab />)
-    await screen.findByText("Second Watchlist")
-    expect(screen.getByTestId("watchlists-overview-live-polite")).toHaveTextContent("")
-    expect(screen.getByTestId("watchlists-overview-live-assertive")).toHaveTextContent("")
+      mocks.selectedWatchlistId = 99
+      rerender(<OverviewTab />)
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(screen.getByText("Second Watchlist")).toBeVisible()
+      expect(screen.getByTestId("watchlists-overview-live-polite")).toHaveTextContent("")
+      expect(screen.getByTestId("watchlists-overview-live-assertive")).toHaveTextContent("")
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

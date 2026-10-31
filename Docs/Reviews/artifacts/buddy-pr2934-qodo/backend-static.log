@@ -1,0 +1,12 @@
+Ruff tldw_Server_API/app/api/v1/endpoints/chat.py: baseline 3, current 3, added 0
+Ruff tldw_Server_API/app/api/v1/endpoints/llm_providers.py: baseline 1, current 1, added 0
+Ruff tldw_Server_API/app/api/v1/endpoints/buddies.py: baseline 0, current 0, added 0
+Ruff tldw_Server_API/app/core/Buddy/service.py: baseline 0, current 0, added 0
+Ruff tldw_Server_API/app/core/Chat/persistence_service.py: baseline 0, current 0, added 0
+Ruff tldw_Server_API/app/core/LLM_Calls/provider_config_resolution.py: baseline 17, current 17, added 0
+Ruff tldw_Server_API/tests/LLM_Adapters/unit/test_llm_providers_optional_metadata.py: baseline 0, current 0, added 0
+Ruff tldw_Server_API/tests/Persona/test_buddy_reply_settings.py: baseline 0, current 0, added 0
+Ruff tldw_Server_API/tests/Persona/test_buddy_workspace_model_handoff.py: baseline 0, current 0, added 0
+Black: four complete files and five changed-file ranges pass
+Compilation: nine modified Python files pass
+git diff --check: pass

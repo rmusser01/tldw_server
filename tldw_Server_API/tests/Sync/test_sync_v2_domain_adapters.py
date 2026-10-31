@@ -15,15 +15,23 @@ from tldw_Server_API.app.core.Sync.v2.adapters import (
     SyncAdapterContext,
     SyncAdapterRegistry,
 )
-from tldw_Server_API.app.core.Sync.v2.domain_adapters._lineage import incoming_references_head
+from tldw_Server_API.app.core.Sync.v2.domain_adapters._lineage import (
+    current_head,
+    incoming_references_head,
+)
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.chat import ChatDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.media import MediaMetadataAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes import NotesDomainAdapter
+from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_organization import (
+    NotesOrganizationDomainAdapter,
+)
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.source_cache import SourceCacheAdapter
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.workspaces import WorkspacesDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.factory import default_sync_v2_registry
 from tldw_Server_API.app.core.Sync.v2.models import (
     M1_SYNC_DOMAINS,
+    NOTES_ORGANIZATION_DOMAINS,
+    NOTES_TASK_SYNC_DOMAINS,
     SYNC_V2_SUPPORTED_DOMAINS,
     WORKSPACE_SYNC_DOMAINS,
     SyncDataset,
@@ -141,6 +149,17 @@ def _context(*envelopes: SyncEnvelope) -> SyncAdapterContext:
     return SyncAdapterContext(prior_envelopes=list(envelopes))
 
 
+def test_planned_head_wins_over_stored_history() -> None:
+    stored = _stored(_envelope(client_envelope_id="stored"), sequence=7)
+    planned = _envelope(
+        client_envelope_id="planned",
+        object_revision=8,
+        payload_hash="sha256:planned",
+    )
+
+    assert current_head([stored, planned]) is planned
+
+
 def _adapter_for_domain(domain: str):
     return {
         "notes": NotesDomainAdapter,
@@ -202,7 +221,20 @@ def _ready_sync_settings() -> SyncV2Settings:
     )
 
 
-def test_default_attachment_ref_adapter_rejects_invalid_parent_domain():
+def test_default_attachment_ref_adapter_rejects_v1_before_validating_payload():
+    """v1 immutability short-circuits every other v1 check, including parent_domain.
+
+    This asserted error_code == "attachment_ref_parent_domain_invalid". That code is
+    unreachable now: 41c097bbcc (2026-08-11) made adapter version 1 immutable, and the
+    check is the FIRST thing evaluate_envelope does, three months after this test was
+    written (0e35487726, 2026-05-23). A v1 write is refused whatever its payload says,
+    so the parent_domain is never examined.
+
+    The ordering is the point, and it is what this test now pins. In v2 the same
+    concern is enforced by the schema instead -- attachment_refs_v2 types parent_domain
+    as Literal["notes.note"] -- and the v2 contract is covered by the 40 tests in
+    tests/Sync/test_sync_v2_attachment_refs.py.
+    """
     default_sync_v2_registry.cache_clear()
     adapter = default_sync_v2_registry().get("attachment.ref")
 
@@ -223,10 +255,95 @@ def test_default_attachment_ref_adapter_rejects_invalid_parent_domain():
     )
 
     assert isinstance(outcome, AdapterRejected)
-    assert outcome.error_code == "attachment_ref_parent_domain_invalid"
+    assert outcome.error_code == "attachment_ref_v1_immutable"
 
 
-def test_default_attachment_ref_adapter_conflicts_divergent_stable_payload_hash():
+def test_default_notes_note_adapter_rejects_noncanonical_payload_before_append():
+    default_sync_v2_registry.cache_clear()
+    adapter = default_sync_v2_registry().get("notes.note")
+
+    outcome = adapter.evaluate_envelope(
+        _envelope(
+            domain="notes.note",
+            payload_clear={
+                "title": "Research note",
+                "body": "Legacy alias must not enter the canonical log.",
+            },
+        ),
+        dataset=_dataset(domains=list(M1_SYNC_DOMAINS)),
+        context=_context(),
+    )
+
+    assert isinstance(adapter, NotesDomainAdapter)
+    assert isinstance(outcome, AdapterRejected)
+    assert outcome.error_code == "notes_note_payload_invalid"
+
+
+def test_default_notes_note_adapter_rejects_restore_intent_on_tombstone():
+    default_sync_v2_registry.cache_clear()
+    adapter = default_sync_v2_registry().get("notes.note")
+
+    outcome = adapter.evaluate_envelope(
+        _envelope(
+            domain="notes.note",
+            operation="tombstone",
+            routing_metadata={"restore_intent": True},
+            payload_clear={
+                "deleted_at": "2026-05-23T18:35:00+00:00",
+                "reason": "user_deleted",
+            },
+        ),
+        dataset=_dataset(domains=list(M1_SYNC_DOMAINS)),
+        context=_context(),
+    )
+
+    assert isinstance(outcome, AdapterRejected)
+    assert outcome.error_code == "notes_note_restore_intent_invalid"
+
+
+def test_default_notes_note_adapter_accepts_restore_based_on_current_tombstone():
+    default_sync_v2_registry.cache_clear()
+    adapter = default_sync_v2_registry().get("notes.note")
+    created = _stored(
+        _envelope(
+            domain="notes.note",
+            client_envelope_id="env-note-created",
+            payload={"title": "Note", "content": "Original"},
+            payload_hash="sha256:note-created",
+        ),
+        sequence=1,
+    )
+    tombstone = _stored(
+        _envelope(
+            domain="notes.note",
+            client_envelope_id="env-note-deleted",
+            operation="tombstone",
+            payload_clear={
+                "deleted_at": "2026-05-23T18:35:00+00:00",
+                "reason": "user_deleted",
+            },
+            payload_hash="sha256:note-deleted",
+        ),
+        sequence=2,
+    )
+
+    outcome = adapter.evaluate_envelope(
+        _envelope(
+            domain="notes.note",
+            client_envelope_id="env-note-restored",
+            base_server_cursor=2,
+            payload={"title": "Note", "content": "Original"},
+            payload_hash="sha256:note-restored",
+            routing_metadata={"restore_intent": True},
+        ),
+        dataset=_dataset(domains=list(M1_SYNC_DOMAINS)),
+        context=_context(created, tombstone),
+    )
+
+    assert outcome == AdapterAccepted(client_envelope_id="env-note-restored")
+
+
+def test_default_attachment_ref_adapter_rejects_v1_divergent_hash_as_immutable():
     default_sync_v2_registry.cache_clear()
     adapter = default_sync_v2_registry().get("attachment.ref")
     prior = _stored(_attachment_ref_envelope())
@@ -249,9 +366,14 @@ def test_default_attachment_ref_adapter_conflicts_divergent_stable_payload_hash(
         context=_context(prior),
     )
 
-    assert isinstance(outcome, AdapterConflict)
-    assert outcome.domain == "attachment.ref"
-    assert outcome.conflict_type == "attachment_ref_hash_mismatch"
+    # Was: AdapterConflict with conflict_type "attachment_ref_hash_mismatch". A v1 write
+    # can no longer reach hash comparison at all -- it is refused as immutable first --
+    # so a divergent hash produces a REJECTION, not a reviewable conflict. That is a
+    # material difference (a rejection is terminal) and it is the current contract.
+    # The v2 equivalent lives in adapters.py: a v2 payload_hash that does not match the
+    # canonical object hash is rejected as attachment_ref_v2_payload_invalid.
+    assert isinstance(outcome, AdapterRejected)
+    assert outcome.error_code == "attachment_ref_v1_immutable"
 
 
 def test_notes_adapter_accepts_metadata_only_tag_status_merge():
@@ -1097,10 +1219,21 @@ def test_service_persists_domain_adapter_conflicts(tmp_path: Path):
 def test_default_sync_v2_registry_advertises_personal_and_workspace_metadata_domains():
     registry = sync_endpoint._default_sync_v2_registry()
 
-    assert registry.supported_domains == sorted(SYNC_V2_SUPPORTED_DOMAINS)
+    # registry.supported_domains lists the adapters the registry HOLDS; it is not what
+    # the service advertises. notes.task / notes.task_activity are deliberately
+    # "dormant": wired into the registry but absent from SYNC_V2_SUPPORTED_DOMAINS and
+    # from the service's advertised supported_domains -- see
+    # test_notes_task_domains_are_known_internally_but_not_supported_or_public and
+    # test_factory_registers_task_components_without_advertising_domain. Comparing the
+    # registry to the advertised list alone conflated the two surfaces.
+    assert registry.supported_domains == sorted(
+        [*SYNC_V2_SUPPORTED_DOMAINS, *NOTES_TASK_SYNC_DOMAINS]
+    )
     for domain in M1_SYNC_DOMAINS:
         if domain == "attachment.ref":
             assert isinstance(registry.get(domain), AttachmentRefAdapter)
+        elif domain == "notes.note":
+            assert isinstance(registry.get(domain), NotesDomainAdapter)
         else:
             assert isinstance(registry.get(domain), StaticSyncAdapter)
     for domain in WORKSPACE_SYNC_DOMAINS:
@@ -1108,6 +1241,8 @@ def test_default_sync_v2_registry_advertises_personal_and_workspace_metadata_dom
     assert isinstance(registry.get("source_cache.entry"), SourceCacheAdapter)
     for domain in ("media.item", "media.keyword", "media.keyword_link"):
         assert isinstance(registry.get(domain), MediaMetadataAdapter)
+    for domain in NOTES_ORGANIZATION_DOMAINS:
+        assert isinstance(registry.get(domain), NotesOrganizationDomainAdapter)
     with pytest.raises(KeyError):
         registry.get("source_cache")
     with pytest.raises(KeyError):

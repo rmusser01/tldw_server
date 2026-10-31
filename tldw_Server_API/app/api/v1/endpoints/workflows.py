@@ -121,9 +121,9 @@ from tldw_Server_API.app.core.Workflows.investigation import build_run_investiga
 from tldw_Server_API.app.core.Workflows.investigation import list_run_steps as build_run_steps
 from tldw_Server_API.app.core.Workflows.investigation import list_step_attempts as build_step_attempts
 from tldw_Server_API.app.core.Workflows.registry import StepTypeRegistry
+from tldw_Server_API.app.core.Utils.base64url import decode_opaque_cursor_segment
 
 _WORKFLOWS_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,
@@ -1558,7 +1558,7 @@ async def create_definition(
     # Basic step type validation is deferred to engine in v0.1; store as-is
     try:
         workflow_id = db.create_definition(
-            tenant_id=str(current_user.tenant_id) if hasattr(current_user, "tenant_id") else "default",
+            tenant_id=_tenant_id_for_user(current_user),
             name=body.name,
             version=body.version,
             owner_id=str(current_user.id),
@@ -1888,7 +1888,7 @@ async def run_saved(
     run_id = str(uuid4())
     db.create_run(
         run_id=run_id,
-        tenant_id=str(current_user.tenant_id) if hasattr(current_user, "tenant_id") else "default",
+        tenant_id=tenant_id,
         user_id=str(current_user.id),
         inputs=(body.inputs if body else {}) or {},
         workflow_id=d.id,
@@ -1921,23 +1921,23 @@ async def run_saved(
                         has_failure_route = False
                     if not has_failure_route:
                         # Append minimal events and step failure (fast-fail)
-                        db.append_event(str(getattr(current_user, 'tenant_id', 'default')), run_id, "run_started", {"mode": mode})
+                        db.append_event(tenant_id, run_id, "run_started", {"mode": mode})
                         step_run_id = f"{run_id}:{s0.get('id','s1')}:{int(__import__('time').time()*1000)}"
                         with contextlib.suppress(_WORKFLOWS_NONCRITICAL_EXCEPTIONS):
                             db.create_step_run(
                                 step_run_id=step_run_id,
-                                tenant_id=str(getattr(current_user, "tenant_id", "default")),
+                                tenant_id=tenant_id,
                                 run_id=run_id,
                                 step_id=s0.get("id", "s1"),
                                 name=s0.get("name") or s0.get("id", "s1"),
                                 step_type="prompt",
                                 inputs={"config": cfg},
                             )
-                        db.append_event(str(getattr(current_user, 'tenant_id', 'default')), run_id, "step_started", {"step_id": s0.get('id','s1'), "type": "prompt"})
+                        db.append_event(tenant_id, run_id, "step_started", {"step_id": s0.get('id','s1'), "type": "prompt"})
                         with contextlib.suppress(_WORKFLOWS_NONCRITICAL_EXCEPTIONS):
                             db.complete_step_run(step_run_id=step_run_id, status="failed", outputs={}, error="forced_error")
                         db.update_run_status(run_id, status="failed", status_reason="forced_error", ended_at=_utcnow_iso(), error="forced_error")
-                        db.append_event(str(getattr(current_user, 'tenant_id', 'default')), run_id, "run_failed", {"error": "forced_error"})
+                        db.append_event(tenant_id, run_id, "run_failed", {"error": "forced_error"})
                         run = db.get_run(run_id)
                         return WorkflowRunResponse(
                             run_id=run.run_id,
@@ -2189,25 +2189,22 @@ async def list_runs(
     cur_order_by = (order_by or "created_at")
     cur_order_desc = (str(order or "desc").lower() != "asc")
     if cursor:
+        # A bad cursor is a 400, not a silent restart from page 1 (Docs/API-related/Pagination_Cursors.md).
         try:
-            import base64
-            import json as _json
-            raw = base64.urlsafe_b64decode(cursor.encode("utf-8") + b"==").decode("utf-8")
-            tok = _json.loads(raw)
-            # Validate and adopt settings from token
-            token_ob = str(tok.get("order_by") or cur_order_by)
-            token_od = bool(tok.get("order_desc") if tok.get("order_desc") is not None else cur_order_desc)
+            tok = json.loads(decode_opaque_cursor_segment(cursor))
             token_ts = tok.get("last_ts")
             token_id = tok.get("last_id")
-            if token_ts and token_id:
-                cursor_ts = str(token_ts)
-                cursor_id = str(token_id)
-                cur_order_by = token_ob
-                cur_order_desc = token_od
-                # When using cursor, ignore provided offset
-                offset = 0
-        except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Workflows runs: failed to parse cursor token; ignoring. Error: {e}")
+            if not (token_ts and token_id):
+                raise ValueError("cursor lacks last_ts/last_id")
+            # Adopt the ordering the cursor was minted under
+            cur_order_by = str(tok.get("order_by") or cur_order_by)
+            cur_order_desc = bool(tok.get("order_desc") if tok.get("order_desc") is not None else cur_order_desc)
+        except (ValueError, AttributeError) as e:
+            raise HTTPException(status_code=400, detail="Invalid cursor") from e
+        cursor_ts = str(token_ts)
+        cursor_id = str(token_id)
+        # When using cursor, ignore provided offset
+        offset = 0
 
     rows = db.list_runs(
         tenant_id=tenant_id,
@@ -2376,7 +2373,7 @@ async def run_adhoc(
     run_id = str(uuid4())
     db.create_run(
         run_id=run_id,
-        tenant_id=str(current_user.tenant_id) if hasattr(current_user, "tenant_id") else "default",
+        tenant_id=tenant_id,
         user_id=str(current_user.id),
         inputs=body.inputs or {},
         workflow_id=None,
@@ -2591,16 +2588,14 @@ async def get_run_events(
     types_norm = [t.strip() for t in (types or []) if str(t).strip()]
     # Cursor token overrides since
     if cursor:
+        # A bad cursor is a 400, not a silent restart from page 1 (Docs/API-related/Pagination_Cursors.md).
         try:
-            import base64
-            import json as _json
-            pad = "=" * (-len(cursor) % 4)
-            raw = base64.urlsafe_b64decode((cursor + pad).encode("utf-8")).decode("utf-8")
-            tok = _json.loads(raw)
-            if isinstance(tok.get("last_seq"), int):
-                since = int(tok["last_seq"])  # seek after this seq
-        except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Workflows events: failed to parse cursor token; ignoring. Error: {e}")
+            last_seq = json.loads(decode_opaque_cursor_segment(cursor)).get("last_seq")
+        except (ValueError, AttributeError) as e:
+            raise HTTPException(status_code=400, detail="Invalid cursor") from e
+        if not isinstance(last_seq, int) or isinstance(last_seq, bool):
+            raise HTTPException(status_code=400, detail="Invalid cursor")
+        since = last_seq  # seek after this seq
     events = db.get_events(run_id, since=since, limit=limit, types=types_norm if types_norm else None)
     out: list[EventResponse] = []
     for e in events:
@@ -3520,7 +3515,11 @@ async def download_run_artifacts_zip(
 
 # -------------------- Options Discovery: Chunkers --------------------
 
-@router.get("/options/chunkers")
+@router.get(
+    "/options/chunkers",
+    # Capability disclosure: the server's step catalogue and shipped templates.
+    dependencies=[Depends(get_request_user)],
+)
 async def get_chunker_options():
     """Return available chunking methods with defaults and a basic parameter schema.
 
@@ -3660,7 +3659,7 @@ async def control_run(
         imp = str(request.headers.get("x-impersonate-user", "")).strip()
         is_admin = _is_workflows_admin_user(current_user)
         if imp and is_admin and str(imp) != str(current_user.id):
-            db.append_event(str(getattr(current_user, 'tenant_id', 'default')), run_id, "admin_impersonation", {"actor": str(current_user.id), "target_user_id": imp, "action": action})
+            db.append_event(tenant_id, run_id, "admin_impersonation", {"actor": str(current_user.id), "target_user_id": imp, "action": action})
     except _WORKFLOWS_NONCRITICAL_EXCEPTIONS:
         pass
     result = "applied"
@@ -3694,6 +3693,8 @@ async def control_run(
 
 @router.get(
     "/step-types",
+    # Capability disclosure: the server's step catalogue and shipped templates.
+    dependencies=[Depends(get_request_user)],
     openapi_extra={
         "x-codeSamples": [
             {
@@ -4099,7 +4100,11 @@ async def list_step_types():
     return out
 
 
-@router.get("/templates")
+@router.get(
+    "/templates",
+    # Capability disclosure: the server's step catalogue and shipped templates.
+    dependencies=[Depends(get_request_user)],
+)
 async def list_workflow_templates(q: Optional[str] = Query(None, description="Search query on name/title/tags"), tag: Optional[str] = Query(None, description="Filter by tag")) -> list[dict[str, Any]]:
     """List available example workflow templates shipped with the server.
 
@@ -4168,6 +4173,8 @@ async def list_workflow_templates(q: Optional[str] = Query(None, description="Se
 
 @router.get(
     "/templates/tags",
+    # Capability disclosure: the server's step catalogue and shipped templates.
+    dependencies=[Depends(get_request_user)],
     openapi_extra={
         "x-codeSamples": [
             {
@@ -4215,7 +4222,11 @@ async def list_workflow_template_tags() -> list[str]:
         return []
 
 
-@router.get("/templates/{name:path}")
+@router.get(
+    "/templates/{name:path}",
+    # Capability disclosure: the server's step catalogue and shipped templates.
+    dependencies=[Depends(get_request_user)],
+)
 async def get_workflow_template(name: str) -> dict[str, Any]:
     """Return JSON content for a named workflow template (sans extension)."""
     # Disallow traversal and separators (defense-in-depth with unquoting)
@@ -4260,7 +4271,11 @@ async def get_workflow_template(name: str) -> dict[str, Any]:
         logger.warning(f"Failed to read workflow template {name}: {e}")
         raise HTTPException(status_code=500, detail="Failed to load template") from e
 
-@router.get("/templates/_byname/{name:path}")
+@router.get(
+    "/templates/_byname/{name:path}",
+    # Capability disclosure: the server's step catalogue and shipped templates.
+    dependencies=[Depends(get_request_user)],
+)
 async def get_workflow_template_legacy(name: str) -> dict[str, Any]:
     """Return JSON content for a named workflow template (sans extension)."""
     # Disallow traversal and separators (defense-in-depth with unquoting)
@@ -4608,7 +4623,7 @@ async def reject_step(
                         ) from exc
                 try:
                     db.append_event(
-                        str(getattr(current_user, "tenant_id", "default")),
+                        tenant_id,
                         run_id,
                         "human_rejected",
                         {"step_id": step_id},
@@ -4702,7 +4717,7 @@ async def reject_step(
                 ) from exc
         try:
             db.append_event(
-                str(getattr(current_user, "tenant_id", "default")),
+                tenant_id,
                 run_id,
                 "human_rejected",
                 {"step_id": step_id},

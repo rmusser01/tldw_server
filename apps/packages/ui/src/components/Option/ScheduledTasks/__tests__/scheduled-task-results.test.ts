@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest"
 
 import { BLOCKED_STATE_LABEL } from "@/design-system"
-import type { ScheduledTask } from "@/services/scheduled-tasks-control-plane"
+import type {
+  ScheduledTask,
+  ScheduledTaskResultResponse
+} from "@/services/scheduled-tasks-control-plane"
 
 import {
   buildScheduledTaskResultDedupeKey,
@@ -16,6 +19,7 @@ import {
   findScheduledTaskResultByRouteState,
   filterScheduledTaskResults,
   mergeScheduledTaskAutomationHomeItems,
+  mapScheduledTaskApiResults,
   projectScheduledTaskResults,
   resolveScheduledTaskResultsCapabilityMode
 } from "../scheduled-task-results"
@@ -38,6 +42,110 @@ const buildTask = (overrides: Partial<ScheduledTask>): ScheduledTask => ({
 })
 
 describe("scheduled task result helpers", () => {
+  const buildApiResult = (
+    overrides: Partial<ScheduledTaskResultResponse> = {}
+  ): ScheduledTaskResultResponse => ({
+    id: "result_1",
+    definition_id: "definition_1",
+    run_id: "run_1",
+    kind: "finding",
+    title: "Possible answer found",
+    summary: "One relevant source matched.",
+    answer: "The answer is now present in the library.",
+    answer_mode: "synthesized",
+    confidence: { label: "medium" },
+    source_refs: [
+      {
+        source_id: "media_1",
+        title: "Research note",
+        snippet: "Short redacted evidence."
+      }
+    ],
+    dedupe_key: "rq:definition_1:run_1:media_1",
+    visibility_destination: { home: true, results: true },
+    review_state: "unread",
+    created_at: "2030-01-01T09:00:00Z",
+    updated_at: "2030-01-01T09:00:00Z",
+    ...overrides
+  })
+
+  it("maps normalized API results into primary result rows with evidence metadata", () => {
+    const [result] = mapScheduledTaskApiResults(
+      [buildApiResult()],
+      { capabilityMode: "normalized_results_mutation" }
+    )
+
+    expect(result).toMatchObject({
+      capabilityMode: "normalized_results_mutation",
+      signalKind: "result",
+      state: "new",
+      severity: "success",
+      taskId: "automation_definition:definition_1",
+      taskTitle: "Possible answer found",
+      taskTypeLabel: "Recurring question",
+      owner: "scheduled_tasks",
+      ownerLabel: "Scheduled Tasks",
+      resultId: "result_1",
+      runId: "run_1",
+      resultCount: 1,
+      sourceLabel: "Research note",
+      outputLabel: "Synthesized answer",
+      answer: "The answer is now present in the library.",
+      answerMode: "synthesized",
+      confidenceLabel: "medium",
+      reviewState: "unread",
+      reviewed: false,
+      reviewAvailable: true,
+      retryAvailable: false
+    })
+    expect(result?.sourceRefs).toEqual([
+      expect.objectContaining({
+        title: "Research note",
+        snippet: "Short redacted evidence."
+      })
+    ])
+    expect(result?.primaryHref).toBe("/scheduled-tasks?tab=results&result_id=result_1")
+    expect(result?.runHref).toBe("/scheduled-tasks?tab=results&run_id=run_1")
+  })
+
+  it("redacts private keys when rendering structured API result answers", () => {
+    const [result] = mapScheduledTaskApiResults([
+      buildApiResult({
+        answer: {
+          text: "The answer is now present.",
+          api_key: "sk-live-secret",
+          citations: [
+            {
+              title: "Research note",
+              access_token: "token-secret"
+            }
+          ]
+        }
+      })
+    ])
+
+    expect(result.answer).toContain("The answer is now present.")
+    expect(result.answer).toContain("[redacted]")
+    expect(result.answer).not.toContain("sk-live-secret")
+    expect(result.answer).not.toContain("token-secret")
+  })
+
+  it("keeps dismissed normalized findings out of Home while preserving them in results", () => {
+    const [result] = mapScheduledTaskApiResults([
+      buildApiResult({
+        review_state: "dismissed",
+        reviewed_at: "2030-01-01T10:00:00Z"
+      })
+    ])
+
+    expect(result).toMatchObject({
+      state: "reviewed",
+      reviewed: true,
+      reviewState: "dismissed"
+    })
+    expect(buildScheduledTaskAutomationHomeItems([result])).toEqual([])
+  })
+
   it("defaults to projected signals when normalized result endpoints are unavailable", () => {
     expect(resolveScheduledTaskResultsCapabilityMode({})).toBe("projected_signals")
     expect(

@@ -12,7 +12,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -104,8 +103,12 @@ class TestCountEmbeddings:
             assert result == 50
 
     @pytest.mark.asyncio
-    async def test_count_embeddings_returns_zero_on_failure(self):
-        """_count_embeddings should return 0 when ChromaDBManager fails."""
+    async def test_count_embeddings_returns_zero_when_unavailable_and_storage_absent(self, monkeypatch, tmp_path):
+        """An unavailable optional Chroma manager is empty only with no storage."""
+        from tldw_Server_API.app.core.config import settings
+
+        monkeypatch.setitem(settings, "USER_DB_BASE_DIR", str(tmp_path))
+        monkeypatch.setenv("TLDW_DB_ALLOWED_BASE_DIRS", str(tmp_path))
         with patch(
             "tldw_Server_API.app.services.admin_data_subject_requests_service._get_chroma_manager_for_user",
             side_effect=RuntimeError("no chroma"),
@@ -121,6 +124,86 @@ class TestCountEmbeddings:
 # ---------------------------------------------------------------------------
 # Sub-task 2.2 tests: update_request_status on the repo
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_at", ["manager", "list", "count", "erasure_count"])
+async def test_embedding_failure_logs_exclude_private_exception_content(
+    monkeypatch, tmp_path, _mock_chroma_manager, failure_at
+):
+    from tldw_Server_API.app.core.config import settings
+    from tldw_Server_API.app.services import admin_data_subject_requests_service as service
+
+    monkeypatch.setitem(settings, "USER_DB_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("TLDW_DB_ALLOWED_BASE_DIRS", str(tmp_path))
+    (tmp_path / "7" / "chroma_storage").mkdir(parents=True)
+
+    private_marker = "private-subject-embedding-content"
+    failure = RuntimeError(private_marker)
+    get_manager = MagicMock(return_value=_mock_chroma_manager)
+    monkeypatch.setattr(service, "_get_chroma_manager_for_user", get_manager)
+    if failure_at == "manager":
+        get_manager.side_effect = failure
+    elif failure_at == "list":
+        _mock_chroma_manager.list_collections.side_effect = failure
+    else:
+        _mock_chroma_manager.list_collections.return_value[0].count.side_effect = failure
+
+    messages = []
+    sink = service.logger.add(
+        lambda message: messages.append(message.record["message"]),
+        level="DEBUG",
+        filter=lambda record: record["name"] == service.__name__,
+    )
+    try:
+        if failure_at == "erasure_count":
+            assert await service._erase_embeddings(7) == 0
+        else:
+            with pytest.raises(service.DataSubjectRequestCoverageUnavailableError):
+                await service._count_embeddings(7)
+    finally:
+        service.logger.remove(sink)
+
+    assert messages
+    assert private_marker not in "\n".join(messages)
+    if failure_at == "erasure_count":
+        _mock_chroma_manager.delete_collection.assert_called_once_with("default")
+
+
+@pytest.mark.asyncio
+async def test_preview_failure_logs_exclude_private_exception_content(monkeypatch):
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.services import admin_data_subject_requests_service as service
+
+    private_marker = "private-subject-coverage-content"
+    monkeypatch.setattr(service, "_resolve_requester_user", AsyncMock(return_value={"id": 7}))
+    monkeypatch.setattr(service, "_enforce_requester_visibility", AsyncMock())
+    monkeypatch.setattr(
+        service,
+        "_build_summary_for_user",
+        AsyncMock(side_effect=service.DataSubjectRequestCoverageUnavailableError(private_marker)),
+    )
+    messages = []
+    sink = service.logger.add(
+        lambda message: messages.append(message.record["message"]),
+        level="WARNING",
+        filter=lambda record: record["name"] == service.__name__,
+    )
+    try:
+        with pytest.raises(HTTPException) as error:
+            await service.preview_data_subject_request(
+                requester_identifier="7",
+                categories=["notes"],
+                users_repo=MagicMock(),
+            )
+    finally:
+        service.logger.remove(sink)
+
+    assert error.value.status_code == 500
+    assert error.value.detail == "requester_data_unavailable"
+    assert messages
+    assert private_marker not in "\n".join(messages)
 
 
 class TestUpdateRequestStatus:
@@ -147,7 +230,7 @@ class TestUpdateRequestStatus:
         )
 
         expected = {"pending", "recorded", "executing", "completed", "failed"}
-        assert AuthnzDataSubjectRequestsRepo._VALID_STATUSES == expected
+        assert expected == AuthnzDataSubjectRequestsRepo._VALID_STATUSES
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,96 @@
+# C9 — Discord/Slack whole-module clone measurements, 2026-09-21
+#
+# Method: normalise the Discord file with
+#   s/discord/slack/g; s/Discord/Slack/g; s/DISCORD/SLACK/g;
+#   s/guild/team/g;    s/Guild/Team/g;    s/GUILD/TEAM/g
+# then difflib.SequenceMatcher(None, a, b, autojunk=False) against the Slack file.
+# "matching lines" = sum of matching-block sizes; % is of the larger file.
+#
+# THREE source pairs (the briefing named two; discord_oauth_admin/slack_oauth_admin is new)
+# and FOUR test pairs.
+
+
+### discord_support.py(677) vs slack_support.py(678) after rename: 533 matching lines = 78.6% of the larger file; ratio=78.7%
+  divergent regions (slack-side line numbers, 1-based):
+   insert  discord_support.py[3:2]  slack_support.py[3:4]  (-0/+2)
+   delete  discord_support.py[9:10]  slack_support.py[11:10]  (-2/+0)
+   replace discord_support.py[30:30]  slack_support.py[30:31]  (-1/+2)
+   replace discord_support.py[39:39]  slack_support.py[40:41]  (-1/+2)
+   replace discord_support.py[56:57]  slack_support.py[58:59]  (-2/+2)
+   replace discord_support.py[72:73]  slack_support.py[74:75]  (-2/+2)
+   replace discord_support.py[117:124]  slack_support.py[119:126]  (-8/+8)
+   replace discord_support.py[127:131]  slack_support.py[129:129]  (-5/+1)
+   insert  discord_support.py[196:195]  slack_support.py[194:195]  (-0/+2)
+   delete  discord_support.py[273:284]  slack_support.py[273:272]  (-12/+0)
+   replace discord_support.py[288:290]  slack_support.py[276:279]  (-3/+4)
+   replace discord_support.py[300:304]  slack_support.py[289:289]  (-5/+1)
+   replace discord_support.py[307:310]  slack_support.py[292:294]  (-4/+3)
+   replace discord_support.py[315:322]  slack_support.py[300:306]  (-8/+7)
+   replace discord_support.py[325:327]  slack_support.py[309:311]  (-3/+3)
+   replace discord_support.py[329:329]  slack_support.py[313:325]  (-1/+13)
+   replace discord_support.py[405:406]  slack_support.py[401:402]  (-2/+2)
+   replace discord_support.py[422:423]  slack_support.py[418:419]  (-2/+2)
+   replace discord_support.py[426:427]  slack_support.py[422:423]  (-2/+2)
+   replace discord_support.py[439:441]  slack_support.py[435:437]  (-3/+3)
+   replace discord_support.py[503:507]  slack_support.py[499:503]  (-5/+5)
+   replace discord_support.py[512:514]  slack_support.py[508:510]  (-3/+3)
+   replace discord_support.py[576:580]  slack_support.py[572:580]  (-5/+9)
+   replace discord_support.py[582:606]  slack_support.py[582:585]  (-25/+4)
+   replace discord_support.py[613:615]  slack_support.py[592:594]  (-3/+3)
+   insert  discord_support.py[617:616]  slack_support.py[596:635]  (-0/+40)
+   delete  discord_support.py[626:641]  slack_support.py[645:644]  (-16/+0)
+   replace discord_support.py[650:654]  slack_support.py[653:654]  (-5/+2)
+   replace discord_support.py[662:664]  slack_support.py[663:665]  (-3/+3)
+
+### discord.py(511) vs slack.py(600) after rename: 368 matching lines = 61.3% of the larger file; ratio=66.2%
+  divergent regions (slack-side line numbers, 1-based):
+   insert  discord.py[3:2]  slack.py[3:4]  (-0/+2)
+   replace discord.py[22:22]  slack.py[24:25]  (-1/+2)
+   delete  discord.py[27:29]  slack.py[31:30]  (-3/+0)
+   replace discord.py[47:47]  slack.py[47:48]  (-1/+2)
+   replace discord.py[49:49]  slack.py[50:51]  (-1/+2)
+   insert  discord.py[54:53]  slack.py[56:58]  (-0/+3)
+   replace discord.py[167:171]  slack.py[172:173]  (-5/+2)
+   replace discord.py[179:181]  slack.py[182:184]  (-3/+3)
+   replace discord.py[197:198]  slack.py[200:201]  (-2/+2)
+   replace discord.py[202:203]  slack.py[205:206]  (-2/+2)
+   replace discord.py[215:216]  slack.py[218:219]  (-2/+2)
+   replace discord.py[234:237]  slack.py[237:242]  (-4/+6)
+   replace discord.py[239:240]  slack.py[244:336]  (-2/+93)
+   replace discord.py[245:261]  slack.py[341:357]  (-17/+17)
+   replace discord.py[263:263]  slack.py[359:382]  (-1/+24)
+   delete  discord.py[265:268]  slack.py[384:383]  (-4/+0)
+   replace discord.py[270:271]  slack.py[385:395]  (-2/+11)
+   replace discord.py[273:290]  slack.py[397:401]  (-18/+5)
+   replace discord.py[294:297]  slack.py[405:407]  (-4/+3)
+   insert  discord.py[300:299]  slack.py[410:440]  (-0/+31)
+   replace discord.py[301:352]  slack.py[442:446]  (-52/+5)
+   replace discord.py[399:400]  slack.py[493:493]  (-2/+1)
+   delete  discord.py[409:410]  slack.py[502:501]  (-2/+0)
+   delete  discord.py[415:416]  slack.py[506:505]  (-2/+0)
+
+### discord_oauth_admin.py(407) vs slack_oauth_admin.py(407) after rename: 371 matching lines = 91.2% of the larger file; ratio=91.2%
+  divergent regions (slack-side line numbers, 1-based):
+   replace discord_oauth_admin.py[23:24]  slack_oauth_admin.py[23:23]  (-2/+1)
+   delete  discord_oauth_admin.py[62:64]  slack_oauth_admin.py[60:59]  (-3/+0)
+   delete  discord_oauth_admin.py[79:80]  slack_oauth_admin.py[74:73]  (-2/+0)
+   insert  discord_oauth_admin.py[156:155]  slack_oauth_admin.py[149:154]  (-0/+6)
+   replace discord_oauth_admin.py[163:170]  slack_oauth_admin.py[162:165]  (-8/+4)
+   replace discord_oauth_admin.py[172:173]  slack_oauth_admin.py[167:168]  (-2/+2)
+   replace discord_oauth_admin.py[186:188]  slack_oauth_admin.py[181:189]  (-3/+9)
+   delete  discord_oauth_admin.py[190:191]  slack_oauth_admin.py[191:190]  (-2/+0)
+   replace discord_oauth_admin.py[214:215]  slack_oauth_admin.py[213:214]  (-2/+2)
+   replace discord_oauth_admin.py[222:223]  slack_oauth_admin.py[222:223]  (-2/+2)
+
+### TEST-SIDE CLONES
+test_discord_command_routing.py         ( 180) vs test_slack_command_routing.py         ( 165):   53 matching = 29.4%
+test_discord_oauth_lifecycle.py         ( 255) vs test_slack_oauth_lifecycle.py         ( 279):  237 matching = 84.9%
+test_discord_policy_hardening.py        ( 350) vs test_slack_policy_hardening.py        ( 326):  212 matching = 60.6%
+test_discord_endpoint_sanitizers.py     (  30) vs test_slack_endpoint_sanitizers.py     (  30):   30 matching = 100.0%
+test LOC: discord-side 815, slack-side 800
+
+### SAME-LINE-NUMBER BYTE-IDENTICAL LINES (support pair)
+# 23 non-trivial (>40 chars) lines are byte-identical at the SAME line number in
+# discord_support.py and slack_support.py. Verified verbatim at the same line numbers:
+#   _error_response   discord_support.py:241-245 == slack_support.py:241-245
+#   _metric_labels    discord_support.py:248-254 == slack_support.py:248-254

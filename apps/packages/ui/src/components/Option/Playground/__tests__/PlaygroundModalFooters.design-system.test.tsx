@@ -343,6 +343,7 @@ describe("Playground modal footers design-system migration", () => {
           {
             id: "template-1",
             selectedModel: "llama",
+            systemPrompt: "",
             character: { name: "Guide" },
             ragPinnedResults: []
           } as NonNullable<PlaygroundStartupTemplateModalProps["preview"]>

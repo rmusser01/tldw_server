@@ -77,7 +77,7 @@ def infer_tts_provider_from_model(model: str | None) -> str | None:
     if cleaned is None:
         return None
     lowered = cleaned.lower()
-    if lowered in {"tts-1", "tts-1-hd"}:
+    if lowered in {"tts-1", "tts-1-hd", "gpt-4o-mini-tts"}:
         return "openai"
     if lowered.startswith("kokoro"):
         return "kokoro"

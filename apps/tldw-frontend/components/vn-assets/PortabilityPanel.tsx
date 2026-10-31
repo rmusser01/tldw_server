@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { Archive, Upload } from 'lucide-react';
+import { createVNAssetIdempotencyKey } from '@web/lib/vnAssetIdempotency';
 import { Badge } from '@web/components/ui/Badge';
 import { Button } from '@web/components/ui/Button';
 import {
@@ -69,11 +70,6 @@ function statusVariant(status?: string): 'danger' | 'info' | 'neutral' | 'succes
 const IMPORT_PREVIEW_TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'quarantined', 'deleted']);
 const IMPORT_PREVIEW_POLL_INTERVAL_MS = 1000;
 const IMPORT_PREVIEW_MAX_POLLS = 60;
-
-function createVNAssetIdempotencyKey(prefix: string): string {
-  const uuid = globalThis.crypto?.randomUUID?.();
-  return `${prefix}-${uuid ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
-}
 
 function waitForImportPreviewPoll(): Promise<void> {
   return new Promise((resolve) => {
@@ -282,7 +278,7 @@ export default function PortabilityPanel({ selectedPack }: PortabilityPanelProps
             <input
               id="vn-pack-import-archive"
               accept=".tldw-vnpack,.zip,application/zip"
-              className="rounded-md border border-border bg-surface px-3 py-2 text-sm"
+              className="min-w-0 w-full rounded-md border border-border bg-surface px-3 py-2 text-sm"
               disabled={isUploading}
               type="file"
               onChange={handleArchiveUpload}

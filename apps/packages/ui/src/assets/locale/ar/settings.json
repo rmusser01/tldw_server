@@ -1000,10 +1000,11 @@
     }
   },
   "onboarding": {
+    "loginSettingsError": "تعذّر فتح إعدادات تسجيل الدخول. حاول مرة أخرى.",
     "title": "مرحبًا — لنقم بتوصيلك",
     "description": "قم بإعداد الخادم وطريقة المصادقة. سنتحقق مباشرة من اتصال الخادم وحالة نظام البحث المعرفي (RAG).",
     "learnMoreTldw": "تعرّف على كيفية عمل خادم tldw",
-    "serverDocsUrl": "https://github.com/rmusser01/tldw_browser_assistant",
+    "serverDocsUrl": "https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md",
     "serverUrl": {
       "placeholder": "http://127.0.0.1:8000",
       "help": "مثال: http://127.0.0.1:8000",

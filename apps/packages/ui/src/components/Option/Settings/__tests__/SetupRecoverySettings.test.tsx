@@ -82,7 +82,7 @@ describe("SetupRecoverySettings", () => {
     )
 
     expect(
-      screen.getByRole("heading", { name: "Setup & Recovery" })
+      screen.getByRole("heading", { level: 2, name: "Setup & Recovery" })
     ).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /fix auth/i })).toHaveAttribute(
       "href",

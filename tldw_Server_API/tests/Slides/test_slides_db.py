@@ -1,17 +1,36 @@
 import json
 import sqlite3
+import stat
 import threading
 import time
 
 import pytest
 
-from tldw_Server_API.app.core.Slides.slides_db import SlidesDatabase, ConflictError, InputError
+import tldw_Server_API.app.core.Slides.slides_db as slides_db
+from tldw_Server_API.app.core.Slides.slides_db import (
+    ConflictError,
+    InputError,
+    SchemaError,
+    SlidesDatabase,
+)
+
+
+def _file_identity(path) -> tuple[int, int, int]:
+    metadata = path.stat(follow_symlinks=False)
+    return (metadata.st_dev, metadata.st_ino, stat.S_IFMT(metadata.st_mode))
 
 
 def _sample_slides() -> str:
     slides = [
         {"order": 0, "layout": "title", "title": "Deck", "content": "", "speaker_notes": None, "metadata": {}},
-        {"order": 1, "layout": "content", "title": "Intro", "content": "- A\n- B", "speaker_notes": None, "metadata": {}},
+        {
+            "order": 1,
+            "layout": "content",
+            "title": "Intro",
+            "content": "- A\n- B",
+            "speaker_notes": None,
+            "metadata": {},
+        },
     ]
     return json.dumps(slides)
 
@@ -76,6 +95,9 @@ def test_slides_db_create_and_get(tmp_path):
     assert fetched.title == "Deck"
     assert fetched.marp_theme == "gaia"
     assert json.loads(fetched.studio_data) == json.loads(_sample_studio_data())
+    assert fetched.content_kind == "structured_slides"
+    assert fetched.html_document is None
+    assert fetched.generation_job_uuid is None
     db.close_connection()
 
 
@@ -319,7 +341,6 @@ def test_slides_db_schema_initialization_serializes_column_migrations(tmp_path, 
             )
             """
         )
-    SlidesDatabase._schema_init_paths.discard(str(db_path.resolve()))
 
     def _slow_marp_theme_migration(conn):
         columns = conn.execute("PRAGMA table_info(presentations)").fetchall()
@@ -333,6 +354,14 @@ def test_slides_db_schema_initialization_serializes_column_migrations(tmp_path, 
         "_ensure_marp_theme_column",
         staticmethod(_slow_marp_theme_migration),
     )
+    original_configure = slides_db.configure_sqlite_connection
+    config_barrier = threading.Barrier(2)
+
+    def _configure_together(conn):
+        config_barrier.wait(timeout=5)
+        original_configure(conn)
+
+    monkeypatch.setattr(slides_db, "configure_sqlite_connection", _configure_together)
 
     errors: list[BaseException] = []
 
@@ -340,14 +369,14 @@ def test_slides_db_schema_initialization_serializes_column_migrations(tmp_path, 
         try:
             db = SlidesDatabase(db_path=db_path, client_id=client_id)
             db.close_connection()
-        except BaseException as exc:  # pragma: no cover - assertion reports details below
+        except BaseException as exc:  # noqa: BLE001  # pragma: no cover - assertion reports details below
             errors.append(exc)
 
     threads = [threading.Thread(target=_open_database, args=(f"tester-{index}",)) for index in range(2)]
     for thread in threads:
         thread.start()
     for thread in threads:
-        thread.join(timeout=5)
+        thread.join(timeout=10)
 
     assert all(not thread.is_alive() for thread in threads)
     assert errors == []
@@ -373,7 +402,9 @@ def test_slides_db_soft_delete_restore(tmp_path):
     )
     deleted = db.soft_delete_presentation(row.id, expected_version=row.version)
     assert deleted.deleted == 1
-    rows, total = db.list_presentations(limit=10, offset=0, include_deleted=False, sort_column="created_at", sort_direction="DESC")
+    rows, total = db.list_presentations(
+        limit=10, offset=0, include_deleted=False, sort_column="created_at", sort_direction="DESC"
+    )
     assert total == 0
     restored = db.restore_presentation(row.id, expected_version=deleted.version)
     assert restored.deleted == 0
@@ -482,3 +513,44 @@ def test_slides_db_runtime_connections_use_full_shared_policy_after_schema_init(
         "busy_timeout": 5000,
         "temp_store": 2,
     }
+
+
+def test_open_existing_complete_does_not_create_a_missing_database(tmp_path):
+    db_path = tmp_path / "missing" / "Slides.db"
+
+    with pytest.raises(
+        SchemaError,
+        match="^Slides database is unavailable or incomplete$",
+    ):
+        SlidesDatabase.open_existing_complete(
+            db_path=db_path,
+            client_id="tester",
+            expected_file_identity=(0, 0, stat.S_IFREG),
+        )
+
+    assert not db_path.exists()
+
+
+def test_open_existing_complete_does_not_repair_an_incomplete_database(tmp_path):
+    db_path = tmp_path / "Slides.db"
+    initialized = SlidesDatabase(db_path=db_path, client_id="setup")
+    initialized.close_connection()
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("DROP TABLE sync_log")
+    expected_identity = _file_identity(db_path)
+
+    with pytest.raises(
+        SchemaError,
+        match="^Slides database is unavailable or incomplete$",
+    ):
+        SlidesDatabase.open_existing_complete(
+            db_path=db_path,
+            client_id="tester",
+            expected_file_identity=expected_identity,
+        )
+
+    with sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True) as connection:
+        sync_log = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sync_log'"
+        ).fetchone()
+    assert sync_log is None

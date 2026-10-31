@@ -1,6 +1,6 @@
 import type { Route } from '@playwright/test';
 import { test, expect, seedAuth, SMOKE_LOAD_TIMEOUT } from './smoke.setup';
-import { waitForAppShell } from '../utils/helpers';
+import { waitForAppShell, waitForVisualSettle } from '../utils/helpers';
 
 const fulfillJson = async (route: Route, status: number, data: unknown) => {
   await route.fulfill({
@@ -111,6 +111,14 @@ test.describe('VN asset packs smoke', () => {
         return;
       }
 
+      if (method === 'GET' && path === '/packs/1/generation/preflight') {
+        await fulfillJson(route, 200, {
+          scope: 'api_process_configuration', worker_health: 'unknown',
+          local_workers_enabled: true, warnings: [], slots: [],
+        });
+        return;
+      }
+
       if (method === 'GET' && path === '/packs/1/readiness') {
         await fulfillJson(route, 200, {
           ready: false,
@@ -209,3 +217,70 @@ test.describe('VN asset packs smoke', () => {
     await expect(page.getByText('Export job: 700')).toBeVisible();
   });
 });
+
+for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
+  test(`VN generation retries a failed slot and refreshes progress at ${viewport.width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize(viewport);
+    await seedAuth(page);
+    const requests: Array<Record<string, unknown>> = [];
+    let retried = false;
+    const slot = {
+      id: 12, pack_id: 7, slot_key: 'sprite_neutral', asset_type: 'sprite',
+      variant_count: 1, status: 'failed', last_error: 'image_backend_unavailable',
+    };
+    await page.route(/\/api\/v1\/vn\/vn-assets(?:\/.*)?$/, async (route) => {
+      const path = new URL(route.request().url()).pathname.replace('/api/v1/vn/vn-assets', '');
+      if (path === '/starter-matrices') return fulfillJson(route, 200, { matrices: [] });
+      if (path === '/packs') return fulfillJson(route, 200, [
+        { id: 7, title: 'Recovery pack', primary_character_id: 42, status: 'draft' },
+      ]);
+      if (path === '/packs/7/slots') return fulfillJson(route, 200, [
+        retried ? { ...slot, status: 'reviewing', last_error: null } : slot,
+      ]);
+      if (path === '/packs/7/items') return fulfillJson(route, 200, []);
+      if (path === '/packs/7/readiness') return fulfillJson(route, 200, {
+        ready: false, status: 'not_ready', warnings: [], errors: [],
+      });
+      if (path === '/packs/7/generation/preflight') return fulfillJson(route, 200, {
+        scope: 'api_process_configuration', worker_health: 'unknown',
+        local_workers_enabled: false,
+        warnings: ['Local generation workers are not both enabled. Enable them or confirm that separate workers are running.'],
+        slots: [{ slot_id: 12, backend: null, model: null, status: 'unavailable',
+          message: 'Enable the selected image backend before retrying.' }],
+      });
+      if (path === '/packs/7/generation') return fulfillJson(route, 200, {
+        status: retried ? 'completed' : 'failed',
+        failed_count: retried ? 0 : 1, completed_count: retried ? 1 : 0,
+      });
+      if (path === '/packs/7/slots/12/retry') {
+        requests.push(route.request().postDataJSON());
+        if (requests.length === 1) return route.abort('failed');
+        retried = true;
+        return fulfillJson(route, 202, { status: 'queued', batch_id: 2 });
+      }
+      return fulfillJson(route, 404, { detail: 'Unexpected VN test request' });
+    });
+    await page.goto('/vn-assets');
+    await waitForAppShell(page, SMOKE_LOAD_TIMEOUT);
+    const retry = page.getByRole('button', { name: 'Retry sprite_neutral' });
+    await expect(retry).toBeEnabled();
+    await waitForVisualSettle(page, SMOKE_LOAD_TIMEOUT);
+    await page.screenshot({ path: testInfo.outputPath('generation-failure.png'), fullPage: true });
+    await retry.click();
+    await expect.poll(() => requests.length).toBe(1);
+    await expect(retry).toBeEnabled();
+    await retry.click();
+    await expect.poll(() => requests.length).toBe(2);
+    expect(requests[0].idempotency_key).toEqual(expect.any(String));
+    expect(requests[1]).toEqual(requests[0]);
+    await expect(page.getByRole('status', { name: 'Generation status' })).toHaveText('completed');
+    await expect(retry).toHaveCount(0);
+    const overflowingElements = await page.evaluate(() => Array.from(document.querySelectorAll('main *'))
+      .filter((element) => element.getBoundingClientRect().right > window.innerWidth)
+      .map((element) => ({ tag: element.tagName, className: element.className,
+        width: element.getBoundingClientRect().width, text: element.textContent?.slice(0, 60) })));
+    expect(overflowingElements).toEqual([]);
+    await waitForVisualSettle(page, SMOKE_LOAD_TIMEOUT);
+    await page.screenshot({ path: testInfo.outputPath('generation-recovered.png'), fullPage: true });
+  });
+}

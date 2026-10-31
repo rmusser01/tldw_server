@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.Notes_Tasks.models import (
     ParsedChecklistResult,
     TaskLocator,
 )
+from tldw_Server_API.app.core.Notes_Tasks.projection_markers import extract_task_marker
 
 _CHECKLIST_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?P<bullet>[-*+])[ \t]+\[(?P<marker>[ xX])\](?:[ \t]+(?P<body>.*)|[ \t]*)$"
@@ -78,8 +79,8 @@ class _ChecklistLine:
 def parse_note_checklists(*, note_id: str, note_version: int, content: str) -> ParsedChecklistResult:
     """Parse GitHub-style checklist lines from note markdown.
 
-    The parser is deterministic and intentionally stores no hidden markdown IDs.
-    Locators are version-bound and suitable for same-version projections.
+    The parser is deterministic. Managed hidden markers carry durable identity,
+    while locators remain version-bound hints for ordinary checklist lines.
     """
     lines = _split_lines(content)
     line_contexts = _build_line_contexts(lines)
@@ -89,7 +90,8 @@ def parse_note_checklists(*, note_id: str, note_version: int, content: str) -> P
     items: list[ParsedChecklistItem] = []
 
     for checklist_line in checklist_lines:
-        text, metadata, warnings = _parse_metadata_tokens(checklist_line.body)
+        marker_result = extract_task_marker(checklist_line.body)
+        text, metadata, warnings = _parse_metadata_tokens(marker_result.body)
         normalized_text_hash = _hash_normalized_text(text)
         occurrence_counts[normalized_text_hash] = occurrence_counts.get(normalized_text_hash, 0) + 1
         has_child_content, block_fingerprint = child_contexts[checklist_line.line_index]
@@ -113,6 +115,8 @@ def parse_note_checklists(*, note_id: str, note_version: int, content: str) -> P
                 warnings=warnings,
                 locator=locator,
                 has_child_content=has_child_content,
+                marker=marker_result.marker,
+                marker_reason_code=marker_result.reason_code,
             )
         )
 

@@ -20,7 +20,11 @@ from tldw_Server_API.app.core.Character_Chat.world_book_manager import (
     BoundedDict,
 )
 from tldw_Server_API.app.core.Character_Chat.constants import MAX_REGEX_MATCH_TIME_MS
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    BackendType,
+    CharactersRAGDB,
+    InputError,
+)
 
 
 @pytest.fixture
@@ -38,11 +42,19 @@ def mock_db():
     mock_cursor.fetchall.return_value = []
     mock_cursor.fetchone.return_value = None
     mock_conn.execute.return_value = mock_cursor
+    mock_conn.in_transaction = False
+    mock.backend_type = BackendType.SQLITE
+
+    # Portable World Book reads use the database read abstraction rather than
+    # entering a backend-specific connection wrapper directly.
+    mock.execute_query.return_value = mock_cursor
 
     mock_ctx = MagicMock()
+    mock_ctx.in_transaction = False
     mock_ctx.__enter__ = MagicMock(return_value=mock_conn)
     mock_ctx.__exit__ = MagicMock(return_value=None)
     mock.get_connection.return_value = mock_ctx
+    mock.transaction.return_value = mock_ctx
 
     return mock
 
@@ -310,7 +322,7 @@ class TestWorldBookService:
             recursive_scanning=False,
         )
 
-        call_args = mock_conn.execute.call_args[0]
+        call_args = mock_db.execute_query.call_args[0]
         sql_text = call_args[0]
         params = call_args[1]
         assert "json_extract" in sql_text
@@ -394,17 +406,20 @@ class TestWorldBookService:
     def test_attach_to_character(self, service, mock_db):
         """Test attaching a world book to a character."""
         mock_conn = mock_db.get_connection().__enter__()
+        mock_cursor = mock_conn.execute.return_value
 
         # Clear previous calls from init
         mock_conn.execute.reset_mock()
 
+        mock_cursor.fetchone.side_effect = [{"id": 1}, {"id": 1}]
+
         result = service.attach_to_character(character_id=1, world_book_id=1, enabled=True, priority=100)
 
-        assert result == True
+        assert result["success"] is True
 
-        # Check insert SQL
-        mock_conn.execute.assert_called_once()
-        call_args = mock_conn.execute.call_args[0]
+        # The service verifies both referenced rows before its idempotent upsert.
+        assert mock_conn.execute.call_count == 3
+        call_args = mock_conn.execute.call_args_list[-1][0]
         sql_text = call_args[0].lower()
         assert "insert into character_world_books" in sql_text
         assert "on conflict" in sql_text

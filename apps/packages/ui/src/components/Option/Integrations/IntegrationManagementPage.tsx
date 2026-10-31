@@ -216,28 +216,47 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
     }
   })
 
+  // A 4xx (endpoint missing, forbidden) will not change on retry; hammering
+  // an absent workspace API produced 12 404s per page load (audit finding S9).
+  // Transient failures (5xx/network) get exactly one quick retry.
+  const retryUnlessClientError = (failureCount: number, error: unknown) => {
+    const status = getCapabilityErrorStatus(error)
+    if (typeof status === "number" && status >= 400 && status < 500) {
+      return false
+    }
+    return failureCount < 1
+  }
+
   const slackPolicyQuery = useQuery({
     queryKey: buildIntegrationQueryKey("workspace", activeOrgId, "slack-policy"),
     queryFn: getWorkspaceSlackPolicy,
-    enabled: scope === "workspace"
+    enabled: scope === "workspace",
+    retry: retryUnlessClientError,
+    retryDelay: 500
   })
 
   const discordPolicyQuery = useQuery({
     queryKey: buildIntegrationQueryKey("workspace", activeOrgId, "discord-policy"),
     queryFn: getWorkspaceDiscordPolicy,
-    enabled: scope === "workspace"
+    enabled: scope === "workspace",
+    retry: retryUnlessClientError,
+    retryDelay: 500
   })
 
   const telegramBotQuery = useQuery({
     queryKey: buildIntegrationQueryKey("workspace", activeOrgId, "telegram-bot"),
     queryFn: getWorkspaceTelegramBot,
-    enabled: scope === "workspace"
+    enabled: scope === "workspace",
+    retry: retryUnlessClientError,
+    retryDelay: 500
   })
 
   const telegramActorsQuery = useQuery({
     queryKey: buildIntegrationQueryKey("workspace", activeOrgId, "telegram-linked-actors"),
     queryFn: listWorkspaceTelegramLinkedActors,
-    enabled: scope === "workspace"
+    enabled: scope === "workspace",
+    retry: retryUnlessClientError,
+    retryDelay: 500
   })
 
   const connectionsByProvider = useMemo(() => {
@@ -342,6 +361,24 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
       })
     : null
 
+  // One page-level status at a time — but only when the overview error means
+  // the workspace-integrations feature is absent from this server (4xx
+  // endpoint-missing codes). The policy/bot/actor panels load from separate
+  // endpoints, so a transient overview failure must not hide their data or
+  // retry actions (2026-09 UX audit finding S3 + PR #2879 review).
+  const overviewErrorStatus =
+    overviewQuery.isError && !overviewQuery.data
+      ? getCapabilityErrorStatus(overviewQuery.error)
+      : null
+  const overviewUnavailable =
+    overviewQuery.isError &&
+    !overviewQuery.data &&
+    !personalIntegrationsUnsupported &&
+    (overviewErrorStatus === 404 ||
+      overviewErrorStatus === 405 ||
+      overviewErrorStatus === 410 ||
+      overviewErrorStatus === 501)
+
   const handlePersonalAction = async (connection: IntegrationConnection, action: string) => {
     if (scope !== "personal" || !isPersonalProvider(connection.provider)) {
       return
@@ -440,7 +477,7 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
         />
       ) : null}
 
-      {!personalIntegrationsUnsupported ? (
+      {!personalIntegrationsUnsupported && !overviewUnavailable ? (
         <Row gutter={[16, 16]}>
           {connectionsByProvider.map((group) => (
             <Col key={group.provider} xs={24} lg={8}>
@@ -456,7 +493,7 @@ export const IntegrationManagementPage: React.FC<IntegrationManagementPageProps>
         </Row>
       ) : null}
 
-      {isWorkspace ? (
+      {isWorkspace && !overviewUnavailable ? (
         <>
           {telegramActorsState ? (
             <RecoveryCallout

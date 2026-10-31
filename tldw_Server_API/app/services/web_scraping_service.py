@@ -8,6 +8,7 @@ import asyncio
 import contextlib
 import json
 import logging
+from collections.abc import Mapping
 from types import SimpleNamespace
 from typing import Any, Optional
 
@@ -24,6 +25,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
     managed_media_database,
 )
 from tldw_Server_API.app.core.deprecations import log_runtime_deprecation
+from tldw_Server_API.app.core.exceptions import ResourceNotFoundError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     async_resolve_chunking_options_and_plan,
     attach_chunking_plan_to_result,
@@ -32,15 +34,15 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import r
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.testing import env_flag_enabled
 
-# Keep fallback imports for compatibility mode
+# Keep deferred crawl/sitemap fallback imports for compatibility mode.
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
-    ContentMetadataHandler,
     recursive_scrape,
     scrape_and_summarize_multiple,
-    scrape_article,
     scrape_by_url_level,
     scrape_from_sitemap,
 )
+from tldw_Server_API.app.core.Web_Scraping.content import ContentMetadataHandler
+from tldw_Server_API.app.core.Web_Scraping.orchestration import scrape_article
 
 # Import the enhanced service
 from tldw_Server_API.app.services.enhanced_web_scraping_service import (
@@ -242,6 +244,7 @@ async def process_web_scraping_task(
     chunking_mode: Optional[str] = None,
     auto_chunking_goal: str = "balanced",
     auto_chunking_use_llm: bool = False,
+    summary_prompt_overrides: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """
     Enhanced web scraping with production features:
@@ -337,6 +340,7 @@ async def process_web_scraping_task(
             keywords=keywords,
             custom_titles=custom_titles,
             system_prompt=system_prompt,
+            summary_prompt_overrides=summary_prompt_overrides,
             temperature=temperature,
             custom_cookies=custom_cookies,
             mode=mode,
@@ -407,11 +411,12 @@ async def process_web_scraping_task(
                     api_key=api_key,
                     keywords=keywords,
                     custom_article_titles=custom_titles,
-                    system_prompt=system_prompt,
+                    system_message=system_prompt,
                     summarize_checkbox=summarize_checkbox,
                     custom_cookies=custom_cookies,
                     temperature=temperature,
                     allow_llm_extraction=summarize_checkbox,
+                    summary_prompt_overrides=summary_prompt_overrides,
                 )
             elif scrape_method == "Sitemap":
                 # Synchronous approach in your code, might need `asyncio.to_thread`
@@ -495,11 +500,11 @@ async def process_web_scraping_task(
                         else:
                             summary = analyze(
                                 input_data=content,
-                                custom_prompt_arg=custom_prompt or "",
+                                custom_prompt_arg=(summary_prompt_overrides or {}).get("user", custom_prompt or ""),
                                 api_name=api_name,
                                 api_key=api_key,
                                 temp=temperature,
-                                system_message=system_prompt or "",
+                                system_message=(summary_prompt_overrides or {}).get("system", system_prompt or ""),
                             )
                             if not _sanitize_analysis_result(article, "summary", summary):
                                 article["summary"] = summary
@@ -691,16 +696,52 @@ async def process_web_scraping_task(
             ) from e
 
 
+def _ingest_crawl_articles(service_result: Any) -> list[dict[str, Any]]:
+    """Recover articles and release temporary payloads not exposed by ingestion.
+
+    Missing enhanced payloads raise ResourceNotFoundError with their result ID.
+    Malformed stored envelopes still release their storage before propagating.
+    """
+    if isinstance(service_result, dict) and service_result.get("ephemeral_id"):
+        result_id = service_result["ephemeral_id"]
+        try:
+            stored = ephemeral_storage.get_data(result_id)
+            if stored is None:
+                raise ResourceNotFoundError("Web crawl results", result_id, "expired before ingestion")
+            service_result = stored["result"]
+        finally:
+            ephemeral_storage.remove_data(result_id)
+    elif (
+        isinstance(service_result, dict)
+        and service_result.get("status") == "ephemeral-ok"
+        and service_result.get("media_id")
+    ):
+        # Legacy crawls also store a copy, but already return the articles inline.
+        ephemeral_storage.remove_data(service_result["media_id"])
+    if isinstance(service_result, dict):
+        service_result = service_result.get("articles") or service_result.get("results") or []
+    articles = service_result if isinstance(service_result, list) else []
+    for article in articles:
+        if isinstance(article, dict) and "summary" in article and "analysis" not in article:
+            article["analysis"] = article.get("summary")
+    return articles
+
+
 async def ingest_web_content_orchestrate(
     request: Any,
     db: Any,
     usage_log: Any,
+    *,
+    summary_prompt_overrides: Mapping[str, str] | None = None,
 ) -> Optional[list[dict[str, Any]]]:
     """
-    Shared helper for `/media/ingest-web-content` side effects and, for
-    selected scrape methods, the scraping + summarization:
+    Shared helper for `/media/ingest-web-content` side effects and summarization:
       - ScrapeMethod.INDIVIDUAL: per-URL scrape + summary
       - ScrapeMethod.SITEMAP: sitemap scrape + summary
+      - URL_LEVEL / RECURSIVE: crawl task + ephemeral result retrieval
+
+    The HTTP caller may supply one owner-bound prompt snapshot. Unscoped callers
+    retain existing defaults without acquiring user prompt storage.
     """
 
     # Log usage for web scraping ingest
@@ -770,10 +811,14 @@ async def ingest_web_content_orchestrate(
 
         analysis_results = analyze(
             input_data=content,
-            custom_prompt_arg=getattr(request, "custom_prompt", None) or "Summarize this article.",
+            custom_prompt_arg=(summary_prompt_overrides or {}).get(
+                "user", getattr(request, "custom_prompt", None) or "Summarize this article."
+            ),
             api_name=api_name,
             temp=0.7,
-            system_message=getattr(request, "system_prompt", None) or "Act as a professional summarizer.",
+            system_message=(summary_prompt_overrides or {}).get(
+                "system", getattr(request, "system_prompt", None) or "Act as a professional summarizer."
+            ),
         )
         if not _sanitize_analysis_result(article, "analysis", analysis_results):
             article["analysis"] = analysis_results
@@ -924,6 +969,7 @@ async def ingest_web_content_orchestrate(
                 max_pages=requested_max_pages,
                 max_depth=level,
                 summarize_checkbox=bool(getattr(request, "perform_analysis", False)),
+                summary_prompt_overrides=summary_prompt_overrides,
                 custom_prompt=getattr(request, "custom_prompt", None),
                 api_name=getattr(request, "api_name", None),
                 api_key=None,
@@ -947,18 +993,7 @@ async def ingest_web_content_orchestrate(
                 auto_chunking_goal=getattr(request, "auto_chunking_goal", "balanced"),
                 auto_chunking_use_llm=bool(getattr(request, "auto_chunking_use_llm", False)),
             )
-            articles: list[dict[str, Any]] = []
-            if isinstance(service_result, dict):
-                if service_result.get("articles"):
-                    articles = service_result["articles"]
-                elif service_result.get("results"):
-                    articles = service_result["results"]
-
-            for r in articles:
-                if isinstance(r, dict) and "summary" in r and "analysis" not in r:
-                    r["analysis"] = r.get("summary")
-
-            return articles
+            return _ingest_crawl_articles(service_result)
         except Exception as exc:  # pragma: no cover - propagate for fallback handler
             logging.exception(f"Enhanced URL Level crawl failed: {exc}")
             raise
@@ -990,6 +1025,7 @@ async def ingest_web_content_orchestrate(
                 max_pages=max_pages,
                 max_depth=max_depth,
                 summarize_checkbox=bool(getattr(request, "perform_analysis", False)),
+                summary_prompt_overrides=summary_prompt_overrides,
                 custom_prompt=getattr(request, "custom_prompt", None),
                 api_name=getattr(request, "api_name", None),
                 api_key=None,
@@ -1013,20 +1049,7 @@ async def ingest_web_content_orchestrate(
                 auto_chunking_goal=getattr(request, "auto_chunking_goal", "balanced"),
                 auto_chunking_use_llm=bool(getattr(request, "auto_chunking_use_llm", False)),
             )
-            articles: list[dict[str, Any]] = []
-            if isinstance(service_result, list):
-                articles = service_result
-            elif isinstance(service_result, dict):
-                if service_result.get("articles"):
-                    articles = service_result.get("articles") or []
-                elif service_result.get("results"):
-                    articles = service_result.get("results") or []
-
-            for r in articles:
-                if isinstance(r, dict) and "summary" in r and "analysis" not in r:
-                    r["analysis"] = r.get("summary")
-
-            return articles
+            return _ingest_crawl_articles(service_result)
         except Exception as exc:  # pragma: no cover - propagate for fallback handler
             logging.exception(f"Enhanced recursive crawl failed: {exc}")
             raise

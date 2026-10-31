@@ -1,4 +1,64 @@
+from collections.abc import Callable, Generator
+from typing import Any
+
 import pytest
+
+
+@pytest.fixture
+def healthy_absent_provider_override_snapshot() -> Generator[None, None, None]:
+    """Expose an explicitly healthy empty override snapshot for legacy routes."""
+
+    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides
+
+    with llm_provider_overrides._OVERRIDE_LOCK:
+        original_overrides = dict(llm_provider_overrides._OVERRIDE_CACHE)
+        original_healthy = llm_provider_overrides._OVERRIDE_CACHE_HEALTHY
+        original_ttl_disabled = (
+            llm_provider_overrides._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS
+        )
+
+    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests({})
+    try:
+        yield
+    finally:
+        llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+            original_overrides,
+            healthy=original_healthy,
+            ttl_enabled=not original_ttl_disabled,
+        )
+
+
+@pytest.fixture
+def character_provider_adapter_boundary() -> tuple[
+    list[dict[str, Any]],
+    Callable[[dict[str, Any]], dict[str, Any]],
+]:
+    """Bind authentic runtime capabilities at a recording provider boundary."""
+
+    from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+        PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    )
+    from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
+        bind_provider_call_credentials,
+    )
+
+    calls: list[dict[str, Any]] = []
+
+    def bind_and_record(request: dict[str, Any]) -> dict[str, Any]:
+        provider = str(request.get("api_endpoint") or "")
+        bound, credentials = bind_provider_call_credentials(
+            provider,
+            request,
+            consume=True,
+        )
+        assert credentials is not None
+        assert bound["credentials_resolved"] is True
+        assert isinstance(bound["api_key"], str) and bound["api_key"]
+        assert PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY not in bound
+        calls.append(bound)
+        return bound
+
+    return calls, bind_and_record
 
 
 @pytest.fixture(autouse=True)

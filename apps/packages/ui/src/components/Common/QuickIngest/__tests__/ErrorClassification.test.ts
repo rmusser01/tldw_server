@@ -2,6 +2,19 @@ import { describe, it, expect } from "vitest"
 import { classifyError } from "../ErrorClassification"
 
 describe("classifyError", () => {
+  it.each([
+    { extraction_failures: [{ code: "extraction_timeout" }, { code: "extraction_failed" }] },
+    { extraction_failures: [{ code: "constructor" }] },
+    { extraction_failures: [null] },
+    { extraction_failures: [{ code: "extraction_timeout" }], errors: ["Source timed out", "Storage failed"] },
+  ])("does not infer a safe retry from mixed or malformed extraction metadata", (data) => {
+    expect(classifyError("request timed out", data).retryable).toBe(false)
+  })
+
+  it("reads the confirmed extraction code inside a completed job envelope", () => {
+    expect(classifyError("generic failure", { result: { extraction_failures: [{ code: "extraction_timeout" }] } }).retryable).toBe(true)
+  })
+
   // -------------------------------------------------------------------------
   // Timeout category
   // -------------------------------------------------------------------------
@@ -120,23 +133,23 @@ describe("classifyError", () => {
   // Unknown / fallback category
   // -------------------------------------------------------------------------
   describe("unknown category", () => {
-    it("returns unknown (retryable) for undefined", () => {
+    it("does not promise that an unknown failure is retryable", () => {
       const result = classifyError(undefined)
       expect(result.classification).toBe("unknown")
-      expect(result.retryable).toBe(true)
+      expect(result.retryable).toBe(false)
       expect(result.badgeLabel).toContain("Error")
     })
 
-    it("returns unknown (retryable) for empty string", () => {
+    it("returns unknown without a retry promise for empty string", () => {
       const result = classifyError("")
       expect(result.classification).toBe("unknown")
-      expect(result.retryable).toBe(true)
+      expect(result.retryable).toBe(false)
     })
 
     it("returns unknown for unrecognized error message", () => {
       const result = classifyError("something completely different happened")
       expect(result.classification).toBe("unknown")
-      expect(result.retryable).toBe(true)
+      expect(result.retryable).toBe(false)
     })
   })
 

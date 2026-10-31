@@ -3,6 +3,27 @@ Contributing
 
 Contributions are welcome, and they are greatly appreciated! Every  little bit helps, and credit will always be given.
 
+Temporary licensing contribution gate
+---------------------------------------
+
+Until the counsel-reviewed frontend CLA and API contract contribution grant are
+published, pull requests authored by anyone other than Robert Benjamin Jake
+Musser cannot modify:
+
+- `admin-ui/**`
+- `apps/tldw-frontend/**`
+- `apps/extension/**`
+- `apps/packages/ui/**`
+- root licensing governance files; or
+- the public API declaration boundary under `tldw_Server_API/app/api/v1/**`
+  and `tldw_Server_API/app/main.py`.
+
+This is a temporary, conservative intake pause. Backend and documentation
+contributions outside those boundaries remain welcome under the normal GPL
+process. Do not place an exception in an issue, review comment, commit message,
+or pull request; only a published contributor agreement can reopen a paused
+boundary.
+
 You can contribute in many ways:
 
 Types of Contributions
@@ -10,7 +31,7 @@ Types of Contributions
 
 ### Report Bugs
 
-Report bugs at <https://github.com/rmusser01/tldw/issues>.
+Report bugs at <https://github.com/rmusser01/tldw_server/issues>.
 
 If you are reporting a bug, please include:
 
@@ -38,7 +59,7 @@ in docstrings, or even on the web in blog posts, articles, and such.
 ### Submit Feedback
 
 The best way to send feedback is to file an issue at
-<https://github.com/rmusser01/tldw/issues>.
+<https://github.com/rmusser01/tldw_server/issues>.
 
 If you are proposing a feature:
 
@@ -83,6 +104,15 @@ for local development.
         $ git checkout -b name-of-your-bugfix-or-feature # or use e.g. issue_13
 
     Now you can make your changes locally.
+
+    If you work in several `git worktree` checkouts that share one virtualenv:
+    `pytest` always imports the first-party packages (`apps/*/src`,
+    `packages/*/src`) from the checkout it runs in, via
+    `[tool.pytest.ini_options] pythonpath`. Plain `python`, scripts and the server
+    do **not**: their editable installs point at whichever checkout ran
+    `pip install -e`. Do not re-run `pip install -e` from a worktree to "fix" that;
+    it repoints the shared venv for every other checkout. Use a separate
+    virtualenv per worktree if you need non-test runs of worktree code.
 
 1.  When you're done making changes, check that your changes pass flake8
     and the tests, including testing other Python versions with tox:

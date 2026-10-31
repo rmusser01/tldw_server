@@ -350,6 +350,37 @@ describe('useMediaReadAlongSession', () => {
     expect(eventLog.findIndex((entry) => entry.startsWith('synthesize:'))).toBe(-1)
   })
 
+  it('skips reusable cache lookup and population for explicit gateway requests', async () => {
+    providerContext.cacheSettings = {
+      provider: 'tldw',
+      backend: 'gateway:company-proxy',
+      cacheable: false,
+      model: 'Vendor/Model',
+      voice: 'Narrator',
+      format: 'mp3'
+    }
+    const { result } = setupHook()
+
+    await act(async () => {
+      await result.current.start('selection')
+    })
+
+    expect(getMediaReadAlongAudioCacheEntry).not.toHaveBeenCalled()
+    expect(saveMediaReadAlongAudioCacheEntry).not.toHaveBeenCalled()
+    expect(providerContext.synthesize).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps legacy generated audio cache lookup and population enabled', async () => {
+    const { result } = setupHook()
+
+    await act(async () => {
+      await result.current.start('selection')
+    })
+
+    expect(getMediaReadAlongAudioCacheEntry).toHaveBeenCalledTimes(1)
+    expect(saveMediaReadAlongAudioCacheEntry).toHaveBeenCalledTimes(1)
+  })
+
   it('registers generated audio terminal listeners as one-shot handlers', async () => {
     const { result } = setupHook()
 

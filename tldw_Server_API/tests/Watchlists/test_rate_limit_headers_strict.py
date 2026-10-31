@@ -24,6 +24,10 @@ def client_with_user(monkeypatch, tmp_path):
     monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
     policy_path = Path(__file__).resolve().parents[2] / "Config_Files" / "resource_governor_policies.yaml"
     monkeypatch.setenv("RG_POLICY_PATH", str(policy_path))
+    # This app has no lifespan/startup, so RGSimpleMiddleware must lazily build its
+    # own governor; RG defaults off under pytest, so it must be explicitly enabled
+    # for these tests to exercise enforcement and get rate-limit headers.
+    monkeypatch.setenv("RG_ENABLED", "1")
 
     from fastapi import FastAPI
     from tldw_Server_API.app.core.config import API_V1_PREFIX

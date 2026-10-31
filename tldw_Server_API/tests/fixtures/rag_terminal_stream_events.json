@@ -1,0 +1,186 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "name": "valid_empty_complete",
+      "event": {
+        "schema_version": 1,
+        "type": "complete",
+        "code": "complete",
+        "upstream_dispatched": true,
+        "output_emitted": false,
+        "allow_non_stream_fallback": false,
+        "message": "Search completed."
+      },
+      "valid": true,
+      "may_replay": false
+    },
+    {
+      "name": "valid_terminal_credential_error",
+      "event": {
+        "schema_version": 1,
+        "type": "error",
+        "code": "provider_authentication_failed",
+        "status_code": 502,
+        "upstream_dispatched": true,
+        "output_emitted": false,
+        "allow_non_stream_fallback": false,
+        "message": "The selected provider credentials could not be authenticated."
+      },
+      "valid": true,
+      "may_replay": false
+    },
+    {
+      "name": "valid_certified_pre_dispatch_transport_error",
+      "event": {
+        "schema_version": 1,
+        "type": "error",
+        "code": "stream_transport_unavailable",
+        "upstream_dispatched": false,
+        "output_emitted": false,
+        "allow_non_stream_fallback": true,
+        "message": "Streaming is unavailable before provider dispatch."
+      },
+      "valid": true,
+      "may_replay": true
+    },
+    {
+      "name": "fallback_true_for_provider_configuration_error",
+      "event": {
+        "schema_version": 1,
+        "type": "error",
+        "code": "provider_configuration_invalid",
+        "status_code": 503,
+        "upstream_dispatched": false,
+        "output_emitted": false,
+        "allow_non_stream_fallback": true,
+        "message": "The selected provider configuration is invalid."
+      },
+      "valid": false,
+      "may_replay": false
+    },
+    {
+      "name": "missing_schema_version",
+      "event": {
+        "type": "error",
+        "code": "stream_transport_unavailable",
+        "upstream_dispatched": false,
+        "output_emitted": false,
+        "allow_non_stream_fallback": true,
+        "message": "Streaming is unavailable before provider dispatch."
+      },
+      "valid": false,
+      "may_replay": false
+    },
+    {
+      "name": "unknown_schema_version",
+      "event": {
+        "schema_version": 2,
+        "type": "error",
+        "code": "stream_transport_unavailable",
+        "upstream_dispatched": false,
+        "output_emitted": false,
+        "allow_non_stream_fallback": true,
+        "message": "Streaming is unavailable before provider dispatch."
+      },
+      "valid": false,
+      "may_replay": false
+    },
+    {
+      "name": "boolean_schema_version",
+      "event": {
+        "schema_version": true,
+        "type": "error",
+        "code": "stream_transport_unavailable",
+        "upstream_dispatched": false,
+        "output_emitted": false,
+        "allow_non_stream_fallback": true,
+        "message": "Streaming is unavailable before provider dispatch."
+      },
+      "valid": false,
+      "may_replay": false
+    },
+    {
+      "name": "missing_terminal_booleans",
+      "event": {
+        "schema_version": 1,
+        "type": "error",
+        "code": "stream_transport_unavailable",
+        "message": "Streaming is unavailable before provider dispatch."
+      },
+      "valid": false,
+      "may_replay": false
+    },
+    {
+      "name": "fallback_true_after_dispatch",
+      "event": {
+        "schema_version": 1,
+        "type": "error",
+        "code": "stream_transport_unavailable",
+        "upstream_dispatched": true,
+        "output_emitted": false,
+        "allow_non_stream_fallback": true,
+        "message": "Streaming failed after provider dispatch."
+      },
+      "valid": false,
+      "may_replay": false
+    },
+    {
+      "name": "fallback_true_after_output",
+      "event": {
+        "schema_version": 1,
+        "type": "error",
+        "code": "stream_transport_unavailable",
+        "upstream_dispatched": true,
+        "output_emitted": true,
+        "allow_non_stream_fallback": true,
+        "message": "Streaming failed after output."
+      },
+      "valid": false,
+      "may_replay": false
+    },
+    {
+      "name": "malformed_boolean_fields",
+      "event": {
+        "schema_version": 1,
+        "type": "error",
+        "code": "stream_transport_unavailable",
+        "upstream_dispatched": "false",
+        "output_emitted": 0,
+        "allow_non_stream_fallback": 1,
+        "message": "Streaming is unavailable before provider dispatch."
+      },
+      "valid": false,
+      "may_replay": false
+    },
+    {
+      "name": "malformed_optional_status_code",
+      "event": {
+        "schema_version": 1,
+        "type": "error",
+        "code": "provider_unavailable",
+        "status_code": "502",
+        "upstream_dispatched": true,
+        "output_emitted": false,
+        "allow_non_stream_fallback": false,
+        "message": "The selected provider is currently unavailable."
+      },
+      "valid": false,
+      "may_replay": false
+    },
+    {
+      "name": "unknown_event_type",
+      "event": {
+        "schema_version": 1,
+        "type": "finished",
+        "code": "complete",
+        "upstream_dispatched": true,
+        "output_emitted": false,
+        "allow_non_stream_fallback": false,
+        "message": "Search completed."
+      },
+      "valid": false,
+      "may_replay": false
+    }
+  ]
+}

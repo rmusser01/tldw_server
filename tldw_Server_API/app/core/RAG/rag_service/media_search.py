@@ -15,6 +15,11 @@ from typing import Any, Optional
 
 from loguru import logger
 
+from .runtime_provider_call import (
+    attach_runtime_provider_credentials,
+    await_runtime_bound_provider_call,
+)
+
 
 # ---------------------------------------------------------------------------
 # Query reformulation prompts
@@ -66,6 +71,8 @@ async def _reformulate_query(
     system_prompt: str,
     llm_provider: str,
     llm_model: str | None,
+    credential_runtime: Any = None,
+    stage_metadata: dict[str, Any] | None = None,
 ) -> str:
     """Use an LLM to reformulate a query for media search."""
     try:
@@ -86,9 +93,22 @@ async def _reformulate_query(
         }
         if model:
             call_kwargs["model"] = model
+        credential_handle = None
+        if credential_runtime is not None:
+            credential_handle = await credential_runtime.resolve(provider, model=model)
+            call_kwargs.update(
+                api_key=credential_handle.api_key,
+                app_config=credential_handle.app_config,
+                credentials_resolved=True,
+            )
+            attach_runtime_provider_credentials(call_kwargs, credential_handle)
 
         raw = await asyncio.wait_for(
-            perform_chat_api_call_async(**call_kwargs),
+            await_runtime_bound_provider_call(
+                perform_chat_api_call_async(**call_kwargs),
+                credential_runtime=credential_runtime,
+                credential_handle=credential_handle,
+            ),
             timeout=10.0,
         )
 
@@ -108,10 +128,25 @@ async def _reformulate_query(
             text = str(raw)
 
         reformulated = text.strip().strip('"\'')
-        return reformulated if reformulated else query
+        if reformulated:
+            if credential_runtime is not None and stage_metadata is not None:
+                stage_metadata.pop("failure_code", None)
+                stage_metadata["verification_available"] = True
+            return reformulated
+        if credential_runtime is not None and stage_metadata is not None:
+            stage_metadata.update(
+                failure_code="provider_unavailable",
+                verification_available=False,
+            )
+        return query
 
     except Exception:
         logger.debug("Media query reformulation failed; using original query")
+        if credential_runtime is not None and stage_metadata is not None:
+            stage_metadata.update(
+                failure_code="provider_unavailable",
+                verification_available=False,
+            )
         return query
 
 
@@ -125,6 +160,8 @@ async def search_images(
     llm_model: str | None = None,
     max_results: int = 10,
     search_engine: str = "duckduckgo",
+    credential_runtime: Any = None,
+    stage_metadata: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Search for relevant images.
 
@@ -137,12 +174,28 @@ async def search_images(
         llm_model: Optional model override.
         max_results: Maximum number of image results.
         search_engine: Web search engine to use.
+        credential_runtime: Optional request-scoped provider credential runtime.
+        stage_metadata: Optional runtime-only reformulation trust metadata output.
 
     Returns:
         List of image result dicts with keys: title, url, thumbnail_url, source, width, height.
     """
     # Reformulate query for image search
-    image_query = await _reformulate_query(query, _IMAGE_QUERY_SYSTEM, llm_provider, llm_model)
+    runtime_kwargs = (
+        {
+            "credential_runtime": credential_runtime,
+            "stage_metadata": stage_metadata,
+        }
+        if credential_runtime is not None
+        else {}
+    )
+    image_query = await _reformulate_query(
+        query,
+        _IMAGE_QUERY_SYSTEM,
+        llm_provider,
+        llm_model,
+        **runtime_kwargs,
+    )
     logger.debug(f"Image search query reformulated: '{query}' → '{image_query}'")
 
     try:
@@ -197,6 +250,8 @@ async def search_videos(
     llm_model: str | None = None,
     max_results: int = 10,
     search_engine: str = "duckduckgo",
+    credential_runtime: Any = None,
+    stage_metadata: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Search for relevant videos (primarily YouTube).
 
@@ -209,12 +264,28 @@ async def search_videos(
         llm_model: Optional model override.
         max_results: Maximum number of video results.
         search_engine: Web search engine to use.
+        credential_runtime: Optional request-scoped provider credential runtime.
+        stage_metadata: Optional runtime-only reformulation trust metadata output.
 
     Returns:
         List of video result dicts with keys: title, url, thumbnail_url, source, description.
     """
     # Reformulate query for video search
-    video_query = await _reformulate_query(query, _VIDEO_QUERY_SYSTEM, llm_provider, llm_model)
+    runtime_kwargs = (
+        {
+            "credential_runtime": credential_runtime,
+            "stage_metadata": stage_metadata,
+        }
+        if credential_runtime is not None
+        else {}
+    )
+    video_query = await _reformulate_query(
+        query,
+        _VIDEO_QUERY_SYSTEM,
+        llm_provider,
+        llm_model,
+        **runtime_kwargs,
+    )
     logger.debug(f"Video search query reformulated: '{query}' → '{video_query}'")
 
     try:

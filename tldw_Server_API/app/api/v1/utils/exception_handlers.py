@@ -19,8 +19,9 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import Request
-from fastapi.responses import JSONResponse
+from fastapi import HTTPException, Request
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import JSONResponse, Response
 from loguru import logger
 from starlette.requests import ClientDisconnect
 
@@ -102,7 +103,21 @@ async def client_disconnect_handler(
     )
 
 
+async def tts_public_http_exception_handler(
+    request: Request,
+    exc: HTTPException,
+) -> Response:
+    """Serialize a bounded TTS error after severing credential-bearing frames."""
+
+    exc.__traceback__ = None
+    exc.__cause__ = None
+    exc.__context__ = None
+    exc.__suppress_context__ = True
+    return await http_exception_handler(request, exc)
+
+
 __all__ = [
     "client_disconnect_handler",
     "global_unhandled_exception_handler",
+    "tts_public_http_exception_handler",
 ]

@@ -31,10 +31,11 @@ from tldw_Server_API.app.core.Evaluations.identity import (
     evaluations_identity_from_user,
 )
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 security = HTTPBearer(auto_error=False)
 _EVALS_LEGACY_RATE_LIMIT_SHIM_LOGGED = False
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 
 def _env_truthy(name: str, default: str = "") -> bool:

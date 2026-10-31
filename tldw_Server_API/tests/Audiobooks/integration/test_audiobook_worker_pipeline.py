@@ -16,8 +16,8 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Jobs.manager import JobManager
-from tldw_Server_API.app.services import audiobook_jobs_worker
 from tldw_Server_API.app.core.TTS.audio_converter import AudioConverter
+from tldw_Server_API.app.services import audiobook_jobs_worker
 
 pytestmark = pytest.mark.integration
 
@@ -26,7 +26,7 @@ def _alignment_payload_for(text: str) -> dict:
     words = text.split()
     payload_words = []
     start = 0
-    for idx, word in enumerate(words):
+    for word in words:
         end = start + 500
         payload_words.append(
             {
@@ -54,6 +54,85 @@ def _wav_bytes(duration_seconds: float = 0.2, sample_rate: int = 16000) -> bytes
         wav_file.setframerate(sample_rate)
         wav_file.writeframes(b"\x00\x00" * frames)
     return buffer.getvalue()
+
+
+def test_route_metadata_merge_marks_conflicting_actual_routes_as_mixed():
+    current = {
+        "requested_backend": "gateway:company",
+        "actual_backend": "gateway:company",
+        "requested_model": "Vendor/Exact-TTS",
+        "actual_model": "Vendor/Exact-TTS",
+        "fallback_used": False,
+        "conversion_used": False,
+    }
+    update = {
+        "requested_backend": "gateway:company",
+        "actual_backend": "gateway:backup",
+        "requested_model": "Vendor/Exact-TTS",
+        "actual_model": "Vendor/Backup-TTS",
+        "fallback_used": True,
+        "conversion_used": True,
+    }
+
+    audiobook_jobs_worker._merge_route_metadata(current, update)
+
+    assert current["requested_backend"] == "gateway:company"
+    assert current["requested_model"] == "Vendor/Exact-TTS"
+    assert current["actual_backend"] == "mixed"
+    assert current["actual_model"] == "mixed"
+    assert current["mixed_route"] is True
+    assert current["fallback_used"] is True
+    assert current["conversion_used"] is True
+
+
+def test_gateway_text_validation_does_not_apply_a_legacy_provider_normalizer():
+    text = "Visit https://example.test/docs or email narrator@example.test."
+
+    sanitized = audiobook_jobs_worker._validate_text(
+        text,
+        provider=None,
+        model="Vendor/Exact-TTS",
+        backend="gateway:company",
+    )
+
+    assert sanitized == text
+
+
+def test_chapter_only_gateway_selects_provider_neutral_text_validation():
+    text = "Visit https://example.test/docs or email narrator@example.test."
+    backend = audiobook_jobs_worker._explicit_text_validation_backend(
+        None,
+        [{"chapter_id": "ch_001", "tts_backend": "gateway:chapter"}],
+    )
+
+    sanitized = audiobook_jobs_worker._validate_text(
+        text,
+        provider=None,
+        model="Vendor/Exact-TTS",
+        backend=backend,
+    )
+
+    assert backend == "gateway:chapter"
+    assert sanitized == text
+
+
+def test_hybrid_legacy_and_gateway_route_aggregate_is_marked_mixed():
+    route = {
+        "requested_backend": "gateway:chapter",
+        "actual_backend": "gateway:chapter",
+        "requested_model": "Vendor/Exact-TTS",
+        "actual_model": "Vendor/Exact-TTS",
+        "fallback_used": False,
+        "conversion_used": False,
+    }
+
+    audiobook_jobs_worker._mark_route_metadata_mixed(route)
+
+    assert route["requested_backend"] == "mixed"
+    assert route["actual_backend"] == "mixed"
+    assert route["requested_model"] == "mixed"
+    assert route["actual_model"] == "mixed"
+    assert route["mixed_route"] is True
 
 
 @pytest.fixture()
@@ -125,6 +204,58 @@ def _build_batch_payload(project_id: str) -> dict:
     }
 
 
+@pytest.mark.asyncio
+async def test_generate_gateway_audio_rebuilds_request_for_current_owner(monkeypatch):
+    captured: dict = {}
+
+    class DummyService:
+        def generate_speech(self, request, **kwargs):
+            captured["request"] = request
+            captured["kwargs"] = kwargs
+            request._tts_metadata = {
+                "requested_backend": "gateway:company",
+                "provider": "gateway:company",
+                "model": "Vendor/Exact-TTS",
+                "fallback_used": False,
+                "conversion_used": False,
+            }
+
+            async def _stream():
+                yield b"audio"
+
+            return _stream()
+
+    async def _get_service():
+        return DummyService()
+
+    monkeypatch.setattr(audiobook_jobs_worker, "get_tts_service_v2", _get_service)
+
+    audio, alignment, route = await audiobook_jobs_worker._generate_tts_audio(
+        text="Read me",
+        model="Vendor/Exact-TTS",
+        provider=None,
+        backend="gateway:company",
+        allow_fallback=False,
+        voice="narrator",
+        speed=None,
+        response_format="mp3",
+        user_id=23,
+    )
+
+    assert audio == b"audio"
+    assert alignment is None
+    assert route["actual_backend"] == "gateway:company"
+    assert route["actual_model"] == "Vendor/Exact-TTS"
+    assert captured["request"].backend == "gateway:company"
+    assert captured["request"].allow_fallback is False
+    assert captured["request"].model == "Vendor/Exact-TTS"
+    assert captured["kwargs"] == {
+        "provider": None,
+        "fallback": False,
+        "user_id": 23,
+    }
+
+
 def test_audiobook_worker_creates_outputs(user_base_dir, jobs_db_path, fake_tts):
     user_id = 1
     project_id = "abk_test01"
@@ -177,6 +308,7 @@ def test_audiobook_worker_creates_outputs(user_base_dir, jobs_db_path, fake_tts)
     assert project.status == "completed"
     chapters = collections_db.list_audiobook_chapters(project_id=project.id, limit=10, offset=0)
     assert len(chapters) == 1
+    assert "requested_backend" not in json.loads(chapters[0].metadata_json or "{}")
     artifacts = collections_db.list_audiobook_artifacts(project_id=project.id, limit=20, offset=0)
     assert len(artifacts) == len(outputs)
     artifact_types = {row.artifact_type for row in artifacts}
@@ -191,6 +323,208 @@ def test_audiobook_worker_creates_outputs(user_base_dir, jobs_db_path, fake_tts)
         if row.type == "audiobook_alignment":
             payload = json.loads(path.read_text(encoding="utf-8"))
             assert payload.get("engine") == "kokoro"
+
+
+def test_audiobook_gateway_worker_uses_owner_credentials_and_persists_route_metadata(
+    user_base_dir,
+    jobs_db_path,
+    monkeypatch,
+):
+    calls: list[dict] = []
+    events: list[tuple[str, dict]] = []
+
+    async def _fake_generate(**kwargs):
+        calls.append(kwargs)
+        return (
+            b"GATEWAY-AUDIO",
+            None,
+            {
+                "requested_backend": "gateway:company",
+                "actual_backend": "gateway:backup",
+                "requested_model": "Vendor/Exact-TTS",
+                "actual_model": "Vendor/Backup-TTS",
+                "fallback_used": True,
+                "conversion_used": False,
+            },
+        )
+
+    monkeypatch.setattr(audiobook_jobs_worker, "_generate_tts_audio", _fake_generate)
+    monkeypatch.setattr(
+        audiobook_jobs_worker,
+        "emit_job_event",
+        lambda event_type, *, job, attrs: events.append((event_type, attrs)),
+    )
+
+    payload = _build_job_payload("abk_gateway")
+    payload.pop("subtitles", None)
+    payload["tts_backend"] = "gateway:company"
+    payload["tts_allow_fallback"] = True
+    payload["tts_model"] = "Vendor/Exact-TTS"
+    payload["tts_voice"] = "narrator"
+    payload["chapters"][0]["voice"] = "narrator"
+
+    job_manager = JobManager()
+    job = job_manager.create_job(
+        domain="audiobooks",
+        queue="default",
+        job_type="audiobook_generate",
+        payload=payload,
+        owner_user_id="17",
+        priority=5,
+    )
+    acquired = job_manager.acquire_next_job(
+        domain="audiobooks",
+        queue="default",
+        lease_seconds=60,
+        worker_id="test-worker",
+    )
+    assert acquired is not None
+
+    asyncio.run(
+        audiobook_jobs_worker.process_audiobook_job(
+            acquired,
+            job_manager=job_manager,
+            worker_id="test-worker",
+        )
+    )
+
+    assert calls
+    assert calls[0]["backend"] == "gateway:company"
+    assert calls[0]["allow_fallback"] is True
+    assert calls[0]["provider"] is None
+    assert calls[0]["user_id"] == 17
+
+    collections_db = CollectionsDatabase(17)
+    outputs, _ = collections_db.list_output_artifacts(job_id=int(job["id"]), limit=50, offset=0)
+    assert outputs
+    output_metadata = json.loads(outputs[0].metadata_json or "{}")
+    assert output_metadata["requested_backend"] == "gateway:company"
+    assert output_metadata["actual_backend"] == "gateway:backup"
+    assert output_metadata["requested_model"] == "Vendor/Exact-TTS"
+    assert output_metadata["actual_model"] == "Vendor/Backup-TTS"
+    assert output_metadata["fallback_used"] is True
+
+    project = collections_db.list_audiobook_projects(limit=10, offset=0)[0]
+    chapter = collections_db.list_audiobook_chapters(project_id=project.id, limit=10, offset=0)[0]
+    chapter_metadata = json.loads(chapter.metadata_json or "{}")
+    assert chapter_metadata["actual_backend"] == "gateway:backup"
+    assert chapter_metadata["fallback_used"] is True
+
+    completed = job_manager.get_job(int(job["id"]))
+    result = completed.get("result") or completed.get("result_json")
+    if isinstance(result, str):
+        result = json.loads(result)
+    assert result["requested_backend"] == "gateway:company"
+    assert result["actual_backend"] == "gateway:backup"
+    assert result["fallback_used"] is True
+    assert any(
+        event_type == "audiobook.tts.route"
+        and attrs.get("actual_backend") == "gateway:backup"
+        for event_type, attrs in events
+    )
+    serialized = json.dumps({"events": events, "result": result, "metadata": output_metadata}).casefold()
+    for forbidden in ("api_key", "authorization", "base_url", "headers", "credential_scope"):
+        assert forbidden not in serialized
+
+
+def test_hybrid_audiobook_merged_artifact_and_job_result_use_mixed_route(
+    user_base_dir,
+    jobs_db_path,
+    monkeypatch,
+):
+    calls: list[dict] = []
+
+    async def _fake_generate(**kwargs):
+        calls.append(kwargs)
+        if kwargs.get("backend"):
+            route = {
+                "requested_backend": "gateway:chapter",
+                "actual_backend": "gateway:chapter",
+                "requested_model": "Vendor/Exact-TTS",
+                "actual_model": "Vendor/Exact-TTS",
+                "fallback_used": False,
+                "conversion_used": False,
+            }
+        else:
+            route = {}
+        return _wav_bytes(), None, route
+
+    async def _fake_concat(_paths, output_path, _format):
+        output_path.write_bytes(_wav_bytes(duration_seconds=0.4))
+        return True
+
+    monkeypatch.setattr(audiobook_jobs_worker, "_generate_tts_audio", _fake_generate)
+    monkeypatch.setattr(AudioConverter, "concat_audio_files", _fake_concat)
+
+    payload = {
+        "project_title": "Hybrid Book",
+        "source": {
+            "input_type": "txt",
+            "raw_text": (
+                "[[chapter:id=ch_001]]\nLegacy chapter.\n"
+                "[[chapter:id=ch_002]]\nGateway chapter."
+            ),
+        },
+        "chapters": [
+            {"chapter_id": "ch_001", "include": True, "voice": "narrator"},
+            {
+                "chapter_id": "ch_002",
+                "include": True,
+                "voice": "narrator",
+                "tts_backend": "gateway:chapter",
+                "tts_allow_fallback": False,
+            },
+        ],
+        "output": {"merge": True, "per_chapter": True, "formats": ["wav"]},
+        "tts_model": "Vendor/Exact-TTS",
+        "project_id": "abk_hybrid_route",
+    }
+    job_manager = JobManager()
+    job = job_manager.create_job(
+        domain="audiobooks",
+        queue="default",
+        job_type="audiobook_generate",
+        payload=payload,
+        owner_user_id="21",
+        priority=5,
+    )
+    acquired = job_manager.acquire_next_job(
+        domain="audiobooks",
+        queue="default",
+        lease_seconds=60,
+        worker_id="test-worker",
+    )
+    assert acquired is not None
+
+    asyncio.run(
+        audiobook_jobs_worker.process_audiobook_job(
+            acquired,
+            job_manager=job_manager,
+            worker_id="test-worker",
+        )
+    )
+
+    assert [call.get("backend") for call in calls] == [None, "gateway:chapter"]
+    collections_db = CollectionsDatabase(21)
+    outputs, _ = collections_db.list_output_artifacts(
+        job_id=int(job["id"]),
+        limit=50,
+        offset=0,
+    )
+    merged_metadata = next(
+        metadata
+        for row in outputs
+        if (metadata := json.loads(row.metadata_json or "{}")).get("scope") == "merged"
+    )
+    assert merged_metadata["actual_backend"] == "mixed"
+    assert merged_metadata["mixed_route"] is True
+
+    completed = job_manager.get_job(int(job["id"]))
+    result = completed.get("result") or completed.get("result_json")
+    if isinstance(result, str):
+        result = json.loads(result)
+    assert result["actual_backend"] == "mixed"
+    assert result["mixed_route"] is True
 
 
 def test_audiobook_output_usage_decrements_on_delete(user_base_dir, jobs_db_path, fake_tts):
@@ -716,7 +1050,7 @@ def test_audiobook_worker_applies_voice_profile(
     payload["chapters"] = [{"chapter_id": "ch_001", "include": True}]
 
     job_manager = JobManager()
-    job = job_manager.create_job(
+    job_manager.create_job(
         domain="audiobooks",
         queue="default",
         job_type="audiobook_generate",
@@ -805,7 +1139,7 @@ def test_audiobook_worker_applies_item_voice_profile_overrides(
     }
 
     job_manager = JobManager()
-    job = job_manager.create_job(
+    job_manager.create_job(
         domain="audiobooks",
         queue="default",
         job_type="audiobook_generate",
@@ -855,7 +1189,6 @@ def test_audiobook_project_endpoints(
     resp = client_user_only.post("/api/v1/audiobooks/jobs", json=create_payload)
     assert resp.status_code == 200
     data = resp.json()
-    job_id = data["job_id"]
     project_id = data["project_id"]
 
     job_manager = JobManager()

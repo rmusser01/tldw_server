@@ -28,6 +28,7 @@ from tldw_Server_API.app.services.mcp_hub_external_auth_service import (
 from tldw_Server_API.app.services.mcp_hub_external_access_resolver import (
     McpHubExternalAccessResolver,
 )
+from tldw_Server_API.app.core.Utils.iso_datetime import parse_iso_utc as _coerce_datetime
 
 _APPROVAL_REQUIRED_BLOCKED_REASONS = {
     "disabled_by_assignment",
@@ -48,22 +49,6 @@ _APPROVAL_REQUIRED_STATES = {"approval_required"}
 
 def _normalize_status_state(value: Any) -> str:
     return str(value or "").strip().lower()
-
-
-def _coerce_datetime(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        if value.tzinfo is not None:
-            return value.astimezone(timezone.utc)
-        return value.replace(tzinfo=timezone.utc)
-    if isinstance(value, str) and value.strip():
-        try:
-            parsed = datetime.fromisoformat(value)
-        except ValueError:
-            return None
-        if parsed.tzinfo is not None:
-            return parsed.astimezone(timezone.utc)
-        return parsed.replace(tzinfo=timezone.utc)
-    return None
 
 
 @dataclass

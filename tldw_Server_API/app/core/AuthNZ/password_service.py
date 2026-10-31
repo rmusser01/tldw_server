@@ -199,7 +199,7 @@ class PasswordService:
 
         # If there are any errors, raise exception
         if errors:
-            raise WeakPasswordError("; ".join(errors))
+            raise WeakPasswordError("; ".join(errors), public_requirements=tuple(errors))
 
     def _has_sequential_chars(self, password: str, max_sequence: int = 3) -> bool:
         """Check if password has sequential characters (e.g., 'abc', '123')"""
@@ -226,18 +226,25 @@ class PasswordService:
         """Check if password has repeated characters (e.g., 'aaa', '111')"""
         return any(len(set(password[i:i + max_repeat])) == 1 for i in range(len(password) - max_repeat + 1))
 
-    def generate_secure_password(self, length: int = 16) -> str:
+    def generate_secure_password(
+        self,
+        length: int = 16,
+        username: Optional[str] = None,
+    ) -> str:
         """
-        Generate a cryptographically secure random password
+        Generate a cryptographically secure password accepted by the active policy.
 
         Args:
-            length: Length of password to generate (minimum 12)
+            length: Requested password length.
+            username: Optional username to exclude from the generated password.
 
         Returns:
-            Secure random password string
+            A secure random password accepted by ``validate_password_strength``.
+
+        Raises:
+            RuntimeError: If no valid password can be generated within the retry bound.
         """
-        if length < 12:
-            length = 12
+        length = max(length, 12, self.min_length)
 
         # Character sets to use
         lowercase = string.ascii_lowercase
@@ -245,23 +252,28 @@ class PasswordService:
         digits = string.digits
         special = "!@#$%^&*()_+-=[]{}|;:,.<>?"
 
-        # Ensure at least one character from each set
-        password = [
-            secrets.choice(lowercase),
-            secrets.choice(uppercase),
-            secrets.choice(digits),
-            secrets.choice(special)
-        ]
-
-        # Fill the rest with random characters from all sets
         all_chars = lowercase + uppercase + digits + special
-        for _ in range(length - 4):
-            password.append(secrets.choice(all_chars))
+        for _ in range(32):
+            # Ensure at least one character from each set.
+            password = [
+                secrets.choice(lowercase),
+                secrets.choice(uppercase),
+                secrets.choice(digits),
+                secrets.choice(special),
+            ]
+            password.extend(secrets.choice(all_chars) for _ in range(length - 4))
+            secrets.SystemRandom().shuffle(password)
+            candidate = "".join(password)
 
-        # Shuffle the password
-        secrets.SystemRandom().shuffle(password)
+            try:
+                self.validate_password_strength(candidate, username)
+            except WeakPasswordError:
+                continue
+            return candidate
 
-        return ''.join(password)
+        raise RuntimeError(
+            "Unable to generate a password that satisfies the configured policy"
+        )
 
     def generate_registration_code(self, length: int = 24) -> str:
         """
@@ -461,10 +473,53 @@ class PasswordService:
             logger.error(f"Error adding to password history: {e}")
             # Don't raise - this shouldn't block password changes
 
+    async def set_password(
+        self,
+        user_id: int,
+        new_hash: str,
+        db_connection: Any,
+        *,
+        is_postgres: Optional[bool] = None,
+    ) -> None:
+        """Store a new password hash and record it in the retained history.
+
+        Runs on the caller's connection, so a transaction around it covers both writes.
+        """
+        postgres_backend = self._resolve_postgres_backend(db_connection, is_postgres=is_postgres)
+        placeholder = ("$1", "$2") if postgres_backend else ("?", "?")
+        sql = (
+            f"UPDATE users SET password_hash = {placeholder[0]}, password_changed_at = CURRENT_TIMESTAMP,"  # nosec B608
+            f" updated_at = CURRENT_TIMESTAMP WHERE id = {placeholder[1]}"
+        )
+        if postgres_backend:
+            await db_connection.execute(sql, new_hash, user_id)
+        else:
+            await db_connection.execute(sql, (new_hash, user_id))
+        await self.add_to_password_history(user_id, new_hash, db_connection, is_postgres=postgres_backend)
+
 
 #######################################################################################################################
 #
 # Module Functions for convenience
+
+
+async def fetch_password_hash(db_connection: Any, user_id: int, *, is_postgres: bool) -> Optional[str]:
+    """A user's stored password hash, or None."""
+    if is_postgres:
+        value = await db_connection.fetchval("SELECT password_hash FROM users WHERE id = $1", user_id)
+        return str(value) if value else None
+    cursor = await db_connection.execute("SELECT password_hash FROM users WHERE id = ?", (user_id,))
+    row = await cursor.fetchone()
+    if not row:
+        return None
+    if isinstance(row, dict):
+        value = row.get("password_hash")
+    else:
+        try:
+            value = row[0]
+        except (IndexError, KeyError, TypeError):
+            value = None
+    return str(value) if value else None
 
 # Global instance with thread-safe initialization
 _password_service: Optional[PasswordService] = None

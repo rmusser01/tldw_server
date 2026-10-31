@@ -1,16 +1,17 @@
 // @vitest-environment jsdom
 import React from "react"
-import { render, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { SidepanelChatSidebar } from "../Sidebar"
 import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator"
+import type { HistoryInfo } from "@/db/dexie/types"
 
 const useServerChatHistoryMock = vi.hoisted(() =>
   vi.fn((_options?: unknown) => ({ data: [], isLoading: false }))
 )
 const fullTextSearchChatHistoriesMock = vi.hoisted(() =>
-  vi.fn(async () => [])
+  vi.fn<(...args: unknown[]) => Promise<HistoryInfo[]>>(async () => [])
 )
 
 vi.mock("react-i18next", () => ({
@@ -216,4 +217,31 @@ describe("SidepanelChatSidebar coordinator integration", () => {
       ).toBe(false)
     })
   })
+})
+
+const snapshot = { requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" as const }, userId: 1 } }
+const sidebarProps = { open: true, variant: "docked" as const, tabs: [], activeTabId: null, onSelectTab: () => {}, onCloseTab: () => {}, onNewTab: () => {}, searchQuery: "private", onSearchQueryChange: () => {} }
+
+it("shows only verified-owner local search titles", async () => {
+  fullTextSearchChatHistoriesMock.mockResolvedValue([
+    { id: "a", title: "Alice private", server_scope_key: "alice", createdAt: 1, is_rag: false },
+    { id: "b", title: "Bob private", server_scope_key: "bob", createdAt: 2, is_rag: false },
+    { id: "legacy", title: "Unowned private", createdAt: 3, is_rag: false }
+  ])
+  render(<SidepanelChatSidebar {...sidebarProps} owner={{ snapshot, ownerKey: "alice", isCurrent: () => true }} />)
+  await screen.findByText("Alice private")
+  expect(screen.queryByText("Bob private")).not.toBeInTheDocument()
+  expect(screen.queryByText("Unowned private")).not.toBeInTheDocument()
+})
+
+it("does not publish a held local search after the requesting owner is revoked", async () => {
+  let finish!: (value: HistoryInfo[]) => void
+  let current = true
+  fullTextSearchChatHistoriesMock.mockImplementationOnce(() => new Promise(resolve => { finish = resolve })).mockResolvedValue([])
+  const view = render(<SidepanelChatSidebar {...sidebarProps} owner={{ snapshot, ownerKey: "alice", isCurrent: () => current }} />)
+  await waitFor(() => expect(finish).toBeTypeOf("function"))
+  current = false
+  view.rerender(<SidepanelChatSidebar {...sidebarProps} owner={{ snapshot, ownerKey: "bob", isCurrent: () => true }} />)
+  await act(async () => { finish([{ id: "a", title: "Alice private", server_scope_key: "alice", createdAt: 1, is_rag: false }]) })
+  expect(screen.queryByText("Alice private")).not.toBeInTheDocument()
 })

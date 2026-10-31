@@ -895,11 +895,9 @@ async def create_transcription(
 
         minutes_est = duration_seconds / 60.0
         try:
-            allow, remaining_after = await _consume_daily_minutes(
-                current_user.id,
-                minutes_est,
-                operation_id=f"audio-transcription:{rid}:daily-minutes",
-            )
+            # No operation_id: the ledger generates one. rid is the client's X-Request-ID,
+            # and a repeated op_id would dedupe away later transcriptions' minutes.
+            allow, remaining_after = await _consume_daily_minutes(current_user.id, minutes_est)
         except _AUDIO_QUOTA_DB_EXC as e:
             logger.exception(
                 'consume_daily_minutes failed; allowing by default: user_id={}, error={}; request_id={}',
@@ -1073,16 +1071,26 @@ async def create_transcription(
                                 },
                             ),
                         )
-                    artifact = adapter.transcribe_batch(
-                        canonical_path,
-                        model=model_for_provider,
-                        language=language_for_provider,
-                        task=task_normalized,
-                        word_timestamps=("word" in granularity_tokens),
-                        prompt=prompt,
-                        hotwords=hotwords_norm,
-                        base_dir=base_dir,
-                    )
+                    transcribe_kwargs = {
+                        "model": model_for_provider,
+                        "language": language_for_provider,
+                        "task": task_normalized,
+                        "word_timestamps": ("word" in granularity_tokens),
+                        "prompt": prompt,
+                        "hotwords": hotwords_norm,
+                        "base_dir": base_dir,
+                    }
+                    if provider == "audio-cpp":
+                        artifact = await asyncio.to_thread(
+                            adapter.transcribe_batch,
+                            canonical_path,
+                            **transcribe_kwargs,
+                        )
+                    else:
+                        artifact = adapter.transcribe_batch(
+                            canonical_path,
+                            **transcribe_kwargs,
+                        )
                     detected_language = artifact.get("language")
                     segments_for_timing = artifact.get("segments") or []
                     transcribed_text = artifact.get("text", "")

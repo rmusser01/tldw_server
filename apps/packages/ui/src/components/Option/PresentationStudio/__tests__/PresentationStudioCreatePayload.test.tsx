@@ -83,6 +83,7 @@ describe("PresentationStudioPage create payload", () => {
   it("sends visual style selection and explicit slide defaults for new projects", async () => {
     clientMocks.createPresentation.mockResolvedValue({
       id: "presentation-1",
+      content_kind: "structured_slides",
       title: "Untitled Presentation",
       description: null,
       theme: "white",

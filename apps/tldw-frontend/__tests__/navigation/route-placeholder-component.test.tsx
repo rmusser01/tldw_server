@@ -42,7 +42,9 @@ describe('RoutePlaceholder recovery', () => {
     );
 
     expect(screen.getByRole('heading', { name: 'Connector Jobs Is Coming Soon' })).toBeVisible();
-    expect(screen.getAllByText('/connectors/jobs')).toHaveLength(2);
+    // Requested and planned route match here, so the path prints once (#2897).
+    expect(screen.getAllByText('/connectors/jobs')).toHaveLength(1);
+    expect(screen.queryByText('Planned route:')).not.toBeInTheDocument();
     expect(screen.getByTestId('route-placeholder-primary')).toHaveAttribute('href', '/connectors');
     expect(screen.getByTestId('route-placeholder-open-settings')).toHaveAttribute('href', '/settings');
     expect(screen.getByTestId('route-placeholder-go-back')).toBeVisible();
@@ -146,7 +148,7 @@ describe('RoutePlaceholder recovery', () => {
     render(<ProfileRedirectPage />);
 
     expect(screen.getByRole('heading', { level: 1, name: 'Profile Page Is Coming Soon' })).toBeVisible();
-    expect(screen.getAllByText('/profile')).toHaveLength(2);
+    expect(screen.getAllByText('/profile')).toHaveLength(1);
     expect(screen.getByTestId('route-placeholder-primary')).toHaveAttribute('href', '/settings');
     expect(screen.getByTestId('route-placeholder-primary')).toHaveTextContent('Open Settings');
     expect(screen.queryByTestId('route-placeholder-open-settings')).not.toBeInTheDocument();
@@ -158,9 +160,43 @@ describe('RoutePlaceholder recovery', () => {
     render(<ConfigRedirectPage />);
 
     expect(screen.getByRole('heading', { level: 1, name: 'Configuration Center Is Coming Soon' })).toBeVisible();
-    expect(screen.getAllByText('/config')).toHaveLength(2);
+    expect(screen.getAllByText('/config')).toHaveLength(1);
     expect(screen.getByTestId('route-placeholder-primary')).toHaveAttribute('href', '/settings');
     expect(screen.getByTestId('route-placeholder-primary')).toHaveTextContent('Open Settings');
     expect(screen.queryByTestId('route-placeholder-open-settings')).not.toBeInTheDocument();
+  });
+});
+
+describe('RoutePlaceholder planned-route disclosure (#2897)', () => {
+  it('shows the planned route only when it differs from the requested one', () => {
+    mockRouter.asPath = '/old-alias';
+
+    render(
+      <RoutePlaceholder
+        title="Connector Jobs Is Coming Soon"
+        description="Connector job orchestration is planned for this route."
+        plannedPath="/connectors/jobs"
+        primaryCtaHref="/connectors"
+        primaryCtaLabel="Open Connectors Hub"
+      />
+    );
+
+    expect(screen.getByText('Planned route:')).toBeVisible();
+    expect(screen.getByText('/connectors/jobs')).toBeVisible();
+    expect(screen.getByText('/old-alias')).toBeVisible();
+  });
+
+  it('titles the document after the placeholder heading', () => {
+    mockRouter.asPath = '/connectors/jobs';
+
+    render(
+      <RoutePlaceholder
+        title="Connector Jobs Is Coming Soon"
+        description="Connector job orchestration is planned for this route."
+        plannedPath="/connectors/jobs"
+      />
+    );
+
+    expect(document.title).toBe('Connector Jobs Is Coming Soon · tldw');
   });
 });

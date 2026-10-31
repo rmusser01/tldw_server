@@ -11,9 +11,8 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing import (
     input_sourcing,
     persistence,
 )
-from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
+from tldw_Server_API.app.core.Metrics.metrics_manager import MetricsRegistry, get_metrics_registry
 from tldw_Server_API.app.services import storage_quota_service
-
 
 pytestmark = pytest.mark.unit
 
@@ -88,6 +87,19 @@ def test_ingestion_metrics_are_registered() -> None:
     assert "ingestion_validation_failures_total" in reg.metrics
     assert "ingestion_chunks_total" in reg.metrics
     assert "ingestion_embeddings_enqueue_total" in reg.metrics
+
+
+def test_native_email_persist_event_is_recorded(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = MetricsRegistry()
+    monkeypatch.setattr(persistence, "get_metrics_registry", lambda: registry)
+
+    persistence._emit_email_native_persist_metric(path_kind="primary", outcome="success")
+
+    stats = registry.get_metric_stats(
+        "email_native_persist_total",
+        labels={"path_kind": "primary", "outcome": "success"},
+    )
+    assert stats["sum"] == 1
 
 
 def test_ingestion_metric_helpers_are_no_throw(monkeypatch: pytest.MonkeyPatch) -> None:

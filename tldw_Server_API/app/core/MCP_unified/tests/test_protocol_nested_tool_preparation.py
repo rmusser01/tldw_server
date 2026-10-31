@@ -28,6 +28,10 @@ class AllowAllRBAC:
         return True
 
 
+class _NonJsonArgument:
+    pass
+
+
 class DynamicModeToolModule(BaseModule):
     TOOL_NAME = "dynamic_mode_action"
 
@@ -234,3 +238,26 @@ async def test_execute_prepared_tool_call_rejects_mutated_request_context() -> N
         match="Prepared tool call integrity check failed",
     ):
         await proto.execute_prepared_tool_call(prepared)
+
+
+@pytest.mark.asyncio
+async def test_prepare_tool_call_maps_non_json_arguments_to_invalid_params() -> None:
+    registry = get_module_registry()
+    await registry.register_module(
+        "dynamic_mode_non_json_prepare",
+        DynamicModeToolModule,
+        ModuleConfig(name="dynamic_mode_non_json_prepare"),
+    )
+
+    proto = MCPProtocol()
+    proto.rbac_policy = AllowAllRBAC()
+    ctx = RequestContext(request_id="np6", user_id="u6", client_id="c6")
+
+    with pytest.raises(InvalidParamsException, match="valid JSON"):
+        await proto.prepare_tool_call(
+            params={
+                "name": DynamicModeToolModule.TOOL_NAME,
+                "arguments": _NonJsonArgument(),
+            },
+            context=ctx,
+        )

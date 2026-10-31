@@ -26,7 +26,7 @@ export const AboutApp = () => {
 
         if (!req.ok) {
           return {
-            ollama: "N/A",
+            serverVersion: "N/A",
             chromeVersion
           }
         }
@@ -37,12 +37,12 @@ export const AboutApp = () => {
           }
         }
         return {
-          ollama: res.info?.version || "N/A",
+          serverVersion: res.info?.version || "N/A",
           chromeVersion
         }
       } catch {
         return {
-          ollama: "N/A",
+          serverVersion: "N/A",
           chromeVersion
         }
       }
@@ -78,7 +78,7 @@ export const AboutApp = () => {
                 label: translateMessage(
                   t,
                   "settings:about.chromeVersion",
-                  "tldw Browser_Assistant Version"
+                  "tldw Assistant Version"
                 ),
                 children: data.chromeVersion
               },
@@ -89,18 +89,31 @@ export const AboutApp = () => {
                   "settings:about.ollamaVersion",
                   "Server Version"
                 ),
-                children: data.ollama
+                children: data.serverVersion
               },
               {
                 key: 3,
                 label: "GitHub",
                 children: (
                   <a
-                    href="https://github.com/rmusser01/tldw_browser_assistant"
+                    href="https://github.com/rmusser01/tldw_server"
                     target="_blank"
                     rel="noreferrer"
                     className="text-primary">
-                    tldw Assistant on GitHub
+                    tldw_server on GitHub
+                  </a>
+                )
+              },
+              {
+                key: 4,
+                label: "License",
+                children: (
+                  <a
+                    href="https://github.com/rmusser01/tldw_server/blob/dev/LICENSE"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-primary">
+                    Source-available frontend terms
                   </a>
                 )
               }

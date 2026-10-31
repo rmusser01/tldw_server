@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   buildSttComparisonConfig,
   buildTextPreview,
+  buildTtsResultMetadata,
   formatByteSize,
   formatClientLatency,
   formatCreatedAt,
@@ -75,5 +76,27 @@ describe("comparison provenance helpers", () => {
     expect(normalizeSttResponse({ text: "", duration: 0 }).metadata).toEqual({
       durationSeconds: 0
     })
+  })
+
+  it("preserves optional TTS gateway provenance without changing legacy metadata", () => {
+    expect(
+      buildTtsResultMetadata("hello", "2026-07-16T12:00:00.000Z", {
+        requestedBackend: "gateway:company-proxy",
+        actualBackend: "openrouter",
+        fallbackUsed: true
+      })
+    ).toMatchObject({
+      requestedBackend: "gateway:company-proxy",
+      actualBackend: "openrouter",
+      fallbackUsed: true
+    })
+
+    const legacy = buildTtsResultMetadata(
+      "hello",
+      "2026-07-16T12:00:00.000Z"
+    )
+    expect(legacy.requestedBackend).toBeUndefined()
+    expect(legacy.actualBackend).toBeUndefined()
+    expect(legacy.fallbackUsed).toBeUndefined()
   })
 })

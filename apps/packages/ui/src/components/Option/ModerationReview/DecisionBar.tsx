@@ -24,13 +24,24 @@ export const DecisionBar: React.FC<DecisionBarProps> = ({
 }) => {
   const [reason, setReason] = React.useState("")
   const [validation, setValidation] = React.useState<string | null>(null)
-  const undoExpired = React.useMemo(() => {
-    if (!undoExpiresAt) {
-      return false
+  const [now, setNow] = React.useState(Date.now)
+  const undoDeadline = undoExpiresAt ? Date.parse(undoExpiresAt) : Number.NaN
+
+  React.useEffect(() => {
+    if (!Number.isFinite(undoDeadline)) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const updateClock = () => {
+      const current = Date.now()
+      setNow(current)
+      if (current <= undoDeadline) {
+        timer = setTimeout(updateClock, Math.min(undoDeadline - current + 1, 2_147_483_647))
+      }
     }
-    const expires = new Date(undoExpiresAt).getTime()
-    return Number.isFinite(expires) && expires < Date.now()
-  }, [undoExpiresAt])
+    updateClock()
+    return () => clearTimeout(timer)
+  }, [undoDeadline])
+
+  const undoExpired = Number.isFinite(undoDeadline) && undoDeadline < now
 
   const runDecision = async (action: ModerationDecisionAction) => {
     if (decisionRequiresReason(action) && !reason.trim()) {

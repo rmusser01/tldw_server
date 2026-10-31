@@ -8,6 +8,7 @@ import {
   InputNumber,
   List,
   Select,
+  Skeleton,
   Space,
   Switch,
   Tag,
@@ -178,9 +179,16 @@ const WorkspacePolicyEditor: React.FC<
   )
 
   return (
-    <Card title={title} loading={loading}>
-      {summary ? <Typography.Paragraph type="secondary">{summary}</Typography.Paragraph> : null}
-      {errorState ? (
+    // Card's `loading` prop unmounts children, disconnecting the useForm
+    // instance and logging an antd warning (#2874). Keep the cheap <Form>
+    // shell mounted instead — that's all the instance needs — and gate the
+    // heavy content on the loading flag.
+    <Card title={title}>
+      {loading ? <Skeleton active paragraph={{ rows: 4 }} /> : null}
+      {!loading && summary ? (
+        <Typography.Paragraph type="secondary">{summary}</Typography.Paragraph>
+      ) : null}
+      {!loading && errorState ? (
         <RecoveryCallout
           state={errorState.state}
           title={errorState.title}
@@ -199,17 +207,21 @@ const WorkspacePolicyEditor: React.FC<
       ) : errorMessage ? (
         <DsAlert variant="error" className="mb-4" title={errorMessage} />
       ) : null}
-      {!errorMessage && !errorState && isUnavailable ? (
+      {!loading && !errorMessage && !errorState && isUnavailable ? (
         <DsAlert variant="warning" className="mb-4" title={`${title} is unavailable`} />
       ) : null}
-      <Descriptions size="small" bordered column={1} style={{ marginBottom: 16 }}>
-        {policyDescription.map((item) => (
-          <Descriptions.Item key={item.label} label={item.label}>
-            {item.value}
-          </Descriptions.Item>
-        ))}
-      </Descriptions>
+      {!loading ? (
+        <Descriptions size="small" bordered column={1} style={{ marginBottom: 16 }}>
+          {policyDescription.map((item) => (
+            <Descriptions.Item key={item.label} label={item.label}>
+              {item.value}
+            </Descriptions.Item>
+          ))}
+        </Descriptions>
+      ) : null}
       <Form form={form} layout="vertical">
+        {!loading ? (
+        <>
         <Form.Item label="Default response mode" name="default_response_mode">
           <Select
             disabled={isUnavailable}
@@ -266,6 +278,8 @@ const WorkspacePolicyEditor: React.FC<
         <Button type="primary" onClick={() => void handleSave()} loading={saving} disabled={isUnavailable}>
           {`Save ${title}`}
         </Button>
+        </>
+        ) : null}
       </Form>
     </Card>
   )
@@ -354,8 +368,11 @@ const TelegramPolicyEditor: React.FC<
   }
 
   return (
-    <Card title="Telegram bot" loading={loading}>
-      {errorState ? (
+    // Same useForm/Card-loading interaction as WorkspacePolicyEditor (#2874):
+    // keep the <Form> shell mounted; gate heavy content on the loading flag.
+    <Card title="Telegram bot">
+      {loading ? <Skeleton active paragraph={{ rows: 4 }} /> : null}
+      {!loading && errorState ? (
         <RecoveryCallout
           state={errorState.state}
           title={errorState.title}
@@ -374,6 +391,7 @@ const TelegramPolicyEditor: React.FC<
       ) : errorMessage ? (
         <DsAlert variant="error" className="mb-4" title={errorMessage} />
       ) : null}
+      {!loading ? (
       <Descriptions size="small" bordered column={1} style={{ marginBottom: 16 }}>
         <Descriptions.Item label="Bot username">{bot?.bot_username ?? "—"}</Descriptions.Item>
         <Descriptions.Item label="Enabled">
@@ -381,8 +399,11 @@ const TelegramPolicyEditor: React.FC<
         </Descriptions.Item>
         <Descriptions.Item label="Linked actors">{linkedActors.length}</Descriptions.Item>
       </Descriptions>
+      ) : null}
 
       <Form form={form} layout="vertical">
+        {!loading ? (
+        <>
         <Form.Item label="Bot token" name="bot_token" rules={[{ required: true, message: "Bot token is required" }]}>
           <Input.Password placeholder="Enter bot token" autoComplete="off" disabled={isUnavailable} />
         </Form.Item>
@@ -403,9 +424,11 @@ const TelegramPolicyEditor: React.FC<
             Generate pairing code
           </Button>
         </Space>
+        </>
+        ) : null}
       </Form>
 
-      {localPairingCode ? (
+      {!loading && localPairingCode ? (
         <DsAlert variant="success" className="mt-4" title="Pairing code generated">
           <div className="flex flex-col">
             <span>
@@ -416,6 +439,7 @@ const TelegramPolicyEditor: React.FC<
         </DsAlert>
       ) : null}
 
+      {!loading ? (
       <div style={{ marginTop: 16 }}>
         <Typography.Title level={5}>Linked actors</Typography.Title>
         {linkedActors.length > 0 ? (
@@ -440,6 +464,7 @@ const TelegramPolicyEditor: React.FC<
           <Typography.Text type="secondary">No linked actors found.</Typography.Text>
         )}
       </div>
+      ) : null}
     </Card>
   )
 }

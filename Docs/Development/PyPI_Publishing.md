@@ -3,9 +3,10 @@
 This guide sets up and uses the repository's PyPI release flow for the `tldw-server` package.
 
 `tldw-server` on PyPI is the backend/API/CLI distribution only. It does not
-bundle the Next.js WebUI from `apps/tldw-frontend`. When a UI is needed, pair
-the PyPI backend release with the separately published WebUI Docker image or
-release artifact described in
+bundle the Next.js WebUI from `apps/tldw-frontend`. During the frontend
+licensing freeze, no WebUI Docker image or release artifact is published; run
+an authorized frontend build from source when a UI is needed. The longer-term
+artifact boundary is described in
 [`Packaging_and_Distribution_Strategy.md`](Packaging_and_Distribution_Strategy.md).
 
 ## What This Repo Now Supports

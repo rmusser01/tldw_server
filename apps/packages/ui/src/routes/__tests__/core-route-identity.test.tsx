@@ -193,6 +193,12 @@ describe("core route identity guardrails", () => {
     expect(
       screen.getByRole("heading", {
         level: 1,
+        name: "Setup"
+      })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("heading", {
+        level: 2,
         name: "Setup operator recovery"
       })
     ).toBeInTheDocument()
@@ -278,6 +284,9 @@ describe("core route identity guardrails", () => {
   it("returns from setup recovery to home after unified setup completion", () => {
     render(<OptionSetup />)
 
+    // While setup is required the route opens on the setup entry choice;
+    // the WebUI lane mounts the unified setup wizard.
+    fireEvent.click(screen.getByRole("button", { name: "Set up in WebUI" }))
     fireEvent.click(screen.getByTestId("complete-unified-setup"))
 
     expect(navigateMock).toHaveBeenCalledWith("/")

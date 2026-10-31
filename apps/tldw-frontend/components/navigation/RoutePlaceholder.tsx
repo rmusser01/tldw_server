@@ -20,6 +20,18 @@ export const RoutePlaceholder: React.FC<RoutePlaceholderProps> = ({
   const router = useRouter();
   const routeLabel = String(router.asPath || '/');
   const showSettingsShortcut = !primaryCtaHref.startsWith('/settings');
+  // Placeholder routes were the only pages with no document title (#2897).
+  React.useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const previous = document.title;
+    document.title = `${title} · tldw`;
+    return () => {
+      document.title = previous;
+    };
+  }, [title]);
+  // When the visitor is already on the planned path, "Requested route" and
+  // "Planned route" print the same value twice - show it once.
+  const plannedDiffers = Boolean(plannedPath) && plannedPath !== routeLabel;
 
   return (
     <div className="flex min-h-[70vh] w-full items-center justify-center px-6 py-12">
@@ -36,7 +48,7 @@ export const RoutePlaceholder: React.FC<RoutePlaceholderProps> = ({
           Requested route:{' '}
           <code className="rounded bg-surface2 px-1 py-0.5">{routeLabel}</code>
         </p>
-        {plannedPath ? (
+        {plannedDiffers ? (
           <p className="mt-1 text-xs text-text-muted">
             Planned route:{' '}
             <code className="rounded bg-surface2 px-1 py-0.5">

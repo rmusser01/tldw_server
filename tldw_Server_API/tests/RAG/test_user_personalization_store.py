@@ -64,8 +64,8 @@ def test_personalization_store_load_failure_log_is_sanitized(tmp_path, monkeypat
 
     monkeypatch.setattr(
         personalization_store.DatabasePaths,
-        "get_user_rag_personalization_path",
-        lambda _user_id: secret_path,
+        "get_user_base_directory",
+        lambda _user_id: secret_path.parent,
     )
     monkeypatch.setattr(Path, "open", _raise_open)
 

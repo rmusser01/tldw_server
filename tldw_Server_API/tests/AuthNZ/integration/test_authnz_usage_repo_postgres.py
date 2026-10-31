@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
+
 
 pytestmark = pytest.mark.integration
 
@@ -20,21 +22,13 @@ async def test_authnz_usage_repo_prune_postgres(test_db_pool):
     recent_ts = now - timedelta(days=1)
 
     # Seed a user to satisfy FKs on usage_daily / llm_usage_daily
-    async with pool.acquire() as conn:
-        user_id = await conn.fetchval(
-            """
-            INSERT INTO users (
-                uuid, username, email, password_hash, role,
-                is_active, is_verified, storage_quota_mb, storage_used_mb
-            )
-            VALUES (gen_random_uuid(), $1, $2, $3, $4, TRUE, TRUE, 5120, 0.0)
-            RETURNING id
-            """,
-            "pg-usage-prune-user",
-            "pg-usage-prune-user@example.com",
-            "hashed",
-            "user",
-        )
+    users = UsersDB(pool)
+    await users.initialize(ensure_schema=False)
+    user = await users.create_user(
+        username="pg-usage-prune-user", email="pg-usage-prune-user@example.com",
+        password_hash="hashed", role="user", is_active=True, is_verified=True,
+    )
+    user_id = int(user["id"])
 
     # Seed minimal usage rows
     await pool.execute(

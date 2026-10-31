@@ -2,6 +2,7 @@ import { apiClient } from './api';
 import { dispatchAuthCredentialsChanged } from './auth-events';
 import { getRuntimeApiBearer, getRuntimeApiKey } from './authStorage';
 import { clearRequestHistory } from './history';
+import { clearStandaloneHtmlSessionRecords } from '@tldw/ui/services/tldw/standalone-html-session-records';
 
 export interface LoginCredentials {
   username: string;
@@ -211,6 +212,10 @@ class AuthService {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('access_token');
       localStorage.removeItem('user');
+      clearStandaloneHtmlSessionRecords();
+      window.dispatchEvent(new CustomEvent('tldw:auth-principal-changed', {
+        detail: { kind: 'logout' },
+      }));
       dispatchAuthCredentialsChanged(false);
       // Purge any credentials/tokens that may have been captured in the
       // request-history ring so they cannot survive logout.

@@ -1,37 +1,57 @@
 import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { runInNewContext } from "node:vm"
+import { load } from "cheerio"
 import { describe, expect, it } from "vitest"
 
 const extensionRoot = path.resolve(__dirname, "..", "..")
-const optionsHtmlPath = path.join(
-  extensionRoot,
-  "entrypoints",
-  "options",
-  "index.html",
-)
 const themeBootstrapPath = path.resolve(
   extensionRoot,
   "../packages/ui/src/public/theme-bootstrap.js",
 )
-const optionsHtml = readFileSync(optionsHtmlPath, "utf8")
 const themeBootstrap = readFileSync(themeBootstrapPath, "utf8")
 
-describe("options theme bootstrap", () => {
-  it("loads a same-origin external classic script synchronously from the head", () => {
-    const head = optionsHtml.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1] ?? ""
+function inlineScriptBodies(html: string): string[] {
+  const document = load(html)
+  return document("script:not([src])")
+    .toArray()
+    .map((script) => document(script).text().trim())
+    .filter(Boolean)
+}
 
-    expect(head).toContain('<script src="/theme-bootstrap.js"></script>')
+describe.each(["options", "sidepanel"])("%s theme bootstrap", (entrypoint) => {
+  const optionsHtml = readFileSync(
+    path.join(extensionRoot, "entrypoints", entrypoint, "index.html"),
+    "utf8"
+  )
+  it("loads a same-origin external classic script synchronously from the head", () => {
+    const document = load(optionsHtml)
+    const bootstrap = document('head > script[src="/theme-bootstrap.js"]')
+
+    expect(bootstrap).toHaveLength(1)
+    expect(bootstrap.is("[type], [async], [defer]")).toBe(false)
   })
 
   it("contains no executable inline script body", () => {
-    const inlineScriptBodies = [...optionsHtml.matchAll(
-      /<script\b([^>]*)>([\s\S]*?)<\/script>/gi,
-    )]
-      .filter(([, attributes, body]) => !/\bsrc\s*=/i.test(attributes) && body.trim())
-      .map(([, , body]) => body.trim())
+    expect(inlineScriptBodies(optionsHtml)).toEqual([])
+  })
 
-    expect(inlineScriptBodies).toEqual([])
+  it.each([
+    ["closing-tag whitespace", "<script>boot()</script \t\n>"],
+    ["mixed-case module tags", '<ScRiPt type="module">boot()</sCrIpT >'],
+    ["an unrelated src attribute", '<script data-src="/external.js">boot()</script>'],
+    ["src text inside an attribute", '<script title="src=external.js">boot()</script>'],
+  ])("detects executable inline code with %s", (_name, html) => {
+    expect(inlineScriptBodies(html)).toEqual(["boot()"])
+  })
+
+  it("excludes external scripts and empty inline bodies", () => {
+    expect(inlineScriptBodies(`
+      <script SRC="/theme-bootstrap.js">ignored()</script>
+      <script src="">ignored()</script>
+      <script> \t\n </script>
+      <script>boot()</script>
+    `)).toEqual(["boot()"])
   })
 
   it("ships the referenced public script", () => {

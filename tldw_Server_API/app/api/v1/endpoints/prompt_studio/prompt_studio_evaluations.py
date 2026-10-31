@@ -23,23 +23,44 @@ from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
-from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import get_prompt_studio_db, get_prompt_studio_user
+from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
+    get_prompt_studio_db,
+    get_prompt_studio_user,
+    require_project_write_access,
+)
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
-from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.api.v1.endpoints.prompt_studio.resource_binding import (
+    authoritative_prompt_project,
+    require_test_cases_in_project,
+)
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_schemas import (
     EvaluationCreate,
     EvaluationList,
     EvaluationResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    record_byok_missing_credentials,
-    resolve_byok_credentials,
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+    derive_trusted_credential_scope,
 )
-from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
-from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionError,
+    record_byok_missing_credentials,
+)
+from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    ProviderCallCredentials,
+    ProviderCredentialRuntime,
+    mark_provider_credential_used,
+)
+from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
+from tldw_Server_API.app.core.Chat.streaming_utils import sanitized_provider_stream_exception
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import DatabaseError, PromptStudioDatabase
+from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.evaluation_manager import EvaluationManager
 from tldw_Server_API.app.core.testing import is_test_mode
@@ -76,6 +97,46 @@ _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS = (
 
 def _is_prompt_studio_test_mode() -> bool:
     return is_test_mode() or os.getenv("PYTEST_CURRENT_TEST") is not None
+
+
+def _prompt_studio_credential_http_exception(exc: ByokResolutionError) -> HTTPException:
+    """Map credential policy/storage failures to bounded Prompt Studio responses."""
+    code = getattr(exc, "policy_code", exc.code)
+    if code in {"provider_disabled", "model_not_allowed", "credential_scope_revoked"}:
+        message = (
+            "The active credential scope is no longer available."
+            if code == "credential_scope_revoked"
+            else "The selected provider or model is disabled by administrator policy."
+        )
+        return HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error_code": code,
+                "message": message,
+            },
+        )
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "error_code": code,
+            "message": "Provider credentials are temporarily unavailable.",
+        },
+    )
+
+
+def _prompt_studio_provider_auth_is_resolved(
+    provider: str,
+    credentials: ProviderCallCredentials,
+) -> bool:
+    """Honor provider-specific auth contracts such as the AWS default chain."""
+
+    return provider_auth_is_resolved(
+        provider,
+        api_key=credentials.api_key,
+        app_config=credentials.app_config,
+        credentials_resolved=credentials.credentials_resolved,
+    )
+
 
 @router.post(
     "/evaluations",
@@ -157,7 +218,25 @@ async def create_evaluation(
     Returns:
         Created evaluation response
     """
+    credential_runtime: ProviderCredentialRuntime | None = None
+    credential_runtime_transferred = False
     try:
+        _, project_id = authoritative_prompt_project(
+            db,
+            evaluation.prompt_id,
+            compatibility_project_id=evaluation.project_id,
+        )
+        await require_project_write_access(
+            project_id,
+            user_context=user_context,
+            db=db,
+        )
+        test_case_ids = require_test_cases_in_project(
+            db,
+            evaluation.test_case_ids or [],
+            project_id,
+        )
+
         # Normalize incoming model configuration to a list of dicts for storage.
         # Support both legacy shape (model_configs: List[dict]) and new shape (config: dict).
         incoming_configs = None
@@ -167,7 +246,13 @@ async def create_evaluation(
             incoming_configs = None
 
         if incoming_configs and isinstance(incoming_configs, list):
-            configs_list: list[dict[str, Any]] = incoming_configs
+            configs_list: list[dict[str, Any]] = [
+                item.model_dump(exclude_none=True)
+                if hasattr(item, "model_dump")
+                else dict(item)
+                for item in incoming_configs
+                if hasattr(item, "model_dump") or isinstance(item, dict)
+            ]
         else:
             single_cfg = getattr(evaluation, "config", None)
             if single_cfg is not None:
@@ -187,50 +272,30 @@ async def create_evaluation(
 
         # Determine effective config to run with (first item if provided)
         first_cfg = configs_list[0] if configs_list else {}
-        model_name = first_cfg.get("model_name") or first_cfg.get("model") or "gpt-3.5-turbo"
+        provider_name = canonical_provider_name(
+            (first_cfg.get("provider") or first_cfg.get("api_name") or "openai").strip() or "openai"
+        )
+        configured_model = first_cfg.get("model_name") or first_cfg.get("model")
+        if configured_model:
+            model_name = configured_model
+        elif provider_name == "openai":
+            model_name = "gpt-3.5-turbo"
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Model is required for an explicit non-OpenAI provider.",
+            )
         temperature = first_cfg.get("temperature", 0.7)
         max_tokens = first_cfg.get("max_tokens", 1000)
-        provider_name = (first_cfg.get("provider") or first_cfg.get("api_name") or "openai").strip() or "openai"
-        provider_key = provider_name.lower()
+        timeout_seconds = first_cfg.get("timeout_seconds")
+        provider_key = provider_name
 
-        def _fallback_resolver(name: str) -> Optional[str]:
-            key_val, _ = resolve_provider_api_key(
-                name,
-                prefer_module_keys_in_tests=True,
-            )
-            return key_val
-
-        user_id_int = None
-        try:
-            user_id_int = int(user_context.get("user_id"))
-        except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
-            user_id_int = None
-
-        byok_resolution = await resolve_byok_credentials(
-            provider_key,
-            user_id=user_id_int,
-            request=request,
-            fallback_resolver=_fallback_resolver,
-        )
-        provider_api_key = byok_resolution.api_key
-        app_config_override = byok_resolution.app_config
-
-        if provider_requires_api_key(provider_key) and not provider_api_key and not _is_prompt_studio_test_mode():
-            record_byok_missing_credentials(provider_key, operation="prompt_studio")
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "error_code": "missing_provider_credentials",
-                    "message": f"Provider '{provider_name}' requires an API key.",
-                },
-            )
-
-        # If metrics provided, return an immediate response echoing metrics (test compatibility).
+        # Metrics-only evaluations do not dispatch an LLM and need no credentials.
         if evaluation.metrics is not None:
             return EvaluationResponse(
                 id=0,
                 uuid=str(uuid.uuid4()),
-                project_id=evaluation.project_id,
+                project_id=project_id,
                 prompt_id=evaluation.prompt_id,
                 name=evaluation.name or "Evaluation",
                 description=evaluation.description or "",
@@ -240,48 +305,87 @@ async def create_evaluation(
                 config=evaluation.config.model_dump() if hasattr(evaluation.config, "model_dump") and evaluation.config else {},
             )
 
+        user_id_int = None
+        try:
+            user_id_int = int(user_context.get("user_id"))
+        except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
+            user_id_int = None
+
+        runtime_user_id, team_ids, org_ids, trusted_base_url_override = (
+            derive_trusted_credential_scope(request, None)
+        )
+        if runtime_user_id is None:
+            runtime_user_id = user_id_int
+        credential_runtime = ProviderCredentialRuntime(
+            user_id=runtime_user_id,
+            team_ids=team_ids,
+            org_ids=org_ids,
+            trusted_base_url_override=trusted_base_url_override,
+            override_snapshot_resolver=capture_provider_override_call_snapshot,
+        )
+        provider_credentials = await credential_runtime.resolve(
+            provider_key,
+            model=model_name,
+        )
+        provider_api_key = provider_credentials.api_key
+        app_config_override = provider_credentials.app_config
+
+        async def _mark_provider_success() -> None:
+            await mark_provider_credential_used(
+                credential_runtime,
+                provider_credentials,
+            )
+
+        if (
+            provider_requires_api_key(provider_key)
+            and not _prompt_studio_provider_auth_is_resolved(
+                provider_key,
+                provider_credentials,
+            )
+            and not _is_prompt_studio_test_mode()
+        ):
+            record_byok_missing_credentials(provider_key, operation="prompt_studio")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "error_code": "missing_provider_credentials",
+                    "message": f"Provider '{provider_name}' requires an API key.",
+                },
+            )
+
         # Use EvaluationManager for sync path; for async we create a record and update later
         eval_manager = EvaluationManager(db)
 
         if getattr(evaluation, 'run_async', False):
             # Create a pending evaluation record tied to this request
-            eval_uuid = str(uuid.uuid4())
-            conn = db.get_connection()
-            cursor = conn.cursor()
-            model_configs = json.dumps(configs_list)
-            started_ts = datetime.utcnow()
-            cursor.execute(
-                """
-                INSERT INTO prompt_studio_evaluations (
-                    uuid, project_id, prompt_id, name, description,
-                    test_case_ids, model_configs, status, client_id, started_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?)
-                """,
-                (
-                    eval_uuid,
-                    evaluation.project_id,
-                    evaluation.prompt_id,
-                    evaluation.name or "Evaluation",
-                    evaluation.description or "",
-                    json.dumps(evaluation.test_case_ids or []),
-                    model_configs,
-                    user_context.get("client_id", "api"),
-                    started_ts,
-                ),
+            created_record = db.create_evaluation(
+                prompt_id=evaluation.prompt_id,
+                project_id=project_id,
+                model_configs=configs_list,
+                status="running",
+                test_case_ids=test_case_ids,
+                client_id=user_context.get("client_id", "api"),
+                name=evaluation.name or "Evaluation",
+                description=evaluation.description or "",
             )
-            eval_id = cursor.lastrowid
-            conn.commit()
+            eval_id = created_record["id"]
+            eval_uuid = created_record["uuid"]
 
             # In test environments, run inline to ensure timely completion for polling tests
             import os as _os
             if _os.getenv("PYTEST_CURRENT_TEST") or is_test_mode():
                 req_id = ensure_request_id(request) if request is not None else None
                 tp = ensure_traceparent(request) if request is not None else ""
+                credential_runtime_transferred = True
                 await run_evaluation_async(
                     eval_id,
                     db,
                     user_id=user_id_int,
                     provider=provider_name,
+                    model=model_name,
+                    timeout_seconds=timeout_seconds,
+                    credential_runtime=credential_runtime,
+                    provider_credentials=provider_credentials,
                     request_id=req_id,
                     traceparent=tp,
                 )
@@ -289,7 +393,7 @@ async def create_evaluation(
                 return EvaluationResponse(
                     id=eval_id,
                     uuid=eval_uuid,
-                    project_id=evaluation.project_id,
+                    project_id=project_id,
                     prompt_id=evaluation.prompt_id,
                     name=evaluation.name or "Evaluation",
                     description=evaluation.description or "",
@@ -308,13 +412,18 @@ async def create_evaluation(
                     db,
                     user_id=user_id_int,
                     provider=provider_name,
+                    model=model_name,
+                    timeout_seconds=timeout_seconds,
+                    credential_runtime=credential_runtime,
+                    provider_credentials=provider_credentials,
                     request_id=req_id,
                     traceparent=tp,
                 )
+                credential_runtime_transferred = True
                 return EvaluationResponse(
                     id=eval_id,
                     uuid=eval_uuid,
-                    project_id=evaluation.project_id,
+                    project_id=project_id,
                     prompt_id=evaluation.prompt_id,
                     name=evaluation.name or "Evaluation",
                     description=evaluation.description or "",
@@ -325,22 +434,23 @@ async def create_evaluation(
             # Run synchronously and return results
             result = await eval_manager.run_evaluation_async(
                 prompt_id=evaluation.prompt_id,
-                test_case_ids=evaluation.test_case_ids or [],
+                test_case_ids=test_case_ids,
                 model=model_name,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 provider=provider_name,
                 api_key=provider_api_key,
                 app_config=app_config_override,
+                credentials_resolved=True,
+                provider_credentials=provider_credentials,
+                timeout_seconds=timeout_seconds,
+                on_provider_success=_mark_provider_success,
             )
-
-            if byok_resolution and byok_resolution.uses_byok:
-                await byok_resolution.touch_last_used()
 
             return EvaluationResponse(
                 id=result["id"],
                 uuid=result["uuid"],
-                project_id=evaluation.project_id,
+                project_id=project_id,
                 prompt_id=result["prompt_id"],
                 name=evaluation.name or "Evaluation",
                 description=evaluation.description or "",
@@ -351,6 +461,8 @@ async def create_evaluation(
 
     except HTTPException:
         raise
+    except ByokResolutionError as e:
+        raise_detached_error(_prompt_studio_credential_http_exception(e))
     except DatabaseError as e:
         rid = ensure_request_id(request) if request is not None else None
         tp = ensure_traceparent(request) if request is not None else ""
@@ -360,8 +472,14 @@ async def create_evaluation(
             ps_job_kind="evaluations",
             traceparent=tp,
         ).error("Failed to create evaluation")
-        raise map_db_error_to_http(e, default_detail="Failed to create evaluation") from e
-    except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS as e:
+        raise_detached_error(
+            map_db_error_to_http(
+                e,
+                default_detail="Failed to create evaluation",
+                log_error=False,
+            )
+        )
+    except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
         rid = ensure_request_id(request) if request is not None else None
         tp = ensure_traceparent(request) if request is not None else ""
         get_ps_logger(
@@ -370,7 +488,12 @@ async def create_evaluation(
             ps_job_kind="evaluations",
             traceparent=tp,
         ).error("Failed to create evaluation")
-        raise HTTPException(status_code=500, detail="Failed to create evaluation") from e
+        raise_detached_error(
+            HTTPException(status_code=500, detail="Failed to create evaluation")
+        )
+    finally:
+        if credential_runtime is not None and not credential_runtime_transferred:
+            await await_owned_worker(credential_runtime.close())
 
 @router.get("/evaluations", response_model=EvaluationList, openapi_extra={
     "responses": {"200": {"description": "Evaluations", "content": {"application/json": {"examples": {"list": {"summary": "Eval list", "value": [{"id": 501, "project_id": 1, "prompt_id": 12, "status": "running"}]}}}}}}
@@ -464,8 +587,14 @@ async def list_evaluations(
             ps_job_kind="evaluations",
             traceparent=tp,
         ).error("Failed to list evaluations")
-        raise map_db_error_to_http(e, default_detail="Failed to list evaluations") from e
-    except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS as e:
+        raise_detached_error(
+            map_db_error_to_http(
+                e,
+                default_detail="Failed to list evaluations",
+                log_error=False,
+            )
+        )
+    except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
         rid = ensure_request_id(request) if request is not None else None
         tp = ensure_traceparent(request) if request is not None else ""
         get_ps_logger(
@@ -474,7 +603,9 @@ async def list_evaluations(
             ps_job_kind="evaluations",
             traceparent=tp,
         ).error("Failed to list evaluations")
-        raise HTTPException(status_code=500, detail="Failed to list evaluations") from e
+        raise_detached_error(
+            HTTPException(status_code=500, detail="Failed to list evaluations")
+        )
 
 @router.get(
     "/evaluations/{evaluation_id}",
@@ -520,28 +651,9 @@ async def get_evaluation(
         Evaluation details
     """
     try:
-        conn = db.get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT id, uuid, project_id, prompt_id, name, description,
-                   status, started_at, created_at, completed_at, aggregate_metrics
-            FROM prompt_studio_evaluations
-            WHERE id = ?
-        """, (evaluation_id,))
-
-        row = cursor.fetchone()
-        if not row:
+        eval_dict = db.get_evaluation(evaluation_id)
+        if not eval_dict:
             raise HTTPException(status_code=404, detail="Evaluation not found")
-
-        # Build a plain dict using sqlite3.Row mapping support
-        try:
-            keys = row.keys() if hasattr(row, 'keys') else [d[0] for d in cursor.description]
-            eval_dict = {k: row[k] if hasattr(row, 'keys') else row[i] for i, k in enumerate(keys)}
-        except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
-            # Final fallback: zip description to row tuple
-            cols = [d[0] for d in cursor.description]
-            eval_dict = {c: row[idx] for idx, c in enumerate(cols)}
 
         # Normalize metrics
         agg = eval_dict.get("aggregate_metrics")
@@ -596,8 +708,14 @@ async def get_evaluation(
             ps_job_kind="evaluations",
             traceparent=tp,
         ).error("Failed to get evaluation")
-        raise map_db_error_to_http(e, default_detail="Failed to get evaluation") from e
-    except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS as e:
+        raise_detached_error(
+            map_db_error_to_http(
+                e,
+                default_detail="Failed to get evaluation",
+                log_error=False,
+            )
+        )
+    except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
         rid = ensure_request_id(request) if request is not None else None
         tp = ensure_traceparent(request) if request is not None else ""
         get_ps_logger(
@@ -606,7 +724,9 @@ async def get_evaluation(
             ps_job_kind="evaluations",
             traceparent=tp,
         ).error("Failed to get evaluation")
-        raise HTTPException(status_code=500, detail="Failed to get evaluation") from e
+        raise_detached_error(
+            HTTPException(status_code=500, detail="Failed to get evaluation")
+        )
 
 @router.delete("/evaluations/{evaluation_id}", openapi_extra={
     "responses": {"200": {"description": "Deleted", "content": {"application/json": {"examples": {"deleted": {"value": {"message": "Evaluation 123 deleted successfully"}}}}}}}
@@ -629,43 +749,8 @@ async def delete_evaluation(
         Success message
     """
     try:
-        conn = db.get_connection()
-        cursor = conn.cursor()
-
-        supports_soft_delete = False
-        try:
-            if db.backend_type == BackendType.POSTGRESQL and db.backend is not None:
-                table_info = db.backend.get_table_info(
-                    "prompt_studio_evaluations",
-                    connection=conn.raw_connection,
-                )
-                columns = {info.get("name") for info in table_info}
-            else:
-                cursor.execute("PRAGMA table_info(prompt_studio_evaluations)")
-                columns = {row[1] for row in cursor.fetchall()}
-            supports_soft_delete = "deleted" in columns and "deleted_at" in columns
-        except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
-            logger.debug("Failed to check prompt_studio_evaluations columns")
-
-        if supports_soft_delete:
-            cursor.execute(
-                """
-                UPDATE prompt_studio_evaluations
-                SET deleted = 1, deleted_at = ?
-                WHERE id = ?
-                """,
-                (datetime.utcnow(), evaluation_id),
-            )
-        else:
-            cursor.execute(
-                "DELETE FROM prompt_studio_evaluations WHERE id = ?",
-                (evaluation_id,),
-            )
-
-        if cursor.rowcount == 0:
+        if not db.delete_evaluation(evaluation_id):
             raise HTTPException(status_code=404, detail="Evaluation not found")
-
-        conn.commit()
 
         return {"message": f"Evaluation {evaluation_id} deleted successfully"}
 
@@ -680,8 +765,14 @@ async def delete_evaluation(
             ps_job_kind="evaluations",
             traceparent=tp,
         ).error("Failed to delete evaluation")
-        raise map_db_error_to_http(e, default_detail="Failed to delete evaluation") from e
-    except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS as e:
+        raise_detached_error(
+            map_db_error_to_http(
+                e,
+                default_detail="Failed to delete evaluation",
+                log_error=False,
+            )
+        )
+    except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
         rid = ensure_request_id(request) if request is not None else None
         tp = ensure_traceparent(request) if request is not None else ""
         get_ps_logger(
@@ -690,7 +781,9 @@ async def delete_evaluation(
             ps_job_kind="evaluations",
             traceparent=tp,
         ).error("Failed to delete evaluation")
-        raise HTTPException(status_code=500, detail="Failed to delete evaluation") from e
+        raise_detached_error(
+            HTTPException(status_code=500, detail="Failed to delete evaluation")
+        )
 
 ########################################################################################################################
 # Background Task Health
@@ -712,7 +805,10 @@ async def _complete_ping(ping_id: str):
 @router.post("/background/ping", openapi_extra={
     "responses": {"200": {"description": "Ping scheduled", "content": {"application/json": {"examples": {"scheduled": {"value": {"id": "abc123", "status": "processing", "created_at": "2024-09-21T12:00:00"}}}}}}}
 })
-async def background_ping(background_tasks: BackgroundTasks) -> dict[str, Any]:
+async def background_ping(
+    background_tasks: BackgroundTasks,
+    _user: dict = Depends(get_prompt_studio_user),
+) -> dict[str, Any]:
     """Schedule a trivial background task to verify background execution works."""
     pid = str(uuid.uuid4())
     _BG_PINGS[pid] = {"id": pid, "status": "processing", "created_at": datetime.now().isoformat()}
@@ -723,7 +819,10 @@ async def background_ping(background_tasks: BackgroundTasks) -> dict[str, Any]:
 @router.get("/background/pings/{ping_id}", openapi_extra={
     "responses": {"200": {"description": "Ping status", "content": {"application/json": {"examples": {"done": {"value": {"id": "abc123", "status": "completed", "completed_at": "2024-09-21T12:00:01"}}}}}}, "404": {"description": "Not found"}}
 })
-async def get_ping_status(ping_id: str) -> dict[str, Any]:
+async def get_ping_status(
+    ping_id: str,
+    _user: dict = Depends(get_prompt_studio_user),
+) -> dict[str, Any]:
     if ping_id not in _BG_PINGS:
         raise HTTPException(status_code=404, detail="Ping not found")
     return _BG_PINGS[ping_id]
@@ -734,9 +833,13 @@ async def run_evaluation_async(
     *,
     user_id: Optional[int] = None,
     provider: str = "openai",
+    model: str | None = None,
+    timeout_seconds: float | None = None,
+    credential_runtime: ProviderCredentialRuntime | None = None,
+    provider_credentials: ProviderCallCredentials | None = None,
     request_id: str | None = None,
     traceparent: str = "",
-):
+) -> None:
     """
     Execute an evaluation and update the existing record.
 
@@ -745,8 +848,7 @@ async def run_evaluation_async(
     """
     import json as _json
 
-    conn = db.get_connection()
-    cursor = conn.cursor()
+    record_loaded = False
     try:
         with log_context(
             request_id=request_id,
@@ -758,37 +860,26 @@ async def run_evaluation_async(
                 evaluation_id,
             )
 
-            cursor.execute(
-                """
-                SELECT id, project_id, prompt_id, test_case_ids, model_configs
-                FROM prompt_studio_evaluations
-                WHERE id = ?
-                """,
-                (evaluation_id,),
-            )
-            row = cursor.fetchone()
-            if not row:
+            record = db.get_evaluation(evaluation_id)
+            if not record:
                 raise RuntimeError("Evaluation not found")
+            record_loaded = True
+            db.update_evaluation(evaluation_id, {"status": "running", "started_at": datetime.utcnow()})
 
-            cursor.execute(
-                """
-                UPDATE prompt_studio_evaluations
-                SET status = 'running', started_at = ?
-                WHERE id = ?
-                """,
-                (datetime.utcnow(), evaluation_id),
-            )
-            conn.commit()
-
-            _id, _project_id, prompt_id, tc_ids_json, model_cfg_json = row
-            try:
-                test_case_ids = _json.loads(tc_ids_json) if tc_ids_json else []
-            except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
-                test_case_ids = []
-            try:
-                cfg_raw = _json.loads(model_cfg_json) if model_cfg_json else {}
-            except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
-                cfg_raw = {}
+            prompt_id = record.get("prompt_id")
+            # The repository decodes JSON columns; tolerate a raw string from older rows.
+            test_case_ids = record.get("test_case_ids") or []
+            cfg_raw = record.get("model_configs") or {}
+            for name, value in (("test_case_ids", test_case_ids), ("model_configs", cfg_raw)):
+                if isinstance(value, str):
+                    try:
+                        decoded = _json.loads(value)
+                    except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
+                        decoded = [] if name == "test_case_ids" else {}
+                    if name == "test_case_ids":
+                        test_case_ids = decoded
+                    else:
+                        cfg_raw = decoded
 
             if isinstance(cfg_raw, list) and cfg_raw:
                 cfg = cfg_raw[0]
@@ -797,7 +888,6 @@ async def run_evaluation_async(
             else:
                 cfg = {}
 
-            model_name = cfg.get("model_name") or cfg.get("model") or "gpt-3.5-turbo"
             try:
                 temperature = float(cfg.get("temperature", 0.7))
             except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
@@ -806,30 +896,54 @@ async def run_evaluation_async(
                 max_tokens = int(cfg.get("max_tokens", 1000))
             except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
                 max_tokens = 1000
-            provider_name = (cfg.get("provider") or cfg.get("api_name") or provider or "openai").strip() or "openai"
-            provider_key = provider_name.lower()
+            provider_name = (
+                provider
+                if provider_credentials is not None
+                else (cfg.get("provider") or cfg.get("api_name") or provider or "openai")
+            )
+            provider_name = canonical_provider_name(str(provider_name).strip() or "openai")
+            configured_model = model or cfg.get("model_name") or cfg.get("model")
+            if configured_model:
+                model_name = configured_model
+            elif provider_name == "openai":
+                model_name = "gpt-3.5-turbo"
+            else:
+                raise RuntimeError("Model is required for the selected provider.")
+            effective_timeout_seconds = timeout_seconds
+            if effective_timeout_seconds is None and provider_credentials is None:
+                effective_timeout_seconds = cfg.get("timeout_seconds")
+            provider_key = provider_name
 
-            byok_resolution = None
-            provider_api_key = None
-            app_config_override = None
-            if user_id is not None:
-                def _fallback_resolver(name: str) -> Optional[str]:
-                    key_val, _ = resolve_provider_api_key(
-                        name,
-                        prefer_module_keys_in_tests=True,
-                    )
-                    return key_val
-
-                byok_resolution = await resolve_byok_credentials(
-                    provider_key,
+            if credential_runtime is None:
+                credential_runtime = ProviderCredentialRuntime(
                     user_id=user_id,
-                    request=None,
-                    fallback_resolver=_fallback_resolver,
+                    team_ids=None,
+                    org_ids=None,
+                    trusted_base_url_override=False,
+                    override_snapshot_resolver=capture_provider_override_call_snapshot,
                 )
-                provider_api_key = byok_resolution.api_key
-                app_config_override = byok_resolution.app_config
+            if provider_credentials is None:
+                provider_credentials = await credential_runtime.resolve(
+                    provider_key,
+                    model=model_name,
+                )
+            provider_api_key = provider_credentials.api_key
+            app_config_override = provider_credentials.app_config
 
-            if provider_requires_api_key(provider_key) and not provider_api_key and not _is_prompt_studio_test_mode():
+            async def _mark_provider_success() -> None:
+                await mark_provider_credential_used(
+                    credential_runtime,
+                    provider_credentials,
+                )
+
+            if (
+                provider_requires_api_key(provider_key)
+                and not _prompt_studio_provider_auth_is_resolved(
+                    provider_key,
+                    provider_credentials,
+                )
+                and not _is_prompt_studio_test_mode()
+            ):
                 raise RuntimeError(f"Provider '{provider_name}' requires an API key.")
 
             eval_manager = EvaluationManager(db)
@@ -843,10 +957,11 @@ async def run_evaluation_async(
                 provider=provider_name,
                 api_key=provider_api_key,
                 app_config=app_config_override,
+                credentials_resolved=provider_credentials.credentials_resolved,
+                provider_credentials=provider_credentials,
+                timeout_seconds=effective_timeout_seconds,
+                on_provider_success=_mark_provider_success,
             )
-
-            if byok_resolution and byok_resolution.uses_byok:
-                await byok_resolution.touch_last_used()
 
             _log.info(
                 "PS evaluation.async.done evaluation_id={} total_tests={} pass_rate={}",
@@ -855,22 +970,39 @@ async def run_evaluation_async(
                 round(float((result.get("metrics") or {}).get("pass_rate", 0.0)), 3),
             )
 
-    except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS as e:
+    except asyncio.CancelledError:
+        cancellation_log = get_ps_logger(
+            request_id=request_id,
+            ps_component="evaluation_bg",
+            ps_job_kind="evaluations",
+            traceparent=traceparent,
+        )
+        cancellation_log.info(
+            "PS evaluation.async.cancelled evaluation_id={}",
+            evaluation_id,
+        )
+        if record_loaded:
+            try:
+                db.cancel_evaluation_if_active(evaluation_id, "Evaluation cancelled")
+            except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
+                cancellation_log.warning(
+                    "PS evaluation.async.cancel_persist_failed evaluation_id={}",
+                    evaluation_id,
+                )
+        raise
+    except (ByokResolutionError, *_PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS) as e:
+        safe_error = sanitized_provider_stream_exception(e)
         get_ps_logger(
             request_id=request_id,
             ps_component="evaluation_bg",
             ps_job_kind="evaluations",
             traceparent=traceparent,
-        ).exception("Failed to run async evaluation: {}", e)
-        try:
-            cursor.execute(
-                """
-                UPDATE prompt_studio_evaluations
-                SET status = 'failed', error_message = ?
-                WHERE id = ?
-                """,
-                (str(e), evaluation_id),
-            )
-            conn.commit()
-        except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
-            pass
+        ).error("Failed to run async evaluation error_code={}", safe_error.code)
+        if record_loaded:
+            try:
+                db.update_evaluation(evaluation_id, {"status": "failed", "error_message": str(safe_error)})
+            except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
+                pass
+    finally:
+        if credential_runtime is not None:
+            await await_owned_worker(credential_runtime.close())

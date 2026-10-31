@@ -9,6 +9,11 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from tldw_Server_API.app.core.Persona.visual_artwork import artwork_manifest_for_import
+from tldw_Server_API.app.core.Persona.companion_behavior import (
+    CompanionBehaviorValidationError,
+    normalize_companion_behavior,
+)
 from tldw_Server_API.app.core.Persona.visual_import_preview_validators import (
     preview_renderer_import,
 )
@@ -20,10 +25,17 @@ from tldw_Server_API.app.core.Persona.visual_starter_recipe_taxonomy import (
 )
 from tldw_Server_API.app.core.Persona.visuals import (
     PersonaVisualManifestError,
+    resolved_visual_state_ids,
     validate_visual_manifest,
 )
 
 from .archive import normalize_member_name, validate_archive_members
+from .codex_pet import (
+    CODEX_PET_ASSET_ID,
+    CODEX_PET_SCHEMA_VERSION,
+    is_codex_pet_archive,
+    load_codex_pet_archive,
+)
 from .constants import (
     ASSET_BYTES_STATUS_MISSING,
     ASSET_BYTES_STATUS_PRESENT,
@@ -32,12 +44,6 @@ from .constants import (
     PERSONA_VISUAL_PACK_SCHEMA_VERSION,
     TRUST_MODE_TRUSTED_RESTORE,
     TRUST_MODE_UNTRUSTED_IMPORT,
-)
-from .codex_pet import (
-    CODEX_PET_ASSET_ID,
-    CODEX_PET_SCHEMA_VERSION,
-    is_codex_pet_archive,
-    load_codex_pet_archive,
 )
 from .fingerprints import canonical_payload_fingerprint, sha256_file, sha256_stream
 
@@ -87,11 +93,10 @@ class PersonaVisualPackImportPreviewer:
 
             self._progress(progress, "validating_assets", {"asset_count": len(assets)})
             asset_summary = _validate_assets(archive, members, assets=assets)
-            visual_manifest = pack.get("visual_manifest")
-            if not isinstance(visual_manifest, dict):
-                raise ValueError("malformed_metadata: metadata/pack.json")
+            visual_manifest = artwork_manifest_for_import(pack)
             renderer_import_preview: dict[str, Any] | None = None
             resolved_required_states: Mapping[str, str] = {}
+            behavior_state_ids: set[str] = set()
             if _uses_renderer_import_preview(visual_manifest):
                 renderer_import_preview = preview_renderer_import(
                     manifest=visual_manifest,
@@ -99,9 +104,7 @@ class PersonaVisualPackImportPreviewer:
                 ).to_dict()
             else:
                 available_asset_ids = {
-                    str(asset["source_asset_id"])
-                    for asset in assets
-                    if asset.get("source_asset_id") not in (None, "")
+                    str(asset["source_asset_id"]) for asset in assets if asset.get("source_asset_id") not in (None, "")
                 }
                 available_dimensions = {
                     str(asset["source_asset_id"]): (int(asset["width"]), int(asset["height"]))
@@ -120,6 +123,14 @@ class PersonaVisualPackImportPreviewer:
                 except PersonaVisualManifestError as exc:
                     raise ValueError("malformed_visual_manifest") from exc
                 resolved_required_states = manifest_validation.resolved_required_states
+                behavior_state_ids = resolved_visual_state_ids(manifest_validation.manifest)
+            try:
+                pack["companion_behavior"] = normalize_companion_behavior(
+                    pack.get("companion_behavior"),
+                    resolvable_state_ids=behavior_state_ids,
+                )
+            except CompanionBehaviorValidationError as exc:
+                raise ValueError("malformed_companion_behavior") from exc
 
         validation_warnings = _validation_warnings(assets)
         source_persona_id = str(pack.get("source_persona_id") or "")
@@ -164,9 +175,7 @@ class PersonaVisualPackImportPreviewer:
         if renderer_import_preview is not None:
             proposed_plan["renderer_import_preview"] = renderer_import_preview
             proposed_plan["commit_eligible"] = bool(renderer_import_preview.get("can_commit"))
-            proposed_plan["activation_eligible"] = bool(
-                renderer_import_preview.get("activation_eligible")
-            )
+            proposed_plan["activation_eligible"] = bool(renderer_import_preview.get("activation_eligible"))
             proposed_plan["commit_blockers"] = list(renderer_import_preview.get("blockers") or [])
             if not proposed_plan["commit_eligible"]:
                 preview_status = "blocked"
@@ -490,9 +499,7 @@ def _bundle_asset_summary(
         "mime_type": asset.get("mime_type"),
         "width": asset.get("width"),
         "height": asset.get("height"),
-        "manifest_referenced": bool(
-            source_asset_id and source_asset_id in manifest_asset_references
-        ),
+        "manifest_referenced": bool(source_asset_id and source_asset_id in manifest_asset_references),
     }
 
 
@@ -511,10 +518,7 @@ def _validation_warnings(assets: list[Mapping[str, Any]]) -> list[str]:
     warnings: list[str] = []
     for asset in assets:
         if asset.get("asset_bytes_status") == ASSET_BYTES_STATUS_MISSING:
-            warnings.append(
-                "missing_asset_bytes:"
-                f"{asset.get('asset_role')}:{asset.get('source_asset_id')}"
-            )
+            warnings.append("missing_asset_bytes:" f"{asset.get('asset_role')}:{asset.get('source_asset_id')}")
     return warnings
 
 
@@ -548,10 +552,7 @@ def _target_pack_conflicts(
                 "conflict_id": f"target_pack_title_match:{pack_id}",
                 "type": "target_pack_title_match",
                 "severity": "warning",
-                "message": (
-                    f"Target persona already has a {pack_status} visual pack "
-                    f"named {incoming_title}."
-                ),
+                "message": (f"Target persona already has a {pack_status} visual pack " f"named {incoming_title}."),
                 "pack_id": pack_id,
                 "pack_title": target_title,
                 "pack_status": pack_status,
@@ -591,9 +592,7 @@ def _required_choices(
                     "reason": "target_pack_conflicts",
                     "default_target_mode": "create_new",
                     "allowed_target_modes": (
-                        ["create_new", "replace_draft"]
-                        if replaceable_pack_ids
-                        else ["create_new"]
+                        ["create_new", "replace_draft"] if replaceable_pack_ids else ["create_new"]
                     ),
                     "replaceable_pack_ids": list(replaceable_pack_ids),
                 }

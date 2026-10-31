@@ -35,37 +35,33 @@ const request: ChatCompletionRequest = {
   messages: [{ role: "user", content: "hello" }]
 }
 
-describe("chat completion response sanitization regressions", () => {
+describe("successful chat completion response preservation", () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it("wraps plain text completions as JSON content for TldwApiClient", async () => {
+  it("preserves plain text completions for TldwApiClient", async () => {
     mocks.bgRequest.mockResolvedValue("hello world")
 
     const client = new TldwApiClient()
     const response = await client.createChatCompletion(request)
 
     expect(response.headers.get("content-type")).toContain("application/json")
-    await expect(response.json()).resolves.toEqual({ content: "hello world" })
+    await expect(response.json()).resolves.toBe("hello world")
   })
 
-  it("sanitizes suspicious plain text responses for TldwApiClient", async () => {
-    mocks.bgRequest.mockResolvedValue(
-      "Traceback: /Users/private/stack.txt\nRuntimeError: boom"
-    )
+  it("preserves successful error-like text for TldwApiClient", async () => {
+    const content = "Traceback: /Users/private/stack.txt\nRuntimeError: boom"
+    mocks.bgRequest.mockResolvedValue(content)
 
     const client = new TldwApiClient()
     const response = await client.createChatCompletion(request)
     const payload = await response.json()
 
-    expect(payload).toEqual({
-      error: "Chat completion failed.",
-      errors: ["One or more internal errors were suppressed."]
-    })
+    expect(payload).toBe(content)
   })
 
-  it("sanitizes nested stack-bearing strings for TldwApiClient", async () => {
+  it("preserves nested successful content for TldwApiClient", async () => {
     mocks.bgRequest.mockResolvedValue({
       id: "resp-1",
       nested: {
@@ -80,16 +76,15 @@ describe("chat completion response sanitization regressions", () => {
     const payload = await response.json()
 
     expect(payload.nested).toEqual({
-      message: "Chat completion failed.",
-      note: "Chat completion failed."
+      message: "Traceback: /Users/private/stack.txt\nRuntimeError: boom",
+      note: "/Users/private/app.py:77"
     })
     expect(payload.choices[0].message.content).toBe("safe assistant response")
   })
 
-  it("sanitizes suspicious plain text responses for chatRagMethods", async () => {
-    mocks.bgRequest.mockResolvedValue(
-      "Traceback: /Users/private/stack.txt\nRuntimeError: boom"
-    )
+  it("preserves successful error-like text for chatRagMethods", async () => {
+    const content = "Traceback: /Users/private/stack.txt\nRuntimeError: boom"
+    mocks.bgRequest.mockResolvedValue(content)
 
     const response = await chatRagMethods.createChatCompletion.call(
       {} as never,
@@ -97,13 +92,10 @@ describe("chat completion response sanitization regressions", () => {
     )
     const payload = await response.json()
 
-    expect(payload).toEqual({
-      error: "Chat completion failed.",
-      errors: ["One or more internal errors were suppressed."]
-    })
+    expect(payload).toBe(content)
   })
 
-  it("sanitizes nested stack-bearing strings for chatRagMethods", async () => {
+  it("preserves nested successful content for chatRagMethods", async () => {
     mocks.bgRequest.mockResolvedValue({
       id: "resp-2",
       nested: {
@@ -120,8 +112,8 @@ describe("chat completion response sanitization regressions", () => {
     const payload = await response.json()
 
     expect(payload.nested).toEqual({
-      message: "Chat completion failed.",
-      note: "Chat completion failed."
+      message: "Traceback: /Users/private/stack.txt\nRuntimeError: boom",
+      note: "/Users/private/app.py:77"
     })
     expect(payload.choices[0].message.content).toBe("safe assistant response")
   })

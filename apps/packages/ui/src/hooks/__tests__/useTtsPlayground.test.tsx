@@ -63,4 +63,36 @@ describe("useTtsPlayground", () => {
       "sk_secret_inline"
     )
   })
+
+  it("retains explicit gateway provenance on generated segments", async () => {
+    resolveTtsProviderContextMock.mockResolvedValueOnce({
+      provider: "tldw",
+      utterance: "hello",
+      supported: true,
+      playbackSpeed: 1,
+      synthesize: vi.fn().mockResolvedValue({
+        buffer: new ArrayBuffer(8),
+        format: "mp3",
+        mimeType: "audio/mpeg",
+        actualBackend: "gateway:backup",
+        fallbackUsed: true
+      })
+    })
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:gateway")
+
+    const { result } = renderHook(() => useTtsPlayground())
+    await act(async () => {
+      await result.current.generateSegments("hello", {
+        provider: "tldw",
+        tldwBackend: "gateway:primary",
+        tldwAllowFallback: true
+      })
+    })
+
+    expect(result.current.segments[0]).toMatchObject({
+      requestedBackend: "gateway:primary",
+      actualBackend: "gateway:backup",
+      fallbackUsed: true
+    })
+  })
 })

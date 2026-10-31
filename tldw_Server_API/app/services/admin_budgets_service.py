@@ -16,6 +16,8 @@ from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Billing.plan_limits import get_plan_limits
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_ROLES
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 
 async def _emit_budget_audit_event(*args, **kwargs):
@@ -42,8 +44,9 @@ _BUDGET_KEYS = {
     "budget_day_tokens",
     "budget_month_tokens",
 }
-_PLATFORM_ADMIN_ROLES = frozenset({"admin", "owner", "super_admin"})
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+# Imported, not restated: see AuthNZ/platform_admin.py for why there is one copy.
+_PLATFORM_ADMIN_ROLES = PLATFORM_ADMIN_ROLES
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 
 def _normalized_claim_values(values: list[Any] | tuple[Any, ...] | set[Any] | None) -> set[str]:

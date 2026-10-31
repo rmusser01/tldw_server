@@ -8,6 +8,8 @@ type Props = {
   provider: string
   model: string
   voice: string
+  backend?: string
+  allowFallback?: boolean
   onProviderChange: (value: string) => void
   onModelChange: (value: string) => void
   onVoiceChange: (value: string) => void
@@ -85,7 +87,13 @@ export const TtsVoiceTab: React.FC<Props> = (props) => {
         />
         {props.provider !== "browser" && (
           <div className="mt-1">
-            <VoicePreviewButton model={props.model} voice={props.voice} provider={props.provider} />
+            <VoicePreviewButton
+              model={props.model}
+              voice={props.voice}
+              provider={props.provider}
+              backend={props.backend}
+              allowFallback={props.allowFallback}
+            />
           </div>
         )}
       </div>

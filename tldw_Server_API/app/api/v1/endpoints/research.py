@@ -32,7 +32,11 @@ from tldw_Server_API.app.api.v1.schemas.websearch_schemas import (
     WebSearchRawResponse,
     WebSearchRequest,
 )
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    get_request_user,
+    require_expected_user,
+    User,
+)
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_repository
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
@@ -358,6 +362,7 @@ from typing import Union
     response_model=Union[WebSearchRawResponse, WebSearchAggregateResponse],
     summary="Web search across providers with optional aggregation",
     tags=["research"],
+    dependencies=[Depends(require_expected_user)],
 )
 async def websearch_endpoint(
     payload: WebSearchRequest,

@@ -788,7 +788,8 @@
     "collapseSidebar": "收起侧边栏",
     "titlePlaceholder": "标题",
     "keywordsEditorPlaceholder": "关键词（标签）",
-    "tagsHelp": "关键词帮助你使用左侧的关键词筛选找到此笔记。"
+    "tagsHelp": "关键词帮助你使用左侧的关键词筛选找到此笔记。",
+    "offlineSaveUnavailable": "在确认您的帐户和本地存储之前，离线保存不可用。您的更改仍未保存。"
   },
   "tts": {
     "playground": "TTS 实验室"

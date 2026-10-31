@@ -62,10 +62,49 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 
 vi.mock("./../chatModePipeline", () => ({
-  runChatPipeline: mocks.runChatPipeline
+  runChatPipeline: mocks.runChatPipeline,
+  getRequiredServicePrompt: (snapshot: any, id: string) => {
+    const resolved = snapshot?.definitions?.[id]
+    if (!resolved) throw new Error(`Service Prompt snapshot is missing ${id}.`)
+    return resolved
+  }
 }))
 
 import { normalChatMode } from "../normalChatMode"
+
+const webSearchSnapshot = {
+  scopeKey: "test-scope",
+  requestScope: {
+    config: {
+      serverUrl: "https://example.test",
+      authMode: "single-user" as const
+    },
+    userId: 1
+  },
+  capability: "supported" as const,
+  scopeSignal: new AbortController().signal,
+  scopeInvalidatedSignal: new AbortController().signal,
+  release: vi.fn(),
+  definitions: {
+    "chat.web_search.answer": {
+      definition: {
+        id: "chat.web_search.answer",
+        parts: [
+          {
+            key: "template",
+            mode: "template" as const,
+            required_variables: ["current_date_time", "search_results"]
+          }
+        ]
+      },
+      parts: {
+        template: "Search wrapper at {current_date_time}\n{search_results}"
+      },
+      source: "packaged" as const,
+      revision: null
+    }
+  }
+}
 
 describe("normalChatMode overlay prompt ordering", () => {
   beforeEach(() => {
@@ -91,6 +130,18 @@ describe("normalChatMode overlay prompt ordering", () => {
     )
   })
 
+  it.each([
+    ["data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg=="],
+    ["data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD=", "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD="],
+    ["legacy,raw-payload", "data:image/jpeg;base64,raw-payload"],
+    ["raw-payload", "data:image/jpeg;base64,raw-payload"],
+    ["", ""]
+  ])("preserves supported data URL MIME and the raw JPEG fallback: %s", async (image, expected) => {
+    mocks.runChatPipeline.mockResolvedValue({ status: "submitted" })
+    await normalChatMode("Question", image, false, [], [], new AbortController().signal, { webSearch: false } as never)
+    expect(mocks.runChatPipeline.mock.calls[0][2]).toBe(expected)
+  })
+
   it("keeps base prompt first, overlay second, actor after overlay, and web search last", async () => {
     const prompt = (await normalChatMode(
       "Where should I go?",
@@ -107,6 +158,7 @@ describe("normalChatMode overlay prompt ordering", () => {
         overlaySystemPrompt: "Overlay snapshot prompt",
         actorSettings: { isEnabled: true } as never,
         webSearch: true,
+        servicePromptSnapshot: webSearchSnapshot,
         setMessages: vi.fn(),
         saveMessageOnSuccess: vi.fn(async () => null),
         saveMessageOnError: vi.fn(async () => null),
@@ -156,5 +208,42 @@ describe("normalChatMode overlay prompt ordering", () => {
     expect((prompt.chatHistory[0] as SystemMessage).content).toBe(
       "Base system prompt\n\nFormatting guide suffix"
     )
+  })
+
+  it("does not classify a no-web-search manual stop as scope invalidation", async () => {
+    const controller = new AbortController()
+    mocks.runChatPipeline.mockImplementationOnce(async (...args: unknown[]) => {
+      const params = args[7] as {
+        discardCurrentTurnOnAbort?: () => boolean
+      }
+      controller.abort()
+      expect(params.discardCurrentTurnOnAbort).toBeUndefined()
+      return { status: "skipped", reason: "Request cancelled" }
+    })
+
+    await expect(normalChatMode(
+      "Hello",
+      "",
+      false,
+      [],
+      [],
+      controller.signal,
+      {
+        selectedModel: "gpt-test",
+        useOCR: false,
+        selectedSystemPrompt: "",
+        currentChatModelSettings: {},
+        webSearch: false,
+        setMessages: vi.fn(),
+        saveMessageOnSuccess: vi.fn(async () => null),
+        saveMessageOnError: vi.fn(async () => null),
+        setHistory: vi.fn(),
+        setIsProcessing: vi.fn(),
+        setStreaming: vi.fn(),
+        setAbortController: vi.fn(),
+        historyId: null,
+        setHistoryId: vi.fn()
+      }
+    )).resolves.toEqual({ status: "skipped", reason: "Request cancelled" })
   })
 })

@@ -152,27 +152,12 @@ async def test_admin_root_ensure_sqlite_ready_sanitizes_mkdir_log(
     file_parent = tmp_path / "not-a-dir"
     file_parent.write_text("blocks mkdir")
 
-    class _Cursor:
-        async def fetchone(self):
-            return None
-
-    class _Connection:
-        async def execute(self, _query: str):
-            return _Cursor()
-
-    class _Acquire:
-        async def __aenter__(self):
-            return _Connection()
-
-        async def __aexit__(self, *_exc_info):
-            return False
-
     class _Pool:
         pool = None
         _sqlite_fs_path = str(file_parent / "authnz.db")
 
-        def acquire(self):
-            return _Acquire()
+        async def sqlite_has_table(self, _name: str) -> bool:
+            return False  # organizations missing: migrations should run
 
     async def _fake_get_db_pool():
         return _Pool()

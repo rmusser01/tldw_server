@@ -789,7 +789,8 @@
     "collapseSidebar": "사이드바 접기",
     "titlePlaceholder": "제목",
     "keywordsEditorPlaceholder": "키워드(태그)",
-    "tagsHelp": "키워드는 왼쪽의 키워드 필터로 이 노트를 찾는 데 도움이 됩니다."
+    "tagsHelp": "키워드는 왼쪽의 키워드 필터로 이 노트를 찾는 데 도움이 됩니다.",
+    "offlineSaveUnavailable": "계정과 로컬 저장소가 확인될 때까지 오프라인 저장을 사용할 수 없습니다. 변경 사항은 저장되지 않은 상태로 유지됩니다."
   },
   "tts": {
     "playground": "TTS 플레이그라운드"

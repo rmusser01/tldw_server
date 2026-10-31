@@ -1,0 +1,2276 @@
+import {
+  type BrowserContext,
+  type Locator,
+  type Page,
+  chromium,
+  expect,
+  test
+} from "@playwright/test"
+import fs from "node:fs"
+import http from "node:http"
+import { AddressInfo } from "node:net"
+import os from "node:os"
+import path from "node:path"
+
+import {
+  forceConnected,
+  setSelectedModel,
+  waitForConnectionStore
+} from "./utils/connection"
+import { launchWithExtension } from "./utils/extension"
+import { resolveExtensionHeadlessMode } from "./utils/extension-common"
+import { grantHostPermission } from "./utils/permissions"
+
+const EXT_PATH = path.resolve(
+  process.env.TLDW_E2E_EXTENSION_PATH || ".output/chrome-mv3"
+)
+const MODEL_ID = "prompt-improvement-model"
+const MODEL_KEY = `tldw:${MODEL_ID}`
+const TEMPLATE_ID = "e2e-prompt-improvement-template"
+const TEMPLATE_TITLE = "E2E selected system template"
+const SYSTEM_COUNTERPART = "SYSTEM_COUNTERPART_SENTINEL"
+const USER_COUNTERPART = "USER_COUNTERPART_SENTINEL"
+const HISTORY_SENTINEL = "HISTORY_SENTINEL"
+const PAGE_CONTEXT_SENTINEL = "PAGE_CONTEXT_SENTINEL"
+const RAG_SENTINEL = "RAG_SENTINEL"
+const TOOL_SENTINEL = "TOOL_SENTINEL"
+const EXCLUDED_SENTINELS = [
+  SYSTEM_COUNTERPART,
+  USER_COUNTERPART,
+  HISTORY_SENTINEL,
+  PAGE_CONTEXT_SENTINEL,
+  RAG_SENTINEL,
+  TOOL_SENTINEL
+] as const
+const REQUEST_KEYS = [
+  "model_selection",
+  "operation_id",
+  "protected_tokens",
+  "target",
+  "text"
+]
+const AXE_SOURCE_PATH = [
+  path.resolve("../packages/ui/node_modules/axe-core/axe.min.js"),
+  path.resolve("packages/ui/node_modules/axe-core/axe.min.js"),
+  path.resolve("apps/packages/ui/node_modules/axe-core/axe.min.js")
+].find((candidate) => fs.existsSync(candidate))
+if (!AXE_SOURCE_PATH) {
+  throw new Error("Could not resolve the workspace axe-core browser bundle")
+}
+const AXE_SOURCE = fs.readFileSync(AXE_SOURCE_PATH, "utf8")
+
+const LIMITS = {
+  max_request_bytes: 64_000,
+  max_draft_chars: 24_000,
+  max_candidate_chars: 24_000,
+  max_raw_output_chars: 32_000,
+  max_findings: 5,
+  max_finding_text_chars: 500,
+  max_provider_chars: 100,
+  max_model_chars: 500,
+  max_meta_prompt_version_chars: 100,
+  max_warning_chars: 100,
+  max_warnings: 16,
+  max_protected_tokens: 64,
+  max_protected_token_kind_chars: 50,
+  max_protected_token_chars: 500,
+  max_protected_token_occurrences: 100,
+  max_protected_token_total_chars: 4_000
+}
+
+type CapabilityMode = "supported" | "false" | "404" | "offline"
+
+type PromptMockOptions = {
+  failFirstImprovement?: boolean
+}
+
+type RecordedRequest = {
+  method: string
+  url: string
+  body: string
+  json: Record<string, unknown> | null
+}
+
+type PromptMockServer = {
+  server: http.Server
+  baseUrl: string
+  requests: RecordedRequest[]
+  improveRequests: () => RecordedRequest[]
+  releaseNextDeferred: () => boolean
+}
+
+const readBody = (req: http.IncomingMessage) =>
+  new Promise<string>((resolve) => {
+    let body = ""
+    req.on("data", (chunk) => {
+      body += chunk
+    })
+    req.on("end", () => resolve(body))
+  })
+
+const parseBody = (body: string): Record<string, unknown> | null => {
+  if (!body) return null
+  try {
+    const value = JSON.parse(body)
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? value
+      : null
+  } catch {
+    return null
+  }
+}
+
+const startPromptMockServer = async (
+  capabilityMode: CapabilityMode = "supported",
+  options: PromptMockOptions = {}
+): Promise<PromptMockServer> => {
+  const requests: RecordedRequest[] = []
+  const deferredResolvers: Array<() => void> = []
+  let providerFailureAttempts = 0
+
+  const server = http.createServer(async (req, res) => {
+    const method = String(req.method || "GET").toUpperCase()
+    const url = req.url || "/"
+
+    const sendJson = (status: number, payload: unknown) => {
+      res.writeHead(status, {
+        "content-type": "application/json",
+        "access-control-allow-origin": "*",
+        "access-control-allow-headers":
+          "content-type, x-api-key, authorization",
+        "access-control-allow-methods": "GET, POST, PATCH, OPTIONS"
+      })
+      res.end(JSON.stringify(payload))
+    }
+
+    if (method === "OPTIONS") {
+      res.writeHead(204, {
+        "access-control-allow-origin": "*",
+        "access-control-allow-headers":
+          "content-type, x-api-key, authorization",
+        "access-control-allow-methods": "GET, POST, PATCH, OPTIONS"
+      })
+      return res.end()
+    }
+
+    const body = ["POST", "PUT", "PATCH"].includes(method)
+      ? await readBody(req)
+      : ""
+    requests.push({ method, url, body, json: parseBody(body) })
+
+    if (url === "/api/v1/health" && method === "GET") {
+      return sendJson(200, { status: "ok" })
+    }
+    if (url.startsWith("/api/v1/llm/models/metadata") && method === "GET") {
+      return sendJson(200, [
+        {
+          id: MODEL_ID,
+          name: "Prompt Improvement Model",
+          provider: "mock",
+          context_length: 4096,
+          capabilities: ["chat"]
+        }
+      ])
+    }
+    if (url === "/api/v1/llm/models" && method === "GET") {
+      return sendJson(200, [MODEL_ID])
+    }
+    if (url.startsWith("/api/v1/users/me/profile") && method === "GET") {
+      return sendJson(200, { preferences: {} })
+    }
+    if (url === "/api/v1/users/me/profile" && method === "PATCH") {
+      return sendJson(200, { preferences: {} })
+    }
+    if (url === "/openapi.json" && method === "GET") {
+      return sendJson(200, {
+        openapi: "3.0.0",
+        info: { version: "prompt-improvement-e2e" },
+        paths: {
+          "/api/v1/health": {},
+          "/api/v1/llm/models": {},
+          "/api/v1/llm/models/metadata": {},
+          "/api/v1/prompts/capabilities": {},
+          "/api/v1/prompts/improve": {}
+        }
+      })
+    }
+    if (url === "/api/v1/prompts/capabilities" && method === "GET") {
+      if (capabilityMode === "offline") {
+        req.socket.destroy()
+        return
+      }
+      if (capabilityMode === "404") {
+        return sendJson(404, { detail: "not found" })
+      }
+      return sendJson(200, {
+        prompt_improvement_v1: {
+          supported: capabilityMode === "supported",
+          limits: LIMITS
+        },
+        single_text_recipe_v2: { supported: false }
+      })
+    }
+    if (url === "/api/v1/prompts/improve" && method === "POST") {
+      const payload = parseBody(body) || {}
+      const text = String(payload.text || "")
+      if (options.failFirstImprovement) {
+        providerFailureAttempts += 1
+        if (providerFailureAttempts === 1) {
+          return sendJson(503, {
+            code: "provider_unavailable",
+            message: "sanitized provider unavailable",
+            retryable: true,
+            request_id: "prompt-e2e-provider-failure"
+          })
+        }
+      }
+      if (text.includes("[DEFER_STALE]") || text.includes("[DEFER_CONFIRM]")) {
+        await new Promise<void>((resolve) => deferredResolvers.push(resolve))
+      }
+      const target = payload.target === "system" ? "system" : "user_message"
+      const improvedText =
+        target === "system"
+          ? "Improved system instruction for {{topic}}."
+          : text.includes("[DEFER_STALE]")
+            ? "Deferred stale candidate."
+            : text.includes("[DEFER_CONFIRM]")
+              ? "Deferred confirmed replacement."
+              : "Improved user request for {{topic}}."
+      return sendJson(200, {
+        schema_version: 1,
+        operation_id: payload.operation_id,
+        status: "improved",
+        improved_text: improvedText,
+        findings: [
+          {
+            category: "clarity",
+            issue: "The request was ambiguous.",
+            change: "Clarified the requested outcome."
+          }
+        ],
+        review_required: false,
+        warnings: [],
+        resolved_model: {
+          provider: "mock",
+          model: MODEL_ID,
+          display_name: "Prompt Improvement Model"
+        },
+        meta_prompt_version: "prompt-improvement-v1"
+      })
+    }
+    if (url === "/api/v1/chat/completions" && method === "POST") {
+      return sendJson(200, {
+        choices: [
+          {
+            message: { role: "assistant", content: "Prompt E2E chat reply" }
+          }
+        ]
+      })
+    }
+    return sendJson(404, { detail: "not found" })
+  })
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+  const address = server.address() as AddressInfo
+  return {
+    server,
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    requests,
+    improveRequests: () =>
+      requests.filter(
+        (request) =>
+          request.method === "POST" && request.url === "/api/v1/prompts/improve"
+      ),
+    releaseNextDeferred: () => {
+      const resolve = deferredResolvers.shift()
+      if (!resolve) return false
+      resolve()
+      return true
+    }
+  }
+}
+
+const stopPromptMockServer = async (mock: PromptMockServer) => {
+  while (mock.releaseNextDeferred()) {
+    // Drain any deliberately deferred provider completions before shutdown.
+  }
+  mock.server.closeAllConnections?.()
+  await new Promise<void>((resolve) => mock.server.close(() => resolve()))
+}
+
+const MOCK_API_KEY = "prompt-improvement-e2e-key"
+
+const buildSeedConfig = (baseUrl: string, apiKey = MOCK_API_KEY) => ({
+  __tldw_first_run_complete: true,
+  __tldw_allow_offline: true,
+  "tldw:seenHints": {
+    "knowledge-search": true,
+    "more-tools": true
+  },
+  tldwConfig: {
+    serverUrl: baseUrl,
+    authMode: "single-user",
+    apiKey
+  },
+  tldw_skip_landing_hub: true
+})
+
+const buildRealServerHarnessConfig = (serverUrl: string, apiKey: string) => ({
+  capabilityUrl: `${serverUrl.replace(/\/$/, "")}/api/v1/prompts/capabilities`,
+  capabilityHeaders: { "X-API-KEY": apiKey },
+  seedConfig: buildSeedConfig(serverUrl, apiKey)
+})
+
+const uiModeStorage = (mode: "casual" | "pro") =>
+  JSON.stringify({ state: { mode }, version: 0 })
+
+const ensureChatInput = async (page: Page) => {
+  const startButton = page.getByRole("button", { name: /Start chatting/i })
+  if (
+    (await startButton.count()) > 0 &&
+    (await startButton.first().isVisible())
+  ) {
+    await startButton.first().click()
+  }
+  const input = page
+    .getByTestId("chat-input")
+    .or(
+      page.getByRole("textbox", {
+        name: /^(Message|Message input)$/i
+      })
+    )
+    .filter({ visible: true })
+  await expect(input).toHaveCount(1, { timeout: 20_000 })
+  await expect(input).toBeVisible({ timeout: 20_000 })
+  await expect(input).toBeEditable()
+  return input
+}
+
+const seedPromptTemplate = async (page: Page) => {
+  await page.evaluate(
+    ({ id, title, content }) =>
+      new Promise<void>((resolve, reject) => {
+        const openRequest = indexedDB.open("PageAssistDatabase")
+        openRequest.onerror = () => reject(openRequest.error)
+        openRequest.onsuccess = () => {
+          const database = openRequest.result
+          const transaction = database.transaction("prompts", "readwrite")
+          transaction.objectStore("prompts").put({
+            id,
+            title,
+            content,
+            is_system: true,
+            favorite: false,
+            createdBy: "e2e",
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            deletedAt: null,
+            syncStatus: "local",
+            sourceSystem: "workspace"
+          })
+          transaction.oncomplete = () => {
+            database.close()
+            resolve()
+          }
+          transaction.onerror = () => reject(transaction.error)
+        }
+      }),
+    {
+      id: TEMPLATE_ID,
+      title: TEMPLATE_TITLE,
+      content: `${SYSTEM_COUNTERPART} Keep {{topic}} literal.`
+    }
+  )
+}
+
+const seedExcludedContext = async (
+  page: Page,
+  selectedModel = MODEL_KEY,
+  options: { temporaryChat?: boolean } = {}
+) => {
+  await page.evaluate(
+    ({ model, history, pageContext, rag, tool, temporaryChat }) => {
+      const store = (window as any).__tldw_useStoreMessageOption
+      if (!store?.setState)
+        throw new Error("Message option store is unavailable")
+      store.setState({
+        selectedModel: model,
+        ...(temporaryChat
+          ? {
+              temporaryChat: true,
+              historyId: "temp",
+              serverChatId: null
+            }
+          : {}),
+        history: [{ role: "user", content: history }],
+        messages: [
+          {
+            id: "prompt-e2e-history",
+            isBot: false,
+            name: "You",
+            role: "user",
+            message: history,
+            sources: []
+          }
+        ],
+        documentContext: [
+          { title: pageContext, type: "tab", url: "https://example.invalid" }
+        ],
+        contextFiles: [
+          {
+            id: "prompt-e2e-context",
+            filename: pageContext,
+            type: "text/plain",
+            content: pageContext,
+            size: pageContext.length,
+            uploadedAt: Date.now(),
+            processed: true
+          }
+        ],
+        selectedKnowledge: {
+          id: "prompt-e2e-knowledge",
+          title: rag,
+          body: rag
+        },
+        ragPinnedResults: [{ id: "prompt-e2e-rag", title: rag, snippet: rag }],
+        toolChoice: "required",
+        actionInfo: tool
+      })
+    },
+    {
+      model: selectedModel,
+      history: HISTORY_SENTINEL,
+      pageContext: PAGE_CONTEXT_SENTINEL,
+      rag: RAG_SENTINEL,
+      tool: TOOL_SENTINEL,
+      temporaryChat: options.temporaryChat ?? false
+    }
+  )
+}
+
+type SurfaceLaunch = {
+  context: BrowserContext
+  bootstrapPage: Page
+  chatPage: Page
+  extensionId: string
+}
+
+const launchChatSurface = async (
+  mock: PromptMockServer,
+  surface: "sidepanel" | "options",
+  options: {
+    withModel?: boolean
+    mode?: "casual" | "pro"
+    nextgen?: boolean
+    variant?: "v1" | "v3" | "v5"
+    viewport?: { width: number; height: number }
+    seedTemplate?: boolean
+    temporaryChat?: boolean
+  } = {}
+): Promise<SurfaceLaunch> => {
+  const {
+    withModel = true,
+    mode = "casual",
+    nextgen = false,
+    variant = "v1",
+    viewport,
+    seedTemplate = false,
+    temporaryChat = false
+  } = options
+  const launched = await launchWithExtension(EXT_PATH, {
+    seedConfig: buildSeedConfig(mock.baseUrl),
+    seedLocalStorage: {
+      "tldw-ui-mode": uiModeStorage(mode),
+      "tldw:nextgenComposerEnabled": nextgen ? "1" : "0",
+      "tldw:composerVariant": variant
+    }
+  })
+  const { context, page, openSidepanel, extensionId, optionsUrl } = launched
+  try {
+    const permission = await grantHostPermission(
+      context,
+      extensionId,
+      `${new URL(mock.baseUrl).origin}/*`
+    )
+    expect(
+      permission,
+      "Packaged extension must receive local mock host access"
+    ).toBe(true)
+    if (seedTemplate) await seedPromptTemplate(page)
+    if (withModel) await setSelectedModel(page, MODEL_KEY)
+
+    const chatPage =
+      surface === "sidepanel" ? await openSidepanel("/chat") : page
+    if (surface === "options") {
+      await chatPage.goto(`${optionsUrl}#/chat`, {
+        waitUntil: "domcontentloaded"
+      })
+    }
+    if (viewport) await chatPage.setViewportSize(viewport)
+    await waitForConnectionStore(chatPage, `prompt-improvement:${surface}`)
+    await forceConnected(
+      chatPage,
+      { serverUrl: mock.baseUrl },
+      `prompt-improvement:${surface}:connected`
+    )
+    await ensureChatInput(chatPage)
+    if (withModel) {
+      await seedExcludedContext(chatPage, MODEL_KEY, { temporaryChat })
+    }
+    return { context, bootstrapPage: page, chatPage, extensionId }
+  } catch (setupError) {
+    try {
+      await context.close()
+    } catch (closeError) {
+      throw new AggregateError(
+        [setupError, closeError],
+        "Extension setup failed and its browser context did not close cleanly"
+      )
+    }
+    throw setupError
+  }
+}
+
+const openPromptActions = async (page: Page, scope: Page | Locator = page) => {
+  const trigger = scope.getByRole("button", { name: "Improve prompt" })
+  await expect(trigger).toBeVisible({ timeout: 20_000 })
+  await trigger.click()
+  const actions = page.getByRole("group", {
+    name: "Prompt improvement actions"
+  })
+  await expect(actions).toBeVisible()
+  await expect(actions).toContainText(/Build from recipe/i)
+  return { trigger, actions }
+}
+
+const clickThroughPaintedCenter = async (page: Page, target: Locator) => {
+  const readHitTest = () =>
+    target.evaluate((element) => {
+      const rect = element.getBoundingClientRect()
+      const point = {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2
+      }
+      const hit = document.elementFromPoint(point.x, point.y)
+      return {
+        matches: Boolean(hit && (hit === element || element.contains(hit))),
+        point,
+        targetRect: rect.toJSON(),
+        hitClass: hit instanceof HTMLElement ? hit.className : "",
+        hitTag: hit?.tagName ?? null,
+        hitText: hit?.textContent?.trim().slice(0, 120) ?? null
+      }
+    })
+  await expect.poll(async () => (await readHitTest()).matches).toBe(true)
+  const hitTest = await readHitTest()
+  const point = hitTest.point
+  await page.mouse.click(point.x, point.y)
+}
+
+const getPromptAssistFeedback = (page: Page, text: string) =>
+  page
+    .locator("body > div.fixed")
+    .filter({ has: page.locator('[role="status"]') })
+    .filter({ hasText: text })
+    .first()
+
+const waitForDrawerSettled = async (dialog: Locator) => {
+  await expect
+    .poll(() =>
+      dialog.evaluate((element) => {
+        const wrapper = element.closest<HTMLElement>(
+          ".ant-drawer-content-wrapper"
+        )
+        return wrapper ? window.getComputedStyle(wrapper).transform : null
+      })
+    )
+    .toBe("none")
+}
+
+const waitForDrawersClosed = async (page: Page, feedback: Locator) => {
+  await expect(feedback).toBeAttached()
+  // Recipe Apply changes the shared drawer title before its exit motion ends.
+  // Observe the real wrappers, not a title-dependent dialog locator.
+  await expect
+    .poll(() =>
+      page.locator(".ant-drawer-content-wrapper").evaluateAll((wrappers) =>
+        wrappers.every(
+          (wrapper) =>
+            !wrapper.checkVisibility({
+              checkOpacity: true,
+              checkVisibilityCSS: true
+            })
+        )
+      )
+    )
+    .toBe(true)
+  await expect(feedback).toBeVisible()
+}
+
+const expectHiddenFeedbackRetainsState = async (feedback: Locator) => {
+  await expect(feedback).toBeAttached()
+  await expect(feedback).toHaveCSS("visibility", "hidden")
+  await expect(
+    feedback.getByRole("button", { name: /^Undo /, includeHidden: true })
+  ).toBeAttached()
+  expect(
+    await feedback.evaluate((element) =>
+      [element, ...element.querySelectorAll("*")].some((descendant) => {
+        const rect = descendant.getBoundingClientRect()
+        const hit = document.elementFromPoint(
+          rect.left + rect.width / 2,
+          rect.top + rect.height / 2
+        )
+        return Boolean(hit && element.contains(hit))
+      })
+    )
+  ).toBe(false)
+}
+
+const scrollDraftNearViewportTop = async (input: Locator) => {
+  const movement = await input.evaluate((element) => {
+    const beforeTop = element.getBoundingClientRect().top
+    element.scrollIntoView({ block: "start" })
+    return {
+      beforeTop,
+      afterTop: element.getBoundingClientRect().top
+    }
+  })
+  expect(movement.afterTop).toBeLessThan(movement.beforeTop)
+  expect(movement.afterTop).toBeLessThanOrEqual(40)
+  await input.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      })
+  )
+}
+
+const expectLayoutNeutralFeedback = async (
+  page: Page,
+  feedback: Locator,
+  input: Locator,
+  sendCluster: Locator,
+  initialCluster: { width: number; height: number },
+  allowHidden = false
+) => {
+  // The exiting review drawer briefly contains the same applied status and
+  // actions. Wait for it to leave before resolving the feedback locator, or
+  // its translated, off-screen panel can be mistaken for the composer portal.
+  await expect(
+    page.getByRole("dialog", { name: "Prompt improvement", exact: true })
+  ).not.toBeVisible()
+  if (!allowHidden) await expect(feedback).toBeVisible()
+  const [feedbackBox, inputBox, clusterBox, viewport] = await Promise.all([
+    feedback.boundingBox(),
+    input.boundingBox(),
+    sendCluster.boundingBox(),
+    page.evaluate(() => ({
+      width: window.innerWidth,
+      height: window.innerHeight
+    }))
+  ])
+  expect(feedbackBox).not.toBeNull()
+  expect(inputBox).not.toBeNull()
+  expect(clusterBox).not.toBeNull()
+  expect(clusterBox!.width).toBe(initialCluster.width)
+  expect(clusterBox!.height).toBe(initialCluster.height)
+  if (allowHidden && !(await feedback.isVisible())) {
+    await expectHiddenFeedbackRetainsState(feedback)
+    return
+  }
+  await expect(feedback).toBeVisible()
+  expect(feedbackBox!.x).toBeGreaterThanOrEqual(0)
+  expect(feedbackBox!.y).toBeGreaterThanOrEqual(0)
+  expect(feedbackBox!.x + feedbackBox!.width).toBeLessThanOrEqual(
+    viewport.width
+  )
+  expect(feedbackBox!.y + feedbackBox!.height).toBeLessThanOrEqual(
+    viewport.height
+  )
+  const intersects = (
+    a: { x: number; y: number; width: number; height: number },
+    b: { x: number; y: number; width: number; height: number }
+  ) =>
+    a.x < b.x + b.width &&
+    a.x + a.width > b.x &&
+    a.y < b.y + b.height &&
+    a.y + a.height > b.y
+  const geometry = JSON.stringify({
+    feedback: feedbackBox,
+    input: inputBox,
+    sendCluster: clusterBox,
+    viewport
+  })
+  expect(intersects(feedbackBox!, inputBox!), geometry).toBe(false)
+  expect(intersects(feedbackBox!, clusterBox!), geometry).toBe(false)
+  await expect
+    .poll(() =>
+      feedback.getByRole("button", { name: /^Undo / }).evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        const hit = document.elementFromPoint(
+          rect.left + rect.width / 2,
+          rect.top + rect.height / 2
+        )
+        return Boolean(hit && element.contains(hit))
+      })
+    )
+    .toBe(true)
+}
+
+const expectVisibleComposerControlsRemainUsable = async (
+  page: Page,
+  feedback: Locator
+) => {
+  const result = await page.evaluate(() => {
+    const input = document.querySelector<HTMLElement>(
+      '[data-testid="chat-input"]'
+    )
+    const sendCluster = document.querySelector<HTMLElement>(
+      '[data-testid="sidepanel-send-action-cluster"]'
+    )
+    const feedbackElement = Array.from(
+      document.body.querySelectorAll<HTMLElement>("body > div.fixed")
+    ).find((candidate) =>
+      candidate
+        .querySelector('[role="status"]')
+        ?.textContent?.includes("applied.")
+    )
+    if (!input || !sendCluster || !feedbackElement) {
+      throw new Error("Could not resolve composer or feedback geometry")
+    }
+
+    const inputAncestors = new Set<HTMLElement>()
+    let ancestor: HTMLElement | null = input
+    while (ancestor) {
+      inputAncestors.add(ancestor)
+      ancestor = ancestor.parentElement
+    }
+    ancestor = sendCluster
+    while (ancestor && !inputAncestors.has(ancestor)) {
+      ancestor = ancestor.parentElement
+    }
+    if (!ancestor) throw new Error("Composer controls have no shared surface")
+
+    const visualViewport = window.visualViewport
+    const viewport = {
+      left: visualViewport?.offsetLeft ?? 0,
+      top: visualViewport?.offsetTop ?? 0,
+      right:
+        (visualViewport?.offsetLeft ?? 0) +
+        (visualViewport?.width ?? window.innerWidth),
+      bottom:
+        (visualViewport?.offsetTop ?? 0) +
+        (visualViewport?.height ?? window.innerHeight)
+    }
+    const feedbackStyle = window.getComputedStyle(feedbackElement)
+    const feedbackRect = feedbackElement.getBoundingClientRect()
+    const feedbackPainted =
+      feedbackStyle.display !== "none" &&
+      feedbackStyle.visibility !== "hidden" &&
+      Number.parseFloat(feedbackStyle.opacity || "1") > 0
+    const controls = Array.from(
+      ancestor.querySelectorAll<HTMLElement>(
+        'button, input, textarea, select, a[href], [contenteditable="true"], [role="button"], [role="checkbox"], [role="combobox"], [role="switch"]'
+      )
+    )
+      .filter((control) => {
+        const rect = control.getBoundingClientRect()
+        const style = window.getComputedStyle(control)
+        const centerX = rect.left + rect.width / 2
+        const centerY = rect.top + rect.height / 2
+        return (
+          rect.width > 0 &&
+          rect.height > 0 &&
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          control.checkVisibility({
+            checkOpacity: true,
+            checkVisibilityCSS: true
+          }) &&
+          control.getAttribute("aria-hidden") !== "true" &&
+          control.getAttribute("aria-disabled") !== "true" &&
+          !control.matches(":disabled") &&
+          centerX >= viewport.left &&
+          centerX <= viewport.right &&
+          centerY >= viewport.top &&
+          centerY <= viewport.bottom
+        )
+      })
+      .map((control) => {
+        const rect = control.getBoundingClientRect()
+        const center = {
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2
+        }
+        const hit = document.elementFromPoint(center.x, center.y)
+        // Remove only feedback from the native stack to establish baseline
+        // hit-testability. A feedback-owned top hit must still fail below;
+        // fixed headers/other pre-existing occluders are not feedback defects.
+        const baselineHit = document
+          .elementsFromPoint(center.x, center.y)
+          .find((element) => !feedbackElement.contains(element))
+        return {
+          name:
+            control.getAttribute("aria-label") ||
+            control.getAttribute("title") ||
+            control.dataset.testid ||
+            control.textContent?.trim().slice(0, 80) ||
+            control.tagName,
+          rect: rect.toJSON(),
+          baselineHitMatches: Boolean(
+            baselineHit &&
+              (baselineHit === control || control.contains(baselineHit))
+          ),
+          intersectsFeedback:
+            feedbackPainted &&
+            rect.left < feedbackRect.right &&
+            rect.right > feedbackRect.left &&
+            rect.top < feedbackRect.bottom &&
+            rect.bottom > feedbackRect.top,
+          centerHitMatches: Boolean(
+            hit && (hit === control || control.contains(hit))
+          ),
+          hitTag: hit?.tagName ?? null,
+          hitText: hit?.textContent?.trim().slice(0, 80) ?? null
+        }
+      })
+      .filter((control) => control.baselineHitMatches)
+
+    return {
+      controls,
+      feedbackPainted,
+      feedbackRect: feedbackRect.toJSON(),
+      viewport
+    }
+  })
+
+  await expect(feedback).toBeAttached()
+  expect(result.controls.map((control) => control.name)).toContain(
+    "Select a Prompt"
+  )
+  expect(
+    result.controls.filter(
+      (control) => control.intersectsFeedback || !control.centerHitMatches
+    ),
+    JSON.stringify(result)
+  ).toEqual([])
+}
+
+const assertPromptRequest = (
+  request: RecordedRequest,
+  expected: { target: "system" | "user_message"; text: string }
+) => {
+  expect(request.json).not.toBeNull()
+  const payload = request.json as Record<string, unknown>
+  expect(Object.keys(payload).sort()).toEqual([...REQUEST_KEYS].sort())
+  expect(payload.operation_id).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+  )
+  expect(payload.target).toBe(expected.target)
+  expect(payload.text).toBe(expected.text)
+  expect(payload.model_selection).toMatchObject({ selected_model: MODEL_KEY })
+  expect(payload.protected_tokens).toEqual(
+    expected.text.includes("{{topic}}")
+      ? [{ kind: "template_variable", value: "{{topic}}", occurrences: 1 }]
+      : []
+  )
+  const serialized = JSON.stringify(payload)
+  for (const sentinel of EXCLUDED_SENTINELS) {
+    if (expected.text.includes(sentinel)) continue
+    expect(serialized).not.toContain(sentinel)
+  }
+}
+
+const selectTemplate = async (page: Page) => {
+  const promptTrigger = page.getByTestId("chat-prompt-select")
+  await expect(promptTrigger).toBeVisible({ timeout: 20_000 })
+  await promptTrigger.click()
+  const templateItem = page.getByRole("menuitem", {
+    name: new RegExp(TEMPLATE_TITLE)
+  })
+  await expect(templateItem).toBeVisible({ timeout: 20_000 })
+  await templateItem.click()
+  await expect(promptTrigger).toContainText(TEMPLATE_TITLE)
+  return promptTrigger
+}
+
+const openSystemEditor = async (page: Page) => {
+  const promptTrigger = page.getByTestId("chat-prompt-select")
+  await promptTrigger.click()
+  await page.getByRole("menuitem", { name: /Edit system prompt/i }).click()
+  const editor = page.getByRole("textbox", { name: "Enter system prompt" })
+  await expect(editor).toBeVisible()
+  return editor
+}
+
+const requirePromptImprovementRealServerConfig = () => {
+  const serverUrl = String(process.env.TLDW_E2E_SERVER_URL || "")
+    .trim()
+    .replace(/\/$/, "")
+  const apiKey = String(process.env.TLDW_E2E_API_KEY || "").trim()
+  if (!serverUrl || !apiKey) {
+    throw new Error(
+      "Prompt-improvement E2E requires TLDW_E2E_SERVER_URL and TLDW_E2E_API_KEY."
+    )
+  }
+  return { serverUrl, apiKey }
+}
+
+const probePackagedRuntime = async () => {
+  const profileDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "tldw-prompt-improvement-preflight-")
+  )
+  const configuredLaunchTimeout = Number.parseInt(
+    String(process.env.TLDW_E2E_EXTENSION_LAUNCH_TIMEOUT_MS || ""),
+    10
+  )
+  const launchTimeout =
+    Number.isFinite(configuredLaunchTimeout) && configuredLaunchTimeout > 0
+      ? configuredLaunchTimeout
+      : 30_000
+  let context: BrowserContext | null = null
+  try {
+    context = await chromium.launchPersistentContext(profileDir, {
+      timeout: launchTimeout,
+      headless: resolveExtensionHeadlessMode(),
+      executablePath:
+        process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
+        chromium.executablePath(),
+      ignoreDefaultArgs: ["--disable-extensions"],
+      args: [
+        `--disable-extensions-except=${EXT_PATH}`,
+        `--load-extension=${EXT_PATH}`,
+        "--no-crashpad",
+        "--disable-crash-reporter",
+        "--crash-dumps-dir=/tmp"
+      ]
+    })
+    const targetWait = Number.parseInt(
+      String(process.env.TLDW_E2E_EXTENSION_TARGET_WAIT_MS || "30000"),
+      10
+    )
+    if (!context.serviceWorkers().length && !context.backgroundPages().length) {
+      const foundTarget = await Promise.race([
+        context.waitForEvent("serviceworker").then(() => true),
+        context.waitForEvent("backgroundpage").then(() => true),
+        new Promise<false>((resolve) =>
+          setTimeout(() => resolve(false), targetWait)
+        )
+      ])
+      if (!foundTarget) {
+        throw new Error(
+          "Could not determine extension id from [no extension targets]"
+        )
+      }
+    }
+  } finally {
+    await context?.close()
+    fs.rmSync(profileDir, { recursive: true, force: true })
+  }
+}
+
+test("real-server harness uses the configured API key for fetch and extension storage", () => {
+  const apiKey = "live-api-key-sentinel"
+  const realServer = buildRealServerHarnessConfig(
+    "http://127.0.0.1:8000/",
+    apiKey
+  )
+
+  expect(realServer.capabilityHeaders["X-API-KEY"]).toBe(apiKey)
+  expect(realServer.seedConfig.tldwConfig.apiKey).toBe(apiKey)
+  expect(buildSeedConfig("http://127.0.0.1:8000").tldwConfig.apiKey).toBe(
+    MOCK_API_KEY
+  )
+})
+
+test("real-server harness fails closed when required configuration is missing", () => {
+  const previousServerUrl = process.env.TLDW_E2E_SERVER_URL
+  const previousApiKey = process.env.TLDW_E2E_API_KEY
+  try {
+    delete process.env.TLDW_E2E_SERVER_URL
+    delete process.env.TLDW_E2E_API_KEY
+    expect(requirePromptImprovementRealServerConfig).toThrow(
+      "Prompt-improvement E2E requires TLDW_E2E_SERVER_URL and TLDW_E2E_API_KEY."
+    )
+  } finally {
+    if (previousServerUrl === undefined) delete process.env.TLDW_E2E_SERVER_URL
+    else process.env.TLDW_E2E_SERVER_URL = previousServerUrl
+    if (previousApiKey === undefined) delete process.env.TLDW_E2E_API_KEY
+    else process.env.TLDW_E2E_API_KEY = previousApiKey
+  }
+})
+
+test.describe("Packaged extension prompt improvement parity", () => {
+  test.describe.configure({ mode: "serial" })
+
+  test.beforeAll(async () => {
+    test.setTimeout(90_000)
+    await probePackagedRuntime()
+  })
+
+  test("sidepanel improves a selected system template and restores the exact draft with Undo", async () => {
+    test.setTimeout(120_000)
+    const mock = await startPromptMockServer()
+    const originalSystemDraft = `${SYSTEM_COUNTERPART} Keep {{topic}} literal.`
+    let context: BrowserContext | null = null
+    try {
+      const launched = await launchChatSurface(mock, "sidepanel", {
+        mode: "pro",
+        viewport: { width: 1000, height: 850 },
+        seedTemplate: true
+      })
+      context = launched.context
+      const page = launched.chatPage
+      const composer = await ensureChatInput(page)
+      await composer.fill(USER_COUNTERPART)
+      const promptTrigger = await selectTemplate(page)
+      const editor = await openSystemEditor(page)
+      await expect(editor).toHaveValue(originalSystemDraft)
+
+      const { actions } = await openPromptActions(
+        page,
+        page.getByRole("dialog", { name: "Edit system prompt" })
+      )
+      const improveNow = actions.getByRole("button", { name: /Improve now/ })
+      await expect(improveNow).toBeEnabled()
+      await improveNow.click()
+      await expect(editor).toHaveValue(
+        "Improved system instruction for {{topic}}."
+      )
+      const undo = page.getByRole("button", { name: "Undo improvement" })
+      await expect(undo).toBeVisible()
+      await undo.click()
+      await expect(editor).toHaveValue(originalSystemDraft)
+      await page.getByRole("button", { name: "Cancel", exact: true }).click()
+      await expect(promptTrigger).toContainText(TEMPLATE_TITLE)
+
+      await expect.poll(() => mock.improveRequests().length).toBe(1)
+      assertPromptRequest(mock.improveRequests()[0], {
+        target: "system",
+        text: originalSystemDraft
+      })
+    } finally {
+      await context?.close()
+      await stopPromptMockServer(mock)
+    }
+  })
+
+  test("narrow options chat reviews, edits, applies, restores focus, and exposes an accessible full-width sheet", async ({
+    page: _page
+  }, testInfo) => {
+    test.setTimeout(120_000)
+    const mock = await startPromptMockServer()
+    const originalDraft = "Clarify {{topic}} for a new reader."
+    let context: BrowserContext | null = null
+    try {
+      const launched = await launchChatSurface(mock, "options", {
+        viewport: { width: 390, height: 780 },
+        seedTemplate: true,
+        temporaryChat: true
+      })
+      context = launched.context
+      const page = launched.chatPage
+      const storeTemplateSelected = await page.evaluate((templateId) => {
+        const store = (window as any).__tldw_useStoreMessageOption
+        store.setState({ selectedSystemPrompt: templateId })
+        return store.getState().selectedSystemPrompt
+      }, TEMPLATE_ID)
+      expect(storeTemplateSelected).toBe(TEMPLATE_ID)
+      const input = await ensureChatInput(page)
+      await input.fill(originalDraft)
+
+      const sendCluster = page.getByTestId("composer-inline-send-control")
+      const compactTrigger = sendCluster.getByRole("button", {
+        name: "Improve prompt"
+      })
+      const send = sendCluster.getByRole("button", { name: "Send message" })
+      await expect(compactTrigger).toBeVisible()
+      await expect(send).toBeVisible()
+      const compactBox = await compactTrigger.boundingBox()
+      expect(compactBox?.width).toBe(44)
+      expect(compactBox?.height).toBe(44)
+      expect(
+        await sendCluster.evaluate((cluster) => {
+          const improve = cluster.querySelector('[aria-label="Improve prompt"]')
+          const sendButton = cluster.querySelector(
+            '[aria-label="Send message"]'
+          )
+          return Boolean(
+            improve &&
+              sendButton &&
+              (improve.compareDocumentPosition(sendButton) &
+                Node.DOCUMENT_POSITION_FOLLOWING) !==
+                0
+          )
+        })
+      ).toBe(true)
+
+      const firstMenu = await openPromptActions(page)
+      const firstMenuBox = await firstMenu.actions.boundingBox()
+      const firstTriggerBox = await firstMenu.trigger.boundingBox()
+      expect(firstMenuBox).not.toBeNull()
+      expect(firstTriggerBox).not.toBeNull()
+      expect(firstMenuBox!.y).toBeGreaterThanOrEqual(0)
+      expect(firstMenuBox!.x).toBeGreaterThanOrEqual(0)
+      expect(firstMenuBox!.x + firstMenuBox!.width).toBeLessThanOrEqual(390)
+      expect(firstMenuBox!.y + firstMenuBox!.height).toBeLessThanOrEqual(
+        firstTriggerBox!.y + 1
+      )
+      await firstMenu.trigger.press("Escape")
+      await expect(firstMenu.actions).not.toBeVisible()
+      await expect(firstMenu.trigger).toBeFocused()
+
+      const secondMenu = await openPromptActions(page)
+      await expect(
+        page.getByText("Chat saving is incomplete", { exact: true })
+      ).toHaveCount(0)
+      await secondMenu.actions
+        .getByRole("button", { name: /Review changes/ })
+        .click()
+      const dialog = page.getByRole("dialog", { name: "Prompt improvement" })
+      await expect(dialog).toBeVisible()
+      const candidate = page.getByRole("textbox", {
+        name: "Improved prompt candidate"
+      })
+      await expect(candidate).toHaveValue(
+        "Improved user request for {{topic}}."
+      )
+      await expect(
+        dialog.getByRole("group", { name: "Edit", exact: true }).getByRole("textbox", {
+          name: "Improved prompt candidate"
+        })
+      ).toHaveValue("Improved user request for {{topic}}.")
+
+      const readLayout = () =>
+        dialog.evaluate((element) => {
+          const drawer =
+            element.closest(".ant-drawer-content-wrapper") ?? element
+          const rect = drawer.getBoundingClientRect()
+          return {
+            left: Math.round(rect.left),
+            right: Math.round(rect.right),
+            width: Math.round(rect.width),
+            viewport: window.innerWidth,
+            documentWidth: document.documentElement.scrollWidth
+          }
+        })
+      await expect.poll(async () => (await readLayout()).left).toBe(0)
+      const layout = await readLayout()
+      expect(layout.left).toBe(0)
+      expect(layout.right).toBeLessThanOrEqual(layout.viewport)
+      expect(layout.width).toBe(layout.viewport)
+      expect(layout.documentWidth).toBeLessThanOrEqual(layout.viewport)
+
+      await page.evaluate(AXE_SOURCE)
+      const axeResults = await dialog.evaluate(async (root) => {
+        const axe = (window as any).axe as {
+          run: (
+            context: Element,
+            options: Record<string, unknown>
+          ) => Promise<{ violations: unknown[] }>
+        }
+        if (!axe?.run)
+          throw new Error("axe-core did not load in the extension page")
+        return axe.run(root, {
+          resultTypes: ["violations"],
+          runOnly: {
+            type: "tag",
+            values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]
+          }
+        })
+      })
+      expect(
+        axeResults.violations,
+        JSON.stringify(axeResults.violations, null, 2)
+      ).toEqual([])
+      fs.writeFileSync(
+        testInfo.outputPath("prompt-improvement-review-axe.json"),
+        JSON.stringify(axeResults, null, 2),
+        "utf8"
+      )
+      const snapshot = await dialog.ariaSnapshot()
+      expect(snapshot).toContain("Review improved prompt")
+      expect(snapshot).toContain("Improved prompt candidate")
+      fs.writeFileSync(
+        testInfo.outputPath("prompt-improvement-review-a11y.aria.yml"),
+        snapshot,
+        "utf8"
+      )
+      await page.screenshot({
+        path: testInfo.outputPath("prompt-improvement-review-narrow.png"),
+        fullPage: true
+      })
+
+      await candidate.press("Escape")
+      await expect(dialog).not.toBeVisible()
+      await expect(input).toBeFocused()
+
+      const thirdMenu = await openPromptActions(page)
+      await thirdMenu.actions
+        .getByRole("button", { name: /Review changes/ })
+        .click()
+      const editableCandidate = page.getByRole("textbox", {
+        name: "Improved prompt candidate"
+      })
+      await editableCandidate.fill("Edited candidate for {{topic}}.")
+      await page.getByRole("button", { name: "Apply to draft" }).click()
+      await expect(input).toHaveValue("Edited candidate for {{topic}}.")
+      await expect(input).toBeFocused()
+      expect(
+        await page.evaluate(
+          () =>
+            (window as any).__tldw_useStoreMessageOption.getState()
+              .selectedSystemPrompt
+        )
+      ).toBe(TEMPLATE_ID)
+
+      await expect.poll(() => mock.improveRequests().length).toBe(2)
+      for (const request of mock.improveRequests()) {
+        assertPromptRequest(request, {
+          target: "user_message",
+          text: originalDraft
+        })
+      }
+      expect(
+        mock.requests.filter(
+          (request) =>
+            request.method === "POST" && request.url.startsWith("/api/v1/chats")
+        )
+      ).toEqual([])
+    } finally {
+      await context?.close()
+      await stopPromptMockServer(mock)
+    }
+  })
+
+  test("640px options chat keeps both review and recipe drawers full width", async () => {
+    test.setTimeout(120_000)
+    const mock = await startPromptMockServer()
+    let context: BrowserContext | null = null
+    try {
+      const launched = await launchChatSurface(mock, "options", {
+        viewport: { width: 640, height: 844 }
+      })
+      context = launched.context
+      const page = launched.chatPage
+      const input = await ensureChatInput(page)
+      await input.fill("640px {{topic}} drawer draft.")
+
+      const expectFullWidthDrawer = async (name: string) => {
+        const dialog = page.getByRole("dialog", { name })
+        await expect(dialog).toBeVisible()
+        const readDrawer = () =>
+          dialog.evaluate((element) => {
+            const wrapper =
+              element.closest(".ant-drawer-content-wrapper") ?? element
+            const rect = wrapper.getBoundingClientRect()
+            return { left: rect.left, right: rect.right, width: rect.width }
+          })
+        await expect
+          .poll(async () => Math.round((await readDrawer()).width))
+          .toBe(640)
+        await expect
+          .poll(async () => Math.round((await readDrawer()).left))
+          .toBe(0)
+        const box = await readDrawer()
+        expect(Math.round(box.right)).toBe(640)
+      }
+
+      const review = await openPromptActions(page)
+      await clickThroughPaintedCenter(
+        page,
+        review.actions.getByRole("button", { name: /Review changes/ })
+      )
+      await expectFullWidthDrawer("Prompt improvement")
+      await page.keyboard.press("Escape")
+      await expect(
+        page.getByRole("dialog", { name: "Prompt improvement" })
+      ).not.toBeVisible()
+
+      const recipe = await openPromptActions(page)
+      await clickThroughPaintedCenter(
+        page,
+        recipe.actions.getByRole("button", { name: /Build from recipe/ })
+      )
+      await expectFullWidthDrawer("Build from recipe")
+    } finally {
+      await context?.close()
+      await stopPromptMockServer(mock)
+    }
+  })
+
+  test("sidepanel never overwrites typing committed while Improve now is pending", async () => {
+    test.setTimeout(120_000)
+    const mock = await startPromptMockServer()
+    const requestedDraft = "[DEFER_STALE] Improve this draft."
+    const liveDraft = "Typing committed while the provider is pending."
+    let context: BrowserContext | null = null
+    try {
+      const launched = await launchChatSurface(mock, "sidepanel")
+      context = launched.context
+      const page = launched.chatPage
+      const input = await ensureChatInput(page)
+      await input.fill(requestedDraft)
+      const { actions } = await openPromptActions(page)
+      await actions.getByRole("button", { name: /Improve now/ }).click()
+      await expect.poll(() => mock.improveRequests().length).toBe(1)
+      await input.fill(liveDraft)
+      mock.releaseNextDeferred()
+
+      await expect(input).toHaveValue(liveDraft)
+      await expect(
+        page.getByText(/draft changed while this result was open/i)
+      ).toBeVisible()
+      await expect(
+        page.getByRole("textbox", { name: "Improved prompt candidate" })
+      ).toHaveValue("Deferred stale candidate.")
+      assertPromptRequest(mock.improveRequests()[0], {
+        target: "user_message",
+        text: requestedDraft
+      })
+    } finally {
+      await context?.close()
+      await stopPromptMockServer(mock)
+    }
+  })
+
+  test("sidepanel requires explicit confirmation before replacing a changed live draft", async () => {
+    test.setTimeout(120_000)
+    const mock = await startPromptMockServer()
+    const requestedDraft = "[DEFER_CONFIRM] Review this draft."
+    const liveDraft = "Newer live draft must survive normal Apply."
+    let context: BrowserContext | null = null
+    try {
+      const launched = await launchChatSurface(mock, "sidepanel")
+      context = launched.context
+      const page = launched.chatPage
+      const input = await ensureChatInput(page)
+      await input.fill(requestedDraft)
+      const { actions } = await openPromptActions(page)
+      await actions.getByRole("button", { name: /Review changes/ }).click()
+      await expect.poll(() => mock.improveRequests().length).toBe(1)
+      await input.fill(liveDraft)
+      mock.releaseNextDeferred()
+
+      await expect(input).toHaveValue(liveDraft)
+      const replace = page.getByRole("button", {
+        name: "Replace current draft"
+      })
+      await expect(replace).toBeVisible()
+      await replace.click({ timeout: 20_000 })
+      const confirmReplace = page.getByRole("button", {
+        name: "Confirm replace"
+      })
+      await expect(confirmReplace).toBeVisible({ timeout: 20_000 })
+      await confirmReplace.click({ timeout: 20_000 })
+      await expect(input).toHaveValue("Deferred confirmed replacement.")
+      assertPromptRequest(mock.improveRequests()[0], {
+        target: "user_message",
+        text: requestedDraft
+      })
+    } finally {
+      await context?.close()
+      await stopPromptMockServer(mock)
+    }
+  })
+
+  test("missing model offers recovery without sending an improvement request", async () => {
+    test.setTimeout(120_000)
+    const mock = await startPromptMockServer()
+    let context: BrowserContext | null = null
+    try {
+      const launched = await launchChatSurface(mock, "sidepanel", {
+        withModel: false
+      })
+      context = launched.context
+      const page = launched.chatPage
+      const input = await ensureChatInput(page)
+      await input.fill("Draft without a selected route.")
+      const { actions } = await openPromptActions(page)
+      await expect(actions).toContainText(
+        "Select a chat model to improve this draft."
+      )
+      await expect(
+        actions.getByRole("button", { name: /Improve now/ })
+      ).toBeDisabled()
+      const selectModel = actions.getByRole("button", { name: "Select model" })
+      await expect(selectModel).toBeVisible()
+      await selectModel.click()
+      await expect(
+        page.getByRole("dialog", {
+          name: /Current Chat Model Settings|currentChatModelSettings/i
+        })
+      ).toBeVisible({ timeout: 20_000 })
+      expect(mock.improveRequests()).toHaveLength(0)
+    } finally {
+      await context?.close()
+      await stopPromptMockServer(mock)
+    }
+  })
+
+  test("structured provider failure preserves the draft and Retry succeeds with a new operation", async () => {
+    test.setTimeout(120_000)
+    const mock = await startPromptMockServer("supported", {
+      failFirstImprovement: true
+    })
+    const draft = "Keep this {{topic}} draft intact."
+    let context: BrowserContext | null = null
+    try {
+      const launched = await launchChatSurface(mock, "sidepanel")
+      context = launched.context
+      const page = launched.chatPage
+      const input = await ensureChatInput(page)
+      await input.fill(draft)
+      const { actions } = await openPromptActions(page)
+      await actions.getByRole("button", { name: /Improve now/ }).click()
+
+      await expect(
+        page.getByRole("alert").filter({
+          hasText: "prompt improvement service is unavailable"
+        })
+      ).toBeVisible()
+      const retry = page.getByRole("button", { name: "Retry" })
+      await expect(retry).toBeVisible()
+      await expect(input).toHaveValue(draft)
+      await expect.poll(() => mock.improveRequests().length).toBe(1)
+      const firstRequest = mock.improveRequests()[0]
+      assertPromptRequest(firstRequest, {
+        target: "user_message",
+        text: draft
+      })
+
+      await retry.click()
+      await expect.poll(() => mock.improveRequests().length).toBe(2)
+      const secondRequest = mock.improveRequests()[1]
+      const firstOperationId = firstRequest.json?.operation_id
+      const secondOperationId = secondRequest.json?.operation_id
+      expect(secondOperationId).not.toBe(firstOperationId)
+      assertPromptRequest(secondRequest, {
+        target: "user_message",
+        text: draft
+      })
+      await expect(input).toHaveValue("Improved user request for {{topic}}.")
+      const appliedStatus = page
+        .getByRole("status")
+        .filter({ hasText: /^Improvement applied\.$/ })
+        .filter({ visible: true })
+        .first()
+      await expect(appliedStatus).toBeVisible()
+      await expect(
+        appliedStatus
+          .locator("..")
+          .getByRole("button", { name: "Undo improvement" })
+      ).toBeVisible()
+    } finally {
+      await context?.close()
+      await stopPromptMockServer(mock)
+    }
+  })
+
+  for (const capabilityMode of ["false", "404", "offline"] as const) {
+    test(`capability ${capabilityMode} fails closed while preserving the local recipe action`, async () => {
+      test.setTimeout(120_000)
+      const mock = await startPromptMockServer(capabilityMode)
+      let context: BrowserContext | null = null
+      try {
+        const launched = await launchChatSurface(mock, "sidepanel")
+        context = launched.context
+        const page = launched.chatPage
+        const input = await ensureChatInput(page)
+        await input.fill(`Capability ${capabilityMode} draft.`)
+        const { actions } = await openPromptActions(page)
+        await expect(actions).toContainText(
+          "Prompt improvement requires a newer server version."
+        )
+        await expect(
+          actions.getByRole("button", { name: /Improve now/ })
+        ).toBeDisabled()
+        await expect(
+          actions.getByRole("button", { name: /Review changes/ })
+        ).toBeDisabled()
+        await expect(actions).toContainText(/Build from recipe/i)
+        expect(mock.improveRequests()).toHaveLength(0)
+      } finally {
+        await context?.close()
+        await stopPromptMockServer(mock)
+      }
+    })
+  }
+
+  test("casual and pro legacy, V1, V3, and V5 composers render one compact upward action immediately before Send", async () => {
+    test.setTimeout(180_000)
+    const mock = await startPromptMockServer()
+    let context: BrowserContext | null = null
+    try {
+      const launched = await launchChatSurface(mock, "sidepanel")
+      context = launched.context
+      const page = launched.chatPage
+      const combinations = [
+        { mode: "casual", variant: "legacy", enabled: false },
+        { mode: "pro", variant: "legacy", enabled: false },
+        { mode: "casual", variant: "v1", enabled: true },
+        { mode: "pro", variant: "v1", enabled: true },
+        { mode: "casual", variant: "v3", enabled: true },
+        { mode: "pro", variant: "v3", enabled: true },
+        { mode: "casual", variant: "v5", enabled: true },
+        { mode: "pro", variant: "v5", enabled: true }
+      ] as const
+
+      for (const combination of combinations) {
+        await page.evaluate((settings) => {
+          localStorage.setItem(
+            "tldw-ui-mode",
+            JSON.stringify({ state: { mode: settings.mode }, version: 0 })
+          )
+          localStorage.setItem(
+            "tldw:nextgenComposerEnabled",
+            settings.enabled ? "1" : "0"
+          )
+          if (settings.variant !== "legacy") {
+            localStorage.setItem("tldw:composerVariant", settings.variant)
+          }
+        }, combination)
+        await page.reload({ waitUntil: "domcontentloaded" })
+        await waitForConnectionStore(
+          page,
+          `prompt-improvement:${combination.mode}:${combination.variant}`
+        )
+        await forceConnected(page, { serverUrl: mock.baseUrl })
+        await ensureChatInput(page)
+        await seedExcludedContext(page)
+        const actions = page.getByRole("button", { name: "Improve prompt" })
+        await expect(actions).toHaveCount(1)
+        await expect(actions).toBeVisible()
+        const sendCluster = page.getByTestId("sidepanel-send-action-cluster")
+        const send = sendCluster.getByRole("button", { name: "Send message" })
+        await expect(
+          sendCluster.getByRole("button", { name: "Improve prompt" })
+        ).toHaveCount(1)
+        await expect(send).toBeVisible()
+        expect(
+          await sendCluster.evaluate((cluster) => {
+            const improve = cluster.querySelector(
+              '[aria-label="Improve prompt"]'
+            )
+            const sendButton = cluster.querySelector(
+              '[aria-label="Send message"]'
+            )
+            return Boolean(
+              improve &&
+                sendButton &&
+                (improve.compareDocumentPosition(sendButton) &
+                  Node.DOCUMENT_POSITION_FOLLOWING) !==
+                  0
+            )
+          })
+        ).toBe(true)
+        const actionBox = await actions.boundingBox()
+        expect(actionBox?.width).toBe(44)
+        expect(actionBox?.height).toBe(44)
+        await actions.click()
+        const menu = page.getByRole("group", {
+          name: "Prompt improvement actions"
+        })
+        await expect(menu).toBeVisible()
+        const menuBox = await menu.boundingBox()
+        const openActionBox = await actions.boundingBox()
+        expect(menuBox).not.toBeNull()
+        expect(openActionBox).not.toBeNull()
+        expect(menuBox!.y).toBeGreaterThanOrEqual(0)
+        expect(menuBox!.x).toBeGreaterThanOrEqual(0)
+        expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(
+          await page.evaluate(() => window.innerWidth)
+        )
+        expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(
+          openActionBox!.y + 1
+        )
+        await actions.press("Escape")
+        await expect(actions).toBeFocused()
+      }
+      expect(mock.improveRequests()).toHaveLength(0)
+    } finally {
+      await context?.close()
+      await stopPromptMockServer(mock)
+    }
+  })
+
+  test("narrow V3 and V5 activate every Prompt Assist menu action through the painted overlay", async () => {
+    test.setTimeout(180_000)
+    const mock = await startPromptMockServer()
+    let context: BrowserContext | null = null
+    try {
+      const launched = await launchChatSurface(mock, "sidepanel", {
+        mode: "pro",
+        nextgen: true,
+        variant: "v3",
+        viewport: { width: 390, height: 844 }
+      })
+      context = launched.context
+      const page = launched.chatPage
+
+      for (const variant of ["v3", "v5"] as const) {
+        for (const action of [
+          "Improve now",
+          "Review changes",
+          "Build from recipe"
+        ] as const) {
+          await page.evaluate((nextVariant) => {
+            localStorage.setItem("tldw:nextgenComposerEnabled", "1")
+            localStorage.setItem("tldw:composerVariant", nextVariant)
+          }, variant)
+          await page.reload({ waitUntil: "domcontentloaded" })
+          await waitForConnectionStore(
+            page,
+            `prompt-improvement:painted-overlay:${variant}:${action}`
+          )
+          await forceConnected(page, { serverUrl: mock.baseUrl })
+          const input = await ensureChatInput(page)
+          await seedExcludedContext(page)
+          await input.fill(`Painted ${variant} ${action} {{topic}} draft.`)
+
+          const { actions } = await openPromptActions(page)
+          expect(
+            await actions.evaluate((menu) => {
+              const menuRect = menu.getBoundingClientRect()
+              let ancestor = menu.parentElement
+              while (ancestor && ancestor !== document.body) {
+                const style = window.getComputedStyle(ancestor)
+                const clips = [
+                  style.overflow,
+                  style.overflowX,
+                  style.overflowY
+                ].some((value) => value === "hidden" || value === "clip")
+                if (clips) {
+                  const rect = ancestor.getBoundingClientRect()
+                  if (
+                    menuRect.left < rect.left ||
+                    menuRect.right > rect.right ||
+                    menuRect.top < rect.top ||
+                    menuRect.bottom > rect.bottom
+                  ) {
+                    return false
+                  }
+                }
+                ancestor = ancestor.parentElement
+              }
+              return true
+            })
+          ).toBe(true)
+          const target = actions.getByRole("button", {
+            name: new RegExp(action)
+          })
+          await clickThroughPaintedCenter(page, target)
+
+          if (action === "Improve now") {
+            await expect(input).toHaveValue(
+              "Improved user request for {{topic}}."
+            )
+          } else if (action === "Review changes") {
+            await expect(
+              page.getByRole("dialog", { name: "Prompt improvement" })
+            ).toBeVisible()
+          } else {
+            await expect(
+              page.getByRole("dialog", { name: "Build from recipe" })
+            ).toBeVisible()
+          }
+        }
+
+        await page.reload({ waitUntil: "domcontentloaded" })
+        await waitForConnectionStore(
+          page,
+          `prompt-improvement:painted-overlay:${variant}:reposition`
+        )
+        await forceConnected(page, { serverUrl: mock.baseUrl })
+        await ensureChatInput(page)
+        await seedExcludedContext(page)
+        const repositioned = await openPromptActions(page)
+        await page.setViewportSize({ width: 400, height: 800 })
+        await page.evaluate(() => window.dispatchEvent(new Event("scroll")))
+        const repositionedBox = await repositioned.actions.boundingBox()
+        expect(repositionedBox).not.toBeNull()
+        expect(repositionedBox!.x).toBeGreaterThanOrEqual(0)
+        expect(repositionedBox!.y).toBeGreaterThanOrEqual(0)
+        expect(repositionedBox!.x + repositionedBox!.width).toBeLessThanOrEqual(
+          400
+        )
+        expect(
+          repositionedBox!.y + repositionedBox!.height
+        ).toBeLessThanOrEqual(800)
+        await page.setViewportSize({ width: 390, height: 844 })
+      }
+    } finally {
+      await context?.close()
+      await stopPromptMockServer(mock)
+    }
+  })
+
+  test("narrow V3 and V5 keep improvement and recipe feedback pointer-usable without covering composer controls", async () => {
+    test.setTimeout(180_000)
+    const mock = await startPromptMockServer()
+    let context: BrowserContext | null = null
+    try {
+      const launched = await launchChatSurface(mock, "sidepanel", {
+        mode: "pro",
+        nextgen: true,
+        variant: "v3",
+        viewport: { width: 390, height: 844 }
+      })
+      context = launched.context
+      const page = launched.chatPage
+
+      for (const variant of ["v3", "v5"] as const) {
+        await page.evaluate((nextVariant) => {
+          localStorage.setItem("tldw:nextgenComposerEnabled", "1")
+          localStorage.setItem("tldw:composerVariant", nextVariant)
+        }, variant)
+        await page.reload({ waitUntil: "domcontentloaded" })
+        await waitForConnectionStore(
+          page,
+          `prompt-improvement:feedback:${variant}`
+        )
+        await forceConnected(page, { serverUrl: mock.baseUrl })
+        const input = await ensureChatInput(page)
+        await seedExcludedContext(page)
+        const originalDraft = `Exact ${variant} {{topic}} draft.`
+        await input.fill(originalDraft)
+        const sendCluster = page.getByTestId("sidepanel-send-action-cluster")
+        const initialClusterBox = await sendCluster.boundingBox()
+        expect(initialClusterBox).not.toBeNull()
+        const initialCluster = {
+          width: initialClusterBox!.width,
+          height: initialClusterBox!.height
+        }
+
+        const improvementMenu = await openPromptActions(page)
+        await clickThroughPaintedCenter(
+          page,
+          improvementMenu.actions.getByRole("button", {
+            name: /Review changes/
+          })
+        )
+        const candidate = page.getByRole("textbox", {
+          name: "Improved prompt candidate"
+        })
+        await expect(candidate).toBeVisible()
+        await candidate.fill(`Reviewed ${variant} {{topic}} candidate.`)
+        const applyImprovement = page.getByRole("button", {
+          name: "Apply to draft"
+        })
+        await applyImprovement.scrollIntoViewIfNeeded()
+        await clickThroughPaintedCenter(page, applyImprovement)
+        await expect(input).toHaveValue(
+          `Reviewed ${variant} {{topic}} candidate.`
+        )
+        const improvementStatus = page
+          .locator('[role="status"]')
+          .filter({ hasText: /^Improvement applied\.$/ })
+          .filter({ visible: true })
+          .first()
+        const improvementFeedback = improvementStatus.locator("..")
+        await expectLayoutNeutralFeedback(
+          page,
+          improvementFeedback,
+          input,
+          sendCluster,
+          initialCluster
+        )
+        const viewChanges = improvementFeedback.getByRole("button", {
+          name: "View changes"
+        })
+        await clickThroughPaintedCenter(page, viewChanges)
+        const inspection = page.getByRole("dialog", {
+          name: "Prompt improvement"
+        })
+        await expect(inspection).toBeVisible()
+        await page.keyboard.press("Escape")
+        await expect(inspection).not.toBeVisible()
+        const undoImprovement = page.getByRole("button", {
+          name: "Undo improvement"
+        })
+        await clickThroughPaintedCenter(page, undoImprovement)
+        await expect(input).toHaveValue(originalDraft)
+
+        const recipeMenu = await openPromptActions(page)
+        await clickThroughPaintedCenter(
+          page,
+          recipeMenu.actions.getByRole("button", {
+            name: /Build from recipe/
+          })
+        )
+        const runtimeValue = page.getByLabel(
+          "Current value for Task (not saved)"
+        )
+        await expect(runtimeValue).toBeVisible()
+        await runtimeValue.fill(`Recipe ${variant} task`)
+        const applyRecipe = page.getByRole("button", {
+          name: "Apply to user message"
+        })
+        await applyRecipe.scrollIntoViewIfNeeded()
+        await clickThroughPaintedCenter(page, applyRecipe)
+        const recipeStatus = page
+          .locator('[role="status"]')
+          .filter({ hasText: /^Recipe applied\.$/ })
+          .filter({ visible: true })
+          .first()
+        const recipeFeedback = recipeStatus.locator("..")
+        await expectLayoutNeutralFeedback(
+          page,
+          recipeFeedback,
+          input,
+          sendCluster,
+          initialCluster
+        )
+        await clickThroughPaintedCenter(
+          page,
+          recipeFeedback.getByRole("button", { name: "Undo recipe" })
+        )
+        await expect(input).toHaveValue(originalDraft)
+      }
+    } finally {
+      await context?.close()
+      await stopPromptMockServer(mock)
+    }
+  })
+
+  test("V5 applied feedback yields pointer ownership to a reopened Prompt Assist menu", async () => {
+    test.setTimeout(120_000)
+    const mock = await startPromptMockServer()
+    let context: BrowserContext | null = null
+    try {
+      const launched = await launchChatSurface(mock, "sidepanel", {
+        mode: "pro",
+        nextgen: true,
+        variant: "v5",
+        viewport: { width: 390, height: 844 }
+      })
+      context = launched.context
+      const page = launched.chatPage
+      await forceConnected(page, { serverUrl: mock.baseUrl })
+      const input = await ensureChatInput(page)
+      await seedExcludedContext(page)
+      const originalDraft = "V5 retained feedback {{topic}} draft."
+      await input.fill(originalDraft)
+
+      const firstMenu = await openPromptActions(page)
+      await clickThroughPaintedCenter(
+        page,
+        firstMenu.actions.getByRole("button", { name: /Improve now/ })
+      )
+      await expect(input).toHaveValue("Improved user request for {{topic}}.")
+      const feedback = getPromptAssistFeedback(page, "Improvement applied.")
+      await expect(feedback).toBeVisible()
+
+      const reopened = await openPromptActions(page)
+      const reviewChanges = reopened.actions.getByRole("button", {
+        name: /Review changes/
+      })
+      await clickThroughPaintedCenter(page, reviewChanges)
+      const reviewDrawer = page.getByRole("dialog", {
+        name: "Prompt improvement"
+      })
+      await expect(reviewDrawer).toBeVisible()
+      await expect(feedback).not.toBeVisible()
+      await page.keyboard.press("Escape")
+      await expect(reviewDrawer).not.toBeVisible()
+      await expect(input).toHaveValue("Improved user request for {{topic}}.")
+    } finally {
+      await context?.close()
+      await stopPromptMockServer(mock)
+    }
+  })
+
+  test("V3 applied feedback yields pointer ownership to inspection drawer controls", async () => {
+    test.setTimeout(120_000)
+    const mock = await startPromptMockServer()
+    let context: BrowserContext | null = null
+    try {
+      const launched = await launchChatSurface(mock, "sidepanel", {
+        mode: "pro",
+        nextgen: true,
+        variant: "v3",
+        viewport: { width: 390, height: 844 }
+      })
+      context = launched.context
+      const page = launched.chatPage
+      await forceConnected(page, { serverUrl: mock.baseUrl })
+      const input = await ensureChatInput(page)
+      await seedExcludedContext(page)
+      const originalDraft = "V3 inspection feedback {{topic}} draft."
+      await input.fill(originalDraft)
+
+      const firstMenu = await openPromptActions(page)
+      await clickThroughPaintedCenter(
+        page,
+        firstMenu.actions.getByRole("button", { name: /Improve now/ })
+      )
+      const feedback = getPromptAssistFeedback(page, "Improvement applied.")
+      await clickThroughPaintedCenter(
+        page,
+        feedback.getByRole("button", { name: "View changes" })
+      )
+      const inspection = page.getByRole("dialog", {
+        name: "Prompt improvement"
+      })
+      await expect(inspection).toBeVisible()
+      await waitForDrawerSettled(inspection)
+      const changes = inspection.getByRole("button", { name: "Changes" })
+      await clickThroughPaintedCenter(page, changes)
+      await expect(changes).toHaveAttribute("aria-pressed", "true")
+      const edit = inspection.getByRole("button", { name: "Edit" })
+      await clickThroughPaintedCenter(page, edit)
+      await expect(edit).toHaveAttribute("aria-pressed", "true")
+      await expect(feedback).not.toBeVisible()
+      await page.keyboard.press("Escape")
+      await expect(inspection).not.toBeVisible()
+      await expect(feedback).toBeVisible()
+      await clickThroughPaintedCenter(
+        page,
+        feedback.getByRole("button", { name: "Undo improvement" })
+      )
+      await expect(input).toHaveValue(originalDraft)
+    } finally {
+      await context?.close()
+      await stopPromptMockServer(mock)
+    }
+  })
+
+  test("V3 and V5 improvement feedback stays usable after viewport shrink and real composer scroll", async () => {
+    test.setTimeout(180_000)
+    const mock = await startPromptMockServer()
+    let context: BrowserContext | null = null
+    try {
+      const launched = await launchChatSurface(mock, "sidepanel", {
+        mode: "pro",
+        nextgen: true,
+        variant: "v3",
+        viewport: { width: 390, height: 844 }
+      })
+      context = launched.context
+      const page = launched.chatPage
+
+      for (const variant of ["v3", "v5"] as const) {
+        await page.evaluate((nextVariant) => {
+          localStorage.setItem("tldw:nextgenComposerEnabled", "1")
+          localStorage.setItem("tldw:composerVariant", nextVariant)
+        }, variant)
+        await page.reload({ waitUntil: "domcontentloaded" })
+        await waitForConnectionStore(
+          page,
+          `prompt-improvement:feedback-resize:${variant}`
+        )
+        await forceConnected(page, { serverUrl: mock.baseUrl })
+        const input = await ensureChatInput(page)
+        await seedExcludedContext(page)
+        const originalDraft = `Resize ${variant} improvement {{topic}} draft.`
+        await input.fill(originalDraft)
+        const sendCluster = page.getByTestId("sidepanel-send-action-cluster")
+        const initialClusterBox = await sendCluster.boundingBox()
+        expect(initialClusterBox).not.toBeNull()
+
+        const menu = await openPromptActions(page)
+        await clickThroughPaintedCenter(
+          page,
+          menu.actions.getByRole("button", { name: /Improve now/ })
+        )
+        const feedback = getPromptAssistFeedback(page, "Improvement applied.")
+        await waitForDrawersClosed(page, feedback)
+        await page.setViewportSize({ width: 360, height: 240 })
+        await scrollDraftNearViewportTop(input)
+        const initialCluster = {
+          width: initialClusterBox!.width,
+          height: initialClusterBox!.height
+        }
+        await expectLayoutNeutralFeedback(
+          page,
+          feedback,
+          input,
+          sendCluster,
+          initialCluster,
+          true
+        )
+        await expectVisibleComposerControlsRemainUsable(page, feedback)
+        await page.setViewportSize({ width: 360, height: 50 })
+        await expectHiddenFeedbackRetainsState(feedback)
+        await page.setViewportSize({ width: 390, height: 844 })
+        await expect(feedback).toBeVisible()
+        await expectLayoutNeutralFeedback(
+          page,
+          feedback,
+          input,
+          sendCluster,
+          initialCluster
+        )
+        await clickThroughPaintedCenter(
+          page,
+          feedback.getByRole("button", { name: "Undo improvement" })
+        )
+        await expect(input).toHaveValue(originalDraft)
+        await page.setViewportSize({ width: 390, height: 844 })
+      }
+    } finally {
+      await context?.close()
+      await stopPromptMockServer(mock)
+    }
+  })
+
+  test("V3 and V5 recipe feedback stays usable after viewport shrink and real composer scroll", async () => {
+    test.setTimeout(180_000)
+    const mock = await startPromptMockServer()
+    let context: BrowserContext | null = null
+    try {
+      const launched = await launchChatSurface(mock, "sidepanel", {
+        mode: "pro",
+        nextgen: true,
+        variant: "v3",
+        viewport: { width: 390, height: 844 }
+      })
+      context = launched.context
+      const page = launched.chatPage
+
+      for (const variant of ["v3", "v5"] as const) {
+        await page.evaluate((nextVariant) => {
+          localStorage.setItem("tldw:nextgenComposerEnabled", "1")
+          localStorage.setItem("tldw:composerVariant", nextVariant)
+        }, variant)
+        await page.reload({ waitUntil: "domcontentloaded" })
+        await waitForConnectionStore(
+          page,
+          `prompt-improvement:recipe-feedback-resize:${variant}`
+        )
+        await forceConnected(page, { serverUrl: mock.baseUrl })
+        const input = await ensureChatInput(page)
+        await seedExcludedContext(page)
+        const originalDraft = `Resize ${variant} recipe {{topic}} draft.`
+        await input.fill(originalDraft)
+        const sendCluster = page.getByTestId("sidepanel-send-action-cluster")
+        const initialClusterBox = await sendCluster.boundingBox()
+        expect(initialClusterBox).not.toBeNull()
+
+        const menu = await openPromptActions(page)
+        await clickThroughPaintedCenter(
+          page,
+          menu.actions.getByRole("button", { name: /Build from recipe/ })
+        )
+        const runtimeValue = page.getByLabel(
+          "Current value for Task (not saved)"
+        )
+        await expect(runtimeValue).toBeVisible()
+        await runtimeValue.fill(`Resize ${variant} recipe task`)
+        const applyRecipe = page.getByRole("button", {
+          name: "Apply to user message"
+        })
+        await applyRecipe.scrollIntoViewIfNeeded()
+        await clickThroughPaintedCenter(page, applyRecipe)
+        const feedback = getPromptAssistFeedback(page, "Recipe applied.")
+        await waitForDrawersClosed(page, feedback)
+        await page.setViewportSize({ width: 360, height: 240 })
+        await scrollDraftNearViewportTop(input)
+        const initialCluster = {
+          width: initialClusterBox!.width,
+          height: initialClusterBox!.height
+        }
+        await expectLayoutNeutralFeedback(
+          page,
+          feedback,
+          input,
+          sendCluster,
+          initialCluster,
+          true
+        )
+        await expectVisibleComposerControlsRemainUsable(page, feedback)
+        await page.setViewportSize({ width: 360, height: 50 })
+        await expectHiddenFeedbackRetainsState(feedback)
+        await page.setViewportSize({ width: 390, height: 844 })
+        await expect(feedback).toBeVisible()
+        await expectLayoutNeutralFeedback(
+          page,
+          feedback,
+          input,
+          sendCluster,
+          initialCluster
+        )
+        await clickThroughPaintedCenter(
+          page,
+          feedback.getByRole("button", { name: "Undo recipe" })
+        )
+        await expect(input).toHaveValue(originalDraft)
+        await page.setViewportSize({ width: 390, height: 844 })
+      }
+    } finally {
+      await context?.close()
+      await stopPromptMockServer(mock)
+    }
+  })
+
+  test("V3 short viewport keeps every visible composer control usable around improvement and recipe feedback", async () => {
+    test.setTimeout(180_000)
+    const mock = await startPromptMockServer()
+    let context: BrowserContext | null = null
+    try {
+      const launched = await launchChatSurface(mock, "sidepanel", {
+        mode: "pro",
+        nextgen: true,
+        variant: "v3",
+        viewport: { width: 390, height: 844 }
+      })
+      context = launched.context
+      const page = launched.chatPage
+
+      for (const operation of ["improvement", "recipe"] as const) {
+        await page.reload({ waitUntil: "domcontentloaded" })
+        await waitForConnectionStore(
+          page,
+          `prompt-improvement:all-v3-controls:${operation}`
+        )
+        await forceConnected(page, { serverUrl: mock.baseUrl })
+        const input = await ensureChatInput(page)
+        await seedExcludedContext(page)
+        const originalDraft = "Retain exact {{topic}} draft."
+        await input.fill(originalDraft)
+        const sendCluster = page.getByTestId("sidepanel-send-action-cluster")
+        const initialCluster = await sendCluster.boundingBox()
+        expect(initialCluster).not.toBeNull()
+
+        const menu = await openPromptActions(page)
+        if (operation === "improvement") {
+          await clickThroughPaintedCenter(
+            page,
+            menu.actions.getByRole("button", { name: /Improve now/ })
+          )
+        } else {
+          await clickThroughPaintedCenter(
+            page,
+            menu.actions.getByRole("button", { name: /Build from recipe/ })
+          )
+          const runtimeValue = page.getByLabel(
+            "Current value for Task (not saved)"
+          )
+          await expect(runtimeValue).toBeVisible()
+          await runtimeValue.fill("Retain recipe task")
+          const applyRecipe = page.getByRole("button", {
+            name: "Apply to user message"
+          })
+          await applyRecipe.scrollIntoViewIfNeeded()
+          await clickThroughPaintedCenter(page, applyRecipe)
+        }
+
+        const feedback = getPromptAssistFeedback(
+          page,
+          operation === "improvement"
+            ? "Improvement applied."
+            : "Recipe applied."
+        )
+        await waitForDrawersClosed(page, feedback)
+        await page.setViewportSize({ width: 360, height: 240 })
+        await scrollDraftNearViewportTop(input)
+        await expectVisibleComposerControlsRemainUsable(page, feedback)
+        await expectLayoutNeutralFeedback(
+          page,
+          feedback,
+          input,
+          sendCluster,
+          initialCluster!,
+          true
+        )
+
+        await page.setViewportSize({ width: 360, height: 50 })
+        await expectHiddenFeedbackRetainsState(feedback)
+        await page.setViewportSize({ width: 390, height: 844 })
+        await expect(feedback).toBeVisible()
+        await expectLayoutNeutralFeedback(
+          page,
+          feedback,
+          input,
+          sendCluster,
+          initialCluster!
+        )
+        await clickThroughPaintedCenter(
+          page,
+          feedback.getByRole("button", {
+            name:
+              operation === "improvement" ? "Undo improvement" : "Undo recipe"
+          })
+        )
+        await expect(input).toHaveValue(originalDraft)
+      }
+    } finally {
+      await context?.close()
+      await stopPromptMockServer(mock)
+    }
+  })
+
+  test("Quick Chat remains outside the recipe-capable Improve action contract", async () => {
+    test.setTimeout(120_000)
+    const mock = await startPromptMockServer()
+    let context: BrowserContext | null = null
+    try {
+      const launched = await launchChatSurface(mock, "options")
+      context = launched.context
+      const page = launched.chatPage
+      await page.goto(
+        `chrome-extension://${launched.extensionId}/options.html#/quick-chat-popout`,
+        { waitUntil: "domcontentloaded" }
+      )
+      await expect(
+        page.getByRole("textbox", { name: "Ask a quick question..." })
+      ).toBeVisible({ timeout: 20_000 })
+      await expect(
+        page.getByRole("button", { name: "Improve prompt" })
+      ).toHaveCount(0)
+    } finally {
+      await context?.close()
+      await stopPromptMockServer(mock)
+    }
+  })
+
+  test("configured real local server smoke matches the advertised capability state", async () => {
+    test.setTimeout(120_000)
+    const { serverUrl, apiKey } = requirePromptImprovementRealServerConfig()
+    const realServer = buildRealServerHarnessConfig(serverUrl, apiKey)
+    const capabilityResponse = await fetch(realServer.capabilityUrl, {
+      headers: realServer.capabilityHeaders
+    })
+    expect(capabilityResponse.ok).toBe(true)
+    const capability = await capabilityResponse.json()
+    const supported = capability.prompt_improvement_v1?.supported
+    expect(typeof supported).toBe("boolean")
+
+    const { context, page, openSidepanel, extensionId } =
+      await launchWithExtension(EXT_PATH, {
+        seedConfig: realServer.seedConfig
+      })
+    try {
+      const granted = await grantHostPermission(
+        context,
+        extensionId,
+        `${new URL(serverUrl).origin}/*`
+      )
+      expect(granted).toBe(true)
+      await setSelectedModel(page, MODEL_KEY)
+      const sidepanel = await openSidepanel("/chat")
+      await waitForConnectionStore(sidepanel, "prompt-improvement:real-local")
+      const input = await ensureChatInput(sidepanel)
+      await input.fill("Real local capability gate smoke.")
+      const { actions } = await openPromptActions(sidepanel)
+      const improveNow = actions.getByRole("button", { name: /Improve now/ })
+      const reviewChanges = actions.getByRole("button", {
+        name: /Review changes/
+      })
+      if (supported) {
+        await expect(improveNow).toBeEnabled()
+        await expect(reviewChanges).toBeEnabled()
+      } else {
+        await expect(actions).toContainText(
+          "Prompt improvement requires a newer server version."
+        )
+        await expect(improveNow).toBeDisabled()
+        await expect(reviewChanges).toBeDisabled()
+      }
+      await expect(actions).toContainText(/Build from recipe/i)
+    } finally {
+      await context.close()
+    }
+  })
+})

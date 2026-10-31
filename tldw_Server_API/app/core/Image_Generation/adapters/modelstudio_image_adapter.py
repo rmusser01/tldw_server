@@ -8,7 +8,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from loguru import logger
-from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
+
 from tldw_Server_API.app.core.http_client import fetch_json
 from tldw_Server_API.app.core.Image_Generation.adapters.base import ImageGenRequest, ImageGenResult
 from tldw_Server_API.app.core.Image_Generation.adapters.image_format_utils import (
@@ -25,9 +25,11 @@ from tldw_Server_API.app.core.Image_Generation.config import (
     DEFAULT_MODELSTUDIO_IMAGE_MODEL,
     DEFAULT_MODELSTUDIO_IMAGE_TIMEOUT_SECONDS,
     get_image_generation_config,
+    resolve_image_generation_model,
 )
 from tldw_Server_API.app.core.Image_Generation.exceptions import ImageBackendUnavailableError, ImageGenerationError
 from tldw_Server_API.app.core.Image_Generation.request_validation import effective_inline_max_bytes
+from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
 
 
 class ModelStudioImageAdapter:
@@ -228,9 +230,7 @@ class ModelStudioImageAdapter:
 
     def _resolve_model(self, request: ImageGenRequest) -> str:
         return (
-            request.model
-            or os.getenv("MODELSTUDIO_IMAGE_MODEL")
-            or self._config.modelstudio_image_default_model
+            resolve_image_generation_model(self.name, request.model, self._config)
             or DEFAULT_MODELSTUDIO_IMAGE_MODEL
         )
 

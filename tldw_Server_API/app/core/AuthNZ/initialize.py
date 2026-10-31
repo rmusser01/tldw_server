@@ -11,6 +11,7 @@
 
 import argparse
 import asyncio
+import contextlib
 import os
 import secrets
 import sys
@@ -34,8 +35,6 @@ SINGLE_USER_API_KEY_PLACEHOLDERS = {
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
 
-import contextlib
-
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager, get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError as AuthNZDatabaseError
@@ -46,11 +45,11 @@ from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.scheduler import start_authnz_scheduler
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 from tldw_Server_API.app.core.AuthNZ.username_utils import normalize_admin_username
+from tldw_Server_API.app.core.config import get_tldw_env_file_path, is_tldw_env_file_exclusive
 from tldw_Server_API.app.core.DB_Management.Users_DB import ensure_user_directories, get_users_db
 from tldw_Server_API.app.core.testing import is_test_mode
 
 _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,
@@ -201,10 +200,16 @@ def _normalize_env_value(value: Optional[str]) -> Optional[str]:
 def _resolve_env_locations() -> tuple[list[Path], list[Path], Path]:
     project_root = Path(__file__).resolve().parent.parent.parent.parent
     cfg_dir = project_root / "Config_Files"
-    env_candidates = [
-        cfg_dir / ".env",
-        cfg_dir / ".ENV",
-    ]
+    explicit_env = get_tldw_env_file_path()
+    env_candidates = [explicit_env] if explicit_env else []
+    if explicit_env and is_tldw_env_file_exclusive():
+        if not explicit_env.is_file():
+            raise FileNotFoundError(
+                "TLDW_ENV_FILE_EXCLUSIVE requires TLDW_ENV_FILE to reference "
+                f"an existing file: {explicit_env}"
+            )
+    else:
+        env_candidates.extend([cfg_dir / ".env", cfg_dir / ".ENV"])
     template_candidates = [cfg_dir / ".env.example"]
     return env_candidates, template_candidates, cfg_dir
 
@@ -339,7 +344,12 @@ def _prompt_yes_no(prompt: str, default_yes: bool, non_interactive: bool) -> boo
     if non_interactive:
         return default_yes
     suffix = "Y/n" if default_yes else "y/N"
-    response = input(f"{prompt} ({suffix}): ").strip().lower()
+    try:
+        response = input(f"{prompt} ({suffix}): ").strip().lower()
+    except EOFError:
+        default = "yes" if default_yes else "no"
+        logger.warning(f"No interactive input detected; using default: {default}")
+        return default_yes
     if not response:
         return default_yes
     return response in {"y", "yes"}
@@ -454,8 +464,10 @@ def check_environment():
         "auth_mode": settings.AUTH_MODE,
     }
 
-def generate_secure_keys(requested_keys: Optional[Iterable[str]] = None):
-    """Generate secure keys for configuration"""
+def generate_secure_keys(
+    requested_keys: Optional[Iterable[str]] = None, *, show_values: bool = False
+) -> dict[str, str]:
+    """Generate configuration keys; display values only for explicit manual setup."""
     print("\n🔑 Generating secure keys...")
 
     from tldw_Server_API.app.core.AuthNZ.api_key_crypto import (
@@ -486,16 +498,25 @@ def generate_secure_keys(requested_keys: Optional[Iterable[str]] = None):
     if requested is None or "MCP_API_KEY_SALT" in requested:
         keys["MCP_API_KEY_SALT"] = secrets.token_urlsafe(32)
 
-    print("\n📝 Generated keys (save these in your .env file):")
+    print("\n📝 Generated keys:")
     print("-" * 50)
     for key, value in keys.items():
-        print(f"{key}={value}")
+        print(f"{key}={value}" if show_values else key)
     print("-" * 50)
 
     return keys
 
+
+def _allow_unrepresentable_status_text() -> None:
+    """Keep console status messages writable under legacy output encodings."""
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if callable(reconfigure):
+        reconfigure(errors="backslashreplace")
+
+
 async def setup_database():
     """Setup database and run migrations"""
+    _allow_unrepresentable_status_text()
     print("\n🗄️  Setting up database...")
 
     settings = get_settings()
@@ -532,6 +553,7 @@ async def setup_database():
 
             from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
             from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
+                ensure_admin_webhook_canonical_tables_pg,
                 ensure_api_keys_tables_pg,
                 ensure_authnz_core_tables_pg,
                 ensure_billing_tables_pg,
@@ -539,6 +561,7 @@ async def setup_database():
                 ensure_generated_files_table_pg,
                 ensure_notification_permissions_pg,
                 ensure_org_provider_secrets_pg,
+                ensure_sharing_tables_pg,
                 ensure_usage_tables_pg,
                 ensure_user_provider_secrets_pg,
                 ensure_virtual_key_counters_pg,
@@ -547,7 +570,14 @@ async def setup_database():
             pool = await get_db_pool()
 
             # Ensure core AuthNZ tables (audit_logs, sessions, registration_codes, RBAC, orgs/teams)
-            await ensure_authnz_core_tables_pg(pool)
+            if not await ensure_authnz_core_tables_pg(pool):
+                raise RuntimeError("Failed to ensure Postgres AuthNZ core tables")
+
+            if not await ensure_sharing_tables_pg(pool):
+                raise RuntimeError("Failed to ensure Postgres sharing tables")
+
+            if not await ensure_admin_webhook_canonical_tables_pg(pool):
+                raise RuntimeError("Failed to ensure Postgres canonical admin webhook tables")
 
             # Ensure billing tables used by webhook/invoice/audit paths.
             ok_billing_tables = await ensure_billing_tables_pg(pool)
@@ -612,7 +642,7 @@ async def setup_database():
 
             print(
                 "✅ Basic schema ensured for Postgres (users, api keys, sessions, "
-                "registration_codes, RBAC, orgs/teams, usage tables)"
+                "registration_codes, RBAC, orgs/teams, sharing, usage tables)"
             )
         except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as e:
             print(f"❌ Failed to bootstrap Postgres schema: {e}")
@@ -639,34 +669,57 @@ async def ensure_authnz_schema_ready_once() -> None:
     """
     global _SCHEMA_ENSURED_KEYS
     async with _SCHEMA_ENSURE_LOCK:
-        try:
-            pool = await get_db_pool()
-        except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as e:
-            with contextlib.suppress(_AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS):
-                logger.debug(f"AuthNZ schema ensure: failed to acquire DB pool; skipping: {e}")
+        pool = await get_db_pool()
+        # If asyncpg pool exists, we're on Postgres; no SQLite migration ensure needed.
+        if getattr(pool, 'pool', None):
             return
 
-        try:
-            # If asyncpg pool exists, we're on Postgres; no SQLite migration ensure needed.
-            if getattr(pool, 'pool', None):
-                return
+        db_fs_path = getattr(pool, '_sqlite_fs_path', None) or getattr(pool, 'db_path', None)
+        if db_fs_path is None or not str(db_fs_path).strip():
+            raise RuntimeError("SQLite AuthNZ database target is unavailable")
+        key = str(db_fs_path)
 
-            db_fs_path = getattr(pool, '_sqlite_fs_path', None) or getattr(pool, 'db_path', None)
-            key = str(db_fs_path or '')
-            if key in _SCHEMA_ENSURED_KEYS:
-                return
-            if db_fs_path and str(db_fs_path) != ':memory:':
-                try:
-                    await asyncio.to_thread(ensure_authnz_tables, Path(str(db_fs_path)))
-                    logger.info(f"AuthNZ Startup: ensured SQLite schema at {db_fs_path}")
-                except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as mig_err:
-                    logger.debug(f"AuthNZ Startup: ensure_authnz_tables skipped/failed: {mig_err}")
-            _SCHEMA_ENSURED_KEYS.add(key)
-        except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as e:
-            # Do not raise during startup; log for diagnostics
-            logger.debug(f"AuthNZ Startup: schema ensure encountered error: {e}")
+        if key in _SCHEMA_ENSURED_KEYS:
+            return
+        if str(db_fs_path) != ':memory:':
+            await asyncio.to_thread(ensure_authnz_tables, Path(str(db_fs_path)))
             with contextlib.suppress(_AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS):
-                _SCHEMA_ENSURED_KEYS.add(str(getattr(pool, '_sqlite_fs_path', '') or getattr(pool, 'db_path', '') or ''))
+                logger.info(f"AuthNZ Startup: ensured SQLite schema at {db_fs_path}")
+        else:
+            raise RuntimeError(
+                "SQLite in-memory AuthNZ database target cannot be validated by path"
+            )
+
+        # Seed baseline RBAC roles/permissions for SQLite in every auth mode.
+        # Postgres bootstrap and the single-user backstop already run this
+        # idempotent seed; SQLite multi-user previously fell through the gap,
+        # leaving the permission catalog empty and the RBAC admin page
+        # unusable on a fresh install (#2920).
+        try:
+            from tldw_Server_API.app.core.AuthNZ.rbac_seed import (
+                ensure_baseline_rbac_seed,
+            )
+
+            async with pool.transaction() as conn:
+                await ensure_baseline_rbac_seed(
+                    conn,
+                    include_mcp_permissions=True,
+                    is_postgres=False,
+                )
+                with contextlib.suppress(_AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS):
+                    await conn.commit()  # type: ignore[attr-defined]
+        except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as seed_err:
+            logger.warning(
+                "AuthNZ Startup: baseline RBAC seed failed (continuing): {}",
+                seed_err,
+            )
+            # Do not latch the ensured key on a failed seed: the schema
+            # ensure above is idempotent, and skipping here lets the next
+            # call retry the seed instead of leaving the catalog empty for
+            # the process lifetime.
+            return
+
+        _SCHEMA_ENSURED_KEYS.add(key)
 
 
 async def ensure_single_user_rbac_seed_if_needed() -> None:
@@ -1133,6 +1186,7 @@ async def bootstrap_single_user_profile() -> bool:
     if settings.AUTH_MODE != "single_user":
         return True
 
+    _allow_unrepresentable_status_text()
     print("\n👤 Bootstrapping single-user profile (admin user + primary API key)...")
     logger.info("Bootstrapping single-user profile (admin user + primary API key)...")
 
@@ -1316,6 +1370,7 @@ async def start_services():
 
 async def main(*, non_interactive: bool = False, test_setup: bool = False):
     """Main initialization function"""
+    _allow_unrepresentable_status_text()
     print_banner()
 
     generated_keys_written = False
@@ -1370,7 +1425,7 @@ async def main(*, non_interactive: bool = False, test_setup: bool = False):
             non_interactive=non_interactive,
         )
         if should_generate:
-            generated = generate_secure_keys()
+            generated = generate_secure_keys(show_values=not non_interactive)
             env_path = env_status.get("env_path")
             if env_path:
                 should_write = _prompt_yes_no(
@@ -1494,6 +1549,6 @@ if __name__ == "__main__":
         print("\n\n⚠️  Initialization cancelled by user")
         sys.exit(0)
     except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as e:
-        print(f"\n❌ Initialization failed: {e}")
-        logger.exception("Initialization error")
+        print(f"\n❌ Initialization failed ({type(e).__name__})")
+        logger.error("Initialization error (error_type={})", type(e).__name__)
         sys.exit(1)

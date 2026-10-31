@@ -40,7 +40,7 @@ describe("TldwApiClient chat trash operations", () => {
       path?: string
       method?: string
     }
-    expect(call.path).toBe("/api/v1/chats/abc")
+    expect(call.path).toBe("/api/v1/chats/abc?scope_type=global")
     expect(call.method).toBe("DELETE")
   })
 
@@ -48,12 +48,12 @@ describe("TldwApiClient chat trash operations", () => {
     mocks.bgRequest.mockImplementation(
       async (request: { path?: string; method?: string }) => {
         if (
-          request.path === "/api/v1/chats/abc?expected_version=4" &&
+          request.path === "/api/v1/chats/abc?scope_type=global&expected_version=4" &&
           request.method === "DELETE"
         ) {
           throw Object.assign(new Error("Version conflict"), { status: 409 })
         }
-        if (request.path === "/api/v1/chats/abc" && request.method === "GET") {
+        if (request.path === "/api/v1/chats/abc?scope_type=global" && request.method === "GET") {
           return {
             id: "abc",
             title: "Recovered",
@@ -63,7 +63,7 @@ describe("TldwApiClient chat trash operations", () => {
           }
         }
         if (
-          request.path === "/api/v1/chats/abc?expected_version=7" &&
+          request.path === "/api/v1/chats/abc?scope_type=global&expected_version=7" &&
           request.method === "DELETE"
         ) {
           return undefined
@@ -81,15 +81,15 @@ describe("TldwApiClient chat trash operations", () => {
     })
     expect(calls).toEqual([
       expect.objectContaining({
-        path: "/api/v1/chats/abc?expected_version=4",
+        path: "/api/v1/chats/abc?scope_type=global&expected_version=4",
         method: "DELETE"
       }),
       expect.objectContaining({
-        path: "/api/v1/chats/abc",
+        path: "/api/v1/chats/abc?scope_type=global",
         method: "GET"
       }),
       expect.objectContaining({
-        path: "/api/v1/chats/abc?expected_version=7",
+        path: "/api/v1/chats/abc?scope_type=global&expected_version=7",
         method: "DELETE"
       })
     ])
@@ -108,7 +108,7 @@ describe("TldwApiClient chat trash operations", () => {
       path?: string
       method?: string
     }
-    expect(call.path).toBe("/api/v1/chats/abc?expected_version=4&hard_delete=true")
+    expect(call.path).toBe("/api/v1/chats/abc?scope_type=global&expected_version=4&hard_delete=true")
     expect(call.method).toBe("DELETE")
   })
 
@@ -128,7 +128,7 @@ describe("TldwApiClient chat trash operations", () => {
       path?: string
       method?: string
     }
-    expect(call.path).toBe("/api/v1/chats/abc/restore?expected_version=4")
+    expect(call.path).toBe("/api/v1/chats/abc/restore?scope_type=global&expected_version=4")
     expect(call.method).toBe("POST")
     expect(result.id).toBe("abc")
     expect(result.version).toBe(5)
@@ -137,7 +137,7 @@ describe("TldwApiClient chat trash operations", () => {
   it("fetches the current version before restore when expectedVersion is omitted", async () => {
     mocks.bgRequest.mockImplementation(
       async (request: { path?: string; method?: string }) => {
-        if (request.path === "/api/v1/chats/abc" && request.method === "GET") {
+        if (request.path === "/api/v1/chats/abc?scope_type=global" && request.method === "GET") {
           return {
             id: "abc",
             title: "Trashed",
@@ -147,7 +147,7 @@ describe("TldwApiClient chat trash operations", () => {
           }
         }
         if (
-          request.path === "/api/v1/chats/abc/restore?expected_version=4" &&
+          request.path === "/api/v1/chats/abc/restore?scope_type=global&expected_version=4" &&
           request.method === "POST"
         ) {
           return {
@@ -171,11 +171,11 @@ describe("TldwApiClient chat trash operations", () => {
     })
     expect(calls).toEqual([
       expect.objectContaining({
-        path: "/api/v1/chats/abc",
+        path: "/api/v1/chats/abc?scope_type=global",
         method: "GET"
       }),
       expect.objectContaining({
-        path: "/api/v1/chats/abc/restore?expected_version=4",
+        path: "/api/v1/chats/abc/restore?scope_type=global&expected_version=4",
         method: "POST"
       })
     ])

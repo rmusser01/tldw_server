@@ -710,6 +710,22 @@ async def test_create_session_persists_stream_backed_control_for_vz_linux(monkey
 
     import tldw_Server_API.app.core.Agent_Client_Protocol.sandbox_runner_client as src
 
+    # The real vz_linux preflight needs a macOS/Apple Silicon host plus the
+    # virtualization helper; this test is about session-control persistence,
+    # so stub the preflight like the other runtime tests in this file.
+    monkeypatch.setattr(
+        src,
+        "collect_runtime_preflights",
+        lambda *, network_policy=None: {
+            RuntimeType.vz_linux: RuntimePreflightResult(
+                runtime=RuntimeType.vz_linux,
+                available=True,
+                supported_trust_levels=["standard"],
+                enforcement_ready={"deny_all": True, "allowlist": False},
+            )
+        },
+    )
+
     class _Obj:
         def __init__(self, obj_id: str) -> None:
             self.id = obj_id

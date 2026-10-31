@@ -192,6 +192,26 @@ describe('ContentViewer stage 15 content announcements', () => {
     mocks.skipReadAlong.mockReset()
   })
 
+  it('disables full-content Chat with a visible reason until content is ready', async () => {
+    const onChat = vi.fn()
+    const { rerender } = render(<ContentViewer selectedMedia={mediaOne} content=""
+      isDetailLoading onChatWithMedia={onChat} />)
+    const button = screen.getByRole('button', { name: 'Chat with this media', exact: true })
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('title', 'Loading full content…')
+    fireEvent.click(button)
+    expect(onChat).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Actions', exact: true }))
+    const action = await screen.findByRole('menuitem', { name: 'Chat with this media (full content)' })
+    expect(action).toHaveAttribute('aria-disabled', 'true')
+    fireEvent.click(action)
+    expect(onChat).not.toHaveBeenCalled()
+    rerender(<ContentViewer selectedMedia={mediaOne} content="Complete source" onChatWithMedia={onChat} />)
+    expect(button).not.toBeDisabled()
+    fireEvent.click(button)
+    expect(onChat).toHaveBeenCalledOnce()
+  })
+
   it('announces loading and ready status when content state changes', async () => {
     const { rerender } = render(
       <ContentViewer

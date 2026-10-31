@@ -5,11 +5,13 @@ from unittest.mock import patch
 @pytest.mark.integration
 @pytest.mark.streaming
 @pytest.mark.asyncio
-async def test_chat_stream_disconnect_no_generatorexit(async_client, auth_headers):
+async def test_chat_stream_disconnect_no_generatorexit(async_client, auth_headers, monkeypatch):
     """Open a streaming chat, read a bit, then disconnect early.
     Ensures no RuntimeError('generator ignored GeneratorExit') surfaces.
     Consolidated from Chat_NEW.
     """
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
     # Mock provider to return a simple sync generator of text chunks
     def provider_stream_generator():

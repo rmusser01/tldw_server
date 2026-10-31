@@ -8,11 +8,16 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Literal, Optional
 
+import yaml
+
 #
 # 3rd-party imports
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 from pydantic_core.core_schema import ValidationInfo
-import yaml
+
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Email.attachment_policy import (
+    normalize_attachment_mime_patterns,
+)
 
 #
 # Local Imports
@@ -482,6 +487,22 @@ class AddMediaForm(ChunkingOptions, AudioVideoOptions, PdfOptions):
     ingest_attachments: Optional[bool] = Field(
         False, description="For emails: parse nested .eml attachments and ingest as separate items"
     )
+    extract_attachments: Optional[bool] = Field(
+        None, description="For emails: override ingest_attachments; false keeps attachment metadata only"
+    )
+    attachment_mime_allowlist: Optional[list[str]] = Field(
+        None, max_length=64, description="Attachment MIME selection (default message/rfc822); empty selects none"
+    )
+    attachment_mime_denylist: Optional[list[str]] = Field(
+        None, max_length=64, description="Attachment MIME exclusion; denies win over allows and .eml inference"
+    )
+
+    @field_validator("attachment_mime_allowlist", "attachment_mime_denylist", mode="before")
+    @classmethod
+    def validate_attachment_mime_rules(cls, value: Any) -> Optional[list[str]]:
+        """Validate repeated/comma-separated MIME rules before form coercion."""
+        return normalize_attachment_mime_patterns(value)
+
     max_depth: Optional[int] = Field(
         2, ge=1, le=5, description="Max depth for nested email parsing when ingest_attachments is true"
     )

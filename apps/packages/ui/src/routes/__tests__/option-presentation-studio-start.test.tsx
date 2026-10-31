@@ -17,7 +17,8 @@ const connectionMocks = vi.hoisted(() => ({
 }))
 
 const clientMocks = vi.hoisted(() => ({
-  createPresentation: vi.fn()
+  createPresentation: vi.fn(),
+  getConfig: vi.fn()
 }))
 
 vi.mock("@/components/Layouts/Layout", () => ({
@@ -51,7 +52,8 @@ vi.mock("@/hooks/useConnectionState", () => ({
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
-    createPresentation: (...args: unknown[]) => clientMocks.createPresentation(...args)
+    createPresentation: (...args: unknown[]) => clientMocks.createPresentation(...args),
+    getConfig: (...args: unknown[]) => clientMocks.getConfig(...args)
   }
 }))
 
@@ -82,6 +84,10 @@ describe("presentation studio start route", () => {
       deleted: false,
       client_id: "1",
       version: 1
+    })
+    clientMocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user"
     })
     vi.spyOn(window, "open").mockImplementation(() => null)
   })
@@ -114,11 +120,13 @@ describe("presentation studio start route", () => {
       )
     )
 
-    expect(window.open).toHaveBeenCalledWith(
-      "http://127.0.0.1:8000/presentation-studio/presentation-123",
-      "_blank",
-      "noopener,noreferrer"
-    )
+    await waitFor(() => {
+      expect(window.open).toHaveBeenCalledWith(
+        "http://127.0.0.1:8080/presentation-studio/presentation-123",
+        "_blank",
+        "noopener,noreferrer"
+      )
+    })
   })
 
   it("creates a seeded project when narration is provided", async () => {

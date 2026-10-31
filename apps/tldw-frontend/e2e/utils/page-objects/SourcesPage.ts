@@ -1,7 +1,7 @@
 /**
  * Page Object for the Sources (Ingestion Sources) page
  */
-import { type Page, type Locator, expect } from "@playwright/test"
+import { type Page, type Locator } from "@playwright/test"
 import { BasePage, type InteractiveElement } from "./BasePage"
 import { waitForAppShell, waitForConnection } from "../helpers"
 
@@ -19,16 +19,17 @@ export class SourcesPage extends BasePage {
 
   async assertPageReady(): Promise<void> {
     await waitForAppShell(this.page, 30_000)
-    // Wait for heading, offline state, unsupported state, unavailable state, or empty state
-    const heading = this.page.getByText("Sources")
-    const loading = this.loadingSpinner
+    await this.loadingSpinner
+      .waitFor({ state: "hidden", timeout: 20_000 })
+      .catch(() => {})
+    // Wait for a settled online, offline, unsupported, unavailable, or empty state.
+    const heading = this.page.getByRole("heading", { name: /^Sources$/i })
     const offline = this.page.getByText("Server is offline. Connect to manage ingestion sources.")
     const unsupported = this.page.getByText(/does not advertise ingestion source/i)
     const unavailable = this.page.getByRole("heading", { name: /cannot reach sources/i })
     const empty = this.page.getByText("No ingestion sources yet.")
     await Promise.race([
       heading.first().waitFor({ state: "visible", timeout: 20_000 }),
-      loading.first().waitFor({ state: "visible", timeout: 20_000 }),
       offline.first().waitFor({ state: "visible", timeout: 20_000 }),
       unsupported.first().waitFor({ state: "visible", timeout: 20_000 }),
       unavailable.first().waitFor({ state: "visible", timeout: 20_000 }),
@@ -59,12 +60,12 @@ export class SourcesPage extends BasePage {
   }
 
   get emptyMessage(): Locator {
-    return this.page.getByText("No ingestion sources yet.")
+    return this.page.getByText("No sources yet", { exact: true })
   }
 
   /** "New source" primary button */
   get newSourceButton(): Locator {
-    return this.page.getByRole("button", { name: /new source/i })
+    return this.page.getByRole("button", { name: /new source/i }).first()
   }
 
   /** Loading spinner */

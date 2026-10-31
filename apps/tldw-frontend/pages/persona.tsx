@@ -1,3 +1,7 @@
-import dynamic from "next/dynamic"
+import dynamic from 'next/dynamic'
 
-export default dynamic(() => import("@/routes/sidepanel-persona"), { ssr: false })
+const PersonaGarden = dynamic(() => import('@/routes/sidepanel-persona'), { ssr: false })
+
+export default function PersonaPage() {
+  return <PersonaGarden shell="options" />
+}

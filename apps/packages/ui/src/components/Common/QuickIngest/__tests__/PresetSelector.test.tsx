@@ -33,6 +33,14 @@ const qi = (
   )
 
 describe("PresetSelector", () => {
+  it("does not predict model duration from a tiny document size", () => {
+    render(<PresetSelector qi={qi} value="standard" onChange={vi.fn()} queueItems={[{
+      id: "cedar", kind: "file", fileName: "cedar.txt", detectedType: "document",
+      icon: "File", fileSize: 275, validation: { valid: true },
+    }]} />)
+    expect(screen.queryByText(/~\d+ (sec|min|hr)/)).not.toBeInTheDocument()
+  })
+
   it("explains that presets are optional starting points and custom changes are allowed", () => {
     render(
       <PresetSelector

@@ -3,6 +3,8 @@ import { updatePageTitle } from "../update-page-title"
 
 describe("updatePageTitle", () => {
   afterEach(() => {
+    vi.unstubAllGlobals()
+    window.history.replaceState({}, "", "/")
     document.head.innerHTML = "<title>Reset</title>"
   })
 
@@ -16,5 +18,19 @@ describe("updatePageTitle", () => {
     expect(warnSpy).not.toHaveBeenCalled()
 
     warnSpy.mockRestore()
+  })
+
+  it("preserves imperative titles in extension documents", () => {
+    vi.stubGlobal("chrome", { runtime: { id: "extension-id" } })
+    window.history.replaceState({}, "", "/options.html#/chat")
+
+    updatePageTitle("Extension conversation")
+
+    expect(document.title).toBe("Extension conversation")
+  })
+
+  it("does not require a browser document during server rendering", () => {
+    vi.stubGlobal("document", undefined)
+    expect(() => updatePageTitle("Server render")).not.toThrow()
   })
 })

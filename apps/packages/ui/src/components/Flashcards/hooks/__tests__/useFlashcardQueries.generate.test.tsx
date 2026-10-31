@@ -52,7 +52,8 @@ describe("useGenerateFlashcardsMutation", () => {
         num_cards: 5,
         card_type: "cloze",
         card_plan: undefined
-      })
+      }),
+      undefined
     )
   })
 })

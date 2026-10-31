@@ -48,6 +48,7 @@ async def run_jobs_webhooks_worker(stop_event: asyncio.Event | None = None) -> N
     """Emit signed webhooks on job.completed/job.failed from job_events outbox.
 
     Env:
+      - JOBS_EVENTS_OUTBOX=true
       - JOBS_WEBHOOKS_ENABLED=true
       - JOBS_WEBHOOKS_URL=https://...
       - JOBS_WEBHOOKS_SECRET_KEYS=key1,key2 (rotating; first used for signing)
@@ -63,6 +64,9 @@ async def run_jobs_webhooks_worker(stop_event: asyncio.Event | None = None) -> N
     url = os.getenv("JOBS_WEBHOOKS_URL")
     if not (env_flag_enabled("JOBS_WEBHOOKS_ENABLED") and url):
         logger.info("Jobs webhooks worker disabled")
+        return
+    if not env_flag_enabled("JOBS_EVENTS_OUTBOX"):
+        logger.warning("Jobs webhooks require JOBS_EVENTS_OUTBOX=true; refusing to start")
         return
     secrets = [(s.strip()).encode("utf-8") for s in (os.getenv("JOBS_WEBHOOKS_SECRET_KEYS", "").split(",")) if s.strip()]
     if not secrets:

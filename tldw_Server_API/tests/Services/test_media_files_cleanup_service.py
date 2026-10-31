@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -186,6 +187,8 @@ async def test_cleanup_orphaned_files_removal_failure_log_is_sanitized(
     orphan_path = storage_base / "1" / "media" / "99" / "secret-file.txt"
     orphan_path.parent.mkdir(parents=True)
     orphan_path.write_text("payload")
+    old_time = orphan_path.stat().st_mtime - 3600
+    os.utime(orphan_path, (old_time, old_time))
 
     def _fail_unlink():
         raise RuntimeError(_LEAK)

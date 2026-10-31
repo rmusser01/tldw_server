@@ -1000,10 +1000,11 @@
     }
   },
   "onboarding": {
+    "loginSettingsError": "Die Anmeldeeinstellungen konnten nicht geöffnet werden. Versuche es erneut.",
     "title": "Willkommen — Lass uns die Verbindung einrichten",
     "description": "Konfiguriere Server und Anmeldung. Wir prüfen Verbindung und RAG‑Status direkt im Ablauf.",
     "learnMoreTldw": "Erfahren Sie, wie der tldw-Server funktioniert",
-    "serverDocsUrl": "https://github.com/rmusser01/tldw_browser_assistant",
+    "serverDocsUrl": "https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md",
     "serverUrl": {
       "placeholder": "z. B. http://127.0.0.1:8000",
       "help": "Beispiel: http://127.0.0.1:8000",

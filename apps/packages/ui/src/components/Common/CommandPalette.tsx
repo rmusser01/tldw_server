@@ -7,6 +7,7 @@ import React, {
   useMemo
 } from "react"
 import { createPortal } from "react-dom"
+import { useBuddyManagementStore } from "@/store/buddy-management"
 import { useLocation, useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import {
@@ -34,10 +35,15 @@ import {
 } from "@/hooks/useKeyboardShortcuts"
 import { useShortcutConfig } from "@/hooks/keyboard/useShortcutConfig"
 import type { KeyboardShortcut as ConfiguredKeyboardShortcut } from "@/hooks/keyboard/useKeyboardShortcuts"
-import { getCommandPaletteTarget } from "@/routes/route-metadata"
+import {
+  getCommandPaletteTarget,
+  getRouteCommandPaletteLabel
+} from "@/routes/route-metadata"
+import { ADMIN_MODULES } from "@/components/Option/Admin/admin-modules"
 import { RESEARCH_WORKSPACE_PATH } from "@/routes/route-paths"
 import { searchSettings } from "@/data/settings-index"
 import { cn } from "@/libs/utils"
+import { requestSettingsNavigation } from "@/utils/settings-return"
 
 type CommandShortcut = { key: string; modifiers: ShortcutModifier[] }
 
@@ -231,7 +237,6 @@ export function CommandPalette({
         targetPath,
         action: () => {
           navigate(targetPath)
-          setOpen(false)
         }
       }
     }
@@ -324,6 +329,34 @@ export function CommandPalette({
         category: "navigation",
         keywords: ["mcp", "hub", "acp", "policy", "server"],
       },
+      // Admin modules, derived from the admin registry so the palette and the
+      // admin surface can't drift apart (2026-09 UX audit finding S1). Labels
+      // come from route metadata to satisfy palette label governance.
+      ...(!isSidepanel
+        ? ([
+            {
+              id: "nav-admin",
+              label: getRouteCommandPaletteLabel("/admin"),
+              description: t(
+                "common:commandPalette.adminOverviewDescription",
+                "Admin Operations overview"
+              ),
+              icon: <Settings className="size-4" />,
+              ...buildRouteCommand("/admin"),
+              category: "navigation" as const,
+              keywords: ["admin", "operations", "server management"],
+            },
+            ...ADMIN_MODULES.map((module) => ({
+              id: `nav${module.route.replaceAll("/", "-")}`,
+              label: getRouteCommandPaletteLabel(module.route),
+              description: module.description,
+              icon: <Settings className="size-4" />,
+              ...buildRouteCommand(module.route),
+              category: "navigation" as const,
+              keywords: ["admin", module.label.toLowerCase()],
+            })),
+          ] as CommandItem[])
+        : []),
       ...(!isSidepanel ? ([
         {
           id: "nav-health",
@@ -332,7 +365,7 @@ export function CommandPalette({
             "Go to Health & Diagnostics"
           ),
           icon: <Activity className="size-4" />,
-          action: () => { navigate("/settings/health"); setOpen(false) },
+          action: () => navigate("/settings/health"),
           targetPath: "/settings/health",
           category: "navigation" as const,
           keywords: ["status", "connection", "diagnostic"],
@@ -524,7 +557,7 @@ export function CommandPalette({
         ? t(setting.descriptionKey, setting.defaultDescription)
         : setting.defaultDescription,
       icon: <Settings className="size-4" />,
-      action: () => { navigate(setting.route); setOpen(false) },
+      action: () => navigate(setting.route),
       targetPath: setting.route,
       category: "setting" as const,
       keywords: setting.keywords,
@@ -533,8 +566,24 @@ export function CommandPalette({
 
   // Combine all commands
   const allCommands = useMemo(() => {
-    return [...defaultCommands, ...additionalCommands, ...settingCommands]
-  }, [defaultCommands, additionalCommands, settingCommands])
+    const buddyCommand: CommandItem = {
+      id: "buddy-persona-management",
+      label: t("sidepanel:buddyManagement.title", "Buddy & Persona Management"),
+      icon: <MessageSquare size={18} />,
+      category: "action",
+      keywords: ["buddy", "persona", "companion", "workspace"],
+      action: () => {
+        setOpen(false)
+        useBuddyManagementStore.getState().show()
+      }
+    }
+    return [
+      buddyCommand,
+      ...defaultCommands,
+      ...additionalCommands,
+      ...settingCommands
+    ]
+  }, [defaultCommands, additionalCommands, settingCommands, t])
 
   const getCanonicalCommandTargetPath = useCallback((targetPath: string) => {
     if (targetPath === "/settings/mcp-hub") return "/mcp-hub"
@@ -646,6 +695,15 @@ export function CommandPalette({
     selected?.scrollIntoView({ block: "nearest" })
   }, [selectedIndex])
 
+  const executeCommand = useCallback((command: CommandItem) => {
+    if (command.targetPath) {
+      const allowed = requestSettingsNavigation(command.targetPath)
+      closePalette()
+      if (!allowed) return
+    }
+    command.action()
+  }, [closePalette])
+
   // Handle keyboard navigation
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Tab") {
@@ -705,16 +763,13 @@ export function CommandPalette({
         break
       case "Enter":
         e.preventDefault()
-        filteredCommands[selectedIndex]?.action()
+        if (filteredCommands[selectedIndex]) {
+          executeCommand(filteredCommands[selectedIndex])
+        }
         break
       // Escape is handled by useShortcut hook to avoid duplicate handlers
     }
-  }, [filteredCommands, selectedIndex])
-
-  // Execute command
-  const executeCommand = useCallback((cmd: CommandItem) => {
-    cmd.action()
-  }, [])
+  }, [executeCommand, filteredCommands, selectedIndex])
 
   if (!open) return null
   if (typeof document === "undefined") return null

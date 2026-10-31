@@ -5,15 +5,79 @@ of text chunks and assert SSE emission with a terminal [DONE].
 """
 
 import asyncio
-import os
 import shutil
 import tempfile
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator, Callable, Iterator
+from typing import Any
 
 import httpx
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+)
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
+    bind_provider_call_credentials,
+)
+
+
+@pytest.fixture
+def configured_openai_server_credential() -> Iterator[str]:
+    """Expose one healthy configured key through the real credential runtime."""
+
+    from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides
+    from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+        LLMProviderOverride,
+    )
+
+    with llm_provider_overrides._OVERRIDE_LOCK:
+        original_overrides = dict(llm_provider_overrides._OVERRIDE_CACHE)
+        original_healthy = llm_provider_overrides._OVERRIDE_CACHE_HEALTHY
+        original_ttl_disabled = (
+            llm_provider_overrides._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS
+        )
+
+    api_key = "test-openai-server-key"
+    configured = dict(original_overrides)
+    configured["openai"] = LLMProviderOverride(
+        provider="openai",
+        api_key=api_key,
+    )
+    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(configured)
+    try:
+        yield api_key
+    finally:
+        llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+            original_overrides,
+            healthy=original_healthy,
+            ttl_enabled=not original_ttl_disabled,
+        )
+
+
+def _recording_chat_adapter(
+    stream_factory: Callable[[], AsyncIterator[str]],
+    calls: list[tuple[str | None, bool, bool]],
+) -> Callable[..., AsyncIterator[str]]:
+    """Consume the runtime capability at the same seam as a real adapter."""
+
+    def _adapter(**kwargs: Any) -> AsyncIterator[str]:
+        provider = str(kwargs.get("api_endpoint") or "")
+        bound, _credentials = bind_provider_call_credentials(
+            provider,
+            kwargs,
+            consume=True,
+        )
+        calls.append(
+            (
+                bound.get("api_key"),
+                bound.get("credentials_resolved") is True,
+                PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY not in bound,
+            )
+        )
+        return stream_factory()
+
+    return _adapter
 
 
 async def _async_text_stream() -> AsyncIterator[str]:
@@ -42,23 +106,28 @@ async def _async_text_stream_slow() -> AsyncIterator[str]:
 
 
 @pytest.mark.asyncio
-async def test_chat_document_generation_streaming_unified_sse(monkeypatch):
+async def test_chat_document_generation_streaming_unified_sse(
+    monkeypatch,
+    configured_openai_server_credential,
+):
     tmpdir = tempfile.mkdtemp(prefix="unified_sse_doc_stream_")
-    os.environ["USER_DB_BASE_DIR"] = tmpdir
-    os.environ["STREAMS_UNIFIED"] = "1"
+    monkeypatch.setenv("USER_DB_BASE_DIR", tmpdir)
+    monkeypatch.setenv("STREAMS_UNIFIED", "1")
     try:
         from tldw_Server_API.app.main import app
         settings = get_settings()
         headers = {"X-API-KEY": settings.SINGLE_USER_API_KEY}
 
-        # Monkeypatch DocumentGeneratorService._call_llm to return async generator
+        # Keep the document service and credential bridge real; replace only the
+        # provider adapter after it consumes the runtime capability.
         import tldw_Server_API.app.core.Chat.document_generator as gen_mod
 
-        def _stub_call_llm(*args, **kwargs):
-
-            return _async_text_stream()
-
-        gen_mod.DocumentGeneratorService._call_llm = _stub_call_llm  # type: ignore
+        adapter_calls: list[tuple[str | None, bool, bool]] = []
+        monkeypatch.setattr(
+            gen_mod,
+            "chat_api_call",
+            _recording_chat_adapter(_async_text_stream, adapter_calls),
+        )
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -111,15 +180,21 @@ async def test_chat_document_generation_streaming_unified_sse(monkeypatch):
         assert any(ln.startswith("data: ") and "[DONE]" not in ln for ln in lines)
         assert lines[-1].strip().lower() == "data: [done]"
         assert done_count == 1
+        assert adapter_calls == [
+            (configured_openai_server_credential, True, True)
+        ]
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 @pytest.mark.asyncio
-async def test_chat_document_generation_streaming_unified_sse_provider_duplicate_done(monkeypatch):
+async def test_chat_document_generation_streaming_unified_sse_provider_duplicate_done(
+    monkeypatch,
+    configured_openai_server_credential,
+):
     tmpdir = tempfile.mkdtemp(prefix="unified_sse_doc_dupdone_")
-    os.environ["USER_DB_BASE_DIR"] = tmpdir
-    os.environ["STREAMS_UNIFIED"] = "1"
+    monkeypatch.setenv("USER_DB_BASE_DIR", tmpdir)
+    monkeypatch.setenv("STREAMS_UNIFIED", "1")
     try:
         from tldw_Server_API.app.main import app
         settings = get_settings()
@@ -127,11 +202,12 @@ async def test_chat_document_generation_streaming_unified_sse_provider_duplicate
 
         import tldw_Server_API.app.core.Chat.document_generator as gen_mod
 
-        def _stub_call_llm(*args, **kwargs):
-
-            return _dup_done_stream()
-
-        gen_mod.DocumentGeneratorService._call_llm = _stub_call_llm  # type: ignore
+        adapter_calls: list[tuple[str | None, bool, bool]] = []
+        monkeypatch.setattr(
+            gen_mod,
+            "chat_api_call",
+            _recording_chat_adapter(_dup_done_stream, adapter_calls),
+        )
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -180,18 +256,24 @@ async def test_chat_document_generation_streaming_unified_sse_provider_duplicate
         assert any(ln.startswith("data: ") and "[DONE]" not in ln for ln in lines)
         assert lines[-1].strip().lower() == "data: [done]"
         assert done_count == 1
+        assert adapter_calls == [
+            (configured_openai_server_credential, True, True)
+        ]
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 @pytest.mark.asyncio
-async def test_chat_document_generation_streaming_unified_sse_slow_async_heartbeat(monkeypatch):
+async def test_chat_document_generation_streaming_unified_sse_slow_async_heartbeat(
+    monkeypatch,
+    configured_openai_server_credential,
+):
     tmpdir = tempfile.mkdtemp(prefix="unified_sse_doc_heartbeat_")
-    os.environ["USER_DB_BASE_DIR"] = tmpdir
-    os.environ["STREAMS_UNIFIED"] = "1"
+    monkeypatch.setenv("USER_DB_BASE_DIR", tmpdir)
+    monkeypatch.setenv("STREAMS_UNIFIED", "1")
     # Short heartbeat so it appears before first chunk
-    os.environ["STREAM_HEARTBEAT_INTERVAL_S"] = "0.02"
-    os.environ["STREAM_HEARTBEAT_MODE"] = "data"
+    monkeypatch.setenv("STREAM_HEARTBEAT_INTERVAL_S", "0.02")
+    monkeypatch.setenv("STREAM_HEARTBEAT_MODE", "data")
     try:
         from tldw_Server_API.app.main import app
         settings = get_settings()
@@ -199,11 +281,12 @@ async def test_chat_document_generation_streaming_unified_sse_slow_async_heartbe
 
         import tldw_Server_API.app.core.Chat.document_generator as gen_mod
 
-        def _stub_call_llm(*args, **kwargs):
-
-            return _async_text_stream_slow()
-
-        gen_mod.DocumentGeneratorService._call_llm = _stub_call_llm  # type: ignore
+        adapter_calls: list[tuple[str | None, bool, bool]] = []
+        monkeypatch.setattr(
+            gen_mod,
+            "chat_api_call",
+            _recording_chat_adapter(_async_text_stream_slow, adapter_calls),
+        )
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -255,7 +338,8 @@ async def test_chat_document_generation_streaming_unified_sse_slow_async_heartbe
         assert any(ln.startswith("data: ") and "[DONE]" not in ln for ln in lines)
         assert lines[-1].strip().lower() == "data: [done]"
         assert done_count == 1
+        assert adapter_calls == [
+            (configured_openai_server_credential, True, True)
+        ]
     finally:
-        for k in ("STREAM_HEARTBEAT_INTERVAL_S", "STREAM_HEARTBEAT_MODE", "STREAMS_UNIFIED"):
-            os.environ.pop(k, None)
         shutil.rmtree(tmpdir, ignore_errors=True)

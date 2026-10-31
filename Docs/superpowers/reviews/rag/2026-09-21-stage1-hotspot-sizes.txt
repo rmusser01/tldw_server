@@ -1,0 +1,33 @@
+# RAG hotspot sizes (wc -l), 2026-09-21
+# baseline for comparison: 2026-04-07-stage1-hotspot-sizes.txt
+
+   58804 total
+    9586 tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py
+    5280 tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py
+    2075 tldw_Server_API/app/core/RAG/rag_service/advanced_reranking.py
+    1681 tldw_Server_API/app/core/RAG/rag_service/research_agent.py
+    1282 tldw_Server_API/app/core/RAG/rag_service/analytics_system.py
+    1145 tldw_Server_API/app/core/RAG/rag_service/query_features.py
+    1094 tldw_Server_API/app/core/RAG/rag_service/agentic_chunker.py
+    1030 tldw_Server_API/app/core/RAG/rag_service/agentic_execution.py
+    1026 tldw_Server_API/app/core/RAG/rag_service/analytics_db.py
+    1000 tldw_Server_API/app/core/RAG/rag_service/semantic_cache.py
+     970 tldw_Server_API/app/core/RAG/rag_service/security_filters.py
+     912 tldw_Server_API/app/core/RAG/rag_service/citations.py
+     908 tldw_Server_API/app/core/RAG/rag_service/generation.py
+     891 tldw_Server_API/app/core/RAG/rag_service/quick_wins.py
+     852 tldw_Server_API/app/core/RAG/rag_service/chromadb_optimizer.py
+     848 tldw_Server_API/app/core/RAG/rag_service/vector_stores/pgvector_adapter.py
+     845 tldw_Server_API/app/core/RAG/rag_service/streaming_executor.py
+     821 tldw_Server_API/app/core/RAG/rag_service/observability.py
+     820 tldw_Server_API/app/core/RAG/rag_service/query_expansion.py
+     820 tldw_Server_API/app/core/RAG/rag_service/quality_graders.py
+     817 tldw_Server_API/app/core/RAG/rag_service/feedback_system.py
+     813 tldw_Server_API/app/core/RAG/rag_service/post_generation_verifier.py
+     763 tldw_Server_API/app/core/RAG/rag_service/metrics_collector.py
+     727 tldw_Server_API/app/core/RAG/rag_service/guardrails.py
+     693 tldw_Server_API/app/core/RAG/rag_service/table_serialization.py
+     676 tldw_Server_API/app/core/RAG/rag_service/document_grader.py
+     672 tldw_Server_API/app/core/RAG/rag_service/batch_processing.py
+     660 tldw_Server_API/app/core/RAG/rag_service/resilience.py
+     645 tldw_Server_API/app/core/RAG/rag_service/knowledge_strips.py

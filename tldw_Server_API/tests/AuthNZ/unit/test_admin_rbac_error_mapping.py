@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
 from typing import Any
@@ -8,13 +9,13 @@ import pytest
 from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints.admin import admin_rbac
-from tldw_Server_API.app.api.v1.schemas.admin_schemas import ToolPermissionGrantRequest
 from tldw_Server_API.app.api.v1.schemas.admin_rbac_schemas import (
     OverrideEffect,
     PermissionCreateRequest,
     RoleCreateRequest,
     UserOverrideUpsertRequest,
 )
+from tldw_Server_API.app.api.v1.schemas.admin_schemas import ToolPermissionGrantRequest
 from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
 
 
@@ -94,8 +95,19 @@ def _configure_error_mapping_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(auth_settings, "is_single_user_mode", lambda: False)
 
 
+# Called directly, FastAPI's Query() defaults would be passed through as filter values.
+_MATRIX_DEFAULTS = {
+    "category": None,
+    "search": None,
+    "role_search": None,
+    "role_names": None,
+    "roles_limit": 100,
+    "roles_offset": 0,
+}
+
+
 def _assert_postgres_role_query_uses_boolean_default(db: _PostgresMatrixDB) -> None:
-    role_queries = [query for query, _params in db.fetch_calls if "FROM roles" in query]
+    role_queries = [query for query, _params in db.fetch_calls if "FROM roles" in query and "is_system" in query]
     assert role_queries
     normalized = " ".join(role_queries[0].split()).replace(" ", "").lower()
     assert "coalesce(is_system,false)" in normalized
@@ -109,7 +121,7 @@ async def test_roles_matrix_postgres_uses_boolean_is_system_default(
     monkeypatch.setattr(admin_rbac, "_get_is_postgres_backend_fn", lambda: _fake_is_pg_true)
     db = _PostgresMatrixDB()
 
-    response = await admin_rbac.get_roles_matrix(db=db)
+    response = await admin_rbac.get_roles_matrix(db=db, **_MATRIX_DEFAULTS)
 
     assert response.roles[0].name == "admin"
     _assert_postgres_role_query_uses_boolean_default(db)
@@ -122,10 +134,27 @@ async def test_roles_boolean_matrix_postgres_uses_boolean_is_system_default(
     monkeypatch.setattr(admin_rbac, "_get_is_postgres_backend_fn", lambda: _fake_is_pg_true)
     db = _PostgresMatrixDB()
 
-    response = await admin_rbac.get_roles_matrix_boolean(db=db)
+    response = await admin_rbac.get_roles_matrix_boolean(db=db, **_MATRIX_DEFAULTS)
 
     assert response.roles[0].name == "admin"
     _assert_postgres_role_query_uses_boolean_default(db)
+
+
+@pytest.mark.asyncio
+async def test_admin_rbac_endpoint_preserves_cancellation_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cancellation = asyncio.CancelledError("request cancelled")
+
+    async def _cancel(*_args: Any, **_kwargs: Any) -> Any:
+        raise cancellation
+
+    monkeypatch.setattr(admin_rbac, "svc_list_roles", _cancel)
+
+    with pytest.raises(asyncio.CancelledError) as raised:
+        await admin_rbac.list_roles(db=object())
+
+    assert raised.value is cancellation
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,3 @@
-import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -7,7 +6,6 @@ from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.tests.Characters.test_character_functionality_db import sample_card_data
-
 
 pytestmark = pytest.mark.unit
 
@@ -26,22 +24,66 @@ def db_instance(db_path: Path) -> Iterator[CharactersRAGDB]:
     db.close_connection()
 
 
-def test_migration_v25_to_latest_creates_persona_tables(db_path: Path):
-    db = CharactersRAGDB(db_path, "seed-client")
-    db.close_connection()
+def _seed_historical_sqlite(db_path: Path, version: int, monkeypatch: pytest.MonkeyPatch) -> CharactersRAGDB:
+    """Build the real historical schema without current compatibility repairs."""
 
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.execute("PRAGMA foreign_keys = OFF")
-        conn.execute(
-            "UPDATE db_schema_version SET version = ? WHERE schema_name = ?",
-            (25, CharactersRAGDB._SCHEMA_NAME),
-        )
-        conn.execute("DROP TABLE IF EXISTS persona_memory_entries")
-        conn.execute("DROP TABLE IF EXISTS persona_sessions")
-        conn.execute("DROP TABLE IF EXISTS persona_policy_rules")
-        conn.execute("DROP TABLE IF EXISTS persona_scope_rules")
-        conn.execute("DROP TABLE IF EXISTS persona_profiles")
-        conn.commit()
+    def initialize_historical(db: CharactersRAGDB) -> None:
+        with db.transaction() as conn:
+            db._apply_schema_v4(conn)
+            steps = db._sqlite_linear_migration_steps()
+            for prior in range(4, version):
+                steps[prior](conn)
+                assert db._get_db_version(conn) == prior + 1
+
+    with monkeypatch.context() as patch:
+        patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", version)
+        patch.setattr(CharactersRAGDB, "_initialize_schema", initialize_historical)
+        return CharactersRAGDB(db_path, "historical-seed-client")
+
+
+def test_migration_v25_to_latest_creates_persona_tables(db_path: Path, monkeypatch: pytest.MonkeyPatch):
+    seeded = _seed_historical_sqlite(db_path, 25, monkeypatch)
+    try:
+        with seeded.transaction() as conn:
+            assert seeded._get_db_version(conn) == 25
+            tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            assert {
+                "persona_profiles",
+                "persona_scope_rules",
+                "persona_policy_rules",
+                "persona_sessions",
+                "persona_memory_entries",
+                "note_attachments",
+            }.isdisjoint(tables)
+            conn.execute(
+                "INSERT INTO character_cards (name, description, client_id) VALUES (?, ?, ?)",
+                ("Historical v25 character", "Retained character content", "historical-seed-client"),
+            )
+            character_before = dict(conn.execute("SELECT * FROM character_cards").fetchone())
+            # Prove the exact persona-table introduction before the current-head upgrade.
+            seeded._migrate_from_v25_to_v26(conn)
+            assert seeded._get_db_version(conn) == 26
+            tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            assert {
+                "persona_profiles",
+                "persona_scope_rules",
+                "persona_policy_rules",
+                "persona_sessions",
+                "persona_memory_entries",
+            }.issubset(tables)
+            conn.execute(
+                "INSERT INTO persona_profiles (id, user_id, name, system_prompt) VALUES (?, ?, ?, ?)",
+                ("historical-persona", "1", "Historical persona", "Retained persona prompt"),
+            )
+            conn.execute(
+                "INSERT INTO persona_memory_entries (id, persona_id, user_id, memory_type, content) "
+                "VALUES (?, ?, ?, ?, ?)",
+                ("historical-memory", "historical-persona", "1", "fact", "Retained memory content"),
+            )
+            persona_before = dict(conn.execute("SELECT * FROM persona_profiles").fetchone())
+            memory_before = dict(conn.execute("SELECT * FROM persona_memory_entries").fetchone())
+    finally:
+        seeded.close_all_connections()
 
     migrated = CharactersRAGDB(db_path, "migration-check-client")
     conn = migrated.get_connection()
@@ -82,44 +124,46 @@ def test_migration_v25_to_latest_creates_persona_tables(db_path: Path):
     assert "idx_persona_memory_scope" in memory_indexes
     assert "idx_persona_memory_session" in memory_indexes
 
+    character_after = dict(
+        conn.execute("SELECT * FROM character_cards WHERE id = ?", (character_before["id"],)).fetchone()
+    )
+    persona_after = dict(
+        conn.execute("SELECT * FROM persona_profiles WHERE id = ?", (persona_before["id"],)).fetchone()
+    )
+    memory_after = dict(
+        conn.execute("SELECT * FROM persona_memory_entries WHERE id = ?", (memory_before["id"],)).fetchone()
+    )
+    assert all(character_after[key] == value for key, value in character_before.items())
+    assert all(persona_after[key] == value for key, value in persona_before.items())
+    assert all(memory_after[key] == value for key, value in memory_before.items())
     migrated.close_connection()
 
 
-def test_migration_v36_to_latest_adds_voice_command_persona_columns(db_path: Path):
-    db = CharactersRAGDB(db_path, "voice-command-seed-client")
-    db.close_connection()
-
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.execute("PRAGMA foreign_keys = OFF")
-        conn.execute(
-            "UPDATE db_schema_version SET version = ? WHERE schema_name = ?",
-            (36, CharactersRAGDB._SCHEMA_NAME),
-        )
-        conn.execute("DROP TABLE IF EXISTS voice_commands")
-        conn.execute(
-            """
-            CREATE TABLE voice_commands (
-                id TEXT PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                name TEXT NOT NULL,
-                phrases TEXT NOT NULL,
-                action_type TEXT NOT NULL,
-                action_config TEXT NOT NULL,
-                priority INTEGER DEFAULT 0,
-                enabled INTEGER DEFAULT 1,
-                requires_confirmation INTEGER DEFAULT 0,
-                description TEXT,
-                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                deleted INTEGER DEFAULT 0
+def test_migration_v36_to_latest_adds_voice_command_persona_columns(db_path: Path, monkeypatch: pytest.MonkeyPatch):
+    seeded = _seed_historical_sqlite(db_path, 36, monkeypatch)
+    try:
+        with seeded.transaction() as conn:
+            assert seeded._get_db_version(conn) == 36
+            tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            assert "note_attachments" not in tables
+            voice_columns = {row["name"] for row in conn.execute("PRAGMA table_info('voice_commands')")}
+            assert {"persona_id", "connection_id"}.isdisjoint(voice_columns)
+            conn.execute(
+                "INSERT INTO persona_profiles (id, user_id, name, system_prompt) VALUES (?, ?, ?, ?)",
+                ("historical-persona", "1", "Historical voice persona", "Retained voice persona prompt"),
             )
-            """
-        )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_voice_commands_user_id ON voice_commands(user_id)")
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_voice_commands_enabled ON voice_commands(enabled, deleted)"
-        )
-        conn.commit()
+            conn.execute(
+                "INSERT INTO voice_commands (id, user_id, name, phrases, action_type, action_config) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                ("historical-voice", 1, "Retained voice command", '["read my note"]', "llm_chat", '{"prompt":"Read"}'),
+            )
+            persona_before = dict(conn.execute("SELECT * FROM persona_profiles").fetchone())
+            voice_before = dict(conn.execute("SELECT * FROM voice_commands").fetchone())
+            seeded._migrate_from_v36_to_v37(conn)
+            assert seeded._get_db_version(conn) == 37
+            assert dict(conn.execute("SELECT * FROM voice_commands").fetchone()) == voice_before
+    finally:
+        seeded.close_all_connections()
 
     migrated = CharactersRAGDB(db_path, "voice-command-migration-check-client")
     conn = migrated.get_connection()
@@ -137,6 +181,14 @@ def test_migration_v36_to_latest_adds_voice_command_persona_columns(db_path: Pat
     voice_indexes = {row["name"] for row in conn.execute("PRAGMA index_list('voice_commands')").fetchall()}
     assert "idx_voice_commands_user_persona_enabled" in voice_indexes
 
+    persona_after = dict(
+        conn.execute("SELECT * FROM persona_profiles WHERE id = ?", (persona_before["id"],)).fetchone()
+    )
+    voice_after = dict(conn.execute("SELECT * FROM voice_commands WHERE id = ?", (voice_before["id"],)).fetchone())
+    assert all(persona_after[key] == value for key, value in persona_before.items())
+    assert all(voice_after[key] == value for key, value in voice_before.items())
+    assert voice_after["persona_id"] is None
+    assert voice_after["connection_id"] is None
     migrated.close_connection()
 
 

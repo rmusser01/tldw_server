@@ -42,6 +42,11 @@ const { navigateMock } = vi.hoisted(() => ({
   navigateMock: vi.fn()
 }))
 
+vi.mock("@/services/service-prompts", async importOriginal => ({
+  ...await importOriginal<typeof import("@/services/service-prompts")>(),
+  ...await import("./review-scope-fixture")
+}))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
@@ -129,7 +134,7 @@ vi.mock("../../hooks", () => ({
   useCramQueueQuery: vi.fn(),
   useReviewQuery: vi.fn(),
   useReviewFlashcardMutation: vi.fn(),
-  useEndFlashcardReviewSessionMutation: vi.fn(),
+  useEndFlashcardReviewSessionMutation: vi.fn(() => ({ mutateAsync: vi.fn().mockResolvedValue({ id: 77 }), isPending: false })),
   useRecentFlashcardReviewSessionsQuery: vi.fn(() => ({
     data: [],
     isLoading: false,
@@ -597,7 +602,7 @@ describe("ReviewTab create CTA visibility", () => {
     expect(within(row).getByText("New: 2")).toBeInTheDocument()
     expect(within(row).getByText("Learning: 1")).toBeInTheDocument()
 
-    fireEvent.click(within(row).getByRole("button", { name: "Review 4 ready" }))
+    fireEvent.click(within(row).getByRole("button", { name: "Review 3 ready" }))
     fireEvent.click(within(row).getByRole("button", { name: "Cram" }))
     fireEvent.click(within(row).getByRole("button", { name: "Edit" }))
     fireEvent.click(within(row).getByRole("button", { name: "Scheduler" }))
@@ -662,6 +667,37 @@ describe("ReviewTab create CTA visibility", () => {
     expect(screen.getByTestId("flashcards-deck-study-dashboard")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Review all due" })).toBeInTheDocument()
     expect(screen.queryByText("Global due question")).not.toBeInTheDocument()
+  })
+
+  it("keeps the all-due action name stable through loading and completion", async () => {
+    vi.mocked(useDecksQuery).mockReturnValue({
+      data: [{ id: 11, name: "Biology" }], isLoading: false,
+    } as ReturnType<typeof useDecksQuery>)
+    vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as ReturnType<typeof useHasCardsQuery>)
+    const card = createReviewCard({ front: "Global due question" })
+    const setReviewQuery = (loading: boolean) => {
+      vi.mocked(useReviewQuery).mockReturnValue({
+        data: card, isLoading: loading, isFetching: loading,
+        refetch: vi.fn().mockResolvedValue(undefined),
+      } as ReturnType<typeof useReviewQuery>)
+    }
+    setReviewQuery(false)
+    const props = {
+      onNavigateToCreate: vi.fn(), onNavigateToImport: vi.fn(),
+      reviewDeckId: undefined, onReviewDeckChange: vi.fn(), isActive: true,
+    }
+    const { rerender } = render(<ReviewTab {...props} />)
+    for (const loading of [true, false]) {
+      setReviewQuery(loading)
+      rerender(<ReviewTab {...props} />)
+      const button = await screen.findByRole("button", { name: "Review all due", exact: true })
+      expect(button).toHaveAttribute("aria-busy", String(loading))
+      if (loading) expect(button).toBeDisabled()
+      else {
+        expect(button).toBeEnabled()
+        expect(within(button).queryByRole("img", { name: "loading" })).not.toBeInTheDocument()
+      }
+    }
   })
 
   it("starts the all-deck due review from the dashboard action", () => {
@@ -1178,6 +1214,8 @@ describe("ReviewTab create CTA visibility", () => {
     } as any)
     vi.mocked(useCramQueueQuery).mockReturnValue({
       data: [],
+      isSuccess: true,
+      isError: false,
       isLoading: false,
       isFetching: false
     } as any)

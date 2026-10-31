@@ -1,13 +1,8 @@
-import React, { Suspense, lazy } from "react"
+import React from "react"
 
 import type { CommandPaletteProps } from "@/components/Common/CommandPalette"
 import { CommandPaletteHost } from "@/components/Common/CommandPaletteHost"
-
-const PageHelpModal = lazy(() =>
-  import("@/components/Common/PageHelpModal").then((m) => ({
-    default: m.PageHelpModal
-  }))
-)
+import { PageHelpModalHost } from "@/components/Common/PageHelpModalHost"
 
 type EventOnlyHostsProps = {
   commandPaletteProps?: CommandPaletteProps
@@ -23,8 +18,6 @@ export const EventOnlyHosts = ({
       commandPaletteProps={commandPaletteProps}
       includePromptCommands={includePromptCommands}
     />
-    <Suspense fallback={null}>
-      <PageHelpModal />
-    </Suspense>
+    <PageHelpModalHost />
   </>
 )

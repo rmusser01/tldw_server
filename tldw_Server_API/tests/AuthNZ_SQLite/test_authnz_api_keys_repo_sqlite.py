@@ -1,19 +1,39 @@
 import json
 import uuid
+from pathlib import Path
 
 import pytest
 
-pytest_plugins = ("tldw_Server_API.tests._plugins.authnz_full_fixtures",)
+
+@pytest.fixture
+async def sqlite_test_environment(tmp_path, monkeypatch):
+    """Bind these SQLite-specific repository tests to an actual SQLite pool."""
+
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+    monkeypatch.setenv("AUTH_MODE", "multi_user")
+    monkeypatch.setenv("JWT_SECRET_KEY", "sqlite-api-keys-test-secret-32-chars-minimum")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
+    reset_settings()
+    await reset_db_pool()
+    pool = await get_db_pool()
+    ensure_authnz_tables(Path(pool.db_path))
+    try:
+        yield
+    finally:
+        await reset_db_pool()
+        reset_settings()
 
 
 @pytest.mark.asyncio
-async def test_authnz_api_keys_repo_fetch_key_limits_sqlite(isolated_test_environment):
+async def test_authnz_api_keys_repo_fetch_key_limits_sqlite(sqlite_test_environment):
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.repos.api_keys_repo import AuthnzApiKeysRepo
     from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
 
-    _client, _db_name = isolated_test_environment
     pool = await get_db_pool()
 
     # Ensure core AuthNZ tables exist via UsersDB and APIKeyManager so we
@@ -53,12 +73,11 @@ async def test_authnz_api_keys_repo_fetch_key_limits_sqlite(isolated_test_enviro
 
 
 @pytest.mark.asyncio
-async def test_authnz_api_keys_repo_virtual_key_scope_alignment_sqlite(isolated_test_environment):
+async def test_authnz_api_keys_repo_virtual_key_scope_alignment_sqlite(sqlite_test_environment):
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
 
-    _client, _db_name = isolated_test_environment
     pool = await get_db_pool()
 
     users_db = UsersDB(pool)
@@ -97,12 +116,11 @@ async def test_authnz_api_keys_repo_virtual_key_scope_alignment_sqlite(isolated_
 
 
 @pytest.mark.asyncio
-async def test_api_key_scope_list_serializes_and_normalizes_sqlite(isolated_test_environment):
+async def test_api_key_scope_list_serializes_and_normalizes_sqlite(sqlite_test_environment):
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager, normalize_scope
 
-    _client, _db_name = isolated_test_environment
     pool = await get_db_pool()
 
     users_db = UsersDB(pool)
@@ -144,7 +162,7 @@ async def test_api_key_scope_list_serializes_and_normalizes_sqlite(isolated_test
 
 
 @pytest.mark.asyncio
-async def test_authnz_api_keys_repo_rotation_and_revoke_sqlite(isolated_test_environment):
+async def test_authnz_api_keys_repo_rotation_and_revoke_sqlite(sqlite_test_environment):
     """AuthnzApiKeysRepo mark_rotated / revoke_api_key_for_user should work on SQLite."""
     from datetime import datetime
 
@@ -153,7 +171,6 @@ async def test_authnz_api_keys_repo_rotation_and_revoke_sqlite(isolated_test_env
     from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager, APIKeyStatus
 
-    _client, _db_name = isolated_test_environment
     pool = await get_db_pool()
 
     # Ensure user and tables exist
@@ -228,14 +245,13 @@ async def test_authnz_api_keys_repo_rotation_and_revoke_sqlite(isolated_test_env
 
 
 @pytest.mark.asyncio
-async def test_authnz_api_keys_repo_usage_and_audit_sqlite(isolated_test_environment):
+async def test_authnz_api_keys_repo_usage_and_audit_sqlite(sqlite_test_environment):
     """AuthnzApiKeysRepo.increment_usage and insert_audit_log work on SQLite."""
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.repos.api_keys_repo import AuthnzApiKeysRepo
     from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
 
-    _client, _db_name = isolated_test_environment
     pool = await get_db_pool()
 
     users_db = UsersDB(pool)

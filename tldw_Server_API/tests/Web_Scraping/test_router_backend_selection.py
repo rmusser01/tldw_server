@@ -1,35 +1,25 @@
 import types
+from typing import Any
+
 import pytest
 
 
 @pytest.mark.asyncio
-async def test_scrape_article_backend_playwright_skips_httpx(monkeypatch):
+async def test_scrape_article_backend_playwright_skips_httpx(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
-    from tldw_Server_API.app.core.Security import egress as egress_module
-
-    monkeypatch.setattr(
-        egress_module,
-        "evaluate_url_policy",
-        lambda url: types.SimpleNamespace(allowed=True),
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article as canonical
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import (
+        ArticleLimits,
+        ArticlePlan,
+        DirectBrowserProfile,
     )
-    monkeypatch.setattr(ael, "load_and_log_configs", lambda: {"web_scraper": {}})
-    async def allow_robots(*args, **kwargs):
-        return True
+    from tldw_Server_API.app.core.Web_Scraping.preflight import PreflightTarget
+    from tldw_Server_API.app.core.Web_Scraping.runtime import (
+        PolicyDecision,
+        RuntimeRequestContext,
+    )
 
-    monkeypatch.setattr(ael, "is_allowed_by_robots_async", allow_robots)
-    monkeypatch.setattr(ael, "_js_required", lambda *args, **kwargs: False)
-
-    rules = {
-        "domains": {
-            "example.com": {
-                "backend": "playwright",
-                "handler": "tldw_Server_API.app.core.Web_Scraping.handlers:handle_generic_html",
-            }
-        }
-    }
-    monkeypatch.setattr(ael.ScraperRouter, "load_rules_from_yaml", lambda path: rules)
-
-    def fake_handler(html, url):
+    def fake_handler(html: str, url: str) -> dict[str, object]:
         return {
             "url": url,
             "title": "handled",
@@ -39,94 +29,91 @@ async def test_scrape_article_backend_playwright_skips_httpx(monkeypatch):
             "extraction_successful": True,
         }
 
-    monkeypatch.setattr(ael, "resolve_handler", lambda _: fake_handler)
+    class FailFetchClient:
+        def __init__(self) -> None:
+            self.requests: list[object] = []
 
-    def fail_http_fetch(*args, **kwargs):
-        raise AssertionError("http_fetch should not be called for playwright backend")
+        def fetch(self, request: object) -> object:
+            self.requests.append(request)
+            raise AssertionError("fetch client should not be called for playwright backend")
 
-    monkeypatch.setattr(ael, "http_fetch", fail_http_fetch)
+    def extract(html: str, url: str, **kwargs: Any) -> dict[str, object]:
+        handler = kwargs["handler"]
+        assert handler is not None
+        return handler(html, url)
 
-    class DummyPage:
-        async def goto(self, *args, **kwargs):
-            return None
-
-        async def wait_for_timeout(self, *args, **kwargs):
-            return None
-
-        async def wait_for_load_state(self, *args, **kwargs):
-            return None
-
-        async def content(self):
+    class Browser:
+        async def acquire(self, *_args: Any, **_kwargs: Any) -> str:
             return "<html><body>ok</body></html>"
 
-        async def close(self):
-            return None
+    class Executor:
+        async def run(self, func: Any, /, *args: Any, **kwargs: Any) -> Any:
+            return func(*args, **kwargs)
 
-    class DummyContext:
-        async def add_cookies(self, *args, **kwargs):
-            return None
+    fetch_client = FailFetchClient()
 
-        async def new_page(self):
-            return DummyPage()
+    async def evaluate_target(url: str, **_kwargs: Any) -> PreflightTarget:
+        return PreflightTarget(
+            url=url,
+            decision=PolicyDecision(True, "test", "allowed", "pre_fetch", "article_extract"),
+            request_context=RuntimeRequestContext(source="article_extract", stage="pre_fetch"),
+        )
 
-        async def close(self):
-            return None
+    plan = ArticlePlan(
+        url="https://example.com/path",
+        domain="example.com",
+        backend="playwright",
+        handler="tldw_Server_API.app.core.Web_Scraping.handlers:handle_generic_html",
+        headers={"User-Agent": "test-agent"},
+        browser=DirectBrowserProfile("test-agent", (), 1, 1_000, False, 0),
+        limits=ArticleLimits(4_096, 8_192),
+    )
 
-    class DummyBrowser:
-        async def new_context(self, *args, **kwargs):
-            return DummyContext()
-
-        async def close(self):
-            return None
-
-    class DummyChromium:
-        async def launch(self, *args, **kwargs):
-            return DummyBrowser()
-
-    class DummyPlaywright:
-        chromium = DummyChromium()
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return None
-
-    monkeypatch.setattr(ael, "async_playwright", lambda: DummyPlaywright())
+    dependencies = canonical.ArticleDependencies(
+        load_config=lambda: {"web_scraper": {"web_scraper_preflight_analyzers": False}},
+        resolve_plan=lambda _url, _config: plan,
+        evaluate_target=evaluate_target,
+        run_preflight=lambda *_args, **_kwargs: None,
+        apply_preflight_advice=lambda result, **kwargs: (kwargs["backend"], kwargs["method"], result),
+        fetch_client=fetch_client,
+        browser=Browser(),
+        executor=Executor(),
+        extract=extract,
+        build_preflight_context=lambda *_args, **_kwargs: object(),
+        preflight_options=canonical.preflight_facade.PreflightOptions.from_mapping,
+        public_preflight_payload=lambda *_args, **_kwargs: None,
+        resolve_handler=lambda _path: fake_handler,
+        js_required=lambda *_args, **_kwargs: False,
+        convert_content=lambda content: content,
+        increment_counter=lambda *_args, **_kwargs: None,
+        observe_histogram=lambda *_args, **_kwargs: None,
+        clock=lambda: 0.0,
+        log=lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(canonical, "_build_default_dependencies", lambda _cookies: dependencies)
 
     result = await ael.scrape_article("https://example.com/path")
     assert result["title"] == "handled"
+    assert fetch_client.requests == []
 
 
 @pytest.mark.asyncio
-async def test_scrape_article_backend_curl_uses_curl(monkeypatch):
+async def test_scrape_article_backend_curl_uses_curl(monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
-    from tldw_Server_API.app.core.Web_Scraping.runtime import FetchResponse
-    from tldw_Server_API.app.core.Security import egress as egress_module
-
-    monkeypatch.setattr(
-        egress_module,
-        "evaluate_url_policy",
-        lambda url: types.SimpleNamespace(allowed=True),
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article as canonical
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import (
+        ArticleLimits,
+        ArticlePlan,
+        DirectBrowserProfile,
     )
-    monkeypatch.setattr(ael, "load_and_log_configs", lambda: {"web_scraper": {}})
-    async def allow_robots(*args, **kwargs):
-        return True
+    from tldw_Server_API.app.core.Web_Scraping.preflight import PreflightTarget
+    from tldw_Server_API.app.core.Web_Scraping.runtime import (
+        FetchResponse,
+        PolicyDecision,
+        RuntimeRequestContext,
+    )
 
-    monkeypatch.setattr(ael, "is_allowed_by_robots_async", allow_robots)
-    monkeypatch.setattr(ael, "_js_required", lambda *args, **kwargs: False)
-
-    rules = {
-        "domains": {
-            "example.com": {
-                "backend": "curl",
-                "handler": "tldw_Server_API.app.core.Web_Scraping.handlers:handle_generic_html",
-            }
-        }
-    }
-    monkeypatch.setattr(ael.ScraperRouter, "load_rules_from_yaml", lambda path: rules)
-
-    def fake_handler(html, url):
+    def fake_handler(html: str, url: str) -> dict[str, object]:
         return {
             "url": url,
             "title": "handled",
@@ -136,24 +123,66 @@ async def test_scrape_article_backend_curl_uses_curl(monkeypatch):
             "extraction_successful": True,
         }
 
-    monkeypatch.setattr(ael, "resolve_handler", lambda _: fake_handler)
+    class FetchClient:
+        def __init__(self) -> None:
+            self.requests: list[Any] = []
 
-    class FakeFetchClient:
-        def __init__(self):
-            self.requests = []
-
-        def fetch(self, request):
+        def fetch(self, request: Any) -> FetchResponse:
             self.requests.append(request)
-            return FetchResponse(
-                url=request.url,
-                status=200,
-                text="<html><body>ok</body></html>",
-                headers={},
-                backend=request.backend,
-            )
+            return FetchResponse(request.url, 200, {}, "<html><body>ok</body></html>", request.backend)
 
-    fetch_client = FakeFetchClient()
-    monkeypatch.setattr(ael, "_ARTICLE_FETCH_CLIENT", fetch_client)
+    class Browser:
+        async def acquire(self, *_args: Any, **_kwargs: Any) -> str:
+            raise AssertionError("browser fallback is not expected")
+
+    class Executor:
+        async def run(self, func: Any, /, *args: Any, **kwargs: Any) -> Any:
+            return func(*args, **kwargs)
+
+    def extract(html: str, url: str, **kwargs: Any) -> dict[str, object]:
+        handler = kwargs["handler"]
+        assert handler is not None
+        return handler(html, url)
+
+    async def evaluate_target(url: str, **_kwargs: Any) -> PreflightTarget:
+        return PreflightTarget(
+            url=url,
+            decision=PolicyDecision(True, "test", "allowed", "pre_fetch", "article_extract"),
+            request_context=RuntimeRequestContext(source="article_extract", stage="pre_fetch"),
+        )
+
+    fetch_client = FetchClient()
+    plan = ArticlePlan(
+        url="https://example.com/path",
+        domain="example.com",
+        backend="curl",
+        handler="tldw_Server_API.app.core.Web_Scraping.handlers:handle_generic_html",
+        headers={"User-Agent": "test-agent"},
+        browser=DirectBrowserProfile("test-agent", (), 1, 1_000, False, 0),
+        limits=ArticleLimits(4_096, 8_192),
+    )
+    dependencies = canonical.ArticleDependencies(
+        load_config=lambda: {"web_scraper": {"web_scraper_preflight_analyzers": False}},
+        resolve_plan=lambda _url, _config: plan,
+        evaluate_target=evaluate_target,
+        run_preflight=lambda *_args, **_kwargs: None,
+        apply_preflight_advice=lambda result, **kwargs: (kwargs["backend"], kwargs["method"], result),
+        fetch_client=fetch_client,
+        browser=Browser(),
+        executor=Executor(),
+        extract=extract,
+        build_preflight_context=lambda *_args, **_kwargs: object(),
+        preflight_options=canonical.preflight_facade.PreflightOptions.from_mapping,
+        public_preflight_payload=lambda *_args, **_kwargs: None,
+        resolve_handler=lambda _path: fake_handler,
+        js_required=lambda *_args, **_kwargs: False,
+        convert_content=lambda content: content,
+        increment_counter=lambda *_args, **_kwargs: None,
+        observe_histogram=lambda *_args, **_kwargs: None,
+        clock=lambda: 0.0,
+        log=lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(canonical, "_build_default_dependencies", lambda _cookies: dependencies)
 
     result = await ael.scrape_article("https://example.com/path")
     assert fetch_client.requests[0].backend == "curl"
@@ -162,14 +191,15 @@ async def test_scrape_article_backend_curl_uses_curl(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_enhanced_scraper_router_backend_playwright(monkeypatch):
-    from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import EnhancedWebScraper
     from tldw_Server_API.app.core.Security import egress as egress_module
+    from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import EnhancedWebScraper
 
     monkeypatch.setattr(
         egress_module,
         "evaluate_url_policy",
         lambda url: types.SimpleNamespace(allowed=True),
     )
+
     async def allow_robots(*args, **kwargs):
         return True
 

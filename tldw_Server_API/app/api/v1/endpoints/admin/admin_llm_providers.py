@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import math
+import os
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
@@ -20,6 +22,12 @@ from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     LLMProviderOverrideResponse,
     LLMProviderTestRequest,
     LLMProviderTestResponse,
+)
+from tldw_Server_API.app.core.LLM_Calls.adapter_registry import (
+    canonical_builtin_llm_provider_name,
+)
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
+    normalize_catalog_provider_for_chat,
 )
 from tldw_Server_API.app.services import admin_llm_providers_service
 
@@ -48,6 +56,9 @@ class AdminLLMProvidersService(Protocol):
     async def test_provider(
         self,
         payload: LLMProviderTestRequest,
+        *,
+        refresh_overrides: bool = True,
+        timeout_seconds: float | None = None,
     ) -> LLMProviderTestResponse: ...
 
 
@@ -61,6 +72,62 @@ def _get_ensure_sqlite_authnz_ready_if_test_mode() -> Callable[[], Awaitable[Non
     from tldw_Server_API.app.api.v1.endpoints import admin as admin_mod
 
     return admin_mod._ensure_sqlite_authnz_ready_if_test_mode
+
+
+async def _get_configured_provider_names() -> list[str]:
+    """Return providers configured through environment or config sources."""
+    try:
+        from tldw_Server_API.app.api.v1.endpoints.llm_providers import (
+            get_configured_providers_async,
+        )
+
+        response = await get_configured_providers_async(include_deprecated=False)
+    except Exception:
+        return []
+    providers = response.get("providers") if isinstance(response, dict) else None
+    if not isinstance(providers, list):
+        return []
+    return [
+        str(item.get("name") or "")
+        for item in providers
+        if isinstance(item, dict)
+        and item.get("is_configured") is True
+        and item.get("provider_enabled") is not False
+    ]
+
+
+def _dedupe_provider_names(names: list[str]) -> list[str]:
+    """Canonicalize supported chat providers and preserve first-seen order."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for raw_name in names:
+        try:
+            name = canonical_builtin_llm_provider_name(
+                normalize_catalog_provider_for_chat(raw_name)
+            )
+        except ValueError:
+            continue
+        if name not in seen:
+            seen.add(name)
+            result.append(name)
+    return result
+
+
+def _provider_health_timeout_seconds() -> float:
+    """Return a short bounded timeout for each provider health check."""
+    default = 5.0
+    try:
+        timeout = float(
+            str(
+                os.getenv(
+                    "ADMIN_LLM_PROVIDER_HEALTH_TIMEOUT_SECONDS",
+                    default,
+                )
+            ).strip()
+        )
+    except (TypeError, ValueError):
+        return default
+    return timeout if math.isfinite(timeout) and 0.05 <= timeout <= 30.0 else default
 
 
 @router.get(
@@ -162,37 +229,54 @@ async def admin_llm_providers_health(
     """
     await _get_ensure_sqlite_authnz_ready_if_test_mode()()
 
-    # Get configured providers
-    try:
-        from tldw_Server_API.app.core.LLM_Calls.LLM_API_Calls import get_available_providers
-
-        providers = get_available_providers()
-    except Exception:
-        providers = []
-
-    if not providers:
-        # Fallback: list from overrides
-        try:
-            overrides = await admin_llm_providers_service.list_overrides(None)
-            providers = [o.provider for o in (overrides.overrides or [])]
-        except Exception:
-            providers = []
+    configured_providers = await _get_configured_provider_names()
+    # Listing once refreshes the shared override snapshot for the whole batch.
+    overrides = await admin_llm_providers_service.list_overrides(None)
+    disabled_providers = set(
+        _dedupe_provider_names(
+            [
+                override.provider
+                for override in overrides.items
+                if override.is_enabled is False
+            ]
+        )
+    )
+    providers = [
+        provider
+        for provider in _dedupe_provider_names(
+            [
+                *(
+                    override.provider
+                    for override in overrides.items
+                    if override.is_enabled is not False
+                ),
+                *configured_providers,
+            ]
+        )
+        if provider not in disabled_providers
+    ]
+    timeout_seconds = _provider_health_timeout_seconds()
 
     results: list[dict[str, Any]] = []
 
     async def _check_provider(provider_name: str) -> dict[str, Any]:
         start = time.monotonic()
         try:
-            test_result = await admin_llm_providers_service.test_provider(
-                LLMProviderTestRequest(provider=provider_name)
+            test_result = await asyncio.wait_for(
+                admin_llm_providers_service.test_provider(
+                    LLMProviderTestRequest(provider=provider_name),
+                    refresh_overrides=False,
+                    timeout_seconds=timeout_seconds,
+                ),
+                timeout=timeout_seconds,
             )
             latency_ms = round((time.monotonic() - start) * 1000)
+            healthy = test_result.status == "valid"
             return {
                 "provider": provider_name,
-                "status": "healthy" if test_result.success else "unhealthy",
+                "status": "healthy" if healthy else "unhealthy",
                 "latency_ms": latency_ms,
-                "message": test_result.message if hasattr(test_result, "message") else None,
-                "error": test_result.error if hasattr(test_result, "error") and not test_result.success else None,
+                "model": test_result.model,
             }
         except Exception:
             latency_ms = round((time.monotonic() - start) * 1000)
@@ -205,7 +289,7 @@ async def admin_llm_providers_health(
             }
 
     if providers:
-        check_tasks = [_check_provider(p) for p in providers[:20]]  # Cap at 20 providers
+        check_tasks = [_check_provider(p) for p in providers]
         results = await asyncio.gather(*check_tasks)
 
     healthy_count = sum(1 for r in results if r["status"] == "healthy")

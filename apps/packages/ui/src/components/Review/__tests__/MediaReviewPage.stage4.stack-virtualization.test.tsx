@@ -153,7 +153,9 @@ vi.mock('@/services/settings/ui-settings', () => ({
   MEDIA_REVIEW_VIEW_MODE_SETTING: { key: 'mediaReviewViewMode', defaultValue: 'spread' }
 }))
 
-vi.mock('@/utils/media-detail-content', () => ({
+vi.mock('@/utils/media-detail-content', async (importOriginal) => ({
+  // Keep real exports (e.g. extractMediaDetailAnalysis); override only what this test controls.
+  ...(await importOriginal<typeof import('@/utils/media-detail-content')>()),
   extractMediaDetailContent: (detail: any) => detail?.content || detail?.text || ''
 }))
 

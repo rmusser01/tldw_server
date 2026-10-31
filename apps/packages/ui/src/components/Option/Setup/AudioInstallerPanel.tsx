@@ -8,6 +8,7 @@ import {
   Select,
   Space,
   Tag,
+  Tooltip,
   Typography
 } from "antd"
 import { useTranslation } from "react-i18next"
@@ -121,7 +122,9 @@ export const AudioInstallerPanel: React.FC = () => {
           />
         )}
 
-        <Descriptions size="small" column={2}>
+        {/* One column on phones: two squeezed columns wrapped values one
+            character per line at 390px (2026-09 UX audit finding S10). */}
+        <Descriptions size="small" column={{ xs: 1, sm: 2 }}>
           <Descriptions.Item
             label={t("settings:audioInstaller.machineProfile", "Machine profile")}
           >
@@ -203,7 +206,12 @@ export const AudioInstallerPanel: React.FC = () => {
             loading={provisioning}
             disabled={!selectedBundleId || !selectedResourceProfile}
           >
-            {t("settings:audioInstaller.provision", "Provision bundle")}
+            {selectedProfile?.estimated_disk_gb
+              ? t("settings:audioInstaller.provisionSized", {
+                  defaultValue: "Provision bundle ({{size}} GB)",
+                  size: selectedProfile.estimated_disk_gb
+                })
+              : t("settings:audioInstaller.provision", "Provision bundle")}
           </Button>
           <Button
             onClick={() => void handleVerify()}
@@ -212,13 +220,20 @@ export const AudioInstallerPanel: React.FC = () => {
           >
             {t("settings:audioInstaller.verify", "Run verification")}
           </Button>
-          <Button
-            onClick={() => void handleProvision(true)}
-            loading={provisioning}
-            disabled={!selectedBundleId || !selectedResourceProfile}
+          <Tooltip
+            title={t(
+              "settings:audioInstaller.safeRerunHint",
+              "Re-runs provisioning but skips any install steps that already completed successfully."
+            )}
           >
-            {t("settings:audioInstaller.safeRerun", "Safe rerun")}
-          </Button>
+            <Button
+              onClick={() => void handleProvision(true)}
+              loading={provisioning}
+              disabled={!selectedBundleId || !selectedResourceProfile}
+            >
+              {t("settings:audioInstaller.safeRerun", "Safe rerun")}
+            </Button>
+          </Tooltip>
         </Space>
 
         {installStatus && (

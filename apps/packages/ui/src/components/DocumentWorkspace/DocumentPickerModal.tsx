@@ -1,3 +1,5 @@
+import { quickIngestAuthority, useQuickIngestAuthority, type QuickIngestOperation } from "@/services/tldw/quick-ingest-authority"
+import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
 import React from "react"
 import { useTranslation } from "react-i18next"
 import {
@@ -20,8 +22,6 @@ import { inferUploadMediaTypeFromFile } from "@/services/tldw/media-routing"
 import { inferDocumentTypeFromMedia } from "./document-utils"
 import type { DocumentType } from "./types"
 import { useNavigate } from "react-router-dom"
-import { setSetting } from "@/services/settings/registry"
-import { LAST_MEDIA_ID_SETTING } from "@/services/settings/ui-settings"
 import { useQuickIngestStore } from "@/store/quick-ingest"
 
 export type DocumentPickerTab = "library" | "upload"
@@ -30,7 +30,7 @@ interface DocumentPickerModalProps {
   open: boolean
   initialTab?: DocumentPickerTab
   onClose: () => void
-  onOpenDocument: (mediaId: number, docTypeHint?: DocumentType | null) => Promise<void>
+  onOpenDocument: (mediaId: number, docTypeHint?: DocumentType | null, operation?: QuickIngestOperation) => Promise<void>
 }
 
 interface MediaListItem {
@@ -110,7 +110,14 @@ const getDocType = (item: MediaListItem): DocumentType | null =>
 const isDocumentCandidate = (item: MediaListItem): boolean =>
   isSupportedDocType(getDocType(item))
 
-export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
+export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = (props) => {
+  const authorityKey = useQuickIngestAuthority()
+  const generation = useQuickIngestSessionStore(state => state.generation)
+  if (!authorityKey) return null
+  return <OwnedDocumentPickerModal key={`${authorityKey}:${generation}`} {...props} />
+}
+
+const OwnedDocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
   open,
   initialTab = "library",
   onClose,
@@ -118,6 +125,7 @@ export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
 }) => {
   const { t } = useTranslation(["option", "common"])
   const navigate = useNavigate()
+  const operation = React.useMemo(() => quickIngestAuthority.capture(), [])
   const isOnline = useServerOnline()
   const recentlyIngestedDocs = useQuickIngestStore(s => s.recentlyIngestedDocs)
 
@@ -147,7 +155,7 @@ export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
 
   const loadMedia = React.useCallback(
     async (query?: string) => {
-      if (!isOnline) return
+      if (!isOnline || !operation.isCurrent()) return
       setLoading(true)
       setError(null)
       try {
@@ -159,29 +167,31 @@ export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
                 query: trimmed,
                 ...(showAllMedia ? {} : { media_types: ["pdf", "ebook"] })
               },
-              { page: 1, results_per_page: 50 }
+              { page: 1, results_per_page: 50 }, operation
             )
         } else {
           response = await tldwClient.listMedia({
             page: 1,
             results_per_page: 50,
             include_keywords: true
-          })
+          }, operation)
         }
+        if (!operation.isCurrent()) return
         const items = normalizeMediaItems(response)
         const filtered = showAllMedia ? items : items.filter(isDocumentCandidate)
         setMediaItems(filtered)
       } catch (err) {
+        if (!operation.isCurrent()) return
         setError(
           err instanceof Error
             ? err.message
             : t("option:documentWorkspace.loadMediaError", "Failed to load media library")
         )
       } finally {
-        setLoading(false)
+        if (operation.isCurrent()) setLoading(false)
       }
     },
-    [isOnline, showAllMedia, t]
+    [isOnline, showAllMedia, t, operation]
   )
 
   React.useEffect(() => {
@@ -196,7 +206,17 @@ export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
   const getRecentDocs = (): Array<{ id: number; title: string; type?: string }> => {
     try {
       const raw = localStorage.getItem(RECENT_DOCS_KEY)
-      return raw ? JSON.parse(raw) : []
+      if (!raw) return []
+      const record = JSON.parse(raw)
+      if (!record || record.authorityKey !== operation.authorityKey || !Array.isArray(record.docs)) {
+        localStorage.removeItem(RECENT_DOCS_KEY)
+        return []
+      }
+      return record.docs.filter((doc: unknown): doc is { id: number; title: string; type?: string } => {
+        if (!doc || typeof doc !== "object") return false
+        const candidate = doc as Record<string, unknown>
+        return typeof candidate.id === "number" && Number.isFinite(candidate.id) && candidate.id > 0 && typeof candidate.title === "string"
+      })
     } catch {
       return []
     }
@@ -205,17 +225,16 @@ export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
   const addToRecent = (item: MediaListItem) => {
     const recent = getRecentDocs().filter((r) => r.id !== item.id)
     recent.unshift({ id: item.id, title: item.title || `Media #${item.id}`, type: item.type })
-    localStorage.setItem(RECENT_DOCS_KEY, JSON.stringify(recent.slice(0, MAX_RECENT)))
+    localStorage.setItem(RECENT_DOCS_KEY, JSON.stringify({ authorityKey: operation.authorityKey, docs: recent.slice(0, MAX_RECENT) }))
   }
 
   const [recentDocs] = React.useState(() => getRecentDocs())
 
   const handleOpen = async (item: MediaListItem) => {
-    if (!item?.id) return
+    if (!operation.isCurrent() || !item?.id) return
     const docType = getDocType(item)
     if (!isSupportedDocType(docType)) {
-      await setSetting(LAST_MEDIA_ID_SETTING, String(item.id))
-      navigate("/media-multi")
+      navigate(`/media?id=${encodeURIComponent(String(item.id))}`)
       onClose()
       return
     }
@@ -223,13 +242,14 @@ export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
     addToRecent(item)
     setOpeningId(item.id)
     try {
-      await onOpenDocument(item.id, docType)
-      onClose()
+      await onOpenDocument(item.id, docType, operation)
+      if (operation.isCurrent()) onClose()
     } catch (err) {
+      if (!operation.isCurrent()) return
       console.error("Failed to open document", err)
       onClose()
     } finally {
-      setOpeningId(null)
+      if (operation.isCurrent()) setOpeningId(null)
     }
   }
 
@@ -241,7 +261,7 @@ export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
     const file = event.target.files?.[0]
-    if (!file) return
+    if (!file || !operation.isCurrent()) return
 
     // Validate file type before uploading
     const ext = file.name.toLowerCase().split(".").pop()
@@ -260,7 +280,8 @@ export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
       const response = await tldwClient.uploadMedia(file, {
         media_type: mediaType,
         keep_original_file: true
-      })
+      }, operation)
+      if (!operation.isCurrent()) return
 
       const mediaId = extractMediaId(response)
       if (!mediaId) {
@@ -286,16 +307,17 @@ export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
       }
 
       const docType = inferDocumentTypeFromMedia(mediaType, file.name)
-      await onOpenDocument(Number(mediaId), docType)
-      onClose()
+      await onOpenDocument(Number(mediaId), docType, operation)
+      if (operation.isCurrent()) onClose()
     } catch (err) {
+      if (!operation.isCurrent()) return
       setError(
         err instanceof Error
           ? err.message
           : t("option:documentWorkspace.uploadFailed", "Upload failed")
       )
     } finally {
-      setUploading(false)
+      if (operation.isCurrent()) setUploading(false)
       if (event.target) {
         event.target.value = ""
       }
@@ -470,7 +492,7 @@ export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
     setIsDragOver(false)
 
     const file = e.dataTransfer.files?.[0]
-    if (!file) return
+    if (!file || !operation.isCurrent()) return
 
     // Validate file type
     const ext = file.name.toLowerCase().split(".").pop()
@@ -556,8 +578,8 @@ export const DocumentPickerModal: React.FC<DocumentPickerModalProps> = ({
               ? {
                   label: t("option:documentWorkspace.openInMedia", "Open in Media"),
                   onClick: async () => {
-                    await setSetting(LAST_MEDIA_ID_SETTING, String(uploadWarning.mediaId))
-                    navigate("/media-multi")
+                    if (!operation.isCurrent()) return
+                    navigate(`/media?id=${encodeURIComponent(String(uploadWarning.mediaId))}`)
                     onClose()
                   }
                 }

@@ -1,132 +1,61 @@
-import { test, expect } from "@playwright/test"
-import { launchWithExtensionOrSkip } from "./utils/real-server"
-import {
-  waitForConnectionStore,
-  forceConnected
-} from "./utils/connection"
-import path from "path"
+import { test, expect } from '@playwright/test'
+import path from 'node:path'
+import { launchWithExtension } from './utils/extension'
+import { grantHostPermission } from './utils/permissions'
+import { startHistoryServer, historySeedConfig, seedHistory, seedSidepanelReference, choose, readStore } from './utils/history-selection'
 
-const EXT_PATH = path.resolve("build/chrome-mv3")
+const EXT_PATH = path.resolve('build/chrome-mv3')
 
-test.describe("Sidepanel / Options page handoff", () => {
-  test("Open full view from sidepanel opens WebUI chat with handoff context", async () => {
-    test.setTimeout(90_000)
+test('selected sidepanel expansion opens extension full page with an independent view over the same owner', async () => {
+  const server = await startHistoryServer()
+  const { context, page, optionsUrl, extensionId, openSidepanel } = await launchWithExtension(EXT_PATH, { seedConfig: historySeedConfig(server.url) })
+  try {
+    expect(await grantHostPermission(context, extensionId, `${server.url}/*`)).toBe(true)
+    await page.goto(`${optionsUrl}#/chat`)
+    await expect(page.getByTestId('chat-input')).toBeVisible()
+    await seedHistory(page)
+    await seedSidepanelReference(page)
+    const sidepanel = await openSidepanel('/chat')
+    await sidepanel.setViewportSize({ width: 390, height: 780 })
+    await choose(sidepanel, 'h1-a')
+    const [expanded] = await Promise.all([context.waitForEvent('page'), sidepanel.getByTestId('chat-open-full-screen').click()])
+    await expect.poll(() => expanded.url()).toContain(`${extensionId}/options.html`)
+    await expect(expanded.getByText('H1 variant A', { exact: true })).toBeVisible()
+    await choose(expanded, 'h1-b')
+    await expect(sidepanel.getByText('H1 variant A', { exact: true })).toBeVisible()
+    await expect(sidepanel.getByText('H1 variant B', { exact: true })).toHaveCount(0)
+    expect(new Set((await readStore(sidepanel, 'historySelections')).filter(row => row.client_session_id !== 'fixture-origin').map(row => row.view.view_session_id)).size).toBe(2)
+  } finally { await context.close(); await server.close() }
+})
 
-    const { context, openSidepanel } =
-      await launchWithExtensionOrSkip(test, EXT_PATH, {
-        seedConfig: {
-          __tldw_first_run_complete: true,
-          __tldw_allow_offline: true,
-          tldwConfig: {
-            serverUrl: "http://127.0.0.1:8000",
-            webUiUrl: "http://127.0.0.1:8080",
-            authMode: "single-user",
-            apiKey: "test-key"
-          }
-        }
-      })
+test('explicit Continue in WebUI composer action preserves its existing full-app draft handoff', async () => {
+  const server = await startHistoryServer()
+  const { context, page, optionsUrl, extensionId, openSidepanel } = await launchWithExtension(EXT_PATH, { seedConfig: historySeedConfig(server.url) })
+  try {
+    expect(await grantHostPermission(context, extensionId, `${server.url}/*`)).toBe(true)
+    await page.goto(optionsUrl + '#/chat')
+    await expect(page.getByTestId('chat-input')).toBeVisible()
+    await seedHistory(page)
+    await seedSidepanelReference(page)
+    const sidepanel = await openSidepanel('/chat')
+    await choose(sidepanel, 'h1-a')
+    await sidepanel.evaluate(() => localStorage.setItem('tldw-ui-mode', JSON.stringify({ state: { mode: 'pro' }, version: 1 })))
+    await sidepanel.reload()
+    await sidepanel.getByTestId('chat-input').fill('H1 explicit composer draft')
+    await sidepanel.getByTestId('control-more-menu').click()
+    const [expanded] = await Promise.all([context.waitForEvent('page'), sidepanel.getByTestId('chat-continue-in-webui').click()])
+    await expect.poll(() => expanded.url()).toContain(`${extensionId}/options.html`)
+    await expect(expanded.getByTestId('chat-input')).toHaveValue('H1 explicit composer draft')
+    expect(server.requests.filter(row => row.method === 'POST' && row.path === '/api/v1/chats/')).toHaveLength(0)
+  } finally { await context.close(); await server.close() }
+})
 
-    try {
-      const sidepanel = await openSidepanel()
-      await waitForConnectionStore(sidepanel, "handoff:sp-store")
-      await forceConnected(
-        sidepanel,
-        { serverUrl: "http://127.0.0.1:8000" },
-        "handoff:sp-connected"
-      )
-
-      const draft = `handoff draft ${Date.now()}`
-      await sidepanel.getByTestId("chat-input").fill(draft)
-
-      const [newPage] = await Promise.all([
-        context.waitForEvent("page"),
-        sidepanel.getByTestId("chat-open-full-screen").click()
-      ])
-      await expect
-        .poll(() => newPage.url(), { timeout: 10_000 })
-        .toContain("http://127.0.0.1:8080/chat")
-
-      const openedUrl = new URL(newPage.url())
-      expect(openedUrl.pathname).toBe("/chat")
-      expect(openedUrl.href).not.toContain("/options.html")
-      expect(openedUrl.searchParams.has("handoff")).toBe(false)
-
-      const encodedHandoff = new URLSearchParams(
-        openedUrl.hash.slice(1)
-      ).get("handoff")
-      expect(encodedHandoff).toBeTruthy()
-      const decodedHandoff = JSON.parse(
-        Buffer.from(
-          encodedHandoff!.replace(/-/g, "+").replace(/_/g, "/"),
-          "base64"
-        ).toString("utf8")
-      )
-      expect(decodedHandoff).toMatchObject({
-        source: "sidepanel-chat",
-        draft,
-        chatMode: "normal",
-        webSearch: false,
-        toolChoice: "none"
-      })
-
-      await context.close()
-    } catch (error) {
-      await context.close()
-      throw error
-    }
-  })
-
-  test("settings changed in options page are accessible from sidepanel storage", async () => {
-    test.setTimeout(90_000)
-
-    const { context, page, openSidepanel, extensionId } =
-      await launchWithExtensionOrSkip(test, EXT_PATH, {
-        seedConfig: {
-          __tldw_first_run_complete: true,
-          __tldw_allow_offline: true,
-          tldwConfig: {
-            serverUrl: "http://127.0.0.1:8000",
-            authMode: "single-user",
-            apiKey: "test-key"
-          }
-        }
-      })
-
-    try {
-      // Write a value via chrome.storage from the options page
-      const testValue = `handoff-test-${Date.now()}`
-      await page.evaluate(
-        (val) =>
-          new Promise<void>((resolve) => {
-            chrome.storage.local.set(
-              { __e2e_handoff_test: val },
-              () => resolve()
-            )
-          }),
-        testValue
-      )
-
-      // Open sidepanel and read the value back
-      const sidepanel = await openSidepanel()
-      const readValue = await sidepanel.evaluate(
-        () =>
-          new Promise<string | null>((resolve) => {
-            if (typeof chrome === "undefined" || !chrome.storage?.local) {
-              resolve(null)
-              return
-            }
-            chrome.storage.local.get("__e2e_handoff_test", (items) => {
-              resolve(items?.__e2e_handoff_test ?? null)
-            })
-          })
-      )
-
-      expect(readValue).toBe(testValue)
-
-      await context.close()
-    } catch (error) {
-      await context.close()
-      throw error
-    }
-  })
+test('settings written in options remain shared with the sidepanel through real extension storage', async () => {
+  const server = await startHistoryServer()
+  const { context, page, openSidepanel } = await launchWithExtension(EXT_PATH, { seedConfig: historySeedConfig(server.url) })
+  try {
+    await page.evaluate(() => chrome.storage.local.set({ userChatBubble: false }))
+    const sidepanel = await openSidepanel('/chat')
+    expect(await sidepanel.evaluate(async () => (await chrome.storage.local.get('userChatBubble')).userChatBubble)).toBe(false)
+  } finally { await context.close(); await server.close() }
 })

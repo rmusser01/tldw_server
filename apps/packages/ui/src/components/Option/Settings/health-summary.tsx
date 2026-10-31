@@ -10,6 +10,19 @@ import { ConnectionPhase } from "@/types/connection"
 import { useTranslation } from "react-i18next"
 import { getCoreIssueLabel } from "./tldw-connection-status"
 
+const Dot = ({ status }: { status: "unknown" | "ok" | "fail" }) => (
+  <span
+    aria-hidden
+    className={`inline-block w-2 h-2 rounded-full ${
+      status === "ok"
+        ? "bg-success"
+        : status === "fail"
+          ? "bg-danger"
+          : "bg-border-strong"
+    }`}
+  />
+)
+
 export default function HealthSummary() {
   const { t } = useTranslation(["settings"])
   const {
@@ -74,19 +87,6 @@ export default function HealthSummary() {
       setRagCheckedAt(knowledgeLastCheckedAt)
     }
   }, [knowledgeLastCheckedAt])
-
-  const Dot = ({ status }: { status: "unknown" | "ok" | "fail" }) => (
-    <span
-      aria-hidden
-      className={`inline-block w-2 h-2 rounded-full ${
-        status === "ok"
-          ? "bg-success"
-          : status === "fail"
-            ? "bg-danger"
-            : "bg-border-strong"
-      }`}
-    />
-  )
 
   let issueLabel: string | null = null
   let issueBody: string | null = null

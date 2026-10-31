@@ -1,0 +1,19 @@
+{
+  "eslint_diagnostics_unchanged": true,
+  "baseline_errors": 1,
+  "baseline_warnings": 52,
+  "formatted_diffs": [
+    {
+      "path": "apps/packages/ui/src/services/tldw/domains/workspace-api.ts",
+      "change": "canonical /api/v1/workspaces/ path only"
+    },
+    {
+      "path": "apps/packages/ui/src/services/tldw/domains/__tests__/workspace-api.status-capabilities.test.ts",
+      "change": "canonical /api/v1/workspaces/ path only"
+    },
+    {
+      "path": "apps/packages/ui/src/services/__tests__/tldw-api-client.workspace-api.test.ts",
+      "change": "canonical /api/v1/workspaces/ path only"
+    }
+  ]
+}

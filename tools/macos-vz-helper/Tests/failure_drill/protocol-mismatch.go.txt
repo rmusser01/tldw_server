@@ -1,0 +1,30 @@
+	// Test-only overlay. Keep the helper gate real; vary only the wire version.
+	testProtocolVersion := ProtocolVersion
+	challengePath := c.cfg.WorkspaceRoot + "/.tldw-protocol-challenge.json"
+	proofPath := c.cfg.WorkspaceRoot + "/.tldw-protocol-proof.json"
+	challengeData, challengeErr := os.ReadFile(challengePath)
+	if challengeErr != nil {
+		return fmt.Errorf("read test protocol challenge %s: %w", challengePath, challengeErr)
+	}
+	var challenge struct {
+		Nonce string `json:"nonce"`
+		InjectMismatch bool `json:"inject_mismatch"`
+	}
+	if err := json.Unmarshal(challengeData, &challenge); err != nil {
+		return fmt.Errorf("decode test protocol challenge %s: %w", challengePath, err)
+	}
+	if len(challenge.Nonce) != 32 {
+		return errors.New("invalid test protocol challenge")
+	}
+	if challenge.InjectMismatch {
+		testProtocolVersion = "999"
+	}
+	proof, err := json.Marshal(map[string]any{
+		"nonce": challenge.Nonce, "vm_id": c.cfg.VMID, "protocol_version": testProtocolVersion,
+	})
+	if err != nil {
+		return fmt.Errorf("encode test protocol proof %s: %w", proofPath, err)
+	}
+	if err := os.WriteFile(proofPath, proof, 0600); err != nil {
+		return fmt.Errorf("write test protocol proof %s: %w", proofPath, err)
+	}

@@ -16,6 +16,127 @@ This guide explains how to set up each TTS provider, especially the local models
 OPENAI_API_KEY=your-api-key-here
 ```
 
+### OpenRouter and Named Speech Gateways
+
+OpenRouter and administrator-defined OpenAI-compatible speech gateways use the
+same server-side adapter. They are explicit backends: `openrouter` is the
+built-in ID, while each key under top-level `gateways` becomes
+`gateway:<slug>`. For example, `gateways.company-proxy` is selected as
+`gateway:company-proxy`. Omitting `backend` preserves the legacy TTS provider
+inference and global fallback path.
+
+The checked-in
+`tldw_Server_API/Config_Files/tts_providers_config.yaml` contains disabled
+examples for both backends. To enable one:
+
+1. Set its exact-cased `default_model`, `default_voice`, `allowed_models`, and
+   optional `model_overrides` for the upstream you operate.
+2. Configure an admin key through the referenced environment variable, enable
+   `allow_user_api_key`, or do both. An enabled gateway needs at least one
+   credential source.
+3. Review its fallback targets. Enable and configure every target, or set
+   `max_attempts: 1` with an empty target list before canarying only one backend.
+4. Set `speech_timeout_seconds` to the maximum duration of one upstream
+   synthesis request (default: 30 seconds).
+5. Set `enabled: true` and restart the server. Gateway definitions are validated
+   and registered at startup; hot reload is not supported in this release.
+6. Confirm the canonical ID and effective catalog with
+   `GET /api/v1/audio/providers` before sending synthesis traffic.
+
+OpenRouter currently documents an OpenAI-compatible speech endpoint and model
+discovery filtered with `output_modalities=speech`:
+
+- [OpenRouter TTS guide](https://openrouter.ai/docs/guides/overview/multimodal/tts)
+- [OpenRouter speech API](https://openrouter.ai/docs/api/api-reference/speech/create-audio-speech)
+
+Optional OpenRouter attribution headers are populated from
+`OPENROUTER_SITE_URL` and `OPENROUTER_SITE_NAME`. Do not put secrets in either
+value.
+
+#### Configuration precedence and overlays
+
+The TTS manager merges its supported sources in this order:
+
+1. built-in schema defaults;
+2. `tts_providers_config.yaml`;
+3. supported `[TTS-Settings]` and provider key values from `config.txt`;
+4. supported process-environment overrides.
+
+Gateway structure belongs in YAML. `${ENV_VAR}` placeholders anywhere in a
+gateway definition are resolved from the process environment before schema
+validation. A missing placeholder is omitted; if the gateway is enabled and the
+missing value is required, startup fails with the relevant configuration path.
+OpenRouter supplies built-in URL, speech path, and discovery defaults, but an
+explicit YAML value wins.
+
+Discovery never grants authority by itself. Static configuration is applied as
+an overlay:
+
+- `allowed_models` is an exact-cased allowlist. It cannot be combined with
+  `allow_discovered_models: true`.
+- `model_overrides` defines exact model voices, formats, defaults, and
+  capabilities. Model IDs are not lowercased.
+- `capability_defaults` applies only where a model overlay does not replace a
+  field.
+- Discovery uses fresh and bounded-stale credential-scoped caches. Startup
+  performs no discovery request and does not depend on upstream availability.
+
+#### URL and request authority
+
+Only an administrator can configure `base_url`, `speech_path`, `models_path`,
+static headers, authentication behavior, discovery query, and fallback targets.
+Users cannot submit any of those values through speech requests or stored key
+metadata.
+
+`base_url` must be an absolute HTTPS URL without embedded credentials, query, or
+fragment. HTTP requires `allow_insecure_http: true` and is restricted to
+localhost or private/local IP literals. `speech_path` and `models_path` must be
+strict relative paths: no leading slash, scheme, authority, query, fragment,
+backslash, empty/dot segment, or encoded traversal. Every upstream request and
+redirect is still subject to the central egress policy.
+
+`allowed_request_options` is a per-gateway set of exact RFC 6901 JSON Pointer
+leaves. Only matching JSON leaves from request `extra_params` are copied into
+the upstream body. Whole-object allowlisting and URL, credential, header,
+model, voice, format, language, or auth authority are rejected. In YAML, quote
+the fallback key as `"on"`; unquoted `on` is interpreted as a boolean by YAML
+1.1 parsers.
+
+#### Credentials and fallback
+
+For an explicit gateway attempt, credential precedence is:
+
+1. the authenticated user's stored key, when `allow_user_api_key: true` and a
+   record exists;
+2. the admin key from the gateway configuration.
+
+A present but unreadable or keyless user record is authoritative and fails
+closed; it does not fall through to the admin key. Each configured fallback
+target resolves its own credential independently, so a source key is never sent
+to another backend. See [BYOK User Guide](../User_Guides/Server/BYOK_User_Guide.md)
+for storage requirements and lifecycle details.
+
+Gateway fallback is separate from legacy global TTS fallback and from
+OpenRouter's own provider routing. It is bounded by each backend's `fallback`
+policy and can be disabled per request with `allow_fallback: false`. The server
+does not transparently retry synthesis POSTs. A fallback attempt is a second
+synthesis request and can incur another provider charge. Fallback is allowed
+only for configured failure categories before audio has been committed; audio
+from failed attempts is discarded and never concatenated.
+
+#### Output conversion and WebUI caching
+
+Native upstream audio can stream. Non-native output conversion is optional,
+requires the configured `source_format` plus an available ffmpeg executable,
+and is always full-buffer before response commitment. Input bytes, output bytes,
+and conversion time are bounded. Local conversion failures are terminal and do
+not trigger another billed synthesis attempt.
+
+The server adds no synthesized-audio cache for gateways. The WebUI also disables
+reusable audio caching for explicit gateway requests in this release because a
+safe cache key must include opaque credential revision and server configuration
+generation.
+
 ### ElevenLabs
 ```bash
 # Add to config.txt or environment
@@ -175,6 +296,9 @@ python Helper_Scripts/TTS_Installers/install_tts_vibevoice.py --variant 1.5B
 python Helper_Scripts/TTS_Installers/install_tts_omnivoice_sidecar.py \
   --model-path models/omnivoice_sidecar/models/OmniVoice
 
+# audio.cpp sidecar config helper (explicit clone/build/model flags)
+python Helper_Scripts/TTS_Installers/install_tts_audio_cpp.py --patch-config
+
 # NeuTTS (deps; optional prefetch)
 python Helper_Scripts/TTS_Installers/install_tts_neutts.py --prefetch
 
@@ -243,6 +367,129 @@ Example request:
   }
 }
 ```
+
+### audio.cpp Setup
+
+`audio_cpp` is an optional TTS provider backed by the external
+[`0xShug0/audio.cpp`](https://github.com/0xShug0/audio.cpp) executable or HTTP
+server. It is disabled by default and does not vendor audio.cpp source or
+prebuilt binaries into tldw_server.
+
+The helper supports `--backend cpu|cuda|hip|vulkan|metal` (default `cuda`)
+and emits both the upstream build flags and runtime backend setting. Backend
+performance and model coverage depend on audio.cpp. The setup contract was checked
+against upstream commit `fa5aaac9266a98c68f8a5c9fcd1ba6ff65875416` (2026-09-09);
+older builds may lack the native idle-unload option used below.
+
+#### External Server Mode
+
+Run `audiocpp_server` yourself and point tldw at its loopback URL:
+
+```yaml
+providers:
+  audio_cpp:
+    enabled: true
+    base_url: "http://127.0.0.1:8080"
+    model: "audio-cpp/pocket-tts"
+    auto_download: false
+    extra_params:
+      managed: false
+      allow_remote_base_url: false
+      external_voice_reference_mode: "disabled"
+```
+
+The adapter checks `/health` and `/v1/models` during initialization. By default,
+`base_url` must be loopback. Set `allow_remote_base_url: true` only when an
+admin intentionally exposes a trusted remote audio.cpp server.
+
+Reference-audio cloning in external mode is disabled by default because this
+adapter sends `voice_ref` as a path readable by the audio.cpp server process. To use
+it with a separate server, set `external_voice_reference_mode: "shared_path"` and
+configure `shared_scratch_dir` to a directory that both tldw and the server can
+read. Staged files use owner-only permissions, so run both processes as the same
+OS user. Files are removed after success, failure, or request cancellation unless
+`retain_request_artifacts` is enabled. Cloning capability discovery reflects this
+configuration. An explicit voice catalog entry can set `request_field: "voice"`
+to select a native upstream voice; entries with a null field remain metadata only
+and require reference audio. Generic voice IDs are not forwarded automatically.
+Upstream also supports inline base64 references; this adapter retains shared-file
+reference staging.
+
+#### Managed Sidecar Mode
+
+Managed mode lets tldw start a loopback sidecar with:
+
+```text
+audiocpp_server --config <generated server_config_path>
+```
+
+Patch the provider config without enabling it:
+
+```bash
+python Helper_Scripts/TTS_Installers/install_tts_audio_cpp.py --patch-config
+```
+
+Enable it in the generated config or run:
+
+```bash
+python Helper_Scripts/TTS_Installers/install_tts_audio_cpp.py --patch-config --enable-provider
+```
+
+The helper builds repo-local paths under `models/audio_cpp`, sets
+`extra_params.managed: true`, and writes runtime-specific settings under
+`extra_params.server`. It does not clone, build, or download models unless you
+pass explicit admin flags such as `--clone`, `--configure`, `--build`, or
+`--install-model`.
+
+The generated sidecar config stays under `models/audio_cpp`, binds to
+`127.0.0.1`, autoselects a free port by default, waits for `/health`, backs off
+after startup failure, and restarts a crashed child before the next request.
+Each supervisor uses a unique generated config file to avoid config overwrites
+between workers. If another process claims a probed port before startup, automatic
+port selection retries the remaining configured candidates. Fixed-port mode and
+other startup failures use the configured backoff. Health checks require an explicit
+positive status. Normal speech requests
+cannot inject extra command arguments or environment variables.
+
+#### Build And Model Package Commands
+
+The helper exposes explicit commands for operators who want a single entry point:
+
+```bash
+python Helper_Scripts/TTS_Installers/install_tts_audio_cpp.py --clone
+python Helper_Scripts/TTS_Installers/install_tts_audio_cpp.py --configure --build --backend cuda
+python Helper_Scripts/TTS_Installers/install_tts_audio_cpp.py --install-model --package-id pocket_tts_english_q8_0
+```
+
+Model installation is always explicit. audio.cpp's upstream
+`tools/model_manager_v2.py` handles package installation, including any gated
+packages or token requirements. Do not put Hugging Face tokens or API keys in
+`tts_providers_config.yaml`.
+
+The default binary path is `models/audio_cpp/_build/bin/audiocpp_server`
+(`.exe` on Windows), and the default model directory is
+`models/audio_cpp/PocketTTS-GGUF/english`. `--build-dir` is reflected in the
+patched binary path. The bundled Alba voice is configured as PocketTTS's
+`default_voice_preset`, so text-only requests work without reference audio.
+For another package, update `model_path`, its default voice preset, and
+`extra_params.server.model` to match that package's directory, family, and ID.
+On macOS without OpenMP, install the build prerequisite or configure upstream
+with `-DENGINE_ENABLE_OPENMP=OFF` before running the helper's `--build` step.
+
+No model download happens during normal tldw startup or a `/audio/speech`
+request. If the configured model files are missing, initialization or generation
+fails closed instead of fetching assets silently.
+
+Runtime note: the legacy `idle_shutdown_seconds` setting now configures upstream
+`idle_unload_ms` (seconds multiplied by 1000). Models unload after inactivity,
+while the process stays warm and reloads lazily on the next request. Active
+inference is protected by upstream's idle-unload policy. Set `0` to disable it;
+external servers configure `idle_unload_ms` themselves.
+
+License and packaging note: audio.cpp is Apache-2.0 while tldw_server is GPLv2
+per project metadata. This implementation treats audio.cpp as an optional
+external component installed by user/admin action. Vendoring, static linking, or
+shipping prebuilt audio.cpp binaries needs separate legal and packaging review.
 
 ### Model Auto-Download Controls
 

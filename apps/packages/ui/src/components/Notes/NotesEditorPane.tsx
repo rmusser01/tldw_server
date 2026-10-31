@@ -120,6 +120,10 @@ export interface NotesEditorPaneProps {
   noteRelations: NoteRelationsShape
   noteNeighborsLoading: boolean
   noteNeighborsError: boolean
+  noteNeighborsUnavailable?: boolean
+  noteNeighborsState?: 'not_loaded' | 'loading' | 'success' | 'error'
+  noteNeighborsRequestKey?: string
+  onRequestNeighbors?: () => void
   onRetryNeighbors?: () => void
 
   // Pinning
@@ -235,7 +239,7 @@ export interface NotesEditorPaneProps {
   saveAndStartNew: () => Promise<void>
   deleteNote: () => Promise<void>
   handleSelectNote: (id: string | number) => Promise<void>
-  openGraphModal: () => void
+  openGraphWorkspace: () => void
   createManualLink: () => Promise<void>
   removeManualLink: (edgeId: string) => Promise<void>
   debouncedLoadKeywordSuggestions: (text: string) => void
@@ -266,6 +270,45 @@ export interface NotesEditorPaneProps {
 // Component
 // ---------------------------------------------------------------------------
 
+export const NotesEditorEmptyState: React.FC<{
+  disabled: boolean
+  onCreateNote: () => void
+}> = ({ disabled, onCreateNote }) => {
+  const { t } = useTranslation(['option', 'common'])
+  return (
+    <div
+      className="flex flex-col items-center justify-center gap-4 px-8 py-12 text-center"
+      data-testid="notes-editor-empty-state"
+    >
+      <div className="text-lg font-medium text-text">
+        {t('option:notesSearch.editorEmptyTitle', {
+          defaultValue: 'Select or create a note'
+        })}
+      </div>
+      <div className="max-w-sm text-sm text-text-muted">
+        {t('option:notesSearch.editorEmptyDescription', {
+          defaultValue: 'Choose a note from the list to start editing, or create a new one.'
+        })}
+      </div>
+      <Button
+        type="primary"
+        onClick={onCreateNote}
+        disabled={disabled}
+        data-testid="notes-editor-empty-create"
+      >
+        {t('option:notesSearch.editorEmptyCreateAction', {
+          defaultValue: 'Create note'
+        })}
+      </Button>
+      <div className="mt-2 text-xs text-text-muted">
+        {t('option:notesSearch.editorEmptyHint', {
+          defaultValue: 'Tip: Type [[ in a note to link to another note.'
+        })}
+      </div>
+    </div>
+  )
+}
+
 const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   isMobileViewport,
   setMobileSidebarOpen,
@@ -284,6 +327,10 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   noteRelations,
   noteNeighborsLoading,
   noteNeighborsError,
+  noteNeighborsUnavailable = false,
+  noteNeighborsState,
+  noteNeighborsRequestKey,
+  onRequestNeighbors,
   onRetryNeighbors,
   selectedNotePinned,
   editorMode,
@@ -371,7 +418,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   saveAndStartNew,
   deleteNote,
   handleSelectNote,
-  openGraphModal,
+  openGraphWorkspace,
   createManualLink,
   removeManualLink,
   debouncedLoadKeywordSuggestions,
@@ -580,39 +627,12 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
       />
       <div className="flex-1 flex flex-col px-4 py-3 overflow-auto">
         {showEmptyState && !loadingDetail && (
-          <div className="flex flex-col items-center justify-center gap-4 px-8 py-12 text-center" data-testid="notes-editor-empty-state">
-            <div className="text-lg font-medium text-text">
-              {t('option:notesSearch.editorEmptyTitle', {
-                defaultValue: 'Select or create a note'
-              })}
-            </div>
-            <div className="max-w-sm text-sm text-text-muted">
-              {t('option:notesSearch.editorEmptyDescription', {
-                defaultValue: 'Choose a note from the list to start editing, or create a new one.'
-              })}
-            </div>
-            <div className="flex gap-2">
-              <Button
-                type="primary"
-                onClick={() => {
-                  if (!editorDisabled) {
-                    void handleNewNote()
-                  }
-                }}
-                disabled={editorDisabled}
-                data-testid="notes-editor-empty-create"
-              >
-                {t('option:notesSearch.editorEmptyCreateAction', {
-                  defaultValue: 'Create note'
-                })}
-              </Button>
-            </div>
-            <div className="mt-2 text-xs text-text-muted">
-              {t('option:notesSearch.editorEmptyHint', {
-                defaultValue: 'Tip: Type [[ in a note to link to another note.'
-              })}
-            </div>
-          </div>
+          <NotesEditorEmptyState
+            disabled={editorDisabled}
+            onCreateNote={() => {
+              void handleNewNote()
+            }}
+          />
         )}
         {showStudioMarkdownOnlyNotice ? (
           <div className="mb-3 flex items-center justify-between gap-3 rounded border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn">
@@ -949,6 +969,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         </div>
         {selectedId != null && (
           <CollapsibleSection
+            key={noteNeighborsRequestKey}
             title={t('option:notesSearch.connectionsSectionTitle', {
               defaultValue: 'Connections'
             })}
@@ -965,11 +986,39 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                 )}
               </Tooltip>
             }
-            defaultOpen
-            storageKey="connections"
+            defaultOpen={!onRequestNeighbors}
+            storageKey={onRequestNeighbors ? undefined : "connections"}
+            onOpenChange={(open) => { if (open) onRequestNeighbors?.() }}
             testId="notes-section-connections"
           >
-          <div
+          {noteNeighborsUnavailable ? (
+            <Typography.Text type="secondary" role="status">
+              {t('option:notesSearch.connectionsUnavailable', {
+                defaultValue: 'Note connections are unavailable for this account.'
+              })}
+            </Typography.Text>
+          ) : noteNeighborsLoading ? (
+            <Typography.Text type="secondary" role="status">
+              {t('option:notesSearch.connectionsLoading', {
+                defaultValue: 'Loading note connections...'
+              })}
+            </Typography.Text>
+          ) : noteNeighborsState === 'not_loaded' ? (
+            <Typography.Text type="secondary" role="status">
+              {!isOnline
+                ? t('option:notesSearch.connectionsOffline', { defaultValue: 'Connect to the server to load note connections.' })
+                : t('option:notesSearch.connectionsNotLoaded', { defaultValue: 'Note connections have not been loaded.' })}
+            </Typography.Text>
+          ) : noteNeighborsState === 'error' ? (
+            <div role="status" data-testid="notes-related-error">
+              <Typography.Text type="secondary">
+                {t('option:notesSearch.connectionsError', { defaultValue: 'Could not load note connections.' })}
+              </Typography.Text>
+              {onRetryNeighbors && <Button size="small" type="link" onClick={onRetryNeighbors} data-testid="notes-related-retry">
+                {t('option:notesSearch.relatedNotesRetry', { defaultValue: 'Retry' })}
+              </Button>}
+            </div>
+          ) : <div
             className="grid grid-cols-1 gap-3 xl:grid-cols-2"
             data-testid="notes-graph-relation-panels"
           >
@@ -985,7 +1034,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
               <Button
                 size="small"
                 className="mt-2"
-                onClick={openGraphModal}
+                onClick={openGraphWorkspace}
                 data-testid="notes-open-graph-view"
               >
                 {t('option:notesSearch.graphOpenButton', {
@@ -1245,7 +1294,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                 </div>
               )}
             </div>
-          </div>
+          </div>}
           </CollapsibleSection>
         )}
         {editorMode !== 'preview' && (

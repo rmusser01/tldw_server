@@ -10,6 +10,7 @@ Covers:
 from __future__ import annotations
 
 import pytest
+from fastapi import APIRouter, FastAPI
 
 from tldw_Server_API.app.core.Resource_Governance.coverage_audit import (
     DEFAULT_EXCLUDED_PREFIXES,
@@ -60,6 +61,9 @@ class _Loader:
 
     def get_snapshot(self):
         return self._snap
+
+    def get_policy(self, pid):
+        return {"requests": {"rpm": 1}}
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +183,27 @@ class TestAuditGovernorCoverage:
         assert len(result["protected_routes"]) == 50
         assert result["protected_count"] == 60
 
+    @pytest.mark.unit
+    def test_route_limit_returns_full_lists(self):
+        """route_limit lets admin callers fetch the complete audit (#2890)."""
+        routes = [_MockRoute(f"/docs/page{i}", {"GET"}) for i in range(60)]
+        app = _MockApp(routes=routes)
+        result = audit_governor_coverage(app, route_limit=1000)
+
+        assert len(result["unprotected_routes"]) == 60
+        assert result["unprotected_count"] == 60
+        assert result["route_list_limit"] == 1000
+
+    @pytest.mark.unit
+    def test_route_list_limit_reported_for_default_cap(self):
+        """Clients can detect truncation from the reported list limit (#2890)."""
+        routes = [_MockRoute(f"/docs/page{i}", {"GET"}) for i in range(60)]
+        app = _MockApp(routes=routes)
+        result = audit_governor_coverage(app)
+
+        assert result["route_list_limit"] == 50
+        assert len(result["unprotected_routes"]) == result["route_list_limit"]
+
     def test_routes_without_methods_skipped(self):
         """Routes without methods attribute are skipped (e.g., Mount)."""
 
@@ -222,3 +247,57 @@ class TestAuditGovernorCoverage:
         assert result["unprotected_count"] == 1
         assert result["coverage_pct"] == 0.0
         assert result["unprotected_routes"][0]["reason"] == "rg_middleware_missing"
+
+    @pytest.mark.unit
+    def test_routes_behind_include_router_are_audited_at_their_served_path(self):
+        """FastAPI >= 0.137 keeps included routers out of app.routes; the audit must still count them."""
+        router = APIRouter()
+
+        @router.get("/items")
+        def items() -> list[str]:
+            return []
+
+        app = FastAPI()
+        app.include_router(router, prefix="/api/v1")
+        app.user_middleware.append(_Middleware(_RGSimpleMiddleware))
+        app.state.rg_policy_loader = _Loader({"by_path": {"/api/v1/items": "items.default"}})
+
+        result = audit_governor_coverage(app)
+
+        assert {"method": "GET", "path": "/api/v1/items"} in result["protected_routes"]
+
+    @pytest.mark.unit
+    def test_tag_only_included_route_is_protected(self):
+        router = APIRouter(tags=["writing"])
+
+        @router.get("/docs")
+        def docs() -> list[str]:
+            return []
+
+        app = FastAPI()
+        app.include_router(router, prefix="/api/v1/writing")
+        app.user_middleware.append(_Middleware(_RGSimpleMiddleware))
+        app.state.rg_policy_loader = _Loader({"by_path": {}, "by_tag": {"writing": "core.default"}})
+
+        result = audit_governor_coverage(app)
+
+        assert {"method": "GET", "path": "/api/v1/writing/docs"} in result["protected_routes"]
+
+    @pytest.mark.unit
+    def test_unmapped_api_route_is_protected_by_default(self):
+        app = _MockApp(routes=[_MockRoute("/api/v1/anything", {"GET"})], user_middleware=[_Middleware(_RGSimpleMiddleware)], state=type("State", (), {
+            "rg_policy_loader": _Loader({"by_path": {}, "by_tag": {}})
+        })())
+        assert audit_governor_coverage(app)["protected_count"] == 1
+
+    @pytest.mark.unit
+    def test_route_mapped_to_undefined_policy_is_reported(self):
+        class _Partial(_Loader):
+            def get_policy(self, pid):
+                return None
+
+        app = _MockApp(routes=[_MockRoute("/api/v1/x", {"GET"})], user_middleware=[_Middleware(_RGSimpleMiddleware)], state=type("State", (), {
+            "rg_policy_loader": _Partial({"by_path": {"/api/v1/x": "typo.policy"}})
+        })())
+        result = audit_governor_coverage(app)
+        assert result["unprotected_routes"][0]["reason"] == "policy_undefined"

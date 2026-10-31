@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 import asyncio
-import os
+import re
 import types
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any
+from contextlib import aclosing
+from dataclasses import dataclass
+from typing import Any, Literal, TypedDict
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAPIError,
+    ChatAuthenticationError,
+    ChatBadRequestError,
+    ChatConfigurationError,
+)
+from tldw_Server_API.app.core.RAG.exceptions import RAGDatabaseError
 from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
     agentic_rag_pipeline,
 )
@@ -17,15 +27,55 @@ from tldw_Server_API.app.core.RAG.rag_service.agentic_execution import (
 from tldw_Server_API.app.core.RAG.rag_service.generation import generate_streaming_response
 from tldw_Server_API.app.core.RAG.rag_service.request_resolution import ResolvedRAGRequest
 from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import RetrievalPlan
+from tldw_Server_API.app.core.RAG.rag_service.runtime_provider_call import (
+    close_provider_stream,
+)
+from tldw_Server_API.app.core.RAG.rag_service.source_health import CANONICAL_KNOWLEDGE_SOURCE_IDS
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
     normalize_documents_for_generation,
     unified_rag_pipeline,
 )
 
 RAGStreamEvent = dict[str, Any]
+
+
+class _RAGTerminalEventRequired(TypedDict):
+    schema_version: Literal[1]
+    type: Literal["complete", "error"]
+    code: str
+    upstream_dispatched: bool
+    output_emitted: bool
+    allow_non_stream_fallback: bool
+    message: str
+
+
+class RAGTerminalEvent(_RAGTerminalEventRequired, total=False):
+    """Versioned terminal event shared with Knowledge QA clients."""
+
+    status_code: int
+
+
 PipelineCallable = Callable[..., Awaitable[Any]]
 GenerationCallable = Callable[..., Awaitable[Any]]
 _PUBLIC_STREAM_ERROR_MESSAGE = "Search failed due to an internal error."
+_PUBLIC_STREAM_COMPLETE_MESSAGE = "Search completed."
+_RAG_STREAM_SCHEMA_VERSION = 1
+_RAG_REPLAY_CERTIFICATION_CODE = "stream_transport_unavailable"
+_RAG_TERMINAL_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_MAX_TERMINAL_MESSAGE_LENGTH = 240
+_RETRIEVAL_HEARTBEAT_SECONDS = 15.0
+_RAG_PROVIDER_ERROR_MESSAGES = {
+    "provider_request_invalid": "The selected provider or model is invalid.",
+    "provider_authentication_failed": "The selected provider credentials could not be authenticated.",
+    "invalid_provider_credentials": "The selected provider credentials are invalid.",
+    "missing_provider_credentials": "The selected provider credentials are not configured.",
+    "credential_store_unavailable": "Provider credential storage is temporarily unavailable.",
+    "credential_scope_revoked": "The selected provider credential scope is no longer available.",
+    "provider_disabled": "The selected provider is disabled by administrator policy.",
+    "model_not_allowed": "The selected model is not allowed for this provider.",
+    "provider_configuration_invalid": "The selected provider configuration is invalid.",
+    "provider_unavailable": "The selected provider is currently unavailable.",
+}
 
 _EXTRA_CONTROL_KEYS = {
     "build_agentic_execution_context",
@@ -41,6 +91,178 @@ def _pipeline_context(extra_context: dict[str, Any]) -> dict[str, Any]:
         for key, value in extra_context.items()
         if key not in _EXTRA_CONTROL_KEYS
     }
+
+
+def classify_rag_provider_error(exc: BaseException) -> tuple[str, int, str] | None:
+    """Return a bounded public code, status, and message for typed provider failures."""
+    if isinstance(exc, ByokResolutionError):
+        code = getattr(exc, "policy_code", exc.code)
+        code = code if code in _RAG_PROVIDER_ERROR_MESSAGES else "provider_configuration_invalid"
+        status_code = 403 if code in {"provider_disabled", "model_not_allowed"} else 503
+        return code, status_code, _RAG_PROVIDER_ERROR_MESSAGES[code]
+    if isinstance(exc, ChatBadRequestError):
+        code = "provider_request_invalid"
+        return code, 400, _RAG_PROVIDER_ERROR_MESSAGES[code]
+    if isinstance(exc, ChatAuthenticationError):
+        code = "provider_authentication_failed"
+        return code, 502, _RAG_PROVIDER_ERROR_MESSAGES[code]
+    if isinstance(exc, ChatConfigurationError):
+        code = str(getattr(exc, "error_code", "provider_configuration_invalid"))
+        if code not in {"missing_provider_credentials", "provider_configuration_invalid"}:
+            code = "provider_configuration_invalid"
+        return code, 503, _RAG_PROVIDER_ERROR_MESSAGES[code]
+    if isinstance(exc, ChatAPIError):
+        try:
+            upstream_status = int(exc.status_code)
+        except (TypeError, ValueError):
+            upstream_status = 0
+        if upstream_status == 400:
+            code, status_code = "provider_request_invalid", 400
+        elif upstream_status in {401, 403}:
+            code, status_code = "provider_authentication_failed", 502
+        else:
+            code, status_code = "provider_unavailable", 502
+        return code, status_code, _RAG_PROVIDER_ERROR_MESSAGES[code]
+    return None
+
+
+def is_valid_rag_terminal_event(event: object) -> bool:
+    """Return whether an object satisfies the strict version-one terminal schema."""
+    if not isinstance(event, dict):
+        return False
+    schema_version = event.get("schema_version")
+    if type(schema_version) is not int or schema_version != _RAG_STREAM_SCHEMA_VERSION:
+        return False
+    event_type = event.get("type")
+    if event_type not in {"complete", "error"}:
+        return False
+    code = event.get("code")
+    message = event.get("message")
+    if not isinstance(code, str) or _RAG_TERMINAL_CODE_RE.fullmatch(code) is None:
+        return False
+    if (
+        not isinstance(message, str)
+        or not message
+        or len(message) > _MAX_TERMINAL_MESSAGE_LENGTH
+    ):
+        return False
+
+    upstream_dispatched = event.get("upstream_dispatched")
+    output_emitted = event.get("output_emitted")
+    allow_fallback = event.get("allow_non_stream_fallback")
+    if not all(
+        type(value) is bool
+        for value in (upstream_dispatched, output_emitted, allow_fallback)
+    ):
+        return False
+    if "status_code" in event:
+        status_code = event["status_code"]
+        if type(status_code) is not int or not 100 <= status_code <= 599:
+            return False
+    if output_emitted and not upstream_dispatched:
+        return False
+    if event_type == "complete":
+        return (
+            code == "complete"
+            and upstream_dispatched is True
+            and allow_fallback is False
+        )
+    if code == "complete":
+        return False
+    if allow_fallback:
+        return (
+            code == _RAG_REPLAY_CERTIFICATION_CODE
+            and upstream_dispatched is False
+            and output_emitted is False
+        )
+    return True
+
+
+def may_replay_non_stream(event: object) -> bool:
+    """Allow replay only for certified pre-dispatch version-one errors."""
+    return bool(
+        is_valid_rag_terminal_event(event)
+        and isinstance(event, dict)
+        and event["schema_version"] == _RAG_STREAM_SCHEMA_VERSION
+        and event["type"] == "error"
+        and event["code"] == _RAG_REPLAY_CERTIFICATION_CODE
+        and event["upstream_dispatched"] is False
+        and event["output_emitted"] is False
+        and event["allow_non_stream_fallback"] is True
+    )
+
+
+def _rag_terminal_event(
+    *,
+    event_type: Literal["complete", "error"],
+    code: str,
+    message: str,
+    upstream_dispatched: bool,
+    output_emitted: bool,
+    allow_non_stream_fallback: bool = False,
+    status_code: int | None = None,
+) -> RAGTerminalEvent:
+    event: RAGTerminalEvent = {
+        "schema_version": _RAG_STREAM_SCHEMA_VERSION,
+        "type": event_type,
+        "code": code,
+        "upstream_dispatched": upstream_dispatched,
+        "output_emitted": output_emitted,
+        "allow_non_stream_fallback": allow_non_stream_fallback,
+        "message": message,
+    }
+    if status_code is not None:
+        event["status_code"] = status_code
+    if not is_valid_rag_terminal_event(event):
+        raise ValueError("Invalid RAG terminal event")
+    return event
+
+
+def rag_complete_event(*, output_emitted: bool) -> RAGTerminalEvent:
+    """Build the explicit terminal event for a clean upstream completion."""
+    return _rag_terminal_event(
+        event_type="complete",
+        code="complete",
+        message=_PUBLIC_STREAM_COMPLETE_MESSAGE,
+        upstream_dispatched=True,
+        output_emitted=output_emitted,
+    )
+
+
+def rag_internal_error_event(
+    *,
+    upstream_dispatched: bool,
+    output_emitted: bool,
+) -> RAGTerminalEvent:
+    """Build a bounded terminal event for an unexpected internal failure."""
+    return _rag_terminal_event(
+        event_type="error",
+        code="stream_internal_error",
+        message=_PUBLIC_STREAM_ERROR_MESSAGE,
+        upstream_dispatched=upstream_dispatched,
+        output_emitted=output_emitted,
+    )
+
+
+def rag_provider_error_event(
+    exc: BaseException,
+    *,
+    upstream_dispatched: bool = True,
+    output_emitted: bool = False,
+) -> RAGTerminalEvent | None:
+    """Build a detail-free stream event for a typed provider failure."""
+    classified = classify_rag_provider_error(exc)
+    if classified is None:
+        return None
+    code, status_code, message = classified
+    return _rag_terminal_event(
+        event_type="error",
+        code=code,
+        message=message,
+        upstream_dispatched=upstream_dispatched,
+        output_emitted=output_emitted,
+        status_code=status_code,
+    )
 
 
 def _value(
@@ -106,6 +328,41 @@ def _normalize_research_event(event: Any) -> dict[str, Any]:
     return {"type": event_type, "data": data}
 
 
+@dataclass
+class _PrefetchedEvidence:
+    """Keep an early clarification alongside retrieved evidence until dispatch."""
+
+    documents: list[Any]
+    clarification_answer: str | None = None
+    security_filter: dict[str, int] | None = None
+    source_status: dict[str, dict[str, Any]] | None = None
+
+
+def _public_source_status(raw: Any) -> dict[str, dict[str, Any]] | None:
+    """Expose only canonical source names and bounded retrieval diagnostics."""
+    if not isinstance(raw, dict):
+        return None
+    result = {}
+    for source in CANONICAL_KNOWLEDGE_SOURCE_IDS:
+        entry = raw.get(source)
+        if not isinstance(entry, dict):
+            continue
+        status, count = entry.get("status"), entry.get("count")
+        if status not in ("searched", "empty", "unavailable", "error"):
+            continue
+        if type(count) is not int or count < 0:
+            continue
+        safe = {"status": status, "count": count}
+        reason = entry.get("reason")
+        if reason in ("no_retriever_configured", "retrieval_failed", "no_matching_entries"):
+            safe["reason"] = reason
+        filtered_count = entry.get("filtered_artifact_count")
+        if type(filtered_count) is int and filtered_count >= 0:
+            safe["filtered_artifact_count"] = filtered_count
+        result[source] = safe
+    return result or None
+
+
 async def _retrieve_standard_documents(
     *,
     resolved_request: ResolvedRAGRequest,
@@ -114,7 +371,7 @@ async def _retrieve_standard_documents(
     pipeline_kwargs: dict[str, Any],
     payload: dict[str, Any],
     progress_queue: asyncio.Queue[Any] | None = None,
-) -> list[Any]:
+) -> _PrefetchedEvidence:
     kwargs = dict(pipeline_kwargs)
     kwargs.setdefault("query", resolved_request.query)
     kwargs.setdefault("top_k", retrieval_plan.top_k)
@@ -124,6 +381,7 @@ async def _retrieve_standard_documents(
     kwargs["enable_generation"] = False
 
     if progress_queue is not None and bool(payload.get("enable_research_progress", False)):
+
         async def _stream_research_progress(event: Any) -> None:
             await progress_queue.put(_normalize_research_event(event))
 
@@ -131,7 +389,45 @@ async def _retrieve_standard_documents(
         kwargs["enable_research_progress"] = True
 
     retrieval_result = await standard_pipeline(**kwargs)
-    return normalize_documents_for_generation(_documents_from_result(retrieval_result))
+    documents = _documents_from_result(retrieval_result)
+    errors = (
+        retrieval_result.get("errors", [])
+        if isinstance(retrieval_result, dict)
+        else getattr(retrieval_result, "errors", [])
+    ) or []
+    if not documents and any(
+        error in {"document_retrieval_failed", "media_db_fallback_failed", "pipeline_failed"}
+        for error in errors
+    ):
+        raise RAGDatabaseError("Document retrieval failed.", operation_type="search")
+    metadata = (
+        retrieval_result.get("metadata", {})
+        if isinstance(retrieval_result, dict)
+        else getattr(retrieval_result, "metadata", {})
+    )
+    clarification = metadata.get("clarification") if isinstance(metadata, dict) else None
+    answer = None
+    if isinstance(clarification, dict) and clarification.get("required") is True:
+        answer = (
+            retrieval_result.get("generated_answer")
+            if isinstance(retrieval_result, dict)
+            else getattr(retrieval_result, "generated_answer", None)
+        )
+        if not isinstance(answer, str) or not answer.strip():
+            answer = "Could you clarify your request?"
+    filter_outcome = metadata.get("security_filter") if isinstance(metadata, dict) else None
+    safe_filter_outcome = None
+    if isinstance(filter_outcome, dict) and all(
+        type(filter_outcome.get(key)) is int and filter_outcome[key] >= 0
+        for key in ("excluded_count", "retained_count")
+    ):
+        safe_filter_outcome = {key: filter_outcome[key] for key in ("excluded_count", "retained_count")}
+    return _PrefetchedEvidence(
+        documents=normalize_documents_for_generation(documents),
+        clarification_answer=answer,
+        security_filter=safe_filter_outcome,
+        source_status=_public_source_status(metadata.get("source_status")) if isinstance(metadata, dict) else None,
+    )
 
 
 async def _retrieve_with_progress_events(
@@ -141,7 +437,7 @@ async def _retrieve_with_progress_events(
     standard_pipeline: PipelineCallable,
     pipeline_kwargs: dict[str, Any],
     payload: dict[str, Any],
-) -> AsyncIterator[RAGStreamEvent | list[Any]]:
+) -> AsyncIterator[RAGStreamEvent | _PrefetchedEvidence]:
     progress_queue: asyncio.Queue[Any] = asyncio.Queue()
     done_marker = object()
     error_marker = object()
@@ -163,17 +459,23 @@ async def _retrieve_with_progress_events(
             await progress_queue.put(done_marker)
 
     retrieval_task = asyncio.create_task(_runner())
-    docs: list[Any] = []
+    docs = _PrefetchedEvidence(documents=[])
     pending_error: Exception | None = None
     try:
         while True:
-            queued = await progress_queue.get()
+            try:
+                queued = await asyncio.wait_for(progress_queue.get(), _RETRIEVAL_HEARTBEAT_SECONDS)
+            except asyncio.TimeoutError:
+                # Cold local model loading can exceed a proxy's idle budget.
+                # Keep retrieval connected without certifying evidence or an answer.
+                yield {"type": "heartbeat"}
+                continue
             if queued is done_marker:
                 break
             if isinstance(queued, tuple) and len(queued) == 2 and queued[0] is error_marker:
                 pending_error = queued[1]
                 continue
-            if isinstance(queued, list):
+            if isinstance(queued, _PrefetchedEvidence):
                 docs = queued
                 continue
             yield queued
@@ -190,33 +492,21 @@ async def _retrieve_with_progress_events(
     yield docs
 
 
-async def _prefetch_documents(
+def _prefetch_documents(
     *,
     resolved_request: ResolvedRAGRequest,
     retrieval_plan: RetrievalPlan,
     standard_pipeline: PipelineCallable,
     pipeline_kwargs: dict[str, Any],
     payload: dict[str, Any],
-) -> AsyncIterator[RAGStreamEvent | list[Any]]:
-    if bool(payload.get("enable_research_progress", False)):
-        async for item in _retrieve_with_progress_events(
-            resolved_request=resolved_request,
-            retrieval_plan=retrieval_plan,
-            standard_pipeline=standard_pipeline,
-            pipeline_kwargs=pipeline_kwargs,
-            payload=payload,
-        ):
-            yield item
-        return
-
-    docs = await _retrieve_standard_documents(
+) -> AsyncIterator[RAGStreamEvent | _PrefetchedEvidence]:
+    return _retrieve_with_progress_events(
         resolved_request=resolved_request,
         retrieval_plan=retrieval_plan,
         standard_pipeline=standard_pipeline,
         pipeline_kwargs=pipeline_kwargs,
         payload=payload,
     )
-    yield docs
 
 
 async def _run_agentic_prefetch(
@@ -257,6 +547,11 @@ async def _run_agentic_prefetch(
         explain_only=bool(_value(agentic_payload, request_defaults, "explain_only", False)),
         resolved_request=resolved_request,
         retrieval_plan=retrieval_plan,
+        **(
+            {"credential_runtime": pipeline_kwargs.get("credential_runtime")}
+            if pipeline_kwargs.get("credential_runtime") is not None
+            else {}
+        ),
     )
 
     metadata = getattr(result, "metadata", {}) if result is not None else {}
@@ -276,6 +571,8 @@ def _context_events(
     docs: list[Any],
     payload: dict[str, Any],
     request_defaults: dict[str, Any],
+    security_filter: dict[str, int] | None = None,
+    source_status: dict[str, dict[str, Any]] | None = None,
 ) -> list[RAGStreamEvent]:
     top_k_requested = _value(payload, request_defaults, "top_k", 10)
     top_k_limit = min(10, _to_int(top_k_requested, 10))
@@ -283,23 +580,41 @@ def _context_events(
     top_contexts = []
     for doc in (docs or [])[:top_k_limit]:
         metadata = _metadata_for_doc(doc)
-        top_contexts.append(
-            {
-                "id": _id_for_doc(doc),
-                "title": metadata.get("title"),
-                "score": _score_for_doc(doc),
-                "url": metadata.get("url"),
-                "source": metadata.get("source"),
-            }
-        )
+        source = doc.get("source") if isinstance(doc, dict) else getattr(doc, "source", None)
+        content = doc.get("content") if isinstance(doc, dict) else getattr(doc, "content", None)
+        context = {
+            "id": _id_for_doc(doc),
+            "title": metadata.get("title"),
+            "score": _score_for_doc(doc),
+            "url": metadata.get("url"),
+            "source": metadata.get("source_type") or metadata.get("source") or getattr(source, "value", source),
+        }
+        if isinstance(content, str) and content:
+            context["excerpt"] = content[:4000]
+        # Retain only public evidence fields from already-authorized retrieval.
+        # Never forward the whole metadata dictionary or invent source provenance.
+        for key in (
+            "source_id",
+            "source_type",
+            "chunk_id",
+            "evidence_origin",
+            "source_status",
+            "unavailable_reason",
+            "page_number",
+        ):
+            value = metadata.get(key)
+            if key == "source_id" and value is None:
+                value = metadata.get("media_id") or metadata.get("note_id")
+            if isinstance(value, (str, int, float)):
+                context[key] = str(value) if key in ("source_id", "chunk_id") else value
+        top_contexts.append(context)
 
     scores = [_score_for_doc(doc) for doc in (docs or [])]
     topicality = 0.0
     if scores:
         score_min, score_max = min(scores), max(scores)
         topicality = sum(
-            (score - score_min) / (score_max - score_min) if score_max > score_min else 1.0
-            for score in scores
+            (score - score_min) / (score_max - score_min) if score_max > score_min else 1.0 for score in scores
         ) / len(scores)
 
     why = {
@@ -315,10 +630,19 @@ def _context_events(
             "Synthesize final answer",
         ]
     }
-    return [
-        {"type": "contexts", "contexts": top_contexts, "why": why},
+    events = [
+        {
+            "type": "contexts",
+            "contexts": top_contexts,
+            "why": why,
+            **({"security_filter": security_filter} if security_filter is not None else {}),
+            **({"source_status": source_status} if source_status is not None else {}),
+        },
         {"type": "reasoning", **rationale},
     ]
+    if not docs and security_filter and security_filter["excluded_count"] > 0:
+        return events[:1]
+    return events
 
 
 def _generation_config(
@@ -336,26 +660,12 @@ def _generation_config(
         )
         cfg = {}
 
-    request_provider = _value(payload, request_defaults, "generation_provider")
-    env_provider = os.getenv("RAG_DEFAULT_LLM_PROVIDER")
-    provider_value = request_provider if isinstance(request_provider, str) else (
-        env_provider if env_provider is not None else cfg.get("RAG_DEFAULT_LLM_PROVIDER")
-    )
-    provider = (
-        provider_value.strip()
-        if isinstance(provider_value, str) and provider_value.strip()
-        else "openai"
-    )
+    from .generation_defaults import resolve_generation_defaults
 
-    request_model = _value(payload, request_defaults, "generation_model")
-    env_model = os.getenv("RAG_DEFAULT_LLM_MODEL")
-    model_value = request_model if isinstance(request_model, str) and request_model else (
-        env_model if env_model is not None else cfg.get("RAG_DEFAULT_LLM_MODEL")
-    )
-    model = (
-        model_value.strip()
-        if isinstance(model_value, str) and model_value.strip()
-        else "gpt-4o-mini"
+    provider, model = resolve_generation_defaults(
+        cfg,
+        _value(payload, request_defaults, "generation_provider"),
+        _value(payload, request_defaults, "generation_model"),
     )
 
     max_tokens = _to_int(_value(payload, request_defaults, "max_generation_tokens", 500), 500)
@@ -364,6 +674,7 @@ def _generation_config(
         "provider": provider,
         "model": model,
         "max_tokens": max_tokens,
+        "enable_citations": bool(_value(payload, request_defaults, "enable_citations", False)),
     }
     prompt_template = _value(payload, request_defaults, "generation_prompt")
     if isinstance(prompt_template, str) and prompt_template:
@@ -378,6 +689,7 @@ async def _stream_generation_events(
     payload: dict[str, Any],
     request_defaults: dict[str, Any],
     generation_streamer: GenerationCallable,
+    credential_runtime: Any = None,
 ) -> AsyncIterator[RAGStreamEvent]:
     context = types.SimpleNamespace()
     context.documents = docs
@@ -386,6 +698,7 @@ async def _stream_generation_events(
         "generation": _generation_config(payload=payload, request_defaults=request_defaults)
     }
     context.metadata = {}
+    context.credential_runtime = credential_runtime
 
     await generation_streamer(
         context,
@@ -396,12 +709,16 @@ async def _stream_generation_events(
     )
 
     last_overlay = None
-    async for chunk in context.stream_generator:
-        yield {"type": "delta", "text": chunk}
-        overlay = context.metadata.get("claims_overlay")
-        if overlay and overlay != last_overlay:
-            yield {"type": "claims_overlay", **overlay}
-            last_overlay = overlay
+    generation_stream = context.stream_generator
+    try:
+        async for chunk in generation_stream:
+            yield {"type": "delta", "text": chunk}
+            overlay = context.metadata.get("claims_overlay")
+            if overlay and overlay != last_overlay:
+                yield {"type": "claims_overlay", **overlay}
+                last_overlay = overlay
+    finally:
+        await close_provider_stream(generation_stream)
 
     final_overlay = context.metadata.get("claims_overlay")
     if final_overlay:
@@ -430,12 +747,15 @@ async def stream_rag_events(
         build_agentic_execution_context,
     )
     sync_retriever_overrides = context.get("sync_retriever_overrides")
+    output_emitted = False
 
     try:
         if callable(sync_retriever_overrides):
             sync_retriever_overrides()
 
         docs: list[Any] = []
+        security_filter = None
+        source_status = None
         if str(resolved_request.strategy).strip().lower() == "agentic":
             try:
                 docs, agentic_events = await _run_agentic_prefetch(
@@ -452,6 +772,8 @@ async def stream_rag_events(
             except asyncio.CancelledError:
                 raise
             except Exception as agentic_error:  # noqa: BLE001 - agentic streaming prefetch is best-effort
+                if classify_rag_provider_error(agentic_error) is not None:
+                    raise
                 logger.debug(
                     "Agentic streaming prefetch failed; continuing with empty contexts",
                     exc_info=agentic_error,
@@ -459,44 +781,95 @@ async def stream_rag_events(
                 docs = []
         else:
             try:
-                async for item in _prefetch_documents(
+                async with aclosing(_prefetch_documents(
                     resolved_request=resolved_request,
                     retrieval_plan=retrieval_plan,
                     standard_pipeline=standard_pipeline,
                     pipeline_kwargs=pipeline_kwargs,
                     payload=payload,
-                ):
-                    if isinstance(item, list):
-                        docs = item
-                    else:
-                        yield item
+                )) as prefetch:
+                    async for item in prefetch:
+                        if isinstance(item, _PrefetchedEvidence):
+                            if item.clarification_answer:
+                                yield {"type": "clarification", "required": True, "stage": "pre_retrieval"}
+                                yield {"type": "delta", "text": item.clarification_answer}
+                                yield rag_complete_event(output_emitted=True)
+                                return
+                            docs = item.documents
+                            security_filter = item.security_filter
+                            source_status = item.source_status
+                        else:
+                            yield item
             except asyncio.CancelledError:
                 raise
-            except Exception as prefetch_error:  # noqa: BLE001 - retrieval prefetch is best-effort for streaming
-                logger.debug(
-                    "RAG streaming standard prefetch failed; continuing with empty contexts",
-                    exc_info=prefetch_error,
+            except Exception as prefetch_error:  # noqa: BLE001 - preserve retrieval failure as a terminal event
+                if classify_rag_provider_error(prefetch_error) is not None:
+                    raise
+                # Exception messages can contain private source text or credentials.
+                logger.bind(
+                    operation="rag_standard_retrieval",
+                    exception_type=type(prefetch_error).__name__,
+                ).error(
+                    "RAG streaming standard retrieval failed (error={})",
+                    type(prefetch_error).__name__,
                 )
-                docs = []
+                # Retrieval may itself dispatch providers for embeddings or
+                # query rewriting; never certify a safe non-stream replay.
+                yield rag_internal_error_event(
+                    upstream_dispatched=True,
+                    output_emitted=output_emitted,
+                )
+                return
 
+        # Numbered citations can reference only the contexts exposed to the client.
+        if bool(_value(payload, request_defaults, "enable_citations", False)):
+            visible_limit = min(10, _to_int(_value(payload, request_defaults, "top_k", 10), 10))
+            docs = docs[:visible_limit]
         for event in _context_events(
             docs=docs,
             payload=payload,
             request_defaults=request_defaults,
+            security_filter=security_filter,
+            source_status=source_status,
         ):
             yield event
 
-        async for event in _stream_generation_events(
+        if not docs and security_filter and security_filter["excluded_count"] > 0:
+            yield rag_complete_event(output_emitted=False)
+            return
+
+        generation_events = _stream_generation_events(
             resolved_request=resolved_request,
             docs=docs,
             payload=payload,
             request_defaults=request_defaults,
             generation_streamer=generation_streamer,
-        ):
-            yield event
+            credential_runtime=context.get("credential_runtime"),
+        )
+        try:
+            async for event in generation_events:
+                if event.get("type") == "delta" and bool(event.get("text")):
+                    output_emitted = True
+                yield event
+        finally:
+            await close_provider_stream(generation_events)
+        yield rag_complete_event(output_emitted=output_emitted)
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:  # noqa: BLE001 - streaming should surface error payload instead of crashing
-        logger.exception("RAG streaming failed")
-        yield {
-            "type": "error",
-            "message": _PUBLIC_STREAM_ERROR_MESSAGE,
-        }
+        # This layer cannot certify that dispatch did not occur. Unknown
+        # provider dispatch is conservatively represented as true.
+        provider_event = rag_provider_error_event(
+            exc,
+            upstream_dispatched=True,
+            output_emitted=output_emitted,
+        )
+        if provider_event is not None:
+            logger.warning("RAG streaming provider failure: {}", provider_event["code"])
+            yield provider_event
+        else:
+            logger.error("RAG streaming failed")
+            yield rag_internal_error_event(
+                upstream_dispatched=True,
+                output_emitted=output_emitted,
+            )

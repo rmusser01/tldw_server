@@ -1,0 +1,1557 @@
+"""POSIX artifact integrity and unmarked cross-platform rejection/snapshot controls."""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import json
+import os
+import sqlite3
+import stat
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+import pytest_asyncio
+
+from tldw_Server_API.app.core.Admin_Webhooks import legacy_import as legacy_import_module
+from tldw_Server_API.app.core.Admin_Webhooks.audit import OperationalAudit
+from tldw_Server_API.app.core.Admin_Webhooks.catalog import EVENT_CATALOG
+from tldw_Server_API.app.core.Admin_Webhooks.config import (
+    AdminWebhookMode,
+    AdminWebhookSettings,
+    WebhookRouteSelection,
+)
+from tldw_Server_API.app.core.Admin_Webhooks.crypto import WebhookKeyRing
+from tldw_Server_API.app.core.Admin_Webhooks.legacy_import import (
+    LegacyImportError,
+    LegacyImportRequest,
+    LegacyImportService,
+    LegacyRejectionReason,
+    LegacySecretDecryptor,
+)
+from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.settings import Settings
+from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
+    AdminWebhookRepository,
+    RegistrationInsert,
+    RegistrationTarget,
+)
+
+NOW = datetime(2026, 8, 22, 20, 0, tzinfo=timezone.utc)
+CATALOG_EVENTS = tuple(item.event_type for item in EVENT_CATALOG)
+
+# Artifact operations require native POSIX permissions. Repository snapshots,
+# pure parser/source-rejection tests, and all host-negative tests stay unmarked.
+_requires_posix_artifacts = pytest.mark.skipif(
+    not legacy_import_module.posix_private_artifacts_supported(),
+    reason="Legacy private artifacts require POSIX ownership and mode-0600 enforcement",
+)
+
+
+@dataclass
+class LegacyImportFixture:
+    pool: DatabasePool
+    repository: AdminWebhookRepository
+    service: LegacyImportService
+    request: LegacyImportRequest
+    store_path: Path
+    original_store_bytes: bytes
+    audits: list[OperationalAudit]
+
+
+def _ring() -> WebhookKeyRing:
+    return WebhookKeyRing(
+        {"migration-key": base64.b64encode(b"m" * 32).decode("ascii")},
+        primary_id="migration-key",
+    )
+
+
+def _settings() -> AdminWebhookSettings:
+    return AdminWebhookSettings(
+        mode=AdminWebhookMode.MIGRATE,
+        route_selection=WebhookRouteSelection.CANONICAL,
+        registration_limit=100,
+        active_limit=25,
+        allow_http_dev=False,
+        idempotency_ttl_seconds=86_400,
+        rollback_window_days=7,
+    )
+
+
+@pytest_asyncio.fixture
+async def legacy_import(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> LegacyImportFixture:
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Admin_Webhooks.domain.evaluate_platform_webhook_url_policy",
+        lambda _url: type("PolicyResult", (), {"allowed": True})(),
+    )
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    store_path = private / "system_ops.json"
+    store = {
+        "incidents": [{"id": "incident-1", "status": "open"}],
+        "webhooks": [
+            {
+                "id": "legacy-alpha",
+                "url": "https://hooks.example.com/private?token=url-canary",
+                "secret": "secret-canary",
+                "events": ["*"],
+                "enabled": True,
+            }
+        ],
+        "webhook_deliveries": [{"id": "delivery-1"}],
+    }
+    store_path.write_text(json.dumps(store), encoding="utf-8")
+    os.chmod(store_path, 0o600)
+    original_store_bytes = store_path.read_bytes()
+
+    database_path = private / "authnz.db"
+    pool = DatabasePool(
+        Settings(
+            AUTH_MODE="single_user",
+            DATABASE_URL=f"sqlite:///{database_path}",
+        )
+    )
+    await pool.initialize()
+    repository = AdminWebhookRepository(pool)
+    audits: list[OperationalAudit] = []
+
+    async def audit_sink(record: OperationalAudit) -> None:
+        audits.append(record)
+
+    service = LegacyImportService(
+        repository=repository,
+        key_ring=_ring(),
+        settings=_settings(),
+        system_ops_path=store_path,
+        application_data_paths=(private,),
+        audit_sink=audit_sink,
+    )
+    request = LegacyImportRequest(
+        report_path=tmp_path / "report.json",
+        backup_path=tmp_path / "system-ops.backup.enc",
+        rollback_key_path=tmp_path / "rollback.key",
+        operator_id=9,
+        now=NOW,
+    )
+    fixture = LegacyImportFixture(
+        pool=pool,
+        repository=repository,
+        service=service,
+        request=request,
+        store_path=store_path,
+        original_store_bytes=original_store_bytes,
+        audits=audits,
+    )
+    try:
+        yield fixture
+    finally:
+        await pool.close()
+
+
+@pytest.mark.unit
+@_requires_posix_artifacts
+async def test_dry_run_is_deterministic_redacted_and_mutates_no_source_or_database(
+    legacy_import: LegacyImportFixture,
+) -> None:
+    first = await legacy_import.service.build_plan(legacy_import.request)
+    second = await legacy_import.service.build_plan(legacy_import.request)
+
+    assert first.report_digest == second.report_digest
+    assert first.operation_id == second.operation_id
+    assert first.source_mapping == second.source_mapping
+    assert first.requires_system_ops_backup is True
+    assert len(first.accepted) == 1
+    assert first.accepted[0].event_types == CATALOG_EVENTS
+    assert first.accepted[0].target_display == "https://hooks.example.com"
+    assert first.accepted[0].secret_rotation_required is True
+    assert first.unresolved == ()
+
+    report_bytes = legacy_import.request.report_path.read_bytes()
+    assert b"secret-canary" not in report_bytes
+    assert b"url-canary" not in report_bytes
+    assert stat.S_IMODE(legacy_import.request.report_path.stat().st_mode) == 0o600
+    assert legacy_import.store_path.read_bytes() == legacy_import.original_store_bytes
+    assert await legacy_import.repository.count_registrations() == 0
+    assert not legacy_import.request.backup_path.exists()
+    assert not legacy_import.request.rollback_key_path.exists()
+
+
+@pytest.mark.unit
+# This full build_plan check publishes a private report; the repository snapshot stays native.
+@_requires_posix_artifacts
+async def test_source_snapshot_does_not_reopen_store_after_strict_read(
+    legacy_import: LegacyImportFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_read_bytes = Path.read_bytes
+
+    def guarded_read_bytes(path: Path) -> bytes:
+        if path == legacy_import.store_path:
+            raise AssertionError("migration snapshot reopened the source path")
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded_read_bytes)
+
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+
+    assert len(plan.accepted) == 1
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_code"),
+    [
+        (b"   \n", None),
+        (b"[]", "admin_webhook_legacy_source_invalid"),
+        (b"{not-json", "admin_webhook_legacy_source_invalid"),
+        (
+            b'{"webhooks":[],"webhooks":[]}',
+            "admin_webhook_legacy_source_invalid",
+        ),
+    ],
+)
+@pytest.mark.unit
+# These are build_plan operation cases; unmarked strict-source parser cases appear below.
+@_requires_posix_artifacts
+async def test_strict_system_ops_source_handling(
+    legacy_import: LegacyImportFixture,
+    payload: bytes,
+    expected_code: str | None,
+) -> None:
+    legacy_import.store_path.write_bytes(payload)
+    if expected_code is None:
+        request = LegacyImportRequest(
+            report_path=legacy_import.request.report_path,
+            backup_path=None,
+            rollback_key_path=None,
+            operator_id=9,
+            now=NOW,
+        )
+        plan = await legacy_import.service.build_plan(request)
+        assert plan.accepted == ()
+        assert plan.requires_system_ops_backup is False
+        return
+
+    with pytest.raises(LegacyImportError) as caught:
+        await legacy_import.service.build_plan(legacy_import.request)
+    assert caught.value.code.value == expected_code
+
+
+@pytest.mark.unit
+@_requires_posix_artifacts
+async def test_dry_run_rejects_id_that_leaves_no_next_sequence_value(
+    legacy_import: LegacyImportFixture,
+) -> None:
+    store = json.loads(legacy_import.store_path.read_text(encoding="utf-8"))
+    store["webhooks"][0]["id"] = 2**63 - 1
+    legacy_import.store_path.write_text(json.dumps(store), encoding="utf-8")
+
+    with pytest.raises(LegacyImportError) as caught:
+        await legacy_import.service.build_plan(legacy_import.request)
+
+    assert caught.value.code.value == "admin_webhook_sequence_exhausted"
+
+
+@pytest.mark.unit
+async def test_repository_snapshot_reads_legacy_rows_and_canonical_allocator_state(
+    legacy_import: LegacyImportFixture,
+) -> None:
+    with sqlite3.connect(legacy_import.repository.database_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO admin_webhooks (
+                id, url, secret_encrypted, secret_key_id, event_types,
+                description, active, retry_count, timeout_seconds, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                17,
+                "https://db-hooks.example.com/path",
+                '{"_enc":"legacy"}',
+                "jwt_secret",
+                '["user.created"]',
+                "Database legacy row",
+                1,
+                3,
+                10,
+                9,
+            ),
+        )
+        connection.commit()
+
+    snapshot = await legacy_import.repository.get_legacy_import_snapshot()
+
+    assert snapshot.table_present is True
+    assert len(snapshot.rows) == 1
+    assert snapshot.rows[0].source_identity == "17"
+    assert snapshot.rows[0].values["secret_encrypted"] == '{"_enc":"legacy"}'
+    assert snapshot.canonical_registration_ids == ()
+    assert snapshot.canonical_non_deleted_count == 0
+    assert snapshot.next_registration_id == 1
+
+
+@pytest.mark.unit
+@_requires_posix_artifacts
+async def test_apply_imports_inactive_preserves_secret_and_sanitizes_exact_fields(
+    legacy_import: LegacyImportFixture,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+
+    completed = await legacy_import.service.apply_plan(
+        legacy_import.request,
+        approved_report_digest=plan.report_digest,
+        request_id="legacy-import-request-1",
+    )
+
+    assert completed.phase == "complete"
+    assert completed.import_operation_id == plan.operation_id
+    assert completed.rollback_retirement_phase == "retained"
+    assert legacy_import.request.backup_path.is_file()
+    assert legacy_import.request.rollback_key_path.is_file()
+    assert stat.S_IMODE(legacy_import.request.backup_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(legacy_import.request.rollback_key_path.stat().st_mode) == 0o600
+
+    canonical_id = next(iter(plan.source_mapping.values()))
+    stored = await legacy_import.repository.get_protected_registration(canonical_id)
+    assert stored is not None
+    assert stored.registration.active is False
+    assert stored.registration.secret_rotation_required is True
+    assert (
+        _ring().decrypt_text(
+            purpose="registration.target",
+            identity={"registration_id": canonical_id, "target_version": 1},
+            protected=stored.target,
+        )
+        == "https://hooks.example.com/private?token=url-canary"
+    )
+    assert (
+        _ring().decrypt_bytes(
+            purpose="registration.secret",
+            identity={"registration_id": canonical_id, "secret_version": 1},
+            protected=stored.secret,
+        )
+        == b"secret-canary"
+    )
+
+    sanitized = json.loads(legacy_import.store_path.read_text(encoding="utf-8"))
+    assert sanitized == {"incidents": [{"id": "incident-1", "status": "open"}]}
+    assert [audit.outcome for audit in legacy_import.audits] == [
+        "accepted",
+        "completed",
+    ]
+
+
+@pytest.mark.unit
+@_requires_posix_artifacts
+async def test_apply_audit_failure_has_zero_database_source_or_artifact_side_effects(
+    legacy_import: LegacyImportFixture,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+    state_before = await legacy_import.repository.get_migration_state()
+    store_before = legacy_import.store_path.read_bytes()
+
+    async def unavailable(_record: OperationalAudit) -> None:
+        raise RuntimeError("unavailable")
+
+    service = LegacyImportService(
+        repository=legacy_import.repository,
+        key_ring=_ring(),
+        settings=_settings(),
+        system_ops_path=legacy_import.store_path,
+        application_data_paths=(legacy_import.store_path.parent,),
+        audit_sink=unavailable,
+    )
+    with pytest.raises(LegacyImportError) as caught:
+        await service.apply_plan(
+            legacy_import.request,
+            approved_report_digest=plan.report_digest,
+            request_id="legacy-import-request-2",
+        )
+
+    assert caught.value.code.value == "admin_webhook_audit_unavailable"
+    assert await legacy_import.repository.get_migration_state() == state_before
+    assert await legacy_import.repository.count_registrations() == 0
+    assert legacy_import.store_path.read_bytes() == store_before
+    assert not legacy_import.request.backup_path.exists()
+    assert not legacy_import.request.rollback_key_path.exists()
+
+
+@pytest.mark.unit
+@_requires_posix_artifacts
+async def test_literal_report_approval_detects_payload_tampering_before_audit(
+    legacy_import: LegacyImportFixture,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+    envelope = json.loads(legacy_import.request.report_path.read_text(encoding="utf-8"))
+    envelope["projected_non_deleted_count"] = 99
+    legacy_import.request.report_path.write_text(json.dumps(envelope), encoding="utf-8")
+    os.chmod(legacy_import.request.report_path, 0o600)
+
+    with pytest.raises(LegacyImportError) as caught:
+        await legacy_import.service.apply_plan(
+            legacy_import.request,
+            approved_report_digest=plan.report_digest,
+            request_id="legacy-import-request-3",
+        )
+
+    assert caught.value.code.value == "admin_webhook_legacy_report_invalid"
+    assert legacy_import.audits == []
+    assert await legacy_import.repository.count_registrations() == 0
+
+
+@pytest.mark.unit
+@_requires_posix_artifacts
+async def test_fresh_install_apply_completes_without_rollback_artifacts(
+    legacy_import: LegacyImportFixture,
+    tmp_path: Path,
+) -> None:
+    legacy_import.store_path.write_text(
+        json.dumps({"incidents": [{"id": "incident-2"}]}),
+        encoding="utf-8",
+    )
+    request = LegacyImportRequest(
+        report_path=tmp_path / "fresh-report.json",
+        backup_path=None,
+        rollback_key_path=None,
+        operator_id=9,
+        now=NOW,
+    )
+    plan = await legacy_import.service.build_plan(request)
+
+    completed = await legacy_import.service.apply_plan(
+        request,
+        approved_report_digest=plan.report_digest,
+        request_id="legacy-import-request-4",
+    )
+
+    assert plan.accepted == ()
+    assert plan.requires_system_ops_backup is False
+    assert completed.phase == "complete"
+    assert completed.rollback_retirement_phase == "not_applicable"
+    assert await legacy_import.repository.count_registrations() == 0
+
+
+class _StaticLegacyDecryptor(LegacySecretDecryptor):
+    def decrypt(self, encrypted_blob: str) -> str:
+        assert encrypted_blob == '{"_enc":"legacy"}'
+        return "database-secret-canary"
+
+
+@pytest.mark.unit
+@_requires_posix_artifacts
+async def test_database_only_import_preserves_collision_mapping_and_advances_sequence(
+    legacy_import: LegacyImportFixture,
+    tmp_path: Path,
+) -> None:
+    legacy_import.store_path.write_text('{"incidents":[]}', encoding="utf-8")
+    ring = _ring()
+    async with legacy_import.repository.transaction() as tx:
+        existing = await tx.insert_registration(
+            RegistrationInsert(
+                id=1,
+                description="Existing canonical",
+                target=RegistrationTarget(
+                    protected=ring.encrypt_text(
+                        purpose="registration.target",
+                        identity={"registration_id": 1, "target_version": 1},
+                        plaintext="https://existing.example.com/hook",
+                    ),
+                    hostname="existing.example.com",
+                    display="https://existing.example.com",
+                ),
+                event_types=("user.created",),
+                active=False,
+                timeout_seconds=10,
+                secret=ring.encrypt_bytes(
+                    purpose="registration.secret",
+                    identity={"registration_id": 1, "secret_version": 1},
+                    plaintext=b"existing-secret",
+                ),
+                secret_rotation_required=False,
+                actor_user_id=9,
+                now=NOW,
+            )
+        )
+        await tx.soft_delete_registration(
+            existing.id,
+            expected_revision=existing.revision,
+            actor_user_id=9,
+            at=NOW + timedelta(minutes=1),
+        )
+        await tx.ensure_registration_sequence_above(1)
+    with sqlite3.connect(legacy_import.repository.database_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO admin_webhooks (
+                id, url, secret_encrypted, secret_key_id, event_types,
+                description, active, retry_count, timeout_seconds, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1,
+                "https://database.example.com/private?token=db-url-canary",
+                '{"_enc":"legacy"}',
+                "jwt_secret",
+                '["incident.created"]',
+                "Database import",
+                1,
+                3,
+                10,
+                9,
+            ),
+        )
+        connection.commit()
+
+    async def audit_sink(record: OperationalAudit) -> None:
+        legacy_import.audits.append(record)
+
+    service = LegacyImportService(
+        repository=legacy_import.repository,
+        key_ring=ring,
+        settings=_settings(),
+        system_ops_path=legacy_import.store_path,
+        application_data_paths=(legacy_import.store_path.parent,),
+        legacy_secret_decryptor=_StaticLegacyDecryptor(),
+        audit_sink=audit_sink,
+    )
+    request = LegacyImportRequest(
+        report_path=tmp_path / "database-report.json",
+        backup_path=None,
+        rollback_key_path=None,
+        operator_id=9,
+        now=NOW,
+        allow_legacy_credential_decryption=True,
+    )
+    plan = await service.build_plan(request)
+
+    assert plan.source_mapping == {"database:1": 2}
+    assert plan.projected_non_deleted_count == 1
+    completed = await service.apply_plan(
+        request,
+        approved_report_digest=plan.report_digest,
+        request_id="legacy-import-request-db",
+    )
+    imported = await legacy_import.repository.get_protected_registration(2)
+    assert imported is not None
+    assert (
+        ring.decrypt_bytes(
+            purpose="registration.secret",
+            identity={"registration_id": 2, "secret_version": 1},
+            protected=imported.secret,
+        )
+        == b"database-secret-canary"
+    )
+    async with legacy_import.repository.transaction() as tx:
+        assert await tx.allocate_registration_id() == 3
+    assert completed.rollback_retirement_phase == "not_applicable"
+    assert not (tmp_path / "database.backup").exists()
+
+
+@pytest.mark.unit
+@_requires_posix_artifacts
+async def test_encrypted_database_source_requires_explicit_decryption_flag(
+    legacy_import: LegacyImportFixture,
+    tmp_path: Path,
+) -> None:
+    legacy_import.store_path.write_text("{}", encoding="utf-8")
+    with sqlite3.connect(legacy_import.repository.database_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO admin_webhooks (
+                id, url, secret_encrypted, event_types, description,
+                active, retry_count, timeout_seconds
+            ) VALUES (1, 'https://database.example.com/hook',
+                      '{"_enc":"legacy"}', '["user.created"]', '', 1, 3, 10)
+            """
+        )
+        connection.commit()
+    request = LegacyImportRequest(
+        report_path=tmp_path / "unresolved-report.json",
+        backup_path=None,
+        rollback_key_path=None,
+        operator_id=9,
+        now=NOW,
+    )
+
+    plan = await legacy_import.service.build_plan(request)
+
+    assert plan.accepted == ()
+    assert len(plan.unresolved) == 1
+    assert plan.unresolved[0].reason_code == "legacy_credential_decryption_required"
+    with pytest.raises(LegacyImportError) as caught:
+        await legacy_import.service.apply_plan(
+            request,
+            approved_report_digest=plan.report_digest,
+            request_id="legacy-import-request-unresolved",
+        )
+    assert caught.value.code.value == "admin_webhook_legacy_unresolved"
+    assert legacy_import.audits == []
+
+
+@pytest.mark.unit
+# This flow publishes three plans; the unmarked source-rejection control below publishes none.
+@_requires_posix_artifacts
+async def test_reject_source_is_audited_and_bound_to_exact_record_fingerprint(
+    legacy_import: LegacyImportFixture,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+    record = plan.accepted[0]
+
+    await legacy_import.service.reject_source(
+        source_kind=record.source_kind,
+        source_identity=record.source_identity,
+        source_record_fingerprint=record.source_record_fingerprint,
+        reason_code=LegacyRejectionReason.OPERATOR_EXCLUDED,
+        operator_id=9,
+        now=NOW,
+        request_id="legacy-reject-request-1",
+    )
+    rejected_plan = await legacy_import.service.build_plan(legacy_import.request)
+
+    assert rejected_plan.accepted == ()
+    assert len(rejected_plan.explicitly_rejected) == 1
+    assert rejected_plan.explicitly_rejected[0].reason_code == "operator_excluded"
+    assert [audit.action for audit in legacy_import.audits] == [
+        "admin_webhook.import.reject_source",
+        "admin_webhook.import.reject_source",
+    ]
+    store = json.loads(legacy_import.store_path.read_text(encoding="utf-8"))
+    store["webhooks"][0]["events"] = ["user.created"]
+    legacy_import.store_path.write_text(json.dumps(store), encoding="utf-8")
+    drifted = await legacy_import.service.build_plan(legacy_import.request)
+    assert drifted.explicitly_rejected == ()
+    assert len(drifted.accepted) == 1
+
+
+@pytest.mark.unit
+@_requires_posix_artifacts
+async def test_extract_rollback_backup_writes_distinct_private_plaintext_file(
+    legacy_import: LegacyImportFixture,
+    tmp_path: Path,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+    await legacy_import.service.apply_plan(
+        legacy_import.request,
+        approved_report_digest=plan.report_digest,
+        request_id="legacy-import-before-extract",
+    )
+    output = tmp_path / "extracted-system-ops.json"
+
+    result = await legacy_import.service.extract_rollback_backup(
+        backup_path=legacy_import.request.backup_path,
+        rollback_key_path=legacy_import.request.rollback_key_path,
+        output_path=output,
+        operator_id=9,
+        now=NOW + timedelta(days=1),
+        confirmed=True,
+        request_id="legacy-extract-request-1",
+    )
+
+    assert result == "admin_webhook_rollback_backup_extracted"
+    assert output.read_bytes() == legacy_import.original_store_bytes
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert [audit.outcome for audit in legacy_import.audits[-2:]] == [
+        "accepted",
+        "completed",
+    ]
+    assert [audit.action for audit in legacy_import.audits[-2:]] == [
+        "admin_webhook.rollback.extract",
+        "admin_webhook.rollback.extract",
+    ]
+
+
+@pytest.mark.unit
+@_requires_posix_artifacts
+async def test_extract_cleans_created_plaintext_when_transaction_exit_is_cancelled(
+    legacy_import: LegacyImportFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+    await legacy_import.service.apply_plan(
+        legacy_import.request,
+        approved_report_digest=plan.report_digest,
+        request_id="legacy-import-before-cancelled-extract",
+    )
+    output = tmp_path / "cancelled-extraction.json"
+    original_transaction = legacy_import.repository.transaction
+
+    @asynccontextmanager
+    async def cancel_after_transaction_exit():
+        async with original_transaction() as tx:
+            yield tx
+        if output.exists():
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(
+        legacy_import.repository,
+        "transaction",
+        cancel_after_transaction_exit,
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await legacy_import.service.extract_rollback_backup(
+            backup_path=legacy_import.request.backup_path,
+            rollback_key_path=legacy_import.request.rollback_key_path,
+            output_path=output,
+            operator_id=9,
+            now=NOW + timedelta(days=1),
+            confirmed=True,
+            request_id="legacy-extract-cancelled-on-exit",
+        )
+
+    assert not output.exists()
+
+
+@pytest.mark.unit
+@_requires_posix_artifacts
+async def test_extract_failure_cleanup_preserves_replaced_output_inode(
+    legacy_import: LegacyImportFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+    await legacy_import.service.apply_plan(
+        legacy_import.request,
+        approved_report_digest=plan.report_digest,
+        request_id="legacy-import-before-replaced-output",
+    )
+    output = tmp_path / "replaced-extraction.json"
+    replacement = b"replacement-owned-by-another-process"
+    original_transaction = legacy_import.repository.transaction
+
+    @asynccontextmanager
+    async def replace_output_then_fail():
+        async with original_transaction() as tx:
+            yield tx
+        if output.exists():
+            output.unlink()
+            output.write_bytes(replacement)
+            os.chmod(output, 0o600)
+            raise RuntimeError("injected transaction-exit failure")
+
+    monkeypatch.setattr(
+        legacy_import.repository,
+        "transaction",
+        replace_output_then_fail,
+    )
+
+    with pytest.raises(LegacyImportError):
+        await legacy_import.service.extract_rollback_backup(
+            backup_path=legacy_import.request.backup_path,
+            rollback_key_path=legacy_import.request.rollback_key_path,
+            output_path=output,
+            operator_id=9,
+            now=NOW + timedelta(days=1),
+            confirmed=True,
+            request_id="legacy-extract-replaced-on-exit",
+        )
+
+    assert output.read_bytes() == replacement
+
+
+@pytest.mark.unit
+@_requires_posix_artifacts
+def test_output_cleanup_preserves_replacement_that_reused_the_inode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Linux reuses a freed inode at once; identity alone must not authorize unlink."""
+    from tldw_Server_API.app.core.Admin_Webhooks import legacy_import as legacy_import_module
+
+    output = tmp_path / "extraction.json"
+    evidence = legacy_import_module._publish_exclusive_output(output, b"extracted-by-us")
+    original_stat = output.lstat()
+    # Stand-in for an unlink + recreate that got the same dev:inode back.
+    os.chmod(output, 0o600)
+    output.write_bytes(b"replacement-owned-by-another-process")
+    assert f"{output.stat().st_dev}:{output.stat().st_ino}" == evidence.identity
+
+    local_os = SimpleNamespace(**{**vars(os), "lstat": lambda path: original_stat})
+    monkeypatch.setattr(legacy_import_module, "os", local_os)
+
+    legacy_import_module._remove_published_output_if_same(
+        output,
+        evidence,
+        expected_payload=b"extracted-by-us",
+    )
+    assert output.read_bytes() == b"replacement-owned-by-another-process"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("change", ["unchanged", "replaced", "modified"])
+@_requires_posix_artifacts
+def test_output_cleanup_requires_unchanged_file_even_when_inode_is_reused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
+    output = tmp_path / "owned-output.json"
+    output.write_bytes(b"owned plaintext")
+    output.chmod(0o600)
+    evidence = legacy_import_module._file_evidence(output)
+    original_stat = output.lstat()
+    if change == "replaced":
+        output.unlink()
+    if change != "unchanged":
+        output.write_bytes(b"owned plaintext")
+        output.chmod(0o600)
+
+    # Model a filesystem reusing the original inode with changed creation/status time.
+    reused_inode_stat = SimpleNamespace(
+        st_mode=original_stat.st_mode,
+        st_uid=original_stat.st_uid,
+        st_gid=original_stat.st_gid,
+        st_dev=original_stat.st_dev,
+        st_ino=original_stat.st_ino,
+        st_ctime_ns=original_stat.st_ctime_ns + (change != "unchanged"),
+    )
+    local_os = SimpleNamespace(**{**vars(os), "lstat": lambda path: reused_inode_stat})
+    monkeypatch.setattr(legacy_import_module, "os", local_os)
+
+    legacy_import_module._remove_published_output_if_same(
+        output, evidence, expected_payload=b"owned plaintext",
+    )
+
+    if change == "unchanged":
+        assert not output.exists()
+    else:
+        assert output.read_bytes() == b"owned plaintext"
+
+
+@pytest.mark.parametrize("closing_action", ["activity", "retirement"])
+@pytest.mark.unit
+@_requires_posix_artifacts
+async def test_extract_holds_migration_lock_through_plaintext_publication(
+    legacy_import: LegacyImportFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    closing_action: str,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+    await legacy_import.service.apply_plan(
+        legacy_import.request,
+        approved_report_digest=plan.report_digest,
+        request_id=f"legacy-import-before-locked-{closing_action}",
+    )
+    output = tmp_path / f"locked-extraction-{closing_action}.json"
+    published_while_locked = asyncio.Event()
+    release_extraction = asyncio.Event()
+    original_transaction = legacy_import.repository.transaction
+
+    @asynccontextmanager
+    async def pause_before_transaction_exit():
+        async with original_transaction() as tx:
+            yield tx
+            if output.exists():
+                published_while_locked.set()
+                await release_extraction.wait()
+
+    monkeypatch.setattr(
+        legacy_import.repository,
+        "transaction",
+        pause_before_transaction_exit,
+    )
+    writer_repository = AdminWebhookRepository(legacy_import.pool)
+
+    async def audit_sink(record: OperationalAudit) -> None:
+        legacy_import.audits.append(record)
+
+    writer_service = LegacyImportService(
+        repository=writer_repository,
+        key_ring=_ring(),
+        settings=_settings(),
+        system_ops_path=legacy_import.store_path,
+        application_data_paths=(legacy_import.store_path.parent,),
+        audit_sink=audit_sink,
+    )
+
+    async def close_rollback_window() -> None:
+        if closing_action == "activity":
+            async with writer_repository.transaction() as tx:
+                await tx.mark_first_canonical_activity(
+                    "registration_mutation",
+                    NOW + timedelta(hours=1),
+                )
+            return
+        await writer_service.destroy_rollback_key(
+            backup_path=legacy_import.request.backup_path,
+            rollback_key_path=legacy_import.request.rollback_key_path,
+            operator_id=10,
+            now=NOW + timedelta(days=8),
+            confirmed=True,
+            request_id="legacy-retirement-waits-for-extraction",
+        )
+
+    extraction_task = asyncio.create_task(
+        legacy_import.service.extract_rollback_backup(
+            backup_path=legacy_import.request.backup_path,
+            rollback_key_path=legacy_import.request.rollback_key_path,
+            output_path=output,
+            operator_id=9,
+            now=NOW + timedelta(days=1),
+            confirmed=True,
+            request_id=f"legacy-extract-holds-lock-{closing_action}",
+        )
+    )
+    closing_task: asyncio.Task[None] | None = None
+    try:
+        await asyncio.wait_for(published_while_locked.wait(), timeout=3)
+        assert output.read_bytes() == legacy_import.original_store_bytes
+        closing_task = asyncio.create_task(close_rollback_window())
+        await asyncio.sleep(0.1)
+        assert not closing_task.done()
+    finally:
+        release_extraction.set()
+        pending = [extraction_task]
+        if closing_task is not None:
+            pending.append(closing_task)
+        await asyncio.gather(*pending, return_exceptions=True)
+
+    assert extraction_task.result() == "admin_webhook_rollback_backup_extracted"
+    assert closing_task is not None
+    closing_task.result()
+
+
+@pytest.mark.unit
+@_requires_posix_artifacts
+async def test_extract_checks_closed_window_before_artifact_access_or_audit(
+    legacy_import: LegacyImportFixture,
+    tmp_path: Path,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+    await legacy_import.service.apply_plan(
+        legacy_import.request,
+        approved_report_digest=plan.report_digest,
+        request_id="legacy-import-before-closed-extract",
+    )
+    async with legacy_import.repository.transaction() as tx:
+        await tx.mark_first_canonical_activity(
+            "registration_mutation",
+            NOW + timedelta(hours=1),
+        )
+    legacy_import.request.backup_path.unlink()
+    legacy_import.request.rollback_key_path.unlink()
+    audit_count = len(legacy_import.audits)
+
+    with pytest.raises(LegacyImportError) as caught:
+        await legacy_import.service.extract_rollback_backup(
+            backup_path=legacy_import.request.backup_path,
+            rollback_key_path=legacy_import.request.rollback_key_path,
+            output_path=tmp_path / "must-not-exist.json",
+            operator_id=9,
+            now=NOW + timedelta(days=1),
+            confirmed=True,
+            request_id="legacy-extract-request-closed",
+        )
+
+    assert caught.value.code.value == "admin_webhook_rollback_window_closed"
+    assert len(legacy_import.audits) == audit_count
+    assert not (tmp_path / "must-not-exist.json").exists()
+
+
+@pytest.mark.unit
+@_requires_posix_artifacts
+async def test_extract_rechecks_activity_after_accepted_audit_before_artifact_access(
+    legacy_import: LegacyImportFixture,
+    tmp_path: Path,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+    await legacy_import.service.apply_plan(
+        legacy_import.request,
+        approved_report_digest=plan.report_digest,
+        request_id="legacy-import-before-racing-activity",
+    )
+
+    async def audit_sink(record: OperationalAudit) -> None:
+        legacy_import.audits.append(record)
+        if record.action == "admin_webhook.rollback.extract" and record.outcome == "accepted":
+            async with legacy_import.repository.transaction() as tx:
+                await tx.mark_first_canonical_activity(
+                    "registration_mutation",
+                    NOW + timedelta(hours=1),
+                )
+
+    racing_service = LegacyImportService(
+        repository=legacy_import.repository,
+        key_ring=_ring(),
+        settings=_settings(),
+        system_ops_path=legacy_import.store_path,
+        application_data_paths=(legacy_import.store_path.parent,),
+        audit_sink=audit_sink,
+    )
+    output = tmp_path / "must-not-extract-after-activity.json"
+
+    with pytest.raises(LegacyImportError) as caught:
+        await racing_service.extract_rollback_backup(
+            backup_path=legacy_import.request.backup_path,
+            rollback_key_path=legacy_import.request.rollback_key_path,
+            output_path=output,
+            operator_id=9,
+            now=NOW + timedelta(days=1),
+            confirmed=True,
+            request_id="legacy-extract-racing-activity",
+        )
+
+    assert caught.value.code.value == "admin_webhook_rollback_window_closed"
+    assert not output.exists()
+
+
+@pytest.mark.unit
+@_requires_posix_artifacts
+async def test_extract_rechecks_retirement_after_accepted_audit_before_artifact_access(
+    legacy_import: LegacyImportFixture,
+    tmp_path: Path,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+    await legacy_import.service.apply_plan(
+        legacy_import.request,
+        approved_report_digest=plan.report_digest,
+        request_id="legacy-import-before-racing-retirement",
+    )
+
+    async def audit_sink(record: OperationalAudit) -> None:
+        legacy_import.audits.append(record)
+        if record.action == "admin_webhook.rollback.extract" and record.outcome == "accepted":
+            await legacy_import.service.destroy_rollback_key(
+                backup_path=legacy_import.request.backup_path,
+                rollback_key_path=legacy_import.request.rollback_key_path,
+                operator_id=10,
+                now=NOW + timedelta(days=8),
+                confirmed=True,
+                request_id="legacy-retirement-races-extraction",
+            )
+
+    racing_service = LegacyImportService(
+        repository=legacy_import.repository,
+        key_ring=_ring(),
+        settings=_settings(),
+        system_ops_path=legacy_import.store_path,
+        application_data_paths=(legacy_import.store_path.parent,),
+        audit_sink=audit_sink,
+    )
+    output = tmp_path / "must-not-extract-after-retirement.json"
+
+    with pytest.raises(LegacyImportError) as caught:
+        await racing_service.extract_rollback_backup(
+            backup_path=legacy_import.request.backup_path,
+            rollback_key_path=legacy_import.request.rollback_key_path,
+            output_path=output,
+            operator_id=9,
+            now=NOW + timedelta(days=1),
+            confirmed=True,
+            request_id="legacy-extract-racing-retirement",
+        )
+
+    assert caught.value.code.value == "admin_webhook_rollback_window_closed"
+    assert not output.exists()
+
+
+@pytest.mark.unit
+@_requires_posix_artifacts
+async def test_destroy_rollback_key_requires_expiry_then_retires_idempotently(
+    legacy_import: LegacyImportFixture,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+    await legacy_import.service.apply_plan(
+        legacy_import.request,
+        approved_report_digest=plan.report_digest,
+        request_id="legacy-import-before-destroy",
+    )
+    audit_count = len(legacy_import.audits)
+    with pytest.raises(LegacyImportError) as early:
+        await legacy_import.service.destroy_rollback_key(
+            backup_path=legacy_import.request.backup_path,
+            rollback_key_path=legacy_import.request.rollback_key_path,
+            operator_id=9,
+            now=NOW + timedelta(days=6),
+            confirmed=True,
+            request_id="legacy-destroy-too-early",
+        )
+    assert early.value.code.value == "admin_webhook_rollback_window_closed"
+    assert len(legacy_import.audits) == audit_count
+
+    retired = await legacy_import.service.destroy_rollback_key(
+        backup_path=legacy_import.request.backup_path,
+        rollback_key_path=legacy_import.request.rollback_key_path,
+        operator_id=9,
+        now=NOW + timedelta(days=8),
+        confirmed=True,
+        request_id="legacy-destroy-request-1",
+    )
+    assert retired == "admin_webhook_rollback_artifacts_retired"
+    assert not legacy_import.request.backup_path.exists()
+    assert not legacy_import.request.rollback_key_path.exists()
+    state = await legacy_import.repository.get_migration_state()
+    assert state.rollback_retirement_phase == "retired"
+    audit_count = len(legacy_import.audits)
+
+    repeated = await legacy_import.service.destroy_rollback_key(
+        backup_path=legacy_import.request.backup_path,
+        rollback_key_path=legacy_import.request.rollback_key_path,
+        operator_id=9,
+        now=NOW + timedelta(days=9),
+        confirmed=True,
+        request_id="legacy-destroy-request-2",
+    )
+    assert repeated == "admin_webhook_rollback_artifacts_already_retired"
+    assert len(legacy_import.audits) == audit_count
+
+
+@pytest.mark.parametrize(
+    "crash_stage",
+    [
+        "after_artifacts_pending",
+        "after_key_publish",
+        "after_backup_publish",
+        "after_artifacts_ready",
+        "after_database_commit",
+        "after_canonical_readback",
+        "after_source_replace",
+        "after_complete",
+    ],
+)
+@pytest.mark.unit
+@_requires_posix_artifacts
+async def test_apply_resumes_from_every_durable_stage_without_duplicate_import(
+    legacy_import: LegacyImportFixture,
+    crash_stage: str,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+
+    def inject(stage: str) -> None:
+        if stage == crash_stage:
+            raise RuntimeError("injected crash")
+
+    async def audit_sink(record: OperationalAudit) -> None:
+        legacy_import.audits.append(record)
+
+    crashing = LegacyImportService(
+        repository=legacy_import.repository,
+        key_ring=_ring(),
+        settings=_settings(),
+        system_ops_path=legacy_import.store_path,
+        application_data_paths=(legacy_import.store_path.parent,),
+        audit_sink=audit_sink,
+        failure_injector=inject,
+    )
+    with pytest.raises(LegacyImportError):
+        await crashing.apply_plan(
+            legacy_import.request,
+            approved_report_digest=plan.report_digest,
+            request_id=f"crash-{crash_stage}",
+        )
+
+    completed = await legacy_import.service.apply_plan(
+        legacy_import.request,
+        approved_report_digest=plan.report_digest,
+        request_id=f"resume-{crash_stage}",
+    )
+
+    assert completed.phase == "complete"
+    assert await legacy_import.repository.count_registrations() == 1
+    sanitized = json.loads(legacy_import.store_path.read_text(encoding="utf-8"))
+    assert "webhooks" not in sanitized
+    assert "webhook_deliveries" not in sanitized
+
+
+def _unsupported_artifact_os(reason: str = "non_posix") -> SimpleNamespace:
+    """Model missing capabilities without changing the process-wide os module."""
+    values = {
+        **vars(os),
+        "name": "posix",
+        "geteuid": getattr(os, "geteuid", lambda: 0),
+        "fchmod": getattr(os, "fchmod", lambda _descriptor, _mode: None),
+    }
+    if reason == "non_posix":
+        values["name"] = "nt"
+    else:
+        values.pop(reason)
+    return SimpleNamespace(**values)
+
+
+@pytest.mark.unit
+def test_private_artifact_capability_matches_native_host(tmp_path: Path) -> None:
+    """Native Windows must reject artifacts rather than claim chmod secures them."""
+    expected = (
+        os.name == "posix"
+        and callable(getattr(os, "geteuid", None))
+        and callable(getattr(os, "fchmod", None))
+    )
+    assert legacy_import_module.posix_private_artifacts_supported() is expected
+    if expected:
+        legacy_import_module.require_posix_private_artifacts()
+    else:
+        with pytest.raises(LegacyImportError, match="admin_webhook_legacy_host_unsupported"):
+            legacy_import_module._publish_exclusive_output(tmp_path / "native-output", b"private")
+        assert not tuple(tmp_path.iterdir())
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("reason", ["non_posix", "geteuid", "fchmod"])
+@pytest.mark.parametrize(
+    "helper",
+    ["normalize", "read", "report", "artifact", "resume", "output", "fsync"],
+)
+def test_unsupported_host_rejects_artifact_helpers_before_filesystem_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str, helper: str,
+) -> None:
+    """Removing any required host capability must stop every direct artifact entry."""
+    local_os = _unsupported_artifact_os(reason)
+    accesses: list[str] = []
+
+    def deny_access(*_args, **_kwargs):
+        accesses.append("artifact access")
+        raise AssertionError("unsupported host must not access an artifact")
+
+    local_os.open = deny_access
+    monkeypatch.setattr(legacy_import_module, "os", local_os)
+    monkeypatch.setattr(legacy_import_module, "tempfile", SimpleNamespace(mkstemp=deny_access))
+    output = tmp_path / "output"
+    staging = tmp_path / "staging"
+    operations = {
+        "normalize": lambda: legacy_import_module._normalize_output_path(output),
+        "read": lambda: legacy_import_module._read_private_file(output),
+        "report": lambda: legacy_import_module._publish_private_report(output, b"private"),
+        "artifact": lambda: legacy_import_module._publish_exclusive_artifact(output, staging, b"private"),
+        "resume": lambda: legacy_import_module._publish_or_resume_artifact(output, staging, b"private"),
+        "output": lambda: legacy_import_module._publish_exclusive_output(output, b"private"),
+        "fsync": lambda: legacy_import_module._fsync_directory(tmp_path),
+    }
+
+    with pytest.raises(LegacyImportError, match="admin_webhook_legacy_host_unsupported"):
+        operations[helper]()
+
+    assert accesses == []
+    assert not tuple(tmp_path.iterdir())
+
+
+@pytest.mark.unit
+def test_unsupported_output_publication_does_not_leave_an_empty_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The historical fchmod AttributeError left an already-created output behind."""
+    monkeypatch.setattr(legacy_import_module, "os", _unsupported_artifact_os("fchmod"))
+    output = tmp_path / "plaintext.json"
+    error: LegacyImportError | AttributeError | None = None
+    try:
+        legacy_import_module._publish_exclusive_output(output, b"private plaintext")
+    except (LegacyImportError, AttributeError) as exc:
+        error = exc
+
+    assert not output.exists()
+    assert isinstance(error, LegacyImportError)
+    assert error.code.value == "admin_webhook_legacy_host_unsupported"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "operation", ["build_plan", "apply_plan", "verify_and_sanitize", "extract_rollback_backup", "destroy_rollback_key"],
+)
+async def test_unsupported_host_artifact_operations_have_no_side_effects(
+    legacy_import: LegacyImportFixture, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
+    """Unsupported operations must stop before source locks, DB reads, or audit."""
+    state_before = await legacy_import.repository.get_migration_state()
+    read_state = legacy_import.repository.get_migration_state
+    accesses: list[str] = []
+
+    async def deny_access(*_args, **_kwargs):
+        accesses.append("source or database access")
+        raise AssertionError("unsupported operation must stop before runtime work")
+
+    monkeypatch.setattr(legacy_import_module, "os", _unsupported_artifact_os())
+    monkeypatch.setattr(legacy_import.service, "_snapshot", deny_access)
+    monkeypatch.setattr(legacy_import.repository, "get_migration_state", deny_access)
+    digest = "sha256:" + "a" * 64
+    if operation == "build_plan":
+        invocation = getattr(legacy_import.service, operation)(legacy_import.request)
+    elif operation in {"apply_plan", "verify_and_sanitize"}:
+        invocation = getattr(legacy_import.service, operation)(
+            legacy_import.request, approved_report_digest=digest,
+        )
+    else:
+        kwargs = {
+            "backup_path": legacy_import.request.backup_path,
+            "rollback_key_path": legacy_import.request.rollback_key_path,
+            "operator_id": 9,
+            "now": NOW,
+            "confirmed": True,
+            "request_id": "unsupported-private-artifact-operation",
+        }
+        if operation == "extract_rollback_backup":
+            kwargs["output_path"] = tmp_path / "plaintext.json"
+        invocation = getattr(legacy_import.service, operation)(**kwargs)
+
+    with pytest.raises(LegacyImportError, match="admin_webhook_legacy_host_unsupported"):
+        await invocation
+
+    assert accesses == []
+    assert await read_state() == state_before
+    assert await legacy_import.repository.count_registrations() == 0
+    assert legacy_import.store_path.read_bytes() == legacy_import.original_store_bytes
+    assert legacy_import.audits == []
+    assert not any(
+        path.exists() for path in (
+            legacy_import.request.report_path, legacy_import.request.backup_path,
+            legacy_import.request.rollback_key_path, tmp_path / "plaintext.json",
+        )
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("payload", "invalid"),
+    [(b" \n", False), (b"[]", True), (b"{not-json", True), (b'{"webhooks":[],"webhooks":[]}', True)],
+)
+def test_strict_source_parser_remains_platform_neutral(
+    legacy_import: LegacyImportFixture, payload: bytes, invalid: bool,
+) -> None:
+    """Source parsing remains available independently of private report publication."""
+    legacy_import.store_path.write_bytes(payload)
+    if invalid:
+        with pytest.raises(LegacyImportError, match="admin_webhook_legacy_source_invalid"):
+            legacy_import.service._read_store()
+    else:
+        store, raw = legacy_import.service._read_store()
+        assert store == {}
+        assert raw == payload
+    assert legacy_import.audits == []
+    assert not legacy_import.request.report_path.exists()
+
+
+@pytest.mark.unit
+async def test_source_rejection_and_constructor_remain_available_on_unsupported_host(
+    legacy_import: LegacyImportFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A private-artifact limitation must not block audited source rejection."""
+    monkeypatch.setattr(legacy_import_module, "os", _unsupported_artifact_os())
+    service = LegacyImportService(
+        repository=legacy_import.repository,
+        key_ring=_ring(),
+        settings=_settings(),
+        system_ops_path=legacy_import.store_path,
+        audit_sink=legacy_import.service._audit_sink,
+    )
+    snapshot = await service._snapshot()
+    record = service._raw_records(snapshot)[0]
+    state = await service.reject_source(
+        source_kind=record.source_kind,
+        source_identity=record.source_identity,
+        source_record_fingerprint=record.source_record_fingerprint,
+        reason_code=LegacyRejectionReason.OPERATOR_EXCLUDED,
+        operator_id=9,
+        now=NOW,
+        request_id="platform-neutral-source-rejection",
+    )
+
+    assert state.source_rejections[0]["source_record_fingerprint"] == record.source_record_fingerprint
+    assert [audit.outcome for audit in legacy_import.audits] == ["accepted", "completed"]
+    assert legacy_import.store_path.read_bytes() == legacy_import.original_store_bytes
+    assert not legacy_import.request.report_path.exists()
+
+
+@pytest.mark.unit
+@_requires_posix_artifacts
+async def test_resume_after_backup_publish_preserves_unrelated_store_changes(
+    legacy_import: LegacyImportFixture,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+
+    def inject(stage: str) -> None:
+        if stage == "after_backup_publish":
+            raise RuntimeError("injected crash")
+
+    async def audit_sink(record: OperationalAudit) -> None:
+        legacy_import.audits.append(record)
+
+    crashing = LegacyImportService(
+        repository=legacy_import.repository,
+        key_ring=_ring(),
+        settings=_settings(),
+        system_ops_path=legacy_import.store_path,
+        application_data_paths=(legacy_import.store_path.parent,),
+        audit_sink=audit_sink,
+        failure_injector=inject,
+    )
+    with pytest.raises(LegacyImportError):
+        await crashing.apply_plan(
+            legacy_import.request,
+            approved_report_digest=plan.report_digest,
+            request_id="crash-after-backup-before-unrelated-change",
+        )
+
+    changed = json.loads(legacy_import.store_path.read_text(encoding="utf-8"))
+    changed["incidents"][0]["status"] = "resolved"
+    changed["incident_notes"] = ["preserve-on-resume"]
+    legacy_import.store_path.write_text(json.dumps(changed), encoding="utf-8")
+
+    completed = await legacy_import.service.apply_plan(
+        legacy_import.request,
+        approved_report_digest=plan.report_digest,
+        request_id="resume-after-unrelated-change",
+    )
+
+    assert completed.phase == "complete"
+    assert json.loads(legacy_import.store_path.read_text(encoding="utf-8")) == {
+        "incidents": [{"id": "incident-1", "status": "resolved"}],
+        "incident_notes": ["preserve-on-resume"],
+    }
+
+
+@pytest.mark.unit
+@_requires_posix_artifacts
+async def test_resume_rejects_authenticated_backup_with_wrong_webhook_subtree(
+    legacy_import: LegacyImportFixture,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+
+    def inject(stage: str) -> None:
+        if stage == "after_backup_publish":
+            raise RuntimeError("injected crash")
+
+    async def audit_sink(record: OperationalAudit) -> None:
+        legacy_import.audits.append(record)
+
+    crashing = LegacyImportService(
+        repository=legacy_import.repository,
+        key_ring=_ring(),
+        settings=_settings(),
+        system_ops_path=legacy_import.store_path,
+        application_data_paths=(legacy_import.store_path.parent,),
+        audit_sink=audit_sink,
+        failure_injector=inject,
+    )
+    with pytest.raises(LegacyImportError):
+        await crashing.apply_plan(
+            legacy_import.request,
+            approved_report_digest=plan.report_digest,
+            request_id="crash-before-authenticated-backup-replacement",
+        )
+
+    key_payload = json.loads(
+        legacy_import.request.rollback_key_path.read_text(encoding="utf-8")
+    )
+    rollback_ring = WebhookKeyRing(
+        {"rollback": key_payload["key_b64"]},
+        primary_id="rollback",
+    )
+    protected = rollback_ring.encrypt_bytes(
+        purpose="legacy.system_ops.backup",
+        identity={
+            "operation_id": plan.operation_id,
+            "source_fingerprint": plan.source_fingerprints["system_ops"],
+        },
+        plaintext=json.dumps(
+            {"incidents": [], "webhooks": [], "webhook_deliveries": []},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8"),
+    )
+    replacement = json.dumps(
+        {
+            "schema_version": 1,
+            "key_id": protected.key_id,
+            "ciphertext_json": protected.ciphertext_json,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    legacy_import.request.backup_path.write_bytes(replacement)
+    os.chmod(legacy_import.request.backup_path, 0o600)
+
+    with pytest.raises(LegacyImportError) as caught:
+        await legacy_import.service.apply_plan(
+            legacy_import.request,
+            approved_report_digest=plan.report_digest,
+            request_id="resume-with-wrong-authenticated-backup",
+        )
+
+    assert caught.value.code.value == "admin_webhook_operation_failed"
+    assert legacy_import.request.backup_path.read_bytes() == replacement
+    assert await legacy_import.repository.count_registrations() == 0
+
+
+@pytest.mark.unit
+@_requires_posix_artifacts
+async def test_reserved_operation_resumes_when_reviewed_report_is_missing(
+    legacy_import: LegacyImportFixture,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+
+    def inject(stage: str) -> None:
+        if stage == "after_artifacts_pending":
+            raise RuntimeError("injected crash")
+
+    async def audit_sink(record: OperationalAudit) -> None:
+        legacy_import.audits.append(record)
+
+    crashing = LegacyImportService(
+        repository=legacy_import.repository,
+        key_ring=_ring(),
+        settings=_settings(),
+        system_ops_path=legacy_import.store_path,
+        application_data_paths=(legacy_import.store_path.parent,),
+        audit_sink=audit_sink,
+        failure_injector=inject,
+    )
+    with pytest.raises(LegacyImportError):
+        await crashing.apply_plan(
+            legacy_import.request,
+            approved_report_digest=plan.report_digest,
+            request_id="crash-before-missing-report",
+        )
+    legacy_import.request.report_path.unlink()
+
+    completed = await legacy_import.service.apply_plan(
+        legacy_import.request,
+        approved_report_digest=plan.report_digest,
+        request_id="resume-without-report",
+    )
+
+    assert completed.phase == "complete"
+    assert await legacy_import.repository.count_registrations() == 1
+
+
+@pytest.mark.unit
+@_requires_posix_artifacts
+async def test_public_verify_and_sanitize_resumes_database_committed_import(
+    legacy_import: LegacyImportFixture,
+) -> None:
+    plan = await legacy_import.service.build_plan(legacy_import.request)
+
+    def inject(stage: str) -> None:
+        if stage == "after_database_commit":
+            raise RuntimeError("injected crash")
+
+    async def audit_sink(record: OperationalAudit) -> None:
+        legacy_import.audits.append(record)
+
+    crashing = LegacyImportService(
+        repository=legacy_import.repository,
+        key_ring=_ring(),
+        settings=_settings(),
+        system_ops_path=legacy_import.store_path,
+        application_data_paths=(legacy_import.store_path.parent,),
+        audit_sink=audit_sink,
+        failure_injector=inject,
+    )
+    with pytest.raises(LegacyImportError):
+        await crashing.apply_plan(
+            legacy_import.request,
+            approved_report_digest=plan.report_digest,
+            request_id="crash-before-public-verification",
+        )
+
+    completed = await legacy_import.service.verify_and_sanitize(
+        legacy_import.request,
+        approved_report_digest=plan.report_digest,
+        request_id="public-verification-resume",
+    )
+
+    assert completed.phase == "complete"
+    assert await legacy_import.repository.count_registrations() == 1

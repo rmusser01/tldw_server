@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
-from tldw_Server_API.app.core.AuthNZ.exceptions import UserNotFoundError
+from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError, UserNotFoundError
+from tldw_Server_API.app.core.AuthNZ.profile_version import (
+    ProfileVersionNotFound,
+    VersionedUserWriteGateway,
+)
 
 
 @dataclass
@@ -28,8 +32,10 @@ class AuthnzMfaRepo:
 
     @staticmethod
     def _normalize_datetime_for_postgres(dt: datetime) -> datetime:
-        """Strip timezone info for PostgreSQL TIMESTAMP columns."""
-        return dt.replace(tzinfo=None) if getattr(dt, "tzinfo", None) else dt
+        """Return an aware UTC value for PostgreSQL TIMESTAMPTZ columns."""
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
 
     @staticmethod
     def _assert_user_row_updated(result: Any, user_id: int, *, operation: str) -> None:
@@ -75,9 +81,16 @@ class AuthnzMfaRepo:
         """
         try:
             async with self.db_pool.transaction() as conn:
+                gateway = VersionedUserWriteGateway(
+                    "postgres" if self._is_postgres_backend() else "sqlite"
+                )
                 if self._is_postgres_backend():
                     ts = self._normalize_datetime_for_postgres(updated_at)
-                    result = await conn.execute(
+                    await gateway.execute_update(
+                        conn,
+                        user_id=user_id,
+                        profile_visible_fields=("two_factor_enabled",),
+                        statement=
                         """
                         UPDATE users
                         SET totp_secret = $1,
@@ -86,13 +99,14 @@ class AuthnzMfaRepo:
                             updated_at = $3
                         WHERE id = $4
                         """,
-                        encrypted_secret,
-                        backup_codes_json,
-                        ts,
-                        user_id,
+                        parameters=(encrypted_secret, backup_codes_json, ts, user_id),
                     )
                 else:
-                    result = await conn.execute(
+                    await gateway.execute_update(
+                        conn,
+                        user_id=user_id,
+                        profile_visible_fields=("two_factor_enabled",),
+                        statement=
                         """
                         UPDATE users
                         SET totp_secret = ?,
@@ -101,14 +115,17 @@ class AuthnzMfaRepo:
                             updated_at = ?
                         WHERE id = ?
                         """,
-                        (
+                        parameters=(
                             encrypted_secret,
                             backup_codes_json,
                             updated_at.isoformat(),
                             user_id,
                         ),
                     )
-                self._assert_user_row_updated(result, user_id, operation="set_mfa_config")
+        except ProfileVersionNotFound:
+            msg = f"User {user_id} not found during set_mfa_config"
+            logger.warning(msg)
+            raise UserNotFoundError(msg) from None
         except Exception as exc:  # pragma: no cover - surfaced via callers
             logger.error(f"AuthnzMfaRepo.set_mfa_config failed: {exc}")
             raise
@@ -124,9 +141,16 @@ class AuthnzMfaRepo:
         """
         try:
             async with self.db_pool.transaction() as conn:
+                gateway = VersionedUserWriteGateway(
+                    "postgres" if self._is_postgres_backend() else "sqlite"
+                )
                 if self._is_postgres_backend():
                     ts = self._normalize_datetime_for_postgres(updated_at)
-                    result = await conn.execute(
+                    await gateway.execute_update(
+                        conn,
+                        user_id=user_id,
+                        profile_visible_fields=("two_factor_enabled",),
+                        statement=
                         """
                         UPDATE users
                         SET totp_secret = NULL,
@@ -135,11 +159,14 @@ class AuthnzMfaRepo:
                             updated_at = $1
                         WHERE id = $2
                         """,
-                        ts,
-                        user_id,
+                        parameters=(ts, user_id),
                     )
                 else:
-                    result = await conn.execute(
+                    await gateway.execute_update(
+                        conn,
+                        user_id=user_id,
+                        profile_visible_fields=("two_factor_enabled",),
+                        statement=
                         """
                         UPDATE users
                         SET totp_secret = NULL,
@@ -148,12 +175,20 @@ class AuthnzMfaRepo:
                             updated_at = ?
                         WHERE id = ?
                         """,
-                        (updated_at.isoformat(), user_id),
+                        parameters=(updated_at.isoformat(), user_id),
                     )
-                self._assert_user_row_updated(result, user_id, operation="clear_mfa_config")
-        except Exception as exc:  # pragma: no cover - surfaced via callers
-            logger.error(f"AuthnzMfaRepo.clear_mfa_config failed: {exc}")
+        except ProfileVersionNotFound:
+            msg = f"User {user_id} not found during clear_mfa_config"
+            logger.warning(msg)
+            raise UserNotFoundError(msg) from None
+        except UserNotFoundError:
             raise
+        except Exception as exc:  # pragma: no cover - surfaced via callers
+            logger.bind(
+                operation="clear_mfa_config",
+                exception_type=type(exc).__name__,
+            ).error("AuthNZ MFA configuration clear failed")
+            raise DatabaseError("Failed to clear MFA configuration") from None
 
     async def get_encrypted_totp_secret(self, user_id: int) -> str | None:
         """
@@ -223,11 +258,14 @@ class AuthnzMfaRepo:
                     "has_secret": row[1],
                     "has_backup_codes": row[2],
                 }
-        except Exception as exc:  # pragma: no cover - surfaced via callers
-            logger.error(
-                f"AuthnzMfaRepo.get_mfa_status_row failed for user {user_id}: {exc}"
-            )
+        except DatabaseError:
             raise
+        except Exception as exc:  # pragma: no cover - surfaced via callers
+            logger.bind(
+                operation="get_mfa_status_row",
+                exception_type=type(exc).__name__,
+            ).error("AuthNZ MFA status read failed")
+            raise DatabaseError("MFA status read failed") from None
 
     async def get_backup_codes_json(self, user_id: int) -> str | None:
         """

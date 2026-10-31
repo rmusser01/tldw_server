@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 import pytest
@@ -21,13 +22,22 @@ from tldw_Server_API.app.core.MCP_unified.protocol import (
     PreparedToolCall,
     RequestContext,
 )
+from tldw_Server_API.app.core.MCP_unified.tool_execution.canonical import canonical_json_bytes
+from tldw_Server_API.app.core.MCP_unified.tool_execution.models import (
+    CanonicalJsonSnapshot,
+    IdempotencyExecutionPolicy,
+    PreparedExecutionPolicy,
+)
+from tldw_Server_API.app.core.MCP_unified.tool_observability import (
+    ensure_tool_definition_eval_metadata,
+)
 
 LEAKED_DETAIL = "backend exploded /tmp/mcp-secret-token token=sk-mcp-secret"
 
 
 def test_protocol_hash_arguments_supports_class_level_compatibility_call() -> None:
     actual = MCPProtocol._hash_arguments({"query": "safe"})
-    expected = "4fdcf0050a6fe4924da3ffad2b978fcc6683b329fba85041e1b7ce687b5a4a23"
+    expected = "ae60598c68a349fda472f70368fb68f638ef19dcf2976fb3e42b00de44305901"
     if actual != expected:
         pytest.fail(f"Expected legacy class-level hash {expected}, got {actual}")
 
@@ -119,6 +129,23 @@ class _FakeTelemetry:
 class _FailingToolModule:
     name = "demo_module"
 
+    def __init__(self) -> None:
+        self.tool_definition = ensure_tool_definition_eval_metadata(
+            {
+                "name": "demo.read",
+                "inputSchema": {"type": "object"},
+                "metadata": {"category": "read"},
+            }
+        )
+
+    async def get_tools(self) -> list[dict[str, Any]]:
+        return [self.tool_definition]
+
+    async def get_tool_def(self, tool_name: str) -> dict[str, Any] | None:
+        if tool_name == self.tool_definition["name"]:
+            return self.tool_definition
+        return None
+
     def is_write_tool_call(
         self,
         tool_name: str,
@@ -139,6 +166,21 @@ class _FailingToolModule:
     ) -> Any:
         del tool_name, arguments, context
         raise RuntimeError(LEAKED_DETAIL)
+
+
+class _FailingToolRegistry:
+    def __init__(self, module: _FailingToolModule) -> None:
+        self.module = module
+
+    async def find_module_for_tool(self, tool_name: str) -> _FailingToolModule | None:
+        if tool_name == self.module.tool_definition["name"]:
+            return self.module
+        return None
+
+    def get_module_id_for_tool(self, tool_name: str) -> str | None:
+        if tool_name == self.module.tool_definition["name"]:
+            return self.module.name
+        return None
 
 
 class _ExternalAdapter(ExternalMCPTransportAdapter):
@@ -197,37 +239,74 @@ class _ExternalAdapter(ExternalMCPTransportAdapter):
         return ExternalToolCallResult(content=[{"type": "text", "text": "ok"}])
 
 
-def _prepared_tool_call(protocol: MCPProtocol, context: RequestContext) -> PreparedToolCall:
-    tool_name = "demo.read"
+def _prepared_tool_call(
+    protocol: MCPProtocol,
+    context: RequestContext,
+    module: _FailingToolModule,
+) -> PreparedToolCall:
+    tool_def = module.tool_definition
+    tool_name = tool_def["name"]
     tool_args = {"query": "safe"}
-    module_id = "demo_module"
-    module = _FailingToolModule()
-    tool_def = {
-        "name": tool_name,
-        "inputSchema": {"type": "object"},
-        "metadata": {"category": "read"},
-    }
+    module_id = module.name
+    arguments_encoded = canonical_json_bytes(tool_args, max_bytes=1_000_000)
+    tool_definition_encoded = canonical_json_bytes(tool_def, max_bytes=1_000_000)
+    scope_reporting_encoded = canonical_json_bytes(None, max_bytes=256_000)
+    tool_definition_snapshot = CanonicalJsonSnapshot(
+        encoded=tool_definition_encoded,
+        sha256=hashlib.sha256(tool_definition_encoded).hexdigest(),
+    )
+    arguments_snapshot = CanonicalJsonSnapshot(
+        encoded=arguments_encoded,
+        sha256=hashlib.sha256(arguments_encoded).hexdigest(),
+    )
+    scope_reporting_snapshot = CanonicalJsonSnapshot(
+        encoded=scope_reporting_encoded,
+        sha256=hashlib.sha256(scope_reporting_encoded).hexdigest(),
+    )
+    policy = PreparedExecutionPolicy(
+        version=1,
+        effect="read",
+        rate_limit_category="read",
+        rate_limit_fail_closed=False,
+        idempotency=IdempotencyExecutionPolicy(
+            inject_argument=False,
+            ttl_seconds=300,
+            contention_wait_seconds=5,
+            finalize_seconds=5,
+            lock_ttl_seconds=300,
+            max_entries=512,
+            max_result_bytes=256_000,
+        ),
+    )
     arguments_hash = protocol._hash_arguments(tool_args)
     context_fingerprint = protocol._fingerprint_request_context(context)
     integrity_tag = protocol._build_prepared_tool_call_integrity_tag(
         tool_name=tool_name,
         module_id=module_id,
-        is_write=False,
+        policy=policy,
         idempotency_cache_key=None,
+        normalized_idempotency_key_digest="",
         arguments_hash=arguments_hash,
         context_fingerprint=context_fingerprint,
+        idempotency_scope_fingerprint="",
+        tool_definition_sha256=tool_definition_snapshot.sha256,
+        scope_reporting_sha256=scope_reporting_snapshot.sha256,
     )
     return PreparedToolCall(
         tool_name=tool_name,
         tool_args=tool_args,
         module=module,
         module_id=module_id,
-        tool_def=tool_def,
-        is_write=False,
+        policy=policy,
+        arguments_snapshot=arguments_snapshot,
+        tool_definition_snapshot=tool_definition_snapshot,
+        scope_reporting_snapshot=scope_reporting_snapshot,
         normalized_idempotency_key=None,
+        normalized_idempotency_key_digest="",
         idempotency_cache_key=None,
         arguments_hash=arguments_hash,
         context_fingerprint=context_fingerprint,
+        idempotency_scope_fingerprint="",
         integrity_tag=integrity_tag,
         context=context,
     )
@@ -286,12 +365,14 @@ async def test_protocol_tool_execution_failure_log_omits_raw_exception_and_trace
     )
 
     fake_telemetry = _FakeTelemetry()
+    module = _FailingToolModule()
     deps = build_default_runtime_dependencies()
+    deps.module_registry = _FailingToolRegistry(module)
     deps.telemetry_provider = fake_telemetry
     protocol = MCPProtocol(dependencies=deps)
     protocol.rate_limiter = _NoopRateLimiter()
     context = RequestContext(request_id="req-tool", client_id="client-tool")
-    prepared = _prepared_tool_call(protocol, context)
+    prepared = _prepared_tool_call(protocol, context, module)
     messages, sink_id = _capture_protocol_logs(level="ERROR")
     try:
         with pytest.raises(RuntimeError):

@@ -927,8 +927,8 @@ class TestAdapterRegistry:
         registry.register_adapter(TTSProvider.MOCK, MockAdapter)
 
         # Check it was registered in the adapter_classes dict
-        assert TTSProvider.MOCK in registry._adapter_specs
-        assert registry._adapter_specs[TTSProvider.MOCK] == MockAdapter
+        assert TTSProvider.MOCK.value in registry._adapter_specs
+        assert registry._adapter_specs[TTSProvider.MOCK.value] == MockAdapter
 
     @pytest.mark.asyncio
     async def test_get_adapter(self):

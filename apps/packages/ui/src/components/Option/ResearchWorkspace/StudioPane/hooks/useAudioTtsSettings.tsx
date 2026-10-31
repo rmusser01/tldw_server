@@ -3,6 +3,15 @@ import type { MessageInstance } from "antd/es/message/interface"
 import type { TFunction } from "i18next"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { fetchTldwVoiceCatalog, type TldwVoice } from "@/services/tldw/audio-voices"
+import {
+  fetchTtsProviders,
+  type TldwTtsProvidersInfo
+} from "@/services/tldw/audio-providers"
+import {
+  fetchTldwTtsModels,
+  type TldwTtsModel
+} from "@/services/tldw/audio-models"
+import { toServerTtsProviderKey } from "@/services/tldw/tts-provider-keys"
 import { inferTldwProviderFromModel } from "@/services/tts-provider"
 import type { AudioTtsProvider } from "@/types/workspace"
 import type { AudioGenerationSettings } from "@/types/workspace"
@@ -110,12 +119,70 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
 
   const [showTtsSettings, setShowTtsSettings] = useState(false)
   const [tldwVoices, setTldwVoices] = useState<TldwVoice[]>([])
+  const [providersInfo, setProvidersInfo] =
+    useState<TldwTtsProvidersInfo | null>(null)
+  const [tldwModels, setTldwModels] = useState<TldwTtsModel[]>([])
   const [loadingVoices, setLoadingVoices] = useState(false)
   const [voiceCatalogSettled, setVoiceCatalogSettled] = useState(false)
   const [previewingVoice, setPreviewingVoice] = useState(false)
   const previewAudioRef = useRef<HTMLAudioElement | null>(null)
 
   const inferredTldwProviderKey = inferTldwProviderFromModel(audioSettings.model)
+  const explicitBackendSupported =
+    providersInfo?.supports_explicit_backend === true
+  const selectedBackend = explicitBackendSupported
+    ? String(audioSettings.backend || "").trim()
+    : ""
+  const selectedBackendCapabilities = selectedBackend
+    ? providersInfo?.providers?.[selectedBackend]
+    : undefined
+  const catalogProvider = selectedBackend
+    ? selectedBackend
+    : inferredTldwProviderKey
+      ? toServerTtsProviderKey(inferredTldwProviderKey)
+      : ""
+
+  useEffect(() => {
+    let cancelled = false
+
+    if (audioSettings.provider !== "tldw") {
+      setProvidersInfo(null)
+      return
+    }
+
+    fetchTtsProviders()
+      .then((info) => {
+        if (!cancelled) setProvidersInfo(info)
+      })
+      .catch(() => {
+        if (!cancelled) setProvidersInfo(null)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [audioSettings.provider])
+
+  useEffect(() => {
+    let cancelled = false
+
+    if (audioSettings.provider !== "tldw") {
+      setTldwModels([])
+      return
+    }
+
+    fetchTldwTtsModels(selectedBackend || undefined)
+      .then((models) => {
+        if (!cancelled) setTldwModels(models)
+      })
+      .catch(() => {
+        if (!cancelled) setTldwModels([])
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [audioSettings.provider, selectedBackend])
 
   // Fetch voices when provider changes to tldw
   useEffect(() => {
@@ -127,7 +194,7 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
       setVoiceCatalogSettled(true)
       return
     }
-    if (!inferredTldwProviderKey) {
+    if (!catalogProvider) {
       setTldwVoices([])
       setLoadingVoices(false)
       setVoiceCatalogSettled(true)
@@ -135,7 +202,12 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
     }
     setVoiceCatalogSettled(false)
     setLoadingVoices(true)
-    fetchTldwVoiceCatalog(inferredTldwProviderKey)
+    fetchTldwVoiceCatalog(
+      catalogProvider,
+      selectedBackend && audioSettings.model
+        ? { model: audioSettings.model }
+        : undefined
+    )
       .then((voices) => {
         if (!cancelled) {
           setTldwVoices(voices)
@@ -156,7 +228,7 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
     return () => {
       cancelled = true
     }
-  }, [audioSettings.provider, inferredTldwProviderKey])
+  }, [audioSettings.model, audioSettings.provider, catalogProvider, selectedBackend])
 
   // Cleanup preview audio on unmount
   useEffect(() => {
@@ -178,6 +250,20 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
           label: v.name || v.voice_id || v.id || "Unknown"
         }))
       }
+      if (selectedBackendCapabilities) {
+        const modelVoices = audioSettings.model
+          ? selectedBackendCapabilities.model_capabilities?.[audioSettings.model]
+              ?.voices
+          : undefined
+        const discoveredVoices =
+          modelVoices?.length
+            ? modelVoices.map((voice) => ({ value: voice, label: voice }))
+            : (selectedBackendCapabilities.voices || []).map((voice) => ({
+                value: voice.voice_id || voice.id || voice.name || "",
+                label: voice.name || voice.voice_id || voice.id || "Unknown"
+              }))
+        return discoveredVoices.filter((voice) => voice.value)
+      }
       if (inferredTldwProviderKey === "kitten_tts") {
         return KITTEN_FALLBACK_VOICES
       }
@@ -187,7 +273,13 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
       return OPENAI_TTS_VOICES
     }
     return []
-  }, [audioSettings.provider, inferredTldwProviderKey, tldwVoices])
+  }, [
+    audioSettings.model,
+    audioSettings.provider,
+    inferredTldwProviderKey,
+    selectedBackendCapabilities,
+    tldwVoices
+  ])
 
   useEffect(() => {
     if (audioSettings.provider !== "tldw") {
@@ -217,13 +309,75 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
   // Get model options based on provider
   const getModelOptions = React.useCallback(() => {
     if (audioSettings.provider === "tldw") {
+      const discoveredModels =
+        tldwModels.length > 0
+          ? tldwModels
+          : (selectedBackendCapabilities?.models || []).map((id) => ({
+              id,
+              label: id
+            }))
+      if (discoveredModels.length > 0) {
+        return discoveredModels.map((model) => ({
+          value: model.id,
+          label: model.label || model.id
+        }))
+      }
       return TLDW_TTS_MODELS
     }
     if (audioSettings.provider === "openai") {
       return OPENAI_TTS_MODELS
     }
     return []
-  }, [audioSettings.provider])
+  }, [
+    audioSettings.provider,
+    selectedBackendCapabilities,
+    tldwModels
+  ])
+
+  const backendOptions = React.useMemo(
+    () => [
+      { value: "", label: "Automatic (legacy model inference)" },
+      ...Object.entries(providersInfo?.providers || {})
+        .filter(
+          ([backend, capabilities]) =>
+            typeof capabilities.display_name === "string" ||
+            backend === "openrouter" ||
+            backend.startsWith("gateway:")
+        )
+        .map(([backend, capabilities]) => ({
+          value: backend,
+          label: capabilities.display_name || backend
+        }))
+    ],
+    [providersInfo]
+  )
+
+  const handleBackendChange = React.useCallback(
+    (backend: string) => {
+      const capabilities = providersInfo?.providers?.[backend]
+      const model =
+        capabilities?.default_model || capabilities?.models?.[0] || ""
+      const modelCapabilities = model
+        ? capabilities?.model_capabilities?.[model]
+        : undefined
+      const firstVoice = capabilities?.voices?.[0]
+      const voice =
+        modelCapabilities?.default_voice ||
+        modelCapabilities?.voices?.[0] ||
+        firstVoice?.voice_id ||
+        firstVoice?.id ||
+        firstVoice?.name ||
+        ""
+
+      setAudioSettings({
+        backend,
+        allowFallback: audioSettings.allowFallback ?? true,
+        model,
+        voice
+      })
+    },
+    [audioSettings.allowFallback, providersInfo, setAudioSettings]
+  )
 
   const handlePreviewVoice = React.useCallback(async () => {
     if (audioSettings.provider === "browser") {
@@ -245,13 +399,15 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
 
     setPreviewingVoice(true)
     try {
-      const audioBuffer = await tldwClient.synthesizeSpeech(VOICE_PREVIEW_TEXT, {
+      const result = await tldwClient.synthesizeSpeechDetailed(VOICE_PREVIEW_TEXT, {
         model: audioSettings.model,
         voice: audioSettings.voice,
         responseFormat: "mp3",
-        speed: audioSettings.speed
+        speed: audioSettings.speed,
+        backend: audioSettings.backend || undefined,
+        allowFallback: audioSettings.allowFallback ?? true
       })
-      const audioBlob = new Blob([audioBuffer], { type: "audio/mpeg" })
+      const audioBlob = new Blob([result.buffer], { type: "audio/mpeg" })
       const audioUrl = URL.createObjectURL(audioBlob)
 
       if (previewAudioRef.current) {
@@ -290,9 +446,12 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
     previewAudioRef,
     // computed
     inferredTldwProviderKey,
+    explicitBackendSupported,
+    backendOptions,
     // callbacks
     getVoiceOptions,
     getModelOptions,
+    handleBackendChange,
     handlePreviewVoice,
   }
 }

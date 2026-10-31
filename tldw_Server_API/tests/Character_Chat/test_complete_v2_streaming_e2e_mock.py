@@ -3,13 +3,12 @@ End-to-end streaming test for complete-v2 that monkeypatches the OpenAI requests
 to emit a deterministic multi-chunk SSE sequence. This avoids real network usage.
 """
 
-import os
-import tempfile
-import shutil
 import json as _json
+import shutil
+import tempfile
 
-import pytest
 import httpx
+import pytest
 
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 
@@ -25,8 +24,7 @@ class _FakeStreamingResponse:
 
     def iter_lines(self, decode_unicode=True):
 
-        for line in self._lines:
-            yield line
+        yield from self._lines
 
     def close(self):
 
@@ -84,10 +82,15 @@ class _FakeSession:
 
 
 @pytest.mark.asyncio
-async def test_complete_v2_streaming_e2e_monkeypatched(monkeypatch):
+async def test_complete_v2_streaming_e2e_monkeypatched(
+    monkeypatch,
+    healthy_absent_provider_override_snapshot,
+    character_provider_adapter_boundary,
+):
     import tldw_Server_API.app.core.LLM_Calls.chat_calls as llm_mod
 
     monkeypatch.setattr(llm_mod, "create_session_with_retries", lambda *args, **kwargs: _FakeSession())
+    provider_calls, bind_provider_call = character_provider_adapter_boundary
 
     streaming_payloads = [
         _json.dumps(
@@ -119,10 +122,11 @@ async def test_complete_v2_streaming_e2e_monkeypatched(monkeypatch):
     import tldw_Server_API.app.api.v1.endpoints.character_chat_sessions as chat_sessions_mod
 
     def _fake_perform_chat_api_call(*args, **kwargs):
+        assert not args
+        bind_provider_call(kwargs)
 
         def _generator():
-            for chunk in stream_chunks:
-                yield chunk
+            yield from stream_chunks
 
         return _generator()
 
@@ -176,20 +180,28 @@ async def test_complete_v2_streaming_e2e_monkeypatched(monkeypatch):
                     if line and line.startswith("data: "):
                         collected.append(line)
             assert collected == expected_lines
+            assert [call["api_endpoint"] for call in provider_calls] == ["openai"]
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 @pytest.mark.asyncio
-async def test_complete_v2_streaming_non_iterable_fallback(monkeypatch):
+async def test_complete_v2_streaming_non_iterable_fallback(
+    monkeypatch,
+    healthy_absent_provider_override_snapshot,
+    character_provider_adapter_boundary,
+):
     tmpdir = tempfile.mkdtemp(prefix="chacha_stream_non_iterable_")
     monkeypatch.setenv("USER_DB_BASE_DIR", tmpdir)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.delenv("STREAMS_UNIFIED", raising=False)
 
     import tldw_Server_API.app.api.v1.endpoints.character_chat_sessions as chat_sessions_mod
+    provider_calls, bind_provider_call = character_provider_adapter_boundary
 
     def _fake_perform_chat_api_call(*args, **kwargs):
+        assert not args
+        bind_provider_call(kwargs)
         return {
             "choices": [{"message": {"role": "assistant", "content": "Fallback content"}}]
         }
@@ -229,5 +241,6 @@ async def test_complete_v2_streaming_non_iterable_fallback(monkeypatch):
         combined = "\n".join(lines)
         assert "Fallback content" in combined
         assert lines[-1].strip().lower() == "data: [done]"
+        assert [call["api_endpoint"] for call in provider_calls] == ["openai"]
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)

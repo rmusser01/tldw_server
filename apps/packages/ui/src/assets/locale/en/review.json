@@ -339,7 +339,7 @@
     "developerTools": "Developer Tools",
     "openTrash": "Trash",
     "deleteItem": "Delete item",
-    "deleteItemConfirm": "Delete this item? This cannot be undone.",
+    "deleteItemConfirm": "Move this item to Trash? You can restore it from Trash.",
     "itemMovedToTrash": "Moved to trash",
     "itemMovedToTrashDesc": "\"{{title}}\" moved to trash.",
     "deletingItem": "Deleting...",

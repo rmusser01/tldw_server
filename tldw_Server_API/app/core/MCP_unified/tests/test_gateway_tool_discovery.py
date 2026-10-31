@@ -18,8 +18,13 @@ from mcp_unified.gateway.tool_discovery import (
 )
 from mcp_unified.profiles.models import MCPProfile, ProfilePolicy
 
-REPO_ROOT = Path(__file__).resolve().parents[5]
-TOOL_DISCOVERY_PATH = REPO_ROOT / "mcp_unified" / "gateway" / "tool_discovery.py"
+# Taken from the imported module rather than reconstructed from the repo root. The
+# previous form was REPO_ROOT / "mcp_unified" / "gateway" / "tool_discovery.py", which
+# stopped resolving when the standalone package moved to a src layout under
+# apps/mcp-unified/src/ -- the test then failed with FileNotFoundError before asserting
+# anything about the boundary. Deriving it from the module the test already imports means
+# it follows any future move. See TASK-13358.
+TOOL_DISCOVERY_PATH = Path(tool_discovery.__file__).resolve()
 
 
 def _profile(
