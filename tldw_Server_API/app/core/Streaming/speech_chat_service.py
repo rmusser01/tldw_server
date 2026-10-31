@@ -31,9 +31,6 @@ import soundfile as sf
 from fastapi import HTTPException, status
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
-    DEFAULT_LLM_PROVIDER,
-)
 from tldw_Server_API.app.core.Audio.tts_service import (
     tts_provider_credential_scope,
 )
@@ -69,6 +66,7 @@ from tldw_Server_API.app.core.Chat.chat_service import (
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     await_bounded_owned_operation,
 )
+from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import (
     is_transcription_error_message,
@@ -666,7 +664,7 @@ async def run_speech_chat_turn(
 
     llm_provider = (
         (request_data.llm_config.api_provider or "").strip().lower()
-        or DEFAULT_LLM_PROVIDER
+        or get_default_provider()
     )
     llm_model = request_data.llm_config.model
     llm_extra_params = _provider_llm_extra_params(request_data.llm_config.extra_params)

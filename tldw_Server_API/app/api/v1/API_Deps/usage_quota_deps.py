@@ -85,18 +85,22 @@ async def users_own_key_serves(user_id: Any, provider: str) -> bool:
         return False
 
 
-async def enforce_llm_quota(user_id: Any, estimated_tokens: int = 1, *, provider: str | None = None) -> None:
+async def enforce_llm_quota(
+    user_id: Any, estimated_tokens: int = 1, *, provider: str | None = None, own_key: bool | None = None
+) -> None:
     """402 limit_exceeded when the user is over an LLM quota; otherwise mark the request admitted (spec §4a).
 
     An over-limit user whose ``provider`` runs on their own key is let through
     unmarked: each call is then checked where its key is known, and a call on
-    the user's own key is not checked (TASK-13955).
+    the user's own key is not checked (TASK-13955). ``own_key`` is the caller's
+    ``users_own_key_serves`` answer for this user and provider, when it already
+    has one; None looks it up.
     """
     refusal = await llm_quota_refusal(user_id, estimated_tokens)
     if refusal is None:
         mark_llm_quota_prechecked()
         return
-    if provider and await users_own_key_serves(user_id, provider):
+    if provider and (own_key if own_key is not None else await users_own_key_serves(user_id, provider)):
         return
     raise LLMQuotaExceededError(**asdict(refusal))
 

@@ -1,6 +1,5 @@
 import pytest
 
-from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 from tldw_Server_API.app.api.v1.schemas import chat_request_schemas
 from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
@@ -14,12 +13,10 @@ from tldw_Server_API.tests.helpers.provider_keys import api_keys_source
 
 @pytest.mark.parametrize("prefer_module_keys_in_tests", [True, False])
 def test_resolver_reads_what_production_reads_under_pytest_and_test_mode(monkeypatch, prefer_module_keys_in_tests):
-    """TASK-13950.13: no API_KEYS override from the schema or endpoint module, whatever the test flags."""
+    """TASK-13950.13: the resolver reads config_llm_providers.get_api_keys, whatever the test flags."""
     monkeypatch.setenv("PYTEST_CURRENT_TEST", "chat/test")
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setattr(chat_request_schemas, "API_KEYS", {"openai": "module-test-key"}, raising=False)
-    monkeypatch.setattr(chat_endpoint, "API_KEYS", {"openai": "module-test-key"}, raising=False)
     monkeypatch.setattr(config_llm_providers, "get_api_keys", lambda: {"openai": "env-key"})
 
     key, debug = gateway.resolve_provider_api_key("openai", prefer_module_keys_in_tests=prefer_module_keys_in_tests)
@@ -30,8 +27,6 @@ def test_resolver_reads_what_production_reads_under_pytest_and_test_mode(monkeyp
 
 def test_the_old_paths_are_the_moved_objects():
     assert chat_service.resolve_provider_api_key is gateway.resolve_provider_api_key
-    # Temporary, until TASK-13950.14 deletes the re-export (its Task 5 removes this assertion).
-    assert chat_request_schemas.get_api_keys is config_llm_providers.get_api_keys
     assert chat_request_schemas.ALL_SUPPORTED_PROVIDER_NAMES_LIST is config_llm_providers.ALL_SUPPORTED_PROVIDER_NAMES_LIST
     assert not hasattr(chat_service, "resolve_static_provider_fallback")
 

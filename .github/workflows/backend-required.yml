@@ -99,7 +99,7 @@ jobs:
           fi
           git cat-file -e "${BASE_SHA}^{commit}"
           git cat-file -e "${HEAD_SHA}^{commit}"
-          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$CHANGED_FILES_PATH"
+          git diff --name-only --no-renames "$BASE_SHA" "$HEAD_SHA" > "$CHANGED_FILES_PATH"
           mapfile -t CHANGED_FILES < "$CHANGED_FILES_PATH"
           python -m Helper_Scripts.ci.emit_ci_gate_flags "${CHANGED_FILES[@]}"
       # Every PR runs this job, backlog-only ones included, while backend-required's own
@@ -306,6 +306,7 @@ jobs:
             tldw_Server_API/tests/lint/test_layering_contract.py \
             tldw_Server_API/tests/lint/test_db_management_logic_imports.py \
             tldw_Server_API/tests/lint/test_core_to_api_import_boundary.py \
+            tldw_Server_API/tests/lint/test_schemas_config_boundary.py \
             tldw_Server_API/tests/lint/test_direct_llm_adapter_calls_ratchet.py \
             tldw_Server_API/tests/lint/test_service_singleton_ratchet.py \
             tldw_Server_API/tests/lint/test_llm_calls_import_isolation.py \

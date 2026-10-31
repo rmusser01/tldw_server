@@ -40,3 +40,10 @@ The owner's decision of 2026-10-26: "BYOK users own keys shuold not count agains
 ## Follow-up
 
 TASK-13955's final summary lists the follow-up task: the auto-router's usage row and the other boundary endpoints (TASK-13956). The owner decided on 2026-10-29 that org and team shared keys keep counting.
+
+## Amendment (2026-10-31): the vendors' other hosts, and a trusted caller's per-request base URL
+
+TASK-13959 closes two gaps that TASK-13955's final review found in "Whose key is the user's own".
+
+- **The vendors' other hosts are theirs.** A vendor's own host is no longer only the one its adapter calls by default. `VENDOR_HOSTS` also lists the hosts each vendor documents for the same API: OpenAI's data-residency hosts (`<region>.api.openai.com`, such as `eu.api.openai.com`), `api.cohere.com`, `api.moonshot.ai`, and Bedrock's FIPS endpoints (`bedrock-runtime-fips.<region>.amazonaws.com`). A user key sent to one of them is the user's own, so the sentence in Consequences that such a host counts no longer holds. A `*` in a host pattern matches one DNS label, so `bedrock-runtime.<region>.amazonaws.com` no longer also matches a deeper host.
+- **A per-request base URL is read too.** A platform admin, a service principal or the single user may pass a `base_url` with the request (ADR-025), and every billed adapter prefers it to the configured one. Off the vendor's hosts, that call is `user_unmetered` and counts, like a configured base URL. Before, it was recorded as `user`.
