@@ -4809,6 +4809,7 @@ export class TldwApiClientBase {
               ? senderCandidate
               : undefined,
           content: String(m.content ?? ""),
+          parent_message_id: m.parent_message_id == null ? m.parent_message_id : String(m.parent_message_id),
           created_at,
           version:
             typeof m.version === "number"

@@ -10,6 +10,32 @@ import {
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
+// Replace only IndexedDB storage; production linking, reconciliation and restore stay connected.
+const mirror = vi.hoisted(() => ({
+  histories: new Map<string, Record<string, unknown>>(), messages: new Map<string, Record<string, unknown>>(),
+  compare: new Map<string, Record<string, unknown>>(), selections: new Map<string, Record<string, unknown>>(), files: new Map<string, Record<string, unknown>>(),
+  transactions: [] as string[],
+}));
+vi.mock("@/db/dexie/schema", () => {
+  const table = (rows: Map<string, Record<string, unknown>>) => ({
+    get: async (id: string) => structuredClone(rows.get(id)),
+    add: async (row: Record<string, unknown>) => { if (rows.has(String(row.id))) throw new Error("duplicate"); rows.set(String(row.id), structuredClone(row)); },
+    put: async (row: Record<string, unknown>) => { rows.set(String(row.id), structuredClone(row)); },
+    update: async (id: string, patch: Record<string, unknown>) => { rows.set(id, { ...rows.get(id), ...structuredClone(patch) }); },
+    where: (field: string) => ({ equals: (value: string) => ({
+      toArray: async () => structuredClone([...rows.values()].filter(row => row[field] === value)),
+    }) }),
+  });
+  return { db: {
+    chatHistories: table(mirror.histories), messages: table(mirror.messages),
+    compareStates: table(mirror.compare), historySelections: table(mirror.selections), sessionFiles: table(mirror.files),
+    transaction: async (mode: string, _tables: unknown[], fn: (tx: { abort: () => void }) => unknown) => {
+      mirror.transactions.push(mode);
+      return fn({ abort: () => { throw new Error("aborted"); } });
+    },
+  } };
+});
+
 const boundary = vi.hoisted(() => ({
   request: vi.fn(),
   api: { listWorkspaces: vi.fn(), getWorkspaceContext: vi.fn() },
@@ -214,6 +240,7 @@ const mount = async (entry = "/workspaces") => {
 };
 
 beforeEach(() => {
+  mirror.histories.clear(); mirror.messages.clear(); mirror.compare.clear(); mirror.selections.clear(); mirror.files.clear(); mirror.transactions = [];
   localStorage.clear();
   useWorkspaceStore.getState().reset();
   boundary.userId = "1";
@@ -690,4 +717,107 @@ it("does not treat an invalid Deep Research flag as an ordinary Open bypass", as
   await screen.findByRole("alert");
   expect(screen.queryByTestId("opened-sources")).not.toBeInTheDocument();
   expect(useWorkspaceStore.getState().workspaceId).toBe(PREVIOUS);
+});
+
+
+const prepareOwnedMirror = async () => {
+  prepare(true);
+  useWorkspaceStore.getState().switchWorkspace(TARGET);
+  const { linkServerChatMirror, reconcileServerChatMirror, serverChatMirrorOwnerKey } = await import("@/db/dexie/server-chat-mirror");
+  const serverMessages = [
+    { id: "server-user", role: "user" as const, content: "Saved question", parent_message_id: null,
+      created_at: "2026-10-31T00:00:00Z", version: 1 },
+    { id: "server-answer", role: "assistant" as const, sender: "assistant", content: "Saved cited answer", parent_message_id: "server-user",
+      created_at: "2026-10-31T00:00:01Z", version: 1 },
+  ];
+  const messages = mapServerChatMessagesToPlaygroundMessages({ serverMessages, assistantName: "AI", characterId: null })
+    .map((row, index) => ({ ...row, id: index ? "local-answer" : "local-user",
+      name: index ? "Qwen" : "You", createdAt: index + 17, modelId: index ? "local-qwen" : undefined,
+      modelName: index ? "Qwen" : undefined, reasoning_time_taken: index ? 0.15 : undefined,
+      parentMessageId: index ? "local-user" : null }));
+  const ownerKey = serverChatMirrorOwnerKey({ requestScope: {
+    config: { serverUrl: "https://open.example.test", authMode: "multi-user" }, userId: boundary.userId,
+  } } as Parameters<typeof serverChatMirrorOwnerKey>[0]);
+  const historyId = await linkServerChatMirror({ chatId: "verified-chat", title: "Cited answer", ownerKey,
+    scope: { type: "workspace", workspaceId: TARGET } });
+  await reconcileServerChatMirror({ historyId, chatId: "verified-chat", ownerKey,
+    messages, localMessages: messages });
+  const save = useWorkspaceStore.getState().saveWorkspaceChatSession;
+  save(TARGET, { messages, history: [], historyId, serverChatId: "verified-chat" },
+    { scopeKey: boundary.scopeKey, isCurrent: () => !boundary.controller.signal.aborted });
+  await flushWorkspacePersistence();
+  await useWorkspaceStore.persist.rehydrate();
+  // The original producer predates the independent Chat hint.
+  for (const key of Object.keys(localStorage)) if (key.startsWith("tldw:research-workspace:chat-reference:")) localStorage.removeItem(key);
+  boundary.request.mockImplementation((request: { path: string }) =>
+    request.path.startsWith("/api/v1/chats/verified-chat/messages")
+      ? Promise.resolve({ messages: serverMessages, total: 2 })
+      : request.path.startsWith("/api/v1/chats/verified-chat?")
+        ? Promise.resolve({ id: "verified-chat", scope_type: "workspace", workspace_id: TARGET, deleted: false })
+        : reply(request));
+  return { historyId, messages, save };
+};
+
+it("opens the producer's acknowledged Workspace mirror after cold persistence without changing its session or rows", async () => {
+  const { historyId } = await prepareOwnedMirror();
+  const before = structuredClone([...mirror.messages]);
+  const session = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET);
+  mirror.transactions = [];
+  await mount("/research-workspace?source_workspace_id=" + TARGET);
+  await screen.findByTestId("opened-sources");
+  expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)).toEqual(session);
+  expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)?.historyId).toBe(historyId);
+  expect([...mirror.messages]).toEqual(before);
+  expect(mirror.transactions.length).toBeGreaterThanOrEqual(2);
+  expect(mirror.transactions.every(mode => mode === "r")).toBe(true);
+});
+
+it.each([
+  "foreign-owner", "wrong-workspace", "legacy-namespace", "missing-header", "pending-settings",
+  "edited-row", "extra-row", "hidden-context", "compare", "pending-turn", "pending-confirmation", "files",
+  "parent", "ambiguous-parent", "unknown-parent", "mirror-race", "header-race", "cache-race", "account-race",
+])("keeps an acknowledged mirror with %s unverified work intact", async kind => {
+  const { historyId, save } = await prepareOwnedMirror();
+  const header = mirror.histories.get(historyId)!;
+  if (kind === "foreign-owner") header.server_scope_key = "bob";
+  if (kind === "wrong-workspace") header.server_workspace_id = PREVIOUS;
+  if (kind === "legacy-namespace") delete header.server_scope_type;
+  if (kind === "missing-header") mirror.histories.delete(historyId);
+  if (kind === "pending-settings") header.local_settings_guard = { revision: "r", pending: ["uncertain-write"] };
+  const row = mirror.messages.get("local-answer")!;
+  if (kind === "edited-row") row.content = "Keep edited row";
+  if (kind === "extra-row") mirror.messages.set("extra", { ...row, id: "extra", serverMessageId: "extra" });
+  if (kind === "hidden-context") row.history_admission = { retain: "unknown context" };
+  if (kind === "compare") mirror.compare.set(historyId, { history_id: historyId, compareMode: true });
+  if (kind === "pending-turn") mirror.selections.set("pending", { conversation_id: historyId, pending_turns: { run: { state: "unknown" } } });
+  if (kind === "pending-confirmation") mirror.selections.set("pending", { conversation_id: historyId, pending_confirmation: { keep: true } });
+  if (kind === "files") mirror.files.set(historyId, { sessionId: historyId, files: [{ id: "private-file" }], retrievalEnabled: true });
+  let preserved = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)!;
+  if (kind === "parent" || kind === "unknown-parent" || kind === "ambiguous-parent") {
+    const messages = structuredClone(preserved.messages);
+    if (kind === "ambiguous-parent") messages[0].id = "server-answer";
+    messages[1].parentMessageId = kind === "parent" ? "server-answer" : kind === "unknown-parent" ? "missing" : "server-answer";
+    save(TARGET, { ...preserved, messages });
+    preserved = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)!;
+  }
+  if (kind.endsWith("-race")) {
+    const request = boundary.request.getMockImplementation()!;
+    boundary.request.mockImplementation((args: { path: string }) => {
+      if (args.path.startsWith("/api/v1/chats/verified-chat/messages")) {
+        if (kind === "mirror-race") row.content = "Keep concurrent mirror edit";
+        if (kind === "header-race") header.title = "Keep newer title";
+        if (kind === "account-race") boundary.controller.abort();
+        if (kind === "cache-race") {
+          save(TARGET, { ...preserved, messages: preserved.messages.map((m, i) => i ? { ...m, message: "Keep newer edit" } : m) });
+          preserved = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)!;
+        }
+      }
+      return request(args);
+    });
+  }
+  await mount("/research-workspace?source_workspace_id=" + TARGET);
+  await screen.findByRole("alert");
+  expect(screen.queryByTestId("opened-sources")).not.toBeInTheDocument();
+  expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)).toEqual(preserved);
+  if (kind === "edited-row") expect(mirror.messages.get("local-answer")!.content).toBe("Keep edited row");
 });

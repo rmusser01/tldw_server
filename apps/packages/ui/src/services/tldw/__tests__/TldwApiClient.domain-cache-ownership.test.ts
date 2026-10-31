@@ -81,6 +81,16 @@ describe.each(adapters)("%s domain-cache ownership", adapter => {
     return (await method.call(client, "7"))[0].content
   }
 
+  it("preserves canonical message parents through the actual adapter", async () => {
+    io.request.mockResolvedValue([
+      { id: "root", sender: "user", content: "Question", parent_message_id: null, created_at: "2026-10-31T00:00:00Z" },
+      { id: "reply", sender: "assistant", content: "Answer", parent_message_id: "root", created_at: "2026-10-31T00:00:01Z" }
+    ])
+    const method = adapter === "base" ? TldwApiClientBase.prototype.listChatMessages
+      : adapter === "domain" ? chatRagMethods.listChatMessages : client.listChatMessages
+    expect((await method.call(client, "owned")).map(row => row.parent_message_id)).toEqual([null, "root"])
+  })
+
   it("does not overwrite shared config when an older direct initialize finishes last", async () => {
     configure(deviceKey)
     const storageRead = deferred()
