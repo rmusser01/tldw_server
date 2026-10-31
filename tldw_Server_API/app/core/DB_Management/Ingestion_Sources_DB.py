@@ -8,6 +8,44 @@ def _json_dumps(value: Any) -> str:
     return json.dumps(value if value is not None else {}, sort_keys=True)
 
 
+async def postgres_source_schema_is_ready(db: Any) -> bool:
+    """Prove base relations in the creation namespace without taking DDL locks."""
+    cursor = await db.execute(
+        """
+        SELECT BOOL_AND(COALESCE(
+            relation.relkind::text = required.kind
+            AND (required.parent_name IS NULL OR (
+                index_state.indrelid = parent.oid
+                AND index_state.indisvalid AND index_state.indisready
+            )), FALSE)) AS ready
+        FROM (VALUES
+            ('ingestion_sources', 'r', NULL::text),
+            ('ingestion_source_state', 'r', NULL),
+            ('ingestion_source_snapshots', 'r', NULL),
+            ('ingestion_source_items', 'r', NULL),
+            ('ingestion_item_events', 'r', NULL),
+            ('ingestion_source_artifacts', 'r', NULL),
+            ('idx_ingestion_sources_user_id', 'i', 'ingestion_sources'),
+            ('idx_ingestion_sources_scheduler', 'i', 'ingestion_sources'),
+            ('idx_ingestion_source_state_active_job', 'i', 'ingestion_source_state'),
+            ('idx_ingestion_source_snapshots_source_status_id', 'i', 'ingestion_source_snapshots'),
+            ('idx_ingestion_source_artifacts_source_kind_status', 'i', 'ingestion_source_artifacts'),
+            ('idx_ingestion_item_events_source_item', 'i', 'ingestion_item_events')
+        ) AS required(name, kind, parent_name)
+        LEFT JOIN pg_catalog.pg_namespace namespace
+          ON namespace.nspname = current_schema()
+        LEFT JOIN pg_catalog.pg_class relation
+          ON relation.relnamespace = namespace.oid AND relation.relname = required.name
+        LEFT JOIN pg_catalog.pg_class parent
+          ON parent.relnamespace = namespace.oid AND parent.relname = required.parent_name
+          AND parent.relkind = 'r'
+        LEFT JOIN pg_catalog.pg_index index_state ON index_state.indexrelid = relation.oid
+        """
+    )
+    row = await cursor.fetchone()
+    return row is not None and row["ready"] is True
+
+
 async def ensure_postgres_source_item_presence(db: Any) -> None:
     """Upgrade pre-presence PostgreSQL catalogs while retaining existing rows."""
     column = await db.execute(
