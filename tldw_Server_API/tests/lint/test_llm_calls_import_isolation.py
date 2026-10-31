@@ -104,8 +104,23 @@ def authnz_load_drift(loaded: Iterable[str], allowed: frozenset[str]) -> list[st
     return [f"new: {m}" for m in sorted(now - allowed)] + [f"stale: {m}" for m in sorted(allowed - now)]
 
 
+# Every LLM_Calls module that imports Provider_Credentials at module level (the gateway reaches only some).
+LLM_CALLS_CREDENTIAL_IMPORTERS = (
+    "gateway",
+    "adapter_utils",
+    "Summarization_General_Lib",
+    "providers.huggingface_adapter",
+    "providers.local_adapters",
+)
+
+
 def test_llm_calls_loads_only_the_known_authnz_modules() -> None:
-    drift = authnz_load_drift(loaded_after_import("tldw_Server_API.app.core.LLM_Calls.gateway"), AUTHNZ_LOADED_BY_LLM_CALLS)
+    loaded = {
+        m
+        for name in LLM_CALLS_CREDENTIAL_IMPORTERS
+        for m in loaded_after_import(f"tldw_Server_API.app.core.LLM_Calls.{name}")
+    }
+    drift = authnz_load_drift(loaded, AUTHNZ_LOADED_BY_LLM_CALLS)
     assert drift == [], "LLM_Calls -> AuthNZ indirect load changed (TASK-13950.17):\n" + "\n".join(drift)
 
 

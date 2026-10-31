@@ -1353,8 +1353,8 @@ async def test_authentication():
         return False
 
 async def start_services():
-    """Start background services"""
-    print("\n🚀 Starting background services...")
+    """Run the background services (monitoring) check"""
+    print("\n🚀 Running the background services check...")
 
     try:
         print("ℹ️  Scheduled AuthNZ jobs run inside the API server.")
@@ -1512,7 +1512,7 @@ async def main(*, non_interactive: bool = False, test_setup: bool = False):
 
     # Step 6: Start services (optional)
     should_start_services = test_setup or _prompt_yes_no(
-        "\n🚀 Start background services?",
+        "\n🚀 Run the background services check?",
         default_yes=False,
         non_interactive=non_interactive,
     )
