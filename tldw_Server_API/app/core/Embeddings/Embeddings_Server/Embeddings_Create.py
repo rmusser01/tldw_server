@@ -26,6 +26,7 @@ import numpy as np
 from loguru import logger
 from prometheus_client import REGISTRY, Counter, Gauge  # Assuming these are defined elsewhere or used directly
 from pydantic import BaseModel, Field
+
 # Was a fourth copy with NO message-text branch and inverted attribute precedence
 # (exc.status_code before exc.response, never exc.status), so an aiohttp
 # ClientResponseError returned None here and the right status elsewhere.
@@ -1165,7 +1166,7 @@ def exponential_backoff(max_retries: int = 3, base_delay: int = 1):
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+            from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
                 PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
             )
 

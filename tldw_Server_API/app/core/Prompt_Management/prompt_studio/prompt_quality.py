@@ -15,7 +15,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     ProviderCallCredentials,
 )
 

@@ -10,11 +10,6 @@ from typing import Any, Optional
 
 from loguru import logger
 
-from ....core.AuthNZ.provider_credential_runtime import (
-    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-    ProviderCallCredentials,
-    is_runtime_issued_provider_call_credentials,
-)
 from ....core.Chat.Chat_Deps import ChatConfigurationError
 from ....core.Chat.streaming_utils import sanitized_provider_stream_exception
 from ....core.exceptions import LLMQuotaExceededError
@@ -25,6 +20,11 @@ from ....core.LLM_Calls.adapter_utils import (
     resolve_provider_api_key_from_config,
     resolve_provider_model,
     split_system_message,
+)
+from ....core.Provider_Credentials.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+    is_runtime_issued_provider_call_credentials,
 )
 from ....core.testing import is_test_mode
 from .test_runner import TestRunner

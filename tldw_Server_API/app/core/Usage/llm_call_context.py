@@ -84,7 +84,7 @@ def call_credential_source(request: Any = None) -> str | None:
     Never raises: a request that cannot be read is an unknown source, so its call is checked and counted.
     """
     try:
-        from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+        from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
             PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
             is_runtime_issued_provider_call_credentials,
         )
@@ -109,8 +109,8 @@ def billed_credential_source(provider: str | None, source: str | None, *configs:
     """
     if source != USER_KEY_SOURCE:
         return source
-    from tldw_Server_API.app.core.AuthNZ.byok_config import PROVIDER_APP_CONFIG_KEYS
     from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+    from tldw_Server_API.app.core.Provider_Credentials.byok_config import PROVIDER_APP_CONFIG_KEYS
 
     name = canonical_provider_name(provider) if provider else ""
     hosts = VENDOR_HOSTS.get(name)

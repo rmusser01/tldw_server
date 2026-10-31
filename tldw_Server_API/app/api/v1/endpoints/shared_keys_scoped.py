@@ -15,24 +15,28 @@ from tldw_Server_API.app.api.v1.schemas.user_keys import (
     SharedProviderKeyTestResponse,
     UserProviderKeyUpsertRequest,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_org_members, list_team_members
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
     is_byok_enabled,
     is_provider_allowlisted,
     is_trusted_base_url_request,
     validate_base_url_override,
     validate_credential_fields,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_testing import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_testing import (
     provider_validation_public_error,
     test_provider_credentials,
 )
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_org_members, list_team_members
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
+from tldw_Server_API.app.core.Provider_Credentials.repos.org_provider_secrets_repo import (
     AuthnzOrgProviderSecretsRepo,
 )
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
     ProviderCredentialAliasConflictError,
     build_secret_payload,
     decrypt_byok_payload,
@@ -41,10 +45,6 @@ from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     key_hint_for_api_key,
     loads_envelope,
 )
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
-from tldw_Server_API.app.core.exceptions import raise_detached_error
-from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
-from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 router = APIRouter(prefix="", tags=["org-team-keys"])
 _ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py

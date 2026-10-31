@@ -8,12 +8,15 @@ from loguru import logger
 from starlette import status
 
 from tldw_Server_API.app.core.Audio.error_payloads import _http_error_detail
-from tldw_Server_API.app.core.AuthNZ.byok_config import PROVIDER_APP_CONFIG_KEYS
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
+from tldw_Server_API.app.core.exceptions import TTSPublicHTTPException, raise_detached_error
+from tldw_Server_API.app.core.Provider_Credentials.byok_config import PROVIDER_APP_CONFIG_KEYS
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
     derive_trusted_credential_scope,
     load_server_config_snapshot,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
     ByokResolutionStatus,
     ResolvedByokCredentials,
@@ -21,15 +24,12 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     resolve_byok_credentials,
     resolve_static_server_fallback_from_snapshot,
 )
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
     capture_provider_override_call_snapshot,
 )
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     ProviderCredentialRuntime,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
-from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
-from tldw_Server_API.app.core.exceptions import TTSPublicHTTPException, raise_detached_error
 from tldw_Server_API.app.core.TTS.adapter_registry import TTSAdapterFactory, TTSAdapterRegistry
 from tldw_Server_API.app.core.TTS.tts_config import get_tts_config
 from tldw_Server_API.app.core.TTS.tts_exceptions import (

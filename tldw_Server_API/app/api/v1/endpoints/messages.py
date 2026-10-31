@@ -23,20 +23,6 @@ from tldw_Server_API.app.api.v1.schemas.anthropic_messages import (
     AnthropicMessagesRequest,
 )
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import derive_trusted_credential_scope
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    ByokResolutionError,
-    record_byok_missing_credentials,
-)
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
-    capture_provider_override_call_snapshot,
-)
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-    ProviderCallCredentials,
-    ProviderCredentialRuntime,
-    mark_provider_credential_used,
-)
 from tldw_Server_API.app.core.Chat.anthropic_messages import (
     anthropic_messages_to_openai,
     anthropic_tool_choice_to_openai,
@@ -68,6 +54,20 @@ from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_ant
 from tldw_Server_API.app.core.LLM_Calls.gateway import _validate_provider_model_selection
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.LLM_Calls.usage_accounting import accounted_direct_stream, record_direct_response
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import derive_trusted_credential_scope
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
+    ByokResolutionError,
+    record_byok_missing_credentials,
+)
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+    ProviderCredentialRuntime,
+    mark_provider_credential_used,
+)
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
 from tldw_Server_API.app.core.Usage.llm_quota_gate import check_llm_call_async
 

@@ -16,30 +16,33 @@ from tldw_Server_API.app.api.v1.schemas.user_keys import (
     SharedProviderKeyTestResponse,
     SharedProviderKeyUpsertRequest,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
     is_byok_enabled,
     is_provider_allowlisted,
     resolve_byok_allowlist,
     validate_base_url_override,
     validate_credential_fields,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
     openai_credential_mutation_lock,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_testing import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_testing import (
     provider_validation_public_error,
     test_provider_credentials,
 )
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
+from tldw_Server_API.app.core.Provider_Credentials.repos.org_provider_secrets_repo import (
     AuthnzOrgProviderSecretsRepo,
 )
-from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
+from tldw_Server_API.app.core.Provider_Credentials.repos.user_provider_secrets_repo import (
     AuthnzUserProviderSecretsRepo,
 )
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
     ProviderCredentialAliasConflictError,
     build_secret_payload,
     decrypt_byok_payload,
@@ -48,9 +51,6 @@ from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     key_hint_for_api_key,
     loads_envelope,
 )
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
-from tldw_Server_API.app.core.exceptions import raise_detached_error
-from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.services import admin_scope_service
 
 

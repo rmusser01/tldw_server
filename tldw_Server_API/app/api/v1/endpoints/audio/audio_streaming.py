@@ -58,19 +58,6 @@ from tldw_Server_API.app.core.Audio.transcription_service import _map_openai_aud
 from tldw_Server_API.app.core.Audio.tts_service import (
     tts_provider_credential_scope,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
-    derive_trusted_credential_scope,
-)
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    ByokResolutionError,
-)
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
-    capture_provider_override_call_snapshot,
-)
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-    ProviderCredentialRuntime,
-)
 from tldw_Server_API.app.core.AuthNZ.settings import is_multi_user_mode
 from tldw_Server_API.app.core.Billing.enforcement import (
     LimitCategory,
@@ -145,6 +132,19 @@ from tldw_Server_API.app.core.Metrics.stt_metrics import (
     emit_stt_session_end_total,
     emit_stt_session_start_total,
     observe_stt_final_latency_seconds,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
+    derive_trusted_credential_scope,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
+    ByokResolutionError,
+)
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCredentialRuntime,
 )
 from tldw_Server_API.app.core.Resource_Governance import cost_units
 from tldw_Server_API.app.core.Streaming import speech_chat_service
