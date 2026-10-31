@@ -28,7 +28,7 @@ vi.mock("@/services/service-prompts", async original => ({
   ...(await original<typeof import("@/services/service-prompts")>()),
   loadServicePromptSnapshot: mockLoadArtifactScope,
 }))
-vi.mock("@/services/workspace-artifact-persistence", () => ({ persistWorkspaceArtifact: mockArtifactSave }))
+vi.mock("@/services/workspace-artifact-persistence", () => ({ persistWorkspaceArtifact: mockArtifactSave, hasCanonicalArtifactWorkspace: () => false }))
 
 const ONBOARDING_KEY = "tldw:research-workspace:onboarding-dismissed:v1"
 const {

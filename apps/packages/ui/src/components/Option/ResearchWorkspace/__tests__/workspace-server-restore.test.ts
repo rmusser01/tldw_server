@@ -45,7 +45,7 @@ import {
   restoreMigratedResearchWorkspace,
 } from "../workspace-server-restore";
 import { isServicePromptRequestPath } from "@/services/tldw/service-prompt-scope-error";
-import { persistWorkspaceArtifact } from "@/services/workspace-artifact-persistence";
+import { persistWorkspaceArtifact, hasCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence";
 import { loadServicePromptSnapshot } from "@/services/service-prompts";
 
 const receiptKey = "tldw:research-workspace:migration:tombstone:original";
@@ -1409,4 +1409,15 @@ describe("post-migration saved chat identity", () => {
       })
     );
   });
+  it("enrolls an explicitly requested canonical workspace without manufacturing a migration tombstone", async () => {
+    localStorage.clear();
+    const applied = vi.fn();
+    await expect(restoreMigratedResearchWorkspace({
+      workspaceId: "original", signal: new AbortController().signal, apply: applied,
+    })).resolves.toBe(true);
+    expect(applied).toHaveBeenCalledTimes(1);
+    expect(hasCanonicalArtifactWorkspace("original", boundary.scopeKey)).toBe(true);
+    expect(localStorage.getItem(receiptKey)).toBeNull();
+  });
+
 });

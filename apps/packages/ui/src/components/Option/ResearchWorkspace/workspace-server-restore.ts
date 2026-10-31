@@ -1,3 +1,4 @@
+import { rememberCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence";
 import { bindWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec";
 import { recoverWebCapturePin, WebCaptureNotCurrentError } from "@/utils/research-web-capture";
 import {
@@ -434,6 +435,7 @@ export const restoreMigratedResearchWorkspace = async (options: {
       );
     }
     assertCurrent();
+    rememberCanonicalArtifactWorkspace(workspaceId, scope.scopeKey);
     options.apply(snapshot, chatSession);
     return true;
   } finally {

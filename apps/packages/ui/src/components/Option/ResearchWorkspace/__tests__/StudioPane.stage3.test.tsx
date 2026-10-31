@@ -7,6 +7,16 @@ import { StudioPane, estimateGenerationSeconds } from "../StudioPane"
 import { buildUnknownResearchWorkspaceCapabilities } from "../research-workspace-capabilities"
 import { createGroundedClaimVerification } from "./studio-test-fixtures"
 
+const mediaSave = vi.hoisted(() => vi.fn(async artifact => artifact))
+vi.mock("@/services/workspace-artifact-persistence", () => ({
+  persistWorkspaceArtifact: mediaSave, hasCanonicalArtifactWorkspace: () => false,
+}))
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async (_ids: unknown, options: { signal: AbortSignal }) => ({
+    scopeKey: "stage3:alice", requestScope: { config: { serverUrl: "https://owned.test" }, userId: "alice" },
+    scopeSignal: options.signal, scopeInvalidatedSignal: options.signal, release: vi.fn(),
+  }),
+}))
 const {
   mockRagSearch,
   mockSynthesizeSpeech,
@@ -313,6 +323,9 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     ragSearch: mockRagSearch,
     synthesizeSpeech: mockSynthesizeSpeech,
     generateSlidesFromMedia: mockGenerateSlidesFromMedia,
+    getWorkspaceSources: async (workspaceId: string) => workspaceStoreState.sources.map(source => ({
+      id: source.id, media_id: source.mediaId, title: source.title, workspace_id: workspaceId,
+    })),
     submitWorkspaceOutput: mockSubmitWorkspaceOutput,
     getWorkspaceOutputStatus: mockGetWorkspaceOutputStatus,
     getMediaDetails: mockGetMediaDetails,
@@ -343,9 +356,10 @@ vi.mock("@/store/model", () => ({
 }))
 
 vi.mock("@/store/workspace", () => ({
-  useWorkspaceStore: (
+  hasResearchWorkspaceMigrationTombstone: () => false,
+  useWorkspaceStore: Object.assign((
     selector: (state: typeof workspaceStoreState) => unknown
-  ) => selector(workspaceStoreState)
+  ) => selector(workspaceStoreState), { getState: () => workspaceStoreState })
 }))
 
 vi.mock("@/components/Common/Mermaid", () => ({
@@ -683,11 +697,13 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
             model: "gpt-4o-mini",
             title_hint: "Workspace A"
           })
-        })
+        }),
+        expect.objectContaining({ requestScope: expect.objectContaining({ userId: "alice" }) })
       )
     })
     await waitFor(() => {
-      expect(mockGetWorkspaceOutputStatus).toHaveBeenCalledWith("workspace-a", 22)
+      expect(mockGetWorkspaceOutputStatus).toHaveBeenCalledWith("workspace-a", 22,
+        expect.objectContaining({ requestScope: expect.objectContaining({ userId: "alice" }) }))
     })
     expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
       expect.stringMatching(/^artifact-/),
@@ -1006,14 +1022,15 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
           model: "gpt-4o-mini",
           provider: "openai",
           text: expect.stringContaining("DSPy Prompting Talk")
-        })
+        }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
       )
     })
 
     expect(mockUpsertWorkspace).toHaveBeenCalledWith("workspace-a", {
       name: "Workspace A",
       study_materials_policy: "workspace"
-    })
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(mockCreateDeck).toHaveBeenCalledWith(
       expect.objectContaining({
         name: expect.stringContaining("Workspace A"),
@@ -1090,7 +1107,8 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
       expect.objectContaining({
         num_cards: 8,
         difficulty: "easy"
-      })
+      }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
     expect(mockCreateFlashcardsBulk).toHaveBeenCalledWith([
       expect.objectContaining({

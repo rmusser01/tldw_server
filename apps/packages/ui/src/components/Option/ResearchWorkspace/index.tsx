@@ -1,6 +1,6 @@
 import { bindWorkspaceArtifactOrigin, hasWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec";
 import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts";
-import { persistWorkspaceArtifact } from "@/services/workspace-artifact-persistence";
+import { persistWorkspaceArtifact, hasCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence";
 import { hasResearchWorkspaceMigrationTombstone } from "@/store/workspace";
 import { watchChatAccountChanges } from "@/services/chat-account-boundary";
 import { buildWorkspaceChatSessionKey } from "@/store/workspace-chat-session-key"
@@ -2597,7 +2597,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     })
 
     try {
-      if (hasResearchWorkspaceMigrationTombstone(originWorkspaceId))
+      if ((hasResearchWorkspaceMigrationTombstone(originWorkspaceId) || hasCanonicalArtifactWorkspace(originWorkspaceId)))
         scope = await loadServicePromptSnapshot([], { signal: controller.signal })
       if (!canContinueImport()) return
       const bundle = scope
@@ -2608,7 +2608,7 @@ const ResearchWorkspaceBody: React.FC = () => {
         : await tldwClient.getResearchBundle(returnContext.researchRunId)
       if (!canContinueImport()) return
 
-      if (!scope && hasResearchWorkspaceMigrationTombstone(originWorkspaceId))
+      if (!scope && (hasResearchWorkspaceMigrationTombstone(originWorkspaceId) || hasCanonicalArtifactWorkspace(originWorkspaceId)))
         scope = await loadServicePromptSnapshot([], { signal: controller.signal })
       if (!canContinueImport()) return
       const currentArtifacts = useWorkspaceStore.getState().generatedArtifacts
@@ -2644,7 +2644,7 @@ const ResearchWorkspaceBody: React.FC = () => {
       const draft = retainedDraft ?? addArtifact(artifactPayload)
       const isCurrentDraft = () => canContinueImport() &&
         useWorkspaceStore.getState().generatedArtifacts.find((artifact) => artifact.id === draft.id) === draft
-      if (!scope && (draft.workspaceArtifactId || hasResearchWorkspaceMigrationTombstone(originWorkspaceId)))
+      if (!scope && (draft.workspaceArtifactId || (hasResearchWorkspaceMigrationTombstone(originWorkspaceId) || hasCanonicalArtifactWorkspace(originWorkspaceId))))
         scope = await loadServicePromptSnapshot([], { signal: controller.signal })
       if (scope) {
         if (!retainedDraft) bindWorkspaceArtifactOrigin(draft, scope.scopeKey, originWorkspaceId)

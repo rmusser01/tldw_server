@@ -23,3 +23,17 @@ ADR assessment: ADR-008 remains governing browser split-key caching. No new dura
 ## First reviewed unit
 
 Only Deep import, canonical reload and enrolled removal/Undo are implemented in this unit. Normal Studio/ACP producer enrollment and later edit durability remain open. Canonical IDs/optimistic versions are separate from generated resource and display identities. Ownership evidence exists only as a runtime Symbol bound by an actual scoped read or fresh owned bundle; serialized caches cannot recreate it. Archive/Undo changes only review state and the removal marker, retaining full canonical lineage and history. One absolute fifteen-second operation budget and independent account retirement prevent a held completion from reviving an old attempt. Build and native acceptance remain required.
+
+## Ordinary Studio generation and study-output edits
+
+Canonical enrollment is runtime metadata established by an owned server restore. It also covers server workspaces that never needed a migration tombstone. Retain workspace IDs and scope keys for the page lifetime: evicting an older enrollment can silently turn a cached workspace switch into a local-only save. This adds no persisted authority or storage namespace.
+
+Capture click and operation retirement before asynchronous capability checks or generation. Retire on unmount, workspace changes and account/server changes; rebuild selected-source identity and titles from scoped canonical reads, and use only witnessed prior artifacts as model input. Generation transports keep the captured target and cancellation signal.
+
+Keep the completed result and stable draft ID when saving fails. A visible save-only Retry reconciles that same draft without another generation. Retire the pending save if the card is edited, deleted or its authority changes. The final save has its own bounded acknowledgement stage; generation Cancel does not discard a completed result while it is being saved.
+
+Worker-created media artifacts keep canonical identity/version separate from display and export IDs. New backend media generation creates a distinct version rather than sharing the previous row's display identity. Client-only enrollment and content-only study edits preserve raw canonical lineage, ownership, producer, review and redaction fields.
+
+Flashcard and quiz editors wait for acknowledgement before publishing changes or closing. Failures/conflicts retain the edit. Pending controls are disabled, and only that editor's removal Undo actions are finalized before Save or retirement; unrelated workspace Undo remains available.
+
+ACP enrollment and live native qualification remain open. Transient audio blob URLs are not durable resources; this draft unit preserves the script, existing metadata and durable references and makes no binary-audio restoration claim. ADR-008 remains governing; no new durable architecture rule or dependency.

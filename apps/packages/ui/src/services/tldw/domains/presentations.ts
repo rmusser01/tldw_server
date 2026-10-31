@@ -1,3 +1,4 @@
+import { requestScopeFields, type ServicePromptRequestScope } from "./service-prompts"
 import { bgRequest } from "@/services/background-proxy"
 import { buildQuery, toTrimmedStringArray } from "../client-utils"
 import type {
@@ -628,24 +629,7 @@ export interface TldwApiClientCore {
   fillPathParams(template: string, values: string | string[]): string
 }
 
-export const presentationsMethods = {
-  async generateSlidesFromMedia(
-    this: TldwApiClientCore,
-    mediaId: number,
-    options?: {
-      titleHint?: string
-      theme?: string
-      visualStyleId?: string
-      visualStyleScope?: string
-      provider?: string
-      model?: string
-      claimsVerificationProvider?: string
-      claimsVerificationModel?: string
-      temperature?: number
-      maxTokens?: number
-      signal?: AbortSignal
-    }
-  ): Promise<{
+type SlidesFromMediaResponse = {
     id: string
     title: string
     description?: string
@@ -665,7 +649,27 @@ export const presentationsMethods = {
     }>
     version: number
     created_at: string
-  }> {
+  }
+
+export const presentationsMethods = {
+  async generateSlidesFromMedia(
+    this: TldwApiClientCore,
+    mediaId: number,
+    options?: {
+      titleHint?: string
+      theme?: string
+      visualStyleId?: string
+      visualStyleScope?: string
+      provider?: string
+      model?: string
+      claimsVerificationProvider?: string
+      claimsVerificationModel?: string
+      temperature?: number
+      maxTokens?: number
+      requestScope?: ServicePromptRequestScope
+      signal?: AbortSignal
+    }
+  ): Promise<SlidesFromMediaResponse> {
     const body: Record<string, unknown> = { media_id: mediaId }
     if (options?.titleHint) body.title_hint = options.titleHint
     if (options?.theme) body.theme = options.theme
@@ -681,12 +685,15 @@ export const presentationsMethods = {
     }
     if (options?.temperature != null) body.temperature = options.temperature
     if (options?.maxTokens != null) body.max_tokens = options.maxTokens
-    return await this.request<any>({
-      path: "/api/v1/slides/generate/from-media",
+    const request = {
+      path: "/api/v1/slides/generate/from-media" as const,
       method: "POST",
       body,
       abortSignal: options?.signal
-    })
+    }
+    return options?.requestScope
+      ? await bgRequest<SlidesFromMediaResponse>({ ...request, ...requestScopeFields(options.requestScope), method: "POST" })
+      : await this.request<any>(request)
   },
 
   async listVisualStyles(

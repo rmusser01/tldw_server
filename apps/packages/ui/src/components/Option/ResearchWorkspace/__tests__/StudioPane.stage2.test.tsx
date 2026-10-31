@@ -1,10 +1,21 @@
 import React from "react"
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { Modal } from "antd"
-import type { WorkspaceSource } from "@/types/workspace"
+import { ConfigProvider, Modal } from "antd"
+import { bindWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec"
+import type { GeneratedArtifact, WorkspaceSource } from "@/types/workspace"
 import { StudioPane } from "../StudioPane"
 import { createGroundedClaimVerification } from "./studio-test-fixtures"
+const editIO = vi.hoisted(() => ({ save: vi.fn(), release: vi.fn() }))
+vi.mock("@/services/workspace-artifact-persistence", () => ({
+  persistWorkspaceArtifact: editIO.save, hasCanonicalArtifactWorkspace: () => false,
+}))
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async (_ids: unknown, options: { signal: AbortSignal }) => ({
+    scopeKey: "server:alice", requestScope: { config: { serverUrl: "https://owned.test" }, userId: "alice" },
+    scopeSignal: options.signal, scopeInvalidatedSignal: options.signal, release: editIO.release,
+  }),
+}))
 const {
   mockScheduleWorkspaceUndoAction,
   mockUndoWorkspaceAction,
@@ -271,6 +282,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 vi.mock("@/services/tldw", () => ({
   tldwModels: {
     getChatModels: mockGetChatModels,
+    clearCache: vi.fn(async () => undefined),
     getProviderDisplayName: (provider: string) => provider
   }
 }))
@@ -288,9 +300,10 @@ vi.mock("@/store/model", () => ({
 }))
 
 vi.mock("@/store/workspace", () => ({
-  useWorkspaceStore: (
+  hasResearchWorkspaceMigrationTombstone: () => false,
+  useWorkspaceStore: Object.assign((
     selector: (state: typeof workspaceStoreState) => unknown
-  ) => selector(workspaceStoreState)
+  ) => selector(workspaceStoreState), { getState: () => workspaceStoreState })
 }))
 
 vi.mock("@/components/Common/Mermaid", () => ({
@@ -323,6 +336,7 @@ vi.mock("@/components/Common/MermaidDiagramBlock", () => ({
 vi.mock("../undo-manager", () => ({
   WORKSPACE_UNDO_WINDOW_MS: 10000,
   scheduleWorkspaceUndoAction: mockScheduleWorkspaceUndoAction,
+  finalizeWorkspaceUndoAction: vi.fn(() => true),
   undoWorkspaceAction: mockUndoWorkspaceAction
 }))
 
@@ -585,6 +599,7 @@ describe("StudioPane Stage 2 workflows", () => {
 
   afterEach(() => {
     Modal.destroyAll()
+    ConfigProvider.config({ holderRender: undefined })
     cleanup()
   })
 
@@ -740,7 +755,7 @@ describe("StudioPane Stage 2 workflows", () => {
     expect(mockUpsertWorkspace).toHaveBeenCalledWith("workspace-a", {
       name: "Workspace A",
       study_materials_policy: "workspace"
-    })
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
 
     expect(mockCreateQuiz).not.toHaveBeenCalled()
     expect(mockCreateQuestion).not.toHaveBeenCalled()
@@ -1336,12 +1351,14 @@ describe("StudioPane Stage 2 workflows", () => {
         provider: "openai",
         claims_verification_provider: "llamacpp",
         claims_verification_model: "qwen-claims"
-      })
+      }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
     expect(mockGenerateFlashcardsService).not.toHaveBeenCalledWith(
       expect.objectContaining({
         text: ""
-      })
+      }),
+      expect.anything()
     )
     expect(mockRagSearch).not.toHaveBeenCalled()
     expect(mockCreateFlashcardsBulk).toHaveBeenCalledWith([
@@ -2144,4 +2161,92 @@ describe("StudioPane Stage 2 workflows", () => {
 
     modalInfoSpy.mockRestore()
   }, 15000)
+  it.each(["flashcards", "quiz"] as const)("waits for a canonical edit acknowledgement before replacing the %s card or closing its editor", async (type) => {
+    const original = bindWorkspaceArtifactOrigin({
+      id: "canonical-edit", workspaceArtifactId: "canonical-edit", workspaceArtifactVersion: 1,
+      type, title: "Saved study output", status: "completed", content: "Original saved content",
+      data: type === "flashcards" ? { flashcards: [{ front: "Old front", back: "Old back" }] } :
+        { questions: [{ question: "Old question", options: ["yes"], answer: "yes" }] },
+      createdAt: new Date(),
+    } as GeneratedArtifact, "server:alice", "workspace-a")
+    workspaceStoreState.generatedArtifacts = [original]
+    let acknowledge!: (value: unknown) => void
+    editIO.save.mockReset().mockImplementationOnce(() => new Promise(resolve => { acknowledge = resolve }))
+    renderStudioPane()
+    fireEvent.click(screen.getByTestId("studio-artifact-edit-canonical-edit"))
+    const label = type === "flashcards" ? "Flashcard front 1" : "Question prompt 1"
+    fireEvent.change(await screen.findByLabelText(label), { target: { value: "Revised study text" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(editIO.save).toHaveBeenCalledTimes(1))
+    expect(mockUpdateArtifactStatus).not.toHaveBeenCalled()
+    expect(screen.getByDisplayValue("Revised study text")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled()
+    const [draft, options] = editIO.save.mock.calls[0]
+    expect(options).toMatchObject({ workspaceId: "workspace-a", updateOnly: "content" })
+    acknowledge({ ...draft, workspaceArtifactVersion: 2 })
+    await waitFor(() => expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
+      "canonical-edit", "completed", expect.objectContaining({ workspaceArtifactVersion: 2 })))
+  })
+
+  it("retains flashcard edits and its modal after a canonical optimistic conflict", async () => {
+    workspaceStoreState.generatedArtifacts = [bindWorkspaceArtifactOrigin({
+      id: "edit-conflict", workspaceArtifactId: "edit-conflict", workspaceArtifactVersion: 1,
+      type: "flashcards", title: "Saved cards", status: "completed", content: "Original saved content",
+      data: { flashcards: [{ front: "Old front", back: "Old back" }] }, createdAt: new Date(),
+    } as GeneratedArtifact, "server:alice", "workspace-a")]
+    editIO.save.mockReset().mockRejectedValueOnce(new Error("This saved draft changed. Reload it before saving another revision."))
+    renderStudioPane()
+    fireEvent.click(screen.getByTestId("studio-artifact-edit-edit-conflict"))
+    fireEvent.change(await screen.findByLabelText("Flashcard front 1"), { target: { value: "Keep my unsaved edit" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(editIO.save).toHaveBeenCalledTimes(1))
+    expect(await screen.findByRole("alert")).toHaveTextContent("This saved draft changed")
+    expect(screen.getByDisplayValue("Keep my unsaved edit")).toBeInTheDocument()
+    expect(mockUpdateArtifactStatus).not.toHaveBeenCalled()
+    expect(mockMessageSuccess).not.toHaveBeenCalled()
+  })
+
+  it.each(["account", "workspace"] as const)("retires a held editor save on %s change without publishing its acknowledgement", async (boundary) => {
+    ConfigProvider.config({ holderRender: children =>
+      <ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider> })
+    const original = bindWorkspaceArtifactOrigin({
+      id: "retired-editor", workspaceArtifactId: "retired-editor", workspaceArtifactVersion: 1,
+      type: "flashcards", title: "Private cards", status: "completed", content: "Original saved content",
+      data: { flashcards: [{ front: "Old front", back: "Old back" }] }, createdAt: new Date(),
+    } as GeneratedArtifact, "server:alice", "workspace-a")
+    workspaceStoreState.generatedArtifacts = [original]
+    let acknowledge!: (value: unknown) => void
+    editIO.save.mockReset().mockImplementationOnce(() => new Promise(resolve => { acknowledge = resolve }))
+    const view = renderStudioPane()
+    fireEvent.click(screen.getByTestId("studio-artifact-edit-retired-editor"))
+    fireEvent.change(await screen.findByLabelText("Flashcard front 1"), { target: { value: "Private unsaved edit" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(editIO.save).toHaveBeenCalledTimes(1))
+    if (boundary === "account") window.dispatchEvent(new Event("tldw:auth-principal-changed"))
+    else workspaceStoreState.workspaceId = "other"
+    workspaceStoreState.generatedArtifacts = []
+    view.rerender(<StudioPane />)
+    await waitFor(() => expect(screen.queryByDisplayValue("Private unsaved edit")).not.toBeInTheDocument())
+    await act(async () => { acknowledge({ ...editIO.save.mock.calls[0][0], workspaceArtifactVersion: 2 }) })
+    expect(mockUpdateArtifactStatus).not.toHaveBeenCalled()
+    expect(mockMessageSuccess).not.toHaveBeenCalled()
+  })
+
+  it("refuses a cached canonical editor card without a current ownership witness", async () => {
+    workspaceStoreState.generatedArtifacts = [{
+      id: "unverified-editor", workspaceArtifactId: "unverified-editor", workspaceArtifactVersion: 1,
+      type: "flashcards", title: "Cached cards", status: "completed", content: "Cached content",
+      data: { flashcards: [{ front: "Old front", back: "Old back" }] }, createdAt: new Date(),
+    }]
+    editIO.save.mockReset()
+    renderStudioPane()
+    fireEvent.click(screen.getByTestId("studio-artifact-edit-unverified-editor"))
+    fireEvent.change(await screen.findByLabelText("Flashcard front 1"), { target: { value: "Keep my draft edit" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent("Reopen this output")
+    expect(editIO.save).not.toHaveBeenCalled()
+    expect(mockUpdateArtifactStatus).not.toHaveBeenCalled()
+    expect(screen.getByDisplayValue("Keep my draft edit")).toBeInTheDocument()
+  })
+
 })

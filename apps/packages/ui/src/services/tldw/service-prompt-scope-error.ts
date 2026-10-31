@@ -104,6 +104,13 @@ export const isServicePromptRequestPath = (
   const pathname = readCanonicalPathname(path)
   if (!pathname) return false
   const requestMethod = String(method || "GET").toUpperCase()
+  if (requestMethod === "POST" && [
+    "/api/v1/research-workspace/artifacts/generate", "/api/v1/quizzes/generate",
+    "/api/v1/slides/generate/from-media", "/api/v1/audio/speech",
+  ].includes(pathname)) return true
+  if (/^\/api\/v1\/workspaces\/[^/]+\/outputs$/.test(pathname)) return requestMethod === "POST"
+  if (/^\/api\/v1\/workspaces\/[^/]+\/outputs\/[A-Za-z0-9_-]+$/.test(pathname)) return requestMethod === "GET"
+  if (/^\/api\/v1\/workspaces\/[^/]+$/.test(pathname) && requestMethod === "PUT") return true
   if (pathname === "/api/v1/data-tables/generate") return requestMethod === "POST"
   if (/^\/api\/v1\/data-tables\/jobs\/[1-9][0-9]*$/.test(pathname)) return ["GET", "DELETE"].includes(requestMethod)
   const tablePath = /^\/api\/v1\/data-tables\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(\/regenerate)?$/i.exec(pathname)
