@@ -72,7 +72,7 @@ async def _build_app(tmp_path, monkeypatch):
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import reset_api_key_manager
     from tldw_Server_API.app.core.AuthNZ.lockout_tracker import reset_lockout_tracker
     from tldw_Server_API.app.core.AuthNZ.rate_limiter import reset_rate_limiter
-    from tldw_Server_API.app.core.AuthNZ.scheduler import reset_authnz_scheduler
+    from tldw_Server_API.app.services.authnz_scheduler import reset_authnz_scheduler
     from tldw_Server_API.app.core.AuthNZ.token_blacklist import reset_token_blacklist
     from tldw_Server_API.app.core.Billing.enforcement import reset_billing_enforcer
     from tldw_Server_API.app.core.Billing.subscription_service import reset_subscription_service

@@ -7,7 +7,7 @@ import pytest
 
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
-from tldw_Server_API.app.core.AuthNZ.scheduler import AuthNZScheduler
+from tldw_Server_API.app.services.authnz_scheduler import AuthNZScheduler
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
 

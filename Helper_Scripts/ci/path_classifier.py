@@ -60,6 +60,7 @@ E2E_BACKEND_GLOBS = [
     "tldw_Server_API/app/core/AuthNZ/**",
     "tldw_Server_API/app/core/Provider_Credentials/**",
     "tldw_Server_API/app/core/Usage/llm_budget_*.py",
+    "tldw_Server_API/app/services/authnz_scheduler.py",
 ]
 
 

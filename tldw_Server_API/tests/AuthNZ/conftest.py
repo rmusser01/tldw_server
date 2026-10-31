@@ -33,7 +33,7 @@ from tldw_Server_API.app.services.registration_service import RegistrationServic
 from tldw_Server_API.app.core.Audit.unified_audit_service import UnifiedAuditService
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
 from tldw_Server_API.app.core.config import settings
-from tldw_Server_API.app.core.AuthNZ.scheduler import reset_authnz_scheduler
+from tldw_Server_API.app.services.authnz_scheduler import reset_authnz_scheduler
 from tldw_Server_API.app.core.AuthNZ.token_blacklist import reset_token_blacklist
 from tldw_Server_API.app.core.AuthNZ.alerting import reset_security_alert_dispatcher
 

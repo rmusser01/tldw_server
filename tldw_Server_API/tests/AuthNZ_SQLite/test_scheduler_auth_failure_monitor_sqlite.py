@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ import scheduler as scheduler_module
+from tldw_Server_API.app.services import authnz_scheduler as scheduler_module
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.settings import Settings
 

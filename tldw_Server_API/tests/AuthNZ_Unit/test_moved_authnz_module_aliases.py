@@ -52,3 +52,21 @@ def test_old_path_aliases_when_imported_first(old: str, new: str) -> None:
         [sys.executable, "-c", code], cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=180
     )
     assert result.returncode == 0, result.stderr[-2000:]
+
+
+def test_root_conftest_disables_the_moved_authnz_scheduler() -> None:
+    import importlib.util
+
+    from tldw_Server_API.app.services import authnz_scheduler
+
+    assert authnz_scheduler.start_authnz_scheduler.__name__ == "_noop"
+    assert importlib.util.find_spec("tldw_Server_API.app.core.AuthNZ.scheduler") is None
+
+
+def test_the_authnz_initialize_cli_imports_no_services() -> None:
+    import ast
+
+    tree = ast.parse((REPO_ROOT / "tldw_Server_API/app/core/AuthNZ/initialize.py").read_text(encoding="utf-8"))
+    names = {node.module or "" for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
+    names |= {alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
+    assert sorted(name for name in names if name.startswith("tldw_Server_API.app.services")) == []

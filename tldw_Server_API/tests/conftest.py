@@ -72,7 +72,7 @@ os.environ.setdefault("WORKFLOWS_WEBHOOK_ALLOWLIST", "*")
 os.environ.setdefault("WORKFLOWS_EGRESS_ALLOWED_PORTS", "*")
 # Disable AuthNZ scheduler functions proactively to avoid background threads
 try:
-    from tldw_Server_API.app.core.AuthNZ import scheduler as _auth_sched
+    from tldw_Server_API.app.services import authnz_scheduler as _auth_sched
     async def _noop():
         return None
     _auth_sched.start_authnz_scheduler = _noop  # type: ignore[assignment]

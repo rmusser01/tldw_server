@@ -20,8 +20,10 @@ def test_guardrail_tables_used_only_in_core_authnz_modules():
         assert root.exists(), f"Expected core path not found: {root}"
     files = [path for root in roots for path in root.rglob("*.py")]
     files += [project_root / "app" / "core" / "Usage" / f"llm_budget_{name}.py" for name in ("guard", "middleware")]
+    files.append(project_root / "app" / "services" / "authnz_scheduler.py")
     assert project_root / "app" / "core" / "Provider_Credentials" / "byok_runtime.py" in files
     assert project_root / "app" / "core" / "Usage" / "llm_budget_guard.py" in files
+    assert project_root / "app" / "services" / "authnz_scheduler.py" in files
 
     allowed_files = {
         "app/core/AuthNZ/rate_limiter.py",
