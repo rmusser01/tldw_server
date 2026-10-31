@@ -12,15 +12,21 @@ The active `dev-core-required-gates` repository ruleset requires these checks:
 4. `frontend-required`
 5. `e2e-required`
 6. `container-build-check`
+7. `E2E Critical (Tier 1 + Journeys)`
 
 These check names are stable and must remain unchanged. Each status is bound to
 GitHub Actions integration `15368`.
+
+`E2E Critical (Tier 1 + Journeys)` is the `critical` job of `frontend-e2e-tiers.yml`.
+Add it to the ruleset only once that workflow's unfiltered `pull_request` trigger is on
+`dev`: an open PR whose last run predates it, and was path-filtered out, shows the check
+as "Expected" until its next push (which strict enforcement forces anyway).
 
 ## Live `dev` Enforcement
 
 GitHub aggregates two active, `dev`-only repository rulesets:
 
-- `dev-core-required-gates` (ID `21824526`) requires all six checks above,
+- `dev-core-required-gates` (ID `21824526`) requires all seven checks above,
   uses strict/current-base enforcement, and has no bypass actors.
 - `frontend-license-gate-dev` (ID `19362594`) retains the pull-request rule
   and requires `frontend-license-policy/trusted/dev` from integration `15368`.
@@ -50,6 +56,8 @@ and check current behaviour rather than assuming.
 
 - If relevant paths changed, the gate executes its full checks.
 - If relevant paths did not change, the gate exits with an explicit no-op success message.
+  `E2E Critical (Tier 1 + Journeys)` instead skips its job, which GitHub counts as passing;
+  its workflow has no `paths:` filter, so the check always reports.
 - If the change-detection job itself fails, the gate reports failure. Before TASK-13462 the gate job was skipped in
   that case, and GitHub counts a skipped required job as satisfied.
 - If the gate's own license wait (`await_license`) is cancelled, fails, or reports a negative verdict, the gate reports
@@ -62,6 +70,8 @@ Examples:
 - UI-only PRs no-op `backend-required` and `coverage-required`.
 - Backend-only PRs no-op `frontend-required`.
 - `e2e-required` runs on frontend changes and selected backend API/schema/auth paths.
+- `E2E Critical (Tier 1 + Journeys)` runs on any backend, workflow, shared-UI, web or
+  extension change (`backend_changed || e2e_changed`); docs- and backlog-only PRs skip it.
 
 ## Gate Reporting and the `workflow_run` Admission Path
 
@@ -171,16 +181,17 @@ nothing.
 
 ### Checking the current state
 
-Do not trust the prose above; check. The question that matters is whether the six
+Do not trust the prose above; check. The question that matters is whether the seven
 required check *names* reach a conclusion on the pull request, so ask the pull request:
 
 ```bash
 gh pr checks <pr> --json name,state \
   --template '{{range .}}{{.state}} {{.name}}{{"\n"}}{{end}}' \
-  | grep -E "required|container-build-check"
+  | grep -E "required|container-build-check|E2E Critical"
 ```
 
-- `SUCCESS` for all six: gates are reporting, nothing to work around.
+- `SUCCESS` for all seven (`SKIPPED` also passes for `E2E Critical`): gates are reporting,
+  nothing to work around.
 - `CANCELLED`: the run that would have reported was superseded. Use the landing
   procedure below.
 - A name missing entirely: that lane never started for this head.
@@ -216,10 +227,10 @@ The steps it performs, and why each is shaped that way:
 2. **Wait for the audit on that exact head SHA to complete.** Not merely "the latest
    audit" -- a rebase-push spawns a new one, and re-running gates while it is pending
    gets them cancelled when it finishes.
-3. **Re-run the six gates individually, paced roughly 40 seconds apart.** A burst makes
+3. **Re-run the seven gates individually, paced roughly 40 seconds apart.** A burst makes
    them cancel each other, and `gh run rerun` fails on a run that is already queued or
    in progress, which silently skips that gate.
-4. **Merge once all six are green**, before anything else lands on `dev`.
+4. **Merge once all seven are green**, before anything else lands on `dev`.
 
 **Landing several PRs is serial, not parallel.** Strict-base enforcement means each merge
 moves `dev` and puts every remaining PR behind, so each one needs its own
@@ -270,7 +281,7 @@ gh variable get MERGE_QUEUE
 2. Do not rebase or update an armed PR, and do not merge it by hand. The queue rebases it when it reaches the front.
 3. To push more work, disarm first (`gh pr merge <n> --disable-auto`), push, then arm again. Re-arming puts the PR at
    the back of the line.
-4. The queue approves a rebased PR's six required gate runs itself; approving one by hand is harmless. Never dispatch
+4. The queue approves a rebased PR's seven required gate runs itself; approving one by hand is harmless. Never dispatch
    a required gate by hand to unblock a PR: a dispatched run's check does not count toward the PR's required statuses,
    so the PR stays blocked.
 5. An evicted PR gets one comment saying why (conflicts, a gate failed twice, a gate run GitHub would not re-run or
@@ -283,13 +294,13 @@ Fork PRs and PRs opened by bots or apps are never queued and stay manual.
 ### What the queue does to the front PR
 
 - **Behind `dev`:** rebases it with a pinned head. GitHub then holds the new head's `pull_request` runs for approval.
-  The queue dispatches `frontend-license-gate.yml` on `dev` with the PR number, approves the held runs of the six
+  The queue dispatches `frontend-license-gate.yml` on `dev` with the PR number, approves the held runs of the seven
   required gates, deletes the other held runs, cancels the old head's runs and comments once. A dispatched gate would
   not count, so the queue never dispatches one.
 - **A status failed:** re-runs that gate's failed jobs once (the license gate is dispatched on `dev` again), and evicts
   the PR if it fails a second time on the same head. A gate run that finished without reporting its check counts as a
   failure; a cancelled gate run is restarted once per head.
-- **All seven green:** checks the head against `dev` (the merge state can lag right after a merge) and waits for
+- **All eight green:** checks the head against `dev` (the merge state can lag right after a merge) and waits for
   auto-merge. The merge pushes `dev`, which wakes the queue for the next PR.
 
 Non-required workflows (`ci.yml` and the rest) are not re-run on the rebased head: their held runs are deleted.
@@ -348,4 +359,4 @@ the ready pull request as `BLOCKED`.
 ## Legacy CI Workflow
 
 The large legacy `.github/workflows/ci.yml` workflow remains available during rollout for broad visibility and historical comparison.
-Required merge protection is provided by the six lanes listed above.
+Required merge protection is provided by the seven lanes listed above.

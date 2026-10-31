@@ -899,6 +899,11 @@ export interface TldwModel {
   chat_provider?: string
   /** Server-observed provider reachability: "working", "unreachable" or "unknown". */
   provider_health?: string
+  /**
+   * Optional sampling fields the provider accepts ("top_k", "min_p"). Absent
+   * when the server doesn't say; then neither is sent (#3283).
+   */
+  sampling_fields?: string[]
   catalog_only?: boolean
   modalities?: {
     input?: string[]
@@ -1080,6 +1085,10 @@ export interface ChatCompletionRequest {
   top_p?: number
   frequency_penalty?: number
   presence_penalty?: number
+  /** Top-K sampling, sent only to providers that accept it (#3283). */
+  topk?: number
+  /** Min-P sampling, sent only to providers that accept it (#3283). */
+  minp?: number
   reasoning_effort?: "low" | "medium" | "high"
   tool_choice?: "auto" | "none" | "required"
   tools?: Record<string, unknown>[]

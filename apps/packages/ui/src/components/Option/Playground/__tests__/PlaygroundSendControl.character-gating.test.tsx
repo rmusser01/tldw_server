@@ -25,12 +25,12 @@ const baseProps = {
 }
 
 describe("PlaygroundSendControl character chat gating", () => {
-  it.each([false, true])("keeps unsupported history Send and Queue unavailable (busy=%s)", async isSending => {
+  it.each([false, true])("keeps unsupported history Send and Send after this reply unavailable (busy=%s)", async isSending => {
     const submit = vi.fn()
     const user = userEvent.setup()
     render(<PlaygroundSendControl {...baseProps} isSending={isSending} onSubmitForm={submit}
       submitDisabledReason="Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat." />)
-    const button = screen.getByRole("button", { name: isSending ? /queue/i : /send/i })
+    const button = screen.getByRole("button", { name: isSending ? "Send after this reply" : /send/i })
     expect(button).toBeDisabled()
     expect(button).toHaveAttribute("title", expect.stringContaining("Tracked persona chat is unavailable"))
     await user.click(button)

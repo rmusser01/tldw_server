@@ -14,6 +14,10 @@ import { useUiModeStore } from "@/store/ui-mode"
 // value set for this model can be reset; a value set for all models is shown
 // as such and has no reset here.
 
+// These tests are about defaults; assume the model accepts Top K and Min P (#3283).
+vi.mock("@/hooks/useSelectedModelSamplingSupport", () => ({
+  useSelectedModelSamplingSupport: () => ({})
+}))
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (_key: string, fallback?: string, options?: Record<string, unknown>) =>

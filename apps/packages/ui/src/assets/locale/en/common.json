@@ -202,6 +202,9 @@
   "complexArguments": "[Complex arguments]",
   "currentChatModelSettings": "Current Chat Model Settings",
   "modelSettings": {
+    "samplingNotSupported": "Not supported by {{provider}}",
+    "samplingThisProvider": "this provider",
+    "samplingSupportUnknown": "Not sent: the server doesn't list whether this model accepts it",
     "label": "Model Settings",
     "description": "Set the model options globally for all chats",
     "form": {
@@ -413,6 +416,11 @@
     "friendlyTimeoutHint": "The server stopped streaming responses. Try again, or open Health & diagnostics to check server status.",
     "friendlyGenericSummary": "Something went wrong while talking to your tldw server.",
     "friendlyGenericHint": "Try again in a moment, or open Health & diagnostics to inspect server health.",
+    "providerUnavailableSummary": "Couldn't reach {{model}}.",
+    "providerUnavailableSummaryGeneric": "Couldn't reach this model's provider.",
+    "providerUnavailableHint": "Your tldw server is fine, but this model's provider didn't respond. Start the provider or switch models.",
+    "gatewayUnavailableHint": "The model's provider, or a proxy in front of your tldw server, didn't respond. Check that both are running, or switch models.",
+    "switchModel": "Switch model",
     "imageArtifactsUnsupportedSummary": "Your tldw server doesn't support image generation yet.",
     "imageArtifactsUnsupportedHint": "Update to a tldw_server2 build with file artifacts enabled, then try again.",
     "imageBackendUnavailableSummary": "Image generation isn't available on your server.",

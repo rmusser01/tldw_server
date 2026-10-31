@@ -31,6 +31,8 @@ type ModelParamSliderFieldProps = {
   isSetHere?: boolean
   onChange: (value: number) => void
   onReset: () => void
+  /** Why this setting can't be used with the selected model (#3283). */
+  unavailableReason?: string
 }
 
 export const ModelParamSliderField = ({
@@ -45,7 +47,8 @@ export const ModelParamSliderField = ({
   defaultValue,
   isSetHere = true,
   onChange,
-  onReset
+  onReset,
+  unavailableReason
 }: ModelParamSliderFieldProps) => {
   const { t } = useTranslation(["sidepanel"])
   const isSet = typeof value === "number" && Number.isFinite(value)
@@ -56,7 +59,9 @@ export const ModelParamSliderField = ({
           value: defaultValue
         })
       : t("sidepanel:modelParams.default", "Default")
-  const readout = !isSet
+  const readout = unavailableReason
+    ? unavailableReason
+    : !isSet
     ? defaultLabel
     : isInherited
       ? t("sidepanel:modelParams.allModelsValue", "{{value}} (all models)", {
@@ -88,7 +93,7 @@ export const ModelParamSliderField = ({
           >
             {readout}
           </span>
-          {isSet && !isInherited && (
+          {isSet && !isInherited && !unavailableReason && (
             <button
               type="button"
               onClick={onReset}
@@ -115,6 +120,7 @@ export const ModelParamSliderField = ({
         step={step}
         value={isSet ? value : defaultValue ?? restingValue}
         onChange={(next) => onChange(next)}
+        disabled={Boolean(unavailableReason)}
         className={classNames("my-0", (!isSet || isInherited) && "opacity-50")}
         aria-label={label}
         ariaValueTextFormatterForHandle={(next) =>

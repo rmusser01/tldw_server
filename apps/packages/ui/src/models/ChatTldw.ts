@@ -48,6 +48,9 @@ export interface ChatTldwOptions {
   topP?: number
   frequencyPenalty?: number
   presencePenalty?: number
+  /** Top-K and Min-P, set only when the model's provider accepts them (#3283). */
+  topK?: number
+  minP?: number
   systemPrompt?: string
   streaming?: boolean
   reasoningEffort?: "low" | "medium" | "high"
@@ -80,6 +83,8 @@ export class ChatTldw {
   topP?: number
   frequencyPenalty?: number
   presencePenalty?: number
+  topK?: number
+  minP?: number
   systemPrompt?: string
   streaming: boolean
   reasoningEffort?: "low" | "medium" | "high"
@@ -119,6 +124,8 @@ export class ChatTldw {
       CHAT_REQUEST_SAMPLING_FALLBACKS.frequencyPenalty
     this.presencePenalty =
       options.presencePenalty ?? CHAT_REQUEST_SAMPLING_FALLBACKS.presencePenalty
+    this.topK = options.topK
+    this.minP = options.minP
     this.systemPrompt = options.systemPrompt
     this.streaming = options.streaming ?? false
     this.reasoningEffort = options.reasoningEffort
@@ -277,6 +284,8 @@ export class ChatTldw {
         topP: this.topP,
         frequencyPenalty: this.frequencyPenalty,
         presencePenalty: this.presencePenalty,
+        topK: this.topK,
+        minP: this.minP,
         systemPrompt: this.systemPrompt,
         stream: true,
         reasoningEffort: this.reasoningEffort,
@@ -407,6 +416,8 @@ export class ChatTldw {
       topP: this.topP,
       frequencyPenalty: this.frequencyPenalty,
       presencePenalty: this.presencePenalty,
+      topK: this.topK,
+      minP: this.minP,
       systemPrompt: this.systemPrompt,
       reasoningEffort: this.reasoningEffort,
       toolChoice: this.toolChoice,
@@ -435,6 +446,8 @@ export class ChatTldw {
       topP: this.topP,
       frequencyPenalty: this.frequencyPenalty,
       presencePenalty: this.presencePenalty,
+      topK: this.topK,
+      minP: this.minP,
       systemPrompt: this.systemPrompt,
       stream: false,
       reasoningEffort: this.reasoningEffort,

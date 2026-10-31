@@ -704,7 +704,7 @@ def _resolve_provider_key(provider: str) -> Optional[str]:
 
     # 2) Check get_api_keys() which reads both env and config.txt
     try:
-        from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import get_api_keys
+        from tldw_Server_API.app.core.config_llm_providers import get_api_keys
         keys = get_api_keys()
         val = (keys.get(provider) or "").strip()
         if val:

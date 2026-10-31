@@ -627,9 +627,9 @@ def _configured_default_provider(app_config: dict[str, Any]) -> str | None:
             if isinstance(value, str) and value.strip():
                 return value.strip()
     try:
-        from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
+        from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 
-        return str(DEFAULT_LLM_PROVIDER or "").strip() or None
+        return str(get_default_provider() or "").strip() or None
     except Exception:  # noqa: BLE001 - optional default-provider import fails closed
         return None
 
