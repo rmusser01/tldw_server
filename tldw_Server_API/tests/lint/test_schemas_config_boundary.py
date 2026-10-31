@@ -51,10 +51,6 @@ _TARGET = f"{_PKG}.api.v1.schemas.chat_request_schemas"
 _SCHEMAS = f"{_PKG}.api.v1.schemas"
 
 IMPORT_TIME_CONFIG_ALLOWLIST: dict[str, str] = {
-    "api/v1/schemas/chat_request_schemas.py": (
-        "DEFAULT_LLM_PROVIDER = get_default_provider() fixes the default at import; "
-        "slice 2 of TASK-13950.14 Task 5 deletes it"
-    ),
     "api/v1/schemas/chat_validators.py": (
         "MAX_REQUEST_SIZE reads [Chat-Module] max_request_size_chars once at import, and tests patch and import the "
         "constant; config reads move to call time under TASK-13950.21"

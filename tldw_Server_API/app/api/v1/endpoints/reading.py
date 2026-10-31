@@ -23,7 +23,7 @@ from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.endpoints.items import bulk_update_items as bulk_update_items_handler
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
+from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.api.v1.schemas.items_schemas import ItemsBulkRequest, ItemsBulkResponse
 from tldw_Server_API.app.api.v1.schemas.reading_schemas import (
     ReadingArchiveCreateRequest,
@@ -993,9 +993,9 @@ async def summarize_reading_item(
     if payload.recursive and payload.chunked:
         raise HTTPException(status_code=400, detail="reading_summary_invalid_strategy")
 
-    provider = (payload.provider or DEFAULT_LLM_PROVIDER).strip()
+    provider = (payload.provider or get_default_provider()).strip()
     if not provider:
-        provider = DEFAULT_LLM_PROVIDER
+        provider = get_default_provider()
     loop = asyncio.get_running_loop()
     try:
         summary = await loop.run_in_executor(

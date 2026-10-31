@@ -47,3 +47,11 @@ def test_core_importer_reads_default_at_call_time(monkeypatch):
     monkeypatch.setattr(config_llm_providers, "load_and_log_configs", lambda: {})
     monkeypatch.setenv("DEFAULT_LLM_PROVIDER", "late-env")
     assert auto_boundary_assistant._configured_default_provider({}) == "late-env"
+
+
+def test_endpoint_reads_default_at_call_time(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import slides
+
+    monkeypatch.setattr(config_llm_providers, "load_and_log_configs", lambda: {})
+    monkeypatch.setenv("DEFAULT_LLM_PROVIDER", "late-env")
+    assert slides._resolve_provider(None) == "late-env"

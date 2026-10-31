@@ -19,7 +19,7 @@ from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.API_Deps.study_assistant_deps import get_study_assistant_guidance
 from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import require_llm_quota
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
+from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.api.v1.schemas.flashcards import (
     Deck,
     DeckCreate,
@@ -276,7 +276,7 @@ def _resolve_flashcard_generation_provider(request_provider: str | None) -> str:
     if is_test_mode():
         return "local-llm"
 
-    fallback = str(DEFAULT_LLM_PROVIDER or "openai").strip().lower()
+    fallback = str(get_default_provider() or "openai").strip().lower()
     return fallback or "openai"
 
 

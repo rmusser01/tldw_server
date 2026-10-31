@@ -62,9 +62,6 @@ from tldw_Server_API.app.api.v1.schemas.chat_conversation_schemas import (
     ConversationScopeParams,
 )
 from tldw_Server_API.app.api.v1.schemas.chat_import_schemas import ChatImportRequest
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
-    DEFAULT_LLM_PROVIDER,
-)
 from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     AssistantOverlaySettings,
     AuthorNoteInfoResponse,
@@ -200,6 +197,7 @@ from tldw_Server_API.app.core.Character_Chat.world_book_prompt_context import (
     apply_world_book_prompt_context,
     build_world_book_prompt_context,
 )
+from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.exceptions import raise_detached_error
 
 MAX_STREAM_PERSIST_USAGE_BYTES = 4_096
@@ -886,7 +884,7 @@ def _get_default_provider() -> str:
     if _is_char_chat_test_mode():
         return "local-llm"
 
-    return DEFAULT_LLM_PROVIDER
+    return get_default_provider()
 
 
 def _should_enforce_char_chat_strict_model_selection() -> bool:

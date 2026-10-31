@@ -27,8 +27,6 @@ def test_resolver_reads_what_production_reads_under_pytest_and_test_mode(monkeyp
 
 def test_the_old_paths_are_the_moved_objects():
     assert chat_service.resolve_provider_api_key is gateway.resolve_provider_api_key
-    # Temporary, until TASK-13950.14 deletes the re-export (its Task 5 removes this assertion).
-    assert chat_request_schemas.get_api_keys is config_llm_providers.get_api_keys
     assert chat_request_schemas.ALL_SUPPORTED_PROVIDER_NAMES_LIST is config_llm_providers.ALL_SUPPORTED_PROVIDER_NAMES_LIST
     assert not hasattr(chat_service, "resolve_static_provider_fallback")
 

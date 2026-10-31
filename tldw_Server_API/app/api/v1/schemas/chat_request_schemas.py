@@ -133,14 +133,7 @@ def _is_server_managed_chat_request_field(field_name: str) -> bool:
     return normalized in _SERVER_MANAGED_CHAT_REQUEST_FIELDS
 
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import normalize_catalog_provider_for_chat
-from tldw_Server_API.app.core.config_llm_providers import (  # noqa: F401 - re-exported until TASK-13950.14 retargets importers
-    ALL_SUPPORTED_PROVIDER_NAMES_LIST,
-    get_api_keys,
-    get_default_provider,
-)
-
-# Import-time bridge for importers and the api_provider description; TASK-13950.14 Task 5 deletes it.
-DEFAULT_LLM_PROVIDER = get_default_provider()
+from tldw_Server_API.app.core.config_llm_providers import ALL_SUPPORTED_PROVIDER_NAMES_LIST
 
 
 # Runtime validation below enforces provider ids; keep this Python 3.10-safe.
@@ -746,7 +739,7 @@ class ChatCompletionRequest(BaseModel):
     # --- Routing Parameter ---
     api_provider: Optional[SUPPORTED_API_ENDPOINTS] = Field(
         default=None,  # Default is handled server-side
-        description=f"[Extension] The target LLM provider (e.g., 'openai', 'anthropic'). If omitted, defaults to the server's configured default ('{DEFAULT_LLM_PROVIDER}').",
+        description="[Extension] The target LLM provider (e.g., 'openai', 'anthropic'). If omitted, defaults to the server's configured default provider.",
     )
     routing: Optional[RoutingOverride] = Field(
         None,

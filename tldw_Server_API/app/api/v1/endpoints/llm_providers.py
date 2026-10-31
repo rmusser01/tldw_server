@@ -14,10 +14,6 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from loguru import logger
 
 import tldw_Server_API.app.core.LLM_Calls.adapter_registry as llm_adapter_registry
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
-    ALL_SUPPORTED_PROVIDER_NAMES_LIST,
-    get_api_keys,
-)
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     ByokResolutionError,
     ServerFallbackCredentials,
@@ -30,6 +26,10 @@ from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
 )
 from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
 from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.config_llm_providers import (
+    ALL_SUPPORTED_PROVIDER_NAMES_LIST,
+    get_api_keys,
+)
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_config_option_names,
     custom_openai_provider_name,

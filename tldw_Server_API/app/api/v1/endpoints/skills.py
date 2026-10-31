@@ -903,9 +903,9 @@ async def execute_skill(
         if isinstance(principal.user_id, int):
             # Populate full RequestContext for fork mode support
             try:
-                from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
+                from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 
-                default_provider = DEFAULT_LLM_PROVIDER
+                default_provider = get_default_provider()
             except Exception:
                 default_provider = "openai"
             try:
