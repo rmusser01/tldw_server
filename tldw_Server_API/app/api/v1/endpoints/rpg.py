@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from dataclasses import asdict
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.security import HTTPAuthorizationCredentials
 
@@ -23,11 +23,19 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user, get_media_db_path_for_rag
 from tldw_Server_API.app.api.v1.schemas.rpg_schemas import (
+    RPGAuthoritySettingsReplaceRequest,
     RPGCampaignCreateRequest,
+    RPGCampaignDetail,
+    RPGCampaignListItem,
+    RPGCampaignListResponse,
     RPGCampaignResponse,
+    RPGCampaignUpdateRequest,
     RPGContextBuildRequest,
     RPGContextResponse,
+    RPGEventResponse,
+    RPGEventsListResponse,
     RPGProposalApplyRequest,
+    RPGProposalListResponse,
     RPGProposalRejectRequest,
     RPGRecordEventsRequest,
     RPGRecordEventsResponse,
@@ -36,7 +44,13 @@ from tldw_Server_API.app.api.v1.schemas.rpg_schemas import (
     RPGRulesPackRefsReplaceRequest,
     RPGRulesPackRefsResponse,
     RPGSessionCreateRequest,
+    RPGSessionDetail,
+    RPGSessionListItem,
+    RPGSessionListResponse,
     RPGSessionResponse,
+    RPGSessionUpdateRequest,
+    RPGSnapshotRebuildResponse,
+    RPGSnapshotResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import bearer_credential
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
@@ -496,5 +510,341 @@ def reject_proposal(
             review_notes=request.review_notes,
         )
         return {"proposal": _proposal_payload(proposal)}
+    except Exception as exc:
+        raise _map_error(exc) from exc
+
+
+def _session_list_items(service: RPGService, sessions: list[Any]) -> list[RPGSessionListItem]:
+    """Serialize session rows for list responses with their pending-proposal counts."""
+
+    return [
+        RPGSessionListItem.model_validate(
+            {
+                **asdict(session),
+                "pending_proposal_count": service.repo.count_pending_proposals(
+                    owner_user_id=service.owner_user_id,
+                    session_id=session.id,
+                ),
+            }
+        )
+        for session in sessions
+    ]
+
+
+@router.get(
+    "/campaigns",
+    response_model=RPGCampaignListResponse,
+    dependencies=_read_dependencies(RPG_CAMPAIGNS_READ),
+)
+def list_campaigns(
+    status_filter: str | None = Query(default=None, alias="status"),
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    service: RPGService = Depends(_service),
+) -> RPGCampaignListResponse:
+    """List the authenticated user's RPG campaigns."""
+
+    try:
+        campaigns, total = service.list_campaigns(status=status_filter, limit=limit, offset=offset)
+        return RPGCampaignListResponse(
+            items=[RPGCampaignListItem.model_validate(asdict(campaign)) for campaign in campaigns],
+            total_count=total,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as exc:
+        raise _map_error(exc) from exc
+
+
+@router.get(
+    "/campaigns/{campaign_id}",
+    response_model=RPGCampaignDetail,
+    dependencies=_read_dependencies(RPG_CAMPAIGNS_READ),
+)
+def get_campaign(
+    campaign_id: int,
+    service: RPGService = Depends(_service),
+) -> RPGCampaignDetail:
+    """Return one RPG campaign with its session count."""
+
+    try:
+        campaign, session_count = service.get_campaign_detail(campaign_id)
+        return RPGCampaignDetail.model_validate({**asdict(campaign), "session_count": session_count})
+    except Exception as exc:
+        raise _map_error(exc) from exc
+
+
+@router.get(
+    "/campaigns/{campaign_id}/sessions",
+    response_model=RPGSessionListResponse,
+    dependencies=_read_dependencies(RPG_SESSIONS_READ),
+)
+def list_campaign_sessions(
+    campaign_id: int,
+    status_filter: str | None = Query(default=None, alias="status"),
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    service: RPGService = Depends(_service),
+) -> RPGSessionListResponse:
+    """List the sessions belonging to one campaign."""
+
+    try:
+        sessions, total = service.list_sessions(
+            campaign_id=campaign_id, status=status_filter, limit=limit, offset=offset
+        )
+        return RPGSessionListResponse(
+            items=_session_list_items(service, sessions),
+            total_count=total,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as exc:
+        raise _map_error(exc) from exc
+
+
+@router.get(
+    "/sessions",
+    response_model=RPGSessionListResponse,
+    dependencies=_read_dependencies(RPG_SESSIONS_READ),
+)
+def list_sessions(
+    campaign_id: int | None = Query(default=None),
+    status_filter: str | None = Query(default=None, alias="status"),
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    service: RPGService = Depends(_service),
+) -> RPGSessionListResponse:
+    """List the authenticated user's RPG sessions, optionally scoped to a campaign."""
+
+    try:
+        sessions, total = service.list_sessions(
+            campaign_id=campaign_id, status=status_filter, limit=limit, offset=offset
+        )
+        return RPGSessionListResponse(
+            items=_session_list_items(service, sessions),
+            total_count=total,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as exc:
+        raise _map_error(exc) from exc
+
+
+@router.get(
+    "/sessions/{session_id}",
+    response_model=RPGSessionDetail,
+    dependencies=_read_dependencies(RPG_SESSIONS_READ),
+)
+def get_session(
+    session_id: int,
+    service: RPGService = Depends(_service),
+) -> RPGSessionDetail:
+    """Return one RPG session with authority settings and pending-proposal count."""
+
+    try:
+        session, pending_proposal_count = service.get_session_detail(session_id)
+        return RPGSessionDetail.model_validate(
+            {**asdict(session), "pending_proposal_count": pending_proposal_count}
+        )
+    except Exception as exc:
+        raise _map_error(exc) from exc
+
+
+@router.get(
+    "/sessions/{session_id}/snapshot",
+    response_model=RPGSnapshotResponse,
+    dependencies=_read_dependencies(RPG_SESSIONS_READ),
+)
+def get_session_snapshot(
+    session_id: int,
+    version: int | None = Query(default=None, ge=0),
+    service: RPGService = Depends(_service),
+) -> RPGSnapshotResponse:
+    """Return a session's snapshot state, optionally a historical version."""
+
+    try:
+        result = service.get_snapshot(session_id, snapshot_version=version)
+        return RPGSnapshotResponse(
+            snapshot_version=result.snapshot_version,
+            last_event_sequence=result.last_event_sequence,
+            snapshot=asdict(result.snapshot),
+            diagnostics=result.diagnostics,
+        )
+    except Exception as exc:
+        raise _map_error(exc) from exc
+
+
+@router.get(
+    "/sessions/{session_id}/events",
+    response_model=RPGEventsListResponse,
+    dependencies=_read_dependencies(RPG_SESSIONS_READ),
+)
+def list_session_events(
+    session_id: int,
+    after_sequence: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    source_type: str | None = Query(default=None),
+    event_type: str | None = Query(default=None),
+    service: RPGService = Depends(_service),
+) -> RPGEventsListResponse:
+    """List a session's event log with cursor pagination."""
+
+    try:
+        events = service.list_events(
+            session_id,
+            after_sequence=after_sequence,
+            limit=limit,
+            source_type=source_type,
+            event_type=event_type,
+        )
+        next_after = events[-1].sequence_number if events else after_sequence
+        return RPGEventsListResponse(
+            items=[RPGEventResponse.model_validate(_event_payload(event)) for event in events],
+            next_after_sequence=next_after,
+            limit=limit,
+        )
+    except Exception as exc:
+        raise _map_error(exc) from exc
+
+
+@router.get(
+    "/sessions/{session_id}/proposals",
+    response_model=RPGProposalListResponse,
+    dependencies=_read_dependencies(RPG_PROPOSALS_REVIEW),
+)
+def list_session_proposals(
+    session_id: int,
+    status_filter: str | None = Query(default=None, alias="status"),
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    service: RPGService = Depends(_service),
+) -> RPGProposalListResponse:
+    """List a session's model proposals for review."""
+
+    try:
+        proposals, total = service.list_proposals(
+            session_id, status=status_filter, limit=limit, offset=offset
+        )
+        return RPGProposalListResponse(
+            items=[_proposal_payload(proposal) for proposal in proposals],
+            total_count=total,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as exc:
+        raise _map_error(exc) from exc
+
+
+@router.patch(
+    "/campaigns/{campaign_id}",
+    response_model=RPGCampaignDetail,
+    dependencies=_write_dependencies(RPG_CAMPAIGNS_MANAGE),
+)
+def update_campaign(
+    campaign_id: int,
+    request: RPGCampaignUpdateRequest,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+    service: RPGService = Depends(_service),
+) -> RPGCampaignDetail:
+    """Update campaign metadata or archive status."""
+
+    try:
+        service.update_campaign(
+            campaign_id,
+            title=request.title,
+            description=request.description,
+            status=request.status,
+            expected_version=request.expected_version,
+            idempotency_key=idempotency_key,
+        )
+        detail, session_count = service.get_campaign_detail(campaign_id)
+        return RPGCampaignDetail.model_validate({**asdict(detail), "session_count": session_count})
+    except Exception as exc:
+        raise _map_error(exc) from exc
+
+
+@router.patch(
+    "/sessions/{session_id}",
+    response_model=RPGSessionDetail,
+    dependencies=_write_dependencies(RPG_SESSIONS_MANAGE),
+)
+def update_session(
+    session_id: int,
+    request: RPGSessionUpdateRequest,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+    service: RPGService = Depends(_service),
+) -> RPGSessionDetail:
+    """Update session metadata or archive status."""
+
+    try:
+        service.update_session(
+            session_id,
+            title=request.title,
+            status=request.status,
+            expected_version=request.expected_version,
+            idempotency_key=idempotency_key,
+        )
+        session, pending_proposal_count = service.get_session_detail(session_id)
+        return RPGSessionDetail.model_validate(
+            {**asdict(session), "pending_proposal_count": pending_proposal_count}
+        )
+    except Exception as exc:
+        raise _map_error(exc) from exc
+
+
+@router.put(
+    "/sessions/{session_id}/authority-settings",
+    response_model=RPGSessionDetail,
+    dependencies=_write_dependencies(RPG_SESSIONS_MANAGE),
+)
+def replace_authority_settings(
+    session_id: int,
+    request: RPGAuthoritySettingsReplaceRequest,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+    service: RPGService = Depends(_service),
+) -> RPGSessionDetail:
+    """Replace a session's authority settings wholesale."""
+
+    try:
+        service.replace_authority_settings(
+            session_id,
+            authority_settings={
+                "import_auto_commit": request.import_auto_commit,
+                "mcp_auto_commit": request.mcp_auto_commit,
+                "model_auto_commit": request.model_auto_commit,
+                "model_auto_commit_event_types": request.model_auto_commit_event_types,
+            },
+            expected_version=request.expected_version,
+            idempotency_key=idempotency_key,
+        )
+        session, pending_proposal_count = service.get_session_detail(session_id)
+        return RPGSessionDetail.model_validate(
+            {**asdict(session), "pending_proposal_count": pending_proposal_count}
+        )
+    except Exception as exc:
+        raise _map_error(exc) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/snapshot/rebuild",
+    response_model=RPGSnapshotRebuildResponse,
+    dependencies=_write_dependencies(RPG_SESSIONS_MANAGE),
+)
+def rebuild_snapshot(
+    session_id: int,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+    service: RPGService = Depends(_service),
+) -> RPGSnapshotRebuildResponse:
+    """Rebuild a session's snapshot by replaying its event log."""
+
+    try:
+        result = service.rebuild_snapshot(session_id, idempotency_key=idempotency_key)
+        return RPGSnapshotRebuildResponse(
+            snapshot_version=result.snapshot.snapshot_version,
+            last_event_sequence=result.snapshot.last_event_sequence,
+            event_count=result.event_count,
+            replayed=result.replayed,
+            diagnostics=result.snapshot.diagnostics_json,
+        )
     except Exception as exc:
         raise _map_error(exc) from exc
