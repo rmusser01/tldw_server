@@ -27,9 +27,11 @@ PR="${2:?usage: land_required_gates.sh <branch> <pr-number> [--no-merge]}"
 NO_MERGE="${3:-}"
 
 REPO="${LAND_GATES_REPO:-rmusser01/tldw_server}"
-# frontend-e2e-tiers.yml reports `E2E Critical (Tier 1 + Journeys)`. Its run conclusion also
-# covers the advisory ux-regression job, so a failure there stops this script too.
 GATES="backend-required security-required coverage-required frontend-required e2e-required container-build-check frontend-e2e-tiers.yml"
+# frontend-e2e-tiers.yml reports the required check `E2E Critical (Tier 1 + Journeys)`, but its
+# run also holds the advisory ux-regression job, so that gate is judged by its check run.
+E2E_WORKFLOW="frontend-e2e-tiers.yml"
+E2E_CHECK="E2E Critical (Tier 1 + Journeys)"
 AUDIT="Frontend License Gate Audit"
 PACE="${LAND_GATES_PACE:-40}"
 
@@ -47,6 +49,33 @@ latest_run() {
   gh run list --repo "$REPO" --branch "$BRANCH" --workflow "$1" --commit "$HEAD_SHA" --limit 1 \
     --json databaseId,status,conclusion,headSha \
     --template '{{range .}}{{printf "%.0f" .databaseId}} {{.status}} {{if .conclusion}}{{.conclusion}}{{else}}pending{{end}} {{.headSha}}{{end}}'
+}
+
+e2e_check_conclusion() {
+  # The required check's conclusion on this head; skipped passes, as GitHub's ruleset counts it.
+  conclusion="$(gh api -X GET "repos/$REPO/commits/$HEAD_SHA/check-runs" -f check_name="$E2E_CHECK" \
+    -f filter=latest --jq '.check_runs[0].conclusion // ""' || true)"
+  case "$conclusion" in
+    success|skipped) echo success;;
+    '') echo missing;;
+    *) echo "$conclusion";;
+  esac
+}
+
+gate_run() {
+  # $1 = gate workflow; latest_run's fields, except that a completed E2E run reports its
+  # required check's conclusion instead of the run's. The other gates are passed through.
+  gate_line="$(latest_run "$1" || true)"
+  if [ "$1" != "$E2E_WORKFLOW" ]; then
+    printf '%s\n' "$gate_line"
+    return
+  fi
+  set -- $gate_line
+  if [ "${2:-}" = completed ]; then
+    printf '%s completed %s %s\n' "$1" "$(e2e_check_conclusion)" "${4:-}"
+  else
+    printf '%s\n' "$*"
+  fi
 }
 
 printf '=== PR #%s (%s @ %s): waiting for the audit on this sha ===\n' "$PR" "$BRANCH" "$SHORT"
@@ -74,7 +103,7 @@ done
 
 printf '=== PR #%s: ensuring the seven gates run ===\n' "$PR"
 for wf in $GATES; do
-  set -- $(latest_run "$wf" || true)
+  set -- $(gate_run "$wf")
   id="${1:-}"
   status="${2:-}"
   concl="${3:-}"
@@ -103,14 +132,14 @@ while [ "$i" -lt 150 ]; do
   ok=0
   bad=''
   for wf in $GATES; do
-    set -- $(latest_run "$wf" || true)
+    set -- $(gate_run "$wf")
     if [ "${4:-}" != "$HEAD_SHA" ]; then
       bad="$bad $wf:stale-head"
       continue
     fi
     case "${2:-}:${3:-}" in
       completed:success)                  ok=$((ok + 1));;
-      completed:failure|completed:timed_out|completed:cancelled) bad="$bad $wf:${3}";;
+      completed:failure|completed:timed_out|completed:cancelled|completed:missing) bad="$bad $wf:${3}";;
     esac
   done
   if [ -n "$bad" ]; then
